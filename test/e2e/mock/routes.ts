@@ -352,6 +352,8 @@ const HANDLERS: Record<string, Handler> = {
     state.repo.private_vulnerability_reporting_enabled = false;
     return noContent();
   },
+  "repository.lfsPut": () => ({ status: 202, body: null }),
+  "repository.lfsRemove": () => noContent(),
 
   // labels -----------------------------------------------------------------
   "labels.list": ({ state, query }) => ok(slicePage(state.labels, query)),

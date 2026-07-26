@@ -137,4 +137,34 @@ describe("repository", () => {
     ).rejects.toThrow(/not a boolean/);
     expect(api.calls).toHaveLength(0);
   });
+
+  test("git LFS applies blindly: PUT on true, DELETE on false, never in the PATCH", async () => {
+    const on = new MockApi({}).allowMutations("PUT /repos/o/r/lfs");
+    const enabled = await repositorySection.run(ctx(on), { enable_git_lfs: true });
+    expect(on.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(["PUT /repos/o/r/lfs"]);
+    expect(enabled.changes).toEqual(["Git LFS: enabled"]);
+    const off = new MockApi({}).allowMutations("DELETE /repos/o/r/lfs");
+    const disabled = await repositorySection.run(ctx(off), { enable_git_lfs: false });
+    expect(off.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(["DELETE /repos/o/r/lfs"]);
+    expect(disabled.changes).toEqual(["Git LFS: disabled"]);
+  });
+
+  test("git LFS check mode emits the cannot-verify note, no drift, no requests beyond the GET", async () => {
+    const api = new MockApi({ "GET /repos/o/r": { data: {} } });
+    const result = await repositorySection.run(ctx(api, true), { enable_git_lfs: true });
+    expect(result.drift).toEqual([]);
+    expect(result.notes).toHaveLength(1);
+    expect(result.notes[0]).toContain("repository.enable_git_lfs");
+    expect(result.notes[0]).toContain("cannot verify");
+    expect(api.mutations()).toEqual([]);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /repos/o/r"]);
+  });
+
+  test("non-boolean git LFS values hit the shared toggle guard", async () => {
+    const api = new MockApi({});
+    await expect(repositorySection.run(ctx(api), { enable_git_lfs: "yes" })).rejects.toThrow(
+      /not a boolean/,
+    );
+    expect(api.calls).toHaveLength(0);
+  });
 });

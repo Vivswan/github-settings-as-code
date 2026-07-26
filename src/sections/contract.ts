@@ -102,7 +102,9 @@ type SupplementalRoute =
   | "GET /repos/{owner}/{repo}/actions/cache/retention-limit"
   | "PUT /repos/{owner}/{repo}/actions/cache/retention-limit"
   | "GET /repos/{owner}/{repo}/actions/cache/storage-limit"
-  | "PUT /repos/{owner}/{repo}/actions/cache/storage-limit";
+  | "PUT /repos/{owner}/{repo}/actions/cache/storage-limit"
+  | "PUT /repos/{owner}/{repo}/lfs"
+  | "DELETE /repos/{owner}/{repo}/lfs";
 
 /**
  * A GitHub REST route as octokit spells it: "METHOD /path/{param}". Using
@@ -142,12 +144,22 @@ export interface EndpointDecl {
    * Advice for known 4xx failure classes, keyed by the HTTP status each one
    * explains; throwFor appends the matching entry (if any) to that status's
    * generic rejection message, so advice never fires on a status it does not
-   * describe. Payloads pass through verbatim (GitHub stays the authority on
+   * describe. 403 and 404 NEVER reach these entries - the permission branch
+   * short-circuits first; ambiguity on those statuses belongs in
+   * `denialHint` below (registry.test.ts sweeps for misplaced entries).
+   * Payloads pass through verbatim (GitHub stays the authority on
    * valid values), so a hint names the failure CLASS and points at the
    * endpoint documentation; it never lists valid values that could go stale.
    * One or two sentences, no trailing period.
    */
   hints?: Readonly<Record<number, string>>;
+  /**
+   * Appended to the PermissionDenied message (which never reads `hints`) for
+   * an endpoint whose 403/404 is ambiguous - it can mean something other
+   * than a missing token grant (e.g. Git LFS disabled account-wide). One
+   * sentence, no trailing period.
+   */
+  denialHint?: string;
 }
 
 /** The method half of a route ("PATCH /repos/..." -> "PATCH"). */
@@ -409,6 +421,7 @@ export async function call<E extends EndpointDecl>(
     throwFor(section, method, path, result.error, {
       operation: opts?.describe,
       hints: endpoint.hints,
+      denialHint: endpoint.denialHint,
     });
   }
   return result.data;
@@ -444,6 +457,7 @@ export async function tryCall<E extends EndpointDecl>(
     throwFor(section, method, path, result.error, {
       operation: opts?.describe,
       hints: endpoint.hints,
+      denialHint: endpoint.denialHint,
     });
   }
   return result;
@@ -481,6 +495,7 @@ export async function probeAbsent<E extends EndpointDecl>(
     throwFor(section, "GET", path, result.error, {
       operation: options?.describe,
       hints: endpoint.hints,
+      denialHint: endpoint.denialHint,
     });
   }
   return { data: result.data };
@@ -575,7 +590,11 @@ export function throwFor(
   method: string,
   path: string,
   error: ApiError,
-  context?: { operation?: string; hints?: Readonly<Record<number, string>> },
+  context?: {
+    operation?: string;
+    hints?: Readonly<Record<number, string>>;
+    denialHint?: string;
+  },
 ): never {
   // "creating ruleset "x" failed - POST /repos/...": the operation label says
   // WHAT was being done in settings-file terms; the raw method/path stays so
@@ -592,9 +611,13 @@ export function throwFor(
   if (isPermissionError(error)) {
     const alsoMissing =
       error.status === 404 ? " (a 404 here can also mean the resource does not exist)" : "";
+    // An endpoint whose 403/404 is AMBIGUOUS (it can mean something other
+    // than a missing grant) says so here, right where the user reads the
+    // grant advice.
+    const denialHint = context?.denialHint ? `. Note: ${context.denialHint}` : "";
     throw new PermissionDenied(
       section.key,
-      `the token was denied ${cause}${alsoMissing}. To fix, ${section.grant}`,
+      `the token was denied ${cause}${alsoMissing}. To fix, ${section.grant}${denialHint}`,
       error.status,
     );
   }

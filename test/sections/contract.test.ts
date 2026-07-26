@@ -74,6 +74,37 @@ describe("throwFor context enrichment", () => {
     expect(denied.detail).not.toContain("never rendered here");
   });
 
+  test("denialHint is appended to the permission branch, and only there", () => {
+    let thrown: unknown;
+    try {
+      throwFor(
+        section,
+        "PUT",
+        "/repos/o/r/lfs",
+        { status: 403, message: "Git LFS is globally disabled", body: "" },
+        { denialHint: "a 403 here can also mean LFS is disabled account-wide" },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    const denied = thrown as PermissionDenied;
+    expect(denied.detail).toContain(section.grant);
+    expect(denied.detail).toContain(
+      ". Note: a 403 here can also mean LFS is disabled account-wide",
+    );
+    // The generic branch never renders it.
+    expect(() =>
+      throwFor(
+        section,
+        "PUT",
+        "/repos/o/r/lfs",
+        { status: 422, message: "nope", body: "" },
+        { denialHint: "not for 422s" },
+      ),
+    ).toThrow(/^(?!.*not for 422s).*fix the "rulesets" values/);
+  });
+
   test("rate-limit and 5xx branches do not render the hint", () => {
     expect(() =>
       throwFor(

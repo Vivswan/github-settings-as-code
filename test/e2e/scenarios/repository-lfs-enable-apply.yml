@@ -1,0 +1,18 @@
+# Git LFS has no read endpoint, so apply asserts the declared state blindly:
+# true issues the PUT (202, GitHub processes it asynchronously). The
+# convergence rerun can only emit the cannot-verify note - no drift - so the
+# run converges by construction.
+name: repository-lfs-enable-apply
+settings:
+  repository:
+    enable_git_lfs: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    repository: applied
+  mutations:
+    - "PUT /repos/{repo}/lfs"
+  converges: true

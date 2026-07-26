@@ -99,6 +99,20 @@ describe("section permissions", () => {
       expect(module.grant).toBe(EXPECTED_GRANT[module.key] ?? "");
     }
   });
+
+  test("no endpoint keys a hint on 403/404 - the permission branch never reads hints", () => {
+    // throwFor classifies 403/404 as PermissionDenied before consulting
+    // `hints`, so an entry there is dead advice; ambiguity on those statuses
+    // belongs in `denialHint` (see the EndpointDecl JSDoc).
+    for (const [key, endpoint] of Object.entries(allEndpoints())) {
+      for (const status of Object.keys(endpoint.hints ?? {})) {
+        expect(
+          ["403", "404"].includes(status),
+          `${key} keys a hint on ${status}, which the permission branch swallows; use denialHint`,
+        ).toBe(false);
+      }
+    }
+  });
 });
 
 describe("grantFor", () => {

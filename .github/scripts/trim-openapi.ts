@@ -18,7 +18,7 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_API_VERSION } from "../../src/github/api.js";
-import { USED_PATHS } from "../../test/e2e/openapi/paths.js";
+import { UNDOCUMENTED_PATHS, USED_PATHS } from "../../test/e2e/openapi/paths.js";
 
 /**
  * The github/rest-api-description commit the trimmed spec is cut from. Bump
@@ -134,6 +134,15 @@ function trimPaths(doc: OpenApiDoc): { trimmed: OpenApiDoc; kept: string[]; miss
 async function main(): Promise<number> {
   console.log(`fetching ${SPEC_URL}`);
   const doc = await fetchSpec(SPEC_URL);
+  // The mirror of the missing-path check below: an UNDOCUMENTED_PATHS entry
+  // exists precisely BECAUSE the descriptor lacks it, so the moment upstream
+  // documents one, the carve-out must go (and validation switch on).
+  const nowDocumented = UNDOCUMENTED_PATHS.filter((path) => doc.paths[path] !== undefined);
+  if (nowDocumented.length > 0) {
+    throw new Error(
+      `the upstream descriptor at ${UPSTREAM_REF} now documents: ${nowDocumented.join(", ")}. Remove these from UNDOCUMENTED_ROUTES in test/e2e/openapi/paths.ts and re-run, so the validator covers them`,
+    );
+  }
   const { trimmed, kept, missing } = trimPaths(doc);
   if (missing.length > 0) {
     throw new Error(
