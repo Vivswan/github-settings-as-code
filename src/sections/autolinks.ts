@@ -4,7 +4,7 @@
  */
 
 import { z } from "zod";
-import { subsetDiff } from "../engine/diff.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
 import type { AutolinkConfig } from "../schema.js";
 import {
   call,
@@ -67,14 +67,34 @@ export const autolinksSection: SectionModule<"autolinks"> = {
         continue;
       }
       if (ctx.check) {
-        result.drift.push(
-          existing
-            ? `autolinks[${autolink.key_prefix}]: live settings differ from the settings file, and autolinks cannot be edited; apply will delete and recreate it`
-            : `autolinks[${autolink.key_prefix}]: missing - declared in the settings file but not on the repo; apply will create it`,
-        );
+        if (existing) {
+          result.drift.push(
+            `autolinks[${autolink.key_prefix}]: live settings differ from the settings file, and autolinks cannot be edited; apply will delete and recreate it`,
+          );
+          // Name the differing fields; the generic line alone left the reader
+          // guessing which key (or typo) forces the replace.
+          result.drift.push(
+            ...subsetDiff(declaredFields, existing, `autolinks[${autolink.key_prefix}]`),
+          );
+        } else {
+          result.drift.push(
+            `autolinks[${autolink.key_prefix}]: missing - declared in the settings file but not on the repo; apply will create it`,
+          );
+        }
         continue;
       }
       if (existing) {
+        const phantom = phantomKeys(declaredFields, existing);
+        if (phantom.length > 0) {
+          result.notes.push(
+            phantomNote(
+              `autolinks[${autolink.key_prefix}]`,
+              phantom,
+              "autolink",
+              "this delete-and-recreate will repeat",
+            ),
+          );
+        }
         // Autolinks have no update endpoint; replace.
         await call(ctx, this, ENDPOINTS.remove, { params: { autolink_id: String(existing.id) } });
       }

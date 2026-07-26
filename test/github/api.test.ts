@@ -183,6 +183,35 @@ describe("error classification", () => {
   });
 });
 
+describe("error body shaping", () => {
+  test("documentation_url survives into the ApiError", async () => {
+    stubFetch([
+      () =>
+        new Response(
+          JSON.stringify({
+            message: "Validation Failed",
+            errors: [{ field: "rules", message: "Invalid rule" }],
+            documentation_url: "https://docs.github.com/rest/repos/rules",
+          }),
+          { status: 422, headers: { "content-type": "application/json" } },
+        ),
+    ]);
+    const result = await api().tryRequest("POST", "/repos/o/r/rulesets", { rules: [] });
+    expect("error" in result && result.error.documentationUrl).toBe(
+      "https://docs.github.com/rest/repos/rules",
+    );
+    // errors[] stays appended to the message, as before.
+    expect("error" in result && result.error.message).toContain("Invalid rule");
+  });
+
+  test("string and empty bodies leave documentationUrl unset", async () => {
+    stubFetch([() => new Response("plain text failure", { status: 422 })]);
+    const result = await api().tryRequest("POST", "/repos/o/r/rulesets", {});
+    expect("error" in result && result.error.documentationUrl).toBeUndefined();
+    expect("error" in result && result.error.message).toBe("plain text failure");
+  });
+});
+
 describe("debug-trace hardening for redacted slugs", () => {
   /**
    * Observe what the client hands to core.debug - the single sink every trace

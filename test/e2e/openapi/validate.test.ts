@@ -314,6 +314,38 @@ describe("OpenApiValidator against the fetched spec", () => {
     expect(violations.some((x) => x.kind === "request-body")).toBe(true);
   });
 
+  test("an off-schema body the mock REJECTED as requestOffSpec skips only the body check", () => {
+    // Settings pass through verbatim, so a user typo the request schema
+    // forbids reaching the API and being 422'd is modeled behavior (the
+    // rulesets-invalid-rule-type scenario); the handler tags that rejection.
+    const violations = v.validateRequest(
+      req({
+        method: "POST",
+        pathname: "/repos/e2e-owner/e2e-repo/labels",
+        status: 422,
+        body: { name: "bug", color: 123 },
+        responseBody: { message: "Validation Failed" },
+        requestOffSpec: true,
+      }),
+    );
+    expect(violations.some((x) => x.kind === "request-body")).toBe(false);
+  });
+
+  test("an off-schema body on an UNTAGGED 4xx is still a request-body violation", () => {
+    // The exemption is the handler's explicit tag, never the status: a plain
+    // 4xx with a drifted body stays a harness bug the validator reports.
+    const violations = v.validateRequest(
+      req({
+        method: "POST",
+        pathname: "/repos/e2e-owner/e2e-repo/labels",
+        status: 422,
+        body: { name: "bug", color: 123 },
+        responseBody: { message: "Validation Failed" },
+      }),
+    );
+    expect(violations.some((x) => x.kind === "request-body")).toBe(true);
+  });
+
   test("a request body missing a required field IS a violation (presence enforced)", () => {
     // The labels-create requestBody requires `name`; a body without it is a
     // real mock/client bug the request-body variant catches.
@@ -641,5 +673,49 @@ describe("validateExchange adapter", () => {
       undefined,
     );
     expect(errors.some((e) => e.includes("[response-body]"))).toBe(true);
+  });
+});
+
+describe("mock rule-type catalog lockstep", () => {
+  test("RULESET_RULE_TYPES matches the spec's rules[].type values exactly", async () => {
+    // The mock's catalog exists only to answer GitHub's real 422 for a typo'd
+    // rules[].type; the request-body validator checks accepted bodies against
+    // the SPEC's enums. If the two sets drift, either a real new rule type is
+    // falsely 422'd by the mock, or the mock accepts a type the validator then
+    // flags. Pinning them equal makes a spec refresh the single update point.
+    // Checked on BOTH operations the catalog serves (create and update).
+    const { RULESET_RULE_TYPES } = await import("../mock/routes.js");
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const spec = JSON.parse(
+      readFileSync(join(import.meta.dir, "github-openapi.trimmed.json"), "utf8"),
+    );
+    const operations = [
+      spec.paths["/repos/{owner}/{repo}/rulesets"].post,
+      spec.paths["/repos/{owner}/{repo}/rulesets/{ruleset_id}"].put,
+    ];
+    for (const operation of operations) {
+      const rules = operation.requestBody.content["application/json"].schema.properties.rules;
+      // Each rule variant sits directly under items.oneOf/anyOf with its type
+      // pinned by a single-value enum (or const). Only those TOP-LEVEL variants
+      // count: rule parameters nest their own `type` enums (actor kinds and the
+      // like) that a deep walk would wrongly collect.
+      const variants = (rules.items.oneOf ?? rules.items.anyOf ?? []) as Array<
+        Record<string, unknown>
+      >;
+      const specTypes = new Set<string>();
+      for (const variant of variants) {
+        const type = (variant.properties as Record<string, unknown> | undefined)?.type as
+          | { enum?: unknown[]; const?: unknown }
+          | undefined;
+        for (const value of type?.enum ?? (type?.const !== undefined ? [type.const] : [])) {
+          if (typeof value === "string") {
+            specTypes.add(value);
+          }
+        }
+      }
+      expect(specTypes.size).toBeGreaterThan(0);
+      expect([...RULESET_RULE_TYPES].sort()).toEqual([...specTypes].sort());
+    }
   });
 });

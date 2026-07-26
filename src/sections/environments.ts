@@ -28,6 +28,9 @@ const ENDPOINTS = {
   update: {
     route: "PUT /repos/{owner}/{repo}/environments/{environment_name}",
     statuses: { 200: "environment created or updated" },
+    hints: {
+      422: 'Usually "reviewers" entries are not {type: User|Team, id: <numeric id>} (logins and slugs are not accepted), or "deployment_branch_policy" does not declare both boolean keys (or null to clear it)',
+    },
   },
 } as const satisfies Record<string, EndpointDecl>;
 
@@ -66,6 +69,7 @@ export const environmentsSection: SectionModule<"environments"> = {
         await call(ctx, this, ENDPOINTS.update, {
           params: { environment_name: name },
           payload: settings,
+          describe: `upserting environment "${name}"`,
         });
         result.changes.push(`applied environment "${name}"`);
       }

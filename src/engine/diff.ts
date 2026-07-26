@@ -6,6 +6,14 @@
  * missing types (environment reviewers, bypass_actors) fall through to
  * order-insensitive subset matching. Both consumers depend on that split,
  * so keep the uniqueness gate intact when touching diffArray.
+ *
+ * Two tolerances are DELIBERATE, not gaps: desired null vs live absent, and
+ * desired "" vs live null/absent, produce no drift, because GitHub returns
+ * null (or omits the field) for empty values. Treating them as drift would
+ * make every section that declares an empty field report false drift
+ * forever. The cost is that a typo'd key with a null or "" value is
+ * invisible here; phantomKeys() below is the tool for callers that need to
+ * spot GitHub-ignored keys before a write.
  */
 
 export function subsetDiff(desired: unknown, live: unknown, path: string): string[] {
@@ -22,9 +30,13 @@ export function subsetDiff(desired: unknown, live: unknown, path: string): strin
     if (typeof live !== "object" || live === null || Array.isArray(live)) {
       return [`${path}: expected object, live has ${JSON.stringify(live)}`];
     }
+    const liveRecord = live as Record<string, unknown>;
     const drift: string[] = [];
     for (const [key, value] of Object.entries(desired as Record<string, unknown>)) {
-      drift.push(...subsetDiff(value, (live as Record<string, unknown>)[key], `${path}.${key}`));
+      // hasOwn, not indexing: a key named like a prototype member (toString)
+      // must read as absent, not as the inherited function.
+      const liveValue = Object.hasOwn(liveRecord, key) ? liveRecord[key] : undefined;
+      drift.push(...subsetDiff(value, liveValue, `${path}.${key}`));
     }
     return drift;
   }
@@ -41,6 +53,38 @@ export function subsetDiff(desired: unknown, live: unknown, path: string): strin
     return [`${path}: ${JSON.stringify(desired)} != ${JSON.stringify(live)}`];
   }
   return [];
+}
+
+/**
+ * The declared top-level keys the live object does not carry at all -
+ * the signature of a key GitHub accepted but ignored (a typo, or a
+ * write-only field). Excludes declared null/"" values, which subsetDiff
+ * deliberately treats as equal to an absent live field. Sections whose
+ * apply is gated by a diff use this to warn that the gating keys can never
+ * converge, instead of silently rewriting on every run.
+ */
+export function phantomKeys(desired: Record<string, unknown>, live: unknown): string[] {
+  if (typeof live !== "object" || live === null || Array.isArray(live)) {
+    return [];
+  }
+  const liveRecord = live as Record<string, unknown>;
+  return Object.keys(desired).filter(
+    (key) =>
+      desired[key] !== null &&
+      desired[key] !== undefined &&
+      desired[key] !== "" &&
+      !Object.hasOwn(liveRecord, key),
+  );
+}
+
+/**
+ * The apply-mode note for phantom keys - one source, so the per-section
+ * copies cannot drift. `noun` names the live resource ("label"); `rewrite`
+ * says what apply will keep doing ("this update will re-run").
+ */
+export function phantomNote(prefix: string, keys: string[], noun: string, rewrite: string): string {
+  const list = keys.map((k) => `"${k}"`).join(", ");
+  return `${prefix}: declared key(s) ${list} do not exist on the live ${noun}, so if GitHub ignores them ${rewrite} on every apply without converging. Fix the key name, or remove it from the settings file`;
 }
 
 /** The `type` key of an object list item, or null when the item has none. */

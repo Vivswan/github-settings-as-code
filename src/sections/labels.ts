@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { subsetDiff } from "../engine/diff.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
 import type { LabelConfig } from "../schema.js";
 import {
   call,
@@ -156,6 +156,12 @@ export const labelsSection: SectionModule<"labels"> = {
         }
         result.drift.push(...extraDrift);
       } else {
+        const phantom = phantomKeys(extraKeys, existing);
+        if (phantom.length > 0) {
+          result.notes.push(
+            phantomNote(`labels[${finalName}]`, phantom, "label", "this update will re-run"),
+          );
+        }
         await call(ctx, this, ENDPOINTS.update, {
           params: { name: existing.name },
           payload: {
