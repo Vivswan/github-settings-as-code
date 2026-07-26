@@ -1,7 +1,7 @@
 /**
  * `repository:` section - PATCH passthrough for repo fields, plus the
  * settings that live on their own endpoints in the REST API even though
- * the Probot schema nests them here: topics and the security toggles.
+ * the Probot schema nests them here: topics and the feature toggles.
  */
 
 import { subsetDiff } from "../engine/diff.js";
@@ -28,30 +28,44 @@ export function normalizeTopics(raw: unknown): string[] {
   return [...new Set(values.map((t) => t.toLowerCase()).filter(Boolean))];
 }
 
-interface SecurityToggle {
+/** One boolean settings key backed by PUT/DELETE on its own sub-resource. */
+interface FeatureToggle {
   key: string;
   label: string;
-  /**
-   * GET/PUT/DELETE endpoints for this toggle's dedicated sub-resource. The
-   * GET's declared >= 400 statuses are the "not enabled" statuses; the
-   * DELETE's are the "already off or not applicable here" statuses, so the
-   * handler reads tolerances straight off these declarations. Typed as the
-   * concrete ENDPOINTS entries (via `satisfies` on the array below) so their
-   * routes carry no path params and the request helpers accept them with no
-   * params argument.
-   */
-  get: EndpointDecl;
   put: EndpointDecl;
   remove: EndpointDecl;
+}
+
+/**
+ * A toggle whose state can also be read back. The GET's declared >= 400
+ * statuses are the "not enabled" statuses; the DELETE's are the "already off
+ * or not applicable here" statuses, so the handler reads tolerances straight
+ * off these declarations. All entries are typed as the concrete ENDPOINTS
+ * members (via `satisfies` on the arrays below) so their routes carry no
+ * path params and the request helpers accept them with no params argument.
+ * A toggle NOT in this list (Git LFS: GitHub exposes no read endpoint) gets
+ * a cannot-verify note in check mode, and apply re-asserts it blindly.
+ */
+interface ReadableToggle extends FeatureToggle {
+  get: EndpointDecl;
   /** Read the enabled state from a successful GET. */
   isEnabled: (data: unknown) => boolean;
 }
 
 const permission: SectionPermission = { repo: ["administration"] };
 
+/**
+ * The LFS endpoints' 403 is ambiguous three ways: LFS disabled account-wide,
+ * disabled for the root of the repository network, or (on organization
+ * repositories) a credential without billing access - none of which a token
+ * grant fixes.
+ */
+const LFS_DENIAL_HINT =
+  "a 403 here can also mean Git LFS is disabled account-wide or for the root of this repository network, or that the credential lacks billing access (organization repositories need an organization owner or billing manager), rather than a missing token grant";
+
 // The repo-level endpoints plus each security toggle's own GET/PUT/DELETE
 // triple, all in one dictionary so the mock server and USED_PATHS derivation
-// see every path this section can touch. SECURITY_TOGGLES below points its
+// see every path this section can touch. FEATURE_TOGGLES below points its
 // handler logic at these same entries, so declaration and use cannot drift.
 const ENDPOINTS = {
   get: { route: "GET /repos/{owner}/{repo}", statuses: { 200: "the repository" } },
@@ -101,9 +115,19 @@ const ENDPOINTS = {
       422: "the same condition as 404, alternate answer",
     },
   },
+  lfsPut: {
+    route: "PUT /repos/{owner}/{repo}/lfs",
+    statuses: { 202: "Git LFS enabled (GitHub processes the change asynchronously)" },
+    denialHint: LFS_DENIAL_HINT,
+  },
+  lfsRemove: {
+    route: "DELETE /repos/{owner}/{repo}/lfs",
+    statuses: { 204: "Git LFS disabled" },
+    denialHint: LFS_DENIAL_HINT,
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
-const SECURITY_TOGGLES = [
+const READABLE_TOGGLES = [
   {
     key: "enable_vulnerability_alerts",
     label: "vulnerability alerts",
@@ -130,15 +154,26 @@ const SECURITY_TOGGLES = [
     remove: ENDPOINTS.privateVulnerabilityReportingRemove,
     isEnabled: (data) => (data as { enabled?: boolean } | null)?.enabled === true,
   },
-] satisfies readonly SecurityToggle[];
+] satisfies readonly ReadableToggle[];
+
+const WRITE_ONLY_TOGGLES = [
+  {
+    key: "enable_git_lfs",
+    label: "Git LFS",
+    put: ENDPOINTS.lfsPut,
+    remove: ENDPOINTS.lfsRemove,
+  },
+] satisfies readonly FeatureToggle[];
+
+const FEATURE_TOGGLES = [...READABLE_TOGGLES, ...WRITE_ONLY_TOGGLES];
 
 /**
  * The keys the repository section handles specially instead of sending them
- * through the base PATCH: `topics` (its own PUT) and the security toggles
+ * through the base PATCH: `topics` (its own PUT) and the feature toggles
  * (each a PUT/DELETE sub-endpoint). Exported as the single source the
  * README's repository special-keys documentation is pinned against.
  */
-export const SPECIAL_KEYS = new Set(["topics", ...SECURITY_TOGGLES.map((toggle) => toggle.key)]);
+export const SPECIAL_KEYS = new Set(["topics", ...FEATURE_TOGGLES.map((toggle) => toggle.key)]);
 
 export const repositorySection: SectionModule<"repository"> = {
   key: "repository",
@@ -150,7 +185,7 @@ export const repositorySection: SectionModule<"repository"> = {
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as Record<string, unknown>;
-    for (const toggle of SECURITY_TOGGLES) {
+    for (const toggle of FEATURE_TOGGLES) {
       if (toggle.key in desired && typeof desired[toggle.key] !== "boolean") {
         throw new Error(
           `repository.${toggle.key} is ${JSON.stringify(desired[toggle.key])}, which is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
@@ -176,7 +211,7 @@ export const repositorySection: SectionModule<"repository"> = {
           ),
         );
       }
-      for (const toggle of SECURITY_TOGGLES) {
+      for (const toggle of READABLE_TOGGLES) {
         if (!(toggle.key in desired)) {
           continue;
         }
@@ -187,6 +222,14 @@ export const repositorySection: SectionModule<"repository"> = {
             `repository.${toggle.key}: declared ${desired[toggle.key]} != live ${enabled}; apply will set the declared value`,
           );
         }
+      }
+      for (const toggle of WRITE_ONLY_TOGGLES) {
+        if (!(toggle.key in desired)) {
+          continue;
+        }
+        result.notes.push(
+          `repository.${toggle.key}: GitHub exposes no endpoint to read this state back, so check mode cannot verify it; apply re-asserts the declared value (${JSON.stringify(desired[toggle.key])}) on every run`,
+        );
       }
       return result;
     }
@@ -200,7 +243,7 @@ export const repositorySection: SectionModule<"repository"> = {
       await call(ctx, this, ENDPOINTS.topics, { payload: { names } });
       result.changes.push(`set topics: ${names.join(", ") || "(none)"}`);
     }
-    for (const toggle of SECURITY_TOGGLES) {
+    for (const toggle of FEATURE_TOGGLES) {
       if (!(toggle.key in desired)) {
         continue;
       }

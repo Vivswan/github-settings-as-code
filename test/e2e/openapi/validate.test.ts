@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { LoggedRequest } from "../mock/routes.js";
-import { USED_PATHS } from "./paths.js";
+import { excludeUndocumented, USED_PATHS } from "./paths.js";
 import {
   OpenApiValidator,
   pathMatches,
@@ -205,6 +205,38 @@ describe("toJsonSchema", () => {
         responseBody: { login: "octocat", id: 1 },
       }),
     ).toEqual([]);
+  });
+});
+
+describe("undocumented-route exemption", () => {
+  test("the declared LFS methods are exempt from unknown-route", () => {
+    expect(
+      validateExchange(req({ method: "PUT", pathname: "/repos/o/r/lfs", status: 202 })),
+    ).toEqual([]);
+    expect(
+      validateExchange(req({ method: "DELETE", pathname: "/repos/o/r/lfs", status: 204 })),
+    ).toEqual([]);
+  });
+
+  test("an unlisted method on the same path is still an unknown route", () => {
+    const violations = validateExchange(
+      req({ method: "GET", pathname: "/repos/o/r/lfs", status: 200, responseBody: {} }),
+    );
+    expect(violations.some((v) => v.includes("unknown-route"))).toBe(true);
+  });
+
+  test("a near-miss path is still an unknown route", () => {
+    const violations = validateExchange(req({ method: "PUT", pathname: "/repos/o/r/lsf" }));
+    expect(violations.some((v) => v.includes("unknown-route"))).toBe(true);
+  });
+
+  test("excludeUndocumented removes declared paths and throws on a stale entry", () => {
+    expect(excludeUndocumented(new Set(["/a", "/b"]), ["/b"])).toEqual(["/a"]);
+    expect(() => excludeUndocumented(new Set(["/a"]), ["/gone"])).toThrow(/stale entry/);
+  });
+
+  test("USED_PATHS no longer carries the undocumented LFS path", () => {
+    expect(USED_PATHS).not.toContain("/repos/{owner}/{repo}/lfs");
   });
 });
 

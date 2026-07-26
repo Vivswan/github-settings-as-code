@@ -18,8 +18,9 @@
  *   equals the declared role.
  * - milestones (true): the PATCH is skipped when the declared fields
  *   subsetDiff clean against the live milestone.
- * - repository (false): the base PATCH, the topics PUT, and each security
- *   toggle's PUT/DELETE run unconditionally.
+ * - repository (false): the base PATCH, the topics PUT, and each feature
+ *   toggle's PUT/DELETE run unconditionally (enable_git_lfs necessarily so:
+ *   no read endpoint exists to compare against).
  * - rulesets (false): an existing ruleset is PUT unconditionally (the GET +
  *   diff runs only in check mode).
  * - branches (false): declared protection is PUT unconditionally (only the
