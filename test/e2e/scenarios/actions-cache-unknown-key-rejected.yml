@@ -1,0 +1,23 @@
+# An actions.cache entry misspells max_cache_size_gb. The cache surface is
+# strict (each limit is the entire body of its own endpoint, so an extra key
+# has no passthrough destination), so validation rejects the document upfront
+# - BEFORE any section writes. The repository section here pins that
+# ordering, mirroring collaborators-unknown-key-rejected.
+name: actions-cache-unknown-key-rejected
+settings:
+  repository:
+    description: should never be written
+  actions:
+    cache:
+      max_cache_size: 25
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    # The path prefix and the offending key, but not zod's own phrasing in
+    # between - a zod wording change must not break this scenario.
+    - "actions.cache"
+    - '"max_cache_size"'
+  never:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/actions/cache/storage-limit"

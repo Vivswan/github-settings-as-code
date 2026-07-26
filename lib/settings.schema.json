@@ -4,7 +4,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "ActionsConfig": {
-      "description": "GitHub Actions permissions, routed across four endpoints by key.",
+      "description": "GitHub Actions settings, routed to the right endpoint by key.",
       "properties": {
         "access_level": {
           "description": "PUT /repos/{r}/actions/permissions/access (private repositories only)",
@@ -23,6 +23,30 @@
             "selected"
           ],
           "type": "string"
+        },
+        "artifact_and_log_retention": {
+          "description": "PUT /repos/{r}/actions/permissions/artifact-and-log-retention: how many days artifacts and workflow logs are kept, e.g. { days: 90 }. The body passes through verbatim, so future fields GitHub adds work unchanged.",
+          "properties": {
+            "days": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "days"
+          ],
+          "type": "object"
+        },
+        "cache": {
+          "description": "Actions cache limits, each key routed to its own endpoint: max_cache_retention_days -> PUT /repos/{r}/actions/cache/retention-limit, max_cache_size_gb -> PUT /repos/{r}/actions/cache/storage-limit. Keys other than these two are rejected (each limit has its own single-field endpoint, so an extra key could only be a typo).",
+          "properties": {
+            "max_cache_retention_days": {
+              "type": "number"
+            },
+            "max_cache_size_gb": {
+              "type": "number"
+            }
+          },
+          "type": "object"
         },
         "can_approve_pull_request_reviews": {
           "description": "Whether workflows may approve pull request reviews.",

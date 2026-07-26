@@ -1,13 +1,14 @@
 /**
- * `actions:` section - a key router across the four Actions permissions
- * endpoints (base permissions, selected-actions allowlist, workflow token
- * defaults, access level), with unknown keys passed through verbatim.
+ * `actions:` section - a key router across the Actions settings endpoints
+ * (base permissions, selected-actions allowlist, workflow token defaults,
+ * access level, artifact/log retention, cache limits), with unknown keys
+ * passed through verbatim to the base permissions PUT.
  */
 
+import { z } from "zod";
 import { subsetDiff } from "../engine/diff.js";
 import type { ActionsConfig } from "../schema.js";
 import {
-  anyRecord,
   call,
   type EndpointDecl,
   emptyResult,
@@ -57,16 +58,103 @@ const ENDPOINTS = {
     route: "PUT /repos/{owner}/{repo}/actions/permissions/access",
     statuses: { 204: "workflows access level applied" },
   },
+  getRetention: {
+    route: "GET /repos/{owner}/{repo}/actions/permissions/artifact-and-log-retention",
+    statuses: { 200: "the artifact and log retention window" },
+  },
+  putRetention: {
+    route: "PUT /repos/{owner}/{repo}/actions/permissions/artifact-and-log-retention",
+    statuses: { 204: "artifact and log retention applied" },
+    hints: {
+      422: "the retention window must be a whole number of days within the plan's maximum; see the artifact-and-log-retention endpoint documentation",
+    },
+  },
+  getCacheRetention: {
+    route: "GET /repos/{owner}/{repo}/actions/cache/retention-limit",
+    statuses: { 200: "the cache retention limit" },
+  },
+  putCacheRetention: {
+    route: "PUT /repos/{owner}/{repo}/actions/cache/retention-limit",
+    statuses: { 204: "cache retention limit applied" },
+    hints: {
+      400: "the retention limit must be a whole number of days within the allowed range; see the cache retention-limit endpoint documentation",
+    },
+  },
+  getCacheStorage: {
+    route: "GET /repos/{owner}/{repo}/actions/cache/storage-limit",
+    statuses: { 200: "the cache storage limit" },
+  },
+  putCacheStorage: {
+    route: "PUT /repos/{owner}/{repo}/actions/cache/storage-limit",
+    statuses: { 204: "cache storage limit applied" },
+    hints: {
+      400: "the storage limit must be a whole number of gigabytes within the allowed range; see the cache storage-limit endpoint documentation",
+    },
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
-// Forward-compatible key routing: known workflow-token keys go to the
-// /workflow sub-endpoint, selected_actions and access_level to their own
-// endpoints, and EVERYTHING else (including future fields GitHub adds)
-// passes through to the base permissions PUT verbatim - never silently
+// Forward-compatible key routing: every DECLARED ActionsConfig key names its
+// destination here, and the `satisfies Record<keyof ActionsConfig, ...>`
+// makes a new schema field with no routing entry a compile error (the
+// "documented but unrouted" state cannot exist). Undeclared (future) keys
+// fall through to the base permissions PUT verbatim - never silently
 // dropped.
-const WORKFLOW_KEYS = new Set(["default_workflow_permissions", "can_approve_pull_request_reviews"]);
+const KEY_DESTINATION = {
+  enabled: "base",
+  allowed_actions: "base",
+  selected_actions: "own-endpoint",
+  default_workflow_permissions: "workflow",
+  can_approve_pull_request_reviews: "workflow",
+  access_level: "own-endpoint",
+  artifact_and_log_retention: "own-endpoint",
+  cache: "own-endpoint",
+} as const satisfies Record<keyof ActionsConfig, "base" | "workflow" | "own-endpoint">;
 
-const KNOWN_PERMISSION_KEYS = new Set(["enabled", "allowed_actions"]);
+function keysTo(destination: "base" | "workflow" | "own-endpoint"): Set<string> {
+  return new Set(
+    Object.entries(KEY_DESTINATION)
+      .filter(([, dest]) => dest === destination)
+      .map(([key]) => key),
+  );
+}
+
+const WORKFLOW_KEYS = keysTo("workflow");
+
+const KNOWN_PERMISSION_KEYS = keysTo("base");
+
+/** Keys with their own sub-endpoint, excluded from the base permissions PUT. */
+const ROUTED_KEYS = keysTo("own-endpoint");
+
+/**
+ * The cache object's keys: each is the whole body of its own single-field
+ * PUT, and `label` names it in change lines and describe prose (kept here
+ * so a future third key cannot be silently mislabeled by a stale ternary).
+ */
+const CACHE_ENDPOINT_BY_KEY = {
+  max_cache_retention_days: {
+    get: "getCacheRetention",
+    put: "putCacheRetention",
+    label: "retention",
+  },
+  max_cache_size_gb: { get: "getCacheStorage", put: "putCacheStorage", label: "storage" },
+} as const;
+
+/**
+ * Top level and retention stay loose (unknown keys pass through to their
+ * PUT bodies verbatim), but cache is strict: each cache limit is the entire
+ * body of its own endpoint, so an unrecognized cache key has no passthrough
+ * destination and can only be a typo. Rejected upfront by validate.ts,
+ * before any section writes.
+ */
+const shape = z.looseObject({
+  artifact_and_log_retention: z.looseObject({ days: z.number() }).optional(),
+  cache: z
+    .strictObject({
+      max_cache_retention_days: z.number().optional(),
+      max_cache_size_gb: z.number().optional(),
+    })
+    .optional(),
+});
 
 export const actionsSection: SectionModule<"actions"> = {
   key: "actions",
@@ -74,14 +162,14 @@ export const actionsSection: SectionModule<"actions"> = {
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
-  shape: anyRecord,
+  shape,
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as ActionsConfig;
     const permissions: Record<string, unknown> = {};
     const workflow: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(desired as Record<string, unknown>)) {
-      if (key === "selected_actions" || key === "access_level") {
+      if (ROUTED_KEYS.has(key)) {
         continue;
       }
       if (WORKFLOW_KEYS.has(key)) {
@@ -89,6 +177,19 @@ export const actionsSection: SectionModule<"actions"> = {
       } else {
         permissions[key] = value;
       }
+    }
+    const cache = (desired.cache ?? {}) as Record<string, unknown>;
+    // Backstop for the shape's one blind spot: zod's strictObject ignores an
+    // own "__proto__" key, and run() sees the ORIGINAL document (validate.ts
+    // applies the raw values, not zod's clone). Unlike the shape rejection,
+    // this throws from run(), so earlier sections may already have applied.
+    const unknownCacheKeys = Object.keys(cache).filter(
+      (k) => !Object.hasOwn(CACHE_ENDPOINT_BY_KEY, k),
+    );
+    if (unknownCacheKeys.length > 0) {
+      throw new Error(
+        `actions.cache: unrecognized key(s) ${unknownCacheKeys.map((k) => `"${k}"`).join(", ")} (known keys: ${Object.keys(CACHE_ENDPOINT_BY_KEY).join(", ")}). Each cache limit is the entire body of its own endpoint, so an extra key has no destination; fix the key name, or remove it`,
+      );
     }
     if (desired.selected_actions !== undefined) {
       // The allowlist endpoint answers 409 unless the policy is "selected";
@@ -150,6 +251,23 @@ export const actionsSection: SectionModule<"actions"> = {
           ...subsetDiff({ access_level: desired.access_level }, live, "actions.access"),
         );
       }
+      if (desired.artifact_and_log_retention !== undefined) {
+        const live = await call(ctx, this, ENDPOINTS.getRetention);
+        result.drift.push(
+          ...subsetDiff(
+            desired.artifact_and_log_retention,
+            live,
+            "actions.artifact_and_log_retention",
+          ),
+        );
+      }
+      for (const [key, roles] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
+        if (!(key in cache)) {
+          continue;
+        }
+        const live = await call(ctx, this, ENDPOINTS[roles.get]);
+        result.drift.push(...subsetDiff({ [key]: cache[key] }, live, "actions.cache"));
+      }
       return result;
     }
 
@@ -170,6 +288,23 @@ export const actionsSection: SectionModule<"actions"> = {
         payload: { access_level: desired.access_level },
       });
       result.changes.push("applied workflows access level");
+    }
+    if (desired.artifact_and_log_retention !== undefined) {
+      await call(ctx, this, ENDPOINTS.putRetention, {
+        payload: desired.artifact_and_log_retention,
+        describe: "setting the artifact and log retention window",
+      });
+      result.changes.push("applied artifact and log retention");
+    }
+    for (const [key, roles] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
+      if (!(key in cache)) {
+        continue;
+      }
+      await call(ctx, this, ENDPOINTS[roles.put], {
+        payload: { [key]: cache[key] },
+        describe: `setting the cache ${roles.label} limit`,
+      });
+      result.changes.push(`applied cache ${roles.label} limit`);
     }
     return result;
   },

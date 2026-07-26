@@ -25,7 +25,7 @@ import { USED_PATHS } from "../../test/e2e/openapi/paths.js";
  * this (and re-run) to adopt upstream changes; pinning to a SHA keeps the
  * output reproducible.
  */
-const UPSTREAM_REF = "417c4fb368fc6a7162ce5f3eeeddce1a9a217747";
+const UPSTREAM_REF = "16bc535ad66fac59d585b1516d1d52f58f787962";
 
 /**
  * The dereferenced (no $ref) descriptor for our pinned API version. Dereferenced
