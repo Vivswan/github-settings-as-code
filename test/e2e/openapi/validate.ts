@@ -19,8 +19,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
-import { matchesTemplate } from "../../../src/sections/contract.js";
+import { endpointMethod, endpointPath, matchesTemplate } from "../../../src/sections/contract.js";
 import type { LoggedRequest } from "../mock/routes.js";
+import { UNDOCUMENTED_ROUTES } from "./paths.js";
 
 /** A plain JSON object. */
 type Json = Record<string, unknown>;
@@ -275,6 +276,19 @@ export class OpenApiValidator {
     const label = `${request.method} ${request.pathname}`;
     const template = this.matchTemplate(request.pathname);
     if (template === null) {
+      if (
+        UNDOCUMENTED_ROUTES.some(
+          (route) =>
+            endpointMethod(route) === request.method &&
+            pathMatches(endpointPath(route), request.pathname),
+        )
+      ) {
+        // A real endpoint GitHub's descriptor does not document (see
+        // UNDOCUMENTED_ROUTES): no schema exists, so nothing can be checked.
+        // Method-exact on purpose - an unlisted method on the same path is
+        // still an unknown route.
+        return [];
+      }
       return [
         {
           request: label,
