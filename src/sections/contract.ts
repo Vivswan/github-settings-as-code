@@ -92,10 +92,23 @@ export function grantFor(permission: SectionPermission, caveat?: string): string
 }
 
 /**
+ * Routes GitHub documents but the pinned @octokit/types release does not
+ * carry yet (its release cadence trails the API). Only the route STRING is
+ * consumed (never octokit's parameter/response typing), so a literal union
+ * is enough. Audit on every @octokit/types bump: delete entries the
+ * upstream Endpoints map has gained.
+ */
+type SupplementalRoute =
+  | "GET /repos/{owner}/{repo}/actions/cache/retention-limit"
+  | "PUT /repos/{owner}/{repo}/actions/cache/retention-limit"
+  | "GET /repos/{owner}/{repo}/actions/cache/storage-limit"
+  | "PUT /repos/{owner}/{repo}/actions/cache/storage-limit";
+
+/**
  * A GitHub REST route as octokit spells it: "METHOD /path/{param}". Using
  * `keyof Endpoints` means a typo'd path or a wrong method does not compile.
  */
-export type Route = keyof Endpoints;
+export type Route = keyof Endpoints | SupplementalRoute;
 
 /**
  * One REST endpoint a section may call. `route` is octokit's canonical
@@ -316,9 +329,12 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
 export interface SectionModule<K extends SectionKey = SectionKey> extends SectionMeta<K> {
   /**
    * Loose zod shape for the declared value: only the natural keys the
-   * handler needs are checked; every unknown field passes through
-   * untouched, so validation can never fight the passthrough-first
-   * forward-compatibility tenet.
+   * handler needs are checked, and unknown fields pass through untouched,
+   * so validation does not fight the passthrough-first forward-compatibility
+   * tenet. The sanctioned exception is a STRICT nested sub-object for a
+   * value whose endpoint offers no passthrough destination (actions.cache:
+   * each key is the entire body of its own endpoint), where an extra key
+   * can only be a typo.
    */
   shape: z.ZodType;
   /**
