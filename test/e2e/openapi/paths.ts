@@ -9,7 +9,7 @@
  */
 
 import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";
-import { endpointPath } from "../../../src/sections/contract.js";
+import { endpointPath, type Route } from "../../../src/sections/contract.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 
 /**
@@ -28,11 +28,54 @@ export const CORE_PATHS: readonly string[] = [
 ];
 
 /**
+ * Routes the action calls that GitHub's api.github.com OpenAPI descriptor
+ * does not document (verified absent at the pinned UPSTREAM_REF; the
+ * endpoints are real: https://docs.github.com/en/rest/repos/lfs). Their
+ * paths are excluded from USED_PATHS so trim-openapi does not hard-error,
+ * and the e2e validator exempts exactly these METHOD+path pairs from the
+ * unknown-route check - an unlisted method on the same path still fails.
+ * Staleness is checked in both directions: excludeUndocumented() below
+ * throws when an entry is no longer a declared endpoint path, and
+ * trim-openapi.ts errors when the upstream descriptor starts documenting
+ * one (delete the entry and re-run).
+ */
+export const UNDOCUMENTED_ROUTES: readonly Route[] = [
+  "PUT /repos/{owner}/{repo}/lfs",
+  "DELETE /repos/{owner}/{repo}/lfs",
+];
+
+/** The distinct path templates of UNDOCUMENTED_ROUTES. */
+export const UNDOCUMENTED_PATHS: readonly string[] = [
+  ...new Set(UNDOCUMENTED_ROUTES.map(endpointPath)),
+];
+
+/**
+ * Remove the undocumented paths from a derived path set, throwing on a
+ * stale entry (one that is not a declared endpoint path anymore). Exported
+ * so the staleness contract is directly testable.
+ */
+export function excludeUndocumented(
+  paths: ReadonlySet<string>,
+  undocumented: readonly string[],
+): string[] {
+  const remaining = new Set(paths);
+  for (const entry of undocumented) {
+    if (!remaining.has(entry)) {
+      throw new Error(
+        `UNDOCUMENTED_PATHS entry "${entry}" is not a declared endpoint path; delete the stale entry`,
+      );
+    }
+    remaining.delete(entry);
+  }
+  return [...remaining].sort();
+}
+
+/**
  * Every distinct path half of every section endpoint AND every issue-report
- * endpoint, unioned with CORE_PATHS and deduped. Method is intentionally
- * dropped: two routes that share a path (e.g. GET and PUT on the same resource)
- * collapse to one entry, which is what the OpenAPI trim wants (paths are keyed
- * by path, not by method).
+ * endpoint, unioned with CORE_PATHS and deduped, minus UNDOCUMENTED_PATHS.
+ * Method is intentionally dropped: two routes that share a path (e.g. GET and
+ * PUT on the same resource) collapse to one entry, which is what the OpenAPI
+ * trim wants (paths are keyed by path, not by method).
  */
 export const USED_PATHS: readonly string[] = (() => {
   const paths = new Set<string>(CORE_PATHS);
@@ -42,5 +85,5 @@ export const USED_PATHS: readonly string[] = (() => {
   for (const endpoint of Object.values(ISSUE_REPORT_ENDPOINTS)) {
     paths.add(endpointPath(endpoint.route));
   }
-  return [...paths].sort();
+  return excludeUndocumented(paths, UNDOCUMENTED_PATHS);
 })();

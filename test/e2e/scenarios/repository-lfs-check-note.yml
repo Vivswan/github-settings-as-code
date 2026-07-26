@@ -1,0 +1,22 @@
+# Check mode cannot read the Git LFS state back (GitHub exposes no endpoint),
+# so a declared enable_git_lfs produces a NOTE, not drift: the run stays
+# clean, exits 0, and never touches the LFS endpoints.
+name: repository-lfs-check-note
+settings:
+  repository:
+    enable_git_lfs: true
+inputs:
+  mode: check
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: clean
+  outcomes:
+    repository: clean
+  never:
+    - "PUT /repos/{repo}/lfs"
+    - "DELETE /repos/{repo}/lfs"
+  stdout_contains:
+    - "repository.enable_git_lfs"
+    - "cannot verify"

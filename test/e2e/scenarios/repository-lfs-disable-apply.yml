@@ -1,0 +1,16 @@
+# The disable direction of the write-only Git LFS toggle: false issues the
+# DELETE (204) unconditionally.
+name: repository-lfs-disable-apply
+settings:
+  repository:
+    enable_git_lfs: false
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    repository: applied
+  mutations:
+    - "DELETE /repos/{repo}/lfs"
+  converges: true
