@@ -261,7 +261,15 @@ export async function runForRepo(
       outcomes.push({
         key: section.key,
         status: "applied",
-        detail: result.changes.length > 0 ? result.changes : ["no changes needed"],
+        // A section that changed nothing but left notes (a tolerated 409, a
+        // personal-account skip) is NOT "already in the desired state"; show
+        // the notes instead of claiming no changes were needed.
+        detail:
+          result.changes.length > 0
+            ? result.changes
+            : result.notes.length > 0
+              ? result.notes
+              : ["no changes needed"],
       });
     }
   }

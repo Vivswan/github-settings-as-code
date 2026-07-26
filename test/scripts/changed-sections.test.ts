@@ -65,14 +65,16 @@ describe("changed-sections file map", () => {
 
   test("the special-named files map to their real keys", () => {
     expect(byFile["code-scanning.ts"]).toEqual(["code_scanning_default_setup"]);
+    expect(byFile["interaction-limits.ts"]).toEqual(["interaction_limits"]);
     expect(byFile["roles.ts"]).toEqual(["collaborators", "teams"]);
   });
 
   test("each 1:1 section file maps to exactly its own key", () => {
-    // code_scanning_default_setup lives in code-scanning.ts, so it has no
-    // <key>.ts entry; every other key does.
+    // code_scanning_default_setup and interaction_limits live in kebab-named
+    // files, so they have no <key>.ts entry; every other key does.
+    const kebabNamed = new Set(["code_scanning_default_setup", "interaction_limits"]);
     for (const key of SECTION_KEYS) {
-      if (key === "code_scanning_default_setup") {
+      if (kebabNamed.has(key)) {
         expect(byFile[`${key}.ts`]).toBeUndefined();
         continue;
       }

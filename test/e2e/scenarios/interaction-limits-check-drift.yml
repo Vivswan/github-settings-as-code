@@ -1,0 +1,20 @@
+# Check mode against an empty live limit (never set, or it expired - the
+# by-design drift of a self-expiring resource): drift, exit 1, no writes.
+name: interaction-limits-check-drift
+settings:
+  interaction_limits:
+    limit: contributors_only
+inputs:
+  mode: check
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    interaction_limits: drift
+  never:
+    - "PUT /repos/{repo}/interaction-limits"
+    - "DELETE /repos/{repo}/interaction-limits"
+  summary_contains:
+    - "no live limit"
