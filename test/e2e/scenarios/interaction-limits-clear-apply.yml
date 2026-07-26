@@ -1,0 +1,21 @@
+# interaction_limits: null actively clears a live repo-level limit via
+# DELETE (mirroring pages: null). The convergence rerun sees the empty body
+# and stays clean.
+name: interaction-limits-clear-apply
+settings:
+  interaction_limits: null
+live_state:
+  interaction_limits:
+    limit: existing_users
+    origin: repository
+    expires_at: "2026-01-02T00:00:00Z"
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    interaction_limits: applied
+  mutations:
+    - "DELETE /repos/{repo}/interaction-limits"
+  converges: true

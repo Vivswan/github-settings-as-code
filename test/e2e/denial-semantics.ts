@@ -34,4 +34,5 @@ export const DENIAL_SEMANTICS: Record<SectionKey, DenialSemantics> = {
   collaborators: "denied",
   teams: "absent",
   milestones: "denied",
+  interaction_limits: "denied",
 };
