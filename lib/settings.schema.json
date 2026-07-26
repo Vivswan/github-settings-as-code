@@ -149,7 +149,7 @@
       "type": "object"
     },
     "CollaboratorConfig": {
-      "description": "One direct collaborator, matched by username.",
+      "description": "One direct collaborator, matched by username. Keys other than username and permission are rejected (a misspelled \"permission\" would otherwise silently grant the default role).",
       "properties": {
         "permission": {
           "description": "\"pull\", \"triage\", \"push\", \"maintain\", \"admin\", or a custom org role; defaults to \"push\".",
@@ -495,7 +495,7 @@
       "type": "object"
     },
     "TeamConfig": {
-      "description": "One org team's access to the repository, matched by team slug.",
+      "description": "One org team's access to the repository, matched by team slug. Keys other than name and permission are rejected (a misspelled \"permission\" would otherwise silently grant the default role).",
       "properties": {
         "name": {
           "description": "The team slug, the natural key.",
@@ -512,7 +512,7 @@
       "type": "object"
     },
     "WorkflowConfig": {
-      "description": "One workflow's enable/disable state, keyed by its file path.",
+      "description": "One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo).",
       "properties": {
         "path": {
           "description": "Full \".github/workflows/ci.yml\" or the bare \"ci.yml\" file name.",

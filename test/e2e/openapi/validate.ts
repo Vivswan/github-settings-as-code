@@ -297,36 +297,43 @@ export class OpenApiValidator {
     const violations: OpenApiViolation[] = [];
     // Request body. Presence IS enforced (keepRequired true): a request body is
     // small and author-controlled, so a missing required field is a real bug.
+    // Exempt only a request whose handler tagged its rejection requestOffSpec:
+    // settings pass through verbatim, so scenarios deliberately send user typos
+    // the request schema forbids (an unknown rules[].type) and the mock
+    // answering GitHub's real 4xx is the behavior under test. Every other
+    // request, accepted or rejected, is still checked.
     const requestBody = operation.requestBody;
     const requestSchema = this.jsonSchema(requestBody?.content);
-    if (request.body !== undefined) {
-      if (requestSchema !== undefined) {
-        // Validate whatever the client sent - object, array, OR primitive. A
-        // primitive where the schema wants an object is real drift; skipping
-        // non-objects would fail open (the gap B1 flagged).
-        for (const detail of this.check(requestSchema, request.body, true)) {
-          violations.push({ request: label, kind: "request-body", detail });
+    if (request.requestOffSpec !== true) {
+      if (request.body !== undefined) {
+        if (requestSchema !== undefined) {
+          // Validate whatever the client sent - object, array, OR primitive. A
+          // primitive where the schema wants an object is real drift; skipping
+          // non-objects would fail open (the gap B1 flagged).
+          for (const detail of this.check(requestSchema, request.body, true)) {
+            violations.push({ request: label, kind: "request-body", detail });
+          }
+        } else if (requestBody === undefined && typeof request.body !== "string") {
+          // The operation documents NO request body at all (a GET/DELETE), yet the
+          // client sent a JSON value: GitHub accepts none there, so flag it. A
+          // string body is the raw/malformed-client case the harness exercises
+          // elsewhere, and an op that documents a body but no application/json
+          // schema (rare) has nothing to shape-check, so both fall through.
+          violations.push({
+            request: label,
+            kind: "request-body",
+            detail: `${request.method} "${template}" documents no request body, but the client sent one`,
+          });
         }
-      } else if (requestBody === undefined && typeof request.body !== "string") {
-        // The operation documents NO request body at all (a GET/DELETE), yet the
-        // client sent a JSON value: GitHub accepts none there, so flag it. A
-        // string body is the raw/malformed-client case the harness exercises
-        // elsewhere, and an op that documents a body but no application/json
-        // schema (rare) has nothing to shape-check, so both fall through.
+      } else if (requestBody?.required === true) {
+        // The operation documents a mandatory body but the client sent none: a
+        // real contract break (the mock/section omitted a required payload).
         violations.push({
           request: label,
           kind: "request-body",
-          detail: `${request.method} "${template}" documents no request body, but the client sent one`,
+          detail: `the spec marks the request body required for ${request.method} "${template}", but the client sent none`,
         });
       }
-    } else if (requestBody?.required === true) {
-      // The operation documents a mandatory body but the client sent none: a
-      // real contract break (the mock/section omitted a required payload).
-      violations.push({
-        request: label,
-        kind: "request-body",
-        detail: `the spec marks the request body required for ${request.method} "${template}", but the client sent none`,
-      });
     }
     // Response status. GitHub's published spec routinely omits error statuses
     // (especially 404s: many endpoints return one that the descriptor never

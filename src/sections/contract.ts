@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { ApiError, GithubClient } from "../github/api.js";
 import { isPermissionError, isRateLimitError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
-import type { SectionKey } from "../schema.js";
+import type { SectionKey, SettingsFile } from "../schema.js";
 
 export class PermissionDenied extends Error {
   constructor(
@@ -125,6 +125,16 @@ export interface EndpointDecl {
    * stays in one place - the declaration - instead of a hard-coded list.
    */
   advisory?: boolean;
+  /**
+   * Advice for known 4xx failure classes, keyed by the HTTP status each one
+   * explains; throwFor appends the matching entry (if any) to that status's
+   * generic rejection message, so advice never fires on a status it does not
+   * describe. Payloads pass through verbatim (GitHub stays the authority on
+   * valid values), so a hint names the failure CLASS and points at the
+   * endpoint documentation; it never lists valid values that could go stale.
+   * One or two sentences, no trailing period.
+   */
+  hints?: Readonly<Record<number, string>>;
 }
 
 /** The method half of a route ("PATCH /repos/..." -> "PATCH"). */
@@ -311,6 +321,29 @@ export interface SectionModule<K extends SectionKey = SectionKey> extends Sectio
    * forward-compatibility tenet.
    */
   shape: z.ZodType;
+  /**
+   * Declared only on CLOSED sections - those whose API calls never forward
+   * extra entry keys (collaborators, teams, workflows), where an
+   * unrecognized key is always a typo that would otherwise apply
+   * "successfully" and never converge. Consumed by validateSectionShapes,
+   * so the rejection happens during upfront document validation, BEFORE any
+   * section has written anything. Open passthrough sections must NOT
+   * declare this: their extra keys genuinely reach GitHub, and future API
+   * fields have to keep working. The conditional type enforces both edges:
+   * `known` may only name real entry keys from SettingsFile, and a
+   * non-list section cannot declare a closedSurface at all (the property
+   * collapses to never).
+   */
+  closedSurface?: NonNullable<SettingsFile[K]> extends readonly (infer E)[]
+    ? {
+        /** Every entry key the section recognizes. */
+        known: readonly (keyof E & string)[];
+        /** The entry's natural key, to name it in the error. */
+        describe: (entry: E) => string;
+        /** What the unrecognized key would silently do, as message prose. */
+        consequence: string;
+      }
+    : never;
   run(ctx: SectionContext, desired: unknown): Promise<SectionResult>;
 }
 
@@ -347,14 +380,20 @@ export async function call<E extends EndpointDecl>(
   ctx: SectionContext,
   section: SectionMeta,
   endpoint: E,
-  ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; payload?: unknown }>
+  ...args: OptsArg<
+    E,
+    { query?: Readonly<Record<string, string>>; payload?: unknown; describe?: string }
+  >
 ): Promise<unknown> {
   const opts = args[0];
   const method = endpointMethod(endpoint.route);
   const path = expand(endpoint, ctx, opts?.params, opts?.query);
   const result = await ctx.api.tryRequest(method, path, opts?.payload);
   if ("error" in result) {
-    throwFor(section, method, path, result.error);
+    throwFor(section, method, path, result.error, {
+      operation: opts?.describe,
+      hints: endpoint.hints,
+    });
   }
   return result.data;
 }
@@ -372,7 +411,12 @@ export async function tryCall<E extends EndpointDecl>(
   endpoint: E,
   ...args: OptsArg<
     E,
-    { query?: Readonly<Record<string, string>>; payload?: unknown; tolerate?: number[] }
+    {
+      query?: Readonly<Record<string, string>>;
+      payload?: unknown;
+      tolerate?: number[];
+      describe?: string;
+    }
   >
 ): Promise<{ data: unknown } | { error: ApiError }> {
   const opts = args[0];
@@ -381,7 +425,10 @@ export async function tryCall<E extends EndpointDecl>(
   const tolerate = opts?.tolerate ?? toleratedStatuses(endpoint);
   const result = await ctx.api.tryRequest(method, path, opts?.payload);
   if ("error" in result && !tolerate.includes(result.error.status)) {
-    throwFor(section, method, path, result.error);
+    throwFor(section, method, path, result.error, {
+      operation: opts?.describe,
+      hints: endpoint.hints,
+    });
   }
   return result;
 }
@@ -399,7 +446,12 @@ export async function probeAbsent<E extends EndpointDecl>(
   endpoint: E,
   ...args: OptsArg<
     E,
-    { query?: Readonly<Record<string, string>>; tolerate?: number[]; accept?: string }
+    {
+      query?: Readonly<Record<string, string>>;
+      tolerate?: number[];
+      accept?: string;
+      describe?: string;
+    }
   >
 ): Promise<{ data: unknown } | { missing: true }> {
   const options = args[0];
@@ -410,7 +462,10 @@ export async function probeAbsent<E extends EndpointDecl>(
     if (tolerate.includes(result.error.status)) {
       return { missing: true };
     }
-    throwFor(section, "GET", path, result.error);
+    throwFor(section, "GET", path, result.error, {
+      operation: options?.describe,
+      hints: endpoint.hints,
+    });
   }
   return { data: result.data };
 }
@@ -504,8 +559,13 @@ export function throwFor(
   method: string,
   path: string,
   error: ApiError,
+  context?: { operation?: string; hints?: Readonly<Record<number, string>> },
 ): never {
-  const cause = `${method} ${path}: ${error.status} ${error.message}`;
+  // "creating ruleset "x" failed - POST /repos/...": the operation label says
+  // WHAT was being done in settings-file terms; the raw method/path stays so
+  // the failing request is still identifiable.
+  const operation = context?.operation ? `${context.operation} failed - ` : "";
+  const cause = `${operation}${method} ${path}: ${error.status} ${error.message}`;
   if (isRateLimitError(error)) {
     // Includes primary and secondary rate limits delivered as 403; those
     // must not be mistaken for missing permissions.
@@ -532,7 +592,12 @@ export function throwFor(
       `${section.key}: ${cause}. The token was rejected as invalid or expired; update the token input (or the secret it reads) with a valid, unexpired PAT`,
     );
   }
+  const advice = context?.hints?.[error.status];
+  const hint = advice ? `. ${advice}` : "";
+  const docs = error.documentationUrl
+    ? `. The fields and values this endpoint accepts are documented at ${error.documentationUrl}`
+    : "";
   throw new Error(
-    `${section.key}: ${cause}. The API rejected the request; fix the "${section.key}" values in the settings file to satisfy the message above`,
+    `${section.key}: ${cause}. The API rejected the request; fix the "${section.key}" values in the settings file to satisfy the message above${hint}${docs}`,
   );
 }

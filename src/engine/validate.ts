@@ -1,11 +1,14 @@
 /**
  * Shape validation for one settings document. Each section's loose zod
  * shape lives on its module (sections/<key>.ts); this walks the declared
- * sections and reports every mismatch.
+ * sections and reports every mismatch. Closed sections (a `closedSurface`
+ * declaration on the module) additionally reject unrecognized entry keys
+ * HERE, during upfront validation, so a typo'd key fails the run before any
+ * section has written anything.
  */
 
 import { SECTION_KEYS } from "../schema.js";
-import { sectionShape } from "../sections/registry.js";
+import { sectionModule, sectionShape } from "../sections/registry.js";
 
 /**
  * Validate the declared sections' shapes. Returns an error message naming
@@ -24,18 +27,59 @@ export function validateSectionShapes(
       continue;
     }
     const parsed = sectionShape(key).safeParse(declared);
-    if (parsed.success) {
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues.slice(0, 5)) {
+        const path = issue.path
+          .map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`))
+          .join("");
+        problems.push(`${key}${path}: ${issue.message}`);
+      }
       continue;
     }
-    for (const issue of parsed.error.issues.slice(0, 5)) {
-      const path = issue.path
-        .map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`))
-        .join("");
-      problems.push(`${key}${path}: ${issue.message}`);
-    }
+    problems.push(...closedSurfaceProblems(key, declared));
   }
   if (problems.length === 0) {
     return null;
   }
-  return `${sourceLabel} has malformed section entries: ${problems.join("; ")}. Fix these values in the settings file (only the named keys are validated; any extra fields pass through)`;
+  return `${sourceLabel} has malformed section entries: ${problems.join("; ")}. Fix these values in the settings file (only the named keys are validated; extra fields pass through, except in the closed sections that reject unrecognized keys)`;
+}
+
+/**
+ * Unrecognized entry keys in a closed section, capped at 5 like the shape
+ * issues above. Runs only after the shape parse succeeded; entries that are
+ * not objects are skipped (for the current closed shapes the parse already
+ * excludes them, so the guard is only defensive).
+ */
+function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unknown): string[] {
+  // The registry's generic view erases the per-section entry typing (the same
+  // erasure sectionShape accepts), so the declaration is re-widened here.
+  const closed = sectionModule(key).closedSurface as
+    | {
+        known: readonly string[];
+        describe: (entry: Record<string, unknown>) => string;
+        consequence: string;
+      }
+    | undefined;
+  if (closed === undefined || !Array.isArray(declared)) {
+    return [];
+  }
+  const known = new Set<string>(closed.known);
+  const problems: string[] = [];
+  for (const entry of declared) {
+    if (problems.length >= 5) {
+      break;
+    }
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const unknown = Object.keys(record).filter((k) => !known.has(k));
+    if (unknown.length > 0) {
+      const list = unknown.map((k) => `"${k}"`).join(", ");
+      problems.push(
+        `${key}[${closed.describe(record)}]: declares ${list}, which this section does not recognize (known keys: ${closed.known.join(", ")}) - ${closed.consequence}. Fix the key name, or remove it`,
+      );
+    }
+  }
+  return problems;
 }

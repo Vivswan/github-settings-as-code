@@ -37,3 +37,39 @@ describe("section shape validation", () => {
     ).toBeNull();
   });
 });
+
+describe("closed-surface sections reject unrecognized entry keys upfront", () => {
+  test("a misspelled collaborator permission fails validation, before any write", () => {
+    const error = validateSectionShapes(
+      { collaborators: [{ username: "alice", permision: "admin" }] },
+      "f.yml",
+    );
+    expect(error).toContain('collaborators[alice]: declares "permision"');
+    expect(error).toContain("known keys: username, permission");
+    expect(error).toContain('default "push" role');
+  });
+
+  test("teams and workflows are closed too", () => {
+    const teams = validateSectionShapes({ teams: [{ name: "t", permissions: "admin" }] }, "f.yml");
+    expect(teams).toContain('teams[t]: declares "permissions"');
+    const workflows = validateSectionShapes(
+      { workflows: [{ path: "ci.yml", state: "active", enabled: true }] },
+      "f.yml",
+    );
+    expect(workflows).toContain('workflows[ci.yml]: declares "enabled"');
+    expect(workflows).toContain("send no payload");
+  });
+
+  test("open sections still pass extra keys through", () => {
+    expect(
+      validateSectionShapes(
+        {
+          collaborators: [{ username: "alice", permission: "admin" }],
+          milestones: [{ title: "v1", due_on: "2027-01-01T00:00:00Z" }],
+          labels: [{ name: "bug", future_field: true }],
+        },
+        "f.yml",
+      ),
+    ).toBeNull();
+  });
+});

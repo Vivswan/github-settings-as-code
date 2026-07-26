@@ -1,0 +1,25 @@
+# The motivating case for the enriched rejection messages: a rule type GitHub
+# does not recognize. Rules pass through verbatim by design (no local catalog
+# of valid types), so the typo reaches GitHub and comes back as a 422; the
+# failure message must name the operation, the failure class, and carry the
+# documentation link from the response body.
+name: rulesets-invalid-rule-type
+settings:
+  rulesets:
+    - name: quality
+      rules:
+        - type: code_quality
+          parameters:
+            severity: warning
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    rulesets: failed
+  stdout_contains:
+    - 'creating ruleset "quality" failed'
+    - "Invalid rule"
+    - "rules[].type GitHub does not recognize"
+    - "documented at https://docs.github.com/rest/repos/rules#create-a-repository-ruleset"

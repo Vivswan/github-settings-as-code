@@ -48,6 +48,11 @@ export function sectionShape(key: SectionKey): z.ZodType {
   return byKey[key].shape;
 }
 
+/** The section module for a key (validate.ts reads shape + closedSurface). */
+export function sectionModule(key: SectionKey): SectionModule {
+  return byKey[key];
+}
+
 /** One endpoint in the flattened cross-section view, tagged with its owner. */
 export type TaggedEndpoint = EndpointDecl & { section: SectionKey; role: string };
 

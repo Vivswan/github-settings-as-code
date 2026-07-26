@@ -65,12 +65,25 @@ interface LiveRulesetSummary {
 
 const permission: SectionPermission = { repo: ["administration"] };
 
+/**
+ * Rules and bypass_actors pass through verbatim (future rule types included),
+ * so a typo'd rules[].type reaches GitHub unchanged and comes back as a 422.
+ * The hint names that failure class; the valid types live in the endpoint
+ * docs, not here, so they cannot go stale.
+ */
+const RULES_HINT =
+  'Usually this means a rules[].type GitHub does not recognize, or "parameters" that do not fit that rule type (rules pass through verbatim, so a typo reaches GitHub unchanged)';
+
 const ENDPOINTS = {
   list: {
     route: "GET /repos/{owner}/{repo}/rulesets",
     statuses: { 200: "the repository ruleset list" },
   },
-  create: { route: "POST /repos/{owner}/{repo}/rulesets", statuses: { 201: "ruleset created" } },
+  create: {
+    route: "POST /repos/{owner}/{repo}/rulesets",
+    statuses: { 201: "ruleset created" },
+    hints: { 422: RULES_HINT },
+  },
   get: {
     route: "GET /repos/{owner}/{repo}/rulesets/{ruleset_id}",
     statuses: { 200: "the ruleset" },
@@ -78,6 +91,7 @@ const ENDPOINTS = {
   update: {
     route: "PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}",
     statuses: { 200: "ruleset updated" },
+    hints: { 422: RULES_HINT },
   },
 } as const satisfies Record<string, EndpointDecl>;
 
@@ -127,7 +141,10 @@ export const rulesetsSection: SectionModule<"rulesets"> = {
             `rulesets[${ruleset.name}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
         } else {
-          await call(ctx, this, ENDPOINTS.create, { payload: ruleset });
+          await call(ctx, this, ENDPOINTS.create, {
+            payload: ruleset,
+            describe: `creating ruleset "${ruleset.name}"`,
+          });
           result.changes.push(`created ruleset "${ruleset.name}"`);
         }
         continue;
@@ -139,6 +156,7 @@ export const rulesetsSection: SectionModule<"rulesets"> = {
         await call(ctx, this, ENDPOINTS.update, {
           params: { ruleset_id: String(id) },
           payload: ruleset,
+          describe: `updating ruleset "${ruleset.name}"`,
         });
         result.changes.push(`updated ruleset "${ruleset.name}" (id ${id})`);
       }

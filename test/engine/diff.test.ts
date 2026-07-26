@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { subsetDiff } from "../../src/engine/diff.js";
+import { phantomKeys, subsetDiff } from "../../src/engine/diff.js";
 
 describe("subsetDiff", () => {
   test("ignores undeclared live keys", () => {
@@ -26,5 +26,24 @@ describe("subsetDiff", () => {
   test("scalar lists compare as sets", () => {
     expect(subsetDiff(["a", "b"], ["b", "a"], "x")).toEqual([]);
     expect(subsetDiff(["a"], ["a", "c"], "x")).toEqual(['x: unexpected "c"']);
+  });
+});
+
+describe("phantomKeys", () => {
+  test("names declared keys the live object does not carry", () => {
+    expect(phantomKeys({ colr: "ff0000", description: "x" }, { description: "x" })).toEqual([
+      "colr",
+    ]);
+  });
+  test("excludes null and empty-string values (subsetDiff tolerates them)", () => {
+    expect(phantomKeys({ a: null, b: "", c: undefined }, {})).toEqual([]);
+  });
+  test("a live key holding any value is not phantom, even when it differs", () => {
+    expect(phantomKeys({ state: "open" }, { state: "closed" })).toEqual([]);
+    expect(phantomKeys({ state: "open" }, { state: null })).toEqual([]);
+  });
+  test("a non-object live value yields nothing", () => {
+    expect(phantomKeys({ a: 1 }, null)).toEqual([]);
+    expect(phantomKeys({ a: 1 }, [])).toEqual([]);
   });
 });
