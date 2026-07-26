@@ -2,8 +2,7 @@
 
 ## Supported versions
 
-Only the latest release is supported. Fixes are not backported; upgrade the
-`uses:` pin to pick them up.
+Only the latest release is supported.
 
 ## Reporting a vulnerability
 
@@ -47,6 +46,9 @@ so the interesting surface is:
 - Supply chain. lib/index.js is a committed bundle and CI fails unless it
   byte-matches a fresh build of src/. A discrepancy CI accepts is a
   vulnerability.
+
+Fixes ship in the next release and are not backported; upgrade the `uses:`
+pin to pick them up.
 
 Drift-detection false positives, confusing messages, and similar problems
 are ordinary bugs; use the issue tracker for those.
