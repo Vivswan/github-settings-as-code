@@ -69,3 +69,18 @@ describe("labels", () => {
     expect(api.calls).toHaveLength(0);
   });
 });
+
+describe("labels phantom keys", () => {
+  test("apply notes keys the live label does not carry before re-updating", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/labels?per_page=100&page=1": {
+        data: [{ name: "bug", color: "d73a4a", description: "x" }],
+      },
+    }).allowMutations("PATCH /repos/o/r/labels/*");
+    const result = await labelsSection.run(ctx(api), [{ name: "bug", colr: "000000" } as never]);
+    expect(result.notes[0]).toMatch(
+      /labels\[bug\]: declared key\(s\) "colr" do not exist on the live label.*without converging/,
+    );
+    expect(result.changes).toEqual(['updated label "bug"']);
+  });
+});

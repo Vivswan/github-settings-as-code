@@ -4,7 +4,7 @@
  */
 
 import { z } from "zod";
-import type { CollaboratorConfig } from "../schema.js";
+import type { CollaboratorConfig, MustBeNever } from "../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -25,6 +25,10 @@ interface LiveCollaborator {
 }
 
 const permission: SectionPermission = { repo: ["administration"] };
+
+const KNOWN_KEYS = ["username", "permission"] as const;
+/** Compile-time lockstep: a CollaboratorConfig field missing from KNOWN_KEYS fails here. */
+type _AllKeysKnown = MustBeNever<Exclude<keyof CollaboratorConfig, (typeof KNOWN_KEYS)[number]>>;
 
 const ENDPOINTS = {
   list: {
@@ -48,6 +52,14 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: z.array(z.looseObject({ username: z.string() })),
+  // Closed surface: the PUT accepts exactly one setting ("permission"), so
+  // an extra key is always a typo - and a misspelled "permission" would
+  // silently grant the default role and report clean forever.
+  closedSurface: {
+    known: KNOWN_KEYS,
+    describe: (c) => c.username,
+    consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
+  },
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as CollaboratorConfig[];
@@ -79,10 +91,10 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
             : `collaborators[${collaborator.username}]: missing - not a collaborator on the repo; apply will send an invitation with "${wantPermission}"`,
         );
       } else {
-        const { username: _u, ...body } = collaborator;
         await call(ctx, this, ENDPOINTS.update, {
           params: { username: collaborator.username },
-          payload: { ...body, permission: wantPermission }, // future sibling keys pass through
+          payload: { permission: wantPermission },
+          describe: `${existing ? "updating" : "inviting"} collaborator "${collaborator.username}"`,
         });
         result.changes.push(
           `${existing ? "updated" : "invited"} collaborator "${collaborator.username}" (${wantPermission})`,

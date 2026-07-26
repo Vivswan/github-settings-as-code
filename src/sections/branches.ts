@@ -39,6 +39,9 @@ const ENDPOINTS = {
   putProtection: {
     route: "PUT /repos/{owner}/{repo}/branches/{branch}/protection",
     statuses: { 200: "protection replaced" },
+    hints: {
+      422: 'Usually a sub-object is missing a required half: "required_status_checks" needs both "strict" and "contexts", "required_pull_request_reviews" values must fit their documented shapes, and "restrictions" needs "users" and "teams" lists (or declare the whole key as null)',
+    },
   },
   removeProtection: {
     route: "DELETE /repos/{owner}/{repo}/branches/{branch}/protection",
@@ -144,6 +147,7 @@ export const branchesSection: SectionModule<"branches"> = {
         await call(ctx, this, ENDPOINTS.putProtection, {
           params: { branch: branch.name },
           payload,
+          describe: `replacing protection for branch "${branch.name}"`,
         });
         result.changes.push(`applied protection to "${branch.name}"`);
       }

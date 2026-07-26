@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import type { WorkflowConfig } from "../schema.js";
+import type { MustBeNever, WorkflowConfig } from "../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -26,6 +26,10 @@ interface LiveWorkflow {
 }
 
 const permission: SectionPermission = { repo: ["actions"] };
+
+const KNOWN_KEYS = ["path", "state"] as const;
+/** Compile-time lockstep: a WorkflowConfig field missing from KNOWN_KEYS fails here. */
+type _AllKeysKnown = MustBeNever<Exclude<keyof WorkflowConfig, (typeof KNOWN_KEYS)[number]>>;
 
 const ENDPOINTS = {
   list: {
@@ -49,6 +53,13 @@ export const workflowsSection: SectionModule<"workflows"> = {
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: z.array(z.looseObject({ path: z.string(), state: z.enum(["active", "disabled"]) })),
+  // Closed surface: the enable/disable PUTs carry no body at all, so an
+  // extra key here can only be a typo that would silently do nothing.
+  closedSurface: {
+    known: KNOWN_KEYS,
+    describe: (w) => w.path,
+    consequence: "the enable/disable calls send no payload, so the key would silently do nothing",
+  },
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as WorkflowConfig[];

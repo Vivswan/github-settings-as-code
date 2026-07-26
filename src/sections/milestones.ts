@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { subsetDiff } from "../engine/diff.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
 import type { MilestoneConfig } from "../schema.js";
 import {
   call,
@@ -88,6 +88,17 @@ export const milestonesSection: SectionModule<"milestones"> = {
       if (ctx.check) {
         result.drift.push(...drift);
       } else {
+        const phantom = phantomKeys(declaredFields, existing);
+        if (phantom.length > 0) {
+          result.notes.push(
+            phantomNote(
+              `milestones[${milestone.title}]`,
+              phantom,
+              "milestone",
+              "this update will re-run",
+            ),
+          );
+        }
         await call(ctx, this, ENDPOINTS.update, {
           params: { milestone_number: String(existing.number) },
           payload: want,

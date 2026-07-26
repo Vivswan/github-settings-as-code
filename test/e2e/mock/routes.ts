@@ -70,6 +70,14 @@ export interface LoggedRequest {
    * documents neither the status nor the shape, by design. Set by server.ts.
    */
   offSpec?: boolean;
+  /**
+   * True when the handler rejected a request whose BODY is deliberately off
+   * the spec's request schema (a passthrough user typo, e.g. an unknown
+   * rules[].type answered with GitHub's real 422). The validator skips only
+   * the request-body check; the response is validated normally. Copied from
+   * MockResponse.requestOffSpec by the pipeline.
+   */
+  requestOffSpec?: boolean;
 }
 
 /** The reply a handler (or the pipeline) produces: a status and a JSON body. */
@@ -78,6 +86,15 @@ export interface MockResponse {
   body: unknown;
   /** Extra response headers (e.g. Retry-After on the 429 fault). */
   headers?: Record<string, string>;
+  /**
+   * When true, this response REJECTS a request whose body is deliberately off
+   * the spec's request schema - settings pass through to the API verbatim, so
+   * scenarios send user typos the schema forbids (an unknown rules[].type) and
+   * the handler answers GitHub's real 4xx. The OpenAPI validator skips the
+   * request-body check for such requests (the rejection is the behavior under
+   * test); the RESPONSE is still validated normally.
+   */
+  requestOffSpec?: boolean;
 }
 
 /**
@@ -400,6 +417,10 @@ const HANDLERS: Record<string, Handler> = {
   // rulesets ---------------------------------------------------------------
   "rulesets.list": ({ state, query }) => ok(slicePage(state.rulesets, query)),
   "rulesets.create": ({ state, body }) => {
+    const invalid = invalidRuleTypeResponse(body, "create-a-repository-ruleset");
+    if (invalid) {
+      return invalid;
+    }
     const ruleset: Json = { id: state.nextId++, source_type: "Repository", ...asObject(body) };
     state.rulesets.push(ruleset);
     return { status: 201, body: ruleset };
@@ -416,7 +437,13 @@ const HANDLERS: Record<string, Handler> = {
     const id = lastSegment(pathname);
     const index = state.rulesets.findIndex((r) => String(r.id) === id);
     if (index < 0) {
+      // Existence first, like GitHub: an unknown ruleset 404s even when the
+      // payload also carries an invalid rule type.
       return { status: 404, body: { message: "Not Found" } };
+    }
+    const invalid = invalidRuleTypeResponse(body, "update-a-repository-ruleset");
+    if (invalid) {
+      return invalid;
     }
     const updated: Json = { id: Number(id), source_type: "Repository", ...asObject(body) };
     state.rulesets[index] = updated;
@@ -752,6 +779,70 @@ function findLabel(state: MockState, name: string): Json | undefined {
 function nextNumber(items: Json[]): number {
   const max = items.reduce((acc, item) => Math.max(acc, Number(item.number) || 0), 0);
   return max + 1;
+}
+
+/**
+ * The rule types GitHub's rulesets API accepts, as its docs list them.
+ * Mock-only realism: the action passes rules through verbatim by design and
+ * never consults this list; it exists so a typo'd rules[].type answers
+ * GitHub's real 422 shape (errors[] plus documentation_url) instead of being
+ * stored silently. Pinned to the trimmed OpenAPI spec's rules[].type enums by
+ * a lockstep test, so it cannot drift from the contract the validator checks.
+ */
+export const RULESET_RULE_TYPES = new Set([
+  "creation",
+  "update",
+  "deletion",
+  "required_linear_history",
+  "merge_queue",
+  "required_deployments",
+  "required_signatures",
+  "pull_request",
+  "required_status_checks",
+  "non_fast_forward",
+  "commit_message_pattern",
+  "commit_author_email_pattern",
+  "committer_email_pattern",
+  "branch_name_pattern",
+  "tag_name_pattern",
+  "workflows",
+  "code_scanning",
+  "copilot_code_review",
+  "license_compliance_scanning",
+  "file_path_restriction",
+  "max_file_path_length",
+  "file_extension_restriction",
+  "max_file_size",
+]);
+
+/** GitHub's 422 for an unrecognized rules[].type, or null when all types are real. */
+function invalidRuleTypeResponse(body: unknown, docAnchor: string): MockResponse | null {
+  const rules = asObject(body).rules;
+  if (!Array.isArray(rules)) {
+    return null;
+  }
+  for (const rule of rules) {
+    const type = typeof rule === "object" && rule !== null ? (rule as Json).type : undefined;
+    if (typeof type === "string" && !RULESET_RULE_TYPES.has(type)) {
+      return {
+        status: 422,
+        body: {
+          message: "Validation Failed",
+          errors: [
+            {
+              resource: "RepositoryRuleset",
+              code: "custom",
+              field: "rules",
+              message: `Invalid rule: ${type}`,
+            },
+          ],
+          documentation_url: `https://docs.github.com/rest/repos/rules#${docAnchor}`,
+        },
+        requestOffSpec: true,
+      };
+    }
+  }
+  return null;
 }
 
 // --- Startup assertions ---------------------------------------------------
@@ -2034,7 +2125,14 @@ export function runPipeline(
     return corrupted;
   }
 
-  return { response, log: { ...baseLog, status: response.status } };
+  return {
+    response,
+    log: {
+      ...baseLog,
+      status: response.status,
+      ...(response.requestOffSpec ? { requestOffSpec: true } : {}),
+    },
+  };
 }
 
 /**

@@ -1,0 +1,22 @@
+# A collaborator entry misspells "permission" as "permision". The section's
+# surface is closed (username + permission is everything the PUT accepts), so
+# validation rejects the document upfront - BEFORE any section writes. The
+# repository section here pins that ordering: were the check inside the
+# handler, repository would have PATCHed first and left a half-applied run.
+name: collaborators-unknown-key-rejected
+settings:
+  repository:
+    description: should never be written
+  collaborators:
+    - username: alice
+      permision: admin
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    - '"permision"'
+    - "known keys: username, permission"
+    - 'default "push" role'
+  never:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/collaborators/alice"
