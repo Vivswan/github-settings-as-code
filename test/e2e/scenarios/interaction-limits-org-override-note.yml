@@ -1,0 +1,20 @@
+# An organization- or user-level interaction limit overrides the repository's:
+# the PUT answers the declared 409, which the section tolerates and surfaces
+# as a note - the run still succeeds, because the org is the place to fix it.
+name: interaction-limits-org-override-note
+settings:
+  interaction_limits:
+    limit: collaborators_only
+live_state:
+  interaction_limits_org_override: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    interaction_limits: applied
+  requests_contain:
+    - "PUT /repos/e2e-owner/e2e-repo/interaction-limits"
+  stdout_contains:
+    - "overrides this repository's"

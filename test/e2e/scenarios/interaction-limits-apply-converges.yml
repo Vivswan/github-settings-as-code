@@ -1,0 +1,18 @@
+# No live limit, a declared one: apply arms it via PUT. The convergence rerun
+# GETs the stored limit back and subsetDiffs the declared keys minus expiry
+# (write-only), so it converges; the expiry note does not affect the outcome.
+name: interaction-limits-apply-converges
+settings:
+  interaction_limits:
+    limit: collaborators_only
+    expiry: one_week
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    interaction_limits: applied
+  mutations:
+    - "PUT /repos/{repo}/interaction-limits"
+  converges: true

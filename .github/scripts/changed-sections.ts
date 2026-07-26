@@ -33,6 +33,8 @@ export const NONE = "none";
 const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   // The file is code-scanning.ts but the section key is the longer form.
   "code-scanning.ts": ["code_scanning_default_setup"],
+  // Kebab file name for the underscore section key, like code-scanning.ts.
+  "interaction-limits.ts": ["interaction_limits"],
   // roles.ts is the shared permission-vocabulary normalizer for both sections.
   "roles.ts": ["collaborators", "teams"],
 };
@@ -47,7 +49,10 @@ const ALL_SELECTING_SECTION_FILES = new Set(["contract.ts", "registry.ts"]);
  * Section keys whose handler file is NOT named `<key>.ts`, so the 1:1 builder
  * must skip them; their real filename is wired through SPECIAL_SECTION_FILES.
  */
-const KEYS_WITHOUT_MATCHING_FILE = new Set<SectionKey>(["code_scanning_default_setup"]);
+const KEYS_WITHOUT_MATCHING_FILE = new Set<SectionKey>([
+  "code_scanning_default_setup",
+  "interaction_limits",
+]);
 
 /** src/sections/<file> -> the section key(s) a change to it can affect. */
 export function buildSectionsByFile(): Record<string, SectionKey[]> {

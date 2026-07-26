@@ -30,6 +30,8 @@
  * - pages (false): an existing site is PUT unconditionally.
  * - code_scanning_default_setup (false): the PATCH runs unconditionally.
  * - teams (false): team access is granted (PUT) unconditionally.
+ * - interaction_limits (false): the PUT re-arms the self-expiring limit
+ *   unconditionally on every apply - the re-arm IS the desired behavior.
  *
  * This table lives in the harness (like DENIAL_SEMANTICS): the engine has no
  * use for it, and the apply-idempotence re-run is its contradiction path - a
@@ -54,4 +56,5 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   collaborators: true,
   teams: false,
   milestones: true,
+  interaction_limits: false,
 };

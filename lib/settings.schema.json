@@ -258,6 +258,23 @@
       ],
       "type": "object"
     },
+    "InteractionLimitsConfig": {
+      "description": "PUT /repos/{r}/interaction-limits, sent verbatim. GitHub reads back limit, origin, and the computed expires_at only.",
+      "properties": {
+        "expiry": {
+          "description": "How long the limit lasts (\"one_day\" through \"six_months\"); GitHub defaults to one_day. Write-only: GitHub reports back the computed expires_at, never the duration, so check mode cannot verify this field and apply re-arms it on every run.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Who may interact: \"existing_users\", \"contributors_only\", or \"collaborators_only\".",
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "type": "object"
+    },
     "LabelConfig": {
       "description": "One label, matched to the live repo by name.",
       "properties": {
@@ -463,6 +480,17 @@
             "$ref": "#/definitions/EnvironmentConfig"
           },
           "type": "array"
+        },
+        "interaction_limits": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InteractionLimitsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Temporary interaction limits; null clears an active repo-level limit, and an absent key leaves whatever is live untouched. Limits self-expire (GitHub's expiry tops out at six_months), so apply re-arms the declared limit on every run and check mode reports drift once it lapses."
         },
         "labels": {
           "description": "Issue/PR labels; undeclared labels are DELETED (Probot parity).",

@@ -81,6 +81,13 @@ export interface LiveState {
   teams?: Record<string, { role_name: string } | null>;
   /** Milestones (GET shape), replaces the baseline. */
   milestones?: Json[];
+  /** GET /interaction-limits body ({limit, origin, expires_at}); default none. */
+  interaction_limits?: Json;
+  /**
+   * When true, an organization- or user-level interaction limit is in
+   * effect: repo-level PUT/DELETE answer 409, matching GitHub.
+   */
+  interaction_limits_org_override?: boolean;
   /**
    * Issues the repo already has (GET shape: number, title, body, state, labels,
    * html_url, pull_request?), replaces the baseline. The private-report issue
@@ -120,6 +127,9 @@ export interface MockState {
   collaborators: Json[];
   teams: Record<string, { role_name: string } | null>;
   milestones: Json[];
+  /** The active interaction limit, or null when none is set. */
+  interaction_limits: Json | null;
+  interaction_limits_org_override: boolean;
   /** Report issues the private-report issue channel lists/creates/patches. */
   issues: Json[];
   /** Next id handed to a created resource (label, ruleset, autolink, ...). */
@@ -232,6 +242,8 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     collaborators: ls.collaborators ? clone(ls.collaborators) : [],
     teams: ls.teams ? clone(ls.teams) : {},
     milestones: ls.milestones ? clone(ls.milestones) : [],
+    interaction_limits: ls.interaction_limits ? clone(ls.interaction_limits) : null,
+    interaction_limits_org_override: ls.interaction_limits_org_override ?? false,
     issues: ls.issues ? clone(ls.issues) : [],
     nextId,
   };
