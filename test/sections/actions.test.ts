@@ -6,6 +6,7 @@ import { ctx } from "./context.js";
 const ACTIONS_WRITES = [
   "PUT /repos/o/r/actions/permissions",
   "PUT /repos/o/r/actions/permissions/*",
+  "PUT /repos/o/r/actions/cache/*",
 ];
 
 describe("actions", () => {
@@ -98,5 +99,75 @@ describe("actions", () => {
         selected_actions: { github_owned_allowed: true },
       }),
     ).rejects.toThrow(/allowed_actions/);
+  });
+
+  test("retention and cache route to their endpoints, never the base PUT", async () => {
+    const api = new MockApi({}).allowMutations(...ACTIONS_WRITES);
+    const result = await actionsSection.run(ctx(api), {
+      artifact_and_log_retention: { days: 30 },
+      cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
+    });
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PUT /repos/o/r/actions/permissions/artifact-and-log-retention",
+      "PUT /repos/o/r/actions/cache/retention-limit",
+      "PUT /repos/o/r/actions/cache/storage-limit",
+    ]);
+    expect(api.mutations()[0]?.payload).toEqual({ days: 30 });
+    expect(api.mutations()[1]?.payload).toEqual({ max_cache_retention_days: 3 });
+    expect(api.mutations()[2]?.payload).toEqual({ max_cache_size_gb: 25 });
+    // No base-permissions PUT: these keys alone must not imply enabled: true.
+    expect(result.notes).toEqual([]);
+  });
+
+  test("a lone cache key touches only its own endpoint", async () => {
+    const api = new MockApi({}).allowMutations(...ACTIONS_WRITES);
+    await actionsSection.run(ctx(api), { cache: { max_cache_size_gb: 25 } });
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PUT /repos/o/r/actions/cache/storage-limit",
+    ]);
+  });
+
+  test("check compares retention and cache against their own endpoints", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/actions/permissions/artifact-and-log-retention": { data: { days: 90 } },
+      "GET /repos/o/r/actions/cache/retention-limit": {
+        data: { max_cache_retention_days: 7 },
+      },
+      "GET /repos/o/r/actions/cache/storage-limit": { data: { max_cache_size_gb: 10 } },
+    });
+    const result = await actionsSection.run(ctx(api, true), {
+      artifact_and_log_retention: { days: 30 },
+      cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
+    });
+    expect(result.drift).toHaveLength(3);
+    expect(result.drift[0]).toContain("actions.artifact_and_log_retention.days");
+    expect(result.drift[1]).toContain("actions.cache.max_cache_retention_days");
+    expect(result.drift[2]).toContain("actions.cache.max_cache_size_gb");
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("the shape rejects unrecognized, null, and scalar cache declarations upfront", () => {
+    // Inherited names like "constructor" must be caught too: an `in`-based
+    // check would walk the prototype chain and let them silently no-op.
+    for (const cache of [{ max_cache_size: 25 }, { constructor: 5 }, null, 5]) {
+      const parsed = actionsSection.shape.safeParse({ cache });
+      expect(parsed.success).toBe(false);
+    }
+    expect(
+      actionsSection.shape.safeParse({
+        cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
+        some_future_key: "passes through",
+      }).success,
+    ).toBe(true);
+  });
+
+  test("the handler backstop catches an own __proto__ key the shape ignores", async () => {
+    // JSON.parse creates __proto__ as an OWN key; zod's strictObject skips
+    // it, so the shape passes and only the run()-level guard can reject it.
+    const cache = JSON.parse('{"__proto__": 5}');
+    expect(actionsSection.shape.safeParse({ cache }).success).toBe(true);
+    await expect(actionsSection.run(ctx(new MockApi({})), { cache })).rejects.toThrow(
+      /actions\.cache: unrecognized key\(s\) "__proto__"/,
+    );
   });
 });

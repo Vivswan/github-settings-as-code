@@ -72,6 +72,18 @@ describe("buildState overlay semantics", () => {
     expect(ids.size).toBe(3);
   });
 
+  test("actions retention and cache limits default to GitHub's values, overlay replaces", () => {
+    const state = buildState(undefined, "org");
+    expect(state.actions_retention).toEqual({ days: 90, maximum_allowed_days: 400 });
+    expect(state.cache_retention_limit).toEqual({ max_cache_retention_days: 7 });
+    expect(state.cache_storage_limit).toEqual({ max_cache_size_gb: 10 });
+    const seeded = buildState(
+      { actions_retention: { days: 30, maximum_allowed_days: 400 } },
+      "org",
+    );
+    expect(seeded.actions_retention).toEqual({ days: 30, maximum_allowed_days: 400 });
+  });
+
   test("ownerKind user marks the org absent", () => {
     const state = buildState(undefined, "user");
     expect(state.org).toBeNull();

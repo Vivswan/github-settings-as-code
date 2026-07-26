@@ -93,7 +93,7 @@ field GitHub ships tomorrow must never read as an error (see
 | `branches` | classic branch protection | Administration: write | `protection: null` removes protection; undeclared untouched; add Contents: read so check mode can tell a missing branch from an unprotected one |
 | `environments` | PUT environments | Environments: write | reviewers, wait timer, branch policies; undeclared untouched |
 | `autolinks` | autolinks CRUD | Administration: write | immutable upstream, so changed entries are replaced; undeclared deleted |
-| `actions` | actions permissions + selected-actions + workflow token + access level | Administration: write | `enabled`, `allowed_actions`, `selected_actions`, `default_workflow_permissions`, `can_approve_pull_request_reviews`, `access_level` (private repos only); undeclared untouched |
+| `actions` | actions permissions + selected-actions + workflow token + access level + artifact/log retention + cache limits | Administration: write | `enabled`, `allowed_actions`, `selected_actions`, `default_workflow_permissions`, `can_approve_pull_request_reviews`, `access_level` (private repos only), `artifact_and_log_retention`, `cache` (retention/storage limits; a 403 on the cache endpoints can mean an org- or enterprise-managed policy rather than a missing grant); undeclared untouched |
 | `workflows` | list workflows, enable/disable | Actions: write | `{path, state: active or disabled}`; bare file names match `.github/workflows/`; undeclared untouched |
 | `pages` | POST/PUT/DELETE pages | Pages: write | `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`; `pages: null` disables the site; undeclared untouched |
 | `code_scanning_default_setup` | code scanning default setup | Administration or Code scanning alerts: write | `state`, `query_suite`, `languages` (compared as a set), and future PATCH fields; needs Advanced Security on private repos, where a 403 can mean Advanced Security is off or the repo is archived; undeclared untouched |
@@ -491,6 +491,11 @@ API calls carry at most a single `permission` setting (the workflow
 enable/disable calls carry none), so an extra key can only be a typo -
 and a misspelled `permission` would otherwise silently grant the default
 `push` role and never show up as drift.
+
+One nested object is strict for the same reason: each key of the actions
+section's `cache` object is the entire body of its own endpoint, so an
+unrecognized cache key has nowhere to go and is rejected upfront; the
+rest of that section stays passthrough.
 
 ## Migrating from the Probot Settings app
 

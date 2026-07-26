@@ -1,0 +1,25 @@
+# Check mode reads each declared cache limit from its own endpoint. Only the
+# storage limit is declared, so only the storage-limit GET happens; the
+# retention-limit endpoint is never touched.
+name: actions-cache-limits-check-drift
+settings:
+  actions:
+    cache:
+      max_cache_size_gb: 25
+inputs:
+  mode: check
+live_state:
+  cache_storage_limit:
+    max_cache_size_gb: 10
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    actions: drift
+  never:
+    - "GET /repos/{repo}/actions/cache/retention-limit"
+    - "PUT /repos/{repo}/actions/cache/storage-limit"
+  summary_contains:
+    - "actions.cache.max_cache_size_gb"

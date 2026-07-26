@@ -548,6 +548,23 @@ const HANDLERS: Record<string, Handler> = {
     state.actions_access = asObject(body);
     return noContent();
   },
+  "actions.getRetention": ({ state }) => ok(state.actions_retention),
+  "actions.putRetention": ({ state, body }) => {
+    // The PUT body is {days}; the GET shape also carries the read-only
+    // maximum_allowed_days, so merge instead of replacing.
+    state.actions_retention = { ...asObject(state.actions_retention), ...asObject(body) };
+    return noContent();
+  },
+  "actions.getCacheRetention": ({ state }) => ok(state.cache_retention_limit),
+  "actions.putCacheRetention": ({ state, body }) => {
+    state.cache_retention_limit = asObject(body);
+    return noContent();
+  },
+  "actions.getCacheStorage": ({ state }) => ok(state.cache_storage_limit),
+  "actions.putCacheStorage": ({ state, body }) => {
+    state.cache_storage_limit = asObject(body);
+    return noContent();
+  },
 
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {

@@ -219,6 +219,19 @@ function genActions(rng: Rng): Json {
   if (rng.bool(0.3)) {
     actions.access_level = rng.pick(["none", "user", "organization"]);
   }
+  if (rng.bool(0.3)) {
+    actions.artifact_and_log_retention = { days: rng.int(400) + 1 };
+  }
+  if (rng.bool(0.3)) {
+    const cache: Json = {};
+    if (rng.bool()) {
+      cache.max_cache_retention_days = rng.int(14) + 1;
+    }
+    if (rng.bool() || Object.keys(cache).length === 0) {
+      cache.max_cache_size_gb = rng.int(50) + 1;
+    }
+    actions.cache = cache;
+  }
   if (Object.keys(actions).length === 0) {
     actions.default_workflow_permissions = rng.pick(["read", "write"]);
   }
@@ -608,8 +621,10 @@ export function genLiveWitness(
  * rejection error must contain: a section path ("labels[2].name"), an unknown
  * top-level key, or a fixed wording fragment. Every case is a violation
  * validateSettingsDoc GENUINELY rejects. Values the loose shapes accept by
- * design stay out of the catalog - unknown nested keys, un-modeled enums
- * (milestones.state, every actions field), arbitrary field types on loose
+ * design stay out of the catalog - unknown nested keys (except inside the
+ * strict actions.cache object, whose rejection the curated scenario
+ * actions-cache-unknown-key-rejected pins), un-modeled enums
+ * (milestones.state, most actions fields), arbitrary field types on loose
  * keys, `pages: null`, and underscore-prefixed top-level keys - because
  * generating them would assert failures the contract does not promise.
  */
