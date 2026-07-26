@@ -4,7 +4,7 @@
  */
 
 import { z } from "zod";
-import type { TeamConfig } from "../schema.js";
+import type { MustBeNever, TeamConfig } from "../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -19,6 +19,10 @@ import {
 import { DEFAULT_ROLE, roleForPermission } from "./roles.js";
 
 const permission: SectionPermission = { repo: ["administration"], org: "members" };
+
+const KNOWN_KEYS = ["name", "permission"] as const;
+/** Compile-time lockstep: a TeamConfig field missing from KNOWN_KEYS fails here. */
+type _AllKeysKnown = MustBeNever<Exclude<keyof TeamConfig, (typeof KNOWN_KEYS)[number]>>;
 
 const ENDPOINTS = {
   // GET /orgs/{org} is a public endpoint, so it needs no token permission.
@@ -44,6 +48,14 @@ export const teamsSection: SectionModule<"teams"> = {
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: z.array(z.looseObject({ name: z.string() })),
+  // Closed surface: the grant PUT accepts exactly one setting ("permission"),
+  // so an extra key is always a typo - and a misspelled "permission" would
+  // silently grant the default role and report clean.
+  closedSurface: {
+    known: KNOWN_KEYS,
+    describe: (t) => t.name,
+    consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
+  },
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as TeamConfig[];
@@ -66,13 +78,10 @@ export const teamsSection: SectionModule<"teams"> = {
     for (const team of desired) {
       const role = team.permission ?? DEFAULT_ROLE;
       if (!ctx.check) {
-        const { name: _n, ...body } = team;
         await call(ctx, this, ENDPOINTS.grant, {
           params: { org: ctx.owner, team_slug: team.name },
-          payload: {
-            ...body, // future sibling keys pass through
-            permission: role,
-          },
+          payload: { permission: role },
+          describe: `granting team "${team.name}" access`,
         });
         result.changes.push(`granted team "${team.name}" ${role}`);
         continue;

@@ -121,7 +121,7 @@ export interface ActionsConfig {
   access_level?: "none" | "user" | "organization";
 }
 
-/** One workflow's enable/disable state, keyed by its file path. */
+/** One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo). */
 export interface WorkflowConfig {
   /** Full ".github/workflows/ci.yml" or the bare "ci.yml" file name. */
   path: string;
@@ -157,7 +157,7 @@ export interface PagesConfig {
   https_enforced?: boolean;
 }
 
-/** One direct collaborator, matched by username. */
+/** One direct collaborator, matched by username. Keys other than username and permission are rejected (a misspelled "permission" would otherwise silently grant the default role). */
 export interface CollaboratorConfig {
   /** GitHub login, the natural key. */
   username: string;
@@ -165,7 +165,7 @@ export interface CollaboratorConfig {
   permission?: string;
 }
 
-/** One org team's access to the repository, matched by team slug. */
+/** One org team's access to the repository, matched by team slug. Keys other than name and permission are rejected (a misspelled "permission" would otherwise silently grant the default role). */
 export interface TeamConfig {
   /** The team slug, the natural key. */
   name: string;

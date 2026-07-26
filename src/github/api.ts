@@ -17,6 +17,8 @@ export interface ApiError {
   status: number;
   message: string;
   body: string;
+  /** GitHub's documentation_url for the failing endpoint, when the body carries one. */
+  documentationUrl?: string;
 }
 
 /**
@@ -340,11 +342,16 @@ export class GithubApi implements GithubClient {
         trace(error.status);
         const body = error.response?.data;
         let message: string;
+        let documentationUrl: string | undefined;
         if (typeof body === "object" && body !== null && "message" in body) {
           message = String((body as { message: unknown }).message);
           const errors = (body as { errors?: unknown }).errors;
           if (errors) {
             message += ` (${JSON.stringify(errors)})`;
+          }
+          const docUrl = (body as { documentation_url?: unknown }).documentation_url;
+          if (typeof docUrl === "string" && docUrl) {
+            documentationUrl = docUrl;
           }
         } else if (typeof body === "string" && body) {
           message = body;
@@ -356,6 +363,7 @@ export class GithubApi implements GithubClient {
             status: error.status,
             message,
             body: typeof body === "string" ? body : JSON.stringify(body ?? ""),
+            ...(documentationUrl === undefined ? {} : { documentationUrl }),
           },
         };
       }

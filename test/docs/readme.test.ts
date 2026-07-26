@@ -245,3 +245,26 @@ describe("schema.ts SettingsFile JSDoc deletion claims", () => {
     }
   });
 });
+
+describe("README closed-sections claim", () => {
+  test("the forward-compatibility prose names exactly the closedSurface sections", () => {
+    // closedSurface is the module-level source of which sections reject
+    // unrecognized keys; the README paragraph must list those and no others,
+    // the same way deletesUndeclared pins the Sections table.
+    const closed = SECTIONS.filter((section) => section.closedSurface !== undefined).map(
+      (section) => section.key,
+    );
+    expect(closed.length).toBeGreaterThan(0);
+    const paragraph = sectionLines(readme, "Forward compatibility").join(" ");
+    const sentence = paragraph.match(/[^.]*closed rather than passthrough[^.]*\./)?.[0];
+    expect(sentence).toBeDefined();
+    for (const key of closed) {
+      expect(sentence).toContain(`\`${key}\``);
+    }
+    for (const key of SECTION_KEYS) {
+      if (!closed.includes(key)) {
+        expect(sentence).not.toContain(`\`${key}\``);
+      }
+    }
+  });
+});

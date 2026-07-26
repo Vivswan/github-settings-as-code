@@ -485,6 +485,13 @@ Two deliberate boundaries:
   than no-op.
 - The pinned `X-GitHub-Api-Version` only changes intentionally.
 
+Three sections are closed rather than passthrough: `collaborators`,
+`teams`, and `workflows` reject entry keys they do not recognize. Their
+API calls carry at most a single `permission` setting (the workflow
+enable/disable calls carry none), so an extra key can only be a typo -
+and a misspelled `permission` would otherwise silently grant the default
+`push` role and never show up as drift.
+
 ## Migrating from the Probot Settings app
 
 Your existing `settings.yml` works as-is for `repository`, `labels`,
