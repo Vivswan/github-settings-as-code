@@ -346,6 +346,24 @@ describe("OpenApiValidator against the fetched spec", () => {
     expect(violations.some((x) => x.kind === "request-body")).toBe(true);
   });
 
+  test("the tag exempts only the schema check; a missing required body still violates", () => {
+    // requestOffSpec asserts the BODY is deliberately off-schema, which
+    // presumes a body exists; omitting a required body altogether is a
+    // harness bug the presence check must keep reporting.
+    const violations = v.validateRequest(
+      req({
+        method: "POST",
+        pathname: "/repos/e2e-owner/e2e-repo/labels",
+        status: 422,
+        responseBody: { message: "Validation Failed" },
+        requestOffSpec: true,
+      }),
+    );
+    expect(violations.some((x) => x.kind === "request-body" && x.detail.includes("required"))).toBe(
+      true,
+    );
+  });
+
   test("a request body missing a required field IS a violation (presence enforced)", () => {
     // The labels-create requestBody requires `name`; a body without it is a
     // real mock/client bug the request-body variant catches.
