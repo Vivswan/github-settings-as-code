@@ -105,7 +105,7 @@ export interface AutolinkConfig {
   is_alphanumeric?: boolean;
 }
 
-/** GitHub Actions permissions, routed across four endpoints by key. */
+/** GitHub Actions settings, routed to the right endpoint by key. */
 export interface ActionsConfig {
   /** PUT /repos/{r}/actions/permissions: whether Actions runs at all. */
   enabled?: boolean;
@@ -119,6 +119,20 @@ export interface ActionsConfig {
   can_approve_pull_request_reviews?: boolean;
   /** PUT /repos/{r}/actions/permissions/access (private repositories only) */
   access_level?: "none" | "user" | "organization";
+  /**
+   * PUT /repos/{r}/actions/permissions/artifact-and-log-retention: how many
+   * days artifacts and workflow logs are kept, e.g. { days: 90 }. The body
+   * passes through verbatim, so future fields GitHub adds work unchanged.
+   */
+  artifact_and_log_retention?: { days: number };
+  /**
+   * Actions cache limits, each key routed to its own endpoint:
+   * max_cache_retention_days -> PUT /repos/{r}/actions/cache/retention-limit,
+   * max_cache_size_gb -> PUT /repos/{r}/actions/cache/storage-limit. Keys
+   * other than these two are rejected (each limit has its own single-field
+   * endpoint, so an extra key could only be a typo).
+   */
+  cache?: { max_cache_retention_days?: number; max_cache_size_gb?: number };
 }
 
 /** One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo). */

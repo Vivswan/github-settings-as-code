@@ -1,10 +1,11 @@
 /**
  * Shape validation for one settings document. Each section's loose zod
  * shape lives on its module (sections/<key>.ts); this walks the declared
- * sections and reports every mismatch. Closed sections (a `closedSurface`
- * declaration on the module) additionally reject unrecognized entry keys
- * HERE, during upfront validation, so a typo'd key fails the run before any
- * section has written anything.
+ * sections and reports every mismatch. Unrecognized keys are rejected HERE,
+ * during upfront validation and before any section has written anything,
+ * for two kinds of surface: closed sections (a `closedSurface` declaration
+ * on the module) and strict nested shapes (a strictObject inside a
+ * section's zod shape, e.g. actions.cache).
  */
 
 import { SECTION_KEYS } from "../schema.js";
@@ -41,7 +42,7 @@ export function validateSectionShapes(
   if (problems.length === 0) {
     return null;
   }
-  return `${sourceLabel} has malformed section entries: ${problems.join("; ")}. Fix these values in the settings file (only the named keys are validated; extra fields pass through, except in the closed sections that reject unrecognized keys)`;
+  return `${sourceLabel} has malformed section entries: ${problems.join("; ")}. Fix these values in the settings file (only the named keys are validated; extra fields pass through, except in closed sections and strict nested objects like actions.cache, which reject unrecognized keys)`;
 }
 
 /**

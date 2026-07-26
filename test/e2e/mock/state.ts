@@ -63,6 +63,12 @@ export interface LiveState {
   workflow_permissions?: Json;
   /** GET /actions/permissions/access body. */
   actions_access?: Json;
+  /** GET /actions/permissions/artifact-and-log-retention body. */
+  actions_retention?: Json;
+  /** GET /actions/cache/retention-limit body. */
+  cache_retention_limit?: Json;
+  /** GET /actions/cache/storage-limit body. */
+  cache_storage_limit?: Json;
   /** Workflows list items ({id, name, path, state}), replaces the baseline. */
   workflows?: Json[];
   /** GET /pages body, or null for "Pages not enabled". */
@@ -105,6 +111,9 @@ export interface MockState {
   selected_actions: Json;
   workflow_permissions: Json;
   actions_access: Json;
+  actions_retention: Json;
+  cache_retention_limit: Json;
+  cache_storage_limit: Json;
   workflows: Json[];
   pages: Json | null;
   code_scanning: Json;
@@ -206,6 +215,17 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     selected_actions: ls.selected_actions ? clone(ls.selected_actions) : {},
     workflow_permissions: ls.workflow_permissions ? clone(ls.workflow_permissions) : {},
     actions_access: ls.actions_access ? clone(ls.actions_access) : {},
+    // GitHub's real defaults, not {}: each body carries required fields, so
+    // an unseeded GET must still answer a spec-valid shape.
+    actions_retention: ls.actions_retention
+      ? clone(ls.actions_retention)
+      : { days: 90, maximum_allowed_days: 400 },
+    cache_retention_limit: ls.cache_retention_limit
+      ? clone(ls.cache_retention_limit)
+      : { max_cache_retention_days: 7 },
+    cache_storage_limit: ls.cache_storage_limit
+      ? clone(ls.cache_storage_limit)
+      : { max_cache_size_gb: 10 },
     workflows: ls.workflows ? clone(ls.workflows) : [],
     pages: ls.pages !== undefined ? clone(ls.pages) : null,
     code_scanning: ls.code_scanning ? clone(ls.code_scanning) : {},
