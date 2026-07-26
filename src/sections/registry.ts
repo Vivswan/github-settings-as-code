@@ -16,6 +16,7 @@ import { codeScanningDefaultSetupSection } from "./code-scanning.js";
 import { collaboratorsSection } from "./collaborators.js";
 import type { EndpointDecl, SectionModule } from "./contract.js";
 import { environmentsSection } from "./environments.js";
+import { interactionLimitsSection } from "./interaction-limits.js";
 import { labelsSection } from "./labels.js";
 import { milestonesSection } from "./milestones.js";
 import { pagesSection } from "./pages.js";
@@ -38,6 +39,7 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   collaborators: collaboratorsSection,
   teams: teamsSection,
   milestones: milestonesSection,
+  interaction_limits: interactionLimitsSection,
 };
 
 /** Every section module, in execution order. */

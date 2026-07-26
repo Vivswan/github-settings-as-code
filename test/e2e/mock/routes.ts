@@ -756,7 +756,64 @@ const HANDLERS: Record<string, Handler> = {
     Object.assign(milestone, asObject(body));
     return ok(milestone);
   },
+
+  // interaction limits -------------------------------------------------------
+  "interaction_limits.get": ({ state }) =>
+    // A literal empty object is GitHub's "no limit set" answer (the spec's
+    // empty-object anyOf branch), never null or a 404. When the org-override
+    // flag is set with no seeded limit, GitHub would report the org's limit,
+    // so the mock derives one - an override with an empty GET is a live
+    // state GitHub cannot produce.
+    ok(
+      state.interaction_limits ??
+        (state.interaction_limits_org_override ? INTERACTION_ORG_LIMIT : {}),
+    ),
+  "interaction_limits.put": ({ state, body }) => {
+    if (state.interaction_limits_org_override) {
+      return INTERACTION_ORG_CONFLICT;
+    }
+    const payload = asObject(body);
+    const expiry = typeof payload.expiry === "string" ? payload.expiry : "one_day";
+    // GitHub stores limit/origin/expires_at only; the declared expiry
+    // duration maps to a FIXED expires_at per value so repeat applies stay
+    // byte-stable for the idempotence proof.
+    state.interaction_limits = {
+      limit: payload.limit,
+      origin: "repository",
+      expires_at: INTERACTION_EXPIRES[expiry] ?? INTERACTION_EXPIRES.one_day,
+    };
+    return ok(state.interaction_limits);
+  },
+  "interaction_limits.remove": ({ state }) => {
+    if (state.interaction_limits_org_override) {
+      return INTERACTION_ORG_CONFLICT;
+    }
+    state.interaction_limits = null;
+    return noContent();
+  },
 };
+
+/** Deterministic expires_at per declared expiry (see interaction_limits.put). */
+const INTERACTION_EXPIRES: Record<string, string> = {
+  one_day: "2027-01-02T00:00:00Z",
+  three_days: "2027-01-04T00:00:00Z",
+  one_week: "2027-01-08T00:00:00Z",
+  one_month: "2027-02-01T00:00:00Z",
+  six_months: "2027-07-01T00:00:00Z",
+};
+
+/** The org-level limit the GET reports when the override flag is set alone. */
+const INTERACTION_ORG_LIMIT = {
+  limit: "existing_users",
+  origin: "organization",
+  expires_at: "2027-07-01T00:00:00Z",
+} as const;
+
+/** The 409 GitHub answers when an org/user-level limit overrides the repo's. */
+const INTERACTION_ORG_CONFLICT = {
+  status: 409,
+  body: { message: "Conflict: an organization or user interaction limit is in effect" },
+} as const;
 
 // --- Handler-local helpers ------------------------------------------------
 

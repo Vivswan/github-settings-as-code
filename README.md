@@ -100,6 +100,7 @@ field GitHub ships tomorrow must never read as an error (see
 | `collaborators` | direct collaborators | Administration: write | invitations for new users; undeclared deleted (owner never touched) |
 | `teams` | org team repo permissions | Members: read (org permission) + Administration: write | org repos only, skipped with a notice on personal accounts; undeclared untouched |
 | `milestones` | milestones | Issues: write | upsert by title; undeclared kept (may hold issues) |
+| `interaction_limits` | interaction-limits | Administration: write | re-arms the self-expiring limit every apply run (expiry is write-only, max six_months); `null` clears it (in multi-repo mode a target's `null` is a defaults opt-out when the defaults declare one, like `pages`); a 409 (org/user-level limit overrides) becomes a note on apply, while check still reports drift; undeclared untouched |
 
 ## Semantics
 

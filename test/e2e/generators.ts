@@ -356,6 +356,20 @@ function genMilestones(rng: Rng): Json[] {
   return out;
 }
 
+function genInteractionLimits(rng: Rng): Json | null {
+  // null (a clear) is a first-class declared value, like pages: null.
+  if (rng.bool(0.2)) {
+    return null;
+  }
+  const limits: Json = {
+    limit: rng.pick(["existing_users", "contributors_only", "collaborators_only"]),
+  };
+  if (rng.bool()) {
+    limits.expiry = rng.pick(["one_day", "three_days", "one_week", "one_month", "six_months"]);
+  }
+  return limits;
+}
+
 const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   repository: genRepository,
   labels: genLabels,
@@ -370,6 +384,7 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   collaborators: genCollaborators,
   teams: genTeams,
   milestones: genMilestones,
+  interaction_limits: genInteractionLimits,
 };
 
 /** A valid-shaped settings value for one section. */
@@ -658,11 +673,15 @@ const RECORD_SECTIONS = [
 
 /**
  * Compile-time exhaustiveness: every section is classified as array, record,
- * or pages (the one nullable-object section, covered by its own catalog
- * cases). A new section that lands unclassified fails here instead of
- * silently missing wrong-container fuzzing.
+ * pages, or interaction_limits (the two nullable-object sections, each
+ * covered by its own catalog cases). A new section that lands unclassified
+ * fails here instead of silently missing wrong-container fuzzing.
  */
-type CoveredSection = (typeof ARRAY_SECTIONS)[number] | (typeof RECORD_SECTIONS)[number] | "pages";
+type CoveredSection =
+  | (typeof ARRAY_SECTIONS)[number]
+  | (typeof RECORD_SECTIONS)[number]
+  | "pages"
+  | "interaction_limits";
 type _UnclassifiedSection = MustBeNever<Exclude<SectionKey, CoveredSection>>;
 
 /** The required string field each array section's item shape enforces. */
@@ -730,6 +749,22 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     build: (rng) => ({
       doc: { pages: rng.pick(["gh-pages", [1]] as const) },
       offendingToken: "pages",
+    }),
+  },
+  {
+    // null is NOT in the pick list: it is a valid declared value (clear).
+    name: "interaction-limits-wrong-type",
+    build: (rng) => ({
+      doc: { interaction_limits: rng.pick(["oops", 7, [1]] as const) },
+      offendingToken: "interaction_limits",
+    }),
+  },
+  {
+    name: "interaction-limits-bad-limit",
+    build: (rng) => ({
+      // A missing or non-string `limit` fails the shape's one required key.
+      doc: { interaction_limits: rng.pick([{ expiry: "one_week" }, { limit: 7 }] as const) },
+      offendingToken: "interaction_limits",
     }),
   },
   {
@@ -883,7 +918,8 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
  * A fault aimed here is guaranteed to fire, which the fuzz iteration's
  * faultsFired assertion turns into a non-vacuity proof. Sections whose first
  * read is conditional or check-mode-only are deliberately absent: repository,
- * environments, and code_scanning_default_setup read only under check (apply
+ * environments, code_scanning_default_setup, and interaction_limits read
+ * only under check (apply
  * writes unconditionally), and branches/actions gate their reads on the
  * declared keys - a fault aimed at a read that never happens would fail the
  * non-vacuity assertion instead of testing anything.
@@ -913,6 +949,7 @@ const UNFAULTABLE_SECTIONS = [
   "environments",
   "actions",
   "code_scanning_default_setup",
+  "interaction_limits",
 ] as const satisfies readonly SectionKey[];
 type FaultClassified = FaultableSection | (typeof UNFAULTABLE_SECTIONS)[number];
 type _UnclassifiedFaultSection = MustBeNever<Exclude<SectionKey, FaultClassified>>;

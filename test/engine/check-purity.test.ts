@@ -34,6 +34,7 @@ const FIXTURES: Record<SectionKey, unknown> = {
   collaborators: [{ username: "bob" }],
   teams: [{ name: "devs" }],
   milestones: [{ title: "v1" }],
+  interaction_limits: { limit: "contributors_only" },
 };
 
 /** Live data that differs from every fixture; unrouted GETs answer 404. */
@@ -64,6 +65,8 @@ const ROUTES = {
   "GET /repos/o/r/milestones?state=all&per_page=100&page=1": {
     data: [{ number: 1, title: "old", description: null, state: "open" }],
   },
+  // An empty body means "no live limit", which drifts against the fixture.
+  "GET /repos/o/r/interaction-limits": { data: {} },
 };
 
 function silentIo(): Io {

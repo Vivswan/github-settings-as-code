@@ -35,6 +35,13 @@ export interface SettingsFile {
   teams?: TeamConfig[];
   /** Milestones, upserted by title; undeclared ones are kept. */
   milestones?: MilestoneConfig[];
+  /**
+   * Temporary interaction limits; null clears an active repo-level limit,
+   * and an absent key leaves whatever is live untouched. Limits self-expire
+   * (GitHub's expiry tops out at six_months), so apply re-arms the declared
+   * limit on every run and check mode reports drift once it lapses.
+   */
+  interaction_limits?: InteractionLimitsConfig | null;
 }
 
 /** One label, matched to the live repo by name. */
@@ -197,6 +204,19 @@ export interface MilestoneConfig {
   state?: "open" | "closed";
 }
 
+/** PUT /repos/{r}/interaction-limits, sent verbatim. GitHub reads back limit, origin, and the computed expires_at only. */
+export interface InteractionLimitsConfig {
+  /** Who may interact: "existing_users", "contributors_only", or "collaborators_only". */
+  limit: string;
+  /**
+   * How long the limit lasts ("one_day" through "six_months"); GitHub
+   * defaults to one_day. Write-only: GitHub reports back the computed
+   * expires_at, never the duration, so check mode cannot verify this field
+   * and apply re-arms it on every run.
+   */
+  expiry?: string;
+}
+
 /** Every recognized top-level section, in execution order. */
 export const SECTION_KEYS = [
   "repository",
@@ -212,6 +232,7 @@ export const SECTION_KEYS = [
   "collaborators",
   "teams",
   "milestones",
+  "interaction_limits",
 ] as const satisfies readonly (keyof SettingsFile)[];
 
 /** A recognized top-level section name. */
