@@ -32,6 +32,15 @@ labels:
   - name: dependencies
     color: "0366d6"
     description: Dependency updates
+  # Dependabot's default per-ecosystem labels: without a `labels:` override in
+  # dependabot.yml it applies these and recreates them if missing, so leaving
+  # them undeclared would make the settings sync delete/recreate them forever.
+  - name: github_actions
+    color: "000000"
+    description: Pull requests that update GitHub Actions code
+  - name: javascript
+    color: "168700"
+    description: Pull requests that update javascript code
   - name: bug
     color: "d73a4a"
     description: Something isn't working
