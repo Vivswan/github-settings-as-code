@@ -47,15 +47,13 @@ describe("parseRecipient", () => {
     expect(parseRecipient(recipient)).toEqual({ ok: true });
   });
 
-  test.each([
-    "",
-    "not-a-key",
-    "age1shortandinvalid",
-    "AGE-SECRET-KEY-1NOTPUBLIC",
-  ])("rejects a malformed recipient: %j", (recipient) => {
-    const result = parseRecipient(recipient);
-    expect(result.ok).toBe(false);
-  });
+  test.each(["", "not-a-key", "age1shortandinvalid", "AGE-SECRET-KEY-1NOTPUBLIC"])(
+    "rejects a malformed recipient: %j",
+    (recipient) => {
+      const result = parseRecipient(recipient);
+      expect(result.ok).toBe(false);
+    },
+  );
 });
 
 describe("deliverArtifactReport", () => {
