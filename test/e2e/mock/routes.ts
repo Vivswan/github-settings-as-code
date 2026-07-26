@@ -74,8 +74,9 @@ export interface LoggedRequest {
    * True when the handler rejected a request whose BODY is deliberately off
    * the spec's request schema (a passthrough user typo, e.g. an unknown
    * rules[].type answered with GitHub's real 422). The validator skips only
-   * the request-body check; the response is validated normally. Copied from
-   * MockResponse.requestOffSpec by the pipeline.
+   * the request-body SCHEMA check; body-presence checks and the response are
+   * validated normally. Copied from MockResponse.requestOffSpec by the
+   * pipeline.
    */
   requestOffSpec?: boolean;
 }
@@ -90,9 +91,10 @@ export interface MockResponse {
    * When true, this response REJECTS a request whose body is deliberately off
    * the spec's request schema - settings pass through to the API verbatim, so
    * scenarios send user typos the schema forbids (an unknown rules[].type) and
-   * the handler answers GitHub's real 4xx. The OpenAPI validator skips the
-   * request-body check for such requests (the rejection is the behavior under
-   * test); the RESPONSE is still validated normally.
+   * the handler answers GitHub's real 4xx. The OpenAPI validator skips only
+   * the request-body SCHEMA check for such requests (the rejection is the
+   * behavior under test); body-presence checks and response validation still
+   * apply.
    */
   requestOffSpec?: boolean;
 }
