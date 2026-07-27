@@ -73,6 +73,17 @@ purpose, because payloads pass through to the API verbatim and declaring a
 field GitHub ships tomorrow must never read as an error (see
 [Forward compatibility](#forward-compatibility)).
 
+## Guides
+
+Task-oriented walkthroughs live in [docs/](docs/README.md):
+[getting started](docs/getting-started.md),
+[examples](docs/examples.md),
+[multi-repo mode](docs/multi-repo.md),
+[playbooks](docs/playbooks.md),
+[check mode](docs/check-mode.md),
+[migrating from Probot](docs/migrating-from-probot.md), and
+[troubleshooting](docs/troubleshooting.md).
+
 ## Versioning
 
 - `@v1` is a moving major tag: <!-- x-release-please-major -->
