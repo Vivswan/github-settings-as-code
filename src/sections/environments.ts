@@ -161,10 +161,10 @@ export const environmentsSection: SectionModule<"environments"> = {
   ),
   /**
    * The declared value of every entry's secrets list, across all declared
-   * environments, for the engine's up-front reference resolution. Defensive
-   * like the shared extractor: this runs BEFORE validation on target-fetched
-   * documents, so a malformed container contributes nothing and shape
-   * validation reports the actionable error.
+   * environments, for the engine's up-front reference resolution. DEFENSIVE
+   * like the shared extractor: a malformed container contributes nothing
+   * instead of throwing, so the actionable error always comes from shape
+   * validation.
    */
   secretValues(declared: unknown): string[] {
     if (!Array.isArray(declared)) {
