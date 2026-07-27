@@ -1,0 +1,24 @@
+# The OIDC subject claim pair. Live is the default template, the declared one
+# pins two claim keys, so apply PUTs the template verbatim (201). The
+# convergence rerun reads it back and must find it matching, including
+# claim-key order. Administration is explicitly DENIED: the pair carries a
+# permission override (Actions), so the apply must succeed anyway - the
+# override proof on the write path.
+name: actions-oidc-sub-apply-converges
+settings:
+  actions:
+    oidc_customization_sub:
+      use_default: false
+      include_claim_keys: [repo, context]
+denial_style: fine_grained
+token_permissions:
+  administration: none
+  actions: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    actions: applied
+  mutations:
+    - "PUT /repos/{repo}/actions/oidc/customization/sub"
+  converges: true

@@ -1,8 +1,8 @@
 /**
  * `actions:` section - a key router across the Actions settings endpoints
  * (base permissions, selected-actions allowlist, workflow token defaults,
- * access level, artifact/log retention, cache limits), with unknown keys
- * passed through verbatim to the base permissions PUT.
+ * access level, artifact/log retention, cache limits, OIDC subject claim),
+ * with unknown keys passed through verbatim to the base permissions PUT.
  */
 
 import { z } from "zod";
@@ -20,6 +20,11 @@ import {
 } from "./contract.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
+
+// The contract documents both 400 and 422 for a rejected template, so the
+// same advice keys both statuses.
+const OIDC_TEMPLATE_HINT =
+  "include_claim_keys entries must be unique claim keys of the OIDC token (alphanumeric and underscores only); see the OIDC subject claim customization endpoint documentation";
 
 const ENDPOINTS = {
   getPermissions: {
@@ -91,6 +96,17 @@ const ENDPOINTS = {
       400: "the storage limit must be a whole number of gigabytes within the allowed range; see the cache storage-limit endpoint documentation",
     },
   },
+  getOidcSub: {
+    route: "GET /repos/{owner}/{repo}/actions/oidc/customization/sub",
+    statuses: { 200: "the OIDC subject claim template" },
+    permission: { repo: ["actions"] },
+  },
+  putOidcSub: {
+    route: "PUT /repos/{owner}/{repo}/actions/oidc/customization/sub",
+    statuses: { 201: "OIDC subject claim template applied" },
+    permission: { repo: ["actions"] },
+    hints: { 400: OIDC_TEMPLATE_HINT, 422: OIDC_TEMPLATE_HINT },
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
 // Forward-compatible key routing: every DECLARED ActionsConfig key names its
@@ -108,6 +124,7 @@ const KEY_DESTINATION = {
   access_level: "own-endpoint",
   artifact_and_log_retention: "own-endpoint",
   cache: "own-endpoint",
+  oidc_customization_sub: "own-endpoint",
 } as const satisfies Record<keyof ActionsConfig, "base" | "workflow" | "own-endpoint">;
 
 function keysTo(destination: "base" | "workflow" | "own-endpoint"): Set<string> {
@@ -140,6 +157,15 @@ const CACHE_ENDPOINT_BY_KEY = {
 } as const;
 
 /**
+ * Claim-key ORDER defines the OIDC subject format ("repo:...:context:..."),
+ * so unlike subsetDiff's scalar-list set comparison, this list must match
+ * element by element - a reordered live value is drift.
+ */
+function sameClaimKeyOrder(declared: readonly string[], live: readonly unknown[]): boolean {
+  return declared.length === live.length && declared.every((key, index) => live[index] === key);
+}
+
+/**
  * Top level and retention stay loose (unknown keys pass through to their
  * PUT bodies verbatim), but cache is strict: each cache limit is the entire
  * body of its own endpoint, so an unrecognized cache key has no passthrough
@@ -154,13 +180,27 @@ const shape = z.looseObject({
       max_cache_size_gb: z.number().optional(),
     })
     .optional(),
+  // The positional claim-key comparator below needs a shape-guaranteed
+  // string array, and the subject-format flag is a YAML boolean-gotcha
+  // magnet; the rest of the object stays loose (future fields ride the
+  // PUT verbatim).
+  oidc_customization_sub: z
+    .looseObject({
+      use_default: z.boolean(),
+      include_claim_keys: z.array(z.string()).optional(),
+      use_immutable_subject: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 export const actionsSection: SectionModule<"actions"> = {
   key: "actions",
   deletesUndeclared: "untouched",
   permission,
-  grant: grantFor(permission),
+  grant: grantFor(
+    permission,
+    'the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
+  ),
   endpoints: ENDPOINTS,
   shape,
   async run(ctx, desiredRaw): Promise<SectionResult> {
@@ -268,6 +308,29 @@ export const actionsSection: SectionModule<"actions"> = {
         const live = await call(ctx, this, ENDPOINTS[roles.get]);
         result.drift.push(...subsetDiff({ [key]: cache[key] }, live, "actions.cache"));
       }
+      if (desired.oidc_customization_sub !== undefined) {
+        const declared = desired.oidc_customization_sub;
+        const live = (await call(ctx, this, ENDPOINTS.getOidcSub)) as Record<string, unknown>;
+        // The claim-key list is special-cased below; everything ELSE in the
+        // declared object (use_default today, future fields tomorrow) rides
+        // the PUT verbatim, so it must be diffed verbatim too - the expiry
+        // precedent: exclude the special field, compare the remainder.
+        const { include_claim_keys, ...comparable } = declared;
+        result.drift.push(...subsetDiff(comparable, live, "actions.oidc_customization_sub"));
+        // GitHub ignores include_claim_keys when use_default is true, and
+        // an OMITTED list on a custom template is itself meaningful
+        // upstream (it opts the repository into the organization template,
+        // whose keys then show up live). So the list is compared only when
+        // the file declares it - declared-keys-only, like everything else.
+        if (declared.use_default === false && include_claim_keys !== undefined) {
+          const liveKeys = Array.isArray(live.include_claim_keys) ? live.include_claim_keys : [];
+          if (!sameClaimKeyOrder(include_claim_keys, liveKeys)) {
+            result.drift.push(
+              `actions.oidc_customization_sub.include_claim_keys: declared ${JSON.stringify(include_claim_keys)} != live ${JSON.stringify(liveKeys)} (claim-key order defines the subject format, so order counts); apply will set the declared value`,
+            );
+          }
+        }
+      }
       return result;
     }
 
@@ -305,6 +368,13 @@ export const actionsSection: SectionModule<"actions"> = {
         describe: `setting the cache ${roles.label} limit`,
       });
       result.changes.push(`applied cache ${roles.label} limit`);
+    }
+    if (desired.oidc_customization_sub !== undefined) {
+      await call(ctx, this, ENDPOINTS.putOidcSub, {
+        payload: desired.oidc_customization_sub,
+        describe: "customizing the OIDC subject claim",
+      });
+      result.changes.push("applied the OIDC subject claim template");
     }
     return result;
   },

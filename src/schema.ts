@@ -140,6 +140,24 @@ export interface ActionsConfig {
    * endpoint, so an extra key could only be a typo).
    */
   cache?: { max_cache_retention_days?: number; max_cache_size_gb?: number };
+  /**
+   * PUT /repos/{r}/actions/oidc/customization/sub: the OIDC subject claim
+   * template for this repository's workflow tokens, e.g.
+   * { use_default: false, include_claim_keys: [repo, context] } (keys must
+   * be unique). Claim-key ORDER defines the subject format, so check mode
+   * compares a declared list positionally; an omitted list on a custom
+   * template opts into the organization template and is not compared.
+   * use_immutable_subject switches the whole subject to the stable
+   * repository-ID-based format; omitted, the organization setting or the
+   * repository's creation date decides, and only a declared value is
+   * compared. Unlike the rest of this section, these
+   * endpoints need the "Actions" PAT permission rather than Administration.
+   */
+  oidc_customization_sub?: {
+    use_default: boolean;
+    include_claim_keys?: string[];
+    use_immutable_subject?: boolean;
+  };
 }
 
 /** One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo). */

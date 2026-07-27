@@ -224,6 +224,29 @@ describe("docs/ guide pages", () => {
           `docs/${page} pins @${m[1]}; guides must use the moving major tag @${major}`,
         ).toBe(major);
       }
+      // release-please's generic updater rewrites the FIRST digit run on an
+      // annotated line (MAJOR_VERSION_REGEX with String.replace). Every
+      // annotated line must therefore keep the @v pin's digit first, or a
+      // v2 release PR silently rewrites the wrong number.
+      for (const [index, line] of markdown.split("\n").entries()) {
+        if (line.includes("x-release-please-major")) {
+          expect(
+            /^[^\d]*@v\d/.test(line),
+            `docs/${page}:${index + 1} carries x-release-please-major but a digit precedes the @v pin; release-please would rewrite that digit instead`,
+          ).toBe(true);
+        }
+      }
+    }
+    // README.md carries the same inline annotation on its moving-major
+    // prose line, subject to the identical first-digit hazard.
+    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+    for (const [index, line] of readme.split("\n").entries()) {
+      if (line.includes("x-release-please-major")) {
+        expect(
+          /^[^\d]*@v\d/.test(line),
+          `README.md:${index + 1} carries x-release-please-major but a digit precedes the @v pin; release-please would rewrite that digit instead`,
+        ).toBe(true);
+      }
     }
     // The guides carry workflow snippets, so zero matches means the pattern
     // rotted, not that the docs went snippet-free.
