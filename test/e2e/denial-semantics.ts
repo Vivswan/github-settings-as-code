@@ -36,4 +36,5 @@ export const DENIAL_SEMANTICS: Record<SectionKey, DenialSemantics> = {
   milestones: "denied",
   interaction_limits: "denied",
   actions_variables: "denied",
+  webhooks: "denied",
 };

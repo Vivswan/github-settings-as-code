@@ -31,6 +31,7 @@ const REQUIRED_PAGES = [
   "playbooks.md",
   "check-mode.md",
   "undeclared-policy.md",
+  "secrets-and-vaults.md",
   "migrating-from-probot.md",
   "troubleshooting.md",
 ] as const;

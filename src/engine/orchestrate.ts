@@ -6,11 +6,17 @@
  * and callers decide how (or whether) to tag them per repository.
  */
 
+import {
+  resolveSecretRefs,
+  type SettingsSource,
+  validateSecretRef,
+} from "../action/secret-refs.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import { type MustBeNever, SECTION_KEYS, type SettingsFile } from "../schema.js";
 import { PermissionDenied, type SectionContext, type SectionResult } from "../sections/contract.js";
 import { SECTIONS } from "../sections/registry.js";
+import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
 import { validateSectionShapes } from "./validate.js";
 
 export interface SectionOutcome {
@@ -31,6 +37,20 @@ export interface RepoRunOptions {
   onMissingPermission: "fail" | "warn";
   requiredSections: Set<string>;
   onlySections: Set<string>;
+  /**
+   * Provenance of one declared secret-field value: which source DOCUMENT
+   * declared it. Omitted, every value is "operator" (single-repo settings,
+   * central files, and the defaults file are operator-authored). The
+   * multi-repo remote flow passes a lookup built from the target-fetched
+   * document BEFORE the defaults merge, so a target-declared reference is
+   * refused even after the merge folds the documents together.
+   */
+  secretSource?: (value: string) => SettingsSource;
+  /**
+   * The environment secret references resolve from in apply mode. Tests
+   * inject a record; production omits it and process.env applies.
+   */
+  secretEnv?: Record<string, string | undefined>;
 }
 
 export type RepoResult = "applied" | "partial" | "clean" | "drift" | "failed" | "skipped";
@@ -164,6 +184,48 @@ export async function runForRepo(
     return opts.onlySections.size === 0 || opts.onlySections.has(section.key);
   });
 
+  // Secret references, phase (a): collect every declared secret-field value
+  // from the ACTIVE sections (a section excluded by `sections` never runs, so
+  // its references must not fail the run) and validate syntax and provenance
+  // in BOTH modes, before the preflight barrier. No environment is read here:
+  // check mode and preflight see syntax only.
+  const secretValues = collectSecretValues(
+    settings,
+    active,
+    opts.secretSource ?? (() => "operator"),
+  );
+  const secretFailure = (errorsBySection: Map<string, string[]>): RepoRunResult => {
+    const outcomes: SectionOutcome[] = [];
+    for (const [key, errors] of errorsBySection) {
+      for (const message of errors) {
+        io.annotate("error", `${key}: ${message}`);
+      }
+      outcomes.push({ key, status: "failed", detail: errors });
+    }
+    return {
+      repo: opts.repo,
+      result: "failed",
+      outcomes,
+      skippedSections: [],
+      preflightDenied: [],
+    };
+  };
+  const pushError = (map: Map<string, string[]>, key: string, message: string): void => {
+    const list = map.get(key) ?? [];
+    list.push(message);
+    map.set(key, list);
+  };
+  const syntaxErrors = new Map<string, string[]>();
+  for (const { section, value, source } of secretValues) {
+    const checked = validateSecretRef(value, source);
+    if (!checked.ok) {
+      pushError(syntaxErrors, section, checked.error);
+    }
+  }
+  if (syntaxErrors.size > 0) {
+    return secretFailure(syntaxErrors);
+  }
+
   // Preflight barrier: the API has no transactions, so a mid-apply
   // permission failure would leave settings half-applied. Under the strict
   // policy, probe every declared section read-only FIRST and refuse to
@@ -186,6 +248,53 @@ export async function runForRepo(
     }
   }
 
+  // Secret references, phase (b), apply mode only: resolve EVERY reference
+  // up front - after the preflight barrier (which is read-only and needs no
+  // secrets) and before the first mutation of ANY section, so an unset or
+  // empty variable fails the repository cleanly with zero writes. Every
+  // resolved plaintext is registered with output masking BEFORE the resolver
+  // exists, so no handler can use a value the masker has not seen.
+  let resolveSecret: SectionContext["resolveSecret"];
+  if (!ctx.check && secretValues.length > 0) {
+    const env = opts.secretEnv ?? process.env;
+    const bySection = new Map<string, SectionSecretValue[]>();
+    for (const value of secretValues) {
+      const list = bySection.get(value.section) ?? [];
+      list.push(value);
+      bySection.set(value.section, list);
+    }
+    const resolutionErrors = new Map<string, string[]>();
+    const resolved: Record<string, string> = {};
+    const mask = new Set<string>();
+    for (const [key, values] of bySection) {
+      const resolution = resolveSecretRefs(values, env);
+      if (!resolution.ok) {
+        resolutionErrors.set(key, resolution.errors);
+        continue;
+      }
+      Object.assign(resolved, resolution.values);
+      for (const plaintext of resolution.mask) {
+        mask.add(plaintext);
+      }
+    }
+    if (resolutionErrors.size > 0) {
+      return secretFailure(resolutionErrors);
+    }
+    for (const plaintext of mask) {
+      io.mask(plaintext);
+    }
+    resolveSecret = (reference: string): string => {
+      const plaintext = reference.startsWith("$") ? resolved[reference.slice(1)] : undefined;
+      if (plaintext === undefined) {
+        throw new Error(
+          `BUG: secret reference ${reference} was not resolved up front; the engine resolves every declared secret value before any section runs`,
+        );
+      }
+      return plaintext;
+    };
+  }
+  const runCtx: SectionContext = resolveSecret === undefined ? ctx : { ...ctx, resolveSecret };
+
   const outcomes: SectionOutcome[] = [];
   let failed = false;
   let partial = false;
@@ -202,7 +311,7 @@ export async function runForRepo(
     }
     let result: SectionResult;
     try {
-      result = await section.run(ctx, desired);
+      result = await section.run(runCtx, desired);
     } catch (error) {
       if (error instanceof PermissionDenied) {
         const required = opts.requiredSections.has(section.key);

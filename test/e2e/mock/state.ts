@@ -103,6 +103,13 @@ export interface LiveState {
    */
   interaction_limits_org_override?: boolean;
   /**
+   * Repository webhooks (GET shape), replaces the baseline. A seed may be
+   * sparse: buildState completes each hook to the spec's required shape (id,
+   * name "web", timestamps, urls, last_response). A seeded config.secret is
+   * STORED verbatim but every GET echoes it as "********", matching GitHub.
+   */
+  hooks?: Json[];
+  /**
    * Issues the repo already has (GET shape: number, title, body, state, labels,
    * html_url, pull_request?), replaces the baseline. The private-report issue
    * channel lists, creates, and patches these; a scenario seeds a pre-existing
@@ -149,6 +156,8 @@ export interface MockState {
   interaction_limits: Json | null;
   interaction_limits_org_override: boolean;
   actions_variables: Json[];
+  /** Repository webhooks; config.secret is stored real, GETs echo "********". */
+  hooks: Json[];
   /** Report issues the private-report issue channel lists/creates/patches. */
   issues: Json[];
   /** Next id handed to a created resource (label, ruleset, autolink, ...). */
@@ -196,6 +205,34 @@ function generateLabels(gen: LabelsGenerate, startId: number): Json[] {
     });
   }
   return out;
+}
+
+/**
+ * Complete a (possibly sparse) webhook body to the spec's required GET shape,
+ * so scenario seeds stay terse and every served hook validates: the seed's
+ * own fields win, `id` comes from the caller unless the seed carries one, and
+ * the server-owned scaffold (type, timestamps, urls, last_response) fills the
+ * rest. Timestamps are FIXED so a repeat apply leaves the state byte-stable
+ * for the idempotence proof.
+ */
+export function completeHook(seed: Json, id: number): Json {
+  const hookId = Number(seed.id ?? id);
+  return {
+    type: "Repository",
+    name: "web",
+    active: true,
+    events: ["push"],
+    config: {},
+    created_at: "2026-07-01T00:00:00Z",
+    updated_at: "2026-07-01T00:00:00Z",
+    url: `https://api.github.com/repos/e2e-owner/e2e-repo/hooks/${hookId}`,
+    test_url: `https://api.github.com/repos/e2e-owner/e2e-repo/hooks/${hookId}/test`,
+    ping_url: `https://api.github.com/repos/e2e-owner/e2e-repo/hooks/${hookId}/pings`,
+    deliveries_url: `https://api.github.com/repos/e2e-owner/e2e-repo/hooks/${hookId}/deliveries`,
+    last_response: { code: null, status: "unused", message: null },
+    id: hookId,
+    ...seed,
+  };
 }
 
 /**
@@ -279,6 +316,7 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     interaction_limits: ls.interaction_limits ? clone(ls.interaction_limits) : null,
     interaction_limits_org_override: ls.interaction_limits_org_override ?? false,
     actions_variables: ls.actions_variables ? clone(ls.actions_variables) : [],
+    hooks: (ls.hooks ?? []).map((hook) => completeHook(clone(hook), takeId())),
     issues: ls.issues ? clone(ls.issues) : [],
     nextId,
   };
