@@ -1091,6 +1091,16 @@ describe("handler statuses obey the realism rule", () => {
           collaborators: [{ login: "carol", role_name: "write" }],
           milestones: [{ number: 1, title: "v1", state: "open" }],
           environments: { prod: { name: "prod", protection_rules: [] } },
+          environment_variables: {
+            prod: [
+              {
+                name: "SEEDED",
+                value: "x",
+                created_at: "2026-06-01T00:00:00Z",
+                updated_at: "2026-06-01T00:00:00Z",
+              },
+            ],
+          },
           teams: { reviewers: { role_name: "write" } },
           pages: { url: "u", source: { branch: "main", path: "/" } },
           actions_permissions: { allowed_actions: "selected" },
@@ -1190,6 +1200,44 @@ describe("handler statuses obey the realism rule", () => {
       ["environments.probe", "GET", `/repos/${OWNER}/${REPO}/environments/absent`], // 404
       ["environments.update", "PUT", `/repos/${OWNER}/${REPO}/environments/staging`, {}], // 200 create
       ["environments.update", "PUT", `/repos/${OWNER}/${REPO}/environments/staging`, {}], // 200 update
+      // environment variables: list (200 + missing-environment 404), create,
+      // update (both + 404), remove (both + 404)
+      ["environments.listVariables", "GET", `/repos/${OWNER}/${REPO}/environments/prod/variables`],
+      ["environments.listVariables", "GET", `/repos/${OWNER}/${REPO}/environments/ghost/variables`], // 404
+      [
+        "environments.createVariable",
+        "POST",
+        `/repos/${OWNER}/${REPO}/environments/prod/variables`,
+        { name: "NEW", value: "v" },
+      ],
+      [
+        "environments.createVariable",
+        "POST",
+        `/repos/${OWNER}/${REPO}/environments/prod/variables`,
+        { name: "new", value: "v" },
+      ], // 409 duplicate (case-insensitive)
+      [
+        "environments.updateVariable",
+        "PATCH",
+        `/repos/${OWNER}/${REPO}/environments/prod/variables/SEEDED`,
+        { value: "y" },
+      ],
+      [
+        "environments.updateVariable",
+        "PATCH",
+        `/repos/${OWNER}/${REPO}/environments/prod/variables/GHOST`,
+        { value: "y" },
+      ], // 404
+      [
+        "environments.removeVariable",
+        "DELETE",
+        `/repos/${OWNER}/${REPO}/environments/prod/variables/SEEDED`,
+      ],
+      [
+        "environments.removeVariable",
+        "DELETE",
+        `/repos/${OWNER}/${REPO}/environments/prod/variables/SEEDED`,
+      ], // 404 already gone
       // autolinks: list, create, remove (both)
       ["autolinks.list", "GET", `/repos/${OWNER}/${REPO}/autolinks`],
       [

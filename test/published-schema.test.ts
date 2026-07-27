@@ -23,8 +23,19 @@ describe("published schema wrapper strictness", () => {
     name.startsWith("UndeclaredPolicyList<"),
   );
 
-  test("one wrapper definition per knobbed section, each closed", () => {
-    expect(wrapperNames.length).toBe(UNDECLARED_POLICY_SECTIONS.length);
+  /**
+   * The nested {undeclared, entries} knobs inside a section entry
+   * (environments[].variables today), mirroring NESTED_POLICY_LISTS in
+   * finalize-schema.ts: each adds one wrapper definition beyond the knobbed
+   * sections.
+   */
+  const NESTED_WRAPPERS = ["UndeclaredPolicyList<EnvironmentVariableConfig>"] as const;
+
+  test("one wrapper definition per knobbed section and nested knob, each closed", () => {
+    expect(wrapperNames.length).toBe(UNDECLARED_POLICY_SECTIONS.length + NESTED_WRAPPERS.length);
+    for (const nested of NESTED_WRAPPERS) {
+      expect(wrapperNames).toContain(nested);
+    }
     for (const name of wrapperNames) {
       expect(
         schema.definitions[name]?.additionalProperties,
@@ -61,6 +72,47 @@ describe("published schema wrapper strictness", () => {
 
     test("a bad policy value is rejected", () => {
       expect(validate({ rulesets: { undeclared: "remove", entries: [] } })).toBe(false);
+    });
+
+    test("both forms of the nested variables knob validate", () => {
+      expect(
+        validate({
+          environments: [{ name: "prod", variables: [{ name: "A", value: "1" }] }],
+        }),
+      ).toBe(true);
+      expect(
+        validate({
+          environments: [
+            {
+              name: "prod",
+              variables: { undeclared: "keep", entries: [{ name: "A", value: "1" }] },
+            },
+          ],
+        }),
+      ).toBe(true);
+    });
+
+    test("a typo key inside the nested variables wrapper is rejected", () => {
+      expect(
+        validate({
+          environments: [{ name: "prod", variables: { entires: [], entries: [] } }],
+        }),
+      ).toBe(false);
+    });
+
+    test("an extra field on a variable entry validates - entries stay open", () => {
+      // Loose like the runtime shape: entry fields pass through to the API
+      // verbatim, so a field GitHub ships tomorrow must validate today.
+      expect(
+        validate({
+          environments: [
+            { name: "prod", variables: [{ name: "A", value: "1", future_field: "x" }] },
+          ],
+        }),
+      ).toBe(true);
+      expect(validate({ actions_variables: [{ name: "A", value: "1", future_field: "x" }] })).toBe(
+        true,
+      );
     });
   });
 });

@@ -323,6 +323,20 @@
           },
           "type": "array"
         },
+        "variables": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/EnvironmentVariableConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CEnvironmentVariableConfig%3E"
+            }
+          ],
+          "description": "Actions variables for this environment, reconciled only when this key is declared (an absent key leaves the live variables untouched). Values are plain text by design - use environment secrets for anything sensitive. Within a declared `variables` key, live variables the entries do not declare are DELETED by default; the wrapped `{undeclared: keep, entries}` form keeps them as notes. Names match case-insensitively, as GitHub treats them."
+        },
         "wait_timer": {
           "description": "Minutes to wait before deployments proceed.",
           "type": "number"
@@ -330,6 +344,24 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "EnvironmentVariableConfig": {
+      "description": "One per-environment Actions variable, matched by case-insensitive name.",
+      "properties": {
+        "name": {
+          "description": "The variable name, the natural key (case-insensitive on GitHub).",
+          "type": "string"
+        },
+        "value": {
+          "description": "The plain-text value; environment secrets are the place for secrets.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
       ],
       "type": "object"
     },
@@ -738,7 +770,7 @@
       "type": "string"
     },
     "UndeclaredPolicyList<ActionsVariableConfig>": {
-      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
       "properties": {
         "entries": {
           "description": "The declared entries, exactly as the plain array form lists them.",
@@ -749,7 +781,7 @@
         },
         "undeclared": {
           "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
         }
       },
       "required": [
@@ -759,7 +791,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<AutolinkConfig>": {
-      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
       "properties": {
         "entries": {
           "description": "The declared entries, exactly as the plain array form lists them.",
@@ -770,7 +802,7 @@
         },
         "undeclared": {
           "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
         }
       },
       "required": [
@@ -780,7 +812,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<CollaboratorConfig>": {
-      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
       "properties": {
         "entries": {
           "description": "The declared entries, exactly as the plain array form lists them.",
@@ -791,7 +823,28 @@
         },
         "undeclared": {
           "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "UndeclaredPolicyList<EnvironmentVariableConfig>": {
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/EnvironmentVariableConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
         }
       },
       "required": [
@@ -801,7 +854,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<LabelConfig>": {
-      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
       "properties": {
         "entries": {
           "description": "The declared entries, exactly as the plain array form lists them.",
@@ -812,7 +865,7 @@
         },
         "undeclared": {
           "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
         }
       },
       "required": [
@@ -822,7 +875,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<MilestoneConfig>": {
-      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
       "properties": {
         "entries": {
           "description": "The declared entries, exactly as the plain array form lists them.",
@@ -833,7 +886,7 @@
         },
         "undeclared": {
           "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
         }
       },
       "required": [
@@ -843,7 +896,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<RulesetConfig>": {
-      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
       "properties": {
         "entries": {
           "description": "The declared entries, exactly as the plain array form lists them.",
@@ -854,7 +907,7 @@
         },
         "undeclared": {
           "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
         }
       },
       "required": [
