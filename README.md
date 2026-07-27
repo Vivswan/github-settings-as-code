@@ -75,17 +75,16 @@ field GitHub ships tomorrow must never read as an error (see
 
 ## Guides
 
-Task-oriented walkthroughs live in [docs/](docs/README.md):
-[getting started](docs/getting-started.md),
-[examples](docs/examples.md),
-[multi-repo mode](docs/multi-repo.md),
-[playbooks](docs/playbooks.md),
-[check mode](docs/check-mode.md),
-[the undeclared policy](docs/undeclared-policy.md),
-[secrets and vaults](docs/secrets-and-vaults.md) (the `$NAME` references
-secret fields take),
-[migrating from Probot](docs/migrating-from-probot.md), and
-[troubleshooting](docs/troubleshooting.md).
+Task-oriented walkthroughs live in [docs/](docs/README.md). Start with
+[getting started](docs/start/getting-started.md) and the
+[examples cookbook](docs/start/examples.md); day-to-day operation is covered by
+[check mode](docs/operate/check-mode.md), [multi-repo mode](docs/operate/multi-repo.md), and
+the [playbooks](docs/playbooks/README.md); the deep dives are
+[the undeclared policy](docs/concepts/undeclared-policy.md) and
+[secrets and vaults](docs/concepts/secrets-and-vaults.md) (the `$NAME` references
+secret fields take); and when you come from elsewhere or something breaks,
+[migrating from Probot](docs/help/migrating-from-probot.md) and
+[troubleshooting](docs/help/troubleshooting.md).
 
 ## Versioning
 
@@ -126,7 +125,7 @@ secret fields take),
 | `milestones` | milestones | Issues: write | upsert by title; undeclared kept by default (settable; deleting detaches issues) |
 | `interaction_limits` | interaction-limits | Administration: write | re-arms the self-expiring limit every apply run (expiry is write-only, max six_months); `null` clears it (in multi-repo mode a target's `null` is a defaults opt-out when the defaults declare one, like `pages`); a 409 (org/user-level limit overrides) becomes a note on apply, while check still reports drift; undeclared untouched |
 | `actions_variables` | Actions variables CRUD | Variables: write | plain-text repository variables upserted by name; names are case-insensitive (GitHub stores them uppercased); values read back in full, so check mode diffs them exactly (secrets are write-only material and deliberately not this section); undeclared deleted by default (settable) |
-| `webhooks` | hooks CRUD + hook config sub-endpoint | Webhooks: write | one hook per `config.url`, the natural key (a changed url declares a NEW hook; the old one becomes undeclared); `config.secret` takes a whole-value `$NAME` reference resolved from the step env at apply time (see the [secrets guide](docs/secrets-and-vaults.md)) and is re-sent every run since GitHub never reveals it, so check notes it cannot verify the secret; events compared order-insensitively; hook urls appear in drift lines on purpose (they are configuration, not credentials); undeclared kept by default (settable) |
+| `webhooks` | hooks CRUD + hook config sub-endpoint | Webhooks: write | one hook per `config.url`, the natural key (a changed url declares a NEW hook; the old one becomes undeclared); `config.secret` takes a whole-value `$NAME` reference resolved from the step env at apply time (see the [secrets guide](docs/concepts/secrets-and-vaults.md)) and is re-sent every run since GitHub never reveals it, so check notes it cannot verify the secret; events compared order-insensitively; hook urls appear in drift lines on purpose (they are configuration, not credentials); undeclared kept by default (settable) |
 
 ## Semantics
 
@@ -193,7 +192,7 @@ wrapper accepts only `undeclared` and `entries`; anything else is rejected
 upfront as a typo. One consequence to weigh before setting
 `milestones: {undeclared: delete, ...}`: deleting a milestone detaches it
 from every issue that carried it, which is why keep is the milestone
-default. The [undeclared policy guide](docs/undeclared-policy.md) covers the
+default. The [undeclared policy guide](docs/concepts/undeclared-policy.md) covers the
 knob per section and how it layers with a multi-repo defaults file.
 
 ## Example settings.yml

@@ -4,8 +4,8 @@ A cookbook of settings.yml files. Every settings example on this page runs
 through the real document validation in CI, so the shapes stay current. What
 each section manages, which token permission it needs, and whether its
 undeclared entries are deleted or kept is specified in the
-[README Sections table](../README.md#sections); the cross-section rules live
-under [Semantics](../README.md#semantics). This page shows shapes, not
+[README Sections table](../../README.md#sections); the cross-section rules live
+under [Semantics](../../README.md#semantics). This page shows shapes, not
 behavior.
 
 One rule frames everything below: only declared keys are applied or
@@ -16,7 +16,7 @@ so a partial ruleset entry silently narrows the live one; declare each
 ruleset completely. Labels and milestones work the other way: only the
 fields you declare are sent, so an omitted description or state is left
 alone. And two sections bend the rule where the API forces their hand, as
-the [Sections table](../README.md#sections) notes: inside a declared
+the [Sections table](../../README.md#sections) notes: inside a declared
 `protection` object the classic API requires all four core keys, so apply
 fills the ones you omit with `null` (see
 [Classic branch protection](#classic-branch-protection) below), and in the
@@ -166,7 +166,7 @@ interaction_limits:
 In `rulesets`, short ref names are auto-prefixed (`staging` becomes
 `refs/heads/staging`) and `~DEFAULT_BRANCH` passes through; rule parameters
 go to the API verbatim, so rule types GitHub ships tomorrow work unchanged
-(see [Forward compatibility](../README.md#forward-compatibility)).
+(see [Forward compatibility](../../README.md#forward-compatibility)).
 
 ## Classic branch protection
 
@@ -224,9 +224,9 @@ branches:
 
 Under a multi-repo defaults file, a target's `null` section can instead mean
 "opt out of the defaults for this repository"; the rules for that merge are
-in [Multi-repo mode](../README.md#multi-repo-mode). A few individual fields
+in [Multi-repo mode](../../README.md#multi-repo-mode). A few individual fields
 accept `null` as a value of their own too, such as `pages.cname` to remove
-a custom domain; the [published schema](../lib/settings.schema.json) marks
+a custom domain; the [published schema](../../lib/settings.schema.json) marks
 those.
 
 ## Private notes
@@ -234,7 +234,7 @@ those.
 Unknown top-level sections are hard errors, so a typo cannot silently do
 nothing (the one exception: under a `sections` allowlist, unknown keys
 outside the allowlist warn instead of failing, which eases version skew;
-the [troubleshooting guide](troubleshooting.md) covers it). Keys starting
+the [troubleshooting guide](../help/troubleshooting.md) covers it). Keys starting
 with an underscore are the escape hatch: they are ignored, which makes
 them usable as private notes.
 
@@ -245,3 +245,11 @@ labels:
   - name: bug
     color: "d73a4a"
 ```
+
+## Where to go next
+
+[Check mode](../operate/check-mode.md) is the safe way to try any of these files
+against a real repository before applying. [Multi-repo mode](../operate/multi-repo.md)
+reuses the same documents across a fleet, and
+[the undeclared policy](../concepts/undeclared-policy.md) explains the `undeclared` knob
+several of the examples above set.

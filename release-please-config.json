@@ -9,11 +9,15 @@
       "initial-version": "1.0.0",
       "extra-files": [
         "README.md",
-        "docs/getting-started.md",
-        "docs/check-mode.md",
-        "docs/multi-repo.md",
-        "docs/migrating-from-probot.md",
-        "docs/playbooks.md"
+        "docs/start/getting-started.md",
+        "docs/operate/check-mode.md",
+        "docs/operate/multi-repo.md",
+        "docs/help/migrating-from-probot.md",
+        "docs/playbooks/drift-attestation.md",
+        "docs/playbooks/fleet-baseline-rings.md",
+        "docs/playbooks/incident-freeze.md",
+        "docs/playbooks/preview-blast-radius.md",
+        "docs/playbooks/trust-tiers.md"
       ]
     }
   }
