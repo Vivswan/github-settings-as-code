@@ -106,6 +106,17 @@ export function unregisterRedactedSlug(slug: string): void {
 }
 
 /**
+ * Drop every hold at once. The run flows' registrations are deliberately
+ * permanent for the life of the process - an error surfaced AFTER a failed
+ * run still traces redacted - so production never calls this. It exists for
+ * tests, which share one process: without a reset, one test file's run-flow
+ * holds silently redact another file's traces.
+ */
+export function clearRedactedSlugs(): void {
+  redactedSlugs.clear();
+}
+
+/**
  * If `path` targets a registered redacted slug, collapse the ENTIRE path to the
  * constant `<redacted>` and flag the payload to be dropped; otherwise return
  * the path unchanged. The whole path is replaced, not just the slug segment:

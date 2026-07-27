@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
 import { run } from "../../src/action/run.js";
+import { clearRedactedSlugs } from "../../src/github/api.js";
 import { MockApi } from "../mock-api.js";
+
+// run() registers a non-self private target for trace redaction, permanently
+// for the process by design - so every test file sharing this process would
+// inherit the holds and trace `<redacted>` for those slugs. Drop them after
+// each test.
+afterEach(() => {
+  clearRedactedSlugs();
+});
 
 describe("run (legacy single-repo regression)", () => {
   const ENV_KEYS = [
