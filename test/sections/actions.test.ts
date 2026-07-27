@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { actionsSection } from "../../src/sections/actions.js";
+import { grantFor, PermissionDenied } from "../../src/sections/contract.js";
 import { MockApi } from "../mock-api.js";
 import { ctx } from "./context.js";
 
@@ -169,5 +170,131 @@ describe("actions", () => {
     await expect(actionsSection.run(ctx(new MockApi({})), { cache })).rejects.toThrow(
       /actions\.cache: unrecognized key\(s\) "__proto__"/,
     );
+  });
+
+  test("apply PUTs the OIDC subject claim template verbatim to its own endpoint", async () => {
+    const api = new MockApi({}).allowMutations("PUT /repos/o/r/actions/oidc/customization/sub");
+    const declared = { use_default: false, include_claim_keys: ["repo", "context"] };
+    const result = await actionsSection.run(ctx(api), { oidc_customization_sub: declared });
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PUT /repos/o/r/actions/oidc/customization/sub",
+    ]);
+    expect(api.mutations()[0]?.payload).toEqual(declared);
+    expect(result.changes).toEqual(["applied the OIDC subject claim template"]);
+  });
+
+  test("check drifts on use_default and never writes", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/actions/oidc/customization/sub": { data: { use_default: true } },
+    });
+    const result = await actionsSection.run(ctx(api, true), {
+      oidc_customization_sub: { use_default: false, include_claim_keys: ["repo"] },
+    });
+    expect(result.drift.some((d) => d.includes("actions.oidc_customization_sub.use_default"))).toBe(
+      true,
+    );
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("check compares include_claim_keys positionally: a reordered live value is drift", async () => {
+    const reordered = new MockApi({
+      "GET /repos/o/r/actions/oidc/customization/sub": {
+        data: { use_default: false, include_claim_keys: ["context", "repo"] },
+      },
+    });
+    const result = await actionsSection.run(ctx(reordered, true), {
+      oidc_customization_sub: { use_default: false, include_claim_keys: ["repo", "context"] },
+    });
+    expect(result.drift).toHaveLength(1);
+    expect(result.drift[0]).toContain("include_claim_keys");
+    expect(result.drift[0]).toContain("order");
+
+    const matching = new MockApi({
+      "GET /repos/o/r/actions/oidc/customization/sub": {
+        data: { use_default: false, include_claim_keys: ["repo", "context"] },
+      },
+    });
+    const clean = await actionsSection.run(ctx(matching, true), {
+      oidc_customization_sub: { use_default: false, include_claim_keys: ["repo", "context"] },
+    });
+    expect(clean.drift).toEqual([]);
+  });
+
+  test("a custom template with an omitted claim-key list does not compare keys", async () => {
+    // {use_default: false} with no list is the documented opt-in to the
+    // ORGANIZATION template, whose keys then appear live; comparing the
+    // omitted list against them would be permanent false drift.
+    const api = new MockApi({
+      "GET /repos/o/r/actions/oidc/customization/sub": {
+        data: { use_default: false, include_claim_keys: ["repo", "context"] },
+      },
+    });
+    const result = await actionsSection.run(ctx(api, true), {
+      oidc_customization_sub: { use_default: false },
+    });
+    expect(result.drift).toEqual([]);
+  });
+
+  test("a default template never compares claim keys (GitHub ignores them)", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/actions/oidc/customization/sub": {
+        data: { use_default: true, include_claim_keys: ["job_workflow_ref"] },
+      },
+    });
+    const result = await actionsSection.run(ctx(api, true), {
+      oidc_customization_sub: { use_default: true, include_claim_keys: ["repo"] },
+    });
+    expect(result.drift).toEqual([]);
+  });
+
+  test("a declared use_immutable_subject rides the remainder diff", async () => {
+    // The flag flips the whole subject format, so a declared false against
+    // a live true must drift; undeclared, the inherited org/date default
+    // stays uncompared like every other undeclared key.
+    const api = new MockApi({
+      "GET /repos/o/r/actions/oidc/customization/sub": {
+        data: { use_default: false, include_claim_keys: ["repo"], use_immutable_subject: true },
+      },
+    });
+    const result = await actionsSection.run(ctx(api, true), {
+      oidc_customization_sub: {
+        use_default: false,
+        include_claim_keys: ["repo"],
+        use_immutable_subject: false,
+      },
+    });
+    expect(result.drift).toHaveLength(1);
+    expect(result.drift[0]).toContain("use_immutable_subject");
+  });
+
+  test("the oidc shape rejects quoted booleans upfront", () => {
+    // A YAML '"false"' is truthy on the wire; both boolean fields must
+    // fail validation before any section writes.
+    for (const bad of [
+      { use_default: "false" },
+      { use_default: true, use_immutable_subject: "false" },
+    ]) {
+      expect(actionsSection.shape.safeParse({ oidc_customization_sub: bad }).success).toBe(false);
+    }
+  });
+
+  test("a denied OIDC read renders the Actions grant, not the section's Administration", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/actions/oidc/customization/sub": {
+        error: { status: 403, message: "Resource not accessible", body: "" },
+      },
+    });
+    let thrown: unknown;
+    try {
+      await actionsSection.run(ctx(api, true), {
+        oidc_customization_sub: { use_default: true },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    const denied = thrown as PermissionDenied;
+    expect(denied.detail).toContain(grantFor({ repo: ["actions"] }));
+    expect(denied.detail).not.toContain('"Administration"');
   });
 });

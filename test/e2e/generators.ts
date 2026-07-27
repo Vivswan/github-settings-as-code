@@ -201,6 +201,14 @@ function genAutolinks(rng: Rng): Json[] {
 }
 
 function genActions(rng: Rng): Json {
+  // oidc_customization_sub is deliberately NEVER generated here: its
+  // endpoints carry a per-endpoint permission override (Actions instead of
+  // Administration) that the fuzz oracle's section-level PERMISSION_BY_KEY
+  // model cannot grade, so any masked iteration declaring it would
+  // mispredict the outcome. Curated scenarios (actions-oidc-*) cover the
+  // key, including both denial directions. If a second mixed-permission
+  // section ever appears, model per-endpoint requirements in the oracle
+  // instead of widening this exclusion.
   const actions: Json = {};
   if (rng.bool()) {
     actions.default_workflow_permissions = rng.pick(["read", "write"]);

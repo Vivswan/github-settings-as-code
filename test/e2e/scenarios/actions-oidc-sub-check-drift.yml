@@ -1,0 +1,23 @@
+# Check mode reads the OIDC subject claim template from its own endpoint; the
+# live template is the default while the file pins claim keys, so both the
+# use_default flag and the positional claim-key list drift.
+name: actions-oidc-sub-check-drift
+settings:
+  actions:
+    oidc_customization_sub:
+      use_default: false
+      include_claim_keys: [repo, context]
+inputs:
+  mode: check
+token_permissions:
+  actions: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    actions: drift
+  never:
+    - "PUT /repos/{repo}/actions/oidc/customization/sub"
+  summary_contains:
+    - "actions.oidc_customization_sub.use_default"
+    - "actions.oidc_customization_sub.include_claim_keys"
