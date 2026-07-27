@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { MARKER_LABEL } from "../../src/report/issue-report.js";
-import { COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
+import { ALWAYS_REWRITE_SECTIONS, COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
 import { type LoggedRequest, sectionForRequest } from "./mock/routes.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./mock/server.js";
 import type { MockState } from "./mock/state.js";
@@ -253,6 +253,10 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
   const inputs = scenario.inputs ?? {};
   const multi = Boolean(scenario.repos || scenario.discovery);
   const env: Record<string, string> = {
+    // Scenario-declared child env FIRST (secret-reference material for the
+    // secrets sections), so the harness-owned keys below always win on a
+    // name collision; the schema already rejects reserved runner prefixes.
+    ...(scenario.env ?? {}),
     PATH: process.env.PATH ?? "",
     HOME: process.env.HOME ?? "",
     // Inputs: @actions/core reads INPUT_<NAME> (uppercased, dashes kept).
@@ -309,12 +313,6 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
     const defaultsPath = join(dir, "defaults.yml");
     writeFileSync(defaultsPath, stringifyYaml(scenario.defaults_file));
     env["INPUT_DEFAULTS-FILE"] = defaultsPath;
-  }
-  // Scenario-declared variables (the step-env half of $NAME secret
-  // references) land LAST but cannot clobber the controls above: the schema
-  // rejects env keys colliding with the harness's reserved names.
-  for (const [name, value] of Object.entries(scenario.env ?? {})) {
-    env[name] = value;
   }
   return env;
 }
@@ -590,13 +588,28 @@ function mutableStates(handle: MockHandle): Array<[string, MockState]> {
 /**
  * Serialize every mutable state family to a "label.family" -> JSON map, so a
  * before/after comparison can name exactly which repo and family moved instead
- * of reporting one opaque inequality.
+ * of reporting one opaque inequality. Underscore-prefixed families are mock
+ * bookkeeping (e.g. the secret write counter), not repo state. Always-rewrite
+ * families (ALWAYS_REWRITE_SECTIONS) drop updated_at: those sections move it
+ * on every legitimate write; created_at stays IN, so a delete-and-recreate on
+ * the second apply still reads as churn.
  */
 function snapshotFamilies(handle: MockHandle): Map<string, string> {
   const snapshot = new Map<string, string>();
   for (const [label, state] of mutableStates(handle)) {
     for (const [family, value] of Object.entries(state)) {
-      snapshot.set(`${label}.${family}`, JSON.stringify(value));
+      if (family.startsWith("_")) {
+        continue;
+      }
+      const projected =
+        ALWAYS_REWRITE_SECTIONS.has(family) && Array.isArray(value)
+          ? value.map((entry) =>
+              typeof entry === "object" && entry !== null
+                ? { ...(entry as Record<string, unknown>), updated_at: undefined }
+                : entry,
+            )
+          : value;
+      snapshot.set(`${label}.${family}`, JSON.stringify(projected));
     }
   }
   return snapshot;
@@ -640,6 +653,32 @@ export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
     }
   }
   return failures;
+}
+
+/**
+ * The always-rewrite half of the idempotence proof: every secret PUT the
+ * first apply issued must be issued AGAIN by the second apply, path for path.
+ * Derived from OBSERVED first-run writes - not from the declared settings -
+ * so permission masks, section allowlists, and the defaults merge need no
+ * re-modeling here: whatever gating let the first PUT through applies
+ * identically to the second run. Exported for direct testing, so the
+ * assertion is provably able to fire.
+ */
+export function missingSecondApplyRewrites(
+  firstWrites: LoggedRequest[],
+  secondWrites: LoggedRequest[],
+): string[] {
+  const isAlwaysRewritePut = (request: LoggedRequest): boolean =>
+    request.method === "PUT" &&
+    ALWAYS_REWRITE_SECTIONS.has(sectionForRequest(request.method, request.pathname) ?? "");
+  const secondPuts = new Set(secondWrites.filter(isAlwaysRewritePut).map((r) => r.pathname));
+  return [...new Set(firstWrites.filter(isAlwaysRewritePut).map((r) => r.pathname))]
+    .filter((pathname) => !secondPuts.has(pathname))
+    .sort()
+    .map(
+      (pathname) =>
+        `apply-idempotence: the first apply wrote PUT ${pathname} but the second did not; declared secrets are re-sealed and re-written on EVERY apply (rotation propagation)`,
+    );
 }
 
 /**
@@ -696,6 +735,8 @@ async function assertApplyIdempotent(
   }
   const writes = handle.requests.slice(requestsBefore).filter((r) => r.method !== "GET");
   failures.push(...secondApplyWriteFailures(writes));
+  const firstWrites = handle.requests.slice(0, requestsBefore).filter((r) => r.method !== "GET");
+  failures.push(...missingSecondApplyRewrites(firstWrites, writes));
   const changed = changedFamilies(before, snapshotFamilies(handle));
   if (changed.length > 0) {
     failures.push(`apply-idempotence: second apply changed mock state: ${changed.join(", ")}`);

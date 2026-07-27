@@ -33,6 +33,11 @@
  *   the unconditional PUT keeps the whole section false; the state-stability
  *   half of the proof covers the variables family.
  * - actions (false): every declared endpoint group is PUT unconditionally.
+ * - actions_secrets (false): every declared secret is re-sealed and re-PUT on
+ *   every apply BY DESIGN - GitHub cannot return a value to compare against,
+ *   and the unconditional rewrite is what makes a rotated source value
+ *   propagate. State stability holds because the mock stores a deterministic
+ *   digest of the unsealed value, not the (per-seal random) ciphertext.
  * - pages (false): an existing site is PUT unconditionally.
  * - code_scanning_default_setup (false): the PATCH runs unconditionally.
  * - teams (false): team access is granted (PUT) unconditionally.
@@ -61,6 +66,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   environments: false,
   autolinks: true,
   actions: false,
+  actions_secrets: false,
   workflows: true,
   pages: false,
   code_scanning_default_setup: false,
@@ -71,3 +77,44 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   actions_variables: true,
   webhooks: false,
 };
+
+/**
+ * Which sections are ALWAYS-REWRITE: their declared entries are re-written on
+ * EVERY apply by contract (values cannot be read back, and the unconditional
+ * re-write is what propagates a rotated source value). The idempotence proof
+ * treats them specially twice over - their server-managed updated_at is
+ * excluded from the stability snapshot, and every secret PUT the first apply
+ * issued must recur in the second (see missingSecondApplyRewrites in
+ * runner.ts). The Record type gives compile-time completeness, and it MATTERS
+ * more here than for COMPARE_BEFORE_WRITE: a section missing from that map
+ * fails loudly, but a section missing from this one makes the required-
+ * rewrite check silently vacuous for its family. Secrets families added later
+ * (environment, Dependabot, Codespaces) must declare themselves true - note
+ * the marker is per SECTION while the property is really per ENDPOINT, so a
+ * mixed section (environments carrying both its own PUT and nested secret
+ * PUTs) should revisit whether the marker moves onto the EndpointDecl.
+ */
+export const ALWAYS_REWRITE: Record<SectionKey, boolean> = {
+  repository: false,
+  labels: false,
+  rulesets: false,
+  branches: false,
+  environments: false,
+  autolinks: false,
+  actions: false,
+  actions_secrets: true,
+  workflows: false,
+  pages: false,
+  code_scanning_default_setup: false,
+  collaborators: false,
+  teams: false,
+  milestones: false,
+  interaction_limits: false,
+  actions_variables: false,
+  webhooks: false,
+};
+
+/** ALWAYS_REWRITE as the set its consumers test membership against. */
+export const ALWAYS_REWRITE_SECTIONS: ReadonlySet<string> = new Set(
+  (Object.keys(ALWAYS_REWRITE) as SectionKey[]).filter((key) => ALWAYS_REWRITE[key]),
+);
