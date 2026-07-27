@@ -8,8 +8,8 @@ settings file does not declare, and each accepts a wrapped form that
 overrides it per file. This page covers the knob, the defaults per section,
 and how it layers with a multi-repo defaults file.
 The normative claims live in the README's
-[Sections table](../README.md#sections) and
-[Undeclared resources](../README.md#undeclared-resources) section.
+[Sections table](../../README.md#sections) and
+[Undeclared resources](../../README.md#undeclared-resources) section.
 
 ## The two forms
 

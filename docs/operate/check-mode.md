@@ -3,13 +3,13 @@
 `mode: check` runs the whole pipeline read-only. Each declared section reads
 the live state and reports how it differs from the settings file instead of
 writing anything. The same declared-keys-only rule as apply holds: a key you
-do not declare is never compared (see [Semantics](../README.md#semantics)).
+do not declare is never compared (see [Semantics](../../README.md#semantics)).
 Check mode changes no settings; the one write it can still perform is
 delivery of a private report when the `private-report` input is enabled.
 The issue channel updates a marker-labelled issue on the target, and on
 first delivery it creates that marker label; the artifact channel uploads
 an encrypted artifact. Neither touches anything else
-(see [Private repositories](../README.md#private-repositories)).
+(see [Private repositories](../../README.md#private-repositories)).
 
 ## Exit behavior
 
@@ -31,7 +31,7 @@ exits 1. A green scheduled apply therefore says nothing about whether
 settings had drifted; a green scheduled check does. In multi-repo mode the
 worst result across all targets decides the exit code, so one drifted target
 fails the whole check run (see
-[Multi-repo mode](../README.md#multi-repo-mode)).
+[Multi-repo mode](../../README.md#multi-repo-mode)).
 
 ## A scheduled check
 
@@ -117,20 +117,32 @@ push access, give the preview that token instead.
 
 ## What a "cannot verify" note means
 
-A few declared values have no read-back endpoint, so check mode cannot
-compare them with anything. Those surface as notice annotations rather than
-drift, and the note says what apply does about it. Two exist today:
+Some declared values have no read-back on GitHub's side, so check mode
+cannot compare them with anything. Those surface as notice annotations
+rather than drift, and each note says what apply does about it:
 
-- `repository.enable_git_lfs`: GitHub offers no endpoint that reports whether
-  Git LFS is enabled, so the declared value cannot be verified; apply
-  re-asserts it on every run.
+- Write-only repository toggles - today `repository.enable_git_lfs`: GitHub
+  offers no endpoint that reports the state, so apply re-asserts the
+  declared value on every run.
 - `interaction_limits.expiry`: GitHub accepts a duration but reads back only
-  the computed `expires_at` timestamp, so the declared duration cannot be
-  verified; apply re-arms the limit on every run.
+  the computed `expires_at` timestamp, so apply re-arms the limit on every
+  run.
+- `webhooks[].config.secret`: GitHub echoes a live secret as `********`, so
+  apply re-sends the declared secret on every run (rotations propagate).
+- Secret values in all four secret families (`actions_secrets`,
+  `dependabot_secrets`, `codespaces_secrets`, and per-environment
+  `secrets`): the API returns names only, so check mode verifies existence
+  and apply re-seals and rewrites every declared value on each run. One
+  note per family (or per environment), not per entry.
+- `environments[].variables` and `environments[].secrets` declared on an
+  environment that does not exist yet: nothing can be listed until apply
+  creates the environment, and the missing environment itself is already
+  drift.
 
 A note is not drift and not a failure. A section whose only findings are
 notes counts as clean, and the notes appear in that section's detail cell in
-the step summary.
+the step summary. The [secrets guide](../concepts/secrets-and-vaults.md) goes deeper on
+what check mode can and cannot promise for secret material.
 
 ## Where the output lands
 
@@ -147,5 +159,5 @@ A check run reports through three channels:
 
 For a redacted private target the public surfaces show only section statuses,
 and the full detail travels over the `private-report` channel; the README's
-[Private repositories](../README.md#private-repositories) section explains
+[Private repositories](../../README.md#private-repositories) section explains
 both.

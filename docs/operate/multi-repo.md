@@ -4,7 +4,7 @@ One workflow in an admin repository can manage settings for a whole fleet.
 This page walks through choosing targets, layering a defaults file, opting a
 single repository out, and one worked fleet pattern. The normative rules (the
 input semantics, the discovery filters, precedence) live in the README's
-[Multi-repo mode](../README.md#multi-repo-mode) section; this page shows how
+[Multi-repo mode](../../README.md#multi-repo-mode) section; this page shows how
 the pieces fit together in practice.
 
 ## How targets are chosen
@@ -22,7 +22,7 @@ Two sourcing modes exist, and one run can use both:
   owns by default (the `affiliation` input widens or moves discovery to
   collaborator or organization repositories), filtered by the
   `visibility`, `archived`, `forks`, `exclude`, and `topics` inputs
-  described in the [README](../README.md#multi-repo-mode).
+  described in the [README](../../README.md#multi-repo-mode).
 
 When the same repository appears in both, the repos-dir file wins and the run
 says so with a notice. The checked-in file is the curated, code-reviewed
@@ -116,7 +116,7 @@ merge: the target's list replaced the defaults' list, so `bug` is not
 declared for this repository at all. Since the labels section deletes
 undeclared labels by default, a target that wants the fleet labels plus its
 own must repeat the fleet labels in its list. The alternative is the
-[undeclared policy](undeclared-policy.md): a defaults file declaring
+[undeclared policy](../concepts/undeclared-policy.md): a defaults file declaring
 `labels: {undeclared: keep, entries: [...]}` hands every target the keep
 policy, so a target that declares only its own labels leaves the fleet
 labels (and any others) in place instead of deleting them - unmanaged, but
@@ -145,7 +145,7 @@ where only some sections give it a meaning of its own: `pages: null` then
 disables the Pages site, and `interaction_limits: null` clears a live
 limit, while a section without null semantics (such as `actions`) rejects
 it as a validation error. The
-[README](../README.md#multi-repo-mode) states the normative rule.
+[README](../../README.md#multi-repo-mode) states the normative rule.
 
 ## Fleet pattern: disabling Actions on satellite repositories
 
@@ -178,5 +178,5 @@ When a public admin repository manages private targets, the default
 `private-repos: redact` hides their slugs and details from the run's public
 logs, summary, and outputs, and the `private-report` input can deliver each
 target's full report over a private channel; the README's
-[Private repositories](../README.md#private-repositories) section covers
+[Private repositories](../../README.md#private-repositories) section covers
 what is hidden, what stays visible, and how to read the full detail.

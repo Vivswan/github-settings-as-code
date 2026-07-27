@@ -3,9 +3,9 @@
 This page walks through moving a repository from the
 [Probot Settings app](https://github.com/repository-settings/app) to this
 action. The short version, and the claim the contract tests pin, is the
-[README's migration paragraph](../README.md#migrating-from-the-probot-settings-app);
+[README's migration paragraph](../../README.md#migrating-from-the-probot-settings-app);
 the full side-by-side comparison is in
-[COVERAGE.md](../COVERAGE.md#compared-to-the-probot-settings-app). If this
+[COVERAGE.md](../../COVERAGE.md#compared-to-the-probot-settings-app). If this
 page and those two ever disagree, they win. What this page adds is the
 walkthrough: what to expect, in what order to do things, and how to read the
 first check run.
@@ -21,7 +21,7 @@ and `mode: check` reports every difference between the file and the live
 repository without writing anything. On top of that you get rulesets, a
 partial-success policy, a token you scope yourself, and per-call debug
 tracing. The
-[comparison table in COVERAGE.md](../COVERAGE.md#compared-to-the-probot-settings-app)
+[comparison table in COVERAGE.md](../../COVERAGE.md#compared-to-the-probot-settings-app)
 lists the differences one by one.
 
 ## What carries over as-is
@@ -32,7 +32,7 @@ Probot shapes remain compatible, including label renames via `new_name` and
 `protection: null` to remove branch protection. For the list sections among
 them the compatible shape is the plain array - the wrapped
 `{undeclared, entries}` form is this action's own extension on top. The
-[README's migration paragraph](../README.md#migrating-from-the-probot-settings-app)
+[README's migration paragraph](../../README.md#migrating-from-the-probot-settings-app)
 is the pinned statement of this parity. The sections outside that list
 (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`,
 `code_scanning_default_setup`, and the rest) are not covered by the parity
@@ -44,7 +44,7 @@ as-is.
 The delivery model is a workflow plus a fine-grained PAT, not an app
 installation. You mint the token, scope it to exactly the sections your file
 declares, and save it as a repository secret; permission errors name the
-exact grant to add. See [Token permissions](../README.md#token-permissions).
+exact grant to add. See [Token permissions](../../README.md#token-permissions).
 
 Failures are loud. An unknown top-level key in the settings file is a hard
 error, not a silent no-op, because a misspelled section that quietly did
@@ -54,7 +54,7 @@ sections also reject entry keys they do not recognize: in `collaborators`
 and `teams` a misspelled `permission` key would silently grant the default
 role, and in `workflows` the enable/disable calls send no payload, so an
 unrecognized key would silently do nothing. See
-[Forward compatibility](../README.md#forward-compatibility).
+[Forward compatibility](../../README.md#forward-compatibility).
 
 The engine is stateless. There is no state file and nothing is stored
 between runs; resources are matched by their natural names, and only declared
@@ -71,7 +71,7 @@ Deletions still exist where the app had them: undeclared labels are deleted
 by default
 (Probot parity), and so are undeclared autolinks and collaborators. Nothing
 else is ever deleted implicitly (see
-[Semantics](../README.md#semantics)), and the check run lists everything an
+[Semantics](../../README.md#semantics)), and the check run lists everything an
 apply would delete before you let it.
 
 ## Step by step
@@ -82,7 +82,7 @@ apply would delete before you let it.
    settings.
 3. Create a fine-grained PAT and save it as a repository secret. Grant only
    the permissions for the sections your file declares; the
-   [getting started guide](getting-started.md) walks through this.
+   [getting started guide](../start/getting-started.md) walks through this.
 4. Add the workflow with `mode: check` for the first run:
 
 ```yaml
@@ -144,8 +144,8 @@ an org settings repository, maps to this action's multi-repo mode: one admin
 repository applies a `defaults-file` merged under per-repo files
 (`repos-dir`) or under each repository's own settings.yml (`repos`), with no
 hosted app in the loop. See
-[Multi-repo mode](../README.md#multi-repo-mode) for the pinned behavior and
-the [multi-repo guide](multi-repo.md) for the walkthrough.
+[Multi-repo mode](../../README.md#multi-repo-mode) for the pinned behavior and
+the [multi-repo guide](../operate/multi-repo.md) for the walkthrough.
 
 ## At org scale: the shadow run
 
@@ -162,10 +162,10 @@ the app's shadow first:
 3. Read the results. A clean target means this action and the app agree on
    that repository; drift means either the app was not actually enforcing
    the file or the file uses something outside the
-   [parity set](../README.md#migrating-from-the-probot-settings-app). Fix
+   [parity set](../../README.md#migrating-from-the-probot-settings-app). Fix
    files until the remaining drift is intended.
 4. Uninstall the app, then flip cohorts to apply in stages rather than all
-   at once; the [playbooks](playbooks.md) page shows a
+   at once; the [playbooks](../playbooks/README.md) page shows a
    ring-based rollout that fits here directly.
 
 Two writers must never race on the same settings, so the uninstall in step

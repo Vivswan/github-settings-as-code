@@ -14,12 +14,12 @@ its HTTP status, and advice starting "To fix, grant" that names the exact
 fine-grained PAT permission the section needs.
 
 What it means: the token lacks that section's grant. Each section's
-permission is listed in the [Sections table](../README.md#sections). The
+permission is listed in the [Sections table](../../README.md#sections). The
 default `GITHUB_TOKEN` cannot hold most of them (Administration in
 particular), so a missing or under-scoped PAT is the usual cause.
 
 What to do: edit the PAT's permissions as the message says (see
-[Token permissions](../README.md#token-permissions)). If you would rather
+[Token permissions](../../README.md#token-permissions)). If you would rather
 skip sections the token cannot reach, set `on-missing-permission: warn`:
 denied sections are skipped with a warning instead of failing the run, and
 when nothing else drifts or fails the result is `partial` and the run stays
@@ -31,7 +31,7 @@ apply run probes every declared section read-only before writing anything.
 If any probe is denied you get error annotations prefixed `preflight:` and
 nothing at all is applied, by design; the API has no transactions, so the
 barrier prevents a half-applied repository. See
-[Semantics](../README.md#semantics).
+[Semantics](../../README.md#semantics).
 
 ## A 404 for something that exists
 
@@ -53,7 +53,7 @@ policy can lock the Actions cache limits, code scanning default setup needs
 Advanced Security on private repositories, and Git LFS can be disabled
 account-wide. For Git LFS the denial message itself carries a note saying
 so; for the others the caveat lives in the
-[Sections table](../README.md#sections) notes for that section.
+[Sections table](../../README.md#sections) notes for that section.
 
 ## Rate limited
 
@@ -66,7 +66,7 @@ limits) are retried automatically, honoring Retry-After and the rate-limit
 reset; transient 5xx and network failures are retried on their own backoff.
 Both paths allow up to two retries, and a reset more than 60 seconds away
 fails loudly instead of stalling the workflow (see
-[Semantics](../README.md#semantics)). By the time this
+[Semantics](../../README.md#semantics)). By the time this
 error surfaces, the run has waited as long as it reasonably could.
 
 What to do: re-run after the reset. If a multi-repo run keeps hitting the
@@ -80,7 +80,7 @@ listing every known section name.
 
 What it means: a misspelled section that silently did nothing would break
 the loud-failure promise, so unknown top-level keys are hard errors (see
-[Forward compatibility](../README.md#forward-compatibility)).
+[Forward compatibility](../../README.md#forward-compatibility)).
 
 What to do: the message names all three options. Fix the typo. Or, for a
 deliberate private key, prefix it with an underscore, which the validator
@@ -109,7 +109,7 @@ update the secret.
 `mode: check` exits 1 on any drift by design, so a red scheduled check run
 means the file and the repository disagree, not that something errored. The
 drift lines in the log list each difference. See the
-[check mode guide](check-mode.md).
+[check mode guide](../operate/check-mode.md).
 
 ## Turning on debug logging
 
@@ -117,7 +117,7 @@ Every API call the action makes is traced as a debug line: method, path,
 request payload, response status, and timing. Debug lines are hidden in
 normal runs; re-run the workflow with "Enable debug logging" checked, or set
 the `ACTIONS_STEP_DEBUG` secret to `true` (see
-[Debugging](../README.md#debugging)). The trace never prints the token: the
+[Debugging](../../README.md#debugging)). The trace never prints the token: the
 authorization header is not part of the trace line, and a token stored as a
 repository secret is masked by the runner wherever it appears in output. For
 redacted private targets in multi-repo mode, the traced path collapses to
