@@ -19,7 +19,7 @@ import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.j
 import { PROBOT_PARITY_KEYS, SECTION_KEYS } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
-import { sectionLines, tableRows } from "./markdown.js";
+import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
@@ -58,14 +58,6 @@ describe("README Sections table", () => {
 });
 
 describe("README example settings.yml blocks", () => {
-  function fencedYamlBlocks(markdown: string): string[] {
-    const blocks: string[] = [];
-    const re = /```yaml\n([\s\S]*?)```/g;
-    for (const m of markdown.matchAll(re)) {
-      blocks.push(m[1] ?? "");
-    }
-    return blocks;
-  }
   const silentIo: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
 
   test("every settings.yml example validates and its repository keys are known", () => {
@@ -74,7 +66,7 @@ describe("README example settings.yml blocks", () => {
     // section keys, then confirm repository special-looking keys are real.
     const known = new Set<string>(SECTION_KEYS);
     let validated = 0;
-    for (const block of fencedYamlBlocks(readme)) {
+    for (const block of fencedBlocks(readme, "yaml")) {
       let doc: unknown;
       try {
         doc = parseYaml(block);

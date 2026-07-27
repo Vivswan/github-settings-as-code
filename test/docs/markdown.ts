@@ -1,9 +1,38 @@
 /**
  * Small markdown helpers shared by the docs contract tests: pull the lines of
- * a named "## heading" section, and parse a markdown table's body rows into
- * trimmed cells. Kept forgiving of column widths so a reflowed table does not
- * break the tests over whitespace.
+ * a named "## heading" section, parse a markdown table's body rows into
+ * trimmed cells, and extract fenced code blocks by info string. Kept forgiving
+ * of column widths so a reflowed table does not break the tests over
+ * whitespace.
  */
+
+/** The contents of every fenced code block whose info string is exactly `info`. */
+export function fencedBlocks(markdown: string, info: string): string[] {
+  const blocks: string[] = [];
+  const escaped = info.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Leading whitespace is tolerated and stripped (the README nests fences
+  // inside list items, indenting fence and body alike), and longer fences
+  // close per CommonMark (the closer carries at least the opener's length).
+  // The guides additionally pin their fences to column zero, three backticks
+  // exactly, so this extractor cannot miss a docs/ block.
+  const re = new RegExp(
+    `^([ \\t]*)(\`{3,})${escaped}[ \\t]*\\n([\\s\\S]*?)^[ \\t]*\\2\`*[ \\t]*$`,
+    "gm",
+  );
+  for (const m of markdown.matchAll(re)) {
+    const indent = m[1] ?? "";
+    const body = m[3] ?? "";
+    blocks.push(
+      indent === ""
+        ? body
+        : body
+            .split("\n")
+            .map((line) => (line.startsWith(indent) ? line.slice(indent.length) : line))
+            .join("\n"),
+    );
+  }
+  return blocks;
+}
 
 /** The lines of a markdown section between `## <heading>` and the next `## `. */
 export function sectionLines(markdown: string, heading: string): string[] {
