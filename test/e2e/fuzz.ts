@@ -1887,7 +1887,7 @@ async function main(): Promise<number> {
     }
 
     // Directed fault battery: every fault kind x budget, with the SECTION
-    // TARGET rotated across all 8 SECTION_PRIMARY_READ entries by battery
+    // TARGET rotated across every SECTION_PRIMARY_READ entry by battery
     // index (offset by the master seed, so the kind-to-section pairing varies
     // across soaks while every soak still covers every kind/budget combo AND
     // every faultable endpoint - no endpoint can starve behind a frozen CI

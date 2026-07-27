@@ -235,14 +235,23 @@ function denialResponse(style: DenialStyle, kind: "read" | "write"): MockRespons
 // --- Pagination -----------------------------------------------------------
 
 /**
- * Slice a full list the way src/github/paginate.ts asks for it: it always
- * sends per_page=100&page=N and stops when a chunk is shorter than per_page.
- * Mirroring that exactly here (default per_page 100, 1-based page) is what
- * makes the mock's paging indistinguishable from GitHub's to the client. A
- * page past the end yields an empty slice, which ends the client's loop.
+ * Slice a full list the way src/github/paginate.ts asks for it: the client
+ * sends per_page (100, or the endpoint's declared smaller pageSize) and
+ * page=N, stopping when a chunk is shorter than requested. `cap`, when
+ * given, is the endpoint's own documented maximum: GitHub clamps an
+ * oversized per_page rather than honoring it, so a capped endpoint serves
+ * at most `cap` items per page no matter what the client asks - mirroring
+ * that here is what keeps the mock's paging indistinguishable from
+ * GitHub's. A page past the end yields an empty slice, which ends the
+ * client's loop.
  */
-export function slicePage<T>(items: readonly T[], query: Record<string, string>): T[] {
-  const perPage = clampInt(query.per_page, 100);
+export function slicePage<T>(
+  items: readonly T[],
+  query: Record<string, string>,
+  cap?: number,
+): T[] {
+  const requested = clampInt(query.per_page, 100);
+  const perPage = cap === undefined ? requested : Math.min(requested, cap);
   const page = clampInt(query.page, 1);
   const start = (page - 1) * perPage;
   return items.slice(start, start + perPage);
@@ -903,6 +912,70 @@ const HANDLERS: Record<string, Handler> = {
     state.interaction_limits = null;
     return noContent();
   },
+
+  // actions_variables --------------------------------------------------------
+  "actions_variables.list": ({ state, query }) => {
+    // The cap comes from the endpoint DECLARATION, the same single source
+    // the client's page loop and the spec-derived pageSize sweep read - so
+    // the mock can never clamp at a stale number the section stopped using.
+    const page = slicePage(
+      state.actions_variables,
+      query,
+      allEndpoints()["actions_variables.list"]?.pageSize,
+    );
+    return ok({ total_count: state.actions_variables.length, variables: page });
+  },
+  "actions_variables.create": ({ state, body }) => {
+    const payload = asObject(body);
+    // GitHub stores variable names uppercased regardless of how they are
+    // entered (the variables naming rules; the spec examples show uppercase
+    // names), so the stored GET shape carries the uppercase name. Payload
+    // spread FIRST so passthrough fields the section sends (and later
+    // subsetDiffs) are stored and read back; the canonical fields are then
+    // normalized over them.
+    const variable: Json = {
+      ...payload,
+      name: variableName(payload),
+      value: payload.value ?? "",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    state.actions_variables.push(variable);
+    // The documented 201 body is an empty object.
+    return { status: 201, body: {} };
+  },
+  "actions_variables.update": ({ state, pathname, body }) => {
+    const name = lastSegment(pathname).toUpperCase();
+    const variable = state.actions_variables.find((v) => String(v.name).toUpperCase() === name);
+    if (!variable) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    const payload = asObject(body);
+    if (typeof payload.name === "string") {
+      variable.name = payload.name.toUpperCase();
+    }
+    if (payload.value !== undefined) {
+      variable.value = payload.value;
+    }
+    // Passthrough fields update verbatim, mirroring the create path, so a
+    // second apply's subsetDiff over them reads back what was written.
+    for (const [key, value] of Object.entries(payload)) {
+      if (VARIABLE_CANONICAL_KEYS.has(key)) {
+        continue;
+      }
+      variable[key] = value;
+    }
+    return noContent();
+  },
+  "actions_variables.remove": ({ state, pathname }) => {
+    const name = lastSegment(pathname).toUpperCase();
+    const index = state.actions_variables.findIndex((v) => String(v.name).toUpperCase() === name);
+    if (index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    state.actions_variables.splice(index, 1);
+    return noContent();
+  },
 };
 
 /** Deterministic expires_at per declared expiry (see interaction_limits.put). */
@@ -970,6 +1043,17 @@ const LABEL_CANONICAL_KEYS = new Set([
 function findLabel(state: MockState, name: string): Json | undefined {
   return state.labels.find((l) => labelName(l) === name.toLowerCase());
 }
+
+/** The uppercase stored name for a variables create payload. */
+function variableName(payload: Json): string {
+  return String(payload.name ?? "").toUpperCase();
+}
+
+/**
+ * Variable fields the server owns (or the update handler maps explicitly);
+ * the passthrough loop must never let a payload overwrite them.
+ */
+const VARIABLE_CANONICAL_KEYS = new Set(["name", "value", "created_at", "updated_at"]);
 
 /** The next 1-based `number` for a list keyed by a numeric `number` field. */
 function nextNumber(items: Json[]): number {

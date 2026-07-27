@@ -35,6 +35,8 @@ const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   "code-scanning.ts": ["code_scanning_default_setup"],
   // Kebab file name for the underscore section key, like code-scanning.ts.
   "interaction-limits.ts": ["interaction_limits"],
+  // Kebab file name for the underscore section key, like code-scanning.ts.
+  "actions-variables.ts": ["actions_variables"],
   // roles.ts is the shared permission-vocabulary normalizer for both sections.
   "roles.ts": ["collaborators", "teams"],
 };
@@ -52,6 +54,7 @@ const ALL_SELECTING_SECTION_FILES = new Set(["contract.ts", "registry.ts"]);
 const KEYS_WITHOUT_MATCHING_FILE = new Set<SectionKey>([
   "code_scanning_default_setup",
   "interaction_limits",
+  "actions_variables",
 ]);
 
 /** src/sections/<file> -> the section key(s) a change to it can affect. */

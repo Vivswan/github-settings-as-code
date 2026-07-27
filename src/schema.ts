@@ -3,7 +3,8 @@
  * Probot Settings app schema (https://github.com/repository-settings/app) in
  * their plain-array form, so an existing Probot config applies to them
  * unchanged; the remaining sections
- * (rulesets, autolinks, actions, workflows, pages, code_scanning_default_setup)
+ * (rulesets, autolinks, actions, workflows, pages, code_scanning_default_setup,
+ * interaction_limits, actions_variables)
  * are additions. Only DECLARED keys are ever applied or compared, so omitting a
  * key means "leave it alone".
  */
@@ -43,6 +44,15 @@ export interface SettingsFile {
    * limit on every run and check mode reports drift once it lapses.
    */
   interaction_limits?: InteractionLimitsConfig | null;
+  /**
+   * GitHub Actions repository variables, upserted by name; undeclared ones
+   * are DELETED by default (the wrapped form can set `undeclared: keep`).
+   * Names are case-insensitive (GitHub stores them uppercased). Values are
+   * plain text BY DESIGN - variables are readable configuration, which is
+   * what makes check-mode diffing possible; secrets are write-only material
+   * and deliberately not this section.
+   */
+  actions_variables?: ActionsVariableConfig[] | UndeclaredPolicyList<ActionsVariableConfig>;
 }
 
 /**
@@ -310,6 +320,14 @@ export interface MilestoneConfig {
   state?: "open" | "closed";
 }
 
+/** One GitHub Actions repository variable, matched by case-insensitive name. */
+export interface ActionsVariableConfig {
+  /** The variable name, the natural key; case-insensitive (stored uppercased by GitHub). */
+  name: string;
+  /** The plain-text value workflows read through the vars context. */
+  value: string;
+}
+
 /** PUT /repos/{r}/interaction-limits, sent verbatim. GitHub reads back limit, origin, and the computed expires_at only. */
 export interface InteractionLimitsConfig {
   /** Who may interact: "existing_users", "contributors_only", or "collaborators_only". */
@@ -339,6 +357,7 @@ export const SECTION_KEYS = [
   "teams",
   "milestones",
   "interaction_limits",
+  "actions_variables",
 ] as const satisfies readonly (keyof SettingsFile)[];
 
 /** A recognized top-level section name. */
@@ -357,6 +376,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "autolinks",
   "collaborators",
   "milestones",
+  "actions_variables",
 ] as const satisfies readonly SectionKey[];
 
 /** A section key that takes the `undeclared` policy knob. */

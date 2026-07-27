@@ -129,6 +129,24 @@
       },
       "type": "object"
     },
+    "ActionsVariableConfig": {
+      "description": "One GitHub Actions repository variable, matched by case-insensitive name.",
+      "properties": {
+        "name": {
+          "description": "The variable name, the natural key; case-insensitive (stored uppercased by GitHub).",
+          "type": "string"
+        },
+        "value": {
+          "description": "The plain-text value workflows read through the vars context.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    },
     "AutolinkConfig": {
       "description": "One autolink reference, matched by key prefix.",
       "properties": {
@@ -549,6 +567,20 @@
           "$ref": "#/definitions/ActionsConfig",
           "description": "GitHub Actions permissions for the repository."
         },
+        "actions_variables": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/ActionsVariableConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CActionsVariableConfig%3E"
+            }
+          ],
+          "description": "GitHub Actions repository variables, upserted by name; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`). Names are case-insensitive (GitHub stores them uppercased). Values are plain text BY DESIGN - variables are readable configuration, which is what makes check-mode diffing possible; secrets are write-only material and deliberately not this section."
+        },
         "autolinks": {
           "anyOf": [
             {
@@ -704,6 +736,27 @@
         "delete"
       ],
       "type": "string"
+    },
+    "UndeclaredPolicyList<ActionsVariableConfig>": {
+      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/ActionsVariableConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
     },
     "UndeclaredPolicyList<AutolinkConfig>": {
       "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
