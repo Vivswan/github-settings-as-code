@@ -61,13 +61,15 @@ describe("generator couplings and pools", () => {
     }
   });
 
-  test("branches protection payloads only use the four core keys", () => {
-    const core = new Set([
+  test("branches protection payloads only use the core keys plus required_signatures", () => {
+    const allowed = new Set([
       "required_status_checks",
       "enforce_admins",
       "required_pull_request_reviews",
       "restrictions",
+      "required_signatures",
     ]);
+    let signatureDraws = 0;
     for (let i = 0; i < 200; i++) {
       const branches = genSettings(new Rng(i), "branches") as Array<{
         protection: Record<string, unknown> | null;
@@ -75,11 +77,18 @@ describe("generator couplings and pools", () => {
       for (const branch of branches) {
         if (branch.protection) {
           for (const key of Object.keys(branch.protection)) {
-            expect(core.has(key)).toBe(true);
+            expect(allowed.has(key)).toBe(true);
+          }
+          if ("required_signatures" in branch.protection) {
+            expect(typeof branch.protection.required_signatures).toBe("boolean");
+            signatureDraws++;
           }
         }
       }
     }
+    // The ~0.3 draw must actually fire across seeds, or the sub-endpoint
+    // paths would go unfuzzed without anything failing.
+    expect(signatureDraws).toBeGreaterThan(0);
   });
 
   test("milestones due_on, when present, is a fixed ISO date (deterministic)", () => {

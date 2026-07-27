@@ -454,7 +454,9 @@ function enabledObject(value: unknown): Json {
  * `{login}`/`{slug}` objects. The inverse of branches' `flattenProtection`:
  * feeding this output through that flattener reproduces the payload's declared
  * keys. Only keys present in the payload are emitted, so the section's
- * declared-keys-only diff sees no phantom fields.
+ * declared-keys-only diff sees no phantom fields. The one dropped key is
+ * required_signatures: GitHub's PUT silently discards it (its own
+ * sub-endpoint sets it), and the mock mirrors that.
  */
 export function protectionFromPut(payload: Json): Json {
   const out: Json = {};
@@ -465,6 +467,11 @@ export function protectionFromPut(payload: Json): Json {
       continue;
     }
     switch (key) {
+      case "required_signatures":
+        // GitHub's protection PUT silently drops this toggle - only the
+        // dedicated sub-endpoint (branches.sigPost/sigDelete) may set it -
+        // so the stored GET shape must not gain it from a PUT body.
+        break;
       case "enforce_admins":
       case "required_linear_history":
       case "allow_force_pushes":
@@ -473,7 +480,6 @@ export function protectionFromPut(payload: Json): Json {
       case "required_conversation_resolution":
       case "lock_branch":
       case "allow_fork_syncing":
-      case "required_signatures":
         out[key] = enabledObject(value);
         break;
       case "restrictions": {

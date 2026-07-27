@@ -157,6 +157,14 @@ describe("protectionFromPut round trip", () => {
     );
     expect(flattened).toEqual({ enforce_admins: false });
   });
+
+  test("required_signatures is dropped from the PUT shape (its sub-endpoint owns it)", () => {
+    // GitHub's protection PUT silently discards the toggle, so the stored GET
+    // shape must not gain it from a PUT body.
+    expect(protectionFromPut({ enforce_admins: true, required_signatures: true })).toEqual({
+      enforce_admins: { enabled: true },
+    });
+  });
 });
 
 describe("environmentFromPut round trip", () => {

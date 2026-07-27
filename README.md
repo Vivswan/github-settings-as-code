@@ -91,6 +91,13 @@ Task-oriented walkthroughs live in [docs/](docs/README.md):
   changing your pin.
 - Pin an exact tag (`@v1.0.1`) when you need byte-stable behavior, and <!-- x-release-please-version -->
   upgrade deliberately.
+- v2 activates settings keys that were inert on v1:
+  `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`,
+  `actions.fork_pr_workflows_private_repos`, and
+  `branches[].protection.required_signatures`. Before moving a `@v1` pin to
+  `@v2`, audit any of those keys already in your settings files for intent;
+  on v2 they act, and a stale `required_signatures: false` would remove a
+  hand-enabled requirement.
 - Only the latest release is supported; fixes are not backported (see
   [SECURITY.md](SECURITY.md)).
 
@@ -101,7 +108,7 @@ Task-oriented walkthroughs live in [docs/](docs/README.md):
 | `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs, immutable-releases | Administration: write | Probot schema incl. `topics` as string or list; `enable_private_vulnerability_reporting` toggle; `enable_git_lfs` toggle (write-only API: check mode notes it cannot verify, apply re-asserts every run); `enable_immutable_releases` toggle (when the repository owner enforces it, writes answer 409 and apply reports a note instead of a change); declared fields only, siblings undeclared untouched |
 | `labels` | labels CRUD | Issues: write | upsert by name (rename via `new_name`); undeclared deleted |
 | `rulesets` | repo rulesets CRUD | Administration: write | branch, tag, and push targets; short ref names auto-prefixed (`staging` -> `refs/heads/staging`); `~DEFAULT_BRANCH` passes through; undeclared kept (notes only) |
-| `branches` | classic branch protection | Administration: write | `protection: null` removes protection; undeclared untouched; add Contents: read so check mode can tell a missing branch from an unprotected one |
+| `branches` | classic branch protection + required-signatures sub-endpoint | Administration: write | `protection: null` removes protection; `required_signatures` applied via its own POST/DELETE (the protection PUT drops it); undeclared untouched; add Contents: read so check mode can tell a missing branch from an unprotected one |
 | `environments` | PUT environments | Environments: write | reviewers, wait timer, branch policies; undeclared untouched |
 | `autolinks` | autolinks CRUD | Administration: write | immutable upstream, so changed entries are replaced; undeclared deleted |
 | `actions` | actions permissions + selected-actions + workflow token + access level + artifact/log retention + cache limits + OIDC subject claim + fork PR policies | Administration: write; `oidc_customization_sub` alone needs Actions: write | `enabled`, `allowed_actions`, `selected_actions`, `default_workflow_permissions`, `can_approve_pull_request_reviews`, `access_level` (private repos only), `artifact_and_log_retention`, `cache` (retention/storage limits; a 403 on the cache endpoints can mean an org- or enterprise-managed policy rather than a missing grant), `oidc_customization_sub` (claim-key order counts), `fork_pr_contributor_approval` (when fork PR workflows need maintainer approval), `fork_pr_workflows_private_repos` (documented for private repos; all four toggles required, since GitHub does not document whether an omitted one is preserved); undeclared untouched |
