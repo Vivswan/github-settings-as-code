@@ -115,9 +115,9 @@ export function secretKey(name: string): string {
 /**
  * The declared `value` of every entry in one {name, value} secret list -
  * plain-array or wrapped form - for the engine's up-front reference
- * resolution (SectionModule.secretValues). Runs BEFORE validation on
- * target-fetched documents (the webhooks precedent), so a malformed
- * container returns [] and shape validation reports the actionable error.
+ * resolution (SectionModule.secretValues). DEFENSIVE by contract: a
+ * malformed container returns [] instead of throwing, so the actionable
+ * error always comes from shape validation, never a TypeError from here.
  */
 export function listSecretValues(declared: unknown): string[] {
   const container = declared as SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
