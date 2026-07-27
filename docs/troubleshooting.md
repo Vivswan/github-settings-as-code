@@ -1,0 +1,137 @@
+# Troubleshooting
+
+Errors from this action are written to carry their own fix: the failing
+request, the API's message verbatim, and what to change. The step summary
+table shows the outcome per section, so start there. This page covers the
+symptoms where the message alone benefits from context: denials that are not
+what they look like, limits, validation errors, and runs that do not match
+the code you think they are running.
+
+## A section fails with "the token was denied ..."
+
+What you see: an error annotation naming the section, the denied request with
+its HTTP status, and advice starting "To fix, grant" that names the exact
+fine-grained PAT permission the section needs.
+
+What it means: the token lacks that section's grant. Each section's
+permission is listed in the [Sections table](../README.md#sections). The
+default `GITHUB_TOKEN` cannot hold most of them (Administration in
+particular), so a missing or under-scoped PAT is the usual cause.
+
+What to do: edit the PAT's permissions as the message says (see
+[Token permissions](../README.md#token-permissions)). If you would rather
+skip sections the token cannot reach, set `on-missing-permission: warn`:
+denied sections are skipped with a warning instead of failing the run, and
+when nothing else drifts or fails the result is `partial` and the run stays
+green. The `required-sections` input names sections that must still fully
+apply even under `warn`.
+
+One related surprise: under the default `on-missing-permission: fail`, an
+apply run probes every declared section read-only before writing anything.
+If any probe is denied you get error annotations prefixed `preflight:` and
+nothing at all is applied, by design; the API has no transactions, so the
+barrier prevents a half-applied repository. See
+[Semantics](../README.md#semantics).
+
+## A 404 for something that exists
+
+Fine-grained tokens surface a missing Administration permission as a 404,
+not a 403, on admin endpoints; GitHub hides the resource rather than admit
+it exists. The action treats both statuses as permission errors, and a
+404 denial appends "(a 404 here can also mean the resource does not
+exist)". Check the grant first. If the grant is right, check the resource:
+the repository slug, a branch name, a workflow file path.
+
+## A 403 that is not about a grant
+
+Two other things arrive as 403. First, rate limiting: both the primary
+limit and secondary (abuse) limits can be delivered as 403. The action
+recognizes these by the API's own message and reports them as rate limits,
+never as missing permissions. Second, feature policies: on a few endpoints
+a 403 means something other than the token. An org- or enterprise-managed
+policy can lock the Actions cache limits, code scanning default setup needs
+Advanced Security on private repositories, and Git LFS can be disabled
+account-wide. For Git LFS the denial message itself carries a note saying
+so; for the others the caveat lives in the
+[Sections table](../README.md#sections) notes for that section.
+
+## Rate limited
+
+What you see: a failure ending "The API rate limit was hit; re-run the
+workflow after the limit resets, or use a token with a higher rate limit".
+
+What it means: the retries already happened, or were deliberately skipped
+because the wait was too long. Rate limits (429 and secondary
+limits) are retried automatically, honoring Retry-After and the rate-limit
+reset; transient 5xx and network failures are retried on their own backoff.
+Both paths allow up to two retries, and a reset more than 60 seconds away
+fails loudly instead of stalling the workflow (see
+[Semantics](../README.md#semantics)). By the time this
+error surfaces, the run has waited as long as it reasonably could.
+
+What to do: re-run after the reset. If a multi-repo run keeps hitting the
+limit, reduce its scope: fewer targets per run, or a `sections` allowlist so
+each target makes fewer calls.
+
+## "unknown top-level section(s) in ..."
+
+What you see: the run fails during validation, naming the unknown keys and
+listing every known section name.
+
+What it means: a misspelled section that silently did nothing would break
+the loud-failure promise, so unknown top-level keys are hard errors (see
+[Forward compatibility](../README.md#forward-compatibility)).
+
+What to do: the message names all three options. Fix the typo. Or, for a
+deliberate private key, prefix it with an underscore, which the validator
+skips:
+
+```yaml settings
+_owner_notes: contact the platform team before editing this file
+labels:
+  - name: bug
+    color: d73a4a
+```
+
+Or, when the file is written for a newer action version than the one running
+(version skew during an upgrade), set the `sections` input: unknown keys
+outside the allowlist downgrade to warnings instead of failing the run.
+
+## The run fails with a 401
+
+The message says "The token was rejected as invalid or expired". This is not
+a permissions problem: the PAT itself expired or was revoked, or the secret
+the `token` input reads holds a stale value. Mint or rotate the token and
+update the secret.
+
+## Check mode "fails" with nothing broken
+
+`mode: check` exits 1 on any drift by design, so a red scheduled check run
+means the file and the repository disagree, not that something errored. The
+drift lines in the log list each difference. See the
+[check mode guide](check-mode.md).
+
+## Turning on debug logging
+
+Every API call the action makes is traced as a debug line: method, path,
+request payload, response status, and timing. Debug lines are hidden in
+normal runs; re-run the workflow with "Enable debug logging" checked, or set
+the `ACTIONS_STEP_DEBUG` secret to `true` (see
+[Debugging](../README.md#debugging)). The trace never prints the token: the
+authorization header is not part of the trace line, and a token stored as a
+repository secret is masked by the runner wherever it appears in output. For
+redacted private targets in multi-repo mode, the traced path collapses to
+`<redacted>` and the payload is dropped entirely. Failures do not need debug
+mode; every error already carries the API's message and the fix, so reach
+for the trace when you need to see the requests that succeeded.
+
+## Behavior does not match src/ (stale bundle)
+
+When you run the action from a fork or a branch
+(`uses: your-fork/repo-settings-as-code@your-branch`), what executes is
+`lib/index.js`, the committed bundle, not the TypeScript under `src/`. If
+you changed `src/` without rebuilding, the run behaves like the old code and
+no error tells you so. Run `bun run build` to regenerate the bundle and the
+published schema, and commit both. This repository's CI has a bundle-check
+job that fails on drift, but it only guards pull requests here; on your own
+branch, the rebuild is on you.
