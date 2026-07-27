@@ -906,7 +906,7 @@ describe("applyMarkerInjection", () => {
     const settings = { labels: [{ name: "bug", color: "d73a4a" }] };
     const result = applyMarkerInjection(settings, true);
     expect(result.notice).toContain(MARKER);
-    const names = (result.settings.labels ?? []).map((l) => l.name);
+    const names = ((result.settings.labels ?? []) as Array<{ name: string }>).map((l) => l.name);
     expect(names).toContain(MARKER);
     expect(names).toContain("bug");
   });

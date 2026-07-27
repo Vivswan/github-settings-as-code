@@ -68,6 +68,43 @@ describe("labels", () => {
     ).rejects.toThrow(/cannot converge/);
     expect(api.calls).toHaveLength(0);
   });
+
+  test("wrapped undeclared:keep leaves the undeclared label as a note, never a DELETE", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/labels?per_page=100&page=1": { data: liveLabels },
+    });
+    const result = await labelsSection.run(ctx(api), {
+      undeclared: "keep",
+      entries: [{ name: "bug", color: "#D73A4A", description: "Something isn't working" }],
+    });
+    expect(result.changes).toEqual([]);
+    expect(result.notes).toEqual([
+      'label "stale" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it',
+    ]);
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("wrapped undeclared:keep in check mode notes the undeclared label instead of drifting", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/labels?per_page=100&page=1": { data: liveLabels },
+    });
+    const result = await labelsSection.run(ctx(api, true), {
+      undeclared: "keep",
+      entries: [{ name: "bug", color: "d73a4a", description: "Something isn't working" }],
+    });
+    expect(result.drift).toEqual([]);
+    expect(result.notes).toHaveLength(1);
+  });
+
+  test("the wrapper without a policy keeps the delete default", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/labels?per_page=100&page=1": { data: liveLabels },
+    }).allowMutations("DELETE /repos/o/r/labels/*");
+    const result = await labelsSection.run(ctx(api), {
+      entries: [{ name: "bug", color: "d73a4a", description: "Something isn't working" }],
+    });
+    expect(result.changes).toEqual(['DELETED undeclared label "stale"']);
+  });
 });
 
 describe("labels phantom keys", () => {

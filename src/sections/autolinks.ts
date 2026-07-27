@@ -1,13 +1,15 @@
 /**
  * `autolinks:` section - autolinks cannot be edited, so a changed one is
- * deleted and recreated. Undeclared autolinks are DELETED.
+ * deleted and recreated. Undeclared autolinks are DELETED by default; the
+ * wrapped `undeclared: keep` form softens that to notes.
  */
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import type { AutolinkConfig } from "../schema.js";
+import type { AutolinkConfig, UndeclaredPolicyList } from "../schema.js";
 import {
   call,
+  defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   grantFor,
@@ -15,6 +17,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredPolicy,
+  undeclaredPolicyShape,
 } from "./contract.js";
 
 interface LiveAutolink {
@@ -37,14 +41,19 @@ const ENDPOINTS = {
 
 export const autolinksSection: SectionModule<"autolinks"> = {
   key: "autolinks",
-  deletesUndeclared: "deletes",
+  undeclaredDefault: "delete",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
-  shape: z.array(z.looseObject({ key_prefix: z.string(), url_template: z.string() })),
+  shape: undeclaredPolicyShape(
+    z.array(z.looseObject({ key_prefix: z.string(), url_template: z.string() })),
+  ),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as AutolinkConfig[];
+    const { policy, entries: desired } = undeclaredPolicy(
+      desiredRaw as AutolinkConfig[] | UndeclaredPolicyList<AutolinkConfig>,
+      defaultUndeclaredPolicy(this),
+    );
     rejectDuplicates(
       this,
       desired,
@@ -111,7 +120,11 @@ export const autolinksSection: SectionModule<"autolinks"> = {
       if (declared.has(autolink.key_prefix)) {
         continue;
       }
-      if (ctx.check) {
+      if (policy === "keep") {
+        result.notes.push(
+          `autolink ${autolink.key_prefix} exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+        );
+      } else if (ctx.check) {
         result.drift.push(
           `autolinks[${autolink.key_prefix}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
         );

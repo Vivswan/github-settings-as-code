@@ -5,7 +5,13 @@ import { z } from "zod";
 import type { ApiError, GithubClient } from "../github/api.js";
 import { isPermissionError, isRateLimitError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
-import type { SectionKey, SettingsFile } from "../schema.js";
+import type {
+  SectionKey,
+  SettingsFile,
+  UndeclaredPolicy,
+  UndeclaredPolicyList,
+  UndeclaredPolicySection,
+} from "../schema.js";
 
 export class PermissionDenied extends Error {
   constructor(
@@ -320,19 +326,29 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
    */
   endpoints: Readonly<Record<string, EndpointDecl>>;
   /**
-   * What this section does to live resources it does NOT declare, the single
-   * source the README Sections table and COVERAGE derive their deletion
-   * claims from:
-   * - "deletes": the section lists live resources and DELETES undeclared ones
-   *   (labels, autolinks, collaborators, though the owner is always exempt).
-   * - "keeps": the section lists live resources but KEEPS undeclared ones,
-   *   surfacing each as a note (rulesets, milestones, since removing them stays
-   *   a human action).
+   * The DEFAULT policy for live resources this section does NOT declare, the
+   * single source the README Sections table and COVERAGE derive their
+   * deletion claims from. For the sections that enumerate sibling resources,
+   * the settings file can override the default per run with the wrapped
+   * `{undeclared, entries}` form (see undeclaredPolicy below):
+   * - "delete": the section lists live resources and DELETES undeclared ones
+   *   by default (labels, autolinks, collaborators, though the owner is
+   *   always exempt); `undeclared: keep` softens that to notes.
+   * - "keep": the section lists live resources but KEEPS undeclared ones by
+   *   default, surfacing each as a note (rulesets, milestones, since removing
+   *   them stays a human action); `undeclared: delete` hardens that to
+   *   deletion.
    * - "untouched": the section never enumerates sibling resources, so an
    *   undeclared one is simply never seen (repository, branches, environments,
-   *   actions, workflows, pages, code_scanning_default_setup, teams).
+   *   actions, workflows, pages, code_scanning_default_setup, teams,
+   *   interaction_limits) and no policy applies.
+   *
+   * The conditional type makes the pairing unrepresentable to get wrong: a
+   * section in UNDECLARED_POLICY_SECTIONS must say "delete" or "keep",
+   * and one outside it must say "untouched" - so defaultUndeclaredPolicy
+   * can never be reached for a section the merge does not normalize.
    */
-  deletesUndeclared: "deletes" | "keeps" | "untouched";
+  undeclaredDefault: K extends UndeclaredPolicySection ? UndeclaredPolicy : "untouched";
 }
 
 /**
@@ -362,23 +378,112 @@ export interface SectionModule<K extends SectionKey = SectionKey> extends Sectio
    * fields have to keep working. The conditional type enforces both edges:
    * `known` may only name real entry keys from SettingsFile, and a
    * non-list section cannot declare a closedSurface at all (the property
-   * collapses to never).
+   * collapses to never). EntryOf sees through the wrapped
+   * `{undeclared, entries}` form, so a closed section that also takes the
+   * policy knob (collaborators) keeps its closed-surface validation in both
+   * forms.
    */
-  closedSurface?: NonNullable<SettingsFile[K]> extends readonly (infer E)[]
-    ? {
+  closedSurface?: [EntryOf<NonNullable<SettingsFile[K]>>] extends [never]
+    ? never
+    : {
         /** Every entry key the section recognizes. */
-        known: readonly (keyof E & string)[];
+        known: readonly (keyof EntryOf<NonNullable<SettingsFile[K]>> & string)[];
         /** The entry's natural key, to name it in the error. */
-        describe: (entry: E) => string;
+        describe: (entry: EntryOf<NonNullable<SettingsFile[K]>>) => string;
         /** What the unrecognized key would silently do, as message prose. */
         consequence: string;
-      }
-    : never;
+      };
   run(ctx: SectionContext, desired: unknown): Promise<SectionResult>;
 }
 
 /** The loose "any YAML mapping" shape for passthrough-heavy sections. */
 export const anyRecord = z.record(z.string(), z.unknown());
+
+/**
+ * The entry type of a list section's declared value, whichever form it
+ * takes: a plain entry array, or the wrapped `{undeclared, entries}` form.
+ * Distributes over the union, so a knobbed section (whose SettingsFile type
+ * is that union) resolves to its one entry type; a non-list section
+ * resolves to never.
+ */
+export type EntryOf<T> = T extends readonly (infer E)[]
+  ? E
+  : T extends { entries: readonly (infer E)[] }
+    ? E
+    : never;
+
+/**
+ * Unwrap a list section's declared value into its policy and entries. The
+ * plain array form takes `defaultPolicy`; the wrapped form's explicit
+ * `undeclared` wins, and an omitted one falls back to the same default. The
+ * default is a REQUIRED parameter on purpose: a nested list in a future
+ * feature cannot derive its default from its section's undeclaredDefault,
+ * so the call site always says which default applies. Entries are returned
+ * by reference, not cloned.
+ */
+export function undeclaredPolicy<E>(
+  declared: readonly E[] | UndeclaredPolicyList<E>,
+  defaultPolicy: UndeclaredPolicy,
+): { policy: UndeclaredPolicy; entries: readonly E[] } {
+  if (Array.isArray(declared)) {
+    return { policy: defaultPolicy, entries: declared };
+  }
+  const wrapped = declared as UndeclaredPolicyList<E>;
+  return { policy: wrapped.undeclared ?? defaultPolicy, entries: wrapped.entries };
+}
+
+/**
+ * The section-level default for undeclaredPolicy, read off the section's own
+ * undeclaredDefault declaration so the two can never disagree. The parameter
+ * type restricts callers to the knobbed sections, where the conditional
+ * undeclaredDefault type already excludes "untouched" - asking for a
+ * non-enumerating section's default is a compile error, not a runtime BUG.
+ */
+export function defaultUndeclaredPolicy(
+  section: SectionMeta<UndeclaredPolicySection>,
+): UndeclaredPolicy {
+  return section.undeclaredDefault;
+}
+
+/**
+ * The zod shape for a knobbed list section: the union of the plain entry
+ * array and the strict `{undeclared, entries}` wrapper. Routed by container
+ * type instead of z.union so a failing entry keeps its precise issue path
+ * (`labels[2].name`, or `labels.entries[2].name` in the wrapped form) - a
+ * plain union collapses every failure into one pathless "Invalid input".
+ * The wrapper is strictObject because it is this action's own vocabulary
+ * (nothing in it passes through to GitHub), so an unrecognized key can only
+ * be a typo.
+ */
+export function undeclaredPolicyShape(list: z.ZodType): z.ZodType {
+  const wrapper = z.strictObject({
+    undeclared: z.enum(["keep", "delete"]).optional(),
+    entries: list,
+  });
+  return z
+    .custom<unknown>(() => true)
+    .superRefine((value, ctx) => {
+      const shape = Array.isArray(value)
+        ? list
+        : typeof value === "object" && value !== null
+          ? wrapper
+          : null;
+      if (shape === null) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            'Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "undeclared" policy)',
+        });
+        return;
+      }
+      const parsed = shape.safeParse(value);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({ ...issue });
+        }
+      }
+    });
+}
 
 export function emptyResult(): SectionResult {
   return { changes: [], drift: [], notes: [] };
@@ -576,7 +681,7 @@ export async function listAllEnveloped<E extends EndpointDecl>(
  */
 export function rejectDuplicates<T>(
   section: SectionMeta,
-  items: T[],
+  items: readonly T[],
   keyOf: (item: T) => string,
   describe: (item: T) => string,
 ): void {

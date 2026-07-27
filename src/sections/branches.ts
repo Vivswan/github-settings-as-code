@@ -75,7 +75,7 @@ const ENDPOINTS = {
 
 export const branchesSection: SectionModule<"branches"> = {
   key: "branches",
-  deletesUndeclared: "untouched",
+  undeclaredDefault: "untouched",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,

@@ -1,14 +1,16 @@
 /**
  * `labels:` section - Probot parity: upsert declared labels by
  * case-insensitive name (with `new_name` rename support) and DELETE
- * undeclared labels, loudly.
+ * undeclared labels, loudly. The wrapped `undeclared: keep` form softens
+ * the deletion to notes.
  */
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import type { LabelConfig } from "../schema.js";
+import type { LabelConfig, UndeclaredPolicyList } from "../schema.js";
 import {
   call,
+  defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   grantFor,
@@ -16,6 +18,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredPolicy,
+  undeclaredPolicyShape,
 } from "./contract.js";
 
 /** Case-insensitive key for name-matched resources (labels). */
@@ -56,14 +60,19 @@ const ENDPOINTS = {
 
 export const labelsSection: SectionModule<"labels"> = {
   key: "labels",
-  deletesUndeclared: "deletes",
+  undeclaredDefault: "delete",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
-  shape: z.array(z.looseObject({ name: z.string(), new_name: z.string().optional() })),
+  shape: undeclaredPolicyShape(
+    z.array(z.looseObject({ name: z.string(), new_name: z.string().optional() })),
+  ),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as LabelConfig[];
+    const { policy, entries: desired } = undeclaredPolicy(
+      desiredRaw as LabelConfig[] | UndeclaredPolicyList<LabelConfig>,
+      defaultUndeclaredPolicy(this),
+    );
     // Duplicate detection covers both identities of every entry: its name
     // and its rename target. Two entries resolving to the same label would
     // fight each other on every run (or fail mid-rename).
@@ -175,12 +184,17 @@ export const labelsSection: SectionModule<"labels"> = {
       }
     }
 
-    // Probot parity: undeclared labels are deleted. Loud on purpose.
+    // Probot parity: undeclared labels are deleted by default, loudly on
+    // purpose; the wrapped `undeclared: keep` form downgrades each to a note.
     for (const label of liveByKey.values()) {
       if (declaredKeys.has(nameKey(label.name))) {
         continue;
       }
-      if (ctx.check) {
+      if (policy === "keep") {
+        result.notes.push(
+          `label "${label.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+        );
+      } else if (ctx.check) {
         result.drift.push(
           `labels[${label.name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
         );

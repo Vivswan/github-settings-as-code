@@ -49,7 +49,11 @@ export function validateSectionShapes(
  * Unrecognized entry keys in a closed section, capped at 5 like the shape
  * issues above. Runs only after the shape parse succeeded; entries that are
  * not objects are skipped (for the current closed shapes the parse already
- * excludes them, so the guard is only defensive).
+ * excludes them, so the guard is only defensive). A knobbed section's
+ * wrapped `{undeclared, entries}` form is unwrapped first, so a closed
+ * section that also takes the policy knob (collaborators) keeps its entry
+ * checks in both forms - the wrapper's own keys are validated by the
+ * strictObject in the section shape, never here.
  */
 function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unknown): string[] {
   // The registry's generic view erases the per-section entry typing (the same
@@ -61,12 +65,22 @@ function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unk
         consequence: string;
       }
     | undefined;
-  if (closed === undefined || !Array.isArray(declared)) {
+  if (closed === undefined) {
+    return [];
+  }
+  const entries = Array.isArray(declared)
+    ? declared
+    : typeof declared === "object" &&
+        declared !== null &&
+        Array.isArray((declared as Record<string, unknown>).entries)
+      ? ((declared as Record<string, unknown>).entries as unknown[])
+      : null;
+  if (entries === null) {
     return [];
   }
   const known = new Set<string>(closed.known);
   const problems: string[] = [];
-  for (const entry of declared) {
+  for (const entry of entries) {
     if (problems.length >= 5) {
       break;
     }

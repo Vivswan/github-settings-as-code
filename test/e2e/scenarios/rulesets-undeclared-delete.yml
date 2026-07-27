@@ -1,0 +1,37 @@
+name: rulesets-undeclared-delete
+description: >-
+  The wrapped rulesets form with "undeclared: delete" hardens the section's
+  keep default: a live ruleset the settings file does not declare is DELETED
+  instead of noted. The declared ruleset is created, apply stays green, and
+  a check rerun converges.
+settings:
+  rulesets:
+    undeclared: delete
+    entries:
+      - name: protect-main
+        target: branch
+        enforcement: active
+        conditions:
+          ref_name:
+            include: ["~DEFAULT_BRANCH"]
+            exclude: []
+        rules:
+          - type: deletion
+live_state:
+  rulesets:
+    - id: 501
+      name: legacy-guard
+      source_type: Repository
+      target: branch
+      enforcement: active
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    rulesets: applied
+  mutations:
+    - "POST /repos/{repo}/rulesets"
+    - "DELETE /repos/{repo}/rulesets/501"
+  stdout_contains:
+    - "DELETED undeclared ruleset \"legacy-guard\""
+  converges: true

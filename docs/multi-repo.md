@@ -68,8 +68,10 @@ as JSON.
 
 ## Layering a defaults file
 
-`defaults-file` names a YAML settings document merged under every target's
-settings, with the target's keys winning. Objects merge recursively, key by
+`defaults-file` names a YAML settings document merged under every processed
+target's settings, with the target's keys winning (a repository with no
+settings file is skipped before the merge, defaults included). Objects
+merge recursively, key by
 key. Arrays and scalars replace wholesale; the merge never concatenates
 lists.
 
@@ -112,8 +114,13 @@ The two `repository` objects merged: the target's `description` and
 both declared `has_wiki` the target won. The two `labels` arrays did not
 merge: the target's list replaced the defaults' list, so `bug` is not
 declared for this repository at all. Since the labels section deletes
-undeclared labels, a target that wants the fleet labels plus its own must
-repeat the fleet labels in its list.
+undeclared labels by default, a target that wants the fleet labels plus its
+own must repeat the fleet labels in its list. The alternative is the
+[undeclared policy](undeclared-policy.md): a defaults file declaring
+`labels: {undeclared: keep, entries: [...]}` hands every target the keep
+policy, so a target that declares only its own labels leaves the fleet
+labels (and any others) in place instead of deleting them - unmanaged, but
+kept.
 
 ## null as an opt-out
 

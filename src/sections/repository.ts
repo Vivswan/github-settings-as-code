@@ -222,7 +222,7 @@ export const SPECIAL_KEYS = new Set(["topics", ...FEATURE_TOGGLES.map((toggle) =
 
 export const repositorySection: SectionModule<"repository"> = {
   key: "repository",
-  deletesUndeclared: "untouched",
+  undeclaredDefault: "untouched",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,

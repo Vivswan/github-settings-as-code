@@ -244,7 +244,7 @@ const shape = z.looseObject({
 
 export const actionsSection: SectionModule<"actions"> = {
   key: "actions",
-  deletesUndeclared: "untouched",
+  undeclaredDefault: "untouched",
   permission,
   grant: grantFor(
     permission,

@@ -1,0 +1,35 @@
+name: labels-undeclared-keep
+description: >-
+  The wrapped labels form with "undeclared: keep" softens the section's
+  delete default: a live label the settings file does not declare is KEPT
+  and surfaced as a note instead of being deleted. The declared label still
+  updates, apply stays green, and a check rerun converges (the kept label is
+  a note, not drift).
+settings:
+  labels:
+    undeclared: keep
+    entries:
+      - name: bug
+        color: d73a4a
+        description: Something isn't working
+live_state:
+  labels:
+    - name: bug
+      color: ffffff
+      description: Something isn't working
+    - name: wontfix
+      color: ffffff
+      description: This will not be worked on
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    labels: applied
+  mutations:
+    - "PATCH /repos/{repo}/labels/bug"
+  never:
+    - "DELETE /repos/{repo}/labels"
+  stdout_contains:
+    - "kept under \"undeclared: keep\""
+    - wontfix
+  converges: true

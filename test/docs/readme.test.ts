@@ -24,10 +24,10 @@ import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 const ROOT = join(import.meta.dir, "..", "..");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 
-/** The claim each deletesUndeclared value must appear as in a Sections row. */
+/** The claim each undeclaredDefault value must appear as in a Sections row. */
 const DELETION_CLAIM: Record<string, string> = {
-  deletes: "undeclared deleted",
-  keeps: "undeclared kept",
+  delete: "undeclared deleted by default (settable",
+  keep: "undeclared kept by default (settable",
   untouched: "undeclared untouched",
 };
 
@@ -39,7 +39,7 @@ describe("README Sections table", () => {
     expect(names).toEqual([...SECTION_KEYS]);
   });
 
-  test("each row's deletion claim derives from the section's deletesUndeclared", () => {
+  test("each row's deletion claim derives from the section's undeclaredDefault", () => {
     const byKey = new Map(SECTIONS.map((section) => [section.key, section]));
     for (const cells of rows) {
       const key = (cells[0] ?? "").replace(/`/g, "");
@@ -48,10 +48,10 @@ describe("README Sections table", () => {
       if (!section) {
         throw new Error(`README Sections row "${key}" is not a section key`);
       }
-      const claim = DELETION_CLAIM[section.deletesUndeclared] as string;
+      const claim = DELETION_CLAIM[section.undeclaredDefault] as string;
       expect(
         notes.includes(claim),
-        `README Sections row "${key}" must state "${claim}" (its deletesUndeclared is "${section.deletesUndeclared}"), got notes: ${notes}`,
+        `README Sections row "${key}" must state "${claim}" (its undeclaredDefault is "${section.undeclaredDefault}"), got notes: ${notes}`,
       ).toBe(true);
     }
   });
@@ -141,11 +141,17 @@ describe("README migration paragraph", () => {
     const paragraph = sectionLines(readme, "Migrating from the Probot Settings app").join(" ");
     // Isolate the parity clause precisely so later mentions (e.g. "move to
     // `rulesets`") cannot leak in and a filename dot cannot truncate it: the
-    // clause runs from "works as-is for" up to its "(same schema)" marker.
-    const clause = paragraph.match(/works as-is for\s+(.*?)\(same schema\)/s);
+    // clause runs from "works as-is for" up to its "(for the list sections
+    // among them, the plain-array form remains Probot-compatible" marker -
+    // the array-form claim is scoped to the list sections, since the
+    // object-shaped sections have no array form and the wrapped `undeclared`
+    // form is this action's own addition.
+    const clause = paragraph.match(
+      /works as-is for\s+(.*?)\(for the list sections among them, the plain-array form remains Probot-compatible/s,
+    );
     expect(
       clause,
-      'README migration paragraph must name the parity sections in a "works as-is for ... (same schema)" clause',
+      'README migration paragraph must name the parity sections in a "works as-is for ... (for the list sections among them, the plain-array form remains Probot-compatible" clause',
     ).not.toBeNull();
     const listed = new Set(
       [...(clause?.[1] ?? "").matchAll(/`([a-z_]+)`/g)]
@@ -217,13 +223,13 @@ describe("README Private repositories section", () => {
 describe("schema.ts SettingsFile JSDoc deletion claims", () => {
   const schemaSrc = readFileSync(join(ROOT, "src", "schema.ts"), "utf8");
   const CLAIM_WORD: Record<string, RegExp> = {
-    deletes: /delete|remove/i,
-    keeps: /kept|keep/i,
+    delete: /delete|remove/i,
+    keep: /kept|keep/i,
   };
 
-  test("the JSDoc for delete/keep sections matches deletesUndeclared", () => {
+  test("the JSDoc for delete/keep sections matches undeclaredDefault", () => {
     for (const section of SECTIONS) {
-      const pattern = CLAIM_WORD[section.deletesUndeclared];
+      const pattern = CLAIM_WORD[section.undeclaredDefault];
       if (!pattern) {
         continue; // "untouched" sections make no per-key deletion claim
       }
@@ -232,7 +238,7 @@ describe("schema.ts SettingsFile JSDoc deletion claims", () => {
       expect(match, `no JSDoc found above SettingsFile.${section.key}`).not.toBeNull();
       expect(
         pattern.test(match?.[0] ?? ""),
-        `SettingsFile.${section.key} JSDoc must state a "${section.deletesUndeclared}" policy (matching ${pattern})`,
+        `SettingsFile.${section.key} JSDoc must state a "${section.undeclaredDefault}" policy (matching ${pattern})`,
       ).toBe(true);
     }
   });
@@ -242,7 +248,7 @@ describe("README closed-sections claim", () => {
   test("the forward-compatibility prose names exactly the closedSurface sections", () => {
     // closedSurface is the module-level source of which sections reject
     // unrecognized keys; the README paragraph must list those and no others,
-    // the same way deletesUndeclared pins the Sections table.
+    // the same way undeclaredDefault pins the Sections table.
     const closed = SECTIONS.filter((section) => section.closedSurface !== undefined).map(
       (section) => section.key,
     );

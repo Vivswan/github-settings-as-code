@@ -121,6 +121,40 @@ describe("generator couplings and pools", () => {
     }
     expect(hostile).toBeGreaterThan(0);
   });
+
+  test("the knobbed non-witness sections emit both forms, every policy included", () => {
+    // labels and milestones are witness sections and stay plain (the oracle
+    // refines their predictions from the witness alone); the other three
+    // knobbed sections must draw the plain array, the bare wrapper, and both
+    // explicit policies across seeds.
+    for (const key of ["autolinks", "collaborators", "rulesets"] as const) {
+      let plain = 0;
+      const wrapped = new Map<string, number>();
+      for (let i = 0; i < 400; i++) {
+        const value = genSettings(new Rng(i), key);
+        if (Array.isArray(value)) {
+          plain++;
+          continue;
+        }
+        const wrapper = value as { undeclared?: string; entries: unknown[] };
+        expect(Array.isArray(wrapper.entries)).toBe(true);
+        const policy = wrapper.undeclared ?? "(omitted)";
+        wrapped.set(policy, (wrapped.get(policy) ?? 0) + 1);
+      }
+      expect(plain).toBeGreaterThan(0);
+      for (const policy of ["keep", "delete", "(omitted)"]) {
+        expect(wrapped.get(policy) ?? 0, `${key} never drew the ${policy} form`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test("the witness sections never emit the wrapped form", () => {
+    for (const key of ["labels", "milestones"] as const) {
+      for (let i = 0; i < 400; i++) {
+        expect(Array.isArray(genSettings(new Rng(i), key))).toBe(true);
+      }
+    }
+  });
 });
 
 describe("genLiveWitness", () => {
