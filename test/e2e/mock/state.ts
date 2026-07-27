@@ -69,6 +69,8 @@ export interface LiveState {
   cache_retention_limit?: Json;
   /** GET /actions/cache/storage-limit body. */
   cache_storage_limit?: Json;
+  /** GET /actions/oidc/customization/sub body. */
+  oidc_customization_sub?: Json;
   /** Workflows list items ({id, name, path, state}), replaces the baseline. */
   workflows?: Json[];
   /** GET /pages body, or null for "Pages not enabled". */
@@ -121,6 +123,7 @@ export interface MockState {
   actions_retention: Json;
   cache_retention_limit: Json;
   cache_storage_limit: Json;
+  oidc_customization_sub: Json;
   workflows: Json[];
   pages: Json | null;
   code_scanning: Json;
@@ -236,6 +239,9 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     cache_storage_limit: ls.cache_storage_limit
       ? clone(ls.cache_storage_limit)
       : { max_cache_size_gb: 10 },
+    oidc_customization_sub: ls.oidc_customization_sub
+      ? clone(ls.oidc_customization_sub)
+      : { use_default: true },
     workflows: ls.workflows ? clone(ls.workflows) : [],
     pages: ls.pages !== undefined ? clone(ls.pages) : null,
     code_scanning: ls.code_scanning ? clone(ls.code_scanning) : {},

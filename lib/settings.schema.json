@@ -64,6 +64,27 @@
           "description": "PUT /repos/{r}/actions/permissions: whether Actions runs at all.",
           "type": "boolean"
         },
+        "oidc_customization_sub": {
+          "description": "PUT /repos/{r}/actions/oidc/customization/sub: the OIDC subject claim template for this repository's workflow tokens, e.g. { use_default: false, include_claim_keys: [repo, context] } (keys must be unique). Claim-key ORDER defines the subject format, so check mode compares a declared list positionally; an omitted list on a custom template opts into the organization template and is not compared. use_immutable_subject switches the whole subject to the stable repository-ID-based format; omitted, the organization setting or the repository's creation date decides, and only a declared value is compared. Unlike the rest of this section, these endpoints need the \"Actions\" PAT permission rather than Administration.",
+          "properties": {
+            "include_claim_keys": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "use_default": {
+              "type": "boolean"
+            },
+            "use_immutable_subject": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "use_default"
+          ],
+          "type": "object"
+        },
         "selected_actions": {
           "additionalProperties": {},
           "description": "PUT /repos/{r}/actions/permissions/selected-actions (allowed_actions: selected)",

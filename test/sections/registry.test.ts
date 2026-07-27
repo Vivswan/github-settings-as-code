@@ -57,6 +57,19 @@ describe("registry <-> README", () => {
 const CODE_SCANNING_CAVEAT =
   "a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived";
 
+// The caveat actions appends: its OIDC endpoints carry a permission
+// override (Actions instead of Administration), so the section grant says
+// so wherever a NON-oidc actions endpoint is denied.
+const ACTIONS_OIDC_CAVEAT =
+  'the "oidc_customization_sub" key alone instead needs "Actions" (read and write)';
+
+// The per-section caveats grantFor appends; the derivation test and the
+// literal snapshot both read this one map.
+const GRANT_CAVEATS: Record<string, string> = {
+  code_scanning_default_setup: CODE_SCANNING_CAVEAT,
+  actions: ACTIONS_OIDC_CAVEAT,
+};
+
 // The exact grant prose each section shows in permission errors, captured
 // against the pre-refactor literals. grantFor derives these now, so any
 // character-level change is a conscious edit here - not a silent drift.
@@ -67,7 +80,7 @@ const EXPECTED_GRANT: Record<string, string> = {
   branches: `grant "Administration" (read and write) under the PAT's Repository permissions`,
   environments: `grant "Environments" (read and write) under the PAT's Repository permissions`,
   autolinks: `grant "Administration" (read and write) under the PAT's Repository permissions`,
-  actions: `grant "Administration" (read and write) under the PAT's Repository permissions`,
+  actions: `grant "Administration" (read and write) under the PAT's Repository permissions; ${ACTIONS_OIDC_CAVEAT}`,
   workflows: `grant "Actions" (read and write) under the PAT's Repository permissions`,
   pages: `grant "Pages" (read and write) under the PAT's Repository permissions`,
   code_scanning_default_setup: `grant "Administration" or "Code scanning alerts" (read and write) under the PAT's Repository permissions; ${CODE_SCANNING_CAVEAT}`,
@@ -87,9 +100,7 @@ describe("section permissions", () => {
 
   test("each section's grant matches grantFor(permission)", () => {
     for (const module of SECTIONS) {
-      const caveat =
-        module.key === "code_scanning_default_setup" ? CODE_SCANNING_CAVEAT : undefined;
-      expect(module.grant).toBe(grantFor(module.permission, caveat));
+      expect(module.grant).toBe(grantFor(module.permission, GRANT_CAVEATS[module.key]));
     }
   });
 
@@ -102,9 +113,11 @@ describe("section permissions", () => {
   });
 
   test("no endpoint keys a hint on 403/404 - the permission branch never reads hints", () => {
-    // throwFor classifies 403/404 as PermissionDenied before consulting
-    // `hints`, so an entry there is dead advice; ambiguity on those statuses
-    // belongs in `denialHint` (see the EndpointDecl JSDoc).
+    // On permission-requiring endpoints, throwFor classifies 403/404 as
+    // PermissionDenied before consulting `hints`, so an entry there is dead
+    // advice; on a public ("none") endpoint the generic branch WOULD render
+    // it, which is why this sweep forbids 403/404 hints outright - ambiguity
+    // on those statuses belongs in `denialHint` (see the EndpointDecl JSDoc).
     for (const [key, endpoint] of Object.entries(allEndpoints())) {
       for (const status of Object.keys(endpoint.hints ?? {})) {
         expect(
@@ -225,14 +238,21 @@ describe("section endpoints", () => {
     }
   });
 
-  test("only branches.branchProbe and teams.org carry a permission override", () => {
+  test("only the known endpoints carry a permission override", () => {
     // An override equal to the section permission would be redundant; this
-    // guards against redundant or stray overrides creeping in. Exactly two
-    // endpoints in the whole registry legitimately override.
+    // guards against redundant or stray overrides creeping in. Exactly these
+    // endpoints in the whole registry legitimately override: the branches
+    // probe (Contents), the teams org read (Members), and the OIDC subject
+    // claim pair (Actions instead of Administration).
     const overridden = Object.entries(allEndpoints())
       .filter(([, endpoint]) => endpoint.permission !== undefined)
       .map(([key]) => key);
-    expect(overridden.sort()).toEqual(["branches.branchProbe", "teams.org"]);
+    expect(overridden.sort()).toEqual([
+      "actions.getOidcSub",
+      "actions.putOidcSub",
+      "branches.branchProbe",
+      "teams.org",
+    ]);
   });
 
   test("endpointPermission resolves override, else section permission", () => {

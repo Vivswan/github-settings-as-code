@@ -567,6 +567,17 @@ const HANDLERS: Record<string, Handler> = {
     state.cache_storage_limit = asObject(body);
     return noContent();
   },
+  "actions.getOidcSub": ({ state }) => ok(state.oidc_customization_sub),
+  "actions.putOidcSub": ({ state, body }) => {
+    // Stores the body verbatim and answers 201 with an empty object (the
+    // documented success shape). The mock has no organization layer, so an
+    // omitted include_claim_keys never resolves to inherited org-template
+    // keys the way it does upstream - a deliberate abstraction, safe
+    // because the section compares only declared keys (the unit tests pin
+    // that semantic).
+    state.oidc_customization_sub = asObject(body);
+    return { status: 201, body: {} };
+  },
 
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {

@@ -1,7 +1,8 @@
 # Repo-owned release pipeline, called by the managed ci.yml on top of the
 # all-green gate. Never overwritten by template sync. Runs the managed
-# release-please machinery, then moves the moving major tag (v1) to the new
-# release so `@v1` pins pick up every release.
+# release-please machinery, then moves the released line's moving major tag
+# (v1 for a v1.x release, v2 for v2.x, derived from the released tag) so
+# major-pinned consumers pick up every release in their line.
 
 name: Release
 
@@ -15,9 +16,10 @@ jobs:
 
   # Move the moving major tag to the release this run just published, but
   # only when the released tag points at the commit this run tested: main
-  # can advance in the seconds between the gate and the release, and `@v1`
-  # consumers must never receive an untested commit. On a mismatch, fail
-  # loudly and repair by hand after verifying that commit's CI.
+  # can advance in the seconds between the gate and the release, and
+  # major-pinned consumers must never receive an untested commit. On a
+  # mismatch, fail loudly and repair by hand after verifying that commit's
+  # CI.
   retag-major:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
