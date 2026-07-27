@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import * as core from "@actions/core";
 import { parse as parseYaml } from "yaml";
 import {
+  clearRedactedSlugs,
   GithubApi,
   isPermissionError,
   isRateLimitError,
@@ -315,6 +318,45 @@ describe("debug-trace hardening for redacted slugs", () => {
     unregisterRedactedSlug("o/held-twice");
   });
 
+  test("clearRedactedSlugs drops every hold, counted ones included (test isolation)", async () => {
+    // The run flows register permanently for the process, so a test file that
+    // exercises them must be able to reset the module state, or its slugs
+    // stay redacted for every later test file in the same process.
+    registerRedactedSlug("o/leftover");
+    registerRedactedSlug("o/leftover"); // a second hold, as probe + run flow would leave
+    clearRedactedSlugs();
+    stubFetch([() => new Response(null, { status: 204 })]);
+    const dbg = captureDebug();
+    try {
+      await api().tryRequest("GET", "/repos/o/leftover");
+    } finally {
+      dbg.restore();
+    }
+    const trace = dbg.lines.join("");
+    expect(trace).toContain("/repos/o/leftover");
+  });
+
+  test("clearRedactedSlugs is never referenced by production code", () => {
+    // The reset is a production-unsafe capability living in a production
+    // module (dropping every hold mid-run would trace private paths and
+    // payloads legibly). The docstring says production never calls it; this
+    // makes the rule mechanical: only its own definition in api.ts may name
+    // the identifier anywhere under src/.
+    const srcDir = join(import.meta.dir, "..", "..", "src");
+    const offenders: string[] = [];
+    for (const file of readdirSync(srcDir, { recursive: true }) as string[]) {
+      if (!file.endsWith(".ts")) {
+        continue;
+      }
+      const hits = readFileSync(join(srcDir, file), "utf8").split("clearRedactedSlugs").length - 1;
+      const allowed = file === join("github", "api.ts") ? 1 : 0;
+      if (hits > allowed) {
+        offenders.push(`src/${file} (${hits} reference(s))`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   test("redactingOctokitLog routes redacted content to core.debug and never to stderr", () => {
     // The exact leak class from the fuzz stderr scan: octokit's plugins log a
     // request line like "GET /repos/owner/repo - 404 ..." (and worse, live-state
@@ -454,9 +496,10 @@ describe("debug-trace hardening for redacted slugs", () => {
 });
 
 describe("secret-field request redaction and fail-closed error responses", () => {
-  // Requests here use the hookco/hookrepo slug, not the o/r other suites use:
-  // the run-flow tests register o/r with the module-global slug redaction and
-  // leave it held, which would collapse these traces in a full-suite run.
+  // Requests here use the hookco/hookrepo slug rather than the o/r other
+  // suites use, so these traces stay independent of slug redaction: this
+  // suite is about FIELD redaction, and a slug hit would collapse the whole
+  // line before the field-level assertions could see anything.
 
   /** Same core.debug spy as the slug-redaction suite: read only this client's lines. */
   function captureDebug(): { lines: string[]; restore: () => void } {
