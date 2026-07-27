@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as core from "@actions/core";
+import { parse as parseYaml } from "yaml";
 import {
   GithubApi,
   isPermissionError,
   isRateLimitError,
   redactingOctokitLog,
   registerRedactedSlug,
+  SECRET_RESPONSE_WITHHELD,
   unregisterRedactedSlug,
 } from "../../src/github/api.js";
 import { api, restoreFetch, stubFetch } from "./stub.js";
@@ -448,5 +450,762 @@ describe("debug-trace hardening for redacted slugs", () => {
     expect(trace).not.toContain("secret-owner/secret-repo");
     expect(trace).not.toContain("secret-repo");
     expect(trace).toContain("rate limit on GET <redacted>");
+  });
+});
+
+describe("secret-field request redaction and fail-closed error responses", () => {
+  // Requests here use the hookco/hookrepo slug, not the o/r other suites use:
+  // the run-flow tests register o/r with the module-global slug redaction and
+  // leave it held, which would collapse these traces in a full-suite run.
+
+  /** Same core.debug spy as the slug-redaction suite: read only this client's lines. */
+  function captureDebug(): { lines: string[]; restore: () => void } {
+    const lines: string[] = [];
+    const spy = spyOn(core, "debug").mockImplementation((message?: string) => {
+      lines.push(String(message));
+    });
+    return { lines, restore: () => spy.mockRestore() };
+  }
+
+  /** Fetch stub that also records every outgoing request body. */
+  function stubFetchCapturingBodies(response: () => Response): { bodies: string[] } {
+    const state = { bodies: [] as string[] };
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      state.bodies.push(String(init?.body ?? ""));
+      return response();
+    }) as unknown as typeof fetch;
+    return state;
+  }
+
+  // A value hostile to exact-literal masking: JSON escaping turns the quotes,
+  // backslash, and newline into \" \\ \n in the response body, so no literal
+  // scan for the original string would find the echo.
+  const hostileSecret = 'he said "no" \\ back\nslash';
+
+  test("config.secret is masked in the trace; the outgoing request is untouched", async () => {
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    const dbg = captureDebug();
+    try {
+      await api().tryRequest("POST", "/repos/hookco/hookrepo/hooks", {
+        name: "web",
+        config: { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
+      });
+    } finally {
+      dbg.restore();
+    }
+    const trace = dbg.lines.join("");
+    expect(trace).toContain('"secret":"***"');
+    expect(trace).not.toContain("he said");
+    // Non-secret payload fields still trace normally.
+    expect(trace).toContain('"url":"https://example.test/hook"');
+    // The wire carries the real value; only the trace is masked.
+    expect(sent.bodies.join("")).toContain(JSON.stringify(hostileSecret).slice(1, -1));
+    expect(sent.bodies.join("")).not.toContain("***");
+  });
+
+  test("encrypted_value is masked in the trace", async () => {
+    stubFetch([() => new Response(null, { status: 204 })]);
+    const dbg = captureDebug();
+    try {
+      await api().tryRequest("PUT", "/repos/hookco/hookrepo/actions/secrets/DEPLOY_KEY", {
+        encrypted_value: "base64-SECRET-material",
+        key_id: "568250167242549743",
+      });
+    } finally {
+      dbg.restore();
+    }
+    const trace = dbg.lines.join("");
+    expect(trace).toContain('"encrypted_value":"***"');
+    expect(trace).not.toContain("base64-SECRET-material");
+    expect(trace).toContain('"key_id":"568250167242549743"');
+  });
+
+  test("a 422 echoing the secret is replaced wholesale; only the status survives", async () => {
+    stubFetch([
+      () =>
+        new Response(
+          JSON.stringify({
+            message: `Validation Failed: secret ${hostileSecret} is too weak`,
+            errors: [{ resource: "Hook", field: "secret", value: hostileSecret }],
+            documentation_url: "https://docs.github.com/rest/repos/webhooks",
+          }),
+          { status: 422, headers: { "content-type": "application/json" } },
+        ),
+    ]);
+    const dbg = captureDebug();
+    let result: Awaited<ReturnType<ReturnType<typeof api>["tryRequest"]>>;
+    try {
+      result = await api().tryRequest("POST", "/repos/hookco/hookrepo/hooks", {
+        name: "web",
+        config: { url: "https://example.test/hook", secret: hostileSecret },
+      });
+    } finally {
+      dbg.restore();
+    }
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.status).toBe(422);
+    // Nothing response-derived survives - not even documentation_url.
+    expect(result.error.documentationUrl).toBeUndefined();
+    // message/errors/body are gone wholesale, not filtered by field name.
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+    expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
+    for (const fragment of ["he said", "back", "slash", "too weak", "Hook"]) {
+      expect(result.error.message).not.toContain(fragment);
+      expect(result.error.body).not.toContain(fragment);
+    }
+    // The debug trace never saw the value either.
+    expect(dbg.lines.join("")).not.toContain("he said");
+  });
+
+  test("a hostile documentation_url carrying the secret cannot ride out", async () => {
+    stubFetch([
+      () =>
+        new Response(
+          JSON.stringify({
+            message: "Bad Request",
+            documentation_url: `https://docs.github.com/${hostileSecret}`,
+          }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        ),
+    ]);
+    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      secret: hostileSecret,
+    });
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.documentationUrl).toBeUndefined();
+    expect(JSON.stringify(result.error)).not.toContain("he said");
+  });
+
+  test("a TOP-LEVEL secret (the hook config sub-endpoint shape) is masked and fail-closed", async () => {
+    // PATCH /hooks/{id}/config sends the config object bare, so `secret`
+    // sits at the top level - the shape 3C sends on every run with a
+    // declared secret.
+    const sent = stubFetchCapturingBodies(
+      () => new Response(`nope: ${hostileSecret}`, { status: 400 }),
+    );
+    const dbg = captureDebug();
+    let result: Awaited<ReturnType<ReturnType<typeof api>["tryRequest"]>>;
+    try {
+      result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+        url: "https://example.test/hook",
+        content_type: "json",
+        secret: hostileSecret,
+      });
+    } finally {
+      dbg.restore();
+    }
+    const trace = dbg.lines.join("");
+    expect(trace).toContain('"secret":"***"');
+    expect(trace).not.toContain("he said");
+    expect(sent.bodies.join("")).toContain(JSON.stringify(hostileSecret).slice(1, -1));
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+    expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
+  });
+
+  test("a secret field at any depth is found - the scan is recursive, not shape-listed", async () => {
+    stubFetch([() => new Response(null, { status: 204 })]);
+    const dbg = captureDebug();
+    try {
+      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", {
+        outer: { hooks: [{ config: { secret: hostileSecret } }, { note: "clean" }] },
+      });
+    } finally {
+      dbg.restore();
+    }
+    const trace = dbg.lines.join("");
+    expect(trace).toContain('"secret":"***"');
+    expect(trace).toContain('"note":"clean"');
+    expect(trace).not.toContain("he said");
+  });
+
+  test("config.encrypted_value nested under config is masked too", async () => {
+    stubFetch([() => new Response(null, { status: 204 })]);
+    const dbg = captureDebug();
+    try {
+      await api().tryRequest("PUT", "/repos/hookco/hookrepo/anything", {
+        config: { encrypted_value: "base64-SECRET", key_id: "1" },
+      });
+    } finally {
+      dbg.restore();
+    }
+    const trace = dbg.lines.join("");
+    expect(trace).toContain('"encrypted_value":"***"');
+    expect(trace).not.toContain("base64-SECRET");
+  });
+
+  test("a transport failure on a secret-carrying request withholds the error detail", async () => {
+    // No HTTP response at all; the rejection message quotes request details
+    // including the secret, with the quotes/backslash/newline that defeat
+    // literal masking.
+    globalThis.fetch = (async () => {
+      throw new Error(`request to https://x failed, body was: {"secret":"${hostileSecret}"}`);
+    }) as unknown as typeof fetch;
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+        url: "https://example.test/hook",
+        secret: hostileSecret,
+      });
+    } catch (error) {
+      thrown = error as Error;
+    }
+    if (thrown === undefined) {
+      throw new Error("expected a thrown transport error");
+    }
+    expect(thrown.message).toContain("details withheld");
+    expect(thrown.message).not.toContain("he said");
+    expect(thrown.message).not.toContain("body was");
+  });
+
+  test("a transport failure on a non-secret request keeps its diagnostic message", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("socket hang up");
+    }) as unknown as typeof fetch;
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("GET", "/repos/hookco/hookrepo", undefined);
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain("socket hang up");
+  });
+
+  test("a secret-carrying 403 rate limit still classifies as a rate limit", async () => {
+    // isRateLimitError normally reads the message, which the wholesale
+    // replacement destroys; the content-free flag must carry the
+    // classification so the section gets retry advice, not a permission
+    // failure. The flag derives from the plugin-matched signals (headers,
+    // the secondary-rate phrase, errors[].type), never from arbitrary
+    // body text.
+    stubFetch([
+      () =>
+        new Response(
+          JSON.stringify({
+            message: `You have exceeded a secondary rate limit (echo: ${hostileSecret})`,
+          }),
+          {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "60",
+              "x-ratelimit-remaining": "42",
+            },
+          },
+        ),
+    ]);
+    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      secret: hostileSecret,
+    });
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+    expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
+    expect(isRateLimitError(result.error)).toBe(true);
+    expect(JSON.stringify(result.error)).not.toContain("he said");
+  });
+
+  test("an echoed 'rate limit' string cannot spoof the classification", async () => {
+    // The classification uses the throttling plugin's exact secondary-limit
+    // phrase (\bsecondary rate\b), so a body merely containing "rate limit"
+    // (imagine a secret's own text echoing it) with no rate-limit headers
+    // stays a permission failure and keeps its grant advice.
+    stubFetch([
+      () =>
+        new Response(JSON.stringify({ message: "rate limit rate limit rate limit" }), {
+          status: 403,
+          headers: { "content-type": "application/json", "x-ratelimit-remaining": "42" },
+        }),
+    ]);
+    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      secret: hostileSecret,
+    });
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(isRateLimitError(result.error)).toBe(false);
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+  });
+
+  test("a HEADERLESS secondary rate limit (message-only) still classifies as one", async () => {
+    // GitHub documents secondary limits where neither x-ratelimit-remaining
+    // nor retry-after is present - the message is the only signal. Missing
+    // this would misread a rate limit as a permission failure, telling the
+    // user to fix their PAT (or silently skipping the section under
+    // on-missing-permission: warn).
+    stubFetch([
+      () =>
+        new Response(JSON.stringify({ message: "You have exceeded a secondary rate limit." }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }),
+    ]);
+    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      secret: hostileSecret,
+    });
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(isRateLimitError(result.error)).toBe(true);
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+  });
+
+  test("errors[].type RATE_LIMITED classifies without headers or message text", async () => {
+    stubFetch([
+      () =>
+        new Response(JSON.stringify({ message: "Forbidden", errors: [{ type: "RATE_LIMITED" }] }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }),
+    ]);
+    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      secret: hostileSecret,
+    });
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(isRateLimitError(result.error)).toBe(true);
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+  });
+
+  test("a toJSON collapsing the payload to a primitive aborts instead of leaking", async () => {
+    // A plain object whose toJSON returns a string would dodge the
+    // field-name scan entirely, print in the trace, and go out as a raw
+    // body. Plain data never changes container-ness through a JSON
+    // round-trip, so the collapse aborts the request.
+    const collapser = {
+      note: "clean-looking",
+      toJSON(): unknown {
+        return `flattened: ${hostileSecret}`;
+      },
+    };
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    const dbg = captureDebug();
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", collapser);
+    } catch (error) {
+      thrown = error as Error;
+    } finally {
+      dbg.restore();
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(thrown?.message).not.toContain("he said");
+    expect(sent.bodies).toHaveLength(0);
+    expect(dbg.lines.join("")).not.toContain("he said");
+  });
+
+  test("a toJSON returning null aborts the same way", async () => {
+    const nuller = {
+      toJSON(): unknown {
+        return null;
+      },
+    };
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", nuller);
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(sent.bodies).toHaveLength(0);
+  });
+
+  test("a proxy with a throwing getPrototypeOf trap aborts without leaking its error", async () => {
+    // The reflective container check itself can throw on a hostile proxy;
+    // that throw must be caught by the fail-closed path, not escape with
+    // the trap's message.
+    const hostileProxy = new Proxy(
+      { url: "https://example.test" },
+      {
+        getPrototypeOf(): object | null {
+          throw new Error(hostileSecret);
+        },
+      },
+    );
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", hostileProxy);
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(thrown?.message).not.toContain("he said");
+    expect(sent.bodies).toHaveLength(0);
+  });
+
+  test("an accessor property is rejected unread - its getter never runs", async () => {
+    // A getter is code, not data: even a getter that would RETURN clean
+    // data could sabotage globals as a side effect. Descriptors reject it
+    // without invoking it.
+    let getterRan = false;
+    const trapped = {
+      url: "https://example.test",
+      get note(): string {
+        getterRan = true;
+        return "innocent";
+      },
+    };
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", trapped);
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(getterRan).toBe(false);
+    expect(sent.bodies).toHaveLength(0);
+  });
+
+  test("an array subclass with an overridden map is rejected, its code never run", async () => {
+    // .map on a subclass dispatches to the override - foreign code that
+    // could substitute [secret]. Only base-class arrays are plain data,
+    // and the normalizer iterates by index rather than dispatching.
+    let overrideRan = false;
+    class SneakyArray extends Array<unknown> {
+      override map<U>(_fn: (v: unknown, i: number, a: unknown[]) => U): U[] {
+        overrideRan = true;
+        return [hostileSecret] as unknown as U[];
+      }
+    }
+    const sneaky = SneakyArray.from([{ name: "web" }]);
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", sneaky);
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(overrideRan).toBe(false);
+    expect(sent.bodies).toHaveLength(0);
+  });
+
+  test("a YAML !!timestamp value (a Date) reaches the abort with the tag named", async () => {
+    // Reachable in production: the loose section shapes pass unknown fields
+    // through verbatim, and the yaml package parses explicit !!timestamp
+    // tags to Date objects. The abort message must point at the YAML tag,
+    // not at secret handling.
+    const parsed = parseYaml("stamp: !!timestamp 2024-01-01") as Record<string, unknown>;
+    expect(parsed.stamp instanceof Date).toBe(true);
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", parsed);
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(thrown?.message).toContain("!!timestamp");
+    expect(sent.bodies).toHaveLength(0);
+  });
+
+  test("a top-level bigint payload aborts instead of reaching octokit", async () => {
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", 42n);
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(sent.bodies).toHaveLength(0);
+  });
+
+  test("a non-plain-object payload (a Buffer) is never sent", async () => {
+    // Octokit passes non-plain objects to fetch verbatim; normalizing one
+    // would silently change the wire, and sending it unscanned would be a
+    // blind spot - so it aborts instead. Nothing sends such a payload
+    // today; this pins the boundary.
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest(
+        "POST",
+        "/repos/hookco/hookrepo/anything",
+        Buffer.from("raw-bytes-here"),
+      );
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(sent.bodies).toHaveLength(0);
+  });
+
+  test("a secret-carrying plain 403 stays a permission failure, not a rate limit", async () => {
+    stubFetch([
+      () =>
+        new Response(JSON.stringify({ message: "Resource not accessible by integration" }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }),
+    ]);
+    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      secret: hostileSecret,
+    });
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(isRateLimitError(result.error)).toBe(false);
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+  });
+
+  test("a payload the scan cannot walk is never sent at all", async () => {
+    // A throwing accessor is the sharpest case: the getter's error message
+    // IS the secret. Normalization resolves accessors inside a try, so the
+    // failure aborts the request with a sanitized throw - sending what the
+    // scan could not inspect would let a stateful object show the scan one
+    // thing and the wire another. The secret appears nowhere.
+    const boobyTrapped = {
+      url: "https://example.test/hook",
+      get secret(): string {
+        throw new Error(hostileSecret);
+      },
+    };
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    const dbg = captureDebug();
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", boobyTrapped);
+    } catch (error) {
+      thrown = error as Error;
+    } finally {
+      dbg.restore();
+    }
+    if (thrown === undefined) {
+      throw new Error("expected a thrown abort");
+    }
+    expect(thrown.message).toContain("was not sent");
+    expect(thrown.message).not.toContain("he said");
+    expect(sent.bodies).toHaveLength(0);
+    expect(dbg.lines.join("")).not.toContain("he said");
+  });
+
+  test("a cyclic payload aborts, never a stack overflow or a raw trace", async () => {
+    const cyclic: Record<string, unknown> = { url: "https://example.test", secret: hostileSecret };
+    cyclic.self = cyclic;
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    const dbg = captureDebug();
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", cyclic);
+    } catch (error) {
+      thrown = error as Error;
+    } finally {
+      dbg.restore();
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(thrown?.message).not.toContain("he said");
+    expect(sent.bodies).toHaveLength(0);
+    expect(dbg.lines.join("")).not.toContain("he said");
+  });
+
+  test("a STATEFUL toJSON aborts - toJSON is never consulted at all", async () => {
+    // First serialization would return a clean object, every later one the
+    // secret. The hand-rolled normalization never invokes toJSON and
+    // rejects any function-valued property as non-plain data, so the
+    // request aborts and the secret never leaves the process in any form.
+    let calls = 0;
+    const shifty = {
+      note: "looks-clean",
+      toJSON(): unknown {
+        calls++;
+        return calls === 1
+          ? { note: "looks-clean" }
+          : { note: "looks-clean", secret: hostileSecret };
+      },
+    };
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    const dbg = captureDebug();
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", shifty);
+    } catch (error) {
+      thrown = error as Error;
+    } finally {
+      dbg.restore();
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(calls).toBe(0);
+    expect(sent.bodies).toHaveLength(0);
+    expect(dbg.lines.join("")).not.toContain("he said");
+  });
+
+  test("a toJSON hiding the secret in a renamed container aborts", async () => {
+    // The sharpest shape: toJSON returns a DIFFERENT plain container where
+    // the secret sits under no field name at all - a scan of stringify
+    // output would find nothing to mask and trace the value verbatim.
+    // Never invoking toJSON closes the class.
+    const renamer = {
+      secret: hostileSecret,
+      toJSON(): unknown {
+        return [hostileSecret];
+      },
+    };
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    const dbg = captureDebug();
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", renamer);
+    } catch (error) {
+      thrown = error as Error;
+    } finally {
+      dbg.restore();
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(thrown?.message).not.toContain("he said");
+    expect(sent.bodies).toHaveLength(0);
+    expect(dbg.lines.join("")).not.toContain("he said");
+  });
+
+  test("field-name matching is case-insensitive", async () => {
+    // No GitHub field is anything but lowercase snake_case, but a passthrough
+    // payload can carry arbitrary user keys; a `Secret:` spelling must not
+    // slip the scan.
+    stubFetch([() => new Response(null, { status: 204 })]);
+    const dbg = captureDebug();
+    try {
+      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", {
+        Secret: hostileSecret,
+        config: { ENCRYPTED_VALUE: hostileSecret },
+      });
+    } finally {
+      dbg.restore();
+    }
+    const trace = dbg.lines.join("");
+    expect(trace).toContain('"Secret":"***"');
+    expect(trace).toContain('"ENCRYPTED_VALUE":"***"');
+    expect(trace).not.toContain("he said");
+  });
+
+  test("an own __proto__ key survives in the trace instead of vanishing", async () => {
+    // JSON.parse creates __proto__ as an own DATA property; the masked copy
+    // must keep the branch (a plain {} target would hit the prototype
+    // setter and drop it, breaking trace fidelity).
+    stubFetch([() => new Response(null, { status: 204 })]);
+    const dbg = captureDebug();
+    try {
+      await api().tryRequest(
+        "POST",
+        "/repos/hookco/hookrepo/anything",
+        JSON.parse(`{"__proto__": {"note": "kept"}, "config": {"secret": "s3cret-here"}}`),
+      );
+    } finally {
+      dbg.restore();
+    }
+    const trace = dbg.lines.join("");
+    expect(trace).toContain('"__proto__":{"note":"kept"}');
+    expect(trace).toContain('"secret":"***"');
+    expect(trace).not.toContain("s3cret-here");
+  });
+
+  test("a string-body 403 rate limit on a secret request still classifies as one", async () => {
+    stubFetch([
+      () =>
+        new Response(`You have exceeded a secondary rate limit. ${hostileSecret}`, {
+          status: 403,
+          headers: { "retry-after": "60" },
+        }),
+    ]);
+    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      secret: hostileSecret,
+    });
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+    expect(isRateLimitError(result.error)).toBe(true);
+    expect(JSON.stringify(result.error)).not.toContain("he said");
+  });
+
+  test("a toJSON smuggling a secret field aborts - functions are not plain data", async () => {
+    // The field exists only in toJSON's output; a stringify-based
+    // normalization would have to mask it after the fact. Never invoking
+    // toJSON and rejecting function-valued properties aborts instead.
+    const sneaky = {
+      note: "clean-looking",
+      toJSON(): unknown {
+        return { note: "clean-looking", secret: hostileSecret };
+      },
+    };
+    stubFetch([() => new Response(null, { status: 204 })]);
+    const dbg = captureDebug();
+    let thrown: Error | undefined;
+    try {
+      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", sneaky);
+    } catch (error) {
+      thrown = error as Error;
+    } finally {
+      dbg.restore();
+    }
+    expect(thrown?.message).toContain("was not sent");
+    expect(dbg.lines.join("")).not.toContain("he said");
+  });
+
+  test("a plain-text error body to an encrypted_value request is withheld too", async () => {
+    stubFetch([() => new Response(`rejected: ${hostileSecret}`, { status: 400 })]);
+    const result = await api().tryRequest("PUT", "/repos/hookco/hookrepo/actions/secrets/K", {
+      encrypted_value: hostileSecret,
+      key_id: "1",
+    });
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.status).toBe(400);
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+    expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
+    expect(result.error.documentationUrl).toBeUndefined();
+  });
+
+  test("a non-secret request's trace and error are unchanged by the scan", async () => {
+    // Includes a config object WITHOUT secret fields: presence of `config`
+    // alone must not trigger anything.
+    const payload = { name: "web", config: { url: "https://example.test", content_type: "json" } };
+    stubFetch([
+      () =>
+        new Response(
+          JSON.stringify({
+            message: "Validation Failed",
+            errors: [{ field: "name", message: "bad name" }],
+            documentation_url: "https://docs.github.com/rest",
+          }),
+          { status: 422, headers: { "content-type": "application/json" } },
+        ),
+    ]);
+    const dbg = captureDebug();
+    let result: Awaited<ReturnType<ReturnType<typeof api>["tryRequest"]>>;
+    try {
+      result = await api().tryRequest("POST", "/repos/hookco/hookrepo/hooks", payload);
+    } finally {
+      dbg.restore();
+    }
+    // The traced payload is the original object, byte-identical JSON.
+    expect(dbg.lines.join("")).toContain(` payload: ${JSON.stringify(payload)}`);
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    // The error keeps the message/errors/body shaping exactly as before.
+    expect(result.error.message).toBe(
+      'Validation Failed ([{"field":"name","message":"bad name"}])',
+    );
+    expect(result.error.body).toContain('"bad name"');
+    expect(result.error.documentationUrl).toBe("https://docs.github.com/rest");
   });
 });
