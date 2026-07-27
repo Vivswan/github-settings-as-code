@@ -31,13 +31,15 @@
  *   The nested `variables` reconciliation does compare before writing (it
  *   lists and diffs first, so a second apply issues no variable writes), but
  *   the unconditional PUT keeps the whole section false; the state-stability
- *   half of the proof covers the variables family.
+ *   half of the proof covers the variables family, and the nested `secrets`
+ *   PUTs are always-rewrite by contract (see ALWAYS_REWRITE_STATE_FAMILIES).
  * - actions (false): every declared endpoint group is PUT unconditionally.
- * - actions_secrets (false): every declared secret is re-sealed and re-PUT on
- *   every apply BY DESIGN - GitHub cannot return a value to compare against,
- *   and the unconditional rewrite is what makes a rotated source value
- *   propagate. State stability holds because the mock stores a deterministic
- *   digest of the unsealed value, not the (per-seal random) ciphertext.
+ * - actions_secrets, dependabot_secrets, codespaces_secrets (false): every
+ *   declared secret is re-sealed and re-PUT on every apply BY DESIGN -
+ *   GitHub cannot return a value to compare against, and the unconditional
+ *   rewrite is what makes a rotated source value propagate. State stability
+ *   holds because the mock stores a deterministic digest of the unsealed
+ *   value, not the (per-seal random) ciphertext.
  * - pages (false): an existing site is PUT unconditionally.
  * - code_scanning_default_setup (false): the PATCH runs unconditionally.
  * - teams (false): team access is granted (PUT) unconditionally.
@@ -57,6 +59,7 @@
  */
 
 import type { SectionKey } from "../../src/schema.js";
+import { allEndpoints } from "../../src/sections/registry.js";
 
 export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   repository: false,
@@ -67,6 +70,8 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   autolinks: true,
   actions: false,
   actions_secrets: false,
+  dependabot_secrets: false,
+  codespaces_secrets: false,
   workflows: true,
   pages: false,
   code_scanning_default_setup: false,
@@ -79,42 +84,44 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
 };
 
 /**
- * Which sections are ALWAYS-REWRITE: their declared entries are re-written on
- * EVERY apply by contract (values cannot be read back, and the unconditional
- * re-write is what propagates a rotated source value). The idempotence proof
- * treats them specially twice over - their server-managed updated_at is
- * excluded from the stability snapshot, and every secret PUT the first apply
- * issued must recur in the second (see missingSecondApplyRewrites in
- * runner.ts). The Record type gives compile-time completeness, and it MATTERS
- * more here than for COMPARE_BEFORE_WRITE: a section missing from that map
- * fails loudly, but a section missing from this one makes the required-
- * rewrite check silently vacuous for its family. Secrets families added later
- * (environment, Dependabot, Codespaces) must declare themselves true - note
- * the marker is per SECTION while the property is really per ENDPOINT, so a
- * mixed section (environments carrying both its own PUT and nested secret
- * PUTs) should revisit whether the marker moves onto the EndpointDecl.
+ * The ALWAYS-REWRITE half of the idempotence proof reads two declarations:
+ *
+ * - Which WRITES must recur on a second apply comes from the EndpointDecl
+ *   `alwaysRewrite` flag the sealed secret PUTs declare (see
+ *   missingSecondApplyRewrites in runner.ts, which resolves each logged PUT
+ *   to its endpoint). The property is per ENDPOINT, not per section, because
+ *   environments carries a passthrough PUT and always-rewrite secret PUTs
+ *   side by side.
+ *
+ * - Which MOCK STATE FAMILIES may move their updated_at between applies
+ *   comes from this mapping: every flagged endpoint (by its "section.role"
+ *   key) names the state family its writes land in. State families are the
+ *   mock's own storage layout, so they cannot be derived from the
+ *   declarations - but deriving the FAMILY SET from this mapping and pinning
+ *   the KEY SET against the flags (the lockstep test in runner.test.ts)
+ *   means a NEW flagged endpoint fails the suite until it declares its
+ *   family here, even inside a section that already carries one.
  */
-export const ALWAYS_REWRITE: Record<SectionKey, boolean> = {
-  repository: false,
-  labels: false,
-  rulesets: false,
-  branches: false,
-  environments: false,
-  autolinks: false,
-  actions: false,
-  actions_secrets: true,
-  workflows: false,
-  pages: false,
-  code_scanning_default_setup: false,
-  collaborators: false,
-  teams: false,
-  milestones: false,
-  interaction_limits: false,
-  actions_variables: false,
-  webhooks: false,
+export const ALWAYS_REWRITE_ENDPOINT_FAMILIES: Readonly<Record<string, string>> = {
+  "actions_secrets.put": "actions_secrets",
+  "dependabot_secrets.put": "dependabot_secrets",
+  "codespaces_secrets.put": "codespaces_secrets",
+  "environments.putSecret": "environment_secrets",
 };
 
-/** ALWAYS_REWRITE as the set its consumers test membership against. */
-export const ALWAYS_REWRITE_SECTIONS: ReadonlySet<string> = new Set(
-  (Object.keys(ALWAYS_REWRITE) as SectionKey[]).filter((key) => ALWAYS_REWRITE[key]),
+/** The snapshot exclusion set snapshotFamilies consumes, from the mapping. */
+export const ALWAYS_REWRITE_STATE_FAMILIES: ReadonlySet<string> = new Set(
+  Object.values(ALWAYS_REWRITE_ENDPOINT_FAMILIES),
 );
+
+/**
+ * The "section.role" keys of every endpoint declaring alwaysRewrite, derived
+ * from the declarations. Exists for the lockstep test; the runtime consumers
+ * read the flag per endpoint, never through this list.
+ */
+export function alwaysRewriteEndpointKeys(): string[] {
+  return Object.entries(allEndpoints())
+    .filter(([, endpoint]) => endpoint.alwaysRewrite)
+    .map(([key]) => key)
+    .sort();
+}

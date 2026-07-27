@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { parseRecipient } from "../../src/report/artifact-report.js";
+import {
+  ALWAYS_REWRITE_ENDPOINT_FAMILIES,
+  alwaysRewriteEndpointKeys,
+} from "./apply-idempotence.js";
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
 import type { LoggedRequest } from "./mock/routes.js";
 import {
@@ -234,6 +238,28 @@ describe("checkLeaks (redaction leak invariant)", () => {
   });
 });
 
+describe("always-rewrite lockstep (endpoint flag <-> mock state families)", () => {
+  test("every alwaysRewrite endpoint declares its mock state family, and nothing else does", () => {
+    // The required-rewrite obligation lives on the EndpointDecl (per
+    // endpoint); the snapshot exclusion derives from the endpoint-to-family
+    // mapping. Pinning the mapping's KEYS against the flags means a new
+    // flagged endpoint fails here until it names its state family - even
+    // when its section already carries another flagged endpoint.
+    expect(alwaysRewriteEndpointKeys()).toEqual(
+      Object.keys(ALWAYS_REWRITE_ENDPOINT_FAMILIES).sort(),
+    );
+    // The mapping itself, pinned literally: the families are mock storage
+    // names (state.ts), which nothing can derive - a wrong family here would
+    // silently stop stripping updated_at for that store.
+    expect(ALWAYS_REWRITE_ENDPOINT_FAMILIES).toEqual({
+      "actions_secrets.put": "actions_secrets",
+      "dependabot_secrets.put": "dependabot_secrets",
+      "codespaces_secrets.put": "codespaces_secrets",
+      "environments.putSecret": "environment_secrets",
+    });
+  });
+});
+
 describe("secondApplyWriteFailures (apply-idempotence zero-write subset)", () => {
   const write = (method: string, pathname: string): LoggedRequest => ({
     method,
@@ -318,6 +344,24 @@ describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)",
         [],
       ),
     ).toEqual([]);
+  });
+
+  test("every family's sealed PUT binds: dependabot, codespaces, environment secrets", () => {
+    // The obligation derives from the EndpointDecl alwaysRewrite flag, so a
+    // skipped first-apply PUT fires for each family - and crucially, the
+    // ENVIRONMENT PUT itself (same section, no flag) creates no obligation.
+    const firstWrites = [
+      write("PUT", "/repos/e2e-owner/e2e-repo/dependabot/secrets/REGISTRY_TOKEN"),
+      write("PUT", "/repos/e2e-owner/e2e-repo/codespaces/secrets/DOTFILES_PAT"),
+      write("PUT", "/repos/e2e-owner/e2e-repo/environments/prod"),
+      write("PUT", "/repos/e2e-owner/e2e-repo/environments/prod/secrets/DEPLOY_KEY"),
+    ];
+    const failures = missingSecondApplyRewrites(firstWrites, []);
+    expect(failures).toHaveLength(3);
+    expect(failures.join("\n")).toContain("dependabot/secrets/REGISTRY_TOKEN");
+    expect(failures.join("\n")).toContain("codespaces/secrets/DOTFILES_PAT");
+    expect(failures.join("\n")).toContain("environments/prod/secrets/DEPLOY_KEY");
+    expect(failures.join("\n")).not.toContain("environments/prod but");
   });
 });
 

@@ -1,14 +1,15 @@
 /**
  * The shared secrets engine: existence-based reconciliation plus client-side
- * sealing for GitHub's four repo-scoped secret families (Actions today;
- * environment, Dependabot, and Codespaces secrets are built to slot in). Each
- * family exposes the same four operations - an enveloped list, a public key,
- * a sealed PUT, a DELETE - differing only in route, so a consuming section
- * keeps its own EndpointDecls (which also drive the mock routes and
+ * sealing for GitHub's four repo-scoped secret families - repository Actions,
+ * Dependabot, and Codespaces secrets, plus per-environment Actions secrets.
+ * Each family exposes the same four operations - an enveloped list, a public
+ * key, a sealed PUT, a DELETE - differing only in route, so a consuming
+ * section keeps its own EndpointDecls (which also drive the mock routes and
  * USED_PATHS) and hands the engine a SecretsScope carrying four TYPED
  * operation closures built against those literal routes. The closures are
  * where the per-route params contract typechecks; the engine itself never
- * sees a route.
+ * sees a route. A nested family (environment secrets) builds ONE scope PER
+ * ENVIRONMENT, its closures closing over the environment name.
  *
  * The semantics the engine encodes, shared by every family:
  * - GitHub never returns a secret's value, only names and timestamps. Check
@@ -31,13 +32,14 @@
  */
 
 import sodium from "libsodium-wrappers";
-import type { UndeclaredPolicy } from "../schema.js";
+import type { UndeclaredPolicy, UndeclaredPolicyList } from "../schema.js";
 import {
   emptyResult,
   rejectDuplicates,
   type SectionContext,
   type SectionMeta,
   type SectionResult,
+  undeclaredPolicy,
 } from "./contract.js";
 
 /** One declared secret entry, as every family's settings shape spells it. */
@@ -82,16 +84,56 @@ export interface SecretsScopeOps {
 
 /** One secret scope: a family's operations plus how to name it in output. */
 export interface SecretsScope {
-  /** The drift-line prefix, e.g. "actions_secrets" (later families: a nested label). */
+  /** The drift-line prefix, e.g. "actions_secrets" or "environments[prod].secrets". */
   label: string;
-  /** The noun for notes, e.g. "Actions secret". */
+  /**
+   * The noun for notes, e.g. "Actions secret". A per-environment scope
+   * carries the environment name here ("prod environment secret") so its
+   * one cannot-verify note and every keep-note name their environment.
+   */
   noun: string;
+  /**
+   * Where an undeclared or missing secret lives, for note and drift prose;
+   * defaults to "the repo" (the repository-level families). A nested scope
+   * says "the environment".
+   */
+  home?: string;
+  /**
+   * Appended to change lines and write describes to place the write, e.g.
+   * ` in environment "prod"` (the environment variables wording precedent);
+   * defaults to "" for the repository-level families.
+   */
+  changeSuffix?: string;
   ops: SecretsScopeOps;
 }
 
 /** The matching key for a secret name: GitHub stores and compares uppercase. */
 export function secretKey(name: string): string {
   return name.toUpperCase();
+}
+
+/**
+ * The declared `value` of every entry in one {name, value} secret list -
+ * plain-array or wrapped form - for the engine's up-front reference
+ * resolution (SectionModule.secretValues). Runs BEFORE validation on
+ * target-fetched documents (the webhooks precedent), so a malformed
+ * container returns [] and shape validation reports the actionable error.
+ */
+export function listSecretValues(declared: unknown): string[] {
+  const container = declared as SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
+  const isWrapper =
+    typeof container === "object" &&
+    container !== null &&
+    !Array.isArray(container) &&
+    Array.isArray((container as UndeclaredPolicyList<SecretEntry>).entries);
+  if (!Array.isArray(container) && !isWrapper) {
+    return [];
+  }
+  // The default policy is irrelevant here: only the entries are read.
+  const { entries } = undeclaredPolicy(container, "keep");
+  return entries
+    .map((entry) => (typeof entry === "object" && entry !== null ? entry.value : undefined))
+    .filter((value): value is string => typeof value === "string");
 }
 
 /**
@@ -234,6 +276,8 @@ export async function reconcileSecrets(
 ): Promise<SectionResult> {
   const result = emptyResult();
   const { entries, policy } = opts;
+  const home = scope.home ?? "the repo";
+  const suffix = scope.changeSuffix ?? "";
 
   const live = (await scope.ops.list(ctx, section)) as Array<{ name?: unknown }>;
   // Uppercase key -> the name as the API listed it (already uppercase on real
@@ -249,7 +293,7 @@ export async function reconcileSecrets(
     for (const entry of entries) {
       if (!liveByKey.has(secretKey(entry.name))) {
         result.drift.push(
-          `${scope.label}[${secretKey(entry.name)}]: missing - declared in the settings file but not on the repo; apply will create it`,
+          `${scope.label}[${secretKey(entry.name)}]: missing - declared in the settings file but not on ${home}; apply will create it`,
         );
       }
     }
@@ -284,12 +328,14 @@ export async function reconcileSecrets(
         section,
         name,
         { encrypted_value: encryptedValue, key_id: keyId },
-        `writing secret "${name}"`,
+        `writing secret "${name}"${suffix}`,
       );
       // Existence from the listing decides the verb; the PUT's own 201/204
       // says the same thing but call() deliberately does not surface statuses.
       result.changes.push(
-        liveByKey.has(name) ? `updated secret "${name}"` : `created secret "${name}"`,
+        liveByKey.has(name)
+          ? `updated secret "${name}"${suffix}`
+          : `created secret "${name}"${suffix}`,
       );
     }
   }
@@ -300,15 +346,20 @@ export async function reconcileSecrets(
     }
     if (policy === "keep") {
       result.notes.push(
-        `${scope.noun} "${liveName}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it (a deleted secret's value is unrecoverable)`,
+        `${scope.noun} "${liveName}" exists on ${home} but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it (a deleted secret's value is unrecoverable)`,
       );
     } else if (ctx.check) {
       result.drift.push(
         `${scope.label}[${liveName}]: undeclared - not in the settings file, so apply will DELETE it (the value is unrecoverable); add it to the settings file to keep it`,
       );
     } else {
-      await scope.ops.remove(ctx, section, liveName, `deleting undeclared secret "${liveName}"`);
-      result.changes.push(`DELETED undeclared secret "${liveName}"`);
+      await scope.ops.remove(
+        ctx,
+        section,
+        liveName,
+        `deleting undeclared secret "${liveName}"${suffix}`,
+      );
+      result.changes.push(`DELETED undeclared secret "${liveName}"${suffix}`);
     }
   }
   return result;

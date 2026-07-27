@@ -3,7 +3,8 @@
  * Probot Settings app schema (https://github.com/repository-settings/app) in
  * their plain-array form, so an existing Probot config applies to them
  * unchanged; the remaining sections
- * (rulesets, autolinks, actions, workflows, pages, code_scanning_default_setup,
+ * (rulesets, autolinks, actions, actions_secrets, dependabot_secrets,
+ * codespaces_secrets, workflows, pages, code_scanning_default_setup,
  * interaction_limits, actions_variables, webhooks)
  * are additions. Only DECLARED keys are ever applied or compared, so omitting a
  * key means "leave it alone".
@@ -33,6 +34,22 @@ export interface SettingsFile {
    * secret's value is unrecoverable).
    */
   actions_secrets?: ActionsSecretConfig[] | UndeclaredPolicyList<ActionsSecretConfig>;
+  /**
+   * Repository Dependabot secrets (private-registry credentials Dependabot
+   * uses), written by name with values sealed client-side; each value is a
+   * whole-value `$NAME` reference to the action step's environment, never a
+   * literal. Undeclared secrets are kept by default (the wrapped form can
+   * set `undeclared: delete`; a deleted secret's value is unrecoverable).
+   */
+  dependabot_secrets?: DependabotSecretConfig[] | UndeclaredPolicyList<DependabotSecretConfig>;
+  /**
+   * Repository Codespaces secrets (development environment secrets), written
+   * by name with values sealed client-side; each value is a whole-value
+   * `$NAME` reference to the action step's environment, never a literal.
+   * Undeclared secrets are kept by default (the wrapped form can set
+   * `undeclared: delete`; a deleted secret's value is unrecoverable).
+   */
+  codespaces_secrets?: CodespacesSecretConfig[] | UndeclaredPolicyList<CodespacesSecretConfig>;
   /** Per-workflow enable/disable state; undeclared workflows are untouched. */
   workflows?: WorkflowConfig[];
   /** GitHub Pages configuration; null disables Pages on the repository. */
@@ -198,6 +215,18 @@ export interface EnvironmentConfig {
    * treats them.
    */
   variables?: EnvironmentVariableConfig[] | UndeclaredPolicyList<EnvironmentVariableConfig>;
+  /**
+   * Actions secrets for this environment, reconciled only when this key is
+   * declared (an absent key leaves the live secrets untouched). Each value
+   * is a whole-value `$NAME` reference to the action step's environment,
+   * never a literal, sealed client-side against the environment's public
+   * key; GitHub cannot return a value, so check mode verifies existence
+   * only and apply re-seals every declared value on each run. Within a
+   * declared `secrets` key, live secrets the entries do not declare are
+   * KEPT by default (their values are unrecoverable); the wrapped
+   * `{undeclared: delete, entries}` form opts into deletion.
+   */
+  secrets?: EnvironmentSecretConfig[] | UndeclaredPolicyList<EnvironmentSecretConfig>;
 }
 
 /** One per-environment Actions variable, matched by case-insensitive name. */
@@ -205,6 +234,25 @@ export interface EnvironmentVariableConfig {
   /** The variable name, the natural key (case-insensitive on GitHub). */
   name: string;
   /** The plain-text value; environment secrets are the place for secrets. */
+  value: string;
+}
+
+/**
+ * One per-environment Actions secret, matched by case-insensitive name
+ * (GitHub stores secret names uppercase). Keys other than name and value are
+ * rejected: the API body is built from the sealed value alone, so an extra
+ * key would silently do nothing.
+ */
+export interface EnvironmentSecretConfig {
+  /** The secret name, the natural key; compared case-insensitively and written uppercase. */
+  name: string;
+  /**
+   * A whole-value `$NAME` reference to an environment variable holding the
+   * secret - never a literal (settings files are committed plaintext).
+   * Resolved from the action step's env at run time and sealed with a
+   * libsodium sealed box before upload; GitHub cannot return the value, so
+   * check mode verifies existence only and apply re-seals it on every run.
+   */
   value: string;
 }
 
@@ -298,6 +346,44 @@ export interface ActionsConfig {
  * silently do nothing.
  */
 export interface ActionsSecretConfig {
+  /** The secret name, the natural key; compared case-insensitively and written uppercase. */
+  name: string;
+  /**
+   * A whole-value `$NAME` reference to an environment variable holding the
+   * secret - never a literal (settings files are committed plaintext).
+   * Resolved from the action step's env at run time and sealed with a
+   * libsodium sealed box before upload; GitHub cannot return the value, so
+   * check mode verifies existence only and apply re-seals it on every run.
+   */
+  value: string;
+}
+
+/**
+ * One repository Dependabot secret, matched by case-insensitive name (GitHub
+ * stores secret names uppercase). Keys other than name and value are rejected:
+ * the API body is built from the sealed value alone, so an extra key would
+ * silently do nothing.
+ */
+export interface DependabotSecretConfig {
+  /** The secret name, the natural key; compared case-insensitively and written uppercase. */
+  name: string;
+  /**
+   * A whole-value `$NAME` reference to an environment variable holding the
+   * secret - never a literal (settings files are committed plaintext).
+   * Resolved from the action step's env at run time and sealed with a
+   * libsodium sealed box before upload; GitHub cannot return the value, so
+   * check mode verifies existence only and apply re-seals it on every run.
+   */
+  value: string;
+}
+
+/**
+ * One repository Codespaces secret, matched by case-insensitive name (GitHub
+ * stores secret names uppercase). Keys other than name and value are rejected:
+ * the API body is built from the sealed value alone, so an extra key would
+ * silently do nothing.
+ */
+export interface CodespacesSecretConfig {
   /** The secret name, the natural key; compared case-insensitively and written uppercase. */
   name: string;
   /**
@@ -439,6 +525,8 @@ export const SECTION_KEYS = [
   "autolinks",
   "actions",
   "actions_secrets",
+  "dependabot_secrets",
+  "codespaces_secrets",
   "workflows",
   "pages",
   "code_scanning_default_setup",
@@ -465,6 +553,8 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "rulesets",
   "autolinks",
   "actions_secrets",
+  "dependabot_secrets",
+  "codespaces_secrets",
   "collaborators",
   "milestones",
   "actions_variables",

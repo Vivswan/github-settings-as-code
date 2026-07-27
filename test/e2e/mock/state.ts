@@ -83,6 +83,16 @@ export interface LiveState {
    * the mock tracks a digest of each uploaded value separately.
    */
   actions_secrets?: Json[];
+  /** Dependabot secrets list items, same GET shape as actions_secrets. */
+  dependabot_secrets?: Json[];
+  /** Codespaces secrets list items, same GET shape as actions_secrets. */
+  codespaces_secrets?: Json[];
+  /**
+   * Per-environment Actions secrets (GET shape: {name, created_at,
+   * updated_at}), keyed by environment name. Values are never part of the
+   * GET shape; the mock tracks digests separately, per environment.
+   */
+  environment_secrets?: Record<string, Json[]>;
   /** Workflows list items ({id, name, path, state}), replaces the baseline. */
   workflows?: Json[];
   /** GET /pages body, or null for "Pages not enabled". */
@@ -154,19 +164,31 @@ export interface MockState {
   fork_pr_workflows_private_repos: Json;
   /** Actions secrets in GET shape ({name, created_at, updated_at}). */
   actions_secrets: Json[];
+  /** Dependabot secrets, same GET shape as actions_secrets. */
+  dependabot_secrets: Json[];
+  /** Codespaces secrets, same GET shape as actions_secrets. */
+  codespaces_secrets: Json[];
+  /** Per-environment Actions secrets (GET shape), keyed by environment name. */
+  environment_secrets: Record<string, Json[]>;
   /**
-   * Monotonic count of secret PUTs against this state, feeding each write's
-   * deterministic updated_at. Underscore prefix: mock bookkeeping, excluded
-   * from the idempotence snapshot (see snapshotFamilies in runner.ts).
+   * Monotonic count of secret PUTs against this state - EVERY family shares
+   * it - feeding each write's deterministic updated_at. Underscore prefix:
+   * mock bookkeeping, excluded from the idempotence snapshot (see
+   * snapshotFamilies in runner.ts).
    */
   _secret_write_counter: number;
   /**
    * sha256 digest of each uploaded secret's UNSEALED value, keyed by secret
-   * name. Never the plaintext, and never served: it exists so the state
-   * snapshot can prove a second apply re-wrote the same value (a re-seal
-   * produces different ciphertext for the same plaintext by design).
+   * name (one map per repository-level family; environment secrets nest one
+   * map per environment). Never the plaintext, and never served: it exists
+   * so the state snapshot can prove a second apply re-wrote the same value
+   * (a re-seal produces different ciphertext for the same plaintext by
+   * design).
    */
   actions_secret_digests: Record<string, string>;
+  dependabot_secret_digests: Record<string, string>;
+  codespaces_secret_digests: Record<string, string>;
+  environment_secret_digests: Record<string, Record<string, string>>;
   workflows: Json[];
   pages: Json | null;
   code_scanning: Json;
@@ -329,8 +351,14 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
           require_approval_for_fork_pr_workflows: true,
         },
     actions_secrets: ls.actions_secrets ? clone(ls.actions_secrets) : [],
+    dependabot_secrets: ls.dependabot_secrets ? clone(ls.dependabot_secrets) : [],
+    codespaces_secrets: ls.codespaces_secrets ? clone(ls.codespaces_secrets) : [],
+    environment_secrets: ls.environment_secrets ? clone(ls.environment_secrets) : {},
     _secret_write_counter: 0,
     actions_secret_digests: {},
+    dependabot_secret_digests: {},
+    codespaces_secret_digests: {},
+    environment_secret_digests: {},
     workflows: ls.workflows ? clone(ls.workflows) : [],
     pages: ls.pages !== undefined ? clone(ls.pages) : null,
     code_scanning: ls.code_scanning ? clone(ls.code_scanning) : {},

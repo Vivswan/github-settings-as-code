@@ -166,13 +166,66 @@ verbatim, so an extra key rides along and GitHub decides; a secret's PUT
 body is built from the sealed value alone, so an extra key has no
 destination and would "apply" successfully forever while doing nothing.
 
+## Dependabot and Codespaces secrets
+
+Two sibling sections manage the other repository-level secret stores with
+the exact same shape and semantics: `dependabot_secrets` (private-registry
+credentials Dependabot uses when it resolves dependencies) and
+`codespaces_secrets` (secrets exposed to development environments). Each
+seals against its own public key and needs its own PAT permission -
+"Dependabot secrets" and "Codespaces secrets" respectively; note GitHub
+gates even the Codespaces secret reads at write access.
+
+```yaml settings
+dependabot_secrets:
+  - name: PRIVATE_REGISTRY_TOKEN
+    value: $PRIVATE_REGISTRY_TOKEN
+codespaces_secrets:
+  - name: DOTFILES_PAT
+    value: $DOTFILES_PAT
+```
+
+Everything said about `actions_secrets` applies: existence-only checks, one
+cannot-verify note, re-seal on every apply, undeclared secrets kept unless
+the wrapped `undeclared: delete` form says otherwise.
+
+## Environment secrets
+
+Deployment environments carry their own secret store, managed as a nested
+`secrets` key on an `environments` entry - next to the `variables` key it
+mirrors:
+
+```yaml settings
+environments:
+  - name: staging
+    secrets:
+      - name: DEPLOY_TOKEN
+        value: $STAGING_DEPLOY_TOKEN
+  - name: prod
+    secrets:
+      - name: DEPLOY_TOKEN
+        value: $PROD_DEPLOY_TOKEN
+```
+
+Each environment is its own sealing scope with its own public key, so the
+same secret name can carry a different value per environment, as above.
+Reconciliation runs after the environment itself is applied; in check mode
+against an environment that does not exist yet, the declared secrets cannot
+be listed, so a note says they are unverifiable until apply creates it.
+Within a declared `secrets` key, live secrets the entries do not declare
+are kept by default (their values are unrecoverable); the wrapped
+`{undeclared: delete, entries}` form opts into deletion. The endpoints ride
+the same "Environments" PAT permission as the rest of the section.
+
 ## Multi-repo fan-out
 
 In multi-repo mode a defaults file merges under every target the run
-processes. A defaults file that declares `actions_secrets` therefore writes
-those secrets into EVERY discovered target - which is sometimes exactly the
-point (a fleet-wide deploy key), and sometimes a surprise (a token fanned
-out to repositories that should never hold it). Scope discovery
+processes. A defaults file that declares a secret section
+(`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, or
+environment secrets) therefore writes those secrets into EVERY discovered
+target - which is sometimes exactly the point (a fleet-wide deploy key),
+and sometimes a surprise (a token fanned out to repositories that should
+never hold it). Scope discovery
 deliberately before declaring secrets in a defaults file: prefer an
 explicit `repos` list or tight discovery filters over `repos: "*"`, and run
 `mode: check` first to see which repositories the run would process and
