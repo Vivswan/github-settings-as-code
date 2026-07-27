@@ -109,7 +109,7 @@ Settings as Code: GitHub Action applying declarative repository settings: rulese
   reads: `permission` (a `SectionPermission`) drives the PAT grant prose
   (`grantFor`), the mock's permission gate, and the fuzz oracle; the `ENDPOINTS`
   dictionary drives the paths, the mock routes, and `USED_PATHS`.
-  `deletesUndeclared` pins the README Sections table via the docs contradiction
+  `undeclaredDefault` pins the README Sections table via the docs contradiction
   test. Change one and its consumers follow.
 - Scenarios in `test/e2e/scenarios/` must run green via `bun run test:e2e`
   before they land. When adding a section file under `src/sections/`, its

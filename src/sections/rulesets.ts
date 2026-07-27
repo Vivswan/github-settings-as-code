@@ -1,14 +1,16 @@
 /**
  * `rulesets:` section - upsert by name with full-payload PUT (a partial PUT
- * silently narrows a ruleset). Undeclared rulesets are NEVER deleted; they
- * are listed as notes so removal stays an explicit human action.
+ * silently narrows a ruleset). Undeclared rulesets are NEVER deleted by
+ * default; they are listed as notes so removal stays an explicit human
+ * action. The wrapped `undeclared: delete` form hardens that to deletion.
  */
 
 import { z } from "zod";
 import { subsetDiff } from "../engine/diff.js";
-import type { RulesetConfig } from "../schema.js";
+import type { RulesetConfig, UndeclaredPolicyList } from "../schema.js";
 import {
   call,
+  defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   grantFor,
@@ -17,6 +19,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredPolicy,
+  undeclaredPolicyShape,
 } from "./contract.js";
 
 /**
@@ -93,34 +97,44 @@ const ENDPOINTS = {
     statuses: { 200: "ruleset updated" },
     hints: { 422: RULES_HINT },
   },
+  remove: {
+    route: "DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id}",
+    statuses: { 204: "ruleset deleted" },
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
 export const rulesetsSection: SectionModule<"rulesets"> = {
   key: "rulesets",
-  deletesUndeclared: "keeps",
+  undeclaredDefault: "keep",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
-  shape: z.array(
-    z.looseObject({
-      name: z.string(),
-      // normalizeRuleset maps over these before the API can reject them, so
-      // the shape must catch a non-list here (a classic missing "-" typo).
-      conditions: z
-        .looseObject({
-          ref_name: z
-            .looseObject({
-              include: z.array(z.string()).optional(),
-              exclude: z.array(z.string()).optional(),
-            })
-            .optional(),
-        })
-        .optional(),
-    }),
+  shape: undeclaredPolicyShape(
+    z.array(
+      z.looseObject({
+        name: z.string(),
+        // normalizeRuleset maps over these before the API can reject them, so
+        // the shape must catch a non-list here (a classic missing "-" typo).
+        conditions: z
+          .looseObject({
+            ref_name: z
+              .looseObject({
+                include: z.array(z.string()).optional(),
+                exclude: z.array(z.string()).optional(),
+              })
+              .optional(),
+          })
+          .optional(),
+      }),
+    ),
   ),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = (desiredRaw as RulesetConfig[]).map(normalizeRuleset);
+    const { policy, entries } = undeclaredPolicy(
+      desiredRaw as RulesetConfig[] | UndeclaredPolicyList<RulesetConfig>,
+      defaultUndeclaredPolicy(this),
+    );
+    const desired = entries.map(normalizeRuleset);
     // Upsert matches by exact name, so two entries with the same name would
     // fight each other (create twice, then trade updates) on every run.
     rejectDuplicates(
@@ -130,6 +144,11 @@ export const rulesetsSection: SectionModule<"rulesets"> = {
       (r) => r.name,
     );
     const summaries = (await listAll(ctx, this, ENDPOINTS.list)) as LiveRulesetSummary[];
+    // Match and update anything not explicitly owned by another source (the
+    // pre-knob upsert semantics; source_type is optional in the API type).
+    // Deletion is gated harder below: only a summary the API explicitly
+    // marks source_type "Repository" is ever deleted - a missing field is
+    // not proof of ownership, and deletion cannot be undone.
     const repoRulesets = summaries.filter((r) => (r.source_type ?? "Repository") === "Repository");
     const idByName = new Map(repoRulesets.map((r) => [r.name, r.id]));
 
@@ -164,11 +183,32 @@ export const rulesetsSection: SectionModule<"rulesets"> = {
 
     const declaredNames = new Set(desired.map((r) => r.name));
     for (const live of repoRulesets) {
-      if (!declaredNames.has(live.name)) {
-        result.notes.push(
-          `ruleset "${live.name}" exists on the repo but is not declared in the settings file; left untouched - add it to the settings file to manage it, or delete it in the repo's GitHub settings`,
-        );
+      if (declaredNames.has(live.name)) {
+        continue;
       }
+      if (policy === "delete") {
+        if (live.source_type !== "Repository") {
+          result.notes.push(
+            `ruleset "${live.name}" is undeclared, but the list response does not mark it source_type "Repository"; NOT deleting - only rulesets the API explicitly marks repository-owned are deleted; add it to the settings file to manage it, or delete it in GitHub if it should not exist`,
+          );
+          continue;
+        }
+        if (ctx.check) {
+          result.drift.push(
+            `rulesets[${live.name}]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it`,
+          );
+        } else {
+          await call(ctx, this, ENDPOINTS.remove, {
+            params: { ruleset_id: String(live.id) },
+            describe: `deleting undeclared ruleset "${live.name}"`,
+          });
+          result.changes.push(`DELETED undeclared ruleset "${live.name}"`);
+        }
+        continue;
+      }
+      result.notes.push(
+        `ruleset "${live.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+      );
     }
     return result;
   },

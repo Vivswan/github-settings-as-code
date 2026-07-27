@@ -1,7 +1,8 @@
 name: milestones-keep-undeclared
 description: >-
-  A live milestone the settings file does not declare is KEPT (milestones are
-  never deleted), surfaced as a note; the one declared milestone is created.
+  A live milestone the settings file does not declare is KEPT (the
+  plain-array form uses the milestone default of keep), surfaced as a note;
+  the one declared milestone is created.
   No PATCH or DELETE ever touches the undeclared milestone. A check rerun
   converges.
 settings:

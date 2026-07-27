@@ -48,7 +48,7 @@ const ENDPOINTS = {
 
 export const workflowsSection: SectionModule<"workflows"> = {
   key: "workflows",
-  deletesUndeclared: "untouched",
+  undeclaredDefault: "untouched",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,

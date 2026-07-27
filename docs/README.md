@@ -15,6 +15,9 @@ to put it to work.
   and decommissioning.
 - [Check mode](check-mode.md): drift detection on a schedule, exit codes, and
   what a "cannot verify" note is telling you.
+- [The undeclared policy](undeclared-policy.md): the `undeclared` knob on the
+  list sections, per-section defaults, the milestone-deletion caveat, and how
+  the policy layers with a defaults file.
 - [Migrating from the Probot Settings app](migrating-from-probot.md): a
   step-by-step move, including the parts that changed on purpose.
 - [Troubleshooting](troubleshooting.md): permission denials, ambiguous 403s,

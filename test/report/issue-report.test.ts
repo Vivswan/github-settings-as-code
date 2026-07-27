@@ -203,6 +203,64 @@ describe("injectMarkerLabel", () => {
     expect(settings.labels).toHaveLength(1);
   });
 
+  test("a wrapped labels section stays wrapped, keeping its undeclared policy", () => {
+    // Injection must rebuild the operator's chosen shape: losing the wrapper
+    // here would silently restore the labels default (delete) on the next run.
+    const settings: SettingsFile = {
+      labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
+    };
+    const result = injectMarkerLabel(settings);
+    expect(result.injected).toBe(true);
+    expect(result.settings.labels).toEqual({
+      undeclared: "keep",
+      entries: [{ name: "bug", color: "d73a4a" }, MARKER_LABEL_CONFIG],
+    });
+    // input is not mutated
+    expect(settings.labels).toEqual({
+      undeclared: "keep",
+      entries: [{ name: "bug", color: "d73a4a" }],
+    });
+  });
+
+  test("a rename-refusal in a wrapped labels section rebuilds the wrapped form", () => {
+    const settings: SettingsFile = {
+      labels: {
+        undeclared: "keep",
+        entries: [{ name: MARKER_LABEL, new_name: "something-else", color: "0e2a47" }],
+      },
+    };
+    const result = injectMarkerLabel(settings);
+    expect(result.injected).toBe(false);
+    expect(result.renameRefused).toBe(true);
+    expect(result.settings.labels).toEqual({
+      undeclared: "keep",
+      entries: [{ name: MARKER_LABEL, new_name: undefined, color: "0e2a47" }],
+    });
+  });
+
+  test("a bare wrapper (no policy key) stays bare - omission is preserved", () => {
+    // Injection must not change the SHAPE of the operator's declaration: a
+    // bare wrapper stays bare. In multi-repo mode the merge has already
+    // resolved the policy before injection runs; in single-repo mode there
+    // is no merge and the section handler resolves the default itself.
+    // Materializing the key here would rewrite a declaration the user
+    // wrote, for no gain on either path.
+    const settings: SettingsFile = { labels: { entries: [{ name: "bug" }] } };
+    const result = injectMarkerLabel(settings);
+    expect(result.injected).toBe(true);
+    expect(Object.keys(result.settings.labels as object)).toEqual(["entries"]);
+    expect(result.settings.labels).toEqual({ entries: [{ name: "bug" }, MARKER_LABEL_CONFIG] });
+  });
+
+  test("a rename-refusal in a bare wrapper also preserves the omission", () => {
+    const settings: SettingsFile = {
+      labels: { entries: [{ name: MARKER_LABEL, new_name: "something-else" }] },
+    };
+    const result = injectMarkerLabel(settings);
+    expect(result.renameRefused).toBe(true);
+    expect(Object.keys(result.settings.labels as object)).toEqual(["entries"]);
+  });
+
   test("an already-declared marker (any case) is left alone", () => {
     const settings: SettingsFile = { labels: [{ name: "Settings-As-Code-Report" }] };
     const result = injectMarkerLabel(settings);
@@ -229,7 +287,7 @@ describe("injectMarkerLabel", () => {
       { name: MARKER_LABEL, new_name: undefined, color: "0e2a47" },
     ]);
     // input is not mutated
-    const original = settings.labels?.[0] as { new_name?: string } | undefined;
+    const original = (settings.labels as Array<{ new_name?: string }> | undefined)?.[0];
     expect(original?.new_name).toBe("something-else");
   });
 

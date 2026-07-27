@@ -17,7 +17,7 @@
 import type { ApiError, GithubClient } from "../github/api.js";
 import { isPermissionError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
-import type { LabelConfig, SettingsFile } from "../schema.js";
+import type { LabelConfig, SettingsFile, UndeclaredPolicyList } from "../schema.js";
 import {
   type EndpointDecl,
   expand,
@@ -254,7 +254,7 @@ export async function deliverIssueReport(
 }
 
 /**
- * Marker-label injection, closing the deletesUndeclared hole: when the
+ * Marker-label injection, closing the undeclaredDefault hole: when the
  * merged settings declare a `labels` section, an apply would DELETE the
  * undeclared marker label right after report delivery created it. Appending
  * the marker to the declared set (when no entry already manages it) lets the
@@ -271,10 +271,22 @@ export function injectMarkerLabel(settings: SettingsFile): {
   injected: boolean;
   renameRefused: boolean;
 } {
-  const labels = settings.labels;
-  if (!Array.isArray(labels)) {
+  // The labels section takes the undeclared-policy knob, so the declaration
+  // is either the plain entry array or the wrapped {undeclared, entries}
+  // form; unwrap here and rebuild in the SAME form below, so the injection
+  // never rewrites the operator's chosen shape (or their policy).
+  const declaration = settings.labels;
+  const wrapped = !Array.isArray(declaration);
+  const labels = wrapped
+    ? declaration !== undefined && Array.isArray(declaration?.entries)
+      ? declaration.entries
+      : null
+    : declaration;
+  if (labels === null || !Array.isArray(labels)) {
     return { settings, injected: false, renameRefused: false };
   }
+  const rebuild = (entries: LabelConfig[]): SettingsFile["labels"] =>
+    wrapped ? { ...(declaration as UndeclaredPolicyList<LabelConfig>), entries } : entries;
   const marker = nameKey(MARKER_LABEL);
   // An entry that renames the marker to a different name: keep the entry but
   // drop the rename so the marker label keeps its name.
@@ -286,7 +298,11 @@ export function injectMarkerLabel(settings: SettingsFile): {
     const guarded = labels.map((label) =>
       renamesMarkerAway(label) ? { ...label, new_name: undefined } : label,
     );
-    return { settings: { ...settings, labels: guarded }, injected: false, renameRefused: true };
+    return {
+      settings: { ...settings, labels: rebuild(guarded) },
+      injected: false,
+      renameRefused: true,
+    };
   }
   const declared = labels.some(
     (label) => nameKey(label.name) === marker || nameKey(label.new_name ?? label.name) === marker,
@@ -295,7 +311,7 @@ export function injectMarkerLabel(settings: SettingsFile): {
     return { settings, injected: false, renameRefused: false };
   }
   return {
-    settings: { ...settings, labels: [...labels, MARKER_LABEL_CONFIG] },
+    settings: { ...settings, labels: rebuild([...labels, MARKER_LABEL_CONFIG]) },
     injected: true,
     renameRefused: false,
   };
