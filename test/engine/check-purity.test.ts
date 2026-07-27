@@ -38,6 +38,9 @@ const FIXTURES: Record<SectionKey, unknown> = {
   ],
   autolinks: [{ key_prefix: "NEW-", url_template: "https://x.test/<num>" }],
   actions: { allowed_actions: "all", access_level: "organization" },
+  // A declared-but-missing secret (the empty list below) is existence drift;
+  // check mode must not resolve the reference, so no env entry exists here.
+  actions_secrets: [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }],
   workflows: [{ path: "ci.yml", state: "active" }],
   pages: { build_type: "workflow" },
   code_scanning_default_setup: { state: "configured" },
@@ -83,6 +86,9 @@ const ROUTES = {
   },
   "GET /repos/o/r/actions/permissions": { data: { enabled: true, allowed_actions: "selected" } },
   "GET /repos/o/r/actions/permissions/access": { data: { access_level: "none" } },
+  "GET /repos/o/r/actions/secrets?per_page=100&page=1": {
+    data: { total_count: 0, secrets: [] },
+  },
   "GET /repos/o/r/actions/workflows?per_page=100&page=1": {
     data: {
       total_count: 1,

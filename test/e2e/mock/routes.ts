@@ -26,6 +26,12 @@ import { allEndpoints, SECTIONS, type TaggedEndpoint } from "../../../src/sectio
 import { DENIAL_SEMANTICS } from "../denial-semantics.js";
 import type { DenialStyle, MaskGrade, MaskKey, Scenario } from "../schema.js";
 import {
+  MOCK_SECRETS_KEY_ID,
+  MOCK_SECRETS_PUBLIC_KEY,
+  secretDigest,
+  unsealSecretValue,
+} from "./secrets.js";
+import {
   collaboratorFromPut,
   completeHook,
   environmentFromPut,
@@ -756,6 +762,67 @@ const HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
+  // actions_secrets ----------------------------------------------------------
+  //
+  // The list serves names and timestamps only (values are never part of the
+  // GET shape). The PUT is the crypto proof: it UNSEALS the uploaded
+  // ciphertext with the fixed test keypair - verifying the client's key
+  // decode, sealed-box construction, and base64 round-trip in one step - and
+  // stores the name plus a deterministic digest of the unsealed value, never
+  // the plaintext. Every PUT bumps updated_at (as GitHub does), so the
+  // idempotence snapshot's volatile-field exclusion is exercised for real.
+  "actions_secrets.list": ({ state, query }) =>
+    ok({
+      total_count: state.actions_secrets.length,
+      secrets: slicePage(state.actions_secrets, query),
+    }),
+  "actions_secrets.publicKey": () =>
+    ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
+  "actions_secrets.put": ({ state, pathname, body }) => {
+    const name = lastSegment(pathname);
+    const payload = asObject(body);
+    if (payload.key_id !== MOCK_SECRETS_KEY_ID) {
+      return {
+        status: 422,
+        body: { message: `key_id "${String(payload.key_id)}" does not match the sealing key` },
+      };
+    }
+    const plaintext = unsealSecretValue(String(payload.encrypted_value ?? ""));
+    if (plaintext === null) {
+      // The ciphertext does not open against the advertised public key: a
+      // client-side sealing bug. GitHub would store the garbage; the mock
+      // rejects it loudly instead, so a broken sealing path can never pass.
+      return {
+        status: 422,
+        body: { message: "encrypted_value is not a sealed box for the advertised public key" },
+      };
+    }
+    state.actions_secret_digests[name] = secretDigest(plaintext);
+    state._secret_write_counter += 1;
+    const stamp = secretWriteStamp(state._secret_write_counter);
+    const existing = state.actions_secrets.find((s) => s.name === name);
+    if (existing) {
+      (existing as Record<string, unknown>).updated_at = stamp;
+      return noContent(); // 204: updated
+    }
+    state.actions_secrets.push({
+      name,
+      created_at: stamp,
+      updated_at: stamp,
+    });
+    return { status: 201, body: {} };
+  },
+  "actions_secrets.remove": ({ state, pathname }) => {
+    const name = lastSegment(pathname);
+    const index = state.actions_secrets.findIndex((s) => s.name === name);
+    if (index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    state.actions_secrets.splice(index, 1);
+    delete state.actions_secret_digests[name];
+    return noContent();
+  },
+
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {
     const page = slicePage(state.workflows, query);
@@ -1117,6 +1184,15 @@ const HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 };
+
+/**
+ * The deterministic timestamp the Nth secret PUT against a state carries:
+ * every write moves updated_at, exactly like GitHub, without the mock ever
+ * reading a real clock.
+ */
+function secretWriteStamp(writeCount: number): string {
+  return new Date(Date.UTC(2020, 0, 15, 0, 0, writeCount)).toISOString().replace(".000Z", "Z");
+}
 
 /** Deterministic expires_at per declared expiry (see interaction_limits.put). */
 const INTERACTION_EXPIRES: Record<string, string> = {

@@ -193,6 +193,7 @@ describe("denial semantics", () => {
       [
         "actions",
         "actions_variables",
+        "actions_secrets",
         "autolinks",
         "code_scanning_default_setup",
         "collaborators",

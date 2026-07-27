@@ -28,6 +28,7 @@ export const DENIAL_SEMANTICS: Record<SectionKey, DenialSemantics> = {
   environments: "absent",
   autolinks: "denied",
   actions: "denied",
+  actions_secrets: "denied",
   workflows: "denied",
   pages: "absent",
   code_scanning_default_setup: "denied",

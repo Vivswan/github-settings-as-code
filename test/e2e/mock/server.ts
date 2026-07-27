@@ -20,6 +20,7 @@ import {
   newPipelineRunState,
   runPipeline,
 } from "./routes.js";
+import { mockSodiumReady } from "./secrets.js";
 import {
   buildMultiState,
   buildState,
@@ -122,6 +123,10 @@ export async function startMockServer(
   assertHandlerCompleteness();
   // Reject fault/corrupt directives naming unknown endpoints or duplicate faults.
   assertFaultKeys(options.faults, options.corrupt);
+  // libsodium init, awaited ONCE here: the secret-family PUT handlers unseal
+  // synchronously (the Handler contract is synchronous by design), so the
+  // WASM must be ready before the first request can arrive.
+  await mockSodiumReady();
 
   // Multi-repo scenarios run per-slug state; single-repo scenarios keep the one
   // MockState. Exactly one is populated, and the pipeline dispatches on which.

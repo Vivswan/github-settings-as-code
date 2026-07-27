@@ -25,6 +25,14 @@ export interface SettingsFile {
   autolinks?: AutolinkConfig[] | UndeclaredPolicyList<AutolinkConfig>;
   /** GitHub Actions permissions for the repository. */
   actions?: ActionsConfig;
+  /**
+   * Repository Actions secrets, written by name with values sealed
+   * client-side; each value is a whole-value `$NAME` reference to the action
+   * step's environment, never a literal. Undeclared secrets are kept by
+   * default (the wrapped form can set `undeclared: delete`; a deleted
+   * secret's value is unrecoverable).
+   */
+  actions_secrets?: ActionsSecretConfig[] | UndeclaredPolicyList<ActionsSecretConfig>;
   /** Per-workflow enable/disable state; undeclared workflows are untouched. */
   workflows?: WorkflowConfig[];
   /** GitHub Pages configuration; null disables Pages on the repository. */
@@ -283,6 +291,25 @@ export interface ActionsConfig {
   };
 }
 
+/**
+ * One repository Actions secret, matched by case-insensitive name (GitHub
+ * stores secret names uppercase). Keys other than name and value are rejected:
+ * the API body is built from the sealed value alone, so an extra key would
+ * silently do nothing.
+ */
+export interface ActionsSecretConfig {
+  /** The secret name, the natural key; compared case-insensitively and written uppercase. */
+  name: string;
+  /**
+   * A whole-value `$NAME` reference to an environment variable holding the
+   * secret - never a literal (settings files are committed plaintext).
+   * Resolved from the action step's env at run time and sealed with a
+   * libsodium sealed box before upload; GitHub cannot return the value, so
+   * check mode verifies existence only and apply re-seals it on every run.
+   */
+  value: string;
+}
+
 /** One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo). */
 export interface WorkflowConfig {
   /** Full ".github/workflows/ci.yml" or the bare "ci.yml" file name. */
@@ -411,6 +438,7 @@ export const SECTION_KEYS = [
   "environments",
   "autolinks",
   "actions",
+  "actions_secrets",
   "workflows",
   "pages",
   "code_scanning_default_setup",
@@ -436,6 +464,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "labels",
   "rulesets",
   "autolinks",
+  "actions_secrets",
   "collaborators",
   "milestones",
   "actions_variables",

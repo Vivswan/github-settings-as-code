@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { FILTER_INPUTS } from "../../src/action/inputs.js";
 import { RESERVED_REF_PREFIXES } from "../../src/action/secret-refs.js";
+import type { MustBeNever } from "../../src/schema.js";
 import type { PatResource } from "../../src/sections/contract.js";
 import type { LiveState } from "./mock/state.js";
 
@@ -26,7 +27,7 @@ export const TierSchema = z.enum(["mock", "live"]);
  * The `satisfies` keeps this list in lockstep with PatResource - a new
  * resource that is not listed here fails to compile.
  */
-const MASK_KEYS = [
+export const MASK_KEYS = [
   "administration",
   "issues",
   "environments",
@@ -36,8 +37,12 @@ const MASK_KEYS = [
   "contents",
   "variables",
   "webhooks",
+  "secrets",
   "org_members",
 ] as const satisfies readonly (PatResource | "org_members")[];
+
+/** Compile-time tripwire: a PatResource missing from MASK_KEYS fails here. */
+type _MaskCoversEveryResource = MustBeNever<Exclude<PatResource, (typeof MASK_KEYS)[number]>>;
 
 export const MaskKeySchema = z.enum(MASK_KEYS);
 

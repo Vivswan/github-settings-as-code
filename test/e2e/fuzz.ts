@@ -36,12 +36,12 @@ import {
   presenceLiveState,
   type ScenarioMeta,
   SECTION_PRIMARY_READ,
+  scenarioSecretEnv,
   UNPARSEABLE_YAML,
   validateAgainstPublishedSchema,
   WITNESS_KINDS,
   WITNESS_SECTIONS,
   type WitnessSection,
-  webhookSecretEnv,
 } from "./generators.js";
 import type { LoggedRequest } from "./mock/routes.js";
 import {
@@ -1286,10 +1286,11 @@ async function faultedSectionRun(seed: number, plan: SectionFaultPlan): Promise<
     Object.assign(combinedLive, witness.state);
   }
   const liveState = Object.keys(combinedLive).length > 0 ? combinedLive : undefined;
-  // A drawn webhooks section may declare secret references; wire the fixed
-  // pool's env exactly the way genScenario does, so an apply-mode fault run
-  // never fails on an unset variable instead of the injected fault.
-  const secretEnv = webhookSecretEnv(settings);
+  // A drawn section may declare secret references (webhook secrets,
+  // actions_secrets values); wire the fixed pool's env exactly the way
+  // genScenario does, so an apply-mode fault run never fails on an unset
+  // variable instead of the injected fault.
+  const secretEnv = scenarioSecretEnv(settings);
   const meta: ScenarioMeta = {
     sections: [plan.section],
     mask: {},
