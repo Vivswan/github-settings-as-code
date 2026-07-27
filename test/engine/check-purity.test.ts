@@ -18,12 +18,16 @@ import { MockApi } from "../mock-api.js";
 /**
  * Declared values chosen to MISMATCH the routed live data below, so every
  * handler walks its drift paths (create/update/delete/replace), not just
- * the clean early returns.
+ * the clean early returns. The two wrapped declarations exercise the
+ * undeclared-policy knob's both settings: labels keeps its undeclared live
+ * label under `undeclared: keep` (still drifting on the missing declared
+ * label), rulesets walks its DELETE path under `undeclared: delete` - in
+ * check mode both must stay read-only like everything else.
  */
 const FIXTURES: Record<SectionKey, unknown> = {
   repository: { description: "declared", enable_vulnerability_alerts: true },
-  labels: [{ name: "bug", color: "d73a4a" }],
-  rulesets: [{ name: "declared-ruleset", target: "branch" }],
+  labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
+  rulesets: { undeclared: "delete", entries: [{ name: "declared-ruleset", target: "branch" }] },
   branches: [{ name: "main", protection: { enforce_admins: true } }],
   environments: [{ name: "prod", wait_timer: 5 }],
   autolinks: [{ key_prefix: "NEW-", url_template: "https://x.test/<num>" }],

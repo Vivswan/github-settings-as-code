@@ -51,7 +51,7 @@ export function sectionShape(key: SectionKey): z.ZodType {
 }
 
 /** The section module for a key (validate.ts reads shape + closedSurface). */
-export function sectionModule(key: SectionKey): SectionModule {
+export function sectionModule<K extends SectionKey>(key: K): SectionModule<K> {
   return byKey[key];
 }
 

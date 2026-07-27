@@ -1,12 +1,14 @@
 /**
  * `collaborators:` section - direct collaborators keyed by username.
- * Undeclared collaborators are REMOVED (the owner never is).
+ * Undeclared collaborators are REMOVED by default (the owner never is);
+ * the wrapped `undeclared: keep` form softens the removal to notes.
  */
 
 import { z } from "zod";
-import type { CollaboratorConfig, MustBeNever } from "../schema.js";
+import type { CollaboratorConfig, MustBeNever, UndeclaredPolicyList } from "../schema.js";
 import {
   call,
+  defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   grantFor,
@@ -15,6 +17,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredPolicy,
+  undeclaredPolicyShape,
 } from "./contract.js";
 import { DEFAULT_ROLE, roleForPermission } from "./roles.js";
 
@@ -47,11 +51,11 @@ const ENDPOINTS = {
 
 export const collaboratorsSection: SectionModule<"collaborators"> = {
   key: "collaborators",
-  deletesUndeclared: "deletes",
+  undeclaredDefault: "delete",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
-  shape: z.array(z.looseObject({ username: z.string() })),
+  shape: undeclaredPolicyShape(z.array(z.looseObject({ username: z.string() }))),
   // Closed surface: the PUT accepts exactly one setting ("permission"), so
   // an extra key is always a typo - and a misspelled "permission" would
   // silently grant the default role and report clean forever.
@@ -62,7 +66,10 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
   },
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as CollaboratorConfig[];
+    const { policy, entries: desired } = undeclaredPolicy(
+      desiredRaw as CollaboratorConfig[] | UndeclaredPolicyList<CollaboratorConfig>,
+      defaultUndeclaredPolicy(this),
+    );
     rejectDuplicates(
       this,
       desired,
@@ -105,9 +112,13 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
     for (const collaborator of live) {
       const login = collaborator.login.toLowerCase();
       if (login === ctx.owner.toLowerCase() || declared.has(login)) {
-        continue; // never remove the owner
+        continue; // never remove the owner (under either policy)
       }
-      if (ctx.check) {
+      if (policy === "keep") {
+        result.notes.push(
+          `collaborator "${collaborator.login}" has access but is not declared in the settings file; kept under "undeclared: keep" - add them to the settings file to manage their access, or set "undeclared: delete" to have apply REMOVE them`,
+        );
+      } else if (ctx.check) {
         result.drift.push(
           `collaborators[${collaborator.login}]: undeclared - not in the settings file, so apply will REMOVE them; add them to the settings file to keep their access`,
         );

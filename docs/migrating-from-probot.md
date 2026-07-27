@@ -27,9 +27,11 @@ lists the differences one by one.
 ## What carries over as-is
 
 Your existing settings.yml keeps working for `repository`, `labels`,
-`branches`, `collaborators`, `teams`, and `milestones`. Those six sections use
-the Probot schema unchanged, including label renames via `new_name` and
-`protection: null` to remove branch protection. The
+`branches`, `collaborators`, `teams`, and `milestones`: their original
+Probot shapes remain compatible, including label renames via `new_name` and
+`protection: null` to remove branch protection. For the list sections among
+them the compatible shape is the plain array - the wrapped
+`{undeclared, entries}` form is this action's own extension on top. The
 [README's migration paragraph](../README.md#migrating-from-the-probot-settings-app)
 is the pinned statement of this parity. The sections outside that list
 (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`,
@@ -61,10 +63,12 @@ managing it; it does not revert anything.
 
 Rulesets are first class. Your `branches` section keeps working, and you can
 optionally move protection to `rulesets`, which cover branch, tag, and push
-targets. Undeclared rulesets are never deleted; removing protection stays a
-human action.
+targets. Undeclared rulesets are kept by default - deleting them is an
+explicit opt-in (`undeclared: delete`), so removing protection stays a
+deliberate action.
 
 Deletions still exist where the app had them: undeclared labels are deleted
+by default
 (Probot parity), and so are undeclared autolinks and collaborators. Nothing
 else is ever deleted implicitly (see
 [Semantics](../README.md#semantics)), and the check run lists everything an

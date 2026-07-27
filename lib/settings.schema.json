@@ -550,11 +550,18 @@
           "description": "GitHub Actions permissions for the repository."
         },
         "autolinks": {
-          "description": "Autolink references; undeclared ones are DELETED.",
-          "items": {
-            "$ref": "#/definitions/AutolinkConfig"
-          },
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/AutolinkConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CAutolinkConfig%3E"
+            }
+          ],
+          "description": "Autolink references; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`)."
         },
         "branches": {
           "description": "Classic branch protection per branch.",
@@ -568,11 +575,18 @@
           "description": "Code scanning default setup (CodeQL)."
         },
         "collaborators": {
-          "description": "Direct collaborators; undeclared ones are REMOVED (owner never touched).",
-          "items": {
-            "$ref": "#/definitions/CollaboratorConfig"
-          },
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/CollaboratorConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CCollaboratorConfig%3E"
+            }
+          ],
+          "description": "Direct collaborators; undeclared ones are REMOVED by default (owner never touched; the wrapped form can set `undeclared: keep`)."
         },
         "environments": {
           "description": "Deployment environments, upserted by name.",
@@ -593,18 +607,32 @@
           "description": "Temporary interaction limits; null clears an active repo-level limit, and an absent key leaves whatever is live untouched. Limits self-expire (GitHub's expiry tops out at six_months), so apply re-arms the declared limit on every run and check mode reports drift once it lapses."
         },
         "labels": {
-          "description": "Issue/PR labels; undeclared labels are DELETED (Probot parity).",
-          "items": {
-            "$ref": "#/definitions/LabelConfig"
-          },
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/LabelConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CLabelConfig%3E"
+            }
+          ],
+          "description": "Issue/PR labels; undeclared labels are DELETED by default (Probot parity; the wrapped form can set `undeclared: keep`)."
         },
         "milestones": {
-          "description": "Milestones, upserted by title; undeclared ones are kept.",
-          "items": {
-            "$ref": "#/definitions/MilestoneConfig"
-          },
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/MilestoneConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CMilestoneConfig%3E"
+            }
+          ],
+          "description": "Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`, which detaches deleted milestones from their issues)."
         },
         "pages": {
           "anyOf": [
@@ -622,11 +650,18 @@
           "description": "Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents."
         },
         "rulesets": {
-          "description": "Repository rulesets, upserted by name; undeclared ones are kept.",
-          "items": {
-            "$ref": "#/definitions/RulesetConfig"
-          },
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/RulesetConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CRulesetConfig%3E"
+            }
+          ],
+          "description": "Repository rulesets, upserted by name; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`)."
         },
         "teams": {
           "description": "Org team access to the repo; skipped on personal accounts.",
@@ -661,6 +696,119 @@
         "name"
       ],
       "type": "object"
+    },
+    "UndeclaredPolicy": {
+      "description": "What apply does to live resources the settings file does not declare.",
+      "enum": [
+        "keep",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "UndeclaredPolicyList<AutolinkConfig>": {
+      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/AutolinkConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "UndeclaredPolicyList<CollaboratorConfig>": {
+      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/CollaboratorConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "UndeclaredPolicyList<LabelConfig>": {
+      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/LabelConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "UndeclaredPolicyList<MilestoneConfig>": {
+      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/MilestoneConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "UndeclaredPolicyList<RulesetConfig>": {
+      "description": "The wrapped form of a list section, overriding what happens to live resources the file does not declare. The plain array form keeps the section's default policy (or the policy a multi-repo defaults file set for the section); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/RulesetConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the section's own default applies (a multi-repo defaults file can set it for its targets)."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
     },
     "WorkflowConfig": {
       "description": "One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo).",

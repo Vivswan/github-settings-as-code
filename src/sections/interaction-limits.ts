@@ -58,7 +58,7 @@ function overriddenFromAbove(live: Record<string, unknown>): boolean {
 
 export const interactionLimitsSection: SectionModule<"interaction_limits"> = {
   key: "interaction_limits",
-  deletesUndeclared: "untouched",
+  undeclaredDefault: "untouched",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,

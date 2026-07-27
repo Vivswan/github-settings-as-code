@@ -449,7 +449,8 @@ collaborator (the repository owner is never touched), and team-derived
 access is unaffected because the section manages direct grants only. In
 check mode the same file emits one drift line per unauthorized direct
 grant, which is the access review report. Two caveats complete the
-picture. Undeclared collaborators are deleted while undeclared teams are
+picture. Undeclared collaborators are deleted under this file's plain-array
+declaration (the section's default policy) while undeclared teams are
 left untouched (see the [Sections table](../README.md#sections)), so a
 team you stop declaring keeps its access until removed by hand. And
 pending invitations are outside the section's reach: it invites new
@@ -522,7 +523,7 @@ jobs:
 ```
 
 The recovery file re-declares the same ruleset as `enforcement: disabled`
-on purpose: undeclared rulesets are never deleted, so a recovery file that
+on purpose: undeclared rulesets are kept by default, so a recovery file that
 simply omitted it would leave the freeze in place. The interaction limit
 is the failsafe in the other direction, since it self-expires after a day
 even if nobody runs the recover profile. One scope constraint: GitHub
