@@ -2,9 +2,10 @@
  * GitHub REST client on @octokit/rest with the retry and throttling
  * plugins: rate limits (429 and secondary 403s) and transient 5xx/network
  * failures are retried with backoff automatically, honoring Retry-After.
- * Requests still pass through VERBATIM: paths are built by the sections
- * and payloads are sent as the raw JSON body (the `data` option), so no
- * endpoint typing ever drops an unknown field.
+ * Paths are built by the sections, and payloads pass through with every
+ * field intact: the JSON body is the payload's own serialization (a
+ * byte-identical round-trip for plain data - see redactSecretPayloadSafe),
+ * never an endpoint typing that could drop an unknown field.
  */
 
 import * as core from "@actions/core";
@@ -19,6 +20,13 @@ export interface ApiError {
   body: string;
   /** GitHub's documentation_url for the failing endpoint, when the body carries one. */
   documentationUrl?: string;
+  /**
+   * Content-free rate-limit classification, set only when the response to a
+   * secret-carrying request was withheld: isRateLimitError normally reads
+   * the message, which the wholesale replacement destroys, and a secondary
+   * rate limit arriving as 403 must not be misread as a permission failure.
+   */
+  rateLimited?: boolean;
 }
 
 /**
@@ -146,6 +154,229 @@ function redactMessage(message: string): string {
     }
   }
   return message;
+}
+
+/** The constant written over a secret-bearing request field in the debug trace. */
+export const SECRET_FIELD_PLACEHOLDER = "***";
+
+/**
+ * The wholesale replacement for an error response to a secret-carrying
+ * request. A 4xx body can ECHO the rejected value inside its free-text
+ * message/errors, where no field name finds it, and JSON escaping (quotes,
+ * backslashes, newlines) defeats exact-literal masking - so nothing of the
+ * body survives; only the HTTP status and the content-free rate-limit
+ * classification flag do.
+ */
+export const SECRET_RESPONSE_WITHHELD =
+  "response body withheld: the request carried a secret field and an error body may echo its value";
+
+/**
+ * Octokit's own body rule: only plain objects and arrays are stringified.
+ * Arrays must be genuine base-class arrays - a subclass can override map
+ * and iteration, which is foreign code the normalizer must never invoke.
+ */
+function isPlainJsonContainer(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (Array.isArray(value)) {
+    return proto === Array.prototype;
+  }
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Build the normalized plain-data tree BY HAND, never handing the input to
+ * JSON.stringify: stringify honors toJSON, and a toJSON can return a
+ * different container that hides a secret under no field name at all
+ * ({secret, toJSON: () => [value]} traces the value with no key to match).
+ * No payload-supplied code EVER runs: properties are read through their
+ * descriptors and an enumerable accessor property is rejected UNREAD (a
+ * getter is code, not data - and a getter that ran could sabotage the
+ * globals the rest of the pipeline uses), toJSON is never invoked, methods
+ * are never dispatched. Non-enumerable and symbol-keyed properties are
+ * ignored entirely, never inspected - the set stringify would serialize is
+ * exactly the set walked, and only the normalized COPY is ever sent, so
+ * ignored code can neither execute nor reach the wire. Anything else that
+ * is not JSON plain data - a function, a bigint,
+ * a symbol, a class instance, a non-plain prototype, an accessor - THROWS
+ * into the caller's fail-closed catch. Cycles exhaust the stack and are
+ * caught the same way.
+ *
+ * For plain JSON data the output stringifies byte-identically to the
+ * input: undefined-valued object keys are dropped, undefined array items,
+ * holes, and non-finite numbers become null - exactly JSON.stringify's own
+ * rules.
+ * Note YAML can step OUTSIDE plain data through explicit tags
+ * (!!timestamp parses to a Date, !!binary to a Uint8Array); those throw
+ * here and abort the request with a message naming the tags, which beats
+ * the garbage their old stringification produced.
+ */
+function normalizePlainData(value: unknown): unknown {
+  if (value === null) {
+    return null;
+  }
+  switch (typeof value) {
+    case "string":
+    case "boolean":
+      return value;
+    case "number":
+      return Number.isFinite(value) ? value : null;
+    case "object":
+      break;
+    default:
+      throw new Error("not plain JSON data");
+  }
+  if (!isPlainJsonContainer(value)) {
+    throw new Error("not plain JSON data");
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Array.isArray(value)) {
+    // Base-class array (isPlainJsonContainer checked the prototype); a
+    // manual index loop over descriptors never dispatches .map or invokes
+    // an index accessor someone defineProperty'd onto the array.
+    const items: unknown[] = [];
+    for (let index = 0; index < value.length; index++) {
+      const descriptor = descriptors[index];
+      if (descriptor === undefined) {
+        items.push(null); // a hole; stringify renders it null
+        continue;
+      }
+      if (!("value" in descriptor)) {
+        throw new Error("not plain JSON data");
+      }
+      const item: unknown = descriptor.value;
+      items.push(item === undefined ? null : normalizePlainData(item));
+    }
+    return items;
+  }
+  const out: Record<string, unknown> = Object.create(null);
+  for (const key of Object.keys(value)) {
+    const descriptor = descriptors[key];
+    if (descriptor === undefined) {
+      continue;
+    }
+    if (!("value" in descriptor)) {
+      throw new Error("not plain JSON data");
+    }
+    const item: unknown = descriptor.value;
+    if (item === undefined) {
+      continue;
+    }
+    out[key] = normalizePlainData(item);
+  }
+  return out;
+}
+
+/**
+ * The scan entry point: normalize, then walk. The hand-rolled
+ * normalization (see normalizePlainData) reads the input once into a pure
+ * plain-data tree; redactSecretPayload walks that tree, the trace prints
+ * it (masked), and the request SENDS it - one read, one truth, and no
+ * exotic object can make the scan, the trace, and the wire disagree.
+ * YAML-derived payloads are plain data apart from the explicit-tag escape
+ * hatch normalizePlainData documents; this is the runtime enforcement of
+ * that boundary, and nothing payload-supplied is ever executed on the way.
+ *
+ * Primitives pass through untouched - they carry no named fields for the
+ * scan, and a bare-value secret is unsupported by design. Any other
+ * non-plain payload (a Buffer, a typed array, a stream, anything carrying
+ * a function or exotic prototype anywhere in its graph) fails `ok: false`
+ * and is never sent: octokit would pass a non-plain body to fetch
+ * verbatim, so normalizing it would silently change the wire, and sending
+ * it unscanned would be a blind spot. The caller aborts instead of
+ * sending what it could not inspect.
+ */
+function redactSecretPayloadSafe(
+  payload: unknown,
+): { ok: true; payload: unknown; traced: unknown; carriesSecret: boolean } | { ok: false } {
+  if (payload === undefined) {
+    return { ok: true, payload: undefined, traced: undefined, carriesSecret: false };
+  }
+  // Everything reflective happens INSIDE the try: even Array.isArray and
+  // Object.getPrototypeOf can throw on a hostile proxy (a throwing or
+  // revoked trap), and an error thrown before the guard could carry a
+  // secret in its message.
+  try {
+    if (typeof payload !== "object" || payload === null) {
+      // Only JSON primitives pass through - a function, bigint or symbol
+      // cannot be JSON-encoded and fails closed instead of reaching
+      // octokit un-normalized.
+      const jsonPrimitive =
+        payload === null ||
+        typeof payload === "string" ||
+        typeof payload === "boolean" ||
+        (typeof payload === "number" && Number.isFinite(payload));
+      return jsonPrimitive
+        ? { ok: true, payload, traced: payload, carriesSecret: false }
+        : { ok: false };
+    }
+    if (!isPlainJsonContainer(payload)) {
+      return { ok: false };
+    }
+    const normalized: unknown = normalizePlainData(payload);
+    const scanned = redactSecretPayload(normalized);
+    return { ok: true, payload: normalized, ...scanned };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** Request-payload field names whose values are secrets wherever they appear. */
+const SECRET_FIELD_NAMES = new Set(["secret", "encrypted_value"]);
+
+/**
+ * Structural redaction of secret-bearing request fields before tracing.
+ * The scan is recursive over objects and arrays and keys on the FIELD
+ * NAMES alone (`secret`, `encrypted_value`), so a consumer nesting one
+ * level deeper - or a new consumer entirely - is covered without declaring
+ * anything here; an unenforced "declare your shape here" contract is how a
+ * leak happens. Field-name keying cannot cover an UNNAMED value: a bare
+ * string body has no key to match, so a future consumer must never send a
+ * secret as the whole payload.
+ * Copy-on-write: when no secret field is present the input is returned
+ * unchanged (the trace is byte-identical); on a hit, `traced`
+ * is a structural copy with only the secret fields masked - the request
+ * sends the unmasked tree - and `carriesSecret` flags the request for
+ * fail-closed error handling.
+ * Over-matching an innocent field that happens to be named `secret` costs
+ * a masked trace line and a withheld error body, never a wrong request.
+ */
+function redactSecretPayload(payload: unknown): { traced: unknown; carriesSecret: boolean } {
+  if (typeof payload !== "object" || payload === null) {
+    return { traced: payload, carriesSecret: false };
+  }
+  if (Array.isArray(payload)) {
+    let hit = false;
+    // Index loop, not .map: the walker must not dispatch through mutable
+    // prototype methods (the tree it walks is ours, but the habit is the
+    // guarantee).
+    const traced: unknown[] = [];
+    for (let index = 0; index < payload.length; index++) {
+      const scanned = redactSecretPayload(payload[index]);
+      hit = hit || scanned.carriesSecret;
+      traced.push(scanned.traced);
+    }
+    return hit ? { traced, carriesSecret: true } : { traced: payload, carriesSecret: false };
+  }
+  const record = payload as Record<string, unknown>;
+  let hit = false;
+  // Null prototype: JSON.parse creates own `__proto__` DATA properties, and
+  // assigning that key through a plain `{}` would hit the prototype setter
+  // and silently drop the branch from the trace.
+  const traced: Record<string, unknown> = Object.create(null);
+  for (const [key, value] of Object.entries(record)) {
+    if (SECRET_FIELD_NAMES.has(key.toLowerCase())) {
+      traced[key] = SECRET_FIELD_PLACEHOLDER;
+      hit = true;
+    } else {
+      const scanned = redactSecretPayload(value);
+      hit = hit || scanned.carriesSecret;
+      traced[key] = scanned.traced;
+    }
+  }
+  return hit ? { traced, carriesSecret: true } : { traced: payload, carriesSecret: false };
 }
 
 /**
@@ -310,11 +541,24 @@ export class GithubApi implements GithubClient {
     options?: { accept?: string; raw?: boolean },
   ): Promise<{ data: unknown } | { error: ApiError }> {
     const started = Date.now();
+    // One serialization, one truth: the scan normalizes the payload and the
+    // request sends that SAME normalized tree (identical bytes for plain
+    // data). A payload that cannot be normalized is never sent at all -
+    // sending what the scan could not inspect would let a stateful object
+    // show the scan one thing and the wire another.
+    const secretScan = redactSecretPayloadSafe(payload);
+    if (!secretScan.ok) {
+      throw new Error(
+        `${method} ${path} was not sent: its payload could not be safely inspected for secret fields - it is not plain JSON data (a cyclic value, or a YAML explicit tag such as !!timestamp or !!binary, which parse to Date and binary objects). Use a plain string in the settings file instead`,
+      );
+    }
     const trace = (status: number): void => {
       const safe = redactTracePath(path);
       debugLog(
         `${method} ${safe.path} -> ${status} (${Date.now() - started}ms)` +
-          (safe.redacted || payload === undefined ? "" : ` payload: ${JSON.stringify(payload)}`),
+          (safe.redacted || payload === undefined
+            ? ""
+            : ` payload: ${JSON.stringify(secretScan.traced)}`),
       );
     };
     try {
@@ -325,9 +569,11 @@ export class GithubApi implements GithubClient {
           accept: options?.accept ?? "application/vnd.github+json",
           "x-github-api-version": this.apiVersion,
         },
-        // `data` is the request body VERBATIM (JSON-encoded as-is), which
-        // keeps the passthrough tenet: octokit never reshapes the payload.
-        ...(payload === undefined ? {} : { data: payload }),
+        // `data` is the request body as the scan normalized it (JSON
+        // round-trip of the input - identical bytes for plain data), which
+        // keeps the passthrough tenet: octokit never reshapes the payload,
+        // and the wire carries exactly the tree the scan inspected.
+        ...(payload === undefined ? {} : { data: secretScan.payload }),
       } as unknown as Parameters<InstanceType<typeof ActionOctokit>["request"]>[0]);
       trace(response.status);
       const data = response.data as unknown;
@@ -339,6 +585,64 @@ export class GithubApi implements GithubClient {
       return { data: data === undefined || data === "" ? null : data };
     } catch (error) {
       if (isHttpError(error)) {
+        if (secretScan.carriesSecret) {
+          // Fail closed: the request carried a secret field, and the error
+          // body may echo the rejected value inside free text. The response is
+          // replaced wholesale - before the trace line is written and before
+          // the ApiError exists. Nothing from the response BODY survives
+          // (not even documentation_url); only the status and the
+          // classification flag below remain.
+          // Rate limiting normally classifies by message content, which the
+          // replacement destroys - so the flag is computed FIRST, from the
+          // signals the throttling plugin itself recognizes: the
+          // primary-limit header (x-ratelimit-remaining 0), the plugin's
+          // secondary-limit message predicate (\bsecondary rate\b - GitHub
+          // documents secondary limits where no rate-limit header is
+          // present), the structured errors[].type === "RATE_LIMITED", and
+          // the retry-after header. Accepting retry-after ALONE is
+          // deliberately broader than the plugin (which reads it only after
+          // the phrase matches): no documented 403 carries retry-after
+          // without being a rate limit, and a header cannot be spoofed by
+          // an echoed value. The residual spoof is an operator's own
+          // secret containing the exact phrase "secondary rate" echoed into
+          // a 403 - theoretical (permission 403s do not echo payloads) and
+          // strictly less harmful than telling a rate-limited user to fix
+          // their token.
+          const headers = error.response?.headers ?? {};
+          const body = error.response?.data;
+          const classificationText =
+            typeof body === "object" && body !== null && "message" in body
+              ? String((body as { message: unknown }).message)
+              : typeof body === "string" && body
+                ? body
+                : error.message;
+          const errorsRateLimited =
+            typeof body === "object" &&
+            body !== null &&
+            Array.isArray((body as { errors?: unknown }).errors) &&
+            ((body as { errors: unknown[] }).errors ?? []).some(
+              (entry) =>
+                typeof entry === "object" &&
+                entry !== null &&
+                (entry as { type?: unknown }).type === "RATE_LIMITED",
+            );
+          const rateLimited =
+            error.status === 429 ||
+            (error.status === 403 &&
+              (String(headers["x-ratelimit-remaining"]) === "0" ||
+                headers["retry-after"] !== undefined ||
+                errorsRateLimited ||
+                /\bsecondary rate\b/i.test(classificationText)));
+          trace(error.status);
+          return {
+            error: {
+              status: error.status,
+              message: SECRET_RESPONSE_WITHHELD,
+              body: SECRET_RESPONSE_WITHHELD,
+              ...(rateLimited ? { rateLimited: true } : {}),
+            },
+          };
+        }
         trace(error.status);
         const body = error.response?.data;
         let message: string;
@@ -368,9 +672,16 @@ export class GithubApi implements GithubClient {
         };
       }
       // No HTTP response at all: network-level failure after the plugins
-      // exhausted their retries.
+      // exhausted their retries. A secret-carrying request withholds even
+      // the transport error's message - some transport failures quote
+      // request details in free text, where no field name finds a secret.
+      const reason = secretScan.carriesSecret
+        ? "the transport failed before an HTTP response arrived (details withheld: the request carried a secret field)"
+        : error instanceof Error
+          ? error.message
+          : String(error);
       throw new Error(
-        `${method} ${path} failed: ${error instanceof Error ? error.message : String(error)}. Check network connectivity from the runner to ${this.baseUrl}, then re-run the workflow`,
+        `${method} ${path} failed: ${reason}. Check network connectivity from the runner to ${this.baseUrl}, then re-run the workflow`,
       );
     }
   }
@@ -379,10 +690,15 @@ export class GithubApi implements GithubClient {
 /**
  * True when a response is rate limiting in a 403 costume: primary REST
  * rate-limit exhaustion and secondary (abuse) limits arrive as 403, not
- * 429, once the throttling plugin gives up retrying.
+ * 429, once the throttling plugin gives up retrying. A withheld response
+ * (secret-carrying request) has no message to read, so its content-free
+ * `rateLimited` flag stands in.
  */
 export function isRateLimitError(error: ApiError): boolean {
-  return error.status === 429 || (error.status === 403 && /rate limit/i.test(error.message));
+  return (
+    error.status === 429 ||
+    (error.status === 403 && (error.rateLimited === true || /rate limit/i.test(error.message)))
+  );
 }
 
 /** True when an error means the token lacks access, as opposed to a bad payload. */
