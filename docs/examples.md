@@ -1,0 +1,247 @@
+# Examples
+
+A cookbook of settings.yml files. Every settings example on this page runs
+through the real document validation in CI, so the shapes stay current. What
+each section manages, which token permission it needs, and whether its
+undeclared entries are deleted or kept is specified in the
+[README Sections table](../README.md#sections); the cross-section rules live
+under [Semantics](../README.md#semantics). This page shows shapes, not
+behavior.
+
+One rule frames everything below: only declared keys are applied or
+compared. A section, or a field inside one, that the file does not mention
+is never touched. The rule has edges worth knowing. Some list entries are
+one full payload: a declared ruleset is applied with a full-payload PUT,
+so a partial ruleset entry silently narrows the live one; declare each
+ruleset completely. Labels and milestones work the other way: only the
+fields you declare are sent, so an omitted description or state is left
+alone. And two sections bend the rule where the API forces their hand, as
+the [Sections table](../README.md#sections) notes: inside a declared
+`protection` object the classic API requires all four core keys, so apply
+fills the ones you omit with `null` (see
+[Classic branch protection](#classic-branch-protection) below), and in the
+`actions` section, declaring any base permissions key (or
+`selected_actions`, which infers `allowed_actions: selected`) makes the
+base PUT carry `enabled: true` unless the file says otherwise, while
+retention-, cache-, workflow-token-, or access-only declarations leave the
+base policy alone.
+
+## A minimal file
+
+Enough to be useful on day one: a few repository fields and the labels you
+actually triage with.
+
+```yaml settings
+repository:
+  description: Payments service
+  topics: payments, service
+  has_wiki: false
+  delete_branch_on_merge: true
+
+labels:
+  - name: bug
+    color: "d73a4a"
+    description: Something isn't working
+  - name: needs-triage
+    color: "ededed"
+```
+
+## A full-featured file
+
+A single-repo file exercising most sections. `topics` accepts a
+comma-separated string or a YAML list, and `enable_*` keys are feature
+toggles the section routes to their own endpoints; everything else under
+`repository` goes to the API verbatim.
+
+```yaml settings
+repository:
+  description: Payments service
+  homepage: https://payments.example.com
+  topics: payments, service, production
+  has_wiki: false
+  has_projects: false
+  allow_merge_commit: false
+  allow_squash_merge: true
+  squash_merge_commit_title: PR_TITLE
+  delete_branch_on_merge: true
+  enable_vulnerability_alerts: true
+  enable_automated_security_fixes: true
+
+labels:
+  - name: bug
+    color: "d73a4a"
+    description: Something isn't working
+  - name: prio
+    new_name: priority-high
+    color: "b60205"
+
+rulesets:
+  - name: protect main
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include: ["~DEFAULT_BRANCH"]
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 1
+          dismiss_stale_reviews_on_push: true
+          require_code_owner_review: false
+          require_last_push_approval: false
+          required_review_thread_resolution: true
+  - name: release tags
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include: ["refs/tags/v*"]
+        exclude: []
+    rules:
+      - type: deletion
+      - type: update
+
+environments:
+  - name: production
+    wait_timer: 30
+    prevent_self_review: true
+    reviewers:
+      - type: Team
+        id: 4501
+    deployment_branch_policy:
+      protected_branches: true
+      custom_branch_policies: false
+
+autolinks:
+  - key_prefix: "TICKET-"
+    url_template: "https://example.atlassian.net/browse/TICKET-<num>"
+
+actions:
+  enabled: true
+  allowed_actions: selected
+  selected_actions:
+    github_owned_allowed: true
+    verified_allowed: false
+    patterns_allowed:
+      - Vivswan/*
+  default_workflow_permissions: read
+  can_approve_pull_request_reviews: false
+  artifact_and_log_retention:
+    days: 30
+  cache:
+    max_cache_retention_days: 7
+
+workflows:
+  - path: nightly-sync.yml
+    state: disabled
+
+pages:
+  build_type: workflow
+
+code_scanning_default_setup:
+  state: configured
+  query_suite: default
+
+collaborators:
+  - username: octocat
+    permission: push
+
+teams:
+  - name: platform
+    permission: maintain
+
+milestones:
+  - title: v2.0
+    description: The big rewrite
+    state: open
+
+interaction_limits:
+  limit: collaborators_only
+  expiry: one_week
+```
+
+In `rulesets`, short ref names are auto-prefixed (`staging` becomes
+`refs/heads/staging`) and `~DEFAULT_BRANCH` passes through; rule parameters
+go to the API verbatim, so rule types GitHub ships tomorrow work unchanged
+(see [Forward compatibility](../README.md#forward-compatibility)).
+
+## Classic branch protection
+
+`branches` is the classic per-branch protection API, kept for Probot
+compatibility; rulesets are the modern replacement. The declared
+`protection` object is the PUT payload, with one adjustment: the classic
+API rejects a payload missing any of its four core keys
+(`required_status_checks`, `enforce_admins`,
+`required_pull_request_reviews`, `restrictions`), so apply fills omitted
+core keys with `null`. A `null` there means "off", so an omitted
+`enforce_admins` is turned off, not left alone; declare every core key you
+want to keep, and check mode reports an omitted-but-live core key as drift
+before an apply would null it away.
+
+```yaml settings
+branches:
+  - name: main
+    protection:
+      required_pull_request_reviews:
+        required_approving_review_count: 1
+      enforce_admins: true
+      required_status_checks:
+        strict: true
+        contexts: [all-green]
+      restrictions: null
+```
+
+## What null means
+
+For most sections, leaving a key out means "do not touch it". Three
+resource-level declarations give an explicit `null` a meaning of its own.
+
+`pages: null` declares the Pages site off. Apply deletes an existing site;
+an absent `pages` key leaves the site alone.
+
+```yaml settings
+pages: null
+```
+
+`interaction_limits: null` clears an active repository-level interaction
+limit. An absent key leaves whatever limit is live untouched.
+
+```yaml settings
+interaction_limits: null
+```
+
+`protection: null` on a branch declares it unprotected, and apply removes
+existing classic protection.
+
+```yaml settings
+branches:
+  - name: legacy
+    protection: null
+```
+
+Under a multi-repo defaults file, a target's `null` section can instead mean
+"opt out of the defaults for this repository"; the rules for that merge are
+in [Multi-repo mode](../README.md#multi-repo-mode). A few individual fields
+accept `null` as a value of their own too, such as `pages.cname` to remove
+a custom domain; the [published schema](../lib/settings.schema.json) marks
+those.
+
+## Private notes
+
+Unknown top-level sections are hard errors, so a typo cannot silently do
+nothing (the one exception: under a `sections` allowlist, unknown keys
+outside the allowlist warn instead of failing, which eases version skew;
+the [troubleshooting guide](troubleshooting.md) covers it). Keys starting
+with an underscore are the escape hatch: they are ignored, which makes
+them usable as private notes.
+
+```yaml settings
+_owner: platform-team, see runbook RB-112
+
+labels:
+  - name: bug
+    color: "d73a4a"
+```
