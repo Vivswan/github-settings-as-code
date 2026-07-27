@@ -1,14 +1,16 @@
 /**
  * `milestones:` section - upsert by title. Divergence from Probot:
- * undeclared milestones are kept (they may hold issues) and surfaced as
- * notes instead of deleted.
+ * undeclared milestones are kept by default (deleting a milestone detaches
+ * it from every issue carrying it) and surfaced as notes. The wrapped
+ * `undeclared: delete` form hardens that to deletion, detachment included.
  */
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import type { MilestoneConfig } from "../schema.js";
+import type { MilestoneConfig, UndeclaredPolicyList } from "../schema.js";
 import {
   call,
+  defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   grantFor,
@@ -17,6 +19,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredPolicy,
+  undeclaredPolicyShape,
 } from "./contract.js";
 
 interface LiveMilestone {
@@ -38,18 +42,25 @@ const ENDPOINTS = {
     route: "PATCH /repos/{owner}/{repo}/milestones/{milestone_number}",
     statuses: { 200: "milestone updated" },
   },
+  remove: {
+    route: "DELETE /repos/{owner}/{repo}/milestones/{milestone_number}",
+    statuses: { 204: "milestone deleted" },
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
 export const milestonesSection: SectionModule<"milestones"> = {
   key: "milestones",
-  deletesUndeclared: "keeps",
+  undeclaredDefault: "keep",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
-  shape: z.array(z.looseObject({ title: z.string() })),
+  shape: undeclaredPolicyShape(z.array(z.looseObject({ title: z.string() }))),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as MilestoneConfig[];
+    const { policy, entries: desired } = undeclaredPolicy(
+      desiredRaw as MilestoneConfig[] | UndeclaredPolicyList<MilestoneConfig>,
+      defaultUndeclaredPolicy(this),
+    );
     rejectDuplicates(
       this,
       desired,
@@ -106,14 +117,32 @@ export const milestonesSection: SectionModule<"milestones"> = {
         result.changes.push(`updated milestone "${milestone.title}"`);
       }
     }
-    // Divergence from Probot: undeclared milestones are kept (they may hold
-    // issues); surfaced as notes instead.
+    // Divergence from Probot: undeclared milestones are kept by default,
+    // because deleting a milestone DETACHES it from every issue carrying it;
+    // the wrapped `undeclared: delete` form opts into exactly that.
     for (const milestone of live) {
-      if (!declared.has(milestone.title)) {
-        result.notes.push(
-          `milestone "${milestone.title}" exists on the repo but is not declared in the settings file; left untouched - add it to the settings file to manage it, or delete it on GitHub (closing is not enough; closed milestones are still listed)`,
-        );
+      if (declared.has(milestone.title)) {
+        continue;
       }
+      if (policy === "delete") {
+        if (ctx.check) {
+          result.drift.push(
+            `milestones[${milestone.title}]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it, detaching it from every issue that carries it; add it to the settings file to keep it`,
+          );
+        } else {
+          await call(ctx, this, ENDPOINTS.remove, {
+            params: { milestone_number: String(milestone.number) },
+            describe: `deleting undeclared milestone "${milestone.title}"`,
+          });
+          result.changes.push(
+            `DELETED undeclared milestone "${milestone.title}" (detached from every issue that carried it)`,
+          );
+        }
+        continue;
+      }
+      result.notes.push(
+        `milestone "${milestone.title}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it, detaching it from every issue that carries it (closing is not enough; closed milestones are still listed)`,
+      );
     }
     return result;
   },

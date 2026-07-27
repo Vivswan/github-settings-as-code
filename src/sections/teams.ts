@@ -43,7 +43,7 @@ const ENDPOINTS = {
 
 export const teamsSection: SectionModule<"teams"> = {
   key: "teams",
-  deletesUndeclared: "untouched",
+  undeclaredDefault: "untouched",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,

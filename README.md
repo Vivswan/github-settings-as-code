@@ -81,6 +81,7 @@ Task-oriented walkthroughs live in [docs/](docs/README.md):
 [multi-repo mode](docs/multi-repo.md),
 [playbooks](docs/playbooks.md),
 [check mode](docs/check-mode.md),
+[the undeclared policy](docs/undeclared-policy.md),
 [migrating from Probot](docs/migrating-from-probot.md), and
 [troubleshooting](docs/troubleshooting.md).
 
@@ -106,18 +107,18 @@ Task-oriented walkthroughs live in [docs/](docs/README.md):
 | Section | Endpoints | PAT permission | Notes |
 |---|---|---|---|
 | `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs, immutable-releases | Administration: write | Probot schema incl. `topics` as string or list; `enable_private_vulnerability_reporting` toggle; `enable_git_lfs` toggle (write-only API: check mode notes it cannot verify, apply re-asserts every run); `enable_immutable_releases` toggle (when the repository owner enforces it, writes answer 409 and apply reports a note instead of a change); declared fields only, siblings undeclared untouched |
-| `labels` | labels CRUD | Issues: write | upsert by name (rename via `new_name`); undeclared deleted |
-| `rulesets` | repo rulesets CRUD | Administration: write | branch, tag, and push targets; short ref names auto-prefixed (`staging` -> `refs/heads/staging`); `~DEFAULT_BRANCH` passes through; undeclared kept (notes only) |
+| `labels` | labels CRUD | Issues: write | upsert by name (rename via `new_name`); undeclared deleted by default (settable) |
+| `rulesets` | repo rulesets CRUD | Administration: write | branch, tag, and push targets; short ref names auto-prefixed (`staging` -> `refs/heads/staging`); `~DEFAULT_BRANCH` passes through; undeclared kept by default (settable) |
 | `branches` | classic branch protection + required-signatures sub-endpoint | Administration: write | `protection: null` removes protection; `required_signatures` applied via its own POST/DELETE (the protection PUT drops it); undeclared untouched; add Contents: read so check mode can tell a missing branch from an unprotected one |
 | `environments` | PUT environments | Environments: write | reviewers, wait timer, branch policies; undeclared untouched |
-| `autolinks` | autolinks CRUD | Administration: write | immutable upstream, so changed entries are replaced; undeclared deleted |
+| `autolinks` | autolinks CRUD | Administration: write | immutable upstream, so changed entries are replaced; undeclared deleted by default (settable) |
 | `actions` | actions permissions + selected-actions + workflow token + access level + artifact/log retention + cache limits + OIDC subject claim + fork PR policies | Administration: write; `oidc_customization_sub` alone needs Actions: write | `enabled`, `allowed_actions`, `selected_actions`, `default_workflow_permissions`, `can_approve_pull_request_reviews`, `access_level` (private repos only), `artifact_and_log_retention`, `cache` (retention/storage limits; a 403 on the cache endpoints can mean an org- or enterprise-managed policy rather than a missing grant), `oidc_customization_sub` (claim-key order counts), `fork_pr_contributor_approval` (when fork PR workflows need maintainer approval), `fork_pr_workflows_private_repos` (documented for private repos; all four toggles required, since GitHub does not document whether an omitted one is preserved); undeclared untouched |
 | `workflows` | list workflows, enable/disable | Actions: write | `{path, state: active or disabled}`; bare file names match `.github/workflows/`; undeclared untouched |
 | `pages` | POST/PUT/DELETE pages | Pages: write | `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`; `pages: null` disables the site; undeclared untouched |
 | `code_scanning_default_setup` | code scanning default setup | Administration or Code scanning alerts: write | `state`, `query_suite`, `languages` (compared as a set), and future PATCH fields; needs Advanced Security on private repos, where a 403 can mean Advanced Security is off or the repo is archived; undeclared untouched |
-| `collaborators` | direct collaborators | Administration: write | invitations for new users; undeclared deleted (owner never touched) |
+| `collaborators` | direct collaborators | Administration: write | invitations for new users; undeclared deleted by default (settable; owner never touched) |
 | `teams` | org team repo permissions | Members: read (org permission) + Administration: write | org repos only, skipped with a notice on personal accounts; undeclared untouched |
-| `milestones` | milestones | Issues: write | upsert by title; undeclared kept (may hold issues) |
+| `milestones` | milestones | Issues: write | upsert by title; undeclared kept by default (settable; deleting detaches issues) |
 | `interaction_limits` | interaction-limits | Administration: write | re-arms the self-expiring limit every apply run (expiry is write-only, max six_months); `null` clears it (in multi-repo mode a target's `null` is a defaults opt-out when the defaults declare one, like `pages`); a 409 (org/user-level limit overrides) becomes a note on apply, while check still reports drift; undeclared untouched |
 
 ## Semantics
@@ -129,11 +130,16 @@ Task-oriented walkthroughs live in [docs/](docs/README.md):
   sections diff first and skip converged writes, others send idempotent
   full-payload writes), and a check right after an apply reports clean.
 - Labels: declared labels are upserted (rename via `new_name`);
-  undeclared labels are DELETED (Probot parity), loudly.
+  undeclared labels are DELETED by default (Probot parity), loudly. The
+  [`undeclared` policy](#undeclared-resources) can soften this to keep.
 - Rulesets: upserted by name with the full payload; undeclared
-  rulesets are never deleted, since removing protection stays a human action.
-- Milestones: upserted by title; undeclared ones are kept (they may hold
-  issues) and listed as notices.
+  rulesets are never deleted by default, since removing protection stays a
+  human action. The [`undeclared` policy](#undeclared-resources) can opt
+  into deletion.
+- Milestones: upserted by title; undeclared ones are kept by default
+  (deleting a milestone detaches it from every issue carrying it) and
+  listed as notices. The [`undeclared` policy](#undeclared-resources) can
+  opt into deletion.
 - Permission failures (403, or 404 on admin endpoints with a fine-grained
   token) are the only softenable errors; everything else always fails with
   the API message verbatim.
@@ -152,6 +158,34 @@ Task-oriented walkthroughs live in [docs/](docs/README.md):
 See [COVERAGE.md](COVERAGE.md) for the full inventory: everything
 supported, every repo-scoped gap, and the user-scoped surface that is out of
 scope by design.
+
+## Undeclared resources
+
+Five sections enumerate the live resources next to the declared ones, and
+each has a default policy for the ones the file does not declare: `labels`,
+`autolinks`, and `collaborators` delete them; `rulesets` and `milestones`
+keep them and list each as a note. A section's list value can override that
+default with a wrapped form:
+
+```yaml
+labels:
+  undeclared: keep        # or: delete
+  entries:
+    - name: bug
+      color: "d73a4a"
+```
+
+The plain array form stays exactly what it was (the section's default
+applies, unless a multi-repo defaults file sets a policy for the section -
+that policy is inherited), and `entries` holds the same items the array
+form would. A wrapper that omits `undeclared` behaves exactly like the
+plain array. The
+wrapper accepts only `undeclared` and `entries`; anything else is rejected
+upfront as a typo. One consequence to weigh before setting
+`milestones: {undeclared: delete, ...}`: deleting a milestone detaches it
+from every issue that carried it, which is why keep is the milestone
+default. The [undeclared policy guide](docs/undeclared-policy.md) covers the
+knob per section and how it layers with a multi-repo defaults file.
 
 ## Example settings.yml
 
@@ -268,8 +302,10 @@ reported in one aggregate notice per reason.
 When the same repository appears in both, the central file wins (with a
 notice).
 
-`defaults-file` names a YAML document deep-merged UNDER every target's
-settings: target keys win, objects merge, arrays and scalars replace (an
+`defaults-file` names a YAML document deep-merged UNDER every processed
+target's settings (a repository with no settings file is skipped outright,
+defaults included): target keys win, objects merge, arrays and scalars
+replace (an
 array is always a full payload, matching check-mode semantics).
 
 A `null` section in a target means one of two things in that merge:
@@ -516,10 +552,17 @@ section's `cache` object is the entire body of its own endpoint, so an
 unrecognized cache key has nowhere to go and is rejected upfront; the
 rest of that section stays passthrough.
 
+The wrapped [`undeclared` form](#undeclared-resources) of the list sections
+is strict the same way: `undeclared` and `entries` are this action's own
+vocabulary, never sent to GitHub, so any other wrapper key is rejected
+upfront as a typo.
+
 ## Migrating from the Probot Settings app
 
 Your existing `settings.yml` works as-is for `repository`, `labels`,
-`branches`, `collaborators`, `teams`, and `milestones` (same schema).
+`branches`, `collaborators`, `teams`, and `milestones` (for the list
+sections among them, the plain-array form remains Probot-compatible; the
+object-shaped sections keep their original Probot shapes).
 Uninstall the app, add the workflow above, and optionally move branch
 protection to `rulesets`. Differences: applies run visibly in Actions
 (loud failures instead of silent skips), rulesets are supported, and

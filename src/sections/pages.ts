@@ -34,7 +34,7 @@ const ENDPOINTS = {
 
 export const pagesSection: SectionModule<"pages"> = {
   key: "pages",
-  deletesUndeclared: "untouched",
+  undeclaredDefault: "untouched",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,

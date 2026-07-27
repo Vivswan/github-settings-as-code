@@ -12,13 +12,61 @@
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import settingsSchema from "../../lib/settings.schema.json" with { type: "json" };
-import { type MustBeNever, SECTION_KEYS, type SectionKey } from "../../src/schema.js";
+import {
+  type MustBeNever,
+  SECTION_KEYS,
+  type SectionKey,
+  UNDECLARED_POLICY_SECTIONS,
+} from "../../src/schema.js";
+import { undeclaredPolicy } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { LiveState } from "./mock/state.js";
 import type { Rng } from "./prng.js";
 import type { DenialStyle, MaskGrade, MaskKey, OwnerKind, Scenario } from "./schema.js";
 
 type Json = Record<string, unknown>;
+
+/** Either form a knobbed list section's generated value can take. */
+type EntriesForm = Json[] | { undeclared?: "keep" | "delete"; entries: Json[] };
+
+/**
+ * Unwrap a generated section value into its entry list through the SAME
+ * helper the engine uses, so harness code reads both the plain and the
+ * wrapped form without hand-rolled casts. Entries come back by reference:
+ * mutating them (or pushing into them) edits the generated document in
+ * place, whichever form was drawn. The default policy is irrelevant here -
+ * only the entries are read.
+ */
+function entriesOf(value: unknown): Json[] {
+  return undeclaredPolicy(value as EntriesForm, "keep").entries as Json[];
+}
+
+/**
+ * Sometimes rewrap a generated entry list in the `{undeclared, entries}`
+ * form, so the fuzz corpus exercises the knob's parsing, merging, and
+ * schema surface alongside the plain form. The policy draw is skewed toward
+ * OMITTING `undeclared` (the wrapper alone), because with the mock's empty
+ * live baselines an explicit policy changes no outcome - the delete/keep
+ * behavior itself is pinned by curated scenarios (labels-undeclared-keep,
+ * rulesets-undeclared-delete, milestones-undeclared-delete).
+ *
+ * The WITNESS sections (labels, milestones) must never call this: the
+ * oracle refines their predictions from the seeded witness alone, so a
+ * generated `undeclared: keep` over an extra-undeclared labels witness
+ * would flip the engine's outcome (a kept note instead of drift/deletion)
+ * and fail the iteration, and milestones' delete path has no witness
+ * modeling it. New draws live on a forked stream so the pre-existing
+ * main-stream sequence (and every recorded seed) stays stable.
+ */
+function maybeWrapUndeclared(rng: Rng, entries: Json[]): EntriesForm {
+  const knobRng = rng.fork("undeclared-knob");
+  if (!knobRng.bool(0.25)) {
+    return entries;
+  }
+  return knobRng.bool(0.5)
+    ? { undeclared: knobRng.pick(["keep", "delete"] as const), entries }
+    : { entries };
+}
 
 /**
  * Hostile string pool for names that flow into URLs, step-summary cells, and
@@ -97,6 +145,8 @@ function genLabels(rng: Rng): Json[] {
     }
     labels.push(label);
   }
+  // labels is a WITNESS section: always the plain array form, never
+  // maybeWrapUndeclared (its rationale explains why).
   return labels;
 }
 
@@ -132,8 +182,8 @@ function genRepository(rng: Rng): Json {
   return repo;
 }
 
-function genRulesets(rng: Rng): Json[] {
-  return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
+function genRulesets(rng: Rng): EntriesForm {
+  const entries = Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const target = rng.pick(["branch", "tag"] as const);
     return {
       name: `${rng.pick(["protect", "guard", "lock"])}-${i}`,
@@ -148,6 +198,7 @@ function genRulesets(rng: Rng): Json[] {
       rules: [{ type: rng.pick(["deletion", "non_fast_forward", "required_signatures"]) }],
     };
   });
+  return maybeWrapUndeclared(rng, entries);
 }
 
 function genBranches(rng: Rng): Json[] {
@@ -201,12 +252,13 @@ function genEnvironments(rng: Rng): Json[] {
   });
 }
 
-function genAutolinks(rng: Rng): Json[] {
-  return Array.from({ length: rng.int(2) + 1 }, (_, i) => ({
+function genAutolinks(rng: Rng): EntriesForm {
+  const entries = Array.from({ length: rng.int(2) + 1 }, (_, i) => ({
     key_prefix: `${rng.pick(["JIRA", "TICKET", "REF"])}-${i}-`,
     url_template: `https://example.com/browse/<num>?ref=${i}`,
     is_alphanumeric: rng.bool(),
   }));
+  return maybeWrapUndeclared(rng, entries);
 }
 
 function genActions(rng: Rng): Json {
@@ -351,7 +403,7 @@ function genCodeScanning(rng: Rng): Json {
   return cfg;
 }
 
-function genCollaborators(rng: Rng): Json[] {
+function genCollaborators(rng: Rng): EntriesForm {
   const used = new Set<string>();
   const out: Json[] = [];
   const count = rng.int(3) + 1;
@@ -363,7 +415,7 @@ function genCollaborators(rng: Rng): Json[] {
     used.add(username.toLowerCase());
     out.push({ username, permission: rng.pick(["pull", "push", "maintain", "admin"]) });
   }
-  return out;
+  return maybeWrapUndeclared(rng, out);
 }
 
 function genTeams(rng: Rng): Json[] {
@@ -395,6 +447,8 @@ function genMilestones(rng: Rng): Json[] {
     }
     out.push(m);
   }
+  // milestones is a WITNESS section: always the plain array form, never
+  // maybeWrapUndeclared (its rationale explains why).
   return out;
 }
 
@@ -445,8 +499,10 @@ export function genSettings(rng: Rng, key: SectionKey): unknown {
  *   so check must report drift and apply must issue an update.
  * - "extra-undeclared" (labels only): a live label the settings do not
  *   declare, so check reports undeclared drift and apply DELETEs it.
- *   Milestones KEEP undeclared entries by design (no delete endpoint), so
- *   this kind is never generated for them.
+ *   Milestones keep undeclared entries by default, and their wrapped
+ *   `undeclared: delete` path is pinned by a curated scenario
+ *   (milestones-undeclared-delete) rather than a witness kind, so this
+ *   kind is never generated for them.
  */
 export type LiveWitnessKind = "matching" | "drift-update" | "extra-undeclared";
 
@@ -668,7 +724,9 @@ export function genLiveWitness(
   if (!WITNESS_KINDS[key].includes(kind)) {
     throw new Error(`genLiveWitness: ${key} does not support the "${kind}" witness`);
   }
-  const declared = settings as Json[];
+  // The witness sections are generated in the plain array form only, but the
+  // unwrap keeps this correct if that exclusion ever moves.
+  const declared = entriesOf(settings);
   return key === "labels"
     ? labelsWitness(rng, declared, kind)
     : milestonesWitness(rng, declared, kind);
@@ -739,13 +797,22 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   milestones: "title",
 };
 
-/** A valid generated array-section value plus a random item index to break. */
+/**
+ * A valid generated array-section value plus a random item to break. The
+ * knobbed sections sometimes come back in the wrapped `{entries}` form, so
+ * the entries are unwrapped through the shared helper (mutations write
+ * through by reference) and `itemToken` spells the issue path the validator
+ * reports for whichever form was drawn (`labels[2]` or `labels.entries[2]`).
+ */
 function validItems(
   rng: Rng,
   key: (typeof ARRAY_SECTIONS)[number],
-): { value: Json[]; index: number } {
-  const value = genSettings(rng.fork("valid"), key) as Json[];
-  return { value, index: rng.int(value.length) };
+): { value: EntriesForm; entries: Json[]; index: number; itemToken: string } {
+  const value = genSettings(rng.fork("valid"), key) as EntriesForm;
+  const entries = entriesOf(value);
+  const index = rng.int(entries.length);
+  const itemToken = Array.isArray(value) ? `${key}[${index}]` : `${key}.entries[${index}]`;
+  return { value, entries, index, itemToken };
 }
 
 /**
@@ -813,64 +880,88 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     name: "scalar-item",
     build: (rng) => {
       const key = rng.pick(ARRAY_SECTIONS);
-      const { value, index } = validItems(rng, key);
-      (value as unknown[])[index] = "oops";
-      return { doc: { [key]: value }, offendingToken: `${key}[${index}]` };
+      const { value, entries, index, itemToken } = validItems(rng, key);
+      (entries as unknown[])[index] = "oops";
+      return { doc: { [key]: value }, offendingToken: itemToken };
     },
   },
   {
     name: "missing-natural-key",
     build: (rng) => {
       const key = rng.pick(ARRAY_SECTIONS);
-      const { value, index } = validItems(rng, key);
-      delete (value[index] as Json)[NATURAL_KEYS[key]];
-      return { doc: { [key]: value }, offendingToken: `${key}[${index}].${NATURAL_KEYS[key]}` };
+      const { value, entries, index, itemToken } = validItems(rng, key);
+      delete (entries[index] as Json)[NATURAL_KEYS[key]];
+      return { doc: { [key]: value }, offendingToken: `${itemToken}.${NATURAL_KEYS[key]}` };
     },
   },
   {
     name: "non-string-natural-key",
     build: (rng) => {
       const key = rng.pick(ARRAY_SECTIONS);
-      const { value, index } = validItems(rng, key);
-      (value[index] as Json)[NATURAL_KEYS[key]] = 42;
-      return { doc: { [key]: value }, offendingToken: `${key}[${index}].${NATURAL_KEYS[key]}` };
+      const { value, entries, index, itemToken } = validItems(rng, key);
+      (entries[index] as Json)[NATURAL_KEYS[key]] = 42;
+      return { doc: { [key]: value }, offendingToken: `${itemToken}.${NATURAL_KEYS[key]}` };
     },
   },
   {
     name: "labels-new-name-not-a-string",
     build: (rng) => {
-      const { value, index } = validItems(rng, "labels");
-      (value[index] as Json).new_name = 7;
-      return { doc: { labels: value }, offendingToken: `labels[${index}].new_name` };
+      const { value, entries, index, itemToken } = validItems(rng, "labels");
+      (entries[index] as Json).new_name = 7;
+      return { doc: { labels: value }, offendingToken: `${itemToken}.new_name` };
     },
   },
   {
     name: "branches-protection-missing",
     build: (rng) => {
       // protection is REQUIRED (nullable, not optional) on every branch entry.
-      const { value, index } = validItems(rng, "branches");
-      delete (value[index] as Json).protection;
-      return { doc: { branches: value }, offendingToken: `branches[${index}].protection` };
+      const { value, entries, index, itemToken } = validItems(rng, "branches");
+      delete (entries[index] as Json).protection;
+      return { doc: { branches: value }, offendingToken: `${itemToken}.protection` };
     },
   },
   {
     name: "workflows-state-enum",
     build: (rng) => {
       // The one enum any loose shape enforces.
-      const { value, index } = validItems(rng, "workflows");
-      (value[index] as Json).state = rng.pick(["paused", "enabled", "on"]);
-      return { doc: { workflows: value }, offendingToken: `workflows[${index}].state` };
+      const { value, entries, index, itemToken } = validItems(rng, "workflows");
+      (entries[index] as Json).state = rng.pick(["paused", "enabled", "on"]);
+      return { doc: { workflows: value }, offendingToken: `${itemToken}.state` };
     },
   },
   {
     name: "rulesets-include-not-a-list",
     build: (rng) => {
       // The classic missing "-" typo the rulesets shape exists to catch.
-      const { value, index } = validItems(rng, "rulesets");
-      (value[index] as Json).conditions = { ref_name: { include: "main" } };
+      const { value, entries, index, itemToken } = validItems(rng, "rulesets");
+      (entries[index] as Json).conditions = { ref_name: { include: "main" } };
       return {
         doc: { rulesets: value },
-        offendingToken: `rulesets[${index}].conditions.ref_name.include`,
+        offendingToken: `${itemToken}.conditions.ref_name.include`,
+      };
+    },
+  },
+  {
+    // The {undeclared, entries} wrapper is this action's own strict
+    // vocabulary, so a typo'd wrapper key must fail upfront, named.
+    name: "wrapper-unknown-key",
+    build: (rng) => {
+      const key = rng.pick(UNDECLARED_POLICY_SECTIONS);
+      const typo = rng.pick(["entires", "entry", "items"]);
+      return {
+        doc: { [key]: { [typo]: entriesOf(genSettings(rng.fork("valid"), key)) } },
+        offendingToken: typo,
+      };
+    },
+  },
+  {
+    name: "wrapper-bad-policy",
+    build: (rng) => {
+      const key = rng.pick(UNDECLARED_POLICY_SECTIONS);
+      const entries = entriesOf(genSettings(rng.fork("valid"), key));
+      return {
+        doc: { [key]: { undeclared: rng.pick(["detele", "kep", true]), entries } },
+        offendingToken: `${key}.undeclared`,
       };
     },
   },
@@ -1602,9 +1693,14 @@ export function genMultiScenario(
       const liveDescCanary = `CANARY-${rng.seed}-${i}-live`;
       const repoCanary = `CANARY-${rng.seed}-${i}-repo`;
       canaries.push(nameCanary, declaredDescCanary, liveDescCanary, repoCanary);
-      const declaredLabels = Array.isArray(settings.labels) ? (settings.labels as Json[]) : [];
+      // The declared labels may be in either form (plain array or wrapper);
+      // entriesOf returns the live entry list by reference, so the push
+      // lands inside whichever container was generated.
+      const declaredLabels = settings.labels === undefined ? [] : entriesOf(settings.labels);
       declaredLabels.push({ name: nameCanary, color: "abcdef", description: declaredDescCanary });
-      settings.labels = declaredLabels;
+      if (settings.labels === undefined) {
+        settings.labels = declaredLabels;
+      }
       const liveLabels = Array.isArray(live.labels) ? (live.labels as Json[]) : [];
       // Same name (so the engine matches and diffs it, not create+delete) but a
       // DIFFERENT description, so the canary drifts into the detail line.

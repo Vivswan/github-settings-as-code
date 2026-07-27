@@ -475,6 +475,15 @@ const HANDLERS: Record<string, Handler> = {
     state.rulesets[index] = updated;
     return ok(updated);
   },
+  "rulesets.remove": ({ state, pathname }) => {
+    const id = lastSegment(pathname);
+    const index = state.rulesets.findIndex((r) => String(r.id) === id);
+    if (index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    state.rulesets.splice(index, 1);
+    return noContent();
+  },
 
   // branches ---------------------------------------------------------------
   "branches.getProtection": ({ state, pathname }) => {
@@ -849,6 +858,15 @@ const HANDLERS: Record<string, Handler> = {
     }
     Object.assign(milestone, asObject(body));
     return ok(milestone);
+  },
+  "milestones.remove": ({ state, pathname }) => {
+    const number = lastSegment(pathname);
+    const index = state.milestones.findIndex((m) => String(m.number) === number);
+    if (index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    state.milestones.splice(index, 1);
+    return noContent();
   },
 
   // interaction limits -------------------------------------------------------

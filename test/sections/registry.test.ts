@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { SECTION_KEYS } from "../../src/schema.js";
+import { SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import {
   call,
+  defaultUndeclaredPolicy,
   type EndpointDecl,
   endpointKind,
   endpointPath,
@@ -16,7 +17,7 @@ import {
   type SectionPermission,
   toleratedStatuses,
 } from "../../src/sections/contract.js";
-import { allEndpoints, SECTIONS } from "../../src/sections/registry.js";
+import { allEndpoints, SECTIONS, sectionModule } from "../../src/sections/registry.js";
 
 describe("registry <-> README", () => {
   test("the README Sections table lists every section, in order, naming each granted permission", () => {
@@ -91,6 +92,35 @@ const EXPECTED_GRANT: Record<string, string> = {
 };
 
 describe("section permissions", () => {
+  test("every knobbed section's shape parses both forms and yields a default policy", () => {
+    // The knob invariant is mostly compile-time: UNDECLARED_POLICY_SECTIONS
+    // is pinned to the SettingsFile types in both directions (schema.ts),
+    // and SectionMeta's conditional undeclaredDefault type forces "delete"
+    // or "keep" exactly for listed sections. The zod shapes are the one
+    // runtime-only piece: merge.ts wraps unconditionally for every listed
+    // key, so a listed section whose shape only accepted the plain array
+    // would reject its own normalized declaration - and only in multi-repo
+    // mode (single-repo skips applyDefaults). Round-tripping both forms
+    // here pins the shapes to the same list the merge drives off.
+    const byKey = new Map(SECTIONS.map((module) => [module.key as string, module]));
+    for (const key of UNDECLARED_POLICY_SECTIONS) {
+      const module = byKey.get(key);
+      if (!module) {
+        throw new Error(`UNDECLARED_POLICY_SECTIONS names "${key}" but no module registers it`);
+      }
+      expect(module.shape.safeParse([]).success, `${key}: plain array form must parse`).toBe(true);
+      expect(
+        module.shape.safeParse({ entries: [] }).success,
+        `${key}: wrapper without a policy must parse`,
+      ).toBe(true);
+      expect(
+        module.shape.safeParse({ undeclared: "keep", entries: [] }).success,
+        `${key}: wrapper with a policy must parse`,
+      ).toBe(true);
+      expect(["keep", "delete"]).toContain(defaultUndeclaredPolicy(sectionModule(key)));
+    }
+  });
+
   test("every registered section declares a permission with at least one repo resource", () => {
     for (const module of SECTIONS) {
       expect(module.permission).toBeDefined();
@@ -261,7 +291,7 @@ describe("section endpoints", () => {
       permission: { repo: ["administration"] },
       grant: "grant",
       endpoints: {},
-      deletesUndeclared: "untouched",
+      undeclaredDefault: "untouched",
     };
     // No override -> the section's permission.
     expect(
@@ -482,7 +512,7 @@ describe("probeAbsent tolerance derivation", () => {
     permission: { repo: ["administration"] },
     grant: "grant",
     endpoints: {},
-    deletesUndeclared: "untouched",
+    undeclaredDefault: "untouched",
   };
   const ctxWith = (status: number): SectionContext => ({
     api: {

@@ -1,7 +1,8 @@
 /**
  * Types for the settings file. The sections in PROBOT_PARITY_KEYS keep the
- * Probot Settings app schema (https://github.com/repository-settings/app), so
- * an existing Probot config applies to them unchanged; the remaining sections
+ * Probot Settings app schema (https://github.com/repository-settings/app) in
+ * their plain-array form, so an existing Probot config applies to them
+ * unchanged; the remaining sections
  * (rulesets, autolinks, actions, workflows, pages, code_scanning_default_setup)
  * are additions. Only DECLARED keys are ever applied or compared, so omitting a
  * key means "leave it alone".
@@ -11,16 +12,16 @@
 export interface SettingsFile {
   /** Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents. */
   repository?: RepositoryConfig;
-  /** Issue/PR labels; undeclared labels are DELETED (Probot parity). */
-  labels?: LabelConfig[];
-  /** Repository rulesets, upserted by name; undeclared ones are kept. */
-  rulesets?: RulesetConfig[];
+  /** Issue/PR labels; undeclared labels are DELETED by default (Probot parity; the wrapped form can set `undeclared: keep`). */
+  labels?: LabelConfig[] | UndeclaredPolicyList<LabelConfig>;
+  /** Repository rulesets, upserted by name; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`). */
+  rulesets?: RulesetConfig[] | UndeclaredPolicyList<RulesetConfig>;
   /** Classic branch protection per branch. */
   branches?: BranchConfig[];
   /** Deployment environments, upserted by name. */
   environments?: EnvironmentConfig[];
-  /** Autolink references; undeclared ones are DELETED. */
-  autolinks?: AutolinkConfig[];
+  /** Autolink references; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`). */
+  autolinks?: AutolinkConfig[] | UndeclaredPolicyList<AutolinkConfig>;
   /** GitHub Actions permissions for the repository. */
   actions?: ActionsConfig;
   /** Per-workflow enable/disable state; undeclared workflows are untouched. */
@@ -29,12 +30,12 @@ export interface SettingsFile {
   pages?: PagesConfig | null;
   /** Code scanning default setup (CodeQL). */
   code_scanning_default_setup?: CodeScanningDefaultSetupConfig;
-  /** Direct collaborators; undeclared ones are REMOVED (owner never touched). */
-  collaborators?: CollaboratorConfig[];
+  /** Direct collaborators; undeclared ones are REMOVED by default (owner never touched; the wrapped form can set `undeclared: keep`). */
+  collaborators?: CollaboratorConfig[] | UndeclaredPolicyList<CollaboratorConfig>;
   /** Org team access to the repo; skipped on personal accounts. */
   teams?: TeamConfig[];
-  /** Milestones, upserted by title; undeclared ones are kept. */
-  milestones?: MilestoneConfig[];
+  /** Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`, which detaches deleted milestones from their issues). */
+  milestones?: MilestoneConfig[] | UndeclaredPolicyList<MilestoneConfig>;
   /**
    * Temporary interaction limits; null clears an active repo-level limit,
    * and an absent key leaves whatever is live untouched. Limits self-expire
@@ -71,6 +72,31 @@ export interface RepositoryConfig {
   enable_immutable_releases?: boolean;
   /** Everything else passes through to PATCH /repos/{r} verbatim. */
   [key: string]: unknown;
+}
+
+/** What apply does to live resources the settings file does not declare. */
+export type UndeclaredPolicy = "keep" | "delete";
+
+/**
+ * The wrapped form of a list section, overriding what happens to live
+ * resources the file does not declare. The plain array form keeps the
+ * section's default policy (or the policy a multi-repo defaults file set
+ * for the section); this wrapper can set it explicitly, and with
+ * `undeclared` omitted it behaves exactly like the plain array. The wrapper is
+ * this action's own vocabulary (nothing here passes through to GitHub), so
+ * its keys are strict: anything besides `undeclared` and `entries` is
+ * rejected upfront as a typo.
+ */
+export interface UndeclaredPolicyList<E> {
+  /**
+   * What apply does to live resources `entries` does not declare: "delete"
+   * removes them, "keep" leaves them alone and surfaces each as a note.
+   * Omitted, the section's own default applies (a multi-repo defaults file
+   * can set it for its targets).
+   */
+  undeclared?: UndeclaredPolicy;
+  /** The declared entries, exactly as the plain array form lists them. */
+  entries: E[];
 }
 
 /** One label, matched to the live repo by name. */
@@ -319,10 +345,52 @@ export const SECTION_KEYS = [
 export type SectionKey = (typeof SECTION_KEYS)[number];
 
 /**
- * The sections whose settings.yml schema matches the Probot Settings app, so
- * an existing Probot config applies to them as-is. The single source the
- * README's "Migrating from the Probot Settings app" paragraph is pinned
- * against. `satisfies` keeps every entry a real section key.
+ * The sections that take the `undeclared` policy knob: their SettingsFile
+ * value is a union of the plain entry array and UndeclaredPolicyList. The
+ * defaults merge (engine/merge.ts) normalizes and resolves exactly these
+ * sections; the lockstep types below pin the list to the SettingsFile
+ * declarations in both directions.
+ */
+export const UNDECLARED_POLICY_SECTIONS = [
+  "labels",
+  "rulesets",
+  "autolinks",
+  "collaborators",
+  "milestones",
+] as const satisfies readonly SectionKey[];
+
+/** A section key that takes the `undeclared` policy knob. */
+export type UndeclaredPolicySection = (typeof UNDECLARED_POLICY_SECTIONS)[number];
+
+/**
+ * The section keys whose SettingsFile value accepts the wrapped form. Both
+ * union branches are required - the plain entry array AND the wrapper - so
+ * a future section whose config object merely carries an `entries` property
+ * does not classify as knobbed by accident.
+ */
+type KnobbedByType = {
+  [K in SectionKey]: [Extract<NonNullable<SettingsFile[K]>, readonly unknown[]>] extends [never]
+    ? never
+    : [Extract<NonNullable<SettingsFile[K]>, { entries: readonly unknown[] }>] extends [never]
+      ? never
+      : K;
+}[SectionKey];
+/** Compile-time lockstep: a knobbed SettingsFile type missing from the list fails here. */
+type _KnobListComplete = MustBeNever<
+  Exclude<KnobbedByType, (typeof UNDECLARED_POLICY_SECTIONS)[number]>
+>;
+/** Compile-time lockstep: a listed section whose type lacks the wrapper fails here. */
+type _KnobListSound = MustBeNever<
+  Exclude<(typeof UNDECLARED_POLICY_SECTIONS)[number], KnobbedByType>
+>;
+
+/**
+ * The sections whose plain-array settings.yml form matches the Probot
+ * Settings app schema, so an existing Probot config applies to them as-is
+ * (the wrapped `undeclared` form is this action's own addition on top). The
+ * single source the README's "Migrating from the Probot Settings app"
+ * paragraph is pinned against. `satisfies` keeps every entry a real section
+ * key.
  */
 export const PROBOT_PARITY_KEYS = [
   "repository",
