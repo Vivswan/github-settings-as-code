@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { FILTER_INPUTS } from "../../src/action/inputs.js";
+import { RESERVED_REF_PREFIXES } from "../../src/action/secret-refs.js";
 import type { PatResource } from "../../src/sections/contract.js";
 import type { LiveState } from "./mock/state.js";
 
@@ -34,6 +35,7 @@ const MASK_KEYS = [
   "code_scanning_alerts",
   "contents",
   "variables",
+  "webhooks",
   "org_members",
 ] as const satisfies readonly (PatResource | "org_members")[];
 
@@ -296,6 +298,37 @@ const FaultSchema = z
   })
   .strict();
 
+/**
+ * Environment variable names a scenario's `env` map may not set: the runner
+ * builds the child environment from scratch, and these are its own controls.
+ * The prefixes are the SAME reserved set secret references refuse
+ * (RESERVED_REF_PREFIXES), plus the exact names the runner assigns itself.
+ */
+const RESERVED_ENV_NAMES = new Set(["PATH", "HOME", "RETRY_BASE_MS"]);
+
+function reservedEnvKey(name: string): boolean {
+  return RESERVED_ENV_NAMES.has(name) || RESERVED_REF_PREFIXES.some((p) => name.startsWith(p));
+}
+
+/**
+ * Extra variables injected into the child process environment, for scenarios
+ * that exercise `$NAME` secret references (the step-env wiring a real
+ * workflow does with `env:`). Keys colliding with the harness's own controls
+ * (INPUT_*, GITHUB_*, RUNNER_*, ACTIONS_*, NODE_*, and the runner-assigned
+ * names) are rejected at load time: a scenario must not be able to smuggle an
+ * input or runner override past the hermetic childEnv build.
+ */
+const EnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
+  for (const name of Object.keys(env)) {
+    if (reservedEnvKey(name)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `env key "${name}" collides with a harness control (reserved: ${[...RESERVED_ENV_NAMES].join(", ")} and the ${RESERVED_REF_PREFIXES.join("/")} prefixes)`,
+      });
+    }
+  }
+});
+
 export const ScenarioSchema = z
   .object({
     name: z.string(),
@@ -314,6 +347,12 @@ export const ScenarioSchema = z
      */
     settings_raw: z.string().optional(),
     inputs: InputsSchema.optional(),
+    /**
+     * Extra child-process environment variables (see EnvSchema): the step-env
+     * half of a `$NAME` secret reference, defined the way a workflow's `env:`
+     * block would define it.
+     */
+    env: EnvSchema.optional(),
     /** Resource -> granted access; unspecified resources default to "write". */
     token_permissions: TokenPermissionsSchema.optional(),
     denial_style: DenialStyleSchema.default("fine_grained"),

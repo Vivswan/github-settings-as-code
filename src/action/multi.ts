@@ -20,6 +20,7 @@ import { parseReposInput } from "../discovery/repos-input.js";
 import { dedupeTargets, type Target } from "../discovery/targets.js";
 import { applyDefaults } from "../engine/merge.js";
 import { type RepoRunResult, runForRepo, validateSettingsDoc } from "../engine/orchestrate.js";
+import { secretValueStrings } from "../engine/secrets.js";
 import {
   type GithubClient,
   isPermissionError,
@@ -34,6 +35,7 @@ import { type ArtifactUploader, deliverArtifactReport } from "../report/artifact
 import { composeReport, type TranscriptLine } from "../report/composer.js";
 import { deliverIssueReport, injectMarkerLabel, MARKER_LABEL } from "../report/issue-report.js";
 import type { SettingsFile } from "../schema.js";
+import { SECTIONS } from "../sections/registry.js";
 import { DEFAULT_SETTINGS_FILE, quoteList } from "./inputs.js";
 import {
   capturingIo,
@@ -263,6 +265,15 @@ async function processTarget(ctx: {
     return fail(`cannot parse ${read.sourceLabel}: ${parsed.error}. Fix the YAML in that file`);
   }
 
+  // Secret provenance is tagged at READ time, before the defaults merge folds
+  // the documents together: a remote target's settings.yml is authored by the
+  // TARGET repository, so any secret value it declares is sourced "target"
+  // (where a $NAME reference is refused - a target must not route the
+  // operator's environment into itself). Central files and the defaults file
+  // are operator-authored, so everything else stays the "operator" default.
+  const targetDeclared =
+    target.source === "remote" ? secretValueStrings(parsed.settings, SECTIONS) : undefined;
+
   const { settings: merged, disabled } = applyDefaults(defaults, parsed.settings);
   const injected = applyMarkerInjection(merged, injectMarker);
   const settings = injected.settings;
@@ -299,6 +310,9 @@ async function processTarget(ctx: {
       onMissingPermission: cfg.onMissingPermission,
       requiredSections: cfg.requiredSections,
       onlySections: cfg.onlySections,
+      ...(targetDeclared === undefined
+        ? {}
+        : { secretSource: (value: string) => (targetDeclared.has(value) ? "target" : "operator") }),
     },
     targetIo,
   );

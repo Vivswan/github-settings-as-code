@@ -38,6 +38,11 @@
  * - teams (false): team access is granted (PUT) unconditionally.
  * - interaction_limits (false): the PUT re-arms the self-expiring limit
  *   unconditionally on every apply - the re-arm IS the desired behavior.
+ * - webhooks (false): a DECLARED config.secret rides the config PATCH on
+ *   every apply run (GitHub echoes a live secret as "********", so there is
+ *   nothing to compare against and re-sending is how rotations propagate);
+ *   the events/active PATCH and the no-secret config PATCH do diff first,
+ *   but one unconditional write path makes the section unconditional here.
  *
  * This table lives in the harness (like DENIAL_SEMANTICS): the engine has no
  * use for it, and the apply-idempotence re-run is its contradiction path - a
@@ -64,4 +69,5 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   milestones: true,
   interaction_limits: false,
   actions_variables: true,
+  webhooks: false,
 };

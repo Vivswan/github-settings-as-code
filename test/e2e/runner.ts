@@ -310,6 +310,12 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
     writeFileSync(defaultsPath, stringifyYaml(scenario.defaults_file));
     env["INPUT_DEFAULTS-FILE"] = defaultsPath;
   }
+  // Scenario-declared variables (the step-env half of $NAME secret
+  // references) land LAST but cannot clobber the controls above: the schema
+  // rejects env keys colliding with the harness's reserved names.
+  for (const [name, value] of Object.entries(scenario.env ?? {})) {
+    env[name] = value;
+  }
   return env;
 }
 
@@ -870,23 +876,24 @@ export async function runScenario(
         failures.push(`stdout must not contain: ${needle}`);
       }
     }
-    // 7b-ii. Whole-surface leak invariant: leaks_nowhere runs the SAME checkLeaks
-    // primitive the fuzzer uses, so a needle listed here is proven absent from the
-    // summary, stdout, stderr (mask lines stripped), AND every output value at
-    // once - the full "no public surface" guarantee, not just one named channel.
-    if (exp.leaks_nowhere && exp.leaks_nowhere.length > 0) {
-      failures.push(
-        ...checkLeaks(
-          {
-            summary: first.summary,
-            stdout: first.stdout,
-            stderr: first.stderr,
-            outputs: first.outputs,
-          },
-          exp.leaks_nowhere,
+    // 7b-ii. Whole-surface leak invariant, centralized: leaks_nowhere runs
+    // the SAME checkLeaks primitive the fuzzer uses, and every scenario env
+    // value joins the needle set automatically - a scenario env value is by
+    // definition a resolved secret plaintext, so it must never reach any
+    // public surface whether or not the author remembered to list it. The
+    // set dedupes an env value the author also listed explicitly, and an
+    // EMPTY env value is skipped (a set-but-empty variable is a scenario
+    // about the resolver's empty-value error, not a leakable secret). The
+    // sweep is deferred past the rerun blocks below so it covers the primary
+    // invocation AND every internal re-run (a converges check or idempotence
+    // re-apply must not leak what the first run masked).
+    const leakNeedles = [
+      ...new Set(
+        [...(exp.leaks_nowhere ?? []), ...Object.values(scenario.env ?? {})].filter(
+          (needle) => needle !== "",
         ),
-      );
-    }
+      ),
+    ];
     // requests_contain may assert on a query string, so match the full form.
     const fullLog = handle.requests.map((r) => renderRequest(r, true));
     for (const needle of exp.requests_contain ?? []) {
@@ -948,6 +955,34 @@ export async function runScenario(
     if (openApiViolations.length > 0) {
       const lines = openApiViolations.map((v) => `${v.request} [${v.kind}]: ${v.detail}`);
       failures.push(`OpenAPI contract violations:\n  ${lines.join("\n  ")}`);
+    }
+
+    // The deferred leak sweep (see 7b-ii): primary run plus every rerun.
+    if (leakNeedles.length > 0) {
+      failures.push(
+        ...checkLeaks(
+          {
+            summary: first.summary,
+            stdout: first.stdout,
+            stderr: first.stderr,
+            outputs: first.outputs,
+          },
+          leakNeedles,
+        ),
+      );
+      for (const rerun of reruns) {
+        failures.push(
+          ...checkLeaks(
+            {
+              summary: rerun.summary,
+              stdout: rerun.stdout,
+              stderr: rerun.stderr,
+              outputs: rerun.outputs,
+            },
+            leakNeedles,
+          ).map((failure) => `${rerun.label}: ${failure}`),
+        );
+      }
     }
 
     const report: ScenarioReport = {

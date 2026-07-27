@@ -29,6 +29,16 @@ export interface SectionContext {
   repo: string; // owner/name
   owner: string;
   check: boolean;
+  /**
+   * Resolve a whole-value `$NAME` secret reference to its plaintext. Present
+   * only in apply mode: the engine resolves EVERY declared secret value up
+   * front (after the preflight barrier, before the first mutation of any
+   * section) and registers each plaintext with output masking before any
+   * handler runs, so a handler only ever looks up an already-resolved name.
+   * Absent in check mode and during preflight, where references are
+   * validated for syntax only and the environment is never read.
+   */
+  resolveSecret?: (reference: string) => string;
 }
 
 export interface SectionResult {
@@ -49,7 +59,8 @@ export type PatResource =
   | "pages"
   | "code_scanning_alerts"
   | "contents"
-  | "variables";
+  | "variables"
+  | "webhooks";
 
 /**
  * The machine-readable permission a section requires. `repo` lists the
@@ -73,6 +84,7 @@ const RESOURCE_LABEL: Record<PatResource, string> = {
   code_scanning_alerts: "Code scanning alerts",
   contents: "Contents",
   variables: "Variables",
+  webhooks: "Webhooks",
 };
 
 /** Human-facing label for each PAT organization resource. */
@@ -405,6 +417,17 @@ export interface SectionModule<K extends SectionKey = SectionKey> extends Sectio
         /** What the unrecognized key would silently do, as message prose. */
         consequence: string;
       };
+  /**
+   * The declared values of this section's DESIGNATED SECRET FIELDS (e.g.
+   * every webhooks entry's config.secret), extracted from the raw declared
+   * value. Declared only by sections that carry secret fields. The engine
+   * collects these before any section runs: it validates each value as a
+   * whole-value `$NAME` reference (syntax only in check mode and preflight)
+   * and, in apply mode, resolves them all up front - masking every
+   * plaintext - so ctx.resolveSecret never misses. Values are returned raw;
+   * nothing here reads the environment.
+   */
+  secretValues?(declared: unknown): string[];
   run(ctx: SectionContext, desired: unknown): Promise<SectionResult>;
 }
 
