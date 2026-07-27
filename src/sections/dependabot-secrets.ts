@@ -1,16 +1,18 @@
 /**
- * `actions_secrets:` section - repository Actions secrets, reconciled by
- * existence through the shared secrets engine (secrets-engine.ts). Declared
- * values are whole-value `$NAME` environment references (never literals -
- * settings files are committed plaintext), resolved at apply time and sealed
- * client-side; GitHub cannot return a value, so check mode verifies that each
- * declared secret exists and apply re-seals every declared value on each run.
- * Undeclared secrets are kept by default (their values are unrecoverable);
- * the wrapped `undeclared: delete` form opts into deletion.
+ * `dependabot_secrets:` section - repository Dependabot secrets
+ * (private-registry credentials Dependabot uses), reconciled by existence
+ * through the shared secrets engine (secrets-engine.ts). Declared values are
+ * whole-value `$NAME` environment references (never literals - settings
+ * files are committed plaintext), resolved at apply time and sealed
+ * client-side against the Dependabot public key; GitHub cannot return a
+ * value, so check mode verifies that each declared secret exists and apply
+ * re-seals every declared value on each run. Undeclared secrets are kept by
+ * default (their values are unrecoverable); the wrapped `undeclared: delete`
+ * form opts into deletion.
  */
 
 import { z } from "zod";
-import type { ActionsSecretConfig, UndeclaredPolicyList } from "../schema.js";
+import type { DependabotSecretConfig, UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -32,24 +34,24 @@ import {
   type SecretsScopeOps,
 } from "./secrets-engine.js";
 
-const permission: SectionPermission = { repo: ["secrets"] };
+const permission: SectionPermission = { repo: ["dependabot_secrets"] };
 
 const ENDPOINTS = {
   list: {
-    route: "GET /repos/{owner}/{repo}/actions/secrets",
+    route: "GET /repos/{owner}/{repo}/dependabot/secrets",
     statuses: { 200: "the secrets list (names and timestamps; never values)" },
   },
   publicKey: {
-    route: "GET /repos/{owner}/{repo}/actions/secrets/public-key",
+    route: "GET /repos/{owner}/{repo}/dependabot/secrets/public-key",
     statuses: { 200: "the sealing public key" },
   },
   put: {
-    route: "PUT /repos/{owner}/{repo}/actions/secrets/{secret_name}",
+    route: "PUT /repos/{owner}/{repo}/dependabot/secrets/{secret_name}",
     statuses: { 201: "secret created", 204: "secret updated" },
     alwaysRewrite: true,
   },
   remove: {
-    route: "DELETE /repos/{owner}/{repo}/actions/secrets/{secret_name}",
+    route: "DELETE /repos/{owner}/{repo}/dependabot/secrets/{secret_name}",
     statuses: { 204: "secret deleted" },
   },
 } as const satisfies Record<string, EndpointDecl>;
@@ -70,13 +72,13 @@ const OPS: SecretsScopeOps = {
 };
 
 const SCOPE: SecretsScope = {
-  label: "actions_secrets",
-  noun: "Actions secret",
+  label: "dependabot_secrets",
+  noun: "Dependabot secret",
   ops: OPS,
 };
 
-export const actionsSecretsSection: SectionModule<"actions_secrets"> = {
-  key: "actions_secrets",
+export const dependabotSecretsSection: SectionModule<"dependabot_secrets"> = {
+  key: "dependabot_secrets",
   undeclaredDefault: "keep",
   permission,
   grant: grantFor(permission),
@@ -95,7 +97,7 @@ export const actionsSecretsSection: SectionModule<"actions_secrets"> = {
   },
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const { policy, entries } = undeclaredPolicy(
-      desiredRaw as ActionsSecretConfig[] | UndeclaredPolicyList<ActionsSecretConfig>,
+      desiredRaw as DependabotSecretConfig[] | UndeclaredPolicyList<DependabotSecretConfig>,
       defaultUndeclaredPolicy(this),
     );
     rejectDuplicateSecretNames(this, entries);

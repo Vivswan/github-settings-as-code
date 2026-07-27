@@ -29,7 +29,10 @@ describe("published schema wrapper strictness", () => {
    * finalize-schema.ts: each adds one wrapper definition beyond the knobbed
    * sections.
    */
-  const NESTED_WRAPPERS = ["UndeclaredPolicyList<EnvironmentVariableConfig>"] as const;
+  const NESTED_WRAPPERS = [
+    "UndeclaredPolicyList<EnvironmentVariableConfig>",
+    "UndeclaredPolicyList<EnvironmentSecretConfig>",
+  ] as const;
 
   test("one wrapper definition per knobbed section and nested knob, each closed", () => {
     expect(wrapperNames.length).toBe(UNDECLARED_POLICY_SECTIONS.length + NESTED_WRAPPERS.length);

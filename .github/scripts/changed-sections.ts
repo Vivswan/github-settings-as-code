@@ -33,6 +33,8 @@ export const NONE = "none";
 const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   // Kebab file names for underscore section keys.
   "actions-secrets.ts": ["actions_secrets"],
+  "dependabot-secrets.ts": ["dependabot_secrets"],
+  "codespaces-secrets.ts": ["codespaces_secrets"],
   // The file is code-scanning.ts but the section key is the longer form.
   "code-scanning.ts": ["code_scanning_default_setup"],
   // Kebab file name for the underscore section key, like code-scanning.ts.
@@ -41,10 +43,15 @@ const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   "actions-variables.ts": ["actions_variables"],
   // roles.ts is the shared permission-vocabulary normalizer for both sections.
   "roles.ts": ["collaborators", "teams"],
-  // secrets-engine.ts is the shared sealing/reconciliation engine; today
-  // actions_secrets is its only consumer (the other secret families will
-  // add themselves here as they land).
-  "secrets-engine.ts": ["actions_secrets"],
+  // secrets-engine.ts is the shared sealing/reconciliation engine, consumed
+  // by the three repository-level secret sections and by environments (its
+  // nested per-environment secrets key).
+  "secrets-engine.ts": [
+    "actions_secrets",
+    "dependabot_secrets",
+    "codespaces_secrets",
+    "environments",
+  ],
 };
 
 /**
@@ -59,6 +66,8 @@ const ALL_SELECTING_SECTION_FILES = new Set(["contract.ts", "registry.ts"]);
  */
 const KEYS_WITHOUT_MATCHING_FILE = new Set<SectionKey>([
   "actions_secrets",
+  "dependabot_secrets",
+  "codespaces_secrets",
   "code_scanning_default_setup",
   "interaction_limits",
   "actions_variables",

@@ -61,7 +61,9 @@ export type PatResource =
   | "contents"
   | "variables"
   | "webhooks"
-  | "secrets";
+  | "secrets"
+  | "dependabot_secrets"
+  | "codespaces_secrets";
 
 /**
  * The machine-readable permission a section requires. `repo` lists the
@@ -87,6 +89,8 @@ const RESOURCE_LABEL: Record<PatResource, string> = {
   variables: "Variables",
   webhooks: "Webhooks",
   secrets: "Secrets",
+  dependabot_secrets: "Dependabot secrets",
+  codespaces_secrets: "Codespaces secrets",
 };
 
 /** Human-facing label for each PAT organization resource. */
@@ -185,6 +189,25 @@ export interface EndpointDecl {
    */
   denialHint?: string;
   /**
+   * True for a WRITE the section issues for every declared entry on EVERY
+   * apply by contract - the sealed secret PUTs, whose values cannot be read
+   * back, so the unconditional re-write is what propagates a rotated source
+   * value. This is a property of the ENDPOINT, not its section: environments
+   * carries a passthrough PUT and always-rewrite secret PUTs side by side.
+   * The e2e apply-idempotence proof derives its required-rewrite set from
+   * this flag, so the contract lives on the declaration it describes.
+   */
+  alwaysRewrite?: true;
+  /**
+   * The access grade GitHub gates this endpoint at, when it differs from the
+   * method-derived one (GET = read). Codespaces repository secrets are the
+   * known case: the fine-grained permission gates even the list and
+   * public-key READS at write. endpointKind() consults this, so the e2e
+   * mock's permission gate and the fuzz oracle model the real gating - a
+   * read-only grant then denies those reads exactly as production does.
+   */
+  accessGrade?: "write";
+  /**
    * The largest per_page this LIST endpoint accepts, when it is smaller than
    * the standard 100 (the Actions variables list caps at 30). The page loop
    * requests exactly this many per page and treats a shorter page as the
@@ -205,9 +228,12 @@ export function endpointPath(route: Route): string {
   return route.slice(route.indexOf(" ") + 1);
 }
 
-/** read for GET, write for every mutating method. Derived from the route. */
+/**
+ * read for GET, write for every mutating method - unless the declaration
+ * carries an accessGrade override (GitHub gates some reads at write).
+ */
 export function endpointKind(endpoint: EndpointDecl): "read" | "write" {
-  return endpointMethod(endpoint.route) === "GET" ? "read" : "write";
+  return endpoint.accessGrade ?? (endpointMethod(endpoint.route) === "GET" ? "read" : "write");
 }
 
 /**
