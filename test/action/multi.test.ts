@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import {
   applyMarkerInjection,
@@ -7,6 +7,7 @@ import {
   toPublicView,
 } from "../../src/action/multi.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
+import { clearRedactedSlugs } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
 import {
   ARTIFACT_FILE,
@@ -14,6 +15,14 @@ import {
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
 import { MockApi } from "../mock-api.js";
+
+// runMulti() registers every slug its redaction plan hides, permanently for
+// the process by design - so every test file sharing this process would
+// inherit the holds and trace `<redacted>` for those slugs. Drop them after
+// each test.
+afterEach(() => {
+  clearRedactedSlugs();
+});
 
 function captureIo(): {
   io: Io;
