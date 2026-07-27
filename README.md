@@ -98,7 +98,7 @@ Task-oriented walkthroughs live in [docs/](docs/README.md):
 
 | Section | Endpoints | PAT permission | Notes |
 |---|---|---|---|
-| `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs | Administration: write | Probot schema incl. `topics` as string or list; `enable_private_vulnerability_reporting` toggle; `enable_git_lfs` toggle (write-only API: check mode notes it cannot verify, apply re-asserts every run); declared fields only, siblings undeclared untouched |
+| `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs, immutable-releases | Administration: write | Probot schema incl. `topics` as string or list; `enable_private_vulnerability_reporting` toggle; `enable_git_lfs` toggle (write-only API: check mode notes it cannot verify, apply re-asserts every run); `enable_immutable_releases` toggle (when the repository owner enforces it, writes answer 409 and apply reports a note instead of a change); declared fields only, siblings undeclared untouched |
 | `labels` | labels CRUD | Issues: write | upsert by name (rename via `new_name`); undeclared deleted |
 | `rulesets` | repo rulesets CRUD | Administration: write | branch, tag, and push targets; short ref names auto-prefixed (`staging` -> `refs/heads/staging`); `~DEFAULT_BRANCH` passes through; undeclared kept (notes only) |
 | `branches` | classic branch protection | Administration: write | `protection: null` removes protection; undeclared untouched; add Contents: read so check mode can tell a missing branch from an unprotected one |

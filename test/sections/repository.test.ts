@@ -1,8 +1,38 @@
 import { describe, expect, test } from "bun:test";
-import { PermissionDenied } from "../../src/sections/contract.js";
-import { normalizeTopics, repositorySection } from "../../src/sections/repository.js";
+import { PermissionDenied, toleratedStatuses } from "../../src/sections/contract.js";
+import {
+  FEATURE_TOGGLES,
+  normalizeTopics,
+  repositorySection,
+} from "../../src/sections/repository.js";
 import { MockApi } from "../mock-api.js";
 import { ctx } from "./context.js";
+
+describe("feature-toggle write tolerances", () => {
+  test("every toggle write tolerates only statuses the apply loop interprets", () => {
+    // The apply loop reports a change for any tolerated outcome that is not
+    // a 409, so a toggle write may only tolerate 409 (owner-enforced note)
+    // and, on a REMOVE only, the 404/422 that mean "already off". A new
+    // tolerated status (say, a 403 on the LFS put, or a 404 on any put)
+    // would otherwise fall through to a change line for a request that
+    // failed.
+    const interpreted = {
+      put: new Set([409]),
+      remove: new Set([404, 409, 422]),
+    };
+    for (const toggle of FEATURE_TOGGLES) {
+      for (const direction of ["put", "remove"] as const) {
+        const endpoint = toggle[direction];
+        for (const status of toleratedStatuses(endpoint)) {
+          expect(
+            interpreted[direction].has(status),
+            `${toggle.key} tolerates ${status} on ${endpoint.route}, which the apply loop does not know how to interpret on a ${direction}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+});
 
 describe("normalizeTopics", () => {
   test("comma string", () => {
@@ -166,5 +196,89 @@ describe("repository", () => {
       /not a boolean/,
     );
     expect(api.calls).toHaveLength(0);
+  });
+
+  test("immutable releases toggles its own endpoint: PUT on true, DELETE on false", async () => {
+    const on = new MockApi({}).allowMutations("PUT /repos/o/r/immutable-releases");
+    const enabled = await repositorySection.run(ctx(on), { enable_immutable_releases: true });
+    expect(on.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PUT /repos/o/r/immutable-releases",
+    ]);
+    expect(enabled.changes).toEqual(["immutable releases: enabled"]);
+    const off = new MockApi({}).allowMutations("DELETE /repos/o/r/immutable-releases");
+    const disabled = await repositorySection.run(ctx(off), { enable_immutable_releases: false });
+    expect(off.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "DELETE /repos/o/r/immutable-releases",
+    ]);
+    expect(disabled.changes).toEqual(["immutable releases: disabled"]);
+  });
+
+  test("immutable releases check reads the {enabled} body and treats 404 as off", async () => {
+    // Live enabled, declared false: ordinary drift with the apply promise.
+    const liveOn = new MockApi({
+      "GET /repos/o/r": { data: {} },
+      "GET /repos/o/r/immutable-releases": { data: { enabled: true, enforced_by_owner: false } },
+    });
+    const drift = await repositorySection.run(ctx(liveOn, true), {
+      enable_immutable_releases: false,
+    });
+    expect(drift.drift).toEqual([
+      "repository.enable_immutable_releases: declared false != live true; apply will set the declared value",
+    ]);
+    expect(liveOn.mutations()).toEqual([]);
+    // The probe's 404 reads as off: drift against declared true, clean against
+    // declared false.
+    const liveOff = new MockApi({
+      "GET /repos/o/r": { data: {} },
+      "GET /repos/o/r/immutable-releases": {
+        error: { status: 404, message: "Not Found", body: "" },
+      },
+    });
+    const missing = await repositorySection.run(ctx(liveOff, true), {
+      enable_immutable_releases: true,
+    });
+    expect(missing.drift).toEqual([
+      "repository.enable_immutable_releases: declared true != live false; apply will set the declared value",
+    ]);
+    const clean = await repositorySection.run(ctx(liveOff, true), {
+      enable_immutable_releases: false,
+    });
+    expect(clean.drift).toEqual([]);
+  });
+
+  test("owner-enforced immutable releases drift says apply cannot change it", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r": { data: {} },
+      "GET /repos/o/r/immutable-releases": { data: { enabled: true, enforced_by_owner: true } },
+    });
+    const result = await repositorySection.run(ctx(api, true), {
+      enable_immutable_releases: false,
+    });
+    expect(result.drift).toEqual([
+      "repository.enable_immutable_releases: declared false != live true; the repository owner enforces immutable releases, so apply cannot change it from the repository",
+    ]);
+    // A matching declaration stays clean even under enforcement.
+    const matching = await repositorySection.run(ctx(api, true), {
+      enable_immutable_releases: true,
+    });
+    expect(matching.drift).toEqual([]);
+  });
+
+  test("a 409 on either immutable-releases write is a note, never a change line", async () => {
+    const conflict = { status: 409, message: "Conflict", body: "" };
+    const put = new MockApi({ "PUT /repos/o/r/immutable-releases": { error: conflict } });
+    const onEnable = await repositorySection.run(ctx(put), { enable_immutable_releases: true });
+    expect(onEnable.changes).toEqual([]);
+    expect(onEnable.notes).toEqual([
+      "repository.enable_immutable_releases: the repository owner enforces immutable releases, so apply cannot change it from the repository (409)",
+    ]);
+    const remove = new MockApi({ "DELETE /repos/o/r/immutable-releases": { error: conflict } });
+    const onDisable = await repositorySection.run(ctx(remove), {
+      enable_immutable_releases: false,
+    });
+    expect(onDisable.changes).toEqual([]);
+    expect(onDisable.notes).toEqual([
+      "repository.enable_immutable_releases: the repository owner enforces immutable releases, so apply cannot change it from the repository (409)",
+    ]);
   });
 });

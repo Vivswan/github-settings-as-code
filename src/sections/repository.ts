@@ -50,6 +50,12 @@ interface ReadableToggle extends FeatureToggle {
   get: EndpointDecl;
   /** Read the enabled state from a successful GET. */
   isEnabled: (data: unknown) => boolean;
+  /**
+   * Read from a successful GET whether the live state is enforced above the
+   * repository (immutable releases' enforced_by_owner), so drift prose says
+   * apply cannot change it instead of promising to set the declared value.
+   */
+  isEnforced?: (data: unknown) => boolean;
 }
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -62,6 +68,13 @@ const permission: SectionPermission = { repo: ["administration"] };
  */
 const LFS_DENIAL_HINT =
   "a 403 here can also mean Git LFS is disabled account-wide or for the root of this repository network, or that the credential lacks billing access (organization repositories need an organization owner or billing manager), rather than a missing token grant";
+
+/**
+ * The declared meaning of the 409 both immutable-releases writes answer when
+ * the repository owner enforces the feature; the apply note and the check
+ * drift prose build on the same words.
+ */
+const OWNER_ENFORCED = "the repository owner enforces immutable releases";
 
 // The repo-level endpoints plus each security toggle's own GET/PUT/DELETE
 // triple, all in one dictionary so the mock server and USED_PATHS derivation
@@ -115,6 +128,21 @@ const ENDPOINTS = {
       422: "the same condition as 404, alternate answer",
     },
   },
+  immutableReleasesGet: {
+    route: "GET /repos/{owner}/{repo}/immutable-releases",
+    statuses: {
+      200: "the immutable releases state readable from the body",
+      404: "immutable releases are not enabled",
+    },
+  },
+  immutableReleasesPut: {
+    route: "PUT /repos/{owner}/{repo}/immutable-releases",
+    statuses: { 204: "immutable releases enabled", 409: OWNER_ENFORCED },
+  },
+  immutableReleasesRemove: {
+    route: "DELETE /repos/{owner}/{repo}/immutable-releases",
+    statuses: { 204: "immutable releases disabled", 409: OWNER_ENFORCED },
+  },
   lfsPut: {
     route: "PUT /repos/{owner}/{repo}/lfs",
     statuses: { 202: "Git LFS enabled (GitHub processes the change asynchronously)" },
@@ -154,6 +182,16 @@ const READABLE_TOGGLES = [
     remove: ENDPOINTS.privateVulnerabilityReportingRemove,
     isEnabled: (data) => (data as { enabled?: boolean } | null)?.enabled === true,
   },
+  {
+    key: "enable_immutable_releases",
+    label: "immutable releases",
+    get: ENDPOINTS.immutableReleasesGet,
+    put: ENDPOINTS.immutableReleasesPut,
+    remove: ENDPOINTS.immutableReleasesRemove,
+    isEnabled: (data) => (data as { enabled?: boolean } | null)?.enabled === true,
+    isEnforced: (data) =>
+      (data as { enforced_by_owner?: boolean } | null)?.enforced_by_owner === true,
+  },
 ] satisfies readonly ReadableToggle[];
 
 const WRITE_ONLY_TOGGLES = [
@@ -165,7 +203,14 @@ const WRITE_ONLY_TOGGLES = [
   },
 ] satisfies readonly FeatureToggle[];
 
-const FEATURE_TOGGLES = [...READABLE_TOGGLES, ...WRITE_ONLY_TOGGLES];
+/**
+ * Every feature toggle, exported for the test that pins the apply loop's
+ * safety contract: the loop reports a change for any tolerated non-409
+ * outcome, so a toggle write may only tolerate statuses the loop knows how
+ * to interpret (409 owner-enforced, and the 404/422 that mean "already
+ * off" on a remove).
+ */
+export const FEATURE_TOGGLES = [...READABLE_TOGGLES, ...WRITE_ONLY_TOGGLES];
 
 /**
  * The keys the repository section handles specially instead of sending them
@@ -218,8 +263,11 @@ export const repositorySection: SectionModule<"repository"> = {
         const probe = await probeAbsent(ctx, this, toggle.get);
         const enabled = "missing" in probe ? false : toggle.isEnabled(probe.data);
         if (enabled !== desired[toggle.key]) {
+          const enforced = "missing" in probe ? false : toggle.isEnforced?.(probe.data) === true;
           result.drift.push(
-            `repository.${toggle.key}: declared ${desired[toggle.key]} != live ${enabled}; apply will set the declared value`,
+            enforced
+              ? `repository.${toggle.key}: declared ${desired[toggle.key]} != live ${enabled}; the repository owner enforces ${toggle.label}, so apply cannot change it from the repository`
+              : `repository.${toggle.key}: declared ${desired[toggle.key]} != live ${enabled}; apply will set the declared value`,
           );
         }
       }
@@ -247,15 +295,21 @@ export const repositorySection: SectionModule<"repository"> = {
       if (!(toggle.key in desired)) {
         continue;
       }
-      if (desired[toggle.key]) {
-        await call(ctx, this, toggle.put);
-      } else {
-        // Disabling where the feature does not apply is already the declared
-        // state; the DELETE's declared >= 400 statuses (e.g. 404/422 for
-        // private vulnerability reporting) are tolerated, anything else is a
-        // real failure. Toggles whose DELETE declares no such statuses
-        // tolerate nothing, so tryCall throws on any error just like call.
-        await tryCall(ctx, this, toggle.remove);
+      // Both writes go through tryCall so each endpoint's declared >= 400
+      // statuses are tolerated: on a DELETE, 404/422 mean the feature does
+      // not apply here, so the declared "off" already holds and the change
+      // line stands (private vulnerability reporting); a 409 on either write
+      // means the setting is enforced above the repository (immutable
+      // releases' owner enforcement), so nothing changed - a note, never a
+      // false change line. An endpoint declaring no >= 400 statuses
+      // tolerates nothing, so tryCall throws on any error just like call.
+      const endpoint = desired[toggle.key] ? toggle.put : toggle.remove;
+      const outcome = await tryCall(ctx, this, endpoint);
+      if ("error" in outcome && outcome.error.status === 409) {
+        result.notes.push(
+          `repository.${toggle.key}: ${(endpoint as EndpointDecl).statuses[409]}, so apply cannot change it from the repository (409)`,
+        );
+        continue;
       }
       result.changes.push(`${toggle.label}: ${desired[toggle.key] ? "enabled" : "disabled"}`);
     }
