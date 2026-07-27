@@ -88,10 +88,12 @@ export interface RepositoryConfig {
 export type UndeclaredPolicy = "keep" | "delete";
 
 /**
- * The wrapped form of a list section, overriding what happens to live
- * resources the file does not declare. The plain array form keeps the
- * section's default policy (or the policy a multi-repo defaults file set
- * for the section); this wrapper can set it explicitly, and with
+ * The wrapped form of a list, overriding what happens to live resources the
+ * file does not declare. The plain array form keeps the list's own default
+ * policy (for a top-level section that is the section default, and a
+ * multi-repo defaults file can set it; a nested list such as
+ * environments[].variables has its own fixed default and never inherits
+ * one); this wrapper can set it explicitly, and with
  * `undeclared` omitted it behaves exactly like the plain array. The wrapper is
  * this action's own vocabulary (nothing here passes through to GitHub), so
  * its keys are strict: anything besides `undeclared` and `entries` is
@@ -101,8 +103,7 @@ export interface UndeclaredPolicyList<E> {
   /**
    * What apply does to live resources `entries` does not declare: "delete"
    * removes them, "keep" leaves them alone and surfaces each as a note.
-   * Omitted, the section's own default applies (a multi-repo defaults file
-   * can set it for its targets).
+   * Omitted, the list's own default applies.
    */
   undeclared?: UndeclaredPolicy;
   /** The declared entries, exactly as the plain array form lists them. */
@@ -173,6 +174,24 @@ export interface EnvironmentConfig {
     /** Restrict to name patterns (declared separately, a known gap). */
     custom_branch_policies: boolean;
   } | null;
+  /**
+   * Actions variables for this environment, reconciled only when this key is
+   * declared (an absent key leaves the live variables untouched). Values are
+   * plain text by design - use environment secrets for anything sensitive.
+   * Within a declared `variables` key, live variables the entries do not
+   * declare are DELETED by default; the wrapped `{undeclared: keep, entries}`
+   * form keeps them as notes. Names match case-insensitively, as GitHub
+   * treats them.
+   */
+  variables?: EnvironmentVariableConfig[] | UndeclaredPolicyList<EnvironmentVariableConfig>;
+}
+
+/** One per-environment Actions variable, matched by case-insensitive name. */
+export interface EnvironmentVariableConfig {
+  /** The variable name, the natural key (case-insensitive on GitHub). */
+  name: string;
+  /** The plain-text value; environment secrets are the place for secrets. */
+  value: string;
 }
 
 /** One autolink reference, matched by key prefix. */

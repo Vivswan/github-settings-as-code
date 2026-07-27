@@ -240,6 +240,9 @@ function genBranches(rng: Rng): Json[] {
 }
 
 function genEnvironments(rng: Rng): Json[] {
+  // The variables draws are NEW, so they live on a forked stream: the main
+  // stream stays stable and recorded seeds keep reproducing.
+  const variablesRng = rng.fork("variables");
   return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const env: Json = { name: `${rng.pick(["staging", "prod", "qa"])}-${i}` };
     if (rng.bool()) {
@@ -247,6 +250,19 @@ function genEnvironments(rng: Rng): Json[] {
     }
     if (rng.bool()) {
       env.prevent_self_review = rng.bool();
+    }
+    if (variablesRng.bool(0.35)) {
+      // Names are unique per environment by the suffix even after the
+      // case-insensitive uppercase match, and mixed-case picks exercise it.
+      // The empty live baseline means an explicit `undeclared` policy would
+      // change no outcome, so the wrapped draw omits it (the keep-note and
+      // delete paths are pinned by curated scenarios); the bare `{entries}`
+      // wrapper still exercises the nested knob's parsing and schema surface.
+      const entries: Json[] = Array.from({ length: variablesRng.int(2) + 1 }, (_, j) => ({
+        name: `${variablesRng.pick(["DEPLOY_REGION", "log_level", "Retries"])}_${j}`,
+        value: variablesRng.pick(["eu-west-1", "debug", "3"]),
+      }));
+      env.variables = variablesRng.bool(0.25) ? { entries } : entries;
     }
     return env;
   });
@@ -1078,7 +1094,9 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
  * read is conditional or check-mode-only are deliberately absent: repository,
  * environments, code_scanning_default_setup, and interaction_limits read
  * only under check (apply
- * writes unconditionally), and branches/actions gate their reads on the
+ * writes unconditionally; environments' variables list additionally fires
+ * only when an entry declares the nested key), and branches/actions gate
+ * their reads on the
  * declared keys - a fault aimed at a read that never happens would fail the
  * non-vacuity assertion instead of testing anything.
  */

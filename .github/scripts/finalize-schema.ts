@@ -20,13 +20,29 @@ const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
   definitions?: Record<string, Record<string, unknown>>;
 };
 
+/**
+ * The {undeclared, entries} knobs nested INSIDE a section entry rather than
+ * at the top level (environments[].variables today), each contributing one
+ * wrapper definition beyond the knobbed sections. Named by the entry type so
+ * the presence check below fails loudly when the generator renames one.
+ */
+const NESTED_POLICY_LISTS = ["UndeclaredPolicyList<EnvironmentVariableConfig>"] as const;
+
 const wrappers = Object.entries(schema.definitions ?? {}).filter(([name]) =>
   name.startsWith("UndeclaredPolicyList<"),
 );
-if (wrappers.length !== UNDECLARED_POLICY_SECTIONS.length) {
+const expected = UNDECLARED_POLICY_SECTIONS.length + NESTED_POLICY_LISTS.length;
+if (wrappers.length !== expected) {
   throw new Error(
-    `finalize-schema: expected ${UNDECLARED_POLICY_SECTIONS.length} UndeclaredPolicyList definitions (one per knobbed section), found ${wrappers.length} - the generator renamed or dropped some, update this script`,
+    `finalize-schema: expected ${expected} UndeclaredPolicyList definitions (one per knobbed section plus the nested knobs), found ${wrappers.length} - the generator renamed or dropped some, update this script`,
   );
+}
+for (const nested of NESTED_POLICY_LISTS) {
+  if (!wrappers.some(([name]) => name === nested)) {
+    throw new Error(
+      `finalize-schema: nested wrapper "${nested}" is missing from the generated definitions - the generator renamed it, update NESTED_POLICY_LISTS`,
+    );
+  }
 }
 for (const [name, definition] of wrappers) {
   const properties = definition.properties as Record<string, unknown> | undefined;

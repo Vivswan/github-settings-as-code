@@ -53,6 +53,8 @@ export interface LiveState {
   branches?: string[];
   /** Deployment environments keyed by name (GET shape). */
   environments?: Record<string, Json>;
+  /** Per-environment Actions variables (GET shape), keyed by environment name. */
+  environment_variables?: Record<string, Json[]>;
   /** Autolinks, replaces the baseline. */
   autolinks?: Json[];
   /** GET /actions/permissions body. */
@@ -125,6 +127,7 @@ export interface MockState {
   branch_protection: Record<string, Json | null>;
   branches: string[];
   environments: Record<string, Json>;
+  environment_variables: Record<string, Json[]>;
   autolinks: Json[];
   actions_permissions: Json;
   selected_actions: Json;
@@ -236,6 +239,7 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     branch_protection: ls.branch_protection ? clone(ls.branch_protection) : {},
     branches: ls.branches ? clone(ls.branches) : [],
     environments: ls.environments ? clone(ls.environments) : {},
+    environment_variables: ls.environment_variables ? clone(ls.environment_variables) : {},
     autolinks: ls.autolinks ? clone(ls.autolinks) : [],
     actions_permissions: ls.actions_permissions ? clone(ls.actions_permissions) : {},
     selected_actions: ls.selected_actions ? clone(ls.selected_actions) : {},

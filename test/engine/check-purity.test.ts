@@ -29,7 +29,13 @@ const FIXTURES: Record<SectionKey, unknown> = {
   labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
   rulesets: { undeclared: "delete", entries: [{ name: "declared-ruleset", target: "branch" }] },
   branches: [{ name: "main", protection: { enforce_admins: true } }],
-  environments: [{ name: "prod", wait_timer: 5 }],
+  environments: [
+    {
+      name: "prod",
+      wait_timer: 5,
+      variables: [{ name: "DEPLOY_REGION", value: "eu-west-1" }],
+    },
+  ],
   autolinks: [{ key_prefix: "NEW-", url_template: "https://x.test/<num>" }],
   actions: { allowed_actions: "all", access_level: "organization" },
   workflows: [{ path: "ci.yml", state: "active" }],
@@ -53,6 +59,21 @@ const ROUTES = {
   },
   "GET /repos/o/r/autolinks": {
     data: [{ id: 1, key_prefix: "OLD-", url_template: "u", is_alphanumeric: true }],
+  },
+  // The environment exists but drifts (wait_timer 1 vs the declared 5), so the
+  // variables comparison path runs too: a divergent value plus an undeclared
+  // live variable exercise the nested drift branches, still read-only.
+  "GET /repos/o/r/environments/prod": {
+    data: { name: "prod", protection_rules: [{ id: 1, type: "wait_timer", wait_timer: 1 }] },
+  },
+  "GET /repos/o/r/environments/prod/variables?per_page=30&page=1": {
+    data: {
+      total_count: 2,
+      variables: [
+        { name: "DEPLOY_REGION", value: "us-east-1" },
+        { name: "STALE", value: "x" },
+      ],
+    },
   },
   "GET /repos/o/r/actions/permissions": { data: { enabled: true, allowed_actions: "selected" } },
   "GET /repos/o/r/actions/permissions/access": { data: { access_level: "none" } },
