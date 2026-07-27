@@ -2,14 +2,15 @@
  * `branches:` section - classic branch protection, Probot schema:
  * [{name, protection: {...} | null}]. The protection PUT requires the four
  * core keys to be present (null is a valid value); protection: null removes
- * protection entirely.
+ * protection entirely. required_signatures is the one toggle the PUT does
+ * not accept (GitHub silently drops it), so it is stripped from the payload
+ * and applied through its own POST/DELETE sub-endpoint after the PUT.
  */
 
 import { z } from "zod";
 import { subsetDiff } from "../engine/diff.js";
 import type { BranchConfig } from "../schema.js";
 import {
-  anyRecord,
   call,
   type EndpointDecl,
   emptyResult,
@@ -47,6 +48,17 @@ const ENDPOINTS = {
     route: "DELETE /repos/{owner}/{repo}/branches/{branch}/protection",
     statuses: { 204: "protection removed" },
   },
+  // required_signatures lives on its own sub-resource (the protection PUT
+  // silently drops the key), so the declared boolean is applied through
+  // these two calls right after a successful PUT.
+  sigPost: {
+    route: "POST /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures",
+    statuses: { 200: "signed commits now required" },
+  },
+  sigDelete: {
+    route: "DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures",
+    statuses: { 204: "signed-commit requirement removed" },
+  },
   // Advisory branch-existence probe: called directly via tryRequest (not
   // through the enforced helpers), declared here so the dictionary is
   // complete for downstream mock-route and USED_PATHS derivation. It is
@@ -67,7 +79,24 @@ export const branchesSection: SectionModule<"branches"> = {
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
-  shape: z.array(z.looseObject({ name: z.string(), protection: anyRecord.nullable() })),
+  // protection stays a passthrough record except its one routed key: the
+  // signature toggle is typed so a YAML-quoted "true" fails upfront in
+  // document validation, before any section writes (the 1A/1C precedent).
+  shape: z.array(
+    z.looseObject({
+      name: z.string(),
+      protection: z
+        .looseObject({
+          required_signatures: z
+            .boolean({
+              error:
+                'required_signatures must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the toggle direction is unambiguous',
+            })
+            .optional(),
+        })
+        .nullable(),
+    }),
+  ),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as BranchConfig[];
@@ -99,6 +128,11 @@ export const branchesSection: SectionModule<"branches"> = {
       }
       // The classic API rejects payloads missing the core keys; fill nulls.
       const payload: Record<string, unknown> = { ...branch.protection };
+      // GitHub's protection PUT silently DROPS required_signatures, so it
+      // must never ride the payload; the sub-endpoint calls after the PUT
+      // apply the declared toggle instead.
+      const requiredSignatures = payload.required_signatures as boolean | undefined;
+      delete payload.required_signatures;
       for (const key of REQUIRED_PROTECTION_KEYS) {
         if (!(key in payload)) {
           payload[key] = null;
@@ -130,6 +164,13 @@ export const branchesSection: SectionModule<"branches"> = {
           // GET shapes booleans as {enabled: bool}; compare declared keys
           // against a flattened view.
           const live = flattenProtection(probe.data as Record<string, unknown>);
+          // The protection GET OMITS required_signatures entirely when
+          // signed commits are not required, so an absent live field means
+          // false; normalize before the diff so declared false does not
+          // read as drift.
+          if (!("required_signatures" in live)) {
+            live.required_signatures = false;
+          }
           result.drift.push(
             ...subsetDiff(branch.protection, live, `branches[${branch.name}].protection`),
           );
@@ -149,6 +190,20 @@ export const branchesSection: SectionModule<"branches"> = {
           payload,
           describe: `replacing protection for branch "${branch.name}"`,
         });
+        // The declared toggle is applied once the PUT has ensured the
+        // protection (and with it the sub-resource) exists; an undeclared
+        // toggle leaves the live requirement alone.
+        if (requiredSignatures === true) {
+          await call(ctx, this, ENDPOINTS.sigPost, {
+            params: { branch: branch.name },
+            describe: `requiring signed commits on branch "${branch.name}"`,
+          });
+        } else if (requiredSignatures === false) {
+          await call(ctx, this, ENDPOINTS.sigDelete, {
+            params: { branch: branch.name },
+            describe: `removing the signed-commit requirement from branch "${branch.name}"`,
+          });
+        }
         result.changes.push(`applied protection to "${branch.name}"`);
       }
     }

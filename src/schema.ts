@@ -108,7 +108,15 @@ export interface RulesetConfig {
 export interface BranchConfig {
   /** The branch name. */
   name: string;
-  /** PUT .../protection payload; null removes protection (Probot parity). */
+  /**
+   * PUT .../protection payload; null removes protection (Probot parity).
+   * `required_signatures` (a boolean) is the one key the PUT does not
+   * accept, so it is applied through its own
+   * POST/DELETE .../protection/required_signatures sub-endpoint instead.
+   * GitHub does not document whether the protection PUT preserves an
+   * existing signature requirement, so declare the toggle on any branch
+   * that carries one - a declared value is pinned either way.
+   */
   protection: Record<string, unknown> | null;
 }
 

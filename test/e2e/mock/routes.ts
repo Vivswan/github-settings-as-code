@@ -488,12 +488,48 @@ const HANDLERS: Record<string, Handler> = {
   "branches.putProtection": ({ state, pathname, body }) => {
     const branch = segmentFromEnd(pathname, 1);
     const stored = protectionFromPut(asObject(body));
+    // The signed-commit requirement is its own sub-resource and absent from
+    // the PUT's request schema (protectionFromPut drops any
+    // required_signatures the body smuggles in). Whether GitHub's PUT
+    // PRESERVES an existing requirement is not documented; the mock carries
+    // it across as the conservative reading, and the user-facing docs tell
+    // anyone relying on the requirement to DECLARE the toggle, which pins
+    // the state under either upstream behavior.
+    const previous = state.branch_protection[branch];
+    if (previous && previous.required_signatures !== undefined) {
+      stored.required_signatures = previous.required_signatures;
+    }
     state.branch_protection[branch] = stored;
     return ok(stored);
   },
   "branches.removeProtection": ({ state, pathname }) => {
     const branch = segmentFromEnd(pathname, 1);
     state.branch_protection[branch] = null;
+    return noContent();
+  },
+  "branches.sigPost": ({ state, pathname }) => {
+    const branch = segmentFromEnd(pathname, 2); // .../branches/{branch}/protection/required_signatures
+    const protection = state.branch_protection[branch];
+    if (!protection) {
+      return { status: 404, body: { message: "Branch not protected" } };
+    }
+    protection.required_signatures = { enabled: true };
+    // The documented 200 body carries {url, enabled}; the url stays out of
+    // the stored state so the flattener sees the same shape a GET serves.
+    return ok({
+      url: `https://api.github.com/repos/e2e-owner/e2e-repo/branches/${branch}/protection/required_signatures`,
+      enabled: true,
+    });
+  },
+  "branches.sigDelete": ({ state, pathname }) => {
+    const branch = segmentFromEnd(pathname, 2);
+    const protection = state.branch_protection[branch];
+    if (!protection) {
+      return { status: 404, body: { message: "Branch not protected" } };
+    }
+    // The GET shape OMITS the field when signatures are not required, so a
+    // delete removes the key instead of storing {enabled: false}.
+    delete protection.required_signatures;
     return noContent();
   },
   "branches.branchProbe": ({ state, pathname }) => {
