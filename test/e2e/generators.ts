@@ -122,6 +122,9 @@ function genRepository(rng: Rng): Json {
   if (rng.bool(0.3)) {
     repo.enable_git_lfs = rng.bool();
   }
+  if (rng.bool(0.3)) {
+    repo.enable_immutable_releases = rng.bool();
+  }
   // Always leave at least one key so the section does real work.
   if (Object.keys(repo).length === 0) {
     repo.has_issues = rng.bool();

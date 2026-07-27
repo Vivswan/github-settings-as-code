@@ -1092,6 +1092,7 @@ describe("handler statuses obey the realism rule", () => {
             vulnerability_alerts_enabled: true,
             automated_security_fixes_enabled: true,
             private_vulnerability_reporting_enabled: true,
+            immutable_releases_enabled: true,
           },
         },
       }),
@@ -1099,7 +1100,7 @@ describe("handler statuses obey the realism rule", () => {
     // (key, method, path, body?) tuples. Ordering matters where one call sets
     // up another (e.g. a create before the list, a remove last).
     const cases: Array<[string, string, string, unknown?]> = [
-      // repository core + all three security toggles (enabled GET, put, remove)
+      // repository core + all four readable toggles (enabled GET, put, remove)
       ["repository.get", "GET", `/repos/${OWNER}/${REPO}`],
       ["repository.update", "PATCH", `/repos/${OWNER}/${REPO}`, { description: "x" }],
       ["repository.topics", "PUT", `/repos/${OWNER}/${REPO}/topics`, { names: ["a"] }],
@@ -1139,6 +1140,13 @@ describe("handler statuses obey the realism rule", () => {
         "repository.privateVulnerabilityReportingRemove",
         "DELETE",
         `/repos/${OWNER}/${REPO}/private-vulnerability-reporting`,
+      ],
+      ["repository.immutableReleasesGet", "GET", `/repos/${OWNER}/${REPO}/immutable-releases`],
+      ["repository.immutableReleasesPut", "PUT", `/repos/${OWNER}/${REPO}/immutable-releases`],
+      [
+        "repository.immutableReleasesRemove",
+        "DELETE",
+        `/repos/${OWNER}/${REPO}/immutable-releases`,
       ],
       // labels: create, list, update, then the error branches, then remove
       ["labels.create", "POST", labelsPath, { name: "feat" }],
@@ -1278,7 +1286,8 @@ describe("handler statuses obey the realism rule", () => {
   test("security-toggle GET returns an allowed status when the feature is absent", async () => {
     // A second server with the toggles unset exercises the "not enabled"
     // branches: vulnerability-alerts 404, automated-security-fixes 404,
-    // private-vulnerability-reporting 200 (enabled: false).
+    // private-vulnerability-reporting 200 (enabled: false),
+    // immutable-releases 404.
     const h = await start(scenario());
     const branches: Array<[string, string]> = [
       ["repository.vulnerabilityAlertsGet", `/repos/${OWNER}/${REPO}/vulnerability-alerts`],
@@ -1287,9 +1296,30 @@ describe("handler statuses obey the realism rule", () => {
         "repository.privateVulnerabilityReportingGet",
         `/repos/${OWNER}/${REPO}/private-vulnerability-reporting`,
       ],
+      ["repository.immutableReleasesGet", `/repos/${OWNER}/${REPO}/immutable-releases`],
     ];
     for (const [key, path] of branches) {
       const res = await call(h, "GET", path);
+      expect(statusAllowed(key, res.status)).toBe(true);
+    }
+  });
+
+  test("owner-enforced immutable releases answer 409 on both writes", async () => {
+    // The declared-409 branches: under the enforcement flag the mock must
+    // refuse both write directions with the documented status, never an
+    // undeclared 2xx.
+    const h = await start(
+      scenario({
+        live_state: {
+          repo: { immutable_releases_enabled: true, immutable_releases_enforced_by_owner: true },
+        },
+      }),
+    );
+    for (const method of ["PUT", "DELETE"] as const) {
+      const res = await call(h, method, `/repos/${OWNER}/${REPO}/immutable-releases`);
+      expect(res.status).toBe(409);
+      const key =
+        method === "PUT" ? "repository.immutableReleasesPut" : "repository.immutableReleasesRemove";
       expect(statusAllowed(key, res.status)).toBe(true);
     }
   });

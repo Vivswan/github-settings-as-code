@@ -1,0 +1,26 @@
+# Check mode against owner-enforced immutable releases with a declared false:
+# declared != effective IS drift (check stays red even though apply cannot fix
+# it from the repository), and the prose says the owner enforces it instead of
+# promising that apply will set the declared value.
+name: repository-immutable-releases-check-drift
+settings:
+  repository:
+    enable_immutable_releases: false
+inputs:
+  mode: check
+live_state:
+  repo:
+    immutable_releases_enabled: true
+    immutable_releases_enforced_by_owner: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    repository: drift
+  never:
+    - "PUT /repos/{repo}/immutable-releases"
+    - "DELETE /repos/{repo}/immutable-releases"
+  stdout_contains:
+    - "the repository owner enforces immutable releases, so apply cannot change it from the repository"
