@@ -1222,6 +1222,33 @@ describe("handler statuses obey the realism rule", () => {
         `/repos/${OWNER}/${REPO}/actions/permissions/access`,
         { access_level: "none" },
       ],
+      [
+        "actions.getForkPrApproval",
+        "GET",
+        `/repos/${OWNER}/${REPO}/actions/permissions/fork-pr-contributor-approval`,
+      ],
+      [
+        "actions.putForkPrApproval",
+        "PUT",
+        `/repos/${OWNER}/${REPO}/actions/permissions/fork-pr-contributor-approval`,
+        { approval_policy: "first_time_contributors" },
+      ],
+      [
+        "actions.getForkPrPrivate",
+        "GET",
+        `/repos/${OWNER}/${REPO}/actions/permissions/fork-pr-workflows-private-repos`,
+      ],
+      [
+        "actions.putForkPrPrivate",
+        "PUT",
+        `/repos/${OWNER}/${REPO}/actions/permissions/fork-pr-workflows-private-repos`,
+        {
+          run_workflows_from_fork_pull_requests: true,
+          send_write_tokens_to_workflows: false,
+          send_secrets_and_variables: false,
+          require_approval_for_fork_pr_workflows: true,
+        },
+      ],
       // workflows: list, enable/disable (both + 404 branches)
       ["workflows.list", "GET", `/repos/${OWNER}/${REPO}/actions/workflows`],
       ["workflows.enable", "PUT", `/repos/${OWNER}/${REPO}/actions/workflows/9/enable`],

@@ -600,6 +600,31 @@ const HANDLERS: Record<string, Handler> = {
     state.oidc_customization_sub = asObject(body);
     return { status: 201, body: {} };
   },
+  "actions.getForkPrApproval": ({ state }) => ok(state.fork_pr_contributor_approval),
+  "actions.putForkPrApproval": ({ state, body }) => {
+    // The PUT body is the same required-approval_policy shape the GET
+    // returns, so the body replaces the stored policy wholesale.
+    state.fork_pr_contributor_approval = asObject(body);
+    return noContent();
+  },
+  // Both fork-pr-workflows-private-repos handlers serve every repository,
+  // visibility included, ON PURPOSE. GitHub documents the pair for private
+  // repositories but not what a public repository answers (the contract's
+  // 403 is bare), so EITHER mock behavior would be a guess - and the engine
+  // has no visibility branch on this path (repo visibility feeds only the
+  // redaction machinery), so a visibility-gated denial would exercise no
+  // engine code the fine_grained denial scenarios do not already cover.
+  // The section's denialHint carries the ambiguity for real users, and the
+  // curated scenarios pin the private-repo case.
+  "actions.getForkPrPrivate": ({ state }) => ok(state.fork_pr_workflows_private_repos),
+  "actions.putForkPrPrivate": ({ state, body }) => {
+    // Stored verbatim: the section's shape requires the complete four-toggle
+    // policy, so the mock never has to model GitHub's UNDOCUMENTED behavior
+    // for an omitted toggle (preserve vs reset), and a complete body makes
+    // replace and merge identical anyway.
+    state.fork_pr_workflows_private_repos = asObject(body);
+    return noContent();
+  },
 
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {

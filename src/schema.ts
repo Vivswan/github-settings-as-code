@@ -187,6 +187,31 @@ export interface ActionsConfig {
     include_claim_keys?: string[];
     use_immutable_subject?: boolean;
   };
+  /**
+   * PUT /repos/{r}/actions/permissions/fork-pr-contributor-approval: when
+   * workflows triggered by fork pull requests need a maintainer's approval
+   * before they run, e.g. { approval_policy: first_time_contributors }.
+   * The policies GitHub accepts today are
+   * first_time_contributors_new_to_github, first_time_contributors, and
+   * all_external_contributors. The body passes through verbatim, so future
+   * fields GitHub adds work unchanged.
+   */
+  fork_pr_contributor_approval?: { approval_policy: string };
+  /**
+   * PUT /repos/{r}/actions/permissions/fork-pr-workflows-private-repos:
+   * whether pull requests from forks may run workflows on this private
+   * repository, and what those workflows receive. All four toggles are
+   * required: GitHub does not document whether the PUT preserves or resets
+   * an omitted toggle, so the file declares the complete policy - which is
+   * also the posture that leaves no toggle unwatched. The body passes
+   * through verbatim, so future fields GitHub adds work unchanged.
+   */
+  fork_pr_workflows_private_repos?: {
+    run_workflows_from_fork_pull_requests: boolean;
+    send_write_tokens_to_workflows: boolean;
+    send_secrets_and_variables: boolean;
+    require_approval_for_fork_pr_workflows: boolean;
+  };
 }
 
 /** One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo). */

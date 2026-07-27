@@ -71,6 +71,10 @@ export interface LiveState {
   cache_storage_limit?: Json;
   /** GET /actions/oidc/customization/sub body. */
   oidc_customization_sub?: Json;
+  /** GET /actions/permissions/fork-pr-contributor-approval body. */
+  fork_pr_contributor_approval?: Json;
+  /** GET /actions/permissions/fork-pr-workflows-private-repos body. */
+  fork_pr_workflows_private_repos?: Json;
   /** Workflows list items ({id, name, path, state}), replaces the baseline. */
   workflows?: Json[];
   /** GET /pages body, or null for "Pages not enabled". */
@@ -124,6 +128,8 @@ export interface MockState {
   cache_retention_limit: Json;
   cache_storage_limit: Json;
   oidc_customization_sub: Json;
+  fork_pr_contributor_approval: Json;
+  fork_pr_workflows_private_repos: Json;
   workflows: Json[];
   pages: Json | null;
   code_scanning: Json;
@@ -242,6 +248,17 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     oidc_customization_sub: ls.oidc_customization_sub
       ? clone(ls.oidc_customization_sub)
       : { use_default: true },
+    fork_pr_contributor_approval: ls.fork_pr_contributor_approval
+      ? clone(ls.fork_pr_contributor_approval)
+      : { approval_policy: "first_time_contributors_new_to_github" },
+    fork_pr_workflows_private_repos: ls.fork_pr_workflows_private_repos
+      ? clone(ls.fork_pr_workflows_private_repos)
+      : {
+          run_workflows_from_fork_pull_requests: false,
+          send_write_tokens_to_workflows: false,
+          send_secrets_and_variables: false,
+          require_approval_for_fork_pr_workflows: true,
+        },
     workflows: ls.workflows ? clone(ls.workflows) : [],
     pages: ls.pages !== undefined ? clone(ls.pages) : null,
     code_scanning: ls.code_scanning ? clone(ls.code_scanning) : {},
