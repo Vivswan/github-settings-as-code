@@ -1,0 +1,38 @@
+name: actions-variables-check-drift
+description: >
+  Check mode surfaces all three kinds of Actions-variable drift at once: a
+  value change, a declared variable missing from the repo, and a live
+  variable the settings file does not declare (which apply would delete,
+  the section's default policy). The run reports drift, exits 1, and writes
+  nothing.
+settings:
+  actions_variables:
+    - name: DEPLOY_REGION
+      value: eu-west-1
+    - name: BUILD_MODE
+      value: release
+live_state:
+  actions_variables:
+    - name: DEPLOY_REGION
+      value: us-east-1
+      created_at: "2026-01-01T00:00:00Z"
+      updated_at: "2026-01-01T00:00:00Z"
+    - name: RETIRED_FLAG
+      value: "off"
+      created_at: "2026-01-01T00:00:00Z"
+      updated_at: "2026-01-01T00:00:00Z"
+inputs:
+  mode: check
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    actions_variables: drift
+  never:
+    - POST /repos/{repo}/actions/variables
+    - PATCH /repos/{repo}/actions/variables
+    - DELETE /repos/{repo}/actions/variables
+  summary_contains:
+    - "actions_variables[DEPLOY_REGION].value"
+    - "apply will create it"
+    - "undeclared"

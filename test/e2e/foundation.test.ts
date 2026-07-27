@@ -192,6 +192,7 @@ describe("denial semantics", () => {
     expect(denied.sort()).toEqual(
       [
         "actions",
+        "actions_variables",
         "autolinks",
         "code_scanning_default_setup",
         "collaborators",

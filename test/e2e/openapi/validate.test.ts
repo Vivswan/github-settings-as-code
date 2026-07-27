@@ -7,6 +7,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { endpointMethod, endpointPath } from "../../../src/sections/contract.js";
+import { allEndpoints } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/routes.js";
 import { excludeUndocumented, USED_PATHS } from "./paths.js";
 import {
@@ -288,6 +291,58 @@ describe("OpenApiValidator against the fetched spec", () => {
     // The full repo schema has many required fields; assert the PATH matched
     // (no unknown-route violation), which is the routing contract under test.
     expect(violations.filter((x) => x.kind === "unknown-route")).toEqual([]);
+  });
+
+  test("every declared endpoint's pageSize matches the spec's documented per_page cap", () => {
+    // The per_page maximum is NOT machine-readable: the parameter schema
+    // carries only type and default, and the cap lives in the description
+    // prose. GitHub CLAMPS an oversized per_page rather than honoring it,
+    // and the page loop terminates on a short page - so a list endpoint
+    // with an undeclared sub-100 cap silently truncates after page one.
+    // This sweep parses the cap out of each declared endpoint's per_page
+    // description and pins EndpointDecl.pageSize to it, so a new section
+    // on a capped endpoint (the variables family is capped at 30) cannot
+    // ship the truncation bug.
+    const spec = JSON.parse(
+      readFileSync(new URL("./github-openapi.trimmed.json", import.meta.url), "utf8"),
+    ) as {
+      paths?: Record<
+        string,
+        Record<string, { parameters?: unknown[] }> & { parameters?: unknown[] }
+      >;
+    };
+    // The trimmed spec is fetched fully dereferenced (trim-openapi.ts
+    // rejects any surviving $ref), so parameters are inline objects.
+    const asParam = (param: unknown): { name?: string; description?: string } =>
+      param as { name?: string; description?: string };
+    let cappedEndpoints = 0;
+    for (const [key, endpoint] of Object.entries(allEndpoints())) {
+      const path = endpointPath(endpoint.route);
+      const method = endpointMethod(endpoint.route).toLowerCase();
+      const pathItem = spec.paths?.[path];
+      const operation = pathItem?.[method];
+      if (!operation) {
+        continue; // supplemental routes are absent from the spec
+      }
+      const parameters = [...(operation.parameters ?? []), ...(pathItem?.parameters ?? [])];
+      const perPage = parameters.map(asParam).find((p) => p.name === "per_page");
+      if (perPage === undefined) {
+        continue; // not a paginated endpoint
+      }
+      const capMatch = (perPage.description ?? "").match(/max(?:imum)?(?: of)? (\d+)/i);
+      const cap = capMatch ? Number(capMatch[1]) : 100;
+      const expected = Math.min(cap, 100);
+      if (expected < 100) {
+        cappedEndpoints++;
+      }
+      expect(
+        endpoint.pageSize ?? 100,
+        `${key} (${endpoint.route}): the spec documents a per_page cap of ${cap}, so the declaration must carry pageSize ${expected < 100 ? expected : "unset (standard 100)"}`,
+      ).toBe(expected);
+    }
+    // The variables list is capped at 30; zero capped endpoints means the
+    // description regex rotted, not that every endpoint takes 100.
+    expect(cappedEndpoints).toBeGreaterThan(0);
   });
 
   test("a path the spec does not document is an unknown-route violation", () => {

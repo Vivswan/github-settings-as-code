@@ -461,6 +461,7 @@ describe("genScenario", () => {
     "pages",
     "code_scanning_alerts",
     "contents",
+    "variables",
     "org_members",
   ]);
 

@@ -129,6 +129,17 @@ describe("pagination slicing", () => {
     expect(slicePage(items, { per_page: "0", page: "-1" })).toHaveLength(100);
   });
 
+  test("an endpoint cap clamps an oversized request, exactly as GitHub does", () => {
+    // The variables list is capped at 30: a client asking for 100 gets 30
+    // per page, which is precisely the behavior EndpointDecl.pageSize
+    // exists to survive - the mock must not be more generous than GitHub.
+    const items = Array.from({ length: 40 }, (_, i) => i);
+    expect(slicePage(items, { per_page: "100", page: "1" }, 30)).toHaveLength(30);
+    expect(slicePage(items, { per_page: "100", page: "2" }, 30)).toHaveLength(10);
+    // A request under the cap is honored as asked.
+    expect(slicePage(items, { per_page: "10", page: "1" }, 30)).toHaveLength(10);
+  });
+
   test("a page past the end is empty", () => {
     expect(slicePage([1, 2, 3], { per_page: "100", page: "5" })).toHaveLength(0);
   });

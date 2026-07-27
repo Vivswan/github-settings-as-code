@@ -9,7 +9,7 @@ silently.
 ## Usage
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token):
-   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&contents=read)
+   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&variables=write&contents=read)
    starts you off with every repository permission the
    [Sections](#sections) table can need. Pick the resource owner and
    repositories, and add Members: read by hand when the owner is an
@@ -120,6 +120,7 @@ Task-oriented walkthroughs live in [docs/](docs/README.md):
 | `teams` | org team repo permissions | Members: read (org permission) + Administration: write | org repos only, skipped with a notice on personal accounts; undeclared untouched |
 | `milestones` | milestones | Issues: write | upsert by title; undeclared kept by default (settable; deleting detaches issues) |
 | `interaction_limits` | interaction-limits | Administration: write | re-arms the self-expiring limit every apply run (expiry is write-only, max six_months); `null` clears it (in multi-repo mode a target's `null` is a defaults opt-out when the defaults declare one, like `pages`); a 409 (org/user-level limit overrides) becomes a note on apply, while check still reports drift; undeclared untouched |
+| `actions_variables` | Actions variables CRUD | Variables: write | plain-text repository variables upserted by name; names are case-insensitive (GitHub stores them uppercased); values read back in full, so check mode diffs them exactly (secrets are write-only material and deliberately not this section); undeclared deleted by default (settable) |
 
 ## Semantics
 
@@ -161,11 +162,11 @@ scope by design.
 
 ## Undeclared resources
 
-Five sections enumerate the live resources next to the declared ones, and
+Six sections enumerate the live resources next to the declared ones, and
 each has a default policy for the ones the file does not declare: `labels`,
-`autolinks`, and `collaborators` delete them; `rulesets` and `milestones`
-keep them and list each as a note. A section's list value can override that
-default with a wrapped form:
+`autolinks`, `collaborators`, and `actions_variables` delete them; `rulesets`
+and `milestones` keep them and list each as a note. A section's list value
+can override that default with a wrapped form:
 
 ```yaml
 labels:
@@ -505,10 +506,10 @@ settings file declares; the action never needs more. In multi-repo mode
 the token needs the same permissions on every target repository.
 
 To manage everything in one PAT, grant Administration, Issues,
-Environments, Pages, and Actions at write, plus Contents at read and (for
-org repos) the Members organization permission at read. The pre-filled
-token form linked under [Usage](#usage) grants exactly the repository
-half of that set.
+Environments, Pages, Actions, and Variables at write, plus Contents at
+read and (for org repos) the Members organization permission at read. The
+pre-filled token form linked under [Usage](#usage) grants exactly the
+repository half of that set.
 
 Three things worth knowing when a run fails on permissions:
 
@@ -566,7 +567,8 @@ object-shaped sections keep their original Probot shapes).
 Uninstall the app, add the workflow above, and optionally move branch
 protection to `rulesets`. Differences: applies run visibly in Actions
 (loud failures instead of silent skips), rulesets are supported, and
-nothing except labels/autolinks/collaborators is ever deleted implicitly.
+nothing except labels/autolinks/collaborators/Actions variables is ever
+deleted implicitly.
 
 In short, what you gain over the app:
 
