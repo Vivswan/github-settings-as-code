@@ -61,6 +61,18 @@ The owner exemption for collaborators does not move with the knob: under
 `undeclared: delete` (the default) every undeclared direct collaborator is
 removed except the repository owner.
 
+## The nested variables knob
+
+One list carries the same wrapped form WITHOUT being a top-level section:
+`environments[].variables`. Each environment entry's variables list accepts
+the plain array or `{undeclared, entries}`, and its default is delete
+within a declared `variables` key - the file is that environment's
+variable inventory. The knob is set per environment entry, and it never
+inherits a policy through the multi-repo defaults merge: arrays replace
+wholesale in that merge, so a target that declares `environments` replaces
+the defaults' entire environments array - individual entries never merge,
+and neither do the knobs inside them.
+
 ## Deleting milestones detaches issues
 
 Deleting a milestone does not delete the issues in it; it detaches the
@@ -111,6 +123,9 @@ fleet's policy to delete, declare the fleet's entries in the same defaults
 section, so omitting targets keep them. A check run shows the resulting
 deletions as drift before an apply performs them.
 
-One boundary to know about: the policy is a property of these six
-top-level section lists only. Nothing else inherits it - not other
-sections, and not anything nested inside them.
+One boundary to know about: HAVING a policy and INHERITING one are
+different things. The six top-level section lists take the policy through
+the multi-repo defaults merge as described above. The nested
+`environments[].variables` list has its own knob, set per environment
+entry with its own fixed default - it never inherits a policy from its
+section, from another list, or through the defaults merge.

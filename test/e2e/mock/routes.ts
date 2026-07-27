@@ -574,6 +574,81 @@ const HANDLERS: Record<string, Handler> = {
     state.environments[name] = { name, ...environmentFromPut(asObject(body)) };
     return ok(state.environments[name]);
   },
+  // Every variables handler 404s for an environment that does not exist: the
+  // variables live under the environment, and the section only calls them
+  // after its probe (check) or PUT (apply) proved the environment is there.
+  "environments.listVariables": ({ state, pathname, query }) => {
+    const env = segmentFromEnd(pathname, 1); // .../environments/{name}/variables
+    if (!state.environments[env]) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    const variables = state.environment_variables[env] ?? [];
+    // Clamp from the endpoint declaration, exactly like the repository
+    // variables list: one source for the client loop, the sweep, and here.
+    return ok({
+      total_count: variables.length,
+      variables: slicePage(
+        variables,
+        query,
+        allEndpoints()["environments.listVariables"]?.pageSize,
+      ),
+    });
+  },
+  "environments.createVariable": ({ state, pathname, body }) => {
+    const env = segmentFromEnd(pathname, 1);
+    if (!state.environments[env]) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    const payload = asObject(body);
+    let list = state.environment_variables[env];
+    if (!list) {
+      list = [];
+      state.environment_variables[env] = list;
+    }
+    // A duplicate (case-insensitive) name conflicts, matching GitHub; the
+    // section never POSTs a duplicate (it PATCHes an existing variable).
+    if (list.some((v) => environmentVariableName(v) === String(payload.name).toUpperCase())) {
+      return { status: 409, body: { message: "Variable already exists" } };
+    }
+    // Fixed timestamps keep repeat applies byte-stable for the idempotence
+    // proof; the section never reads them.
+    list.push({
+      name: payload.name,
+      value: payload.value,
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-07-01T00:00:00Z",
+    });
+    return { status: 201, body: {} };
+  },
+  "environments.updateVariable": ({ state, pathname, body }) => {
+    const env = segmentFromEnd(pathname, 2); // .../environments/{env}/variables/{name}
+    const name = lastSegment(pathname);
+    const variable = (state.environment_variables[env] ?? []).find(
+      (v) => environmentVariableName(v) === name.toUpperCase(),
+    );
+    if (!state.environments[env] || !variable) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    const payload = asObject(body);
+    if (typeof payload.name === "string") {
+      variable.name = payload.name;
+    }
+    if (typeof payload.value === "string") {
+      variable.value = payload.value;
+    }
+    return noContent();
+  },
+  "environments.removeVariable": ({ state, pathname }) => {
+    const env = segmentFromEnd(pathname, 2);
+    const name = lastSegment(pathname);
+    const list = state.environment_variables[env] ?? [];
+    const index = list.findIndex((v) => environmentVariableName(v) === name.toUpperCase());
+    if (!state.environments[env] || index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    list.splice(index, 1);
+    return noContent();
+  },
 
   // autolinks --------------------------------------------------------------
   "autolinks.list": ({ state }) => ok(state.autolinks), // section GETs unpaginated
@@ -1023,6 +1098,11 @@ function booleanToggleGet(enabled: boolean): MockResponse {
 
 function labelName(label: Json): string {
   return String(label.name).toLowerCase();
+}
+
+/** A variable's case-insensitive matching key (GitHub uppercases the match). */
+function environmentVariableName(variable: Json): string {
+  return String(variable.name).toUpperCase();
 }
 
 /**
