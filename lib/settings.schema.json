@@ -386,6 +386,49 @@
       },
       "type": "object"
     },
+    "RepositoryConfig": {
+      "additionalProperties": {
+        "description": "Everything else passes through to PATCH /repos/{r} verbatim."
+      },
+      "description": "The `repository:` section. Every field not documented here is sent verbatim to PATCH /repos/{r} (Probot parity), so current and future repo fields work unchanged; the keys below route to their own endpoints instead. Only declared keys are ever applied or compared.",
+      "properties": {
+        "enable_automated_security_fixes": {
+          "description": "Dependabot security updates, via PUT/DELETE /repos/{r}/automated-security-fixes. On read, 404 means off, as does a 200 body with enabled: false.",
+          "type": "boolean"
+        },
+        "enable_git_lfs": {
+          "description": "Git LFS, via PUT/DELETE /repos/{r}/lfs. Write-only upstream: check mode cannot verify it, and apply re-asserts it on every run.",
+          "type": "boolean"
+        },
+        "enable_immutable_releases": {
+          "description": "Immutable releases, via PUT/DELETE /repos/{r}/immutable-releases. On read, 404 means off. When the repository owner enforces immutable releases (enforced_by_owner in the GET body), writes answer 409 and the setting cannot be changed from the repository; apply reports that as a note instead of a change.",
+          "type": "boolean"
+        },
+        "enable_private_vulnerability_reporting": {
+          "description": "Private vulnerability reporting, via PUT/DELETE /repos/{r}/private-vulnerability-reporting. Repositories where the feature does not apply (observed: private repos) read as off.",
+          "type": "boolean"
+        },
+        "enable_vulnerability_alerts": {
+          "description": "Dependabot alerts, via PUT/DELETE /repos/{r}/vulnerability-alerts. On read, 404 means off.",
+          "type": "boolean"
+        },
+        "topics": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped."
+        }
+      },
+      "type": "object"
+    },
     "RulesetConfig": {
       "description": "One repository ruleset, matched to the live repo by name.",
       "properties": {
@@ -539,9 +582,8 @@
           "description": "GitHub Pages configuration; null disables Pages on the repository."
         },
         "repository": {
-          "additionalProperties": {},
-          "description": "Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys below.",
-          "type": "object"
+          "$ref": "#/definitions/RepositoryConfig",
+          "description": "Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents."
         },
         "rulesets": {
           "description": "Repository rulesets, upserted by name; undeclared ones are kept.",

@@ -1,0 +1,22 @@
+# Disabling immutable releases where they are live enabled (and NOT
+# owner-enforced) issues the DELETE and reports the change. The convergence
+# rerun probes GET, reads the 404 as off, and finds it matching.
+name: repository-immutable-releases-disable
+settings:
+  repository:
+    enable_immutable_releases: false
+live_state:
+  repo:
+    immutable_releases_enabled: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    repository: applied
+  mutations:
+    - "DELETE /repos/{repo}/immutable-releases"
+  summary_contains:
+    - immutable releases
+  converges: true
