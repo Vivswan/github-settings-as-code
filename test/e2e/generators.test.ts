@@ -464,6 +464,8 @@ describe("genScenario", () => {
     "variables",
     "webhooks",
     "secrets",
+    "dependabot_secrets",
+    "codespaces_secrets",
     "org_members",
   ]);
 

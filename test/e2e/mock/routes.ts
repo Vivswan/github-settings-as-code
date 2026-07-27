@@ -656,6 +656,55 @@ const HANDLERS: Record<string, Handler> = {
     list.splice(index, 1);
     return noContent();
   },
+  // Every environment-secrets handler 404s for an environment that does not
+  // exist, like the variables handlers: the secrets live under the
+  // environment, and the section only calls them after its probe (check) or
+  // PUT (apply) proved the environment is there. The seal/unseal and
+  // timestamp semantics are the shared secret-family helpers'.
+  "environments.listSecrets": ({ state, pathname, query }) => {
+    const env = segmentFromEnd(pathname, 1); // .../environments/{name}/secrets
+    if (!state.environments[env]) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    return secretsList(state.environment_secrets[env] ?? [], query);
+  },
+  "environments.secretsPublicKey": ({ state, pathname }) => {
+    const env = segmentFromEnd(pathname, 2); // .../environments/{name}/secrets/public-key
+    if (!state.environments[env]) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    return ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY });
+  },
+  "environments.putSecret": ({ state, pathname, body }) => {
+    const env = segmentFromEnd(pathname, 2); // .../environments/{env}/secrets/{name}
+    const name = lastSegment(pathname);
+    if (!state.environments[env]) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    let list = state.environment_secrets[env];
+    if (!list) {
+      list = [];
+      state.environment_secrets[env] = list;
+    }
+    let digests = state.environment_secret_digests[env];
+    if (!digests) {
+      digests = {};
+      state.environment_secret_digests[env] = digests;
+    }
+    return sealedSecretPut(state, list, digests, name, body);
+  },
+  "environments.removeSecret": ({ state, pathname }) => {
+    const env = segmentFromEnd(pathname, 2);
+    const name = lastSegment(pathname);
+    if (!state.environments[env]) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    return secretRemove(
+      state.environment_secrets[env] ?? [],
+      state.environment_secret_digests[env] ?? {},
+      name,
+    );
+  },
 
   // autolinks --------------------------------------------------------------
   "autolinks.list": ({ state }) => ok(state.autolinks), // section GETs unpaginated
@@ -762,66 +811,58 @@ const HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // actions_secrets ----------------------------------------------------------
+  // actions_secrets / dependabot_secrets / codespaces_secrets ----------------
   //
-  // The list serves names and timestamps only (values are never part of the
-  // GET shape). The PUT is the crypto proof: it UNSEALS the uploaded
-  // ciphertext with the fixed test keypair - verifying the client's key
-  // decode, sealed-box construction, and base64 round-trip in one step - and
-  // stores the name plus a deterministic digest of the unsealed value, never
-  // the plaintext. Every PUT bumps updated_at (as GitHub does), so the
-  // idempotence snapshot's volatile-field exclusion is exercised for real.
-  "actions_secrets.list": ({ state, query }) =>
-    ok({
-      total_count: state.actions_secrets.length,
-      secrets: slicePage(state.actions_secrets, query),
-    }),
+  // The three repository-level secret families share one handler shape (see
+  // the sealedSecretPut/secretsList/secretRemove helpers): the list serves
+  // names and timestamps only (values are never part of the GET shape), and
+  // the PUT is the crypto proof - it UNSEALS the uploaded ciphertext with the
+  // fixed test keypair, verifying the client's key decode, sealed-box
+  // construction, and base64 round-trip in one step, and stores the name plus
+  // a deterministic digest of the unsealed value, never the plaintext. Every
+  // PUT bumps updated_at (as GitHub does), so the idempotence snapshot's
+  // volatile-field exclusion is exercised for real.
+  "actions_secrets.list": ({ state, query }) => secretsList(state.actions_secrets, query),
   "actions_secrets.publicKey": () =>
     ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "actions_secrets.put": ({ state, pathname, body }) => {
-    const name = lastSegment(pathname);
-    const payload = asObject(body);
-    if (payload.key_id !== MOCK_SECRETS_KEY_ID) {
-      return {
-        status: 422,
-        body: { message: `key_id "${String(payload.key_id)}" does not match the sealing key` },
-      };
-    }
-    const plaintext = unsealSecretValue(String(payload.encrypted_value ?? ""));
-    if (plaintext === null) {
-      // The ciphertext does not open against the advertised public key: a
-      // client-side sealing bug. GitHub would store the garbage; the mock
-      // rejects it loudly instead, so a broken sealing path can never pass.
-      return {
-        status: 422,
-        body: { message: "encrypted_value is not a sealed box for the advertised public key" },
-      };
-    }
-    state.actions_secret_digests[name] = secretDigest(plaintext);
-    state._secret_write_counter += 1;
-    const stamp = secretWriteStamp(state._secret_write_counter);
-    const existing = state.actions_secrets.find((s) => s.name === name);
-    if (existing) {
-      (existing as Record<string, unknown>).updated_at = stamp;
-      return noContent(); // 204: updated
-    }
-    state.actions_secrets.push({
-      name,
-      created_at: stamp,
-      updated_at: stamp,
-    });
-    return { status: 201, body: {} };
-  },
-  "actions_secrets.remove": ({ state, pathname }) => {
-    const name = lastSegment(pathname);
-    const index = state.actions_secrets.findIndex((s) => s.name === name);
-    if (index < 0) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    state.actions_secrets.splice(index, 1);
-    delete state.actions_secret_digests[name];
-    return noContent();
-  },
+  "actions_secrets.put": ({ state, pathname, body }) =>
+    sealedSecretPut(
+      state,
+      state.actions_secrets,
+      state.actions_secret_digests,
+      lastSegment(pathname),
+      body,
+    ),
+  "actions_secrets.remove": ({ state, pathname }) =>
+    secretRemove(state.actions_secrets, state.actions_secret_digests, lastSegment(pathname)),
+
+  "dependabot_secrets.list": ({ state, query }) => secretsList(state.dependabot_secrets, query),
+  "dependabot_secrets.publicKey": () =>
+    ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
+  "dependabot_secrets.put": ({ state, pathname, body }) =>
+    sealedSecretPut(
+      state,
+      state.dependabot_secrets,
+      state.dependabot_secret_digests,
+      lastSegment(pathname),
+      body,
+    ),
+  "dependabot_secrets.remove": ({ state, pathname }) =>
+    secretRemove(state.dependabot_secrets, state.dependabot_secret_digests, lastSegment(pathname)),
+
+  "codespaces_secrets.list": ({ state, query }) => secretsList(state.codespaces_secrets, query),
+  "codespaces_secrets.publicKey": () =>
+    ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
+  "codespaces_secrets.put": ({ state, pathname, body }) =>
+    sealedSecretPut(
+      state,
+      state.codespaces_secrets,
+      state.codespaces_secret_digests,
+      lastSegment(pathname),
+      body,
+    ),
+  "codespaces_secrets.remove": ({ state, pathname }) =>
+    secretRemove(state.codespaces_secrets, state.codespaces_secret_digests, lastSegment(pathname)),
 
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {
@@ -1188,10 +1229,73 @@ const HANDLERS: Record<string, Handler> = {
 /**
  * The deterministic timestamp the Nth secret PUT against a state carries:
  * every write moves updated_at, exactly like GitHub, without the mock ever
- * reading a real clock.
+ * reading a real clock. One counter per state, shared by EVERY secret
+ * family - the stamps only need to move monotonically per write, and one
+ * source keeps a mixed-family scenario's ordering deterministic.
  */
 function secretWriteStamp(writeCount: number): string {
   return new Date(Date.UTC(2020, 0, 15, 0, 0, writeCount)).toISOString().replace(".000Z", "Z");
+}
+
+/** A secret family's enveloped list page: names and timestamps, never values. */
+function secretsList(list: Json[], query: Record<string, string>): MockResponse {
+  return ok({ total_count: list.length, secrets: slicePage(list, query) });
+}
+
+/**
+ * The sealed PUT every secret family shares. This is the crypto proof: it
+ * UNSEALS the uploaded ciphertext with the fixed test keypair - verifying
+ * the client's key decode, sealed-box construction, and base64 round-trip in
+ * one step - and stores the name plus a deterministic digest of the unsealed
+ * value, never the plaintext. Every PUT bumps updated_at via the per-state
+ * write counter, so the idempotence snapshot's volatile-field exclusion is
+ * exercised for real. 201 on create, 204 on update, matching GitHub.
+ */
+function sealedSecretPut(
+  state: MockState,
+  list: Json[],
+  digests: Record<string, string>,
+  name: string,
+  body: unknown,
+): MockResponse {
+  const payload = asObject(body);
+  if (payload.key_id !== MOCK_SECRETS_KEY_ID) {
+    return {
+      status: 422,
+      body: { message: `key_id "${String(payload.key_id)}" does not match the sealing key` },
+    };
+  }
+  const plaintext = unsealSecretValue(String(payload.encrypted_value ?? ""));
+  if (plaintext === null) {
+    // The ciphertext does not open against the advertised public key: a
+    // client-side sealing bug. GitHub would store the garbage; the mock
+    // rejects it loudly instead, so a broken sealing path can never pass.
+    return {
+      status: 422,
+      body: { message: "encrypted_value is not a sealed box for the advertised public key" },
+    };
+  }
+  digests[name] = secretDigest(plaintext);
+  state._secret_write_counter += 1;
+  const stamp = secretWriteStamp(state._secret_write_counter);
+  const existing = list.find((s) => s.name === name);
+  if (existing) {
+    (existing as Record<string, unknown>).updated_at = stamp;
+    return noContent(); // 204: updated
+  }
+  list.push({ name, created_at: stamp, updated_at: stamp });
+  return { status: 201, body: {} };
+}
+
+/** The DELETE every secret family shares: drop the item and its digest. */
+function secretRemove(list: Json[], digests: Record<string, string>, name: string): MockResponse {
+  const index = list.findIndex((s) => s.name === name);
+  if (index < 0) {
+    return { status: 404, body: { message: "Not Found" } };
+  }
+  list.splice(index, 1);
+  delete digests[name];
+  return noContent();
 }
 
 /** Deterministic expires_at per declared expiry (see interaction_limits.put). */
@@ -1717,6 +1821,16 @@ function matchEndpoint(
  */
 export function sectionForRequest(method: string, pathname: string): SectionKey | null {
   return matchEndpoint(method, pathname)?.endpoint.section ?? null;
+}
+
+/**
+ * The declared endpoint a request resolves to, or null for core/unknown
+ * paths. The runner's always-rewrite check reads its `alwaysRewrite` flag,
+ * so the required-rewrite set derives from the declarations - per ENDPOINT,
+ * where the property lives, not per section.
+ */
+export function endpointForRequest(method: string, pathname: string): TaggedEndpoint | null {
+  return matchEndpoint(method, pathname)?.endpoint ?? null;
 }
 
 /**

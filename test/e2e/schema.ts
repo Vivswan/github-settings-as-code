@@ -38,6 +38,8 @@ export const MASK_KEYS = [
   "variables",
   "webhooks",
   "secrets",
+  "dependabot_secrets",
+  "codespaces_secrets",
   "org_members",
 ] as const satisfies readonly (PatResource | "org_members")[];
 

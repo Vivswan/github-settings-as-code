@@ -4,13 +4,18 @@
  * key reconciles that environment's Actions variables through their own
  * endpoints (undeclared variables WITHIN a declared key are deleted by
  * default; the wrapped `{undeclared: keep, entries}` form softens that to
- * notes).
+ * notes). A declared nested `secrets` key reconciles that environment's
+ * Actions secrets through the shared secrets engine, one scope per
+ * environment (undeclared secrets WITHIN a declared key are KEPT by default
+ * - their values are unrecoverable - and `{undeclared: delete, entries}`
+ * opts into deletion).
  */
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
 import type {
   EnvironmentConfig,
+  EnvironmentSecretConfig,
   EnvironmentVariableConfig,
   UndeclaredPolicyList,
 } from "../schema.js";
@@ -29,6 +34,14 @@ import {
   undeclaredPolicy,
   undeclaredPolicyShape,
 } from "./contract.js";
+import {
+  listSecretValues,
+  prepareSecretValues,
+  reconcileSecrets,
+  type SecretsScope,
+  type SecretsScopeOps,
+  secretKey,
+} from "./secrets-engine.js";
 
 const permission: SectionPermission = { repo: ["environments"] };
 
@@ -63,16 +76,36 @@ const ENDPOINTS = {
     route: "DELETE /repos/{owner}/{repo}/environments/{environment_name}/variables/{name}",
     statuses: { 204: "environment variable deleted" },
   },
+  listSecrets: {
+    route: "GET /repos/{owner}/{repo}/environments/{environment_name}/secrets",
+    statuses: { 200: "the environment secrets list (names and timestamps; never values)" },
+  },
+  secretsPublicKey: {
+    route: "GET /repos/{owner}/{repo}/environments/{environment_name}/secrets/public-key",
+    statuses: { 200: "the environment sealing public key" },
+  },
+  putSecret: {
+    route: "PUT /repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",
+    statuses: { 201: "environment secret created", 204: "environment secret updated" },
+    alwaysRewrite: true,
+  },
+  removeSecret: {
+    route: "DELETE /repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",
+    statuses: { 204: "environment secret deleted" },
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
 /**
  * The per-environment keys that are NOT part of the environment PUT body:
  * each is a sub-resource with its own endpoint family, reconciled AFTER the
- * PUT succeeds (variables today; secrets are designed to join this list).
- * splitEntry strips them in one place, so a nested key can never leak into
- * the passthrough PUT payload or the check-mode environment diff.
+ * PUT succeeds (variables and secrets). splitEntry strips them in one place,
+ * so a nested key can never leak into the passthrough PUT payload or the
+ * check-mode environment diff.
  */
-const NESTED_KEYS = ["variables"] as const satisfies readonly (keyof EnvironmentConfig)[];
+const NESTED_KEYS = [
+  "variables",
+  "secrets",
+] as const satisfies readonly (keyof EnvironmentConfig)[];
 type NestedKey = (typeof NESTED_KEYS)[number];
 
 /** Split one declared entry into the PUT/diff payload and the nested sub-resources. */
@@ -106,8 +139,43 @@ export const environmentsSection: SectionModule<"environments"> = {
       variables: undeclaredPolicyShape(
         z.array(z.looseObject({ name: z.string(), value: z.string() })),
       ).optional(),
+      // STRICT entries, unlike variables: a secret's PUT body is built from
+      // the sealed value alone, so an extra entry key has no destination and
+      // would silently do nothing (the actions_secrets closedSurface rule;
+      // closedSurface itself cannot reach a nested list, so the shape
+      // enforces it here).
+      secrets: undeclaredPolicyShape(
+        z.array(z.strictObject({ name: z.string(), value: z.string() })),
+      ).optional(),
+      // Secrets live under the plural `secrets` list; a singular entry-level
+      // `secret` would pass the loose shape into the environment PUT body
+      // verbatim and configure nothing, so the misplacement is rejected by
+      // name (the webhooks entry-level `secret` pin precedent).
+      secret: z
+        .undefined({
+          error:
+            "environment secrets belong under the entry's `secrets` list, not a singular `secret` key; here it would pass through to the environment PUT verbatim and configure nothing",
+        })
+        .optional(),
     }),
   ),
+  /**
+   * The declared value of every entry's secrets list, across all declared
+   * environments, for the engine's up-front reference resolution. Defensive
+   * like the shared extractor: this runs BEFORE validation on target-fetched
+   * documents, so a malformed container contributes nothing and shape
+   * validation reports the actionable error.
+   */
+  secretValues(declared: unknown): string[] {
+    if (!Array.isArray(declared)) {
+      return [];
+    }
+    return declared.flatMap((entry) =>
+      typeof entry === "object" && entry !== null
+        ? listSecretValues((entry as EnvironmentConfig).secrets)
+        : [],
+    );
+  },
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as EnvironmentConfig[];
@@ -117,12 +185,15 @@ export const environmentsSection: SectionModule<"environments"> = {
       (env) => env.name.toLowerCase(),
       (env) => env.name,
     );
-    // Validate every nested variables list upfront, BEFORE any write: a
-    // duplicate discovered mid-loop would leave earlier environments applied
-    // and later ones untouched.
+    // Validate every nested variables and secrets list upfront, BEFORE any
+    // write: a duplicate discovered mid-loop would leave earlier
+    // environments applied and later ones untouched.
     for (const env of desired) {
       if (env.variables !== undefined) {
         rejectDuplicateVariables(env.name, undeclaredPolicy(env.variables, "delete").entries);
+      }
+      if (env.secrets !== undefined) {
+        rejectDuplicateSecrets(env.name, undeclaredPolicy(env.secrets, "keep").entries);
       }
     }
     for (const env of desired) {
@@ -144,12 +215,21 @@ export const environmentsSection: SectionModule<"environments"> = {
               `environments[${name}].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables`,
             );
           }
+          if (nested.secrets !== undefined) {
+            // Same as variables: no environment, no secrets listing.
+            result.notes.push(
+              `environments[${name}].secrets: not verifiable while the environment is missing; apply will create the environment and reconcile the declared secrets`,
+            );
+          }
         } else {
           result.drift.push(
             ...subsetDiff(settings, flattenEnvironment(probe.data), `environments[${name}]`),
           );
           if (nested.variables !== undefined) {
             await reconcileVariables(ctx, this, name, nested.variables, result);
+          }
+          if (nested.secrets !== undefined) {
+            await reconcileEnvironmentSecrets(ctx, this, name, nested.secrets, result);
           }
         }
       } else {
@@ -161,6 +241,9 @@ export const environmentsSection: SectionModule<"environments"> = {
         result.changes.push(`applied environment "${name}"`);
         if (nested.variables !== undefined) {
           await reconcileVariables(ctx, this, name, nested.variables, result);
+        }
+        if (nested.secrets !== undefined) {
+          await reconcileEnvironmentSecrets(ctx, this, name, nested.secrets, result);
         }
       }
     }
@@ -295,6 +378,98 @@ async function reconcileVariables(
       );
     }
   }
+}
+
+/**
+ * Reject two declared secrets whose names collapse to the same
+ * case-insensitive key (GitHub stores secret names uppercase): they would
+ * fight each other on every run.
+ */
+function rejectDuplicateSecrets(
+  envName: string,
+  entries: readonly EnvironmentSecretConfig[],
+): void {
+  const seen = new Map<string, string>();
+  for (const secret of entries) {
+    const key = secretKey(secret.name);
+    const first = seen.get(key);
+    if (first !== undefined) {
+      throw new Error(
+        `environments: the "${envName}" entry declares secrets "${first}" and "${secret.name}", which GitHub treats as the same secret (names are case-insensitive). Keep exactly one entry per secret`,
+      );
+    }
+    seen.set(key, secret.name);
+  }
+}
+
+/**
+ * ONE secrets-engine scope per environment: the four operation closures
+ * close over this environment's name, so the per-route params contract
+ * typechecks here where the literal routes are known, and the engine never
+ * sees a route. The label and noun both carry the environment name, so
+ * every drift, note, and change line is unambiguous when several
+ * environments declare secrets.
+ */
+function environmentSecretsScope(envName: string): SecretsScope {
+  const ops: SecretsScopeOps = {
+    list: (ctx, section) =>
+      listAllEnveloped(ctx, section, ENDPOINTS.listSecrets, "secrets", {
+        params: { environment_name: envName },
+      }),
+    publicKey: (ctx, section, describe) =>
+      call(ctx, section, ENDPOINTS.secretsPublicKey, {
+        params: { environment_name: envName },
+        describe,
+      }),
+    put: (ctx, section, secretName, payload, describe) =>
+      call(ctx, section, ENDPOINTS.putSecret, {
+        params: { environment_name: envName, secret_name: secretName },
+        payload,
+        describe,
+      }),
+    remove: (ctx, section, secretName, describe) =>
+      call(ctx, section, ENDPOINTS.removeSecret, {
+        params: { environment_name: envName, secret_name: secretName },
+        describe,
+      }),
+  };
+  return {
+    label: `environments[${envName}].secrets`,
+    noun: `${envName} environment secret`,
+    home: "the environment",
+    changeSuffix: ` in environment "${envName}"`,
+    ops,
+  };
+}
+
+/**
+ * Reconcile one environment's declared `secrets` list through the shared
+ * secrets engine. The default WITHIN a declared key is "keep", an explicit
+ * literal on purpose: a deleted secret's value is unrecoverable, so deletion
+ * is opt-in exactly like the top-level secret families, and nested lists
+ * never inherit a policy through the multi-repo defaults merge (environment
+ * entries merge as whole array elements). prepareSecretValues runs PER
+ * ENVIRONMENT - per scope - because its lookup is keyed by secret name
+ * alone: one global call would silently collide same-named secrets across
+ * environments and seal the wrong plaintext.
+ */
+async function reconcileEnvironmentSecrets(
+  ctx: SectionContext,
+  section: SectionModule<"environments">,
+  envName: string,
+  declared: EnvironmentSecretConfig[] | UndeclaredPolicyList<EnvironmentSecretConfig>,
+  result: SectionResult,
+): Promise<void> {
+  const { policy, entries } = undeclaredPolicy(declared, "keep");
+  const resolvedValueOf = prepareSecretValues(ctx, section, entries);
+  const scoped = await reconcileSecrets(ctx, section, environmentSecretsScope(envName), {
+    entries,
+    policy,
+    resolvedValueOf,
+  });
+  result.changes.push(...scoped.changes);
+  result.drift.push(...scoped.drift);
+  result.notes.push(...scoped.notes);
 }
 
 /**

@@ -34,6 +34,7 @@ const FIXTURES: Record<SectionKey, unknown> = {
       name: "prod",
       wait_timer: 5,
       variables: [{ name: "DEPLOY_REGION", value: "eu-west-1" }],
+      secrets: [{ name: "PROD_DEPLOY_KEY", value: "$PROD_DEPLOY_KEY" }],
     },
   ],
   autolinks: [{ key_prefix: "NEW-", url_template: "https://x.test/<num>" }],
@@ -41,6 +42,8 @@ const FIXTURES: Record<SectionKey, unknown> = {
   // A declared-but-missing secret (the empty list below) is existence drift;
   // check mode must not resolve the reference, so no env entry exists here.
   actions_secrets: [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }],
+  dependabot_secrets: [{ name: "REGISTRY_TOKEN", value: "$REGISTRY_TOKEN" }],
+  codespaces_secrets: [{ name: "DEVCONTAINER_PAT", value: "$DEVCONTAINER_PAT" }],
   workflows: [{ path: "ci.yml", state: "active" }],
   pages: { build_type: "workflow" },
   code_scanning_default_setup: { state: "configured" },
@@ -84,9 +87,20 @@ const ROUTES = {
       ],
     },
   },
+  // The declared environment secret is absent from the live list, so the
+  // nested secrets path walks its existence-drift branch, still read-only.
+  "GET /repos/o/r/environments/prod/secrets?per_page=100&page=1": {
+    data: { total_count: 0, secrets: [] },
+  },
   "GET /repos/o/r/actions/permissions": { data: { enabled: true, allowed_actions: "selected" } },
   "GET /repos/o/r/actions/permissions/access": { data: { access_level: "none" } },
   "GET /repos/o/r/actions/secrets?per_page=100&page=1": {
+    data: { total_count: 0, secrets: [] },
+  },
+  "GET /repos/o/r/dependabot/secrets?per_page=100&page=1": {
+    data: { total_count: 0, secrets: [] },
+  },
+  "GET /repos/o/r/codespaces/secrets?per_page=100&page=1": {
     data: { total_count: 0, secrets: [] },
   },
   "GET /repos/o/r/actions/workflows?per_page=100&page=1": {

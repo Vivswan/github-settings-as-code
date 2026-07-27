@@ -6,6 +6,7 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   endpointKind,
+  endpointMethod,
   endpointPath,
   endpointPermission,
   expand,
@@ -83,6 +84,8 @@ const EXPECTED_GRANT: Record<string, string> = {
   autolinks: `grant "Administration" (read and write) under the PAT's Repository permissions`,
   actions: `grant "Administration" (read and write) under the PAT's Repository permissions; ${ACTIONS_OIDC_CAVEAT}`,
   actions_secrets: `grant "Secrets" (read and write) under the PAT's Repository permissions`,
+  dependabot_secrets: `grant "Dependabot secrets" (read and write) under the PAT's Repository permissions`,
+  codespaces_secrets: `grant "Codespaces secrets" (read and write) under the PAT's Repository permissions`,
   workflows: `grant "Actions" (read and write) under the PAT's Repository permissions`,
   pages: `grant "Pages" (read and write) under the PAT's Repository permissions`,
   code_scanning_default_setup: `grant "Administration" or "Code scanning alerts" (read and write) under the PAT's Repository permissions; ${CODE_SCANNING_CAVEAT}`,
@@ -233,6 +236,40 @@ describe("section endpoints", () => {
     expect(
       endpointKind({ route: "DELETE /repos/{owner}/{repo}/labels/{name}", statuses: { 204: "x" } }),
     ).toBe("write");
+  });
+
+  test("an accessGrade override write-gates a GET", () => {
+    expect(
+      endpointKind({
+        route: "GET /repos/{owner}/{repo}/codespaces/secrets",
+        statuses: { 200: "x" },
+        accessGrade: "write",
+      }),
+    ).toBe("write");
+  });
+
+  test("only the known endpoints carry an accessGrade override, never mixed within a section", () => {
+    // The override models GitHub gating a READ at write (Codespaces secrets
+    // is the only known case). The fuzz oracle collapses grade "read" to
+    // "none" at SECTION level for sections whose every GET is write-gated,
+    // so a section mixing overridden and plain GETs would make that collapse
+    // wrong - forbid the shape here until the oracle models per-endpoint
+    // grades.
+    const overridden = Object.entries(allEndpoints())
+      .filter(([, endpoint]) => endpoint.accessGrade !== undefined)
+      .map(([key]) => key)
+      .sort();
+    expect(overridden).toEqual(["codespaces_secrets.list", "codespaces_secrets.publicKey"]);
+    for (const section of SECTIONS) {
+      const gets = Object.values(section.endpoints).filter(
+        (endpoint) => endpointMethod(endpoint.route) === "GET",
+      );
+      const gated = gets.filter((endpoint) => endpoint.accessGrade !== undefined);
+      expect(
+        gated.length === 0 || gated.length === gets.length,
+        `${section.key} mixes write-gated and plain GETs`,
+      ).toBe(true);
+    }
   });
 
   test("toleratedStatuses returns exactly the declared >= 400 statuses", () => {
