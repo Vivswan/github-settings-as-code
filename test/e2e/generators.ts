@@ -22,7 +22,14 @@ import { undeclaredPolicy } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { LiveState } from "./mock/state.js";
 import type { Rng } from "./prng.js";
-import type { DenialStyle, MaskGrade, MaskKey, OwnerKind, Scenario } from "./schema.js";
+import {
+  type DenialStyle,
+  type MaskGrade,
+  type MaskKey,
+  type OwnerKind,
+  MASK_KEYS as SCHEMA_MASK_KEYS,
+  type Scenario,
+} from "./schema.js";
 
 type Json = Record<string, unknown>;
 
@@ -358,6 +365,22 @@ function genWorkflows(rng: Rng): Json[] {
   }));
 }
 
+/**
+ * actions_secrets entries draw their `$NAME` references from E2E_SECRET_ENV,
+ * the ONE fixed name -> plaintext pool shared with webhook secrets;
+ * scenarioSecretEnv() builds the scenario `env` from the same map, so a
+ * generated reference can never name a variable the child env lacks.
+ */
+function genActionsSecrets(rng: Rng): EntriesForm {
+  const names = Object.keys(E2E_SECRET_ENV);
+  const count = rng.int(names.length) + 1;
+  const entries = names.slice(0, count).map((name) => ({
+    name,
+    value: `$${name}`,
+  })) as Json[];
+  return maybeWrapUndeclared(rng, entries);
+}
+
 function genPages(rng: Rng): Json | null {
   if (rng.bool(0.25)) {
     return null;
@@ -505,11 +528,12 @@ function genActionsVariables(rng: Rng): EntriesForm {
 }
 
 /**
- * The ONE fixed pool webhook secret references draw from, name -> plaintext.
- * Single-sourced: the generator draws `$NAME` references from these keys and
- * webhookSecretEnv() (below) builds the scenario `env` from the same map, so
- * a generated reference can never name a variable the child env lacks. The
- * values are distinctive strings so leak checks can hunt them.
+ * The ONE fixed pool secret references draw from, name -> plaintext: webhook
+ * config.secret and actions_secrets values alike. Single-sourced: the
+ * generators draw `$NAME` references from these keys and scenarioSecretEnv()
+ * (below) builds the scenario `env` from the same map, so a generated
+ * reference can never name a variable the child env lacks. The values are
+ * distinctive strings so leak checks can hunt them.
  */
 export const E2E_SECRET_ENV = {
   E2E_SECRET_A: "e2e-hook-secret-alpha",
@@ -556,54 +580,60 @@ function genWebhooks(rng: Rng): EntriesForm {
 }
 
 /**
- * The child-env half of any `$NAME` webhook secret references a generated
- * settings document declares, drawn from E2E_SECRET_ENV (the same pool the
- * generator picks from). Undefined when the document declares none, so
- * secret-free scenarios stay byte-identical. A reference outside the pool is
- * a generator bug and throws.
+ * The child-env half of any `$NAME` secret references a generated settings
+ * document declares - webhook config.secret and actions_secrets values -
+ * drawn from E2E_SECRET_ENV (the same pool the generators pick from).
+ * Undefined when the document declares none, so secret-free scenarios stay
+ * byte-identical. A reference outside the pool is a generator bug and throws.
  */
-export function webhookSecretEnv(settings: Json): Record<string, string> | undefined {
-  const webhooks = settings.webhooks;
-  if (webhooks === undefined || webhooks === null) {
-    return undefined;
-  }
+export function scenarioSecretEnv(settings: Json): Record<string, string> | undefined {
   const env: Record<string, string> = {};
   let found = false;
-  for (const entry of entriesOf(webhooks)) {
-    const secret = (entry.config as Json | undefined)?.secret;
-    if (typeof secret !== "string") {
-      continue;
+  const collect = (reference: unknown): void => {
+    if (typeof reference !== "string") {
+      return;
     }
-    const name = secret.slice(1);
+    const name = reference.slice(1);
     const value = E2E_SECRET_ENV[name as keyof typeof E2E_SECRET_ENV];
     if (value === undefined) {
-      throw new Error(`BUG: generated webhook secret ${secret} is not in the fixed pool`);
+      throw new Error(`BUG: generated secret reference ${reference} is not in the fixed pool`);
     }
     env[name] = value;
     found = true;
+  };
+  if (settings.webhooks !== undefined && settings.webhooks !== null) {
+    for (const entry of entriesOf(settings.webhooks)) {
+      collect((entry.config as Json | undefined)?.secret);
+    }
+  }
+  if (settings.actions_secrets !== undefined && settings.actions_secrets !== null) {
+    for (const entry of entriesOf(settings.actions_secrets)) {
+      collect(entry.value);
+    }
   }
   return found ? env : undefined;
 }
 
 /**
- * Strip webhook secret references from one generated settings document. A
- * multi-repo target's settings.yml is fetched from the TARGET repository,
- * where a `$NAME` reference is refused by design (target provenance must not
- * read the operator's environment) - so the multi generator never declares
- * one there. Mutates the document in place through entriesOf's by-reference
- * entries.
+ * Strip secret references from one generated settings document. A multi-repo
+ * target's settings.yml is fetched from the TARGET repository, where a
+ * `$NAME` reference is refused by design (target provenance must not read
+ * the operator's environment) - so the multi generator never declares one
+ * there: webhook entries lose their config.secret, and actions_secrets
+ * (whose values are ALWAYS references) is removed outright. Mutates the
+ * document in place through entriesOf's by-reference entries.
  */
-export function stripWebhookSecrets(settings: Json): void {
+export function stripSecretReferences(settings: Json): void {
   const webhooks = settings.webhooks;
-  if (webhooks === undefined || webhooks === null) {
-    return;
-  }
-  for (const entry of entriesOf(webhooks)) {
-    const config = entry.config as Json | undefined;
-    if (config !== undefined) {
-      delete config.secret;
+  if (webhooks !== undefined && webhooks !== null) {
+    for (const entry of entriesOf(webhooks)) {
+      const config = entry.config as Json | undefined;
+      if (config !== undefined) {
+        delete config.secret;
+      }
     }
   }
+  delete settings.actions_secrets;
 }
 
 const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
@@ -614,6 +644,7 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   environments: genEnvironments,
   autolinks: genAutolinks,
   actions: genActions,
+  actions_secrets: genActionsSecrets,
   workflows: genWorkflows,
   pages: genPages,
   code_scanning_default_setup: genCodeScanning,
@@ -900,6 +931,7 @@ const ARRAY_SECTIONS = [
   "branches",
   "environments",
   "autolinks",
+  "actions_secrets",
   "workflows",
   "collaborators",
   "teams",
@@ -935,6 +967,7 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   branches: "name",
   environments: "name",
   autolinks: "key_prefix",
+  actions_secrets: "name",
   workflows: "path",
   collaborators: "username",
   teams: "name",
@@ -1217,6 +1250,7 @@ export const SECTION_PRIMARY_READ = {
   milestones: "milestones.list",
   pages: "pages.get",
   actions_variables: "actions_variables.list",
+  actions_secrets: "actions_secrets.list",
   webhooks: "webhooks.list",
 } as const satisfies Partial<Record<SectionKey, string>>;
 
@@ -1285,18 +1319,12 @@ export const ORG_GATED_SECTIONS: ReadonlySet<SectionKey> = new Set(
   SECTIONS.filter((section) => section.permission.org === "members").map((section) => section.key),
 );
 
-const MASK_KEYS: MaskKey[] = [
-  "administration",
-  "issues",
-  "environments",
-  "actions",
-  "pages",
-  "code_scanning_alerts",
-  "contents",
-  "variables",
-  "webhooks",
-  "org_members",
-];
+/**
+ * Permission-mask keys, taken from the schema's compile-complete tuple (its
+ * MustBeNever tripwire covers every PatResource), so a new resource cannot be
+ * left out of permission fuzzing by a stale manual copy here.
+ */
+const MASK_KEYS: readonly MaskKey[] = SCHEMA_MASK_KEYS;
 
 /**
  * The generation facts the oracle (Phase 3b) needs to predict an outcome
@@ -1351,7 +1379,8 @@ export function genScenario(
   rng: Rng,
   options: GenScenarioOptions = {},
 ): { scenario: Scenario; meta: ScenarioMeta } {
-  const pool = options.sections ?? [...SECTION_KEYS];
+  const pool =
+    options.sections !== undefined && options.sections.length > 0 ? options.sections : SECTION_KEYS;
   const chosen = pool.filter(() => rng.bool(0.5));
   if (chosen.length === 0) {
     chosen.push(rng.pick(pool));
@@ -1434,10 +1463,11 @@ export function genScenario(
           : subset;
   }
 
-  // The step-env half of any generated webhook secret references, from the
-  // SAME fixed pool the generator drew them from - single-sourced, so a
-  // reference can never name a variable the child env lacks.
-  const secretEnv = webhookSecretEnv(settings);
+  // The step-env half of any generated secret references (webhook secrets
+  // and actions_secrets values), from the SAME fixed pool the generators
+  // drew them from - single-sourced, so a reference can never name a
+  // variable the child env lacks.
+  const secretEnv = scenarioSecretEnv(settings);
 
   const scenario: Scenario = {
     name: `fuzz-${rng.seed}`,
@@ -1767,7 +1797,11 @@ export function genMultiScenario(
     // mode and policy. teams is included now that the multi-repo mock serves the
     // org-level probe (GET /orgs/{owner}) from shared org state under the global
     // mask, so per-repo teams exercises the org-members AND-gate too.
-    const pool = [...SECTION_KEYS];
+    // actions_secrets is excluded at the draw: its values are ALWAYS $NAME
+    // references, which target provenance refuses, so the section is
+    // unrepresentable in a target-fetched settings.yml (stripSecretReferences
+    // below backstops the same rule for the webhook secret FIELD).
+    const pool = SECTION_KEYS.filter((key) => key !== "actions_secrets");
     let sections = pool.filter(() => child.bool(0.5));
     if (sections.length === 0) {
       sections.push(child.pick(pool));
@@ -1797,7 +1831,7 @@ export function genMultiScenario(
     // where a $NAME secret reference is refused by design (target provenance
     // cannot read the operator's environment) - so multi targets never
     // declare one. The secret path stays covered by the single-repo stream.
-    stripWebhookSecrets(settings);
+    stripSecretReferences(settings);
     const mask: Partial<Record<MaskKey, MaskGrade>> = {};
     for (const resource of MASK_KEYS) {
       if (child.bool(0.3)) {

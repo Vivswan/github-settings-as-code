@@ -1,12 +1,12 @@
 # The undeclared policy
 
-Seven sections list the live resources sitting next to the declared ones:
+Eight sections list the live resources sitting next to the declared ones:
 `labels`, `autolinks`, `collaborators`, `actions_variables`, `rulesets`,
-`milestones`, and `webhooks`. Each has a default answer for a live
-resource the settings file does not declare, and each accepts a wrapped
-form that overrides it per file. This page covers the knob, the defaults
-per section, and how it layers with a multi-repo defaults file. The
-normative claims live in the README's
+`milestones`, `webhooks`, and `actions_secrets`. Each has a default answer
+for a live resource the settings file does not declare, and each accepts a
+wrapped form that overrides it per file. This page covers the knob, the
+defaults per section, and how it layers with a multi-repo defaults file.
+The normative claims live in the README's
 [Sections table](../README.md#sections) and
 [Undeclared resources](../README.md#undeclared-resources) section.
 
@@ -57,6 +57,7 @@ written.
 | `rulesets` | keep | `delete`: make the file the complete ruleset inventory |
 | `milestones` | keep | `delete`: prune stale milestones, with the caveat below |
 | `webhooks` | keep (integrations create their own hooks) | `delete`: make the file the complete hook inventory |
+| `actions_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 
 The owner exemption for collaborators does not move with the knob: under
 `undeclared: delete` (the default) every undeclared direct collaborator is
@@ -125,7 +126,7 @@ section, so omitting targets keep them. A check run shows the resulting
 deletions as drift before an apply performs them.
 
 One boundary to know about: HAVING a policy and INHERITING one are
-different things. The seven top-level section lists take the policy
+different things. The eight top-level section lists take the policy
 through the multi-repo defaults merge as described above. The nested
 `environments[].variables` list has its own knob, set per environment
 entry with its own fixed default - it never inherits a policy from its

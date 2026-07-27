@@ -10,6 +10,7 @@
 import type { z } from "zod";
 import { SECTION_KEYS, type SectionKey } from "../schema.js";
 import { actionsSection } from "./actions.js";
+import { actionsSecretsSection } from "./actions-secrets.js";
 import { actionsVariablesSection } from "./actions-variables.js";
 import { autolinksSection } from "./autolinks.js";
 import { branchesSection } from "./branches.js";
@@ -35,6 +36,7 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   environments: environmentsSection,
   autolinks: autolinksSection,
   actions: actionsSection,
+  actions_secrets: actionsSecretsSection,
   workflows: workflowsSection,
   pages: pagesSection,
   code_scanning_default_setup: codeScanningDefaultSetupSection,

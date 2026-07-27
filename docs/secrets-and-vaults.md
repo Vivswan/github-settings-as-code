@@ -137,3 +137,45 @@ target-authored, and a reference there is a hard error: a target repository
 must not be able to route the operator's environment - and its secrets -
 into itself. Declare secret-bearing sections centrally when you manage a
 fleet.
+
+## Repository Actions secrets
+
+The `actions_secrets` section manages a repository's Actions secrets with
+the same references:
+
+```yaml settings
+actions_secrets:
+  - name: DEPLOY_TOKEN
+    value: $DEPLOY_TOKEN
+  - name: NPM_TOKEN
+    value: $PUBLISH_TOKEN
+```
+
+GitHub never returns a secret's value, only names and timestamps, so check
+mode reconciles EXISTENCE: a declared-but-missing secret is drift, and the
+declared values get one cannot-verify note. Apply seals every declared
+value client-side against the repository's public key and re-writes it on
+every run, which is also how a rotated vault value propagates. Undeclared
+secrets are kept by default - a deleted secret's value is unrecoverable -
+and the wrapped `undeclared: delete` form opts into deletion.
+
+Unlike the variables sections, a secret entry accepts ONLY `name` and
+`value` - an unknown key is rejected upfront rather than passed through.
+That is not an inconsistency: a variables entry's body goes to GitHub
+verbatim, so an extra key rides along and GitHub decides; a secret's PUT
+body is built from the sealed value alone, so an extra key has no
+destination and would "apply" successfully forever while doing nothing.
+
+## Multi-repo fan-out
+
+In multi-repo mode a defaults file merges under every target the run
+processes. A defaults file that declares `actions_secrets` therefore writes
+those secrets into EVERY discovered target - which is sometimes exactly the
+point (a fleet-wide deploy key), and sometimes a surprise (a token fanned
+out to repositories that should never hold it). Scope discovery
+deliberately before declaring secrets in a defaults file: prefer an
+explicit `repos` list or tight discovery filters over `repos: "*"`, and run
+`mode: check` first to see which repositories the run would process and
+which declared secrets are missing where. Check mode verifies existence
+only - apply re-writes every declared secret on every run regardless, so a
+"clean" check still means those values will be sealed and sent.

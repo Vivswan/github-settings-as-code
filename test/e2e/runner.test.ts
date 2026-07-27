@@ -7,6 +7,7 @@ import {
   checkLeaks,
   forbiddenPresent,
   isSubsequence,
+  missingSecondApplyRewrites,
   parseGithubOutput,
   parseSummaryOutcomes,
   secondApplyWriteFailures,
@@ -278,6 +279,45 @@ describe("secondApplyWriteFailures (apply-idempotence zero-write subset)", () =>
       write("PUT", "/repos/e2e-owner/e2e-repo/actions/workflows/7/enable"),
     ]);
     expect(failures).toHaveLength(5);
+  });
+});
+
+describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)", () => {
+  const write = (method: string, pathname: string): LoggedRequest => ({
+    method,
+    pathname,
+    query: "",
+    status: 200,
+  });
+  const secretPut = write("PUT", "/repos/e2e-owner/e2e-repo/actions/secrets/DEPLOY_TOKEN");
+
+  test("a first-apply secret PUT the second apply skipped fires the assertion", () => {
+    const failures = missingSecondApplyRewrites([secretPut], []);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("actions/secrets/DEPLOY_TOKEN");
+    expect(failures[0]).toContain("re-written on EVERY apply");
+  });
+
+  test("a re-issued secret PUT passes; other sections' writes never bind", () => {
+    // A rulesets PUT on the first run creates no re-write obligation - only
+    // always-rewrite sections do.
+    expect(
+      missingSecondApplyRewrites(
+        [secretPut, write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000")],
+        [secretPut],
+      ),
+    ).toEqual([]);
+  });
+
+  test("a first-apply secret DELETE creates no re-write obligation", () => {
+    // The purge direction is one-shot: the second apply sees no live secret
+    // to delete, so only PUTs bind.
+    expect(
+      missingSecondApplyRewrites(
+        [write("DELETE", "/repos/e2e-owner/e2e-repo/actions/secrets/STALE")],
+        [],
+      ),
+    ).toEqual([]);
   });
 });
 
