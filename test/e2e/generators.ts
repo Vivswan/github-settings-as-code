@@ -250,6 +250,9 @@ function genEnvironments(rng: Rng): Json[] {
   // The variables draws are NEW, so they live on a forked stream: the main
   // stream stays stable and recorded seeds keep reproducing.
   const variablesRng = rng.fork("variables");
+  // The nested secrets draws are NEWER still, so they fork off their own
+  // stream for the same reason.
+  const secretsRng = rng.fork("secrets");
   return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const env: Json = { name: `${rng.pick(["staging", "prod", "qa"])}-${i}` };
     if (rng.bool()) {
@@ -270,6 +273,20 @@ function genEnvironments(rng: Rng): Json[] {
         value: variablesRng.pick(["eu-west-1", "debug", "3"]),
       }));
       env.variables = variablesRng.bool(0.25) ? { entries } : entries;
+    }
+    if (secretsRng.bool(0.3)) {
+      // References come from the fixed pool, like every secret family, so
+      // scenarioSecretEnv can wire the child env. Same-named secrets across
+      // sibling environments are deliberately common here (the pool is
+      // small): per-environment scope resolution is exactly what that
+      // exercises.
+      const names = Object.keys(E2E_SECRET_ENV);
+      const count = secretsRng.int(names.length) + 1;
+      const entries: Json[] = names.slice(0, count).map((name) => ({
+        name,
+        value: `$${name}`,
+      }));
+      env.secrets = secretsRng.bool(0.25) ? { entries } : entries;
     }
     return env;
   });
@@ -366,12 +383,14 @@ function genWorkflows(rng: Rng): Json[] {
 }
 
 /**
- * actions_secrets entries draw their `$NAME` references from E2E_SECRET_ENV,
- * the ONE fixed name -> plaintext pool shared with webhook secrets;
- * scenarioSecretEnv() builds the scenario `env` from the same map, so a
- * generated reference can never name a variable the child env lacks.
+ * The secret sections' entries draw their `$NAME` references from
+ * E2E_SECRET_ENV, the ONE fixed name -> plaintext pool shared with webhook
+ * secrets; scenarioSecretEnv() builds the scenario `env` from the same map,
+ * so a generated reference can never name a variable the child env lacks.
+ * Shared by the three repository-level secret families - their settings
+ * shapes are identical.
  */
-function genActionsSecrets(rng: Rng): EntriesForm {
+function genSecretEntries(rng: Rng): EntriesForm {
   const names = Object.keys(E2E_SECRET_ENV);
   const count = rng.int(names.length) + 1;
   const entries = names.slice(0, count).map((name) => ({
@@ -579,12 +598,20 @@ function genWebhooks(rng: Rng): EntriesForm {
   return maybeWrapUndeclared(rng, entries);
 }
 
+/** The top-level sections whose entries are {name, value: $NAME} secret lists. */
+const SECRET_LIST_SECTIONS = [
+  "actions_secrets",
+  "dependabot_secrets",
+  "codespaces_secrets",
+] as const satisfies readonly SectionKey[];
+
 /**
  * The child-env half of any `$NAME` secret references a generated settings
- * document declares - webhook config.secret and actions_secrets values -
- * drawn from E2E_SECRET_ENV (the same pool the generators pick from).
- * Undefined when the document declares none, so secret-free scenarios stay
- * byte-identical. A reference outside the pool is a generator bug and throws.
+ * document declares - webhook config.secret, the three repository secret
+ * sections, and every environment entry's nested secrets - drawn from
+ * E2E_SECRET_ENV (the same pool the generators pick from). Undefined when
+ * the document declares none, so secret-free scenarios stay byte-identical.
+ * A reference outside the pool is a generator bug and throws.
  */
 export function scenarioSecretEnv(settings: Json): Record<string, string> | undefined {
   const env: Record<string, string> = {};
@@ -606,9 +633,20 @@ export function scenarioSecretEnv(settings: Json): Record<string, string> | unde
       collect((entry.config as Json | undefined)?.secret);
     }
   }
-  if (settings.actions_secrets !== undefined && settings.actions_secrets !== null) {
-    for (const entry of entriesOf(settings.actions_secrets)) {
-      collect(entry.value);
+  for (const key of SECRET_LIST_SECTIONS) {
+    if (settings[key] !== undefined && settings[key] !== null) {
+      for (const entry of entriesOf(settings[key])) {
+        collect(entry.value);
+      }
+    }
+  }
+  if (Array.isArray(settings.environments)) {
+    for (const entry of settings.environments as Json[]) {
+      if (entry.secrets !== undefined && entry.secrets !== null) {
+        for (const secret of entriesOf(entry.secrets)) {
+          collect(secret.value);
+        }
+      }
     }
   }
   return found ? env : undefined;
@@ -619,8 +657,9 @@ export function scenarioSecretEnv(settings: Json): Record<string, string> | unde
  * target's settings.yml is fetched from the TARGET repository, where a
  * `$NAME` reference is refused by design (target provenance must not read
  * the operator's environment) - so the multi generator never declares one
- * there: webhook entries lose their config.secret, and actions_secrets
- * (whose values are ALWAYS references) is removed outright. Mutates the
+ * there: webhook entries lose their config.secret, the three repository
+ * secret sections (whose values are ALWAYS references) are removed outright,
+ * and every environment entry loses its nested secrets list. Mutates the
  * document in place through entriesOf's by-reference entries.
  */
 export function stripSecretReferences(settings: Json): void {
@@ -633,7 +672,14 @@ export function stripSecretReferences(settings: Json): void {
       }
     }
   }
-  delete settings.actions_secrets;
+  for (const key of SECRET_LIST_SECTIONS) {
+    delete settings[key];
+  }
+  if (Array.isArray(settings.environments)) {
+    for (const entry of settings.environments as Json[]) {
+      delete entry.secrets;
+    }
+  }
 }
 
 const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
@@ -644,7 +690,9 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   environments: genEnvironments,
   autolinks: genAutolinks,
   actions: genActions,
-  actions_secrets: genActionsSecrets,
+  actions_secrets: genSecretEntries,
+  dependabot_secrets: genSecretEntries,
+  codespaces_secrets: genSecretEntries,
   workflows: genWorkflows,
   pages: genPages,
   code_scanning_default_setup: genCodeScanning,
@@ -932,6 +980,8 @@ const ARRAY_SECTIONS = [
   "environments",
   "autolinks",
   "actions_secrets",
+  "dependabot_secrets",
+  "codespaces_secrets",
   "workflows",
   "collaborators",
   "teams",
@@ -968,6 +1018,8 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   environments: "name",
   autolinks: "key_prefix",
   actions_secrets: "name",
+  dependabot_secrets: "name",
+  codespaces_secrets: "name",
   workflows: "path",
   collaborators: "username",
   teams: "name",
@@ -1251,6 +1303,8 @@ export const SECTION_PRIMARY_READ = {
   pages: "pages.get",
   actions_variables: "actions_variables.list",
   actions_secrets: "actions_secrets.list",
+  dependabot_secrets: "dependabot_secrets.list",
+  codespaces_secrets: "codespaces_secrets.list",
   webhooks: "webhooks.list",
 } as const satisfies Partial<Record<SectionKey, string>>;
 
@@ -1797,11 +1851,14 @@ export function genMultiScenario(
     // mode and policy. teams is included now that the multi-repo mock serves the
     // org-level probe (GET /orgs/{owner}) from shared org state under the global
     // mask, so per-repo teams exercises the org-members AND-gate too.
-    // actions_secrets is excluded at the draw: its values are ALWAYS $NAME
-    // references, which target provenance refuses, so the section is
+    // The secret sections are excluded at the draw: their values are ALWAYS
+    // $NAME references, which target provenance refuses, so the sections are
     // unrepresentable in a target-fetched settings.yml (stripSecretReferences
-    // below backstops the same rule for the webhook secret FIELD).
-    const pool = SECTION_KEYS.filter((key) => key !== "actions_secrets");
+    // below backstops the same rule for the webhook secret FIELD and the
+    // nested environments secrets key).
+    const pool = SECTION_KEYS.filter(
+      (key) => !(SECRET_LIST_SECTIONS as readonly SectionKey[]).includes(key),
+    );
     let sections = pool.filter(() => child.bool(0.5));
     if (sections.length === 0) {
       sections.push(child.pick(pool));

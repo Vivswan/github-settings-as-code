@@ -194,6 +194,8 @@ describe("denial semantics", () => {
         "actions",
         "actions_variables",
         "actions_secrets",
+        "dependabot_secrets",
+        "codespaces_secrets",
         "autolinks",
         "code_scanning_default_setup",
         "collaborators",

@@ -1,16 +1,25 @@
 /**
- * `actions_secrets:` section - repository Actions secrets, reconciled by
- * existence through the shared secrets engine (secrets-engine.ts). Declared
- * values are whole-value `$NAME` environment references (never literals -
- * settings files are committed plaintext), resolved at apply time and sealed
- * client-side; GitHub cannot return a value, so check mode verifies that each
- * declared secret exists and apply re-seals every declared value on each run.
- * Undeclared secrets are kept by default (their values are unrecoverable);
- * the wrapped `undeclared: delete` form opts into deletion.
+ * `codespaces_secrets:` section - repository Codespaces secrets (development
+ * environment secrets), reconciled by existence through the shared secrets
+ * engine (secrets-engine.ts). Declared values are whole-value `$NAME`
+ * environment references (never literals - settings files are committed
+ * plaintext), resolved at apply time and sealed client-side against the
+ * Codespaces public key; GitHub cannot return a value, so check mode
+ * verifies that each declared secret exists and apply re-seals every
+ * declared value on each run. Undeclared secrets are kept by default (their
+ * values are unrecoverable); the wrapped `undeclared: delete` form opts into
+ * deletion.
+ *
+ * The fine-grained "Codespaces secrets" PAT permission gates every endpoint
+ * here at WRITE on real GitHub, reads included (GitHub's own fine-grained
+ * permission data), so both GETs declare `accessGrade: "write"` - the e2e
+ * mock and fuzz oracle then model the real gating. The grant advice already
+ * says read and write, so a token set up from it works, and a read-only
+ * grant fails the list exactly like a missing one.
  */
 
 import { z } from "zod";
-import type { ActionsSecretConfig, UndeclaredPolicyList } from "../schema.js";
+import type { CodespacesSecretConfig, UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -32,24 +41,26 @@ import {
   type SecretsScopeOps,
 } from "./secrets-engine.js";
 
-const permission: SectionPermission = { repo: ["secrets"] };
+const permission: SectionPermission = { repo: ["codespaces_secrets"] };
 
 const ENDPOINTS = {
   list: {
-    route: "GET /repos/{owner}/{repo}/actions/secrets",
+    route: "GET /repos/{owner}/{repo}/codespaces/secrets",
     statuses: { 200: "the secrets list (names and timestamps; never values)" },
+    accessGrade: "write",
   },
   publicKey: {
-    route: "GET /repos/{owner}/{repo}/actions/secrets/public-key",
+    route: "GET /repos/{owner}/{repo}/codespaces/secrets/public-key",
     statuses: { 200: "the sealing public key" },
+    accessGrade: "write",
   },
   put: {
-    route: "PUT /repos/{owner}/{repo}/actions/secrets/{secret_name}",
+    route: "PUT /repos/{owner}/{repo}/codespaces/secrets/{secret_name}",
     statuses: { 201: "secret created", 204: "secret updated" },
     alwaysRewrite: true,
   },
   remove: {
-    route: "DELETE /repos/{owner}/{repo}/actions/secrets/{secret_name}",
+    route: "DELETE /repos/{owner}/{repo}/codespaces/secrets/{secret_name}",
     statuses: { 204: "secret deleted" },
   },
 } as const satisfies Record<string, EndpointDecl>;
@@ -70,13 +81,13 @@ const OPS: SecretsScopeOps = {
 };
 
 const SCOPE: SecretsScope = {
-  label: "actions_secrets",
-  noun: "Actions secret",
+  label: "codespaces_secrets",
+  noun: "Codespaces secret",
   ops: OPS,
 };
 
-export const actionsSecretsSection: SectionModule<"actions_secrets"> = {
-  key: "actions_secrets",
+export const codespacesSecretsSection: SectionModule<"codespaces_secrets"> = {
+  key: "codespaces_secrets",
   undeclaredDefault: "keep",
   permission,
   grant: grantFor(permission),
@@ -95,7 +106,7 @@ export const actionsSecretsSection: SectionModule<"actions_secrets"> = {
   },
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const { policy, entries } = undeclaredPolicy(
-      desiredRaw as ActionsSecretConfig[] | UndeclaredPolicyList<ActionsSecretConfig>,
+      desiredRaw as CodespacesSecretConfig[] | UndeclaredPolicyList<CodespacesSecretConfig>,
       defaultUndeclaredPolicy(this),
     );
     rejectDuplicateSecretNames(this, entries);

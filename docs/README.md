@@ -19,7 +19,9 @@ to put it to work.
   list sections, per-section defaults, the milestone-deletion caveat, and how
   the policy layers with a defaults file.
 - [Secrets and vaults](secrets-and-vaults.md): the `$NAME` references secret
-  fields take (webhook secrets and `actions_secrets`), wiring them from
+  fields take (webhook secrets, the `actions_secrets` /
+  `dependabot_secrets` / `codespaces_secrets` sections, and per-environment
+  secrets), wiring them from
   GitHub Secrets or a vault action, what check mode can and cannot verify,
   and the multi-repo fan-out to plan for.
 - [Migrating from the Probot Settings app](migrating-from-probot.md): a

@@ -17,8 +17,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { MARKER_LABEL } from "../../src/report/issue-report.js";
-import { ALWAYS_REWRITE_SECTIONS, COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
-import { type LoggedRequest, sectionForRequest } from "./mock/routes.js";
+import { ALWAYS_REWRITE_STATE_FAMILIES, COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
+import { endpointForRequest, type LoggedRequest, sectionForRequest } from "./mock/routes.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./mock/server.js";
 import type { MockState } from "./mock/state.js";
 import { sharedValidator } from "./openapi/validate.js";
@@ -585,14 +585,42 @@ function mutableStates(handle: MockHandle): Array<[string, MockState]> {
   return out;
 }
 
+/** An always-rewrite family entry with its server-managed updated_at dropped. */
+function dropUpdatedAt(entry: unknown): unknown {
+  return typeof entry === "object" && entry !== null
+    ? { ...(entry as Record<string, unknown>), updated_at: undefined }
+    : entry;
+}
+
+/**
+ * Project one always-rewrite family for the stability snapshot: updated_at is
+ * dropped from every item, since these sections legitimately move it on every
+ * apply; created_at stays IN, so a delete-and-recreate on the second apply
+ * still reads as churn. The repository-level families store a flat item list;
+ * environment_secrets nests one list per environment name.
+ */
+function projectAlwaysRewrite(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(dropUpdatedAt);
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+        key,
+        Array.isArray(nested) ? nested.map(dropUpdatedAt) : nested,
+      ]),
+    );
+  }
+  return value;
+}
+
 /**
  * Serialize every mutable state family to a "label.family" -> JSON map, so a
  * before/after comparison can name exactly which repo and family moved instead
  * of reporting one opaque inequality. Underscore-prefixed families are mock
- * bookkeeping (e.g. the secret write counter), not repo state. Always-rewrite
- * families (ALWAYS_REWRITE_SECTIONS) drop updated_at: those sections move it
- * on every legitimate write; created_at stays IN, so a delete-and-recreate on
- * the second apply still reads as churn.
+ * bookkeeping (e.g. the secret write counter), not repo state. The
+ * always-rewrite families (ALWAYS_REWRITE_STATE_FAMILIES, the explicit list
+ * in apply-idempotence.ts) drop updated_at via projectAlwaysRewrite.
  */
 function snapshotFamilies(handle: MockHandle): Map<string, string> {
   const snapshot = new Map<string, string>();
@@ -601,14 +629,9 @@ function snapshotFamilies(handle: MockHandle): Map<string, string> {
       if (family.startsWith("_")) {
         continue;
       }
-      const projected =
-        ALWAYS_REWRITE_SECTIONS.has(family) && Array.isArray(value)
-          ? value.map((entry) =>
-              typeof entry === "object" && entry !== null
-                ? { ...(entry as Record<string, unknown>), updated_at: undefined }
-                : entry,
-            )
-          : value;
+      const projected = ALWAYS_REWRITE_STATE_FAMILIES.has(family)
+        ? projectAlwaysRewrite(value)
+        : value;
       snapshot.set(`${label}.${family}`, JSON.stringify(projected));
     }
   }
@@ -658,19 +681,22 @@ export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
 /**
  * The always-rewrite half of the idempotence proof: every secret PUT the
  * first apply issued must be issued AGAIN by the second apply, path for path.
- * Derived from OBSERVED first-run writes - not from the declared settings -
- * so permission masks, section allowlists, and the defaults merge need no
- * re-modeling here: whatever gating let the first PUT through applies
- * identically to the second run. Exported for direct testing, so the
- * assertion is provably able to fire.
+ * Which PUTs bind comes from the EndpointDecl `alwaysRewrite` flag (resolved
+ * per logged request via endpointForRequest), so the obligation lives on the
+ * declaration - per endpoint, not per section, since environments carries a
+ * passthrough PUT and always-rewrite secret PUTs side by side. Derived from
+ * OBSERVED first-run writes - not from the declared settings - so permission
+ * masks, section allowlists, and the defaults merge need no re-modeling
+ * here: whatever gating let the first PUT through applies identically to the
+ * second run. Exported for direct testing, so the assertion is provably able
+ * to fire.
  */
 export function missingSecondApplyRewrites(
   firstWrites: LoggedRequest[],
   secondWrites: LoggedRequest[],
 ): string[] {
   const isAlwaysRewritePut = (request: LoggedRequest): boolean =>
-    request.method === "PUT" &&
-    ALWAYS_REWRITE_SECTIONS.has(sectionForRequest(request.method, request.pathname) ?? "");
+    endpointForRequest(request.method, request.pathname)?.alwaysRewrite === true;
   const secondPuts = new Set(secondWrites.filter(isAlwaysRewritePut).map((r) => r.pathname));
   return [...new Set(firstWrites.filter(isAlwaysRewritePut).map((r) => r.pathname))]
     .filter((pathname) => !secondPuts.has(pathname))

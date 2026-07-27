@@ -15,8 +15,10 @@ import { actionsVariablesSection } from "./actions-variables.js";
 import { autolinksSection } from "./autolinks.js";
 import { branchesSection } from "./branches.js";
 import { codeScanningDefaultSetupSection } from "./code-scanning.js";
+import { codespacesSecretsSection } from "./codespaces-secrets.js";
 import { collaboratorsSection } from "./collaborators.js";
 import type { EndpointDecl, SectionModule } from "./contract.js";
+import { dependabotSecretsSection } from "./dependabot-secrets.js";
 import { environmentsSection } from "./environments.js";
 import { interactionLimitsSection } from "./interaction-limits.js";
 import { labelsSection } from "./labels.js";
@@ -37,6 +39,8 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   autolinks: autolinksSection,
   actions: actionsSection,
   actions_secrets: actionsSecretsSection,
+  dependabot_secrets: dependabotSecretsSection,
+  codespaces_secrets: codespacesSecretsSection,
   workflows: workflowsSection,
   pages: pagesSection,
   code_scanning_default_setup: codeScanningDefaultSetupSection,

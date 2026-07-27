@@ -8,7 +8,11 @@
  */
 
 import type { SectionKey } from "../../src/schema.js";
-import type { SectionPermission } from "../../src/sections/contract.js";
+import {
+  endpointKind,
+  endpointMethod,
+  type SectionPermission,
+} from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { DENIAL_SEMANTICS } from "./denial-semantics.js";
 import type { MultiScenarioMeta, ScenarioMeta } from "./generators.js";
@@ -20,6 +24,23 @@ export type Outcome = "applied" | "clean" | "drift" | "skipped" | "failed" | "ex
 const PERMISSION_BY_KEY: Record<SectionKey, SectionPermission> = Object.fromEntries(
   SECTIONS.map((section) => [section.key, section.permission]),
 ) as Record<SectionKey, SectionPermission>;
+
+/**
+ * Sections whose every GET is write-gated (the EndpointDecl accessGrade
+ * override; Codespaces secrets today): a read-only grant cannot even list,
+ * so grade "read" collapses to "none". Derived from the same declarations
+ * the mock's permission gate reads (endpointKind), so mock and oracle cannot
+ * disagree. A section with MIXED read grades would make the section-level
+ * collapse wrong; the registry unit test forbids that shape.
+ */
+const READS_REQUIRE_WRITE: ReadonlySet<SectionKey> = new Set(
+  SECTIONS.filter((section) => {
+    const gets = Object.values(section.endpoints).filter(
+      (endpoint) => endpointMethod(endpoint.route) === "GET",
+    );
+    return gets.length > 0 && gets.every((endpoint) => endpointKind(endpoint) === "write");
+  }).map((section) => section.key),
+);
 
 const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 
@@ -48,6 +69,11 @@ export function sectionGrade(
     if (GRADE_RANK[grade] > GRADE_RANK[repoGrade]) {
       repoGrade = grade;
     }
+  }
+  if (repoGrade === "read" && READS_REQUIRE_WRITE.has(key)) {
+    // Every read this section can issue is write-gated, so a read-only
+    // grant behaves exactly like no grant: the primary read is denied.
+    repoGrade = "none";
   }
   if (permission.org !== "members") {
     return repoGrade;

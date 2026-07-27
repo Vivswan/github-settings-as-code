@@ -9,7 +9,7 @@ silently.
 ## Usage
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token):
-   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&variables=write&repository_hooks=write&secrets=write&contents=read)
+   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&contents=read)
    starts you off with every repository permission the
    [Sections](#sections) table can need. Pick the resource owner and
    repositories, and add Members: read by hand when the owner is an
@@ -112,10 +112,12 @@ secret fields take),
 | `labels` | labels CRUD | Issues: write | upsert by name (rename via `new_name`); undeclared deleted by default (settable) |
 | `rulesets` | repo rulesets CRUD | Administration: write | branch, tag, and push targets; short ref names auto-prefixed (`staging` -> `refs/heads/staging`); `~DEFAULT_BRANCH` passes through; undeclared kept by default (settable) |
 | `branches` | classic branch protection + required-signatures sub-endpoint | Administration: write | `protection: null` removes protection; `required_signatures` applied via its own POST/DELETE (the protection PUT drops it); undeclared untouched; add Contents: read so check mode can tell a missing branch from an unprotected one |
-| `environments` | PUT environments + per-environment variables CRUD | Environments: write | reviewers, wait timer, branch policies; a declared `variables` key reconciles that environment's Actions variables (plain-text values; within the declared key, undeclared variables are deleted by default, and the wrapped `undeclared: keep` form keeps them as notes); undeclared untouched |
+| `environments` | PUT environments + per-environment variables CRUD + per-environment secrets (list, public-key, sealed PUT, delete) | Environments: write | reviewers, wait timer, branch policies; a declared `variables` key reconciles that environment's Actions variables (plain-text values; within the declared key, undeclared variables are deleted by default, and the wrapped `undeclared: keep` form keeps them as notes); a declared `secrets` key reconciles that environment's Actions secrets like `actions_secrets` (sealed `$NAME` values, existence-only checks; within the declared key, undeclared secrets are kept by default, and the wrapped `undeclared: delete` form deletes them); undeclared untouched |
 | `autolinks` | autolinks CRUD | Administration: write | immutable upstream, so changed entries are replaced; undeclared deleted by default (settable) |
 | `actions` | actions permissions + selected-actions + workflow token + access level + artifact/log retention + cache limits + OIDC subject claim + fork PR policies | Administration: write; `oidc_customization_sub` alone needs Actions: write | `enabled`, `allowed_actions`, `selected_actions`, `default_workflow_permissions`, `can_approve_pull_request_reviews`, `access_level` (private repos only), `artifact_and_log_retention`, `cache` (retention/storage limits; a 403 on the cache endpoints can mean an org- or enterprise-managed policy rather than a missing grant), `oidc_customization_sub` (claim-key order counts), `fork_pr_contributor_approval` (when fork PR workflows need maintainer approval), `fork_pr_workflows_private_repos` (documented for private repos; all four toggles required, since GitHub does not document whether an omitted one is preserved); undeclared untouched |
 | `actions_secrets` | actions secrets list + public-key + sealed PUT + delete | Secrets: write | `{name, value}` entries where `value` is a whole-value `$NAME` reference to the step's env (never a literal; the file is committed plaintext), sealed client-side with libsodium and re-written on every apply so rotated values propagate; values cannot be read back, so check mode verifies existence only; undeclared kept by default (settable; a deleted secret's value is unrecoverable) |
+| `dependabot_secrets` | dependabot secrets list + public-key + sealed PUT + delete | Dependabot secrets: write | same `{name, value: $NAME}` shape and sealed existence-only semantics as `actions_secrets`, over the Dependabot secret store (private-registry credentials Dependabot uses); undeclared kept by default (settable; a deleted secret's value is unrecoverable) |
+| `codespaces_secrets` | codespaces secrets list + public-key + sealed PUT + delete | Codespaces secrets: write | same `{name, value: $NAME}` shape and sealed existence-only semantics as `actions_secrets`, over the Codespaces secret store (development environment secrets); undeclared kept by default (settable; a deleted secret's value is unrecoverable) |
 | `workflows` | list workflows, enable/disable | Actions: write | `{path, state: active or disabled}`; bare file names match `.github/workflows/`; undeclared untouched |
 | `pages` | POST/PUT/DELETE pages | Pages: write | `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`; `pages: null` disables the site; undeclared untouched |
 | `code_scanning_default_setup` | code scanning default setup | Administration or Code scanning alerts: write | `state`, `query_suite`, `languages` (compared as a set), and future PATCH fields; needs Advanced Security on private repos, where a 403 can mean Advanced Security is off or the repo is archived; undeclared untouched |
@@ -166,12 +168,13 @@ scope by design.
 
 ## Undeclared resources
 
-Eight sections enumerate the live resources next to the declared ones, and
+Ten sections enumerate the live resources next to the declared ones, and
 each has a default policy for the ones the file does not declare: `labels`,
 `autolinks`, `collaborators`, and `actions_variables` delete them;
-`rulesets`, `milestones`, `webhooks`, and `actions_secrets` keep them and
-list each as a note. A section's list value can override that default with
-a wrapped form:
+`rulesets`, `milestones`, `webhooks`, and the three secret sections
+(`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`) keep them
+and list each as a note. A section's list value can override that default
+with a wrapped form:
 
 ```yaml
 labels:
@@ -511,10 +514,11 @@ settings file declares; the action never needs more. In multi-repo mode
 the token needs the same permissions on every target repository.
 
 To manage everything in one PAT, grant Administration, Issues,
-Environments, Pages, Actions, Variables, Webhooks, and Secrets at write,
-plus Contents at read and (for org repos) the Members organization
-permission at read. The pre-filled token form linked under
-[Usage](#usage) grants exactly the repository half of that set.
+Environments, Pages, Actions, Variables, Webhooks, Secrets, Dependabot
+secrets, and Codespaces secrets at write, plus Contents at read and (for
+org repos) the Members organization permission at read. The pre-filled
+token form linked under [Usage](#usage) grants exactly the repository half
+of that set.
 
 Three things worth knowing when a run fails on permissions:
 
@@ -546,9 +550,10 @@ Two deliberate boundaries:
   than no-op.
 - The pinned `X-GitHub-Api-Version` only changes intentionally.
 
-Four sections are closed rather than passthrough: `collaborators`,
-`teams`, `workflows`, and `actions_secrets` reject entry keys they do not
-recognize. Their API calls carry at most a single setting per entry (a
+Six sections are closed rather than passthrough: `collaborators`,
+`teams`, `workflows`, and the secret sections `actions_secrets`,
+`dependabot_secrets`, and `codespaces_secrets` reject entry keys they do
+not recognize. Their API calls carry at most a single setting per entry (a
 `permission`, or a sealed secret value; the workflow enable/disable calls
 carry none), so an extra key can only be a typo -
 and a misspelled `permission` would otherwise silently grant the default

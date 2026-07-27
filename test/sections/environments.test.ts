@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import type { SectionContext } from "../../src/sections/contract.js";
 import { environmentsSection } from "../../src/sections/environments.js";
+import {
+  MOCK_SECRETS_PUBLIC_KEY,
+  mockSodiumReady,
+  unsealSecretValue,
+} from "../e2e/mock/secrets.js";
 import { MockApi } from "../mock-api.js";
 import { ctx } from "./context.js";
 
@@ -273,5 +279,221 @@ describe("environments variables shape", () => {
     // The mock echoes no future_field back, so the update notes the
     // phantom rather than pretending it converged.
     expect(result.notes.some((n) => n.includes("future_field"))).toBe(true);
+  });
+});
+
+// --- Nested per-environment secrets -----------------------------------------
+
+const STAGING_SECRETS_LIST = "GET /repos/o/r/environments/staging/secrets?per_page=100&page=1";
+const PROD_SECRETS_LIST = "GET /repos/o/r/environments/prod/secrets?per_page=100&page=1";
+const STAGING_KEY = "GET /repos/o/r/environments/staging/secrets/public-key";
+const PROD_KEY = "GET /repos/o/r/environments/prod/secrets/public-key";
+
+/** A spec-shaped environment secrets list body (names + timestamps only). */
+function secretsBody(names: string[]) {
+  return {
+    data: {
+      total_count: names.length,
+      secrets: names.map((name) => ({
+        name,
+        created_at: "2020-01-15T00:00:00Z",
+        updated_at: "2020-01-15T00:00:00Z",
+      })),
+    },
+  };
+}
+
+/** A SectionContext with a resolver, like the engine provides in apply mode. */
+function secretCtx(api: MockApi, resolved: Record<string, string>): SectionContext {
+  return {
+    ...ctx(api),
+    resolveSecret: (reference: string): string => {
+      const plaintext = resolved[reference];
+      if (plaintext === undefined) {
+        throw new Error(`test resolver has no value for ${reference}`);
+      }
+      return plaintext;
+    },
+  };
+}
+
+describe("environments nested secrets apply mode", () => {
+  test("same-named secrets in sibling environments seal each environment's OWN value", async () => {
+    // The regression this pins: prepareSecretValues keys its lookup by
+    // secret name alone, so it must run PER ENVIRONMENT - one global call
+    // would collide DEPLOY_TOKEN across the two scopes and seal one value
+    // into both.
+    await mockSodiumReady();
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/staging": { data: { name: "staging" } },
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [STAGING_SECRETS_LIST]: secretsBody([]),
+      [PROD_SECRETS_LIST]: secretsBody(["DEPLOY_TOKEN"]),
+      [STAGING_KEY]: { data: { key_id: "k-stg", key: MOCK_SECRETS_PUBLIC_KEY } },
+      [PROD_KEY]: { data: { key_id: "k-prod", key: MOCK_SECRETS_PUBLIC_KEY } },
+    }).allowMutations(
+      "PUT /repos/o/r/environments/staging/secrets/DEPLOY_TOKEN",
+      "PUT /repos/o/r/environments/prod/secrets/DEPLOY_TOKEN",
+    );
+    const result = await environmentsSection.run(
+      secretCtx(api, { $STG: "staging-plaintext", $PRD: "prod-plaintext" }),
+      [
+        { name: "staging", secrets: [{ name: "DEPLOY_TOKEN", value: "$STG" }] },
+        { name: "prod", secrets: [{ name: "DEPLOY_TOKEN", value: "$PRD" }] },
+      ],
+    );
+    const puts = api.mutations().filter((c) => c.method === "PUT" && c.path.includes("/secrets/"));
+    expect(puts.map((c) => c.path)).toEqual([
+      "/repos/o/r/environments/staging/secrets/DEPLOY_TOKEN",
+      "/repos/o/r/environments/prod/secrets/DEPLOY_TOKEN",
+    ]);
+    const unsealed = puts.map((c) =>
+      unsealSecretValue((c.payload as { encrypted_value: string }).encrypted_value),
+    );
+    expect(unsealed).toEqual(["staging-plaintext", "prod-plaintext"]);
+    // Each scope sealed against ITS environment's key_id.
+    expect(puts.map((c) => (c.payload as { key_id: string }).key_id)).toEqual(["k-stg", "k-prod"]);
+    // Change lines place every write in its environment (verb from the
+    // per-environment listing: staging creates, prod updates).
+    expect(result.changes).toEqual([
+      'applied environment "staging"',
+      'created secret "DEPLOY_TOKEN" in environment "staging"',
+      'applied environment "prod"',
+      'updated secret "DEPLOY_TOKEN" in environment "prod"',
+    ]);
+  });
+
+  test("the secrets key never reaches the environment PUT body", async () => {
+    await mockSodiumReady();
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [PROD_SECRETS_LIST]: secretsBody([]),
+      [PROD_KEY]: { data: { key_id: "k", key: MOCK_SECRETS_PUBLIC_KEY } },
+    }).allowMutations("PUT /repos/o/r/environments/prod/secrets/S");
+    await environmentsSection.run(secretCtx(api, { $S: "v" }), [
+      { name: "prod", wait_timer: 5, secrets: [{ name: "S", value: "$S" }] },
+    ]);
+    const envPut = api.calls.find((c) => c.method === "PUT" && !c.path.includes("/secrets/"));
+    expect(envPut?.payload).toEqual({ wait_timer: 5 });
+  });
+
+  test("undeclared live secrets: kept with a note by default, DELETED under the knob", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [PROD_SECRETS_LIST]: secretsBody(["LEGACY"]),
+    });
+    const kept = await environmentsSection.run(ctx(api), [{ name: "prod", secrets: [] }]);
+    expect(kept.notes.join("\n")).toContain(
+      'prod environment secret "LEGACY" exists on the environment but is not declared',
+    );
+    expect(api.calls.filter((c) => c.path.includes("/secrets/"))).toEqual([]);
+
+    const api2 = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [PROD_SECRETS_LIST]: secretsBody(["LEGACY"]),
+    }).allowMutations("DELETE /repos/o/r/environments/prod/secrets/LEGACY");
+    const deleted = await environmentsSection.run(ctx(api2), [
+      { name: "prod", secrets: { undeclared: "delete", entries: [] } },
+    ]);
+    expect(deleted.changes).toContain('DELETED undeclared secret "LEGACY" in environment "prod"');
+    // Nothing declared, so no resolver was needed and no public key fetched.
+    expect(api2.calls.some((c) => c.path.endsWith("/public-key"))).toBe(false);
+  });
+});
+
+describe("environments nested secrets check mode", () => {
+  const liveProd = {
+    data: { name: "prod", protection_rules: [] },
+  };
+
+  test("declared-but-missing is drift with the per-environment label; the note names the environment", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/environments/prod": liveProd,
+      [PROD_SECRETS_LIST]: secretsBody(["LEGACY"]),
+    });
+    const result = await environmentsSection.run(ctx(api, true), [
+      { name: "prod", secrets: [{ name: "DEPLOY_TOKEN", value: "$D" }] },
+    ]);
+    expect(result.drift).toEqual([
+      "environments[prod].secrets[DEPLOY_TOKEN]: missing - declared in the settings file but not on the environment; apply will create it",
+    ]);
+    const cannotVerify = result.notes.filter((n) => n.includes("cannot be read back"));
+    expect(cannotVerify).toHaveLength(1);
+    expect(cannotVerify[0]).toContain("prod environment secret values");
+    expect(api.mutations()).toEqual([]);
+    // Check mode never touches the sealing key.
+    expect(api.calls.some((c) => c.path.endsWith("/public-key"))).toBe(false);
+  });
+
+  test("a missing environment earns the unverifiable-secrets note, like variables", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/environments/prod": {
+        error: { status: 404, message: "Not Found", body: "" },
+      },
+    });
+    const result = await environmentsSection.run(ctx(api, true), [
+      { name: "prod", secrets: [{ name: "S", value: "$S" }] },
+    ]);
+    expect(result.drift.join("\n")).toContain("environments[prod]: missing");
+    expect(result.notes.join("\n")).toContain(
+      "environments[prod].secrets: not verifiable while the environment is missing",
+    );
+    // The secrets list of a missing environment is never requested.
+    expect(api.calls.some((c) => c.path.includes("/secrets"))).toBe(false);
+  });
+});
+
+describe("environments nested secrets validation and shape", () => {
+  test("case-insensitive duplicate names are rejected upfront, naming the environment", async () => {
+    const api = new MockApi({});
+    await expect(
+      environmentsSection.run(ctx(api), [
+        {
+          name: "prod",
+          secrets: [
+            { name: "token", value: "$A" },
+            { name: "TOKEN", value: "$B" },
+          ],
+        },
+      ]),
+    ).rejects.toThrow(/"prod" entry declares secrets "token" and "TOKEN"/);
+    expect(api.calls).toEqual([]);
+  });
+
+  test("secret entries are strict; the singular entry-level `secret` key is rejected by name", () => {
+    const shape = environmentsSection.shape;
+    expect(shape.safeParse([{ name: "prod", secrets: [{ name: "A", value: "$A" }] }]).success).toBe(
+      true,
+    );
+    expect(
+      shape.safeParse([
+        { name: "prod", secrets: { undeclared: "delete", entries: [{ name: "A", value: "$A" }] } },
+      ]).success,
+    ).toBe(true);
+    // An extra entry key has no destination (the PUT body is the sealed
+    // value alone), so it is rejected rather than silently doing nothing.
+    expect(
+      shape.safeParse([{ name: "prod", secrets: [{ name: "A", value: "$A", typo: 1 }] }]).success,
+    ).toBe(false);
+    // The misplacement pin: a singular `secret` would ride the environment
+    // PUT verbatim and configure nothing.
+    const misplaced = shape.safeParse([{ name: "prod", secret: [{ name: "A", value: "$A" }] }]);
+    expect(misplaced.success).toBe(false);
+    expect(JSON.stringify(misplaced.error?.issues)).toContain(
+      "belong under the entry's `secrets` list",
+    );
+  });
+
+  test("secretValues walks every entry's secrets list and survives malformed containers", () => {
+    const values = environmentsSection.secretValues?.([
+      { name: "a", secrets: [{ name: "X", value: "$X" }] },
+      { name: "b", secrets: { entries: [{ name: "Y", value: "$Y" }] } },
+      { name: "c" },
+      { name: "d", secrets: "garbage" },
+      "not-an-entry",
+    ]);
+    expect(values).toEqual(["$X", "$Y"]);
+    // A non-list section value contributes nothing (validation reports it).
+    expect(environmentsSection.secretValues?.({ not: "a list" })).toEqual([]);
   });
 });
