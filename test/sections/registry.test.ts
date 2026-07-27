@@ -82,6 +82,7 @@ const EXPECTED_GRANT: Record<string, string> = {
   environments: `grant "Environments" (read and write) under the PAT's Repository permissions`,
   autolinks: `grant "Administration" (read and write) under the PAT's Repository permissions`,
   actions: `grant "Administration" (read and write) under the PAT's Repository permissions; ${ACTIONS_OIDC_CAVEAT}`,
+  actions_secrets: `grant "Secrets" (read and write) under the PAT's Repository permissions`,
   workflows: `grant "Actions" (read and write) under the PAT's Repository permissions`,
   pages: `grant "Pages" (read and write) under the PAT's Repository permissions`,
   code_scanning_default_setup: `grant "Administration" or "Code scanning alerts" (read and write) under the PAT's Repository permissions; ${CODE_SCANNING_CAVEAT}`,

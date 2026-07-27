@@ -60,7 +60,8 @@ export type PatResource =
   | "code_scanning_alerts"
   | "contents"
   | "variables"
-  | "webhooks";
+  | "webhooks"
+  | "secrets";
 
 /**
  * The machine-readable permission a section requires. `repo` lists the
@@ -85,6 +86,7 @@ const RESOURCE_LABEL: Record<PatResource, string> = {
   contents: "Contents",
   variables: "Variables",
   webhooks: "Webhooks",
+  secrets: "Secrets",
 };
 
 /** Human-facing label for each PAT organization resource. */

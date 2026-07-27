@@ -463,6 +463,7 @@ describe("genScenario", () => {
     "contents",
     "variables",
     "webhooks",
+    "secrets",
     "org_members",
   ]);
 

@@ -77,6 +77,12 @@ export interface LiveState {
   fork_pr_contributor_approval?: Json;
   /** GET /actions/permissions/fork-pr-workflows-private-repos body. */
   fork_pr_workflows_private_repos?: Json;
+  /**
+   * Actions secrets list items (GET shape: {name, created_at, updated_at}),
+   * replaces the (empty) baseline. Values are never part of the GET shape;
+   * the mock tracks a digest of each uploaded value separately.
+   */
+  actions_secrets?: Json[];
   /** Workflows list items ({id, name, path, state}), replaces the baseline. */
   workflows?: Json[];
   /** GET /pages body, or null for "Pages not enabled". */
@@ -146,6 +152,21 @@ export interface MockState {
   oidc_customization_sub: Json;
   fork_pr_contributor_approval: Json;
   fork_pr_workflows_private_repos: Json;
+  /** Actions secrets in GET shape ({name, created_at, updated_at}). */
+  actions_secrets: Json[];
+  /**
+   * Monotonic count of secret PUTs against this state, feeding each write's
+   * deterministic updated_at. Underscore prefix: mock bookkeeping, excluded
+   * from the idempotence snapshot (see snapshotFamilies in runner.ts).
+   */
+  _secret_write_counter: number;
+  /**
+   * sha256 digest of each uploaded secret's UNSEALED value, keyed by secret
+   * name. Never the plaintext, and never served: it exists so the state
+   * snapshot can prove a second apply re-wrote the same value (a re-seal
+   * produces different ciphertext for the same plaintext by design).
+   */
+  actions_secret_digests: Record<string, string>;
   workflows: Json[];
   pages: Json | null;
   code_scanning: Json;
@@ -307,6 +328,9 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
           send_secrets_and_variables: false,
           require_approval_for_fork_pr_workflows: true,
         },
+    actions_secrets: ls.actions_secrets ? clone(ls.actions_secrets) : [],
+    _secret_write_counter: 0,
+    actions_secret_digests: {},
     workflows: ls.workflows ? clone(ls.workflows) : [],
     pages: ls.pages !== undefined ? clone(ls.pages) : null,
     code_scanning: ls.code_scanning ? clone(ls.code_scanning) : {},
