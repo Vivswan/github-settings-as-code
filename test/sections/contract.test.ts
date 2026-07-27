@@ -1,8 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { PermissionDenied, type SectionMeta, throwFor } from "../../src/sections/contract.js";
+import { actionsSection } from "../../src/sections/actions.js";
+import {
+  type EndpointDecl,
+  grantFor,
+  PermissionDenied,
+  type SectionMeta,
+  throwFor,
+} from "../../src/sections/contract.js";
 import { rulesetsSection } from "../../src/sections/rulesets.js";
 
 const section: SectionMeta = rulesetsSection;
+
+/** A synthetic declaration carrying just the context fields under test. */
+function endpoint(extra: Partial<EndpointDecl>): EndpointDecl {
+  return { route: "POST /repos/{owner}/{repo}/rulesets", statuses: { 201: "created" }, ...extra };
+}
 
 describe("throwFor context enrichment", () => {
   const rejection = {
@@ -32,7 +44,7 @@ describe("throwFor context enrichment", () => {
         "POST",
         "/repos/o/r/rulesets",
         { ...rejection, documentationUrl: "https://docs.github.com/rest/repos/rules" },
-        { hints: { 422: "Usually this means a typo" } },
+        { endpoint: endpoint({ hints: { 422: "Usually this means a typo" } }) },
       ),
     ).toThrow(
       /message above\. Usually this means a typo\. The fields and values this endpoint accepts are documented at https:\/\/docs\.github\.com\/rest\/repos\/rules$/,
@@ -46,7 +58,7 @@ describe("throwFor context enrichment", () => {
         "POST",
         "/repos/o/r/rulesets",
         { status: 409, message: "Conflict", body: "" },
-        { hints: { 422: "never rendered on a 409" } },
+        { endpoint: endpoint({ hints: { 422: "never rendered on a 409" } }) },
       );
     } catch (error) {
       expect(String(error)).toContain("409");
@@ -62,7 +74,10 @@ describe("throwFor context enrichment", () => {
         "POST",
         "/repos/o/r/rulesets",
         { status: 403, message: "Resource not accessible", body: "" },
-        { operation: 'creating ruleset "quality"', hints: { 422: "never rendered here" } },
+        {
+          operation: 'creating ruleset "quality"',
+          endpoint: endpoint({ hints: { 422: "never rendered here" } }),
+        },
       );
     } catch (error) {
       thrown = error;
@@ -82,7 +97,11 @@ describe("throwFor context enrichment", () => {
         "PUT",
         "/repos/o/r/lfs",
         { status: 403, message: "Git LFS is globally disabled", body: "" },
-        { denialHint: "a 403 here can also mean LFS is disabled account-wide" },
+        {
+          endpoint: endpoint({
+            denialHint: "a 403 here can also mean LFS is disabled account-wide",
+          }),
+        },
       );
     } catch (error) {
       thrown = error;
@@ -100,7 +119,7 @@ describe("throwFor context enrichment", () => {
         "PUT",
         "/repos/o/r/lfs",
         { status: 422, message: "nope", body: "" },
-        { denialHint: "not for 422s" },
+        { endpoint: endpoint({ denialHint: "not for 422s" }) },
       ),
     ).toThrow(/^(?!.*not for 422s).*fix the "rulesets" values/);
   });
@@ -112,7 +131,7 @@ describe("throwFor context enrichment", () => {
         "GET",
         "/repos/o/r/rulesets",
         { status: 500, message: "Server Error", body: "" },
-        { hints: { 500: "never rendered here" } },
+        { endpoint: endpoint({ hints: { 500: "never rendered here" } }) },
       ),
     ).toThrow(/server error/);
     try {
@@ -121,10 +140,80 @@ describe("throwFor context enrichment", () => {
         "GET",
         "/repos/o/r/rulesets",
         { status: 500, message: "Server Error", body: "" },
-        { hints: { 500: "never rendered here" } },
+        { endpoint: endpoint({ hints: { 500: "never rendered here" } }) },
       );
     } catch (error) {
       expect(String(error)).not.toContain("never rendered here");
     }
+  });
+
+  test("a permission override renders the endpoint's own grant, not the section's", () => {
+    let thrown: unknown;
+    try {
+      throwFor(
+        section,
+        "GET",
+        "/repos/o/r/actions/oidc/customization/sub",
+        { status: 403, message: "Resource not accessible", body: "" },
+        { endpoint: endpoint({ permission: { repo: ["actions"] } }) },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    const denied = thrown as PermissionDenied;
+    expect(denied.detail).toContain(grantFor({ repo: ["actions"] }));
+    expect(denied.detail).not.toContain(section.grant);
+  });
+
+  test('a public endpoint ("none") cannot be a missing-grant failure', () => {
+    // A denied PUBLIC endpoint is by definition not about the token's
+    // grants, so the 403 takes the generic branch instead of rendering
+    // grant advice that cannot help.
+    let thrown: unknown;
+    try {
+      throwFor(
+        section,
+        "GET",
+        "/repos/o/r/rulesets",
+        { status: 403, message: "Forbidden", body: "" },
+        { endpoint: endpoint({ permission: "none" }) },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).not.toBeInstanceOf(PermissionDenied);
+    expect(String(thrown)).toContain('fix the "rulesets" values');
+  });
+
+  test("a no-override denial keeps the section grant's caveat", () => {
+    // section.grant and grantFor(effective) coincide for a caveat-free
+    // section, so only a caveat-bearing one can pin the difference: the
+    // no-override path must render section.grant (caveat included), and a
+    // refactor that re-derives the grant from the resolved permission
+    // would silently drop every caveat while caveat-free fixtures stay
+    // green.
+    let thrown: unknown;
+    try {
+      throwFor(
+        actionsSection,
+        "GET",
+        "/repos/o/r/actions/permissions",
+        { status: 403, message: "Resource not accessible", body: "" },
+        {
+          endpoint: {
+            route: "GET /repos/{owner}/{repo}/actions/permissions",
+            statuses: { 200: "x" },
+          },
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    const denied = thrown as PermissionDenied;
+    expect(denied.detail).toContain(
+      'the "oidc_customization_sub" key alone instead needs "Actions"',
+    );
   });
 });

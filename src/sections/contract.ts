@@ -144,13 +144,15 @@ export interface EndpointDecl {
    * Advice for known 4xx failure classes, keyed by the HTTP status each one
    * explains; throwFor appends the matching entry (if any) to that status's
    * generic rejection message, so advice never fires on a status it does not
-   * describe. 403 and 404 NEVER reach these entries - the permission branch
-   * short-circuits first; ambiguity on those statuses belongs in
-   * `denialHint` below (registry.test.ts sweeps for misplaced entries).
-   * Payloads pass through verbatim (GitHub stays the authority on
-   * valid values), so a hint names the failure CLASS and points at the
-   * endpoint documentation; it never lists valid values that could go stale.
-   * One or two sentences, no trailing period.
+   * describe. On permission-requiring endpoints 403 and 404 NEVER reach
+   * these entries - the permission branch short-circuits first; ambiguity
+   * on those statuses belongs in `denialHint` below (a public "none"
+   * endpoint's 403/404 does take the generic branch, so the registry.test
+   * sweep forbids 403/404 hints outright rather than relying on the
+   * short-circuit). Payloads pass through verbatim (GitHub stays the
+   * authority on valid values), so a hint names the failure CLASS and
+   * points at the endpoint documentation; it never lists valid values that
+   * could go stale. One or two sentences, no trailing period.
    */
   hints?: Readonly<Record<number, string>>;
   /**
@@ -420,8 +422,7 @@ export async function call<E extends EndpointDecl>(
   if ("error" in result) {
     throwFor(section, method, path, result.error, {
       operation: opts?.describe,
-      hints: endpoint.hints,
-      denialHint: endpoint.denialHint,
+      endpoint,
     });
   }
   return result.data;
@@ -456,8 +457,7 @@ export async function tryCall<E extends EndpointDecl>(
   if ("error" in result && !tolerate.includes(result.error.status)) {
     throwFor(section, method, path, result.error, {
       operation: opts?.describe,
-      hints: endpoint.hints,
-      denialHint: endpoint.denialHint,
+      endpoint,
     });
   }
   return result;
@@ -494,8 +494,7 @@ export async function probeAbsent<E extends EndpointDecl>(
     }
     throwFor(section, "GET", path, result.error, {
       operation: options?.describe,
-      hints: endpoint.hints,
-      denialHint: endpoint.denialHint,
+      endpoint,
     });
   }
   return { data: result.data };
@@ -509,13 +508,14 @@ export async function probeAbsent<E extends EndpointDecl>(
 async function listPages(
   ctx: SectionContext,
   section: SectionMeta,
+  endpoint: EndpointDecl,
   path: string,
   extract: (data: unknown) => unknown[] | null,
   shape: string,
 ): Promise<unknown[]> {
   const result = await paginate(ctx.api, path, extract);
   if ("error" in result) {
-    throwFor(section, "GET", path, result.error);
+    throwFor(section, "GET", path, result.error, { endpoint });
   }
   if ("malformed" in result) {
     throw new Error(
@@ -534,7 +534,14 @@ export async function listAll<E extends EndpointDecl>(
 ): Promise<unknown[]> {
   const opts = args[0];
   const path = expand(endpoint, ctx, opts?.params, opts?.query);
-  return listPages(ctx, section, path, (data) => (Array.isArray(data) ? data : null), "a list");
+  return listPages(
+    ctx,
+    section,
+    endpoint,
+    path,
+    (data) => (Array.isArray(data) ? data : null),
+    "a list",
+  );
 }
 
 /**
@@ -553,6 +560,7 @@ export async function listAllEnveloped<E extends EndpointDecl>(
   return listPages(
     ctx,
     section,
+    endpoint,
     path,
     (data) => {
       const chunk = (data as Record<string, unknown> | null)?.[envelopeKey];
@@ -592,8 +600,14 @@ export function throwFor(
   error: ApiError,
   context?: {
     operation?: string;
-    hints?: Readonly<Record<number, string>>;
-    denialHint?: string;
+    /**
+     * The endpoint declaration behind the failing request. Supplies the
+     * status hints and denial hint, and resolves the EFFECTIVE permission:
+     * an endpoint with a permission override renders its own grant advice
+     * instead of the section's, and a public endpoint ("none") cannot be a
+     * missing-grant failure at all, so its 403/404 takes the generic branch.
+     */
+    endpoint?: EndpointDecl;
   },
 ): never {
   // "creating ruleset "x" failed - POST /repos/...": the operation label says
@@ -608,16 +622,26 @@ export function throwFor(
       `${section.key}: ${cause}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
     );
   }
-  if (isPermissionError(error)) {
+  const effective = context?.endpoint ? endpointPermission(section, context.endpoint) : undefined;
+  if (isPermissionError(error) && effective !== "none") {
     const alsoMissing =
       error.status === 404 ? " (a 404 here can also mean the resource does not exist)" : "";
     // An endpoint whose 403/404 is AMBIGUOUS (it can mean something other
     // than a missing grant) says so here, right where the user reads the
     // grant advice.
-    const denialHint = context?.denialHint ? `. Note: ${context.denialHint}` : "";
+    const denialHint = context?.endpoint?.denialHint
+      ? `. Note: ${context.endpoint.denialHint}`
+      : "";
+    // The section's grant prose carries its caveats, so it stays the default;
+    // an endpoint override names a DIFFERENT permission, so only then is the
+    // advice re-derived from the override.
+    const grant =
+      effective !== undefined && effective !== section.permission
+        ? grantFor(effective)
+        : section.grant;
     throw new PermissionDenied(
       section.key,
-      `the token was denied ${cause}${alsoMissing}. To fix, ${section.grant}${denialHint}`,
+      `the token was denied ${cause}${alsoMissing}. To fix, ${grant}${denialHint}`,
       error.status,
     );
   }
@@ -631,7 +655,7 @@ export function throwFor(
       `${section.key}: ${cause}. The token was rejected as invalid or expired; update the token input (or the secret it reads) with a valid, unexpired PAT`,
     );
   }
-  const advice = context?.hints?.[error.status];
+  const advice = context?.endpoint?.hints?.[error.status];
   const hint = advice ? `. ${advice}` : "";
   const docs = error.documentationUrl
     ? `. The fields and values this endpoint accepts are documented at ${error.documentationUrl}`
