@@ -1,21 +1,33 @@
 /**
  * `environments:` section - upsert deployment environments by name via PUT.
- * Undeclared environments are left untouched.
+ * Undeclared environments are left untouched. A declared nested `variables`
+ * key reconciles that environment's Actions variables through their own
+ * endpoints (undeclared variables WITHIN a declared key are deleted by
+ * default; the wrapped `{undeclared: keep, entries}` form softens that to
+ * notes).
  */
 
 import { z } from "zod";
-import { subsetDiff } from "../engine/diff.js";
-import type { EnvironmentConfig } from "../schema.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
+import type {
+  EnvironmentConfig,
+  EnvironmentVariableConfig,
+  UndeclaredPolicyList,
+} from "../schema.js";
 import {
   call,
   type EndpointDecl,
   emptyResult,
   grantFor,
+  listAllEnveloped,
   probeAbsent,
   rejectDuplicates,
+  type SectionContext,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredPolicy,
+  undeclaredPolicyShape,
 } from "./contract.js";
 
 const permission: SectionPermission = { repo: ["environments"] };
@@ -32,7 +44,52 @@ const ENDPOINTS = {
       422: 'Usually "reviewers" entries are not {type: User|Team, id: <numeric id>} (logins and slugs are not accepted), or "deployment_branch_policy" does not declare both boolean keys (or null to clear it)',
     },
   },
+  listVariables: {
+    route: "GET /repos/{owner}/{repo}/environments/{environment_name}/variables",
+    statuses: { 200: "the environment variable list" },
+    // Same documented cap as the repository variables list: GitHub clamps
+    // a larger per_page, and a clamped page would read as the last one.
+    pageSize: 30,
+  },
+  createVariable: {
+    route: "POST /repos/{owner}/{repo}/environments/{environment_name}/variables",
+    statuses: { 201: "environment variable created" },
+  },
+  updateVariable: {
+    route: "PATCH /repos/{owner}/{repo}/environments/{environment_name}/variables/{name}",
+    statuses: { 204: "environment variable updated" },
+  },
+  removeVariable: {
+    route: "DELETE /repos/{owner}/{repo}/environments/{environment_name}/variables/{name}",
+    statuses: { 204: "environment variable deleted" },
+  },
 } as const satisfies Record<string, EndpointDecl>;
+
+/**
+ * The per-environment keys that are NOT part of the environment PUT body:
+ * each is a sub-resource with its own endpoint family, reconciled AFTER the
+ * PUT succeeds (variables today; secrets are designed to join this list).
+ * splitEntry strips them in one place, so a nested key can never leak into
+ * the passthrough PUT payload or the check-mode environment diff.
+ */
+const NESTED_KEYS = ["variables"] as const satisfies readonly (keyof EnvironmentConfig)[];
+type NestedKey = (typeof NESTED_KEYS)[number];
+
+/** Split one declared entry into the PUT/diff payload and the nested sub-resources. */
+function splitEntry(env: EnvironmentConfig): {
+  settings: Record<string, unknown>;
+  nested: Pick<EnvironmentConfig, NestedKey>;
+} {
+  const { name: _name, ...settings } = env;
+  const nested: Pick<EnvironmentConfig, NestedKey> = {};
+  for (const key of NESTED_KEYS) {
+    if (key in settings) {
+      (nested as Record<string, unknown>)[key] = settings[key];
+      delete settings[key];
+    }
+  }
+  return { settings: settings as Record<string, unknown>, nested };
+}
 
 export const environmentsSection: SectionModule<"environments"> = {
   key: "environments",
@@ -40,7 +97,17 @@ export const environmentsSection: SectionModule<"environments"> = {
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
-  shape: z.array(z.looseObject({ name: z.string() })),
+  shape: z.array(
+    z.looseObject({
+      name: z.string(),
+      // Loose like the repository actions_variables entries: the POST/PATCH
+      // bodies pass extra fields through verbatim, so a field GitHub ships
+      // tomorrow can be declared here the day it appears.
+      variables: undeclaredPolicyShape(
+        z.array(z.looseObject({ name: z.string(), value: z.string() })),
+      ).optional(),
+    }),
+  ),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as EnvironmentConfig[];
@@ -50,8 +117,17 @@ export const environmentsSection: SectionModule<"environments"> = {
       (env) => env.name.toLowerCase(),
       (env) => env.name,
     );
+    // Validate every nested variables list upfront, BEFORE any write: a
+    // duplicate discovered mid-loop would leave earlier environments applied
+    // and later ones untouched.
     for (const env of desired) {
-      const { name, ...settings } = env;
+      if (env.variables !== undefined) {
+        rejectDuplicateVariables(env.name, undeclaredPolicy(env.variables, "delete").entries);
+      }
+    }
+    for (const env of desired) {
+      const { settings, nested } = splitEntry(env);
+      const name = env.name;
       if (ctx.check) {
         const probe = await probeAbsent(ctx, this, ENDPOINTS.probe, {
           params: { environment_name: name },
@@ -60,10 +136,21 @@ export const environmentsSection: SectionModule<"environments"> = {
           result.drift.push(
             `environments[${name}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
+          if (nested.variables !== undefined) {
+            // Listing variables of a missing environment is impossible, so
+            // the declared list cannot be verified until the environment
+            // exists; the missing-environment drift above already fails check.
+            result.notes.push(
+              `environments[${name}].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables`,
+            );
+          }
         } else {
           result.drift.push(
             ...subsetDiff(settings, flattenEnvironment(probe.data), `environments[${name}]`),
           );
+          if (nested.variables !== undefined) {
+            await reconcileVariables(ctx, this, name, nested.variables, result);
+          }
         }
       } else {
         await call(ctx, this, ENDPOINTS.update, {
@@ -72,11 +159,143 @@ export const environmentsSection: SectionModule<"environments"> = {
           describe: `upserting environment "${name}"`,
         });
         result.changes.push(`applied environment "${name}"`);
+        if (nested.variables !== undefined) {
+          await reconcileVariables(ctx, this, name, nested.variables, result);
+        }
       }
     }
     return result;
   },
 };
+
+/** The fields of a live variable this section reads. */
+interface LiveVariable {
+  name: string;
+  value: string;
+}
+
+/** GitHub matches variable names case-insensitively; uppercase both sides. */
+function variableKey(name: string): string {
+  return name.toUpperCase();
+}
+
+/**
+ * Reject two declared variables whose names collapse to the same
+ * case-insensitive key: they would fight each other on every run.
+ */
+function rejectDuplicateVariables(
+  envName: string,
+  entries: readonly EnvironmentVariableConfig[],
+): void {
+  const seen = new Map<string, string>();
+  for (const variable of entries) {
+    const key = variableKey(variable.name);
+    const first = seen.get(key);
+    if (first !== undefined) {
+      throw new Error(
+        `environments: the "${envName}" entry declares variables "${first}" and "${variable.name}", which GitHub treats as the same variable (names are case-insensitive). Keep exactly one entry per variable`,
+      );
+    }
+    seen.set(key, variable.name);
+  }
+}
+
+/**
+ * Reconcile one environment's declared `variables` list against the live
+ * variables: create missing ones, update divergent values, and apply the
+ * undeclared policy to the rest. The default WITHIN a declared key is
+ * "delete", an explicit literal on purpose: the section-level default
+ * ("untouched") describes sibling ENVIRONMENTS, not the variables inside one,
+ * and nested lists never inherit a policy through the multi-repo defaults
+ * merge (environment entries merge as whole array elements).
+ */
+async function reconcileVariables(
+  ctx: SectionContext,
+  section: SectionModule<"environments">,
+  envName: string,
+  declared: EnvironmentVariableConfig[] | UndeclaredPolicyList<EnvironmentVariableConfig>,
+  result: SectionResult,
+): Promise<void> {
+  const { policy, entries } = undeclaredPolicy(declared, "delete");
+  const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
+  const live = (await listAllEnveloped(ctx, section, ENDPOINTS.listVariables, "variables", {
+    params: { environment_name: envName },
+  })) as LiveVariable[];
+  const liveByKey = new Map<string, LiveVariable>();
+  for (const variable of live) {
+    liveByKey.set(variableKey(variable.name), variable);
+  }
+
+  for (const variable of entries) {
+    const label = `environments[${envName}].variables[${variable.name}]`;
+    const existing = liveByKey.get(variableKey(variable.name));
+    const { name: _name, value: _value, ...extraKeys } = variable;
+    if (!existing) {
+      if (ctx.check) {
+        result.drift.push(
+          `${label}: missing - declared in the settings file but not on the environment; apply will create it`,
+        );
+      } else {
+        await call(ctx, section, ENDPOINTS.createVariable, {
+          params: { environment_name: envName },
+          payload: { name: variable.name, value: variable.value, ...extraKeys },
+          describe: `creating variable "${variable.name}" in environment "${envName}"`,
+        });
+        result.changes.push(`created variable "${variable.name}" in environment "${envName}"`);
+      }
+      continue;
+    }
+    const valueDrift = existing.value !== variable.value;
+    const extraDrift = subsetDiff(extraKeys, existing, label);
+    if (!valueDrift && extraDrift.length === 0) {
+      continue;
+    }
+    if (ctx.check) {
+      if (valueDrift) {
+        result.drift.push(
+          `${label}.value: declared ${JSON.stringify(variable.value)} != live ${JSON.stringify(existing.value)}; apply will set the declared value`,
+        );
+      }
+      result.drift.push(...extraDrift);
+    } else {
+      const phantom = phantomKeys(extraKeys, existing);
+      if (phantom.length > 0) {
+        result.notes.push(phantomNote(label, phantom, "variable", "this update will re-run"));
+      }
+      await call(ctx, section, ENDPOINTS.updateVariable, {
+        // The live name addresses the PATCH: same variable under GitHub's
+        // case-insensitive matching, and the path always names what exists.
+        params: { environment_name: envName, name: existing.name },
+        payload: { value: variable.value, ...extraKeys },
+        describe: `updating variable "${variable.name}" in environment "${envName}"`,
+      });
+      result.changes.push(`updated variable "${variable.name}" in environment "${envName}"`);
+    }
+  }
+
+  for (const variable of liveByKey.values()) {
+    if (declaredKeys.has(variableKey(variable.name))) {
+      continue;
+    }
+    if (policy === "keep") {
+      result.notes.push(
+        `variable "${variable.name}" exists on environment "${envName}" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+      );
+    } else if (ctx.check) {
+      result.drift.push(
+        `environments[${envName}].variables[${variable.name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
+      );
+    } else {
+      await call(ctx, section, ENDPOINTS.removeVariable, {
+        params: { environment_name: envName, name: variable.name },
+        describe: `deleting undeclared variable "${variable.name}" from environment "${envName}"`,
+      });
+      result.changes.push(
+        `DELETED undeclared variable "${variable.name}" from environment "${envName}"`,
+      );
+    }
+  }
+}
 
 /**
  * GET /environments/{name} nests wait_timer / prevent_self_review / reviewers

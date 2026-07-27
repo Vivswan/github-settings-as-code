@@ -28,6 +28,10 @@
  * - branches (false): declared protection is PUT unconditionally (only the
  *   protection: null removal probes first).
  * - environments (false): every declared environment is PUT unconditionally.
+ *   The nested `variables` reconciliation does compare before writing (it
+ *   lists and diffs first, so a second apply issues no variable writes), but
+ *   the unconditional PUT keeps the whole section false; the state-stability
+ *   half of the proof covers the variables family.
  * - actions (false): every declared endpoint group is PUT unconditionally.
  * - pages (false): an existing site is PUT unconditionally.
  * - code_scanning_default_setup (false): the PATCH runs unconditionally.
