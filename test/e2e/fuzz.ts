@@ -41,6 +41,7 @@ import {
   WITNESS_KINDS,
   WITNESS_SECTIONS,
   type WitnessSection,
+  webhookSecretEnv,
 } from "./generators.js";
 import type { LoggedRequest } from "./mock/routes.js";
 import {
@@ -384,6 +385,10 @@ async function runPredicted(
     problems.push(...summaryTableProblems(report.summary, prediction.sections.length));
   }
   assertNoTokenLeak(report, problems);
+  // Planted scenario-env plaintexts are swept by the RUNNER itself (primary
+  // run and every rerun; see runScenario's centralized leak sweep), so no
+  // separate fuzz-side sweep exists - a duplicate here would double-report
+  // every failure.
 
   return {
     ok: problems.length === 0,
@@ -1281,6 +1286,10 @@ async function faultedSectionRun(seed: number, plan: SectionFaultPlan): Promise<
     Object.assign(combinedLive, witness.state);
   }
   const liveState = Object.keys(combinedLive).length > 0 ? combinedLive : undefined;
+  // A drawn webhooks section may declare secret references; wire the fixed
+  // pool's env exactly the way genScenario does, so an apply-mode fault run
+  // never fails on an unset variable instead of the injected fault.
+  const secretEnv = webhookSecretEnv(settings);
   const meta: ScenarioMeta = {
     sections: [plan.section],
     mask: {},
@@ -1302,6 +1311,7 @@ async function faultedSectionRun(seed: number, plan: SectionFaultPlan): Promise<
     denial_style: "fine_grained",
     owner_kind: "org",
     ...(liveState ? { live_state: liveState } : {}),
+    ...(secretEnv === undefined ? {} : { env: secretEnv }),
     faults: [{ endpoint: plan.key, kind: plan.kind, times: plan.exhausting ? RETRY_BUDGET : 1 }],
     expect: { exit_code: 0 },
   };

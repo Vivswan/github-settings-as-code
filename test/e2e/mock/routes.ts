@@ -27,6 +27,7 @@ import { DENIAL_SEMANTICS } from "../denial-semantics.js";
 import type { DenialStyle, MaskGrade, MaskKey, Scenario } from "../schema.js";
 import {
   collaboratorFromPut,
+  completeHook,
   environmentFromPut,
   type MockState,
   type MultiMockState,
@@ -1051,6 +1052,70 @@ const HANDLERS: Record<string, Handler> = {
     state.actions_variables.splice(index, 1);
     return noContent();
   },
+
+  // webhooks ------------------------------------------------------------------
+  //
+  // The stored hook keeps its REAL config.secret (so state comparisons see
+  // what was written), but every response echoes it as "********" - GitHub
+  // never reveals a webhook secret on any read or write echo.
+  "webhooks.list": ({ state, query }) => ok(slicePage(state.hooks.map(maskHookSecret), query)),
+  "webhooks.create": ({ state, body }) => {
+    const payload = asObject(body);
+    const hook = completeHook(
+      { ...payload, config: storedHookConfig(asObject(payload.config)) },
+      state.nextId++,
+    );
+    state.hooks.push(hook);
+    return { status: 201, body: maskHookSecret(hook) };
+  },
+  "webhooks.update": ({ state, pathname, body }) => {
+    const id = lastSegment(pathname);
+    const hook = state.hooks.find((h) => String(h.id) === id);
+    if (!hook) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    const payload = asObject(body);
+    // GitHub's general PATCH REPLACES the whole config when the body carries
+    // one (removing undeclared keys, the secret included) - the exact
+    // semantics the section avoids by routing config drift through the
+    // config sub-endpoint. Modeled faithfully so a regression that sends
+    // config through this route shows up as lost state.
+    if (payload.config !== undefined) {
+      hook.config = storedHookConfig(asObject(payload.config));
+    }
+    if (payload.events !== undefined) {
+      hook.events = payload.events;
+    }
+    if (payload.active !== undefined) {
+      hook.active = payload.active;
+    }
+    for (const [key, value] of Object.entries(payload)) {
+      if (!HOOK_CANONICAL_KEYS.has(key)) {
+        hook[key] = value; // passthrough fields read back verbatim
+      }
+    }
+    return ok(maskHookSecret(hook));
+  },
+  "webhooks.updateConfig": ({ state, pathname, body }) => {
+    const id = segmentFromEnd(pathname, 1); // .../hooks/{hook_id}/config
+    const hook = state.hooks.find((h) => String(h.id) === id);
+    if (!hook) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    // The config sub-endpoint UPDATES the named fields and leaves the rest
+    // alone - it never removes an existing secret the payload omits.
+    hook.config = storedHookConfig({ ...asObject(hook.config), ...asObject(body) });
+    return ok(maskedConfig(asObject(hook.config)));
+  },
+  "webhooks.remove": ({ state, pathname }) => {
+    const id = lastSegment(pathname);
+    const index = state.hooks.findIndex((h) => String(h.id) === id);
+    if (index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    state.hooks.splice(index, 1);
+    return noContent();
+  },
 };
 
 /** Deterministic expires_at per declared expiry (see interaction_limits.put). */
@@ -1134,6 +1199,38 @@ function variableName(payload: Json): string {
  * the passthrough loop must never let a payload overwrite them.
  */
 const VARIABLE_CANONICAL_KEYS = new Set(["name", "value", "created_at", "updated_at"]);
+/**
+ * Hook fields the update handler maps explicitly; anything else in a general
+ * PATCH body is a passthrough field stored verbatim.
+ */
+const HOOK_CANONICAL_KEYS = new Set(["config", "events", "active", "name", "id"]);
+
+/** GitHub's constant echo for a stored webhook secret, on every read. */
+const HOOK_SECRET_ECHO = "********";
+
+/**
+ * The stored form of a webhook config: GitHub keeps insecure_ssl as the
+ * STRING "0"/"1" and echoes it that way even when the write sent a number,
+ * so the mock normalizes on store - which is exactly what makes the
+ * section's compare-side normalization observable.
+ */
+function storedHookConfig(config: Json): Json {
+  if (typeof config.insecure_ssl === "number") {
+    return { ...config, insecure_ssl: String(config.insecure_ssl) };
+  }
+  return config;
+}
+
+/** A webhook config copy with any stored secret replaced by GitHub's echo. */
+function maskedConfig(config: Json): Json {
+  return config.secret === undefined ? config : { ...config, secret: HOOK_SECRET_ECHO };
+}
+
+/** A response-side hook copy whose config.secret is masked (state keeps the real one). */
+function maskHookSecret(hook: Json): Json {
+  const config = asObject(hook.config);
+  return config.secret === undefined ? hook : { ...hook, config: maskedConfig(config) };
+}
 
 /** The next 1-based `number` for a list keyed by a numeric `number` field. */
 function nextNumber(items: Json[]): number {

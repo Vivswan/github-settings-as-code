@@ -201,6 +201,7 @@ describe("denial semantics", () => {
         "milestones",
         "repository",
         "rulesets",
+        "webhooks",
         "workflows",
       ].sort(),
     );

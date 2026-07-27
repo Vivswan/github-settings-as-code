@@ -1,0 +1,54 @@
+name: webhooks-apply-converges
+description: >-
+  Apply exercises every webhook mutation at once: an existing hook whose
+  config drifted (content_type) gets the config sub-endpoint PATCH carrying
+  the resolved $WEBHOOK_SECRET, its events drift rides the general PATCH
+  (no config key), a missing hook is created, and a live hook the file does
+  not declare is DELETED under "undeclared: delete". The declared secret
+  makes the config PATCH unconditional, so the proof is apply-idempotence:
+  a second apply rewrites the same state and a final check converges.
+settings:
+  webhooks:
+    undeclared: delete
+    entries:
+      - config:
+          url: https://ci.example.com/hook
+          content_type: json
+          secret: $WEBHOOK_SECRET
+        events: [push, pull_request]
+        active: true
+      - config:
+          url: https://deploy.example.com/hook
+          content_type: json
+env:
+  WEBHOOK_SECRET: hook-secret-rotation-1
+live_state:
+  hooks:
+    - id: 601
+      active: true
+      events: [push]
+      config:
+        url: https://ci.example.com/hook
+        content_type: form
+    - id: 602
+      config:
+        url: https://stray.example.com/hook
+        content_type: json
+inputs:
+  mode: apply
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    webhooks: applied
+  mutations:
+    - PATCH /repos/{repo}/hooks/601/config
+    - PATCH /repos/{repo}/hooks/601
+    - POST /repos/{repo}/hooks
+    - DELETE /repos/{repo}/hooks/602
+  requests_contain:
+    - GET /repos/e2e-owner/e2e-repo/hooks
+  stdout_contains:
+    - 'DELETED undeclared webhook "https://stray.example.com/hook"'
+    - the declared secret is re-sent every run
+  apply_idempotent: true
