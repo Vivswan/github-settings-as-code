@@ -115,10 +115,10 @@ function resolvedConfig(ctx: SectionContext, hook: WebhookConfig): Record<string
 
 /**
  * The declared value of every entry's config.secret, for the engine's
- * up-front resolution. Runs BEFORE validation on target-fetched documents,
- * so a malformed container (webhooks: null, a scalar, entries that are not
- * mappings) returns [] and lets the shape validation report the actionable
- * error instead of a TypeError from here.
+ * up-front resolution. DEFENSIVE by contract: a malformed container
+ * (webhooks: null, a scalar, entries that are not mappings) returns []
+ * instead of throwing, so the actionable error always comes from shape
+ * validation, never a TypeError from here.
  */
 function secretValues(declared: unknown): string[] {
   const container = declared as WebhookConfig[] | UndeclaredPolicyList<WebhookConfig>;
