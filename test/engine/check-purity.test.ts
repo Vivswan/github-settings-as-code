@@ -39,6 +39,7 @@ const FIXTURES: Record<SectionKey, unknown> = {
   teams: [{ name: "devs" }],
   milestones: [{ title: "v1" }],
   interaction_limits: { limit: "contributors_only" },
+  actions_variables: [{ name: "DEPLOY_REGION", value: "us-east-1" }],
 };
 
 /** Live data that differs from every fixture; unrouted GETs answer 404. */
@@ -71,6 +72,21 @@ const ROUTES = {
   },
   // An empty body means "no live limit", which drifts against the fixture.
   "GET /repos/o/r/interaction-limits": { data: {} },
+  // A live variable the fixture does not declare (delete-default -> drift)
+  // plus the declared one missing (create-path drift).
+  "GET /repos/o/r/actions/variables?per_page=30&page=1": {
+    data: {
+      total_count: 1,
+      variables: [
+        {
+          name: "STALE_VAR",
+          value: "old",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    },
+  },
 };
 
 function silentIo(): Io {

@@ -33,6 +33,7 @@ const MASK_KEYS = [
   "pages",
   "code_scanning_alerts",
   "contents",
+  "variables",
   "org_members",
 ] as const satisfies readonly (PatResource | "org_members")[];
 

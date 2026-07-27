@@ -10,6 +10,7 @@
 import type { z } from "zod";
 import { SECTION_KEYS, type SectionKey } from "../schema.js";
 import { actionsSection } from "./actions.js";
+import { actionsVariablesSection } from "./actions-variables.js";
 import { autolinksSection } from "./autolinks.js";
 import { branchesSection } from "./branches.js";
 import { codeScanningDefaultSetupSection } from "./code-scanning.js";
@@ -40,6 +41,7 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   teams: teamsSection,
   milestones: milestonesSection,
   interaction_limits: interactionLimitsSection,
+  actions_variables: actionsVariablesSection,
 };
 
 /** Every section module, in execution order. */

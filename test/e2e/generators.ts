@@ -466,6 +466,28 @@ function genInteractionLimits(rng: Rng): Json | null {
   return limits;
 }
 
+function genActionsVariables(rng: Rng): EntriesForm {
+  const used = new Set<string>();
+  const out: Json[] = [];
+  const count = rng.int(3) + 1;
+  for (let i = 0; i < count; i++) {
+    // Names obey GitHub's variable naming rules (alphanumeric/underscore); the
+    // index suffix keeps them unique under the case-insensitive key. A draw
+    // sometimes lowercases the declared name, so the fuzz corpus exercises the
+    // case-insensitive match against the uppercase-stored live name.
+    let name = `${rng.pick(["DEPLOY_REGION", "BUILD_MODE", "LOG_LEVEL", "FEATURE_FLAG"])}_${i}`;
+    if (rng.bool(0.3)) {
+      name = name.toLowerCase();
+    }
+    if (used.has(name.toUpperCase())) {
+      continue;
+    }
+    used.add(name.toUpperCase());
+    out.push({ name, value: rng.pick(["us-east-1", "production", "debug", "on", "42"]) });
+  }
+  return maybeWrapUndeclared(rng, out);
+}
+
 const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   repository: genRepository,
   labels: genLabels,
@@ -481,6 +503,7 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   teams: genTeams,
   milestones: genMilestones,
   interaction_limits: genInteractionLimits,
+  actions_variables: genActionsVariables,
 };
 
 /** A valid-shaped settings value for one section. */
@@ -762,6 +785,7 @@ const ARRAY_SECTIONS = [
   "collaborators",
   "teams",
   "milestones",
+  "actions_variables",
 ] as const satisfies readonly SectionKey[];
 
 /** The sections whose settings value is a plain record (anyRecord shapes). */
@@ -795,6 +819,7 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   collaborators: "username",
   teams: "name",
   milestones: "title",
+  actions_variables: "name",
 };
 
 /**
@@ -1066,6 +1091,7 @@ export const SECTION_PRIMARY_READ = {
   teams: "teams.org",
   milestones: "milestones.list",
   pages: "pages.get",
+  actions_variables: "actions_variables.list",
 } as const satisfies Partial<Record<SectionKey, string>>;
 
 export type FaultableSection = keyof typeof SECTION_PRIMARY_READ;
@@ -1141,6 +1167,7 @@ const MASK_KEYS: MaskKey[] = [
   "pages",
   "code_scanning_alerts",
   "contents",
+  "variables",
   "org_members",
 ];
 

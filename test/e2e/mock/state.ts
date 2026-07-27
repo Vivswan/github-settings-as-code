@@ -90,6 +90,12 @@ export interface LiveState {
   /** GET /interaction-limits body ({limit, origin, expires_at}); default none. */
   interaction_limits?: Json;
   /**
+   * Actions repository variables (GET shape: name, value, created_at,
+   * updated_at), replaces the baseline. GitHub stores names uppercased, so
+   * seeded names should be uppercase to mirror the live service.
+   */
+  actions_variables?: Json[];
+  /**
    * When true, an organization- or user-level interaction limit is in
    * effect: repo-level PUT/DELETE answer 409, matching GitHub.
    */
@@ -139,6 +145,7 @@ export interface MockState {
   /** The active interaction limit, or null when none is set. */
   interaction_limits: Json | null;
   interaction_limits_org_override: boolean;
+  actions_variables: Json[];
   /** Report issues the private-report issue channel lists/creates/patches. */
   issues: Json[];
   /** Next id handed to a created resource (label, ruleset, autolink, ...). */
@@ -267,6 +274,7 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     milestones: ls.milestones ? clone(ls.milestones) : [],
     interaction_limits: ls.interaction_limits ? clone(ls.interaction_limits) : null,
     interaction_limits_org_override: ls.interaction_limits_org_override ?? false,
+    actions_variables: ls.actions_variables ? clone(ls.actions_variables) : [],
     issues: ls.issues ? clone(ls.issues) : [],
     nextId,
   };

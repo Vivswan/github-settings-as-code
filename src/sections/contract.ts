@@ -48,7 +48,8 @@ export type PatResource =
   | "actions"
   | "pages"
   | "code_scanning_alerts"
-  | "contents";
+  | "contents"
+  | "variables";
 
 /**
  * The machine-readable permission a section requires. `repo` lists the
@@ -71,6 +72,7 @@ const RESOURCE_LABEL: Record<PatResource, string> = {
   pages: "Pages",
   code_scanning_alerts: "Code scanning alerts",
   contents: "Contents",
+  variables: "Variables",
 };
 
 /** Human-facing label for each PAT organization resource. */
@@ -168,6 +170,15 @@ export interface EndpointDecl {
    * sentence, no trailing period.
    */
   denialHint?: string;
+  /**
+   * The largest per_page this LIST endpoint accepts, when it is smaller than
+   * the standard 100 (the Actions variables list caps at 30). The page loop
+   * requests exactly this many per page and treats a shorter page as the
+   * last one, so a larger request that GitHub would silently clamp cannot
+   * truncate the walk after page one. Omit on endpoints that take the
+   * standard 100.
+   */
+  pageSize?: number;
 }
 
 /** The method half of a route ("PATCH /repos/..." -> "PATCH"). */
@@ -332,8 +343,9 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
    * the settings file can override the default per run with the wrapped
    * `{undeclared, entries}` form (see undeclaredPolicy below):
    * - "delete": the section lists live resources and DELETES undeclared ones
-   *   by default (labels, autolinks, collaborators, though the owner is
-   *   always exempt); `undeclared: keep` softens that to notes.
+   *   by default (labels, autolinks, collaborators - though the owner is
+   *   always exempt - and actions_variables); `undeclared: keep` softens
+   *   that to notes.
    * - "keep": the section lists live resources but KEEPS undeclared ones by
    *   default, surfacing each as a note (rulesets, milestones, since removing
    *   them stays a human action); `undeclared: delete` hardens that to
@@ -618,7 +630,7 @@ async function listPages(
   extract: (data: unknown) => unknown[] | null,
   shape: string,
 ): Promise<unknown[]> {
-  const result = await paginate(ctx.api, path, extract);
+  const result = await paginate(ctx.api, path, extract, undefined, endpoint.pageSize);
   if ("error" in result) {
     throwFor(section, "GET", path, result.error, { endpoint });
   }
