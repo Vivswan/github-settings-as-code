@@ -18,6 +18,8 @@
  *   equals the declared role.
  * - milestones (true): the PATCH is skipped when the declared fields
  *   subsetDiff clean against the live milestone.
+ * - actions_variables (true): the PATCH is skipped when the live value (and
+ *   any declared passthrough fields) already match the declaration.
  * - repository (false): the base PATCH, the topics PUT, and each feature
  *   toggle's PUT/DELETE run unconditionally (enable_git_lfs necessarily so:
  *   no read endpoint exists to compare against).
@@ -57,4 +59,5 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   teams: false,
   milestones: true,
   interaction_limits: false,
+  actions_variables: true,
 };
