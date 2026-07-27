@@ -1,8 +1,9 @@
 /**
  * `actions:` section - a key router across the Actions settings endpoints
  * (base permissions, selected-actions allowlist, workflow token defaults,
- * access level, artifact/log retention, cache limits, OIDC subject claim),
- * with unknown keys passed through verbatim to the base permissions PUT.
+ * access level, artifact/log retention, cache limits, OIDC subject claim,
+ * fork pull request workflow policies), with unknown keys passed through
+ * verbatim to the base permissions PUT.
  */
 
 import { z } from "zod";
@@ -25,6 +26,12 @@ const permission: SectionPermission = { repo: ["administration"] };
 // same advice keys both statuses.
 const OIDC_TEMPLATE_HINT =
   "include_claim_keys entries must be unique claim keys of the OIDC token (alphanumeric and underscores only); see the OIDC subject claim customization endpoint documentation";
+
+// The fork-pr-workflows-private-repos pair is documented for private
+// repositories, and the contract documents a bare 403 on the GET with no
+// prose about why; a denial here is therefore ambiguous.
+const FORK_PR_PRIVATE_DENIAL =
+  "the fork PR workflow settings are documented for private repositories, so a denial here can also mean the repository is public";
 
 const ENDPOINTS = {
   getPermissions: {
@@ -107,6 +114,30 @@ const ENDPOINTS = {
     permission: { repo: ["actions"] },
     hints: { 400: OIDC_TEMPLATE_HINT, 422: OIDC_TEMPLATE_HINT },
   },
+  getForkPrApproval: {
+    route: "GET /repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval",
+    statuses: { 200: "the fork PR contributor approval policy" },
+  },
+  putForkPrApproval: {
+    route: "PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval",
+    statuses: { 204: "fork PR contributor approval policy applied" },
+    hints: {
+      422: "approval_policy must be one of the contributor approval policies GitHub accepts; see the fork-pr-contributor-approval endpoint documentation",
+    },
+  },
+  getForkPrPrivate: {
+    route: "GET /repos/{owner}/{repo}/actions/permissions/fork-pr-workflows-private-repos",
+    statuses: { 200: "the private-repo fork PR workflow settings" },
+    denialHint: FORK_PR_PRIVATE_DENIAL,
+  },
+  putForkPrPrivate: {
+    route: "PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-workflows-private-repos",
+    statuses: { 204: "private-repo fork PR workflow settings applied" },
+    denialHint: FORK_PR_PRIVATE_DENIAL,
+    hints: {
+      422: "the settings object must carry run_workflows_from_fork_pull_requests with boolean toggles only; see the fork-pr-workflows-private-repos endpoint documentation",
+    },
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
 // Forward-compatible key routing: every DECLARED ActionsConfig key names its
@@ -125,6 +156,8 @@ const KEY_DESTINATION = {
   artifact_and_log_retention: "own-endpoint",
   cache: "own-endpoint",
   oidc_customization_sub: "own-endpoint",
+  fork_pr_contributor_approval: "own-endpoint",
+  fork_pr_workflows_private_repos: "own-endpoint",
 } as const satisfies Record<keyof ActionsConfig, "base" | "workflow" | "own-endpoint">;
 
 function keysTo(destination: "base" | "workflow" | "own-endpoint"): Set<string> {
@@ -189,6 +222,22 @@ const shape = z.looseObject({
       use_default: z.boolean(),
       include_claim_keys: z.array(z.string()).optional(),
       use_immutable_subject: z.boolean().optional(),
+    })
+    .optional(),
+  // The one field each PUT requires must be present before any section
+  // writes (the private-repos flag is also a YAML boolean-gotcha magnet);
+  // the rest of each object rides the PUT verbatim.
+  fork_pr_contributor_approval: z.looseObject({ approval_policy: z.string() }).optional(),
+  // All four toggles are REQUIRED: GitHub does not document whether an
+  // omitted toggle is preserved or reset by the PUT, so the file declares
+  // the complete policy and upstream omission semantics can never matter.
+  // Future fields still ride the looseObject verbatim.
+  fork_pr_workflows_private_repos: z
+    .looseObject({
+      run_workflows_from_fork_pull_requests: z.boolean(),
+      send_write_tokens_to_workflows: z.boolean(),
+      send_secrets_and_variables: z.boolean(),
+      require_approval_for_fork_pr_workflows: z.boolean(),
     })
     .optional(),
 });
@@ -331,6 +380,26 @@ export const actionsSection: SectionModule<"actions"> = {
           }
         }
       }
+      if (desired.fork_pr_contributor_approval !== undefined) {
+        const live = await call(ctx, this, ENDPOINTS.getForkPrApproval);
+        result.drift.push(
+          ...subsetDiff(
+            desired.fork_pr_contributor_approval,
+            live,
+            "actions.fork_pr_contributor_approval",
+          ),
+        );
+      }
+      if (desired.fork_pr_workflows_private_repos !== undefined) {
+        const live = await call(ctx, this, ENDPOINTS.getForkPrPrivate);
+        result.drift.push(
+          ...subsetDiff(
+            desired.fork_pr_workflows_private_repos,
+            live,
+            "actions.fork_pr_workflows_private_repos",
+          ),
+        );
+      }
       return result;
     }
 
@@ -375,6 +444,20 @@ export const actionsSection: SectionModule<"actions"> = {
         describe: "customizing the OIDC subject claim",
       });
       result.changes.push("applied the OIDC subject claim template");
+    }
+    if (desired.fork_pr_contributor_approval !== undefined) {
+      await call(ctx, this, ENDPOINTS.putForkPrApproval, {
+        payload: desired.fork_pr_contributor_approval,
+        describe: "setting the fork PR contributor approval policy",
+      });
+      result.changes.push("applied the fork PR contributor approval policy");
+    }
+    if (desired.fork_pr_workflows_private_repos !== undefined) {
+      await call(ctx, this, ENDPOINTS.putForkPrPrivate, {
+        payload: desired.fork_pr_workflows_private_repos,
+        describe: "setting the private-repo fork PR workflow settings",
+      });
+      result.changes.push("applied the private-repo fork PR workflow settings");
     }
     return result;
   },

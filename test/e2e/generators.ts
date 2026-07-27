@@ -249,6 +249,31 @@ function genActions(rng: Rng): Json {
   if (Object.keys(actions).length === 0) {
     actions.default_workflow_permissions = rng.pick(["read", "write"]);
   }
+  // The fork PR policy keys are NEW draws appended after the original body,
+  // each on its own forked stream, so pre-existing seeds keep producing the
+  // same document above (the seed-stability convention; see genCodeScanning).
+  const approvalRng = rng.fork("fork-pr-approval");
+  if (approvalRng.bool(0.3)) {
+    actions.fork_pr_contributor_approval = {
+      approval_policy: approvalRng.pick([
+        "first_time_contributors_new_to_github",
+        "first_time_contributors",
+        "all_external_contributors",
+      ]),
+    };
+  }
+  const privateReposRng = rng.fork("fork-pr-private");
+  if (privateReposRng.bool(0.3)) {
+    // The shape requires the COMPLETE policy (GitHub does not document
+    // whether the PUT preserves an omitted toggle), so every draw carries
+    // all four booleans.
+    actions.fork_pr_workflows_private_repos = {
+      run_workflows_from_fork_pull_requests: privateReposRng.bool(),
+      send_write_tokens_to_workflows: privateReposRng.bool(),
+      send_secrets_and_variables: privateReposRng.bool(),
+      require_approval_for_fork_pr_workflows: privateReposRng.bool(),
+    };
+  }
   return actions;
 }
 

@@ -1,0 +1,40 @@
+# Check mode reads both fork PR policy endpoints and reports each mismatch as
+# drift without writing anything: the live contributor approval policy is
+# looser than the declared one, and fork PR workflows are off while the file
+# turns them on.
+name: actions-fork-pr-check-drift
+settings:
+  actions:
+    fork_pr_contributor_approval:
+      approval_policy: all_external_contributors
+    fork_pr_workflows_private_repos:
+      run_workflows_from_fork_pull_requests: true
+      send_write_tokens_to_workflows: false
+      send_secrets_and_variables: false
+      require_approval_for_fork_pr_workflows: true
+inputs:
+  mode: check
+live_state:
+  repo:
+    private: true
+    visibility: private
+  fork_pr_contributor_approval:
+    approval_policy: first_time_contributors_new_to_github
+  fork_pr_workflows_private_repos:
+    run_workflows_from_fork_pull_requests: false
+    send_write_tokens_to_workflows: false
+    send_secrets_and_variables: false
+    require_approval_for_fork_pr_workflows: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    actions: drift
+  never:
+    - "PUT /repos/{repo}/actions/permissions/fork-pr-contributor-approval"
+    - "PUT /repos/{repo}/actions/permissions/fork-pr-workflows-private-repos"
+  summary_contains:
+    - "actions.fork_pr_contributor_approval.approval_policy"
+    - "actions.fork_pr_workflows_private_repos.run_workflows_from_fork_pull_requests"

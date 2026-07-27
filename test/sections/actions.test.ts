@@ -278,6 +278,33 @@ describe("actions", () => {
     }
   });
 
+  test("a denied fork-pr-private read renders the ambiguity denialHint", async () => {
+    // If GitHub denies this pair on a public repository, this one sentence
+    // is the whole mitigation - and the mechanism (denialHint on the
+    // permission branch) has silently broken once before, so pin that a
+    // denial actually renders it.
+    const api = new MockApi({
+      "GET /repos/o/r/actions/permissions/fork-pr-workflows-private-repos": {
+        error: { status: 403, message: "Forbidden", body: "" },
+      },
+    });
+    let thrown: unknown;
+    try {
+      await actionsSection.run(ctx(api, true), {
+        fork_pr_workflows_private_repos: {
+          run_workflows_from_fork_pull_requests: true,
+          send_write_tokens_to_workflows: false,
+          send_secrets_and_variables: false,
+          require_approval_for_fork_pr_workflows: true,
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    expect((thrown as PermissionDenied).detail).toContain("can also mean the repository is public");
+  });
+
   test("a denied OIDC read renders the Actions grant, not the section's Administration", async () => {
     const api = new MockApi({
       "GET /repos/o/r/actions/oidc/customization/sub": {
@@ -296,5 +323,126 @@ describe("actions", () => {
     const denied = thrown as PermissionDenied;
     expect(denied.detail).toContain(grantFor({ repo: ["actions"] }));
     expect(denied.detail).not.toContain('"Administration"');
+  });
+
+  test("apply PUTs each fork PR policy object verbatim to its own endpoint", async () => {
+    const api = new MockApi({}).allowMutations(...ACTIONS_WRITES);
+    const approval = { approval_policy: "first_time_contributors" };
+    const privateRepos = {
+      run_workflows_from_fork_pull_requests: true,
+      send_write_tokens_to_workflows: false,
+      send_secrets_and_variables: false,
+      require_approval_for_fork_pr_workflows: true,
+      future_field: "rides along",
+    };
+    const result = await actionsSection.run(ctx(api), {
+      fork_pr_contributor_approval: approval,
+      fork_pr_workflows_private_repos: privateRepos,
+    });
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PUT /repos/o/r/actions/permissions/fork-pr-contributor-approval",
+      "PUT /repos/o/r/actions/permissions/fork-pr-workflows-private-repos",
+    ]);
+    expect(api.mutations()[0]?.payload).toEqual(approval);
+    expect(api.mutations()[1]?.payload).toEqual(privateRepos);
+    // No base-permissions PUT: these keys alone must not imply enabled: true.
+    expect(result.notes).toEqual([]);
+    expect(result.changes).toEqual([
+      "applied the fork PR contributor approval policy",
+      "applied the private-repo fork PR workflow settings",
+    ]);
+  });
+
+  test("check compares the contributor approval policy against its own endpoint", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/actions/permissions/fork-pr-contributor-approval": {
+        data: { approval_policy: "first_time_contributors_new_to_github" },
+      },
+    });
+    const result = await actionsSection.run(ctx(api, true), {
+      fork_pr_contributor_approval: { approval_policy: "all_external_contributors" },
+    });
+    expect(result.drift).toHaveLength(1);
+    expect(result.drift[0]).toContain("actions.fork_pr_contributor_approval.approval_policy");
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("check compares the complete private-repos policy against the live settings", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/actions/permissions/fork-pr-workflows-private-repos": {
+        data: {
+          run_workflows_from_fork_pull_requests: false,
+          send_write_tokens_to_workflows: true,
+          send_secrets_and_variables: true,
+          require_approval_for_fork_pr_workflows: false,
+        },
+      },
+    });
+    const result = await actionsSection.run(ctx(api, true), {
+      fork_pr_workflows_private_repos: {
+        run_workflows_from_fork_pull_requests: true,
+        send_write_tokens_to_workflows: false,
+        send_secrets_and_variables: false,
+        require_approval_for_fork_pr_workflows: true,
+      },
+    });
+    // The shape requires all four toggles and every one is compared: with
+    // every live value flipped, all four must drift - an omitted comparison
+    // cannot pass here.
+    expect(result.drift).toHaveLength(4);
+    for (const field of [
+      "run_workflows_from_fork_pull_requests",
+      "send_write_tokens_to_workflows",
+      "send_secrets_and_variables",
+      "require_approval_for_fork_pr_workflows",
+    ]) {
+      expect(
+        result.drift.some((line) =>
+          line.includes(`actions.fork_pr_workflows_private_repos.${field}`),
+        ),
+        `no drift line for ${field}`,
+      ).toBe(true);
+    }
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("the private-repos shape requires the complete policy and stays loose otherwise", () => {
+    // GitHub does not document whether an omitted toggle is preserved or
+    // reset by the PUT, so the shape demands all four booleans (a YAML-quoted
+    // "true" included) before any section writes.
+    for (const bad of [
+      { send_secrets_and_variables: false },
+      {
+        run_workflows_from_fork_pull_requests: "true",
+        send_write_tokens_to_workflows: false,
+        send_secrets_and_variables: false,
+        require_approval_for_fork_pr_workflows: true,
+      },
+      {
+        run_workflows_from_fork_pull_requests: true,
+        send_write_tokens_to_workflows: false,
+        send_secrets_and_variables: false,
+      },
+    ]) {
+      expect(actionsSection.shape.safeParse({ fork_pr_workflows_private_repos: bad }).success).toBe(
+        false,
+      );
+    }
+    expect(
+      actionsSection.shape.safeParse({
+        fork_pr_contributor_approval: { approval_policy: "first_time_contributors" },
+        fork_pr_workflows_private_repos: {
+          run_workflows_from_fork_pull_requests: true,
+          send_write_tokens_to_workflows: false,
+          send_secrets_and_variables: false,
+          require_approval_for_fork_pr_workflows: true,
+          future_field: "passes through",
+        },
+      }).success,
+    ).toBe(true);
+    // The approval object requires its policy string the same way.
+    expect(actionsSection.shape.safeParse({ fork_pr_contributor_approval: {} }).success).toBe(
+      false,
+    );
   });
 });
