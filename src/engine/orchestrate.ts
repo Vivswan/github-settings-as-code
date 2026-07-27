@@ -13,7 +13,7 @@ import {
 } from "../action/secret-refs.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
-import { type MustBeNever, SECTION_KEYS, type SettingsFile } from "../schema.js";
+import { type MustBeNever, SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
 import { PermissionDenied, type SectionContext, type SectionResult } from "../sections/contract.js";
 import { SECTIONS } from "../sections/registry.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
@@ -38,14 +38,15 @@ export interface RepoRunOptions {
   requiredSections: Set<string>;
   onlySections: Set<string>;
   /**
-   * Provenance of one declared secret-field value: which source DOCUMENT
-   * declared it. Omitted, every value is "operator" (single-repo settings,
-   * central files, and the defaults file are operator-authored). The
-   * multi-repo remote flow passes a lookup built from the target-fetched
-   * document BEFORE the defaults merge, so a target-declared reference is
-   * refused even after the merge folds the documents together.
+   * Provenance of one section's secret-field values: which source DOCUMENT
+   * contributed the section that survived the merge. Omitted, every value is
+   * "operator" (single-repo settings, central files, and the defaults file
+   * are operator-authored). The multi-repo remote flow passes
+   * targetSecretSource(), built from the target-fetched document BEFORE the
+   * defaults merge, so a target-contributed section's references are refused
+   * even after the merge folds the documents together.
    */
-  secretSource?: (value: string) => SettingsSource;
+  secretSource?: (section: SectionKey) => SettingsSource;
   /**
    * The environment secret references resolve from in apply mode. Tests
    * inject a record; production omits it and process.env applies.

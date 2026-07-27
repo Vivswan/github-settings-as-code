@@ -93,9 +93,9 @@ describe("webhooks secretValues", () => {
   });
 
   test("malformed containers return [] and leave the error to validation", () => {
-    // secretValues runs on target-fetched documents BEFORE shape validation
-    // in multi-repo mode, so a malformed declaration must not throw here -
-    // validation is where the user gets the actionable message.
+    // The extractor's contract is defensiveness: it can face any merged
+    // value, so a malformed declaration must not throw here - validation is
+    // where the user gets the actionable message.
     for (const malformed of [null, "hooks", 42, { undeclared: "keep" }, [null, "x"]]) {
       expect(webhooksSection.secretValues?.(malformed)).toEqual([]);
     }
