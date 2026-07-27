@@ -9,8 +9,8 @@
 
 /** One settings.yml document: every top-level section is optional. */
 export interface SettingsFile {
-  /** Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys below. */
-  repository?: Record<string, unknown>;
+  /** Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents. */
+  repository?: RepositoryConfig;
   /** Issue/PR labels; undeclared labels are DELETED (Probot parity). */
   labels?: LabelConfig[];
   /** Repository rulesets, upserted by name; undeclared ones are kept. */
@@ -42,6 +42,35 @@ export interface SettingsFile {
    * limit on every run and check mode reports drift once it lapses.
    */
   interaction_limits?: InteractionLimitsConfig | null;
+}
+
+/**
+ * The `repository:` section. Every field not documented here is sent verbatim
+ * to PATCH /repos/{r} (Probot parity), so current and future repo fields work
+ * unchanged; the keys below route to their own endpoints instead. Only
+ * declared keys are ever applied or compared.
+ */
+export interface RepositoryConfig {
+  /** Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped. */
+  topics?: string | string[];
+  /** Dependabot alerts, via PUT/DELETE /repos/{r}/vulnerability-alerts. On read, 404 means off. */
+  enable_vulnerability_alerts?: boolean;
+  /** Dependabot security updates, via PUT/DELETE /repos/{r}/automated-security-fixes. On read, 404 means off, as does a 200 body with enabled: false. */
+  enable_automated_security_fixes?: boolean;
+  /** Private vulnerability reporting, via PUT/DELETE /repos/{r}/private-vulnerability-reporting. Repositories where the feature does not apply (observed: private repos) read as off. */
+  enable_private_vulnerability_reporting?: boolean;
+  /** Git LFS, via PUT/DELETE /repos/{r}/lfs. Write-only upstream: check mode cannot verify it, and apply re-asserts it on every run. */
+  enable_git_lfs?: boolean;
+  /**
+   * Immutable releases, via PUT/DELETE /repos/{r}/immutable-releases. On
+   * read, 404 means off. When the repository owner enforces immutable
+   * releases (enforced_by_owner in the GET body), writes answer 409 and the
+   * setting cannot be changed from the repository; apply reports that as a
+   * note instead of a change.
+   */
+  enable_immutable_releases?: boolean;
+  /** Everything else passes through to PATCH /repos/{r} verbatim. */
+  [key: string]: unknown;
 }
 
 /** One label, matched to the live repo by name. */

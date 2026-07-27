@@ -352,6 +352,28 @@ const HANDLERS: Record<string, Handler> = {
     state.repo.private_vulnerability_reporting_enabled = false;
     return noContent();
   },
+  "repository.immutableReleasesGet": ({ state }) => {
+    const enforced = state.repo.immutable_releases_enforced_by_owner === true;
+    if (state.repo.immutable_releases_enabled !== true && !enforced) {
+      // The spec documents this 404 (feature not enabled) with NO content.
+      return { status: 404, body: null };
+    }
+    return ok({ enabled: true, enforced_by_owner: enforced });
+  },
+  "repository.immutableReleasesPut": ({ state }) => {
+    if (state.repo.immutable_releases_enforced_by_owner === true) {
+      return IMMUTABLE_OWNER_CONFLICT;
+    }
+    state.repo.immutable_releases_enabled = true;
+    return noContent();
+  },
+  "repository.immutableReleasesRemove": ({ state }) => {
+    if (state.repo.immutable_releases_enforced_by_owner === true) {
+      return IMMUTABLE_OWNER_CONFLICT;
+    }
+    state.repo.immutable_releases_enabled = false;
+    return noContent();
+  },
   "repository.lfsPut": () => ({ status: 202, body: null }),
   "repository.lfsRemove": () => noContent(),
 
@@ -824,6 +846,12 @@ const INTERACTION_ORG_LIMIT = {
 const INTERACTION_ORG_CONFLICT = {
   status: 409,
   body: { message: "Conflict: an organization or user interaction limit is in effect" },
+} as const;
+
+/** The 409 both immutable-releases writes answer under owner enforcement. */
+const IMMUTABLE_OWNER_CONFLICT = {
+  status: 409,
+  body: { message: "Conflict: the repository owner enforces immutable releases" },
 } as const;
 
 // --- Handler-local helpers ------------------------------------------------
