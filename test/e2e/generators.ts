@@ -151,6 +151,9 @@ function genRulesets(rng: Rng): Json[] {
 }
 
 function genBranches(rng: Rng): Json[] {
+  // The required_signatures draws are NEW, so they live on a forked stream:
+  // the main stream stays stable and recorded seeds keep reproducing.
+  const sigRng = rng.fork("required-signatures");
   return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const name = `${rng.pick(["main", "release", "dev"])}-${i}`;
     if (rng.bool(0.3)) {
@@ -177,6 +180,9 @@ function genBranches(rng: Rng): Json[] {
     if (Object.keys(protection).length === 0) {
       const key = rng.pick(PROTECTION_CORE_KEYS);
       protection[key] = key === "enforce_admins" ? true : null;
+    }
+    if (sigRng.bool(0.3)) {
+      protection.required_signatures = sigRng.bool();
     }
     return { name, protection };
   });
