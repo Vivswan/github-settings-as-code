@@ -4,7 +4,7 @@ This walkthrough takes one repository from nothing to a settings file that is
 applied on every change: create the token, add the settings file and the
 workflow, run check mode first, then switch to apply. What each section of
 the settings file manages, and what applying it deletes or keeps, is
-specified in the [README Sections table](../README.md#sections); this page
+specified in the [README Sections table](../../README.md#sections); this page
 only gets you to a first green run.
 
 ## 1. Create the token
@@ -15,7 +15,7 @@ permissions, such as `labels` and `milestones`; most sections need the
 Administration permission, which workflow tokens can never hold, so plan on
 a PAT.
 
-The [pre-filled token form linked in the README](../README.md#usage) starts
+The [pre-filled token form linked in the README](../../README.md#usage) starts
 you off with every repository permission the Sections table can need. Pick
 the resource owner and the repositories the token may touch. If the owner is
 an organization and you plan to manage the `teams` section, also add the
@@ -24,7 +24,7 @@ permissions once an organization is selected.
 
 You can also grant less. The token only needs the permissions for the
 sections your settings file declares, and
-[Token permissions](../README.md#token-permissions) explains which grant maps
+[Token permissions](../../README.md#token-permissions) explains which grant maps
 to which section.
 
 Save the token as a repository secret. The examples below call it
@@ -52,7 +52,7 @@ labels:
 
 Only declared keys are ever applied or compared, so everything this file
 does not mention stays as it is. The exceptions are the sections the
-[Sections table](../README.md#sections) marks as deleting undeclared
+[Sections table](../../README.md#sections) marks as deleting undeclared
 entries: declaring `labels`, `autolinks`, or `collaborators` makes the
 declared list authoritative, and live entries missing from it are deleted on
 apply. That is why the first run below is a check, not an apply.
@@ -95,7 +95,7 @@ The schedule catches drift: in check mode a weekly run turns red when the
 live settings diverge from the file, and after the switch to apply it
 re-asserts the declared keys and reverts anything changed through the UI in
 the meantime (apply is convergent, see
-[Semantics](../README.md#semantics)).
+[Semantics](../../README.md#semantics)).
 
 ## 4. Run check mode first
 
@@ -132,7 +132,7 @@ result: applied
 ```
 
 To keep a permanent drift-report workflow alongside the applying one, see
-the [check mode guide](check-mode.md).
+the [check mode guide](../operate/check-mode.md).
 
 ## 6. Reading the output
 
@@ -149,12 +149,12 @@ carry advisory notes (for example that `enable_git_lfs` is write-only, so
 check mode cannot verify it).
 
 The action also sets a `result` output for downstream steps; the
-[README Inputs table](../README.md#inputs) documents it alongside every
+[README Inputs table](../../README.md#inputs) documents it alongside every
 input.
 
 ## Where to go next
 
 The [examples cookbook](examples.md) has a full-featured settings file and
-the null semantics. [Multi-repo mode](multi-repo.md) scales this setup from
+the null semantics. [Multi-repo mode](../operate/multi-repo.md) scales this setup from
 one repository to a fleet. When a run fails,
-[troubleshooting](troubleshooting.md) covers the common failure shapes.
+[troubleshooting](../help/troubleshooting.md) covers the common failure shapes.

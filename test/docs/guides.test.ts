@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
@@ -25,15 +25,15 @@ const silentIo: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
 
 const REQUIRED_PAGES = [
   "README.md",
-  "getting-started.md",
-  "examples.md",
-  "multi-repo.md",
-  "playbooks.md",
-  "check-mode.md",
-  "undeclared-policy.md",
-  "secrets-and-vaults.md",
-  "migrating-from-probot.md",
-  "troubleshooting.md",
+  "start/getting-started.md",
+  "start/examples.md",
+  "operate/check-mode.md",
+  "operate/multi-repo.md",
+  "playbooks/README.md",
+  "concepts/undeclared-policy.md",
+  "concepts/secrets-and-vaults.md",
+  "help/migrating-from-probot.md",
+  "help/troubleshooting.md",
 ] as const;
 
 function guidePages(): string[] {
@@ -97,6 +97,32 @@ describe("docs/ guide pages", () => {
     for (const page of REQUIRED_PAGES) {
       expect(pages.has(page), `docs/${page} is missing`).toBe(true);
     }
+  });
+
+  test("every relative link in every guide resolves to a real file", () => {
+    // The guides moved into group folders, so every cross-link is a relative
+    // path that a rename or move can silently break. Resolve each one
+    // against its page's directory (anchors stripped; external and
+    // in-page links skipped) and require the target to exist.
+    const broken: string[] = [];
+    for (const page of guidePages()) {
+      const markdown = readFileSync(join(DOCS, page), "utf8");
+      for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
+        const target = match[1] ?? "";
+        if (/^[a-z]+:\/\//.test(target) || target.startsWith("#") || target.startsWith("mailto:")) {
+          continue;
+        }
+        const file = target.split("#")[0] ?? "";
+        if (file === "") {
+          continue;
+        }
+        const resolved = join(DOCS, page, "..", file);
+        if (!existsSync(resolved)) {
+          broken.push(`docs/${page}: (${target})`);
+        }
+      }
+    }
+    expect(broken).toEqual([]);
   });
 
   for (const page of guidePages()) {
