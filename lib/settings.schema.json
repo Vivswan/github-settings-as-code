@@ -734,6 +734,20 @@
           },
           "type": "array"
         },
+        "webhooks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/WebhookConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CWebhookConfig%3E"
+            }
+          ],
+          "description": "Repository webhooks, managed one per config.url; undeclared hooks are kept by default and surfaced as notes, since integrations create their own hooks (the wrapped form can set `undeclared: delete`)."
+        },
         "workflows": {
           "description": "Per-workflow enable/disable state; undeclared workflows are untouched.",
           "items": {
@@ -915,6 +929,87 @@
       ],
       "type": "object",
       "additionalProperties": false
+    },
+    "UndeclaredPolicyList<WebhookConfig>": {
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/WebhookConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "WebhookConfig": {
+      "description": "One repository webhook, matched to the live repo by config.url. Hook URLs are configuration, not credentials: they appear in drift lines and notes on purpose. The secret never does.",
+      "properties": {
+        "active": {
+          "description": "Whether deliveries fire; GitHub defaults a new hook to true.",
+          "type": "boolean"
+        },
+        "config": {
+          "$ref": "#/definitions/WebhookDeliveryConfig",
+          "description": "The delivery settings; config.url is the natural key."
+        },
+        "events": {
+          "description": "Events that trigger deliveries, compared order-insensitively; GitHub defaults a new hook to [\"push\"].",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "const": "web",
+          "description": "GitHub's hook name; \"web\" is the only value modern hooks take, so anything else is rejected.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "config"
+      ],
+      "type": "object"
+    },
+    "WebhookDeliveryConfig": {
+      "additionalProperties": {
+        "description": "Future config fields pass through verbatim."
+      },
+      "description": "A webhook's `config` mapping, sent to the config sub-endpoint on update.",
+      "properties": {
+        "content_type": {
+          "description": "Payload encoding: \"json\" or \"form\".",
+          "type": "string"
+        },
+        "insecure_ssl": {
+          "description": "Whether to skip TLS verification (\"0\" verify / \"1\" skip); GitHub stores it as a string.",
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "secret": {
+          "description": "The shared delivery secret, as a whole-value `$NAME` reference to an environment variable on the action step (never a literal: settings files are committed plaintext). Resolved at apply time; GitHub echoes it back as \"********\", so check mode cannot verify it and apply re-sends it on every run so rotations propagate.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The delivery URL, the natural key: a changed url declares a NEW hook (the old one becomes undeclared).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
     },
     "WorkflowConfig": {
       "description": "One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo).",

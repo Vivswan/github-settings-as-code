@@ -46,6 +46,12 @@ const FIXTURES: Record<SectionKey, unknown> = {
   milestones: [{ title: "v1" }],
   interaction_limits: { limit: "contributors_only" },
   actions_variables: [{ name: "DEPLOY_REGION", value: "us-east-1" }],
+  webhooks: [
+    {
+      config: { url: "https://ci.example.com/hook", content_type: "json", secret: "$HOOK_SECRET" },
+      events: ["push"],
+    },
+  ],
 };
 
 /** Live data that differs from every fixture; unrouted GETs answer 404. */
@@ -107,6 +113,18 @@ const ROUTES = {
         },
       ],
     },
+  },
+  // A live hook with a different content_type, so the webhooks fixture drifts.
+  "GET /repos/o/r/hooks?per_page=100&page=1": {
+    data: [
+      {
+        id: 1,
+        name: "web",
+        active: true,
+        events: ["push"],
+        config: { url: "https://ci.example.com/hook", content_type: "form" },
+      },
+    ],
   },
 };
 

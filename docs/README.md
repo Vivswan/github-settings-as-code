@@ -18,6 +18,9 @@ to put it to work.
 - [The undeclared policy](undeclared-policy.md): the `undeclared` knob on the
   list sections, per-section defaults, the milestone-deletion caveat, and how
   the policy layers with a defaults file.
+- [Secrets and vaults](secrets-and-vaults.md): the `$NAME` references secret
+  fields take (webhook secrets today), wiring them from GitHub Secrets or a
+  vault action, and what check mode can and cannot verify.
 - [Migrating from the Probot Settings app](migrating-from-probot.md): a
   step-by-step move, including the parts that changed on purpose.
 - [Troubleshooting](troubleshooting.md): permission denials, ambiguous 403s,

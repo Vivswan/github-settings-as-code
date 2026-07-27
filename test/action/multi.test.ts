@@ -72,6 +72,21 @@ function cfg(overrides: Partial<Parameters<typeof runMulti>[1]> = {}) {
 }
 
 describe("runMulti", () => {
+  test("a remote target's settings cannot carry a $NAME secret reference (target provenance)", async () => {
+    const api = new MockApi({
+      "GET /repos/o/a": { data: {} },
+      "GET /repos/o/a/contents/.github/settings.yml": {
+        data: "webhooks:\n  - config:\n      url: https://x.test/h\n      secret: $OPERATOR_SECRET\n",
+      },
+    });
+    const { io, annotations } = captureIo();
+    const { fatal, targets } = await runMulti(api, cfg({ reposInput: "o/a" }), io);
+    expect(fatal).toBeNull();
+    expect(targets[0]?.result).toBe("failed");
+    expect(api.mutations()).toEqual([]);
+    expect(annotations.some((a) => a.includes("target-fetched settings file"))).toBe(true);
+  });
+
   test("one failing repo never stops the others; worst-of is failed", async () => {
     const api = new MockApi({
       // o/a: healthy remote target

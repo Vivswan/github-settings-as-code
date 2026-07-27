@@ -90,6 +90,7 @@ const EXPECTED_GRANT: Record<string, string> = {
   milestones: `grant "Issues" (read and write) under the PAT's Repository permissions`,
   interaction_limits: `grant "Administration" (read and write) under the PAT's Repository permissions`,
   actions_variables: `grant "Variables" (read and write) under the PAT's Repository permissions`,
+  webhooks: `grant "Webhooks" (read and write) under the PAT's Repository permissions`,
 };
 
 describe("section permissions", () => {

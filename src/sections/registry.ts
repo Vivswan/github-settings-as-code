@@ -24,6 +24,7 @@ import { pagesSection } from "./pages.js";
 import { repositorySection } from "./repository.js";
 import { rulesetsSection } from "./rulesets.js";
 import { teamsSection } from "./teams.js";
+import { webhooksSection } from "./webhooks.js";
 import { workflowsSection } from "./workflows.js";
 
 const byKey: { [K in SectionKey]: SectionModule<K> } = {
@@ -42,6 +43,7 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   milestones: milestonesSection,
   interaction_limits: interactionLimitsSection,
   actions_variables: actionsVariablesSection,
+  webhooks: webhooksSection,
 };
 
 /** Every section module, in execution order. */

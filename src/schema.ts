@@ -4,7 +4,7 @@
  * their plain-array form, so an existing Probot config applies to them
  * unchanged; the remaining sections
  * (rulesets, autolinks, actions, workflows, pages, code_scanning_default_setup,
- * interaction_limits, actions_variables)
+ * interaction_limits, actions_variables, webhooks)
  * are additions. Only DECLARED keys are ever applied or compared, so omitting a
  * key means "leave it alone".
  */
@@ -53,6 +53,12 @@ export interface SettingsFile {
    * and deliberately not this section.
    */
   actions_variables?: ActionsVariableConfig[] | UndeclaredPolicyList<ActionsVariableConfig>;
+  /**
+   * Repository webhooks, managed one per config.url; undeclared hooks are
+   * kept by default and surfaced as notes, since integrations create their
+   * own hooks (the wrapped form can set `undeclared: delete`).
+   */
+  webhooks?: WebhookConfig[] | UndeclaredPolicyList<WebhookConfig>;
 }
 
 /**
@@ -360,6 +366,42 @@ export interface InteractionLimitsConfig {
   expiry?: string;
 }
 
+/**
+ * One repository webhook, matched to the live repo by config.url. Hook URLs
+ * are configuration, not credentials: they appear in drift lines and notes
+ * on purpose. The secret never does.
+ */
+export interface WebhookConfig {
+  /** GitHub's hook name; "web" is the only value modern hooks take, so anything else is rejected. */
+  name?: "web";
+  /** The delivery settings; config.url is the natural key. */
+  config: WebhookDeliveryConfig;
+  /** Events that trigger deliveries, compared order-insensitively; GitHub defaults a new hook to ["push"]. */
+  events?: string[];
+  /** Whether deliveries fire; GitHub defaults a new hook to true. */
+  active?: boolean;
+}
+
+/** A webhook's `config` mapping, sent to the config sub-endpoint on update. */
+export interface WebhookDeliveryConfig {
+  /** The delivery URL, the natural key: a changed url declares a NEW hook (the old one becomes undeclared). */
+  url: string;
+  /** Payload encoding: "json" or "form". */
+  content_type?: string;
+  /**
+   * The shared delivery secret, as a whole-value `$NAME` reference to an
+   * environment variable on the action step (never a literal: settings
+   * files are committed plaintext). Resolved at apply time; GitHub echoes
+   * it back as "********", so check mode cannot verify it and apply
+   * re-sends it on every run so rotations propagate.
+   */
+  secret?: string;
+  /** Whether to skip TLS verification ("0" verify / "1" skip); GitHub stores it as a string. */
+  insecure_ssl?: string | number;
+  /** Future config fields pass through verbatim. */
+  [key: string]: unknown;
+}
+
 /** Every recognized top-level section, in execution order. */
 export const SECTION_KEYS = [
   "repository",
@@ -377,6 +419,7 @@ export const SECTION_KEYS = [
   "milestones",
   "interaction_limits",
   "actions_variables",
+  "webhooks",
 ] as const satisfies readonly (keyof SettingsFile)[];
 
 /** A recognized top-level section name. */
@@ -396,6 +439,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "collaborators",
   "milestones",
   "actions_variables",
+  "webhooks",
 ] as const satisfies readonly SectionKey[];
 
 /** A section key that takes the `undeclared` policy knob. */
