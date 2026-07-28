@@ -17,11 +17,14 @@ import type {
   EnvironmentConfig,
   EnvironmentSecretConfig,
   EnvironmentVariableConfig,
+  MustBeNever,
+  UndeclaredPolicy,
   UndeclaredPolicyList,
 } from "../schema.js";
 import {
   call,
   type EndpointDecl,
+  type EntryOf,
   emptyResult,
   grantFor,
   listAllEnveloped,
@@ -98,15 +101,149 @@ const ENDPOINTS = {
 /**
  * The per-environment keys that are NOT part of the environment PUT body:
  * each is a sub-resource with its own endpoint family, reconciled AFTER the
- * PUT succeeds (variables and secrets). splitEntry strips them in one place,
- * so a nested key can never leak into the passthrough PUT payload or the
- * check-mode environment diff.
+ * PUT succeeds by its NESTED_RECONCILERS entry. splitEntry strips them in
+ * one place, so a nested key can never leak into the passthrough PUT
+ * payload or the check-mode environment diff.
  */
 const NESTED_KEYS = [
   "variables",
   "secrets",
 ] as const satisfies readonly (keyof EnvironmentConfig)[];
 type NestedKey = (typeof NESTED_KEYS)[number];
+
+/** The declared value of one nested key, once its optionality is peeled off. */
+type NestedDeclared = { [K in NestedKey]: NonNullable<EnvironmentConfig[K]> };
+
+/** The entry type of one nested key's list, seen through the wrapped form. */
+type NestedEntry<K extends NestedKey> = EntryOf<NestedDeclared[K]>;
+
+/**
+ * The EnvironmentConfig keys whose type takes the wrapped
+ * `{undeclared, entries}` form. Taking the wrapper is a rule this section
+ * commits to for every nested sub-resource list (plain-array PUT fields
+ * like `reviewers` never take it), and the guarantee below rests on it:
+ * the lockstep types pin NESTED_KEYS to the wrapped keys in both
+ * directions, so a wrapped key added to EnvironmentConfig cannot silently
+ * leak into the PUT body, and a listed key must really take the wrapper.
+ * A nested list declared as a bare array would evade both checks and ride
+ * into the PUT unnoticed - give a new key the wrapped form, never a bare
+ * array.
+ */
+type NestedByType = {
+  [K in keyof EnvironmentConfig]-?: [
+    Extract<NonNullable<EnvironmentConfig[K]>, { entries: readonly unknown[] }>,
+  ] extends [never]
+    ? never
+    : K;
+}[keyof EnvironmentConfig];
+type _NestedListComplete = MustBeNever<Exclude<NestedByType, NestedKey>>;
+type _NestedListSound = MustBeNever<Exclude<NestedKey, NestedByType>>;
+
+/**
+ * One nested key's handling, so run() can loop over NESTED_KEYS instead of
+ * branching per key. The table below is a mapped type over NestedKey, so a
+ * key added to NESTED_KEYS without a matching entry fails to compile (the
+ * section-registry pattern). Function-valued properties on purpose, not
+ * method shorthand: method parameters check bivariantly, properties
+ * strictly. Today's two entry types are structurally identical, so a
+ * swapped pairing is pinned by the unit tests either way; the strict
+ * checking is for future keys whose types genuinely differ.
+ */
+interface NestedReconciler<K extends NestedKey> {
+  /**
+   * The policy for live sub-resources WITHIN a declared key that its entries
+   * do not declare, the single source every unwrap reads. An explicit
+   * literal per key on purpose: the section-level default ("untouched")
+   * describes sibling ENVIRONMENTS, not the resources inside one, and nested
+   * lists never inherit a policy through the multi-repo defaults merge
+   * (environment entries merge as whole array elements).
+   */
+  defaultPolicy: UndeclaredPolicy;
+  /**
+   * Check-mode note when the declared environment does not exist yet:
+   * listing a missing environment's sub-resources is impossible, so the
+   * declared list cannot be verified until the environment exists, and the
+   * missing-environment drift already fails check.
+   */
+  missingNote: (envName: string) => string;
+  /**
+   * Upfront rejection of misdeclared entries (duplicates, or a cross-key
+   * precondition on the rest of the entry), run for ALL environments before
+   * any write.
+   */
+  validate?: (env: EnvironmentConfig, entries: readonly NestedEntry<K>[]) => void;
+  /** Reconcile one environment's declared list against the live sub-resources. */
+  reconcile: (
+    ctx: SectionContext,
+    section: SectionModule<"environments">,
+    envName: string,
+    policy: UndeclaredPolicy,
+    entries: readonly NestedEntry<K>[],
+    result: SectionResult,
+  ) => Promise<void>;
+}
+
+const NESTED_RECONCILERS: { [K in NestedKey]: NestedReconciler<K> } = {
+  variables: {
+    // "delete" like the top-level actions_variables default: variables are
+    // readable, recreatable configuration.
+    defaultPolicy: "delete",
+    missingNote: (envName) =>
+      `environments[${envName}].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables`,
+    validate: (env, entries) => rejectDuplicateVariables(env.name, entries),
+    reconcile: reconcileVariables,
+  },
+  secrets: {
+    // "keep" like the top-level secret families: a deleted secret's value is
+    // unrecoverable, so deletion is opt-in via the wrapped form.
+    defaultPolicy: "keep",
+    missingNote: (envName) =>
+      `environments[${envName}].secrets: not verifiable while the environment is missing; apply will create the environment and reconcile the declared secrets`,
+    validate: (env, entries) => rejectDuplicateSecrets(env.name, entries),
+    reconcile: reconcileEnvironmentSecrets,
+  },
+};
+
+/**
+ * Unwrap one nested key's declared value against its own table default.
+ * Generic over K so the table lookup and the declared value stay correlated
+ * to the same literal key; the union-typed loop variable in run() cannot
+ * express that without casts. The one cast restates NestedDeclared[K] in the
+ * spelling undeclaredPolicy infers its entry type from.
+ */
+function unwrapNested<K extends NestedKey>(
+  key: K,
+  declared: NestedDeclared[K],
+): { policy: UndeclaredPolicy; entries: readonly NestedEntry<K>[] } {
+  return undeclaredPolicy(
+    declared as readonly NestedEntry<K>[] | UndeclaredPolicyList<NestedEntry<K>>,
+    NESTED_RECONCILERS[key].defaultPolicy,
+  );
+}
+
+/** Run one nested key's upfront validation (see NestedReconciler.validate). */
+function validateNested<K extends NestedKey>(key: K, env: EnvironmentConfig): void {
+  const declared = env[key];
+  if (declared !== undefined) {
+    NESTED_RECONCILERS[key].validate?.(env, unwrapNested(key, declared).entries);
+  }
+}
+
+/** Reconcile one nested key of one environment; generic like validateNested. */
+async function reconcileNested<K extends NestedKey>(
+  ctx: SectionContext,
+  section: SectionModule<"environments">,
+  key: K,
+  envName: string,
+  nested: Pick<EnvironmentConfig, NestedKey>,
+  result: SectionResult,
+): Promise<void> {
+  const declared = nested[key];
+  if (declared !== undefined) {
+    const { policy, entries } = unwrapNested(key, declared);
+    await NESTED_RECONCILERS[key].reconcile(ctx, section, envName, policy, entries, result);
+  }
+}
 
 /** Split one declared entry into the PUT/diff payload and the nested sub-resources. */
 function splitEntry(env: EnvironmentConfig): {
@@ -185,15 +322,12 @@ export const environmentsSection: SectionModule<"environments"> = {
       (env) => env.name.toLowerCase(),
       (env) => env.name,
     );
-    // Validate every nested variables and secrets list upfront, BEFORE any
-    // write: a duplicate discovered mid-loop would leave earlier
-    // environments applied and later ones untouched.
+    // Validate every nested list upfront, BEFORE any write: a duplicate
+    // discovered mid-loop would leave earlier environments applied and later
+    // ones untouched.
     for (const env of desired) {
-      if (env.variables !== undefined) {
-        rejectDuplicateVariables(env.name, undeclaredPolicy(env.variables, "delete").entries);
-      }
-      if (env.secrets !== undefined) {
-        rejectDuplicateSecrets(env.name, undeclaredPolicy(env.secrets, "keep").entries);
+      for (const key of NESTED_KEYS) {
+        validateNested(key, env);
       }
     }
     for (const env of desired) {
@@ -207,29 +341,17 @@ export const environmentsSection: SectionModule<"environments"> = {
           result.drift.push(
             `environments[${name}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
-          if (nested.variables !== undefined) {
-            // Listing variables of a missing environment is impossible, so
-            // the declared list cannot be verified until the environment
-            // exists; the missing-environment drift above already fails check.
-            result.notes.push(
-              `environments[${name}].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables`,
-            );
-          }
-          if (nested.secrets !== undefined) {
-            // Same as variables: no environment, no secrets listing.
-            result.notes.push(
-              `environments[${name}].secrets: not verifiable while the environment is missing; apply will create the environment and reconcile the declared secrets`,
-            );
+          for (const key of NESTED_KEYS) {
+            if (nested[key] !== undefined) {
+              result.notes.push(NESTED_RECONCILERS[key].missingNote(name));
+            }
           }
         } else {
           result.drift.push(
             ...subsetDiff(settings, flattenEnvironment(probe.data), `environments[${name}]`),
           );
-          if (nested.variables !== undefined) {
-            await reconcileVariables(ctx, this, name, nested.variables, result);
-          }
-          if (nested.secrets !== undefined) {
-            await reconcileEnvironmentSecrets(ctx, this, name, nested.secrets, result);
+          for (const key of NESTED_KEYS) {
+            await reconcileNested(ctx, this, key, name, nested, result);
           }
         }
       } else {
@@ -239,11 +361,8 @@ export const environmentsSection: SectionModule<"environments"> = {
           describe: `upserting environment "${name}"`,
         });
         result.changes.push(`applied environment "${name}"`);
-        if (nested.variables !== undefined) {
-          await reconcileVariables(ctx, this, name, nested.variables, result);
-        }
-        if (nested.secrets !== undefined) {
-          await reconcileEnvironmentSecrets(ctx, this, name, nested.secrets, result);
+        for (const key of NESTED_KEYS) {
+          await reconcileNested(ctx, this, key, name, nested, result);
         }
       }
     }
@@ -286,20 +405,17 @@ function rejectDuplicateVariables(
 /**
  * Reconcile one environment's declared `variables` list against the live
  * variables: create missing ones, update divergent values, and apply the
- * undeclared policy to the rest. The default WITHIN a declared key is
- * "delete", an explicit literal on purpose: the section-level default
- * ("untouched") describes sibling ENVIRONMENTS, not the variables inside one,
- * and nested lists never inherit a policy through the multi-repo defaults
- * merge (environment entries merge as whole array elements).
+ * undeclared policy (unwrapped by the caller against the table default) to
+ * the rest.
  */
 async function reconcileVariables(
   ctx: SectionContext,
   section: SectionModule<"environments">,
   envName: string,
-  declared: EnvironmentVariableConfig[] | UndeclaredPolicyList<EnvironmentVariableConfig>,
+  policy: UndeclaredPolicy,
+  entries: readonly EnvironmentVariableConfig[],
   result: SectionResult,
 ): Promise<void> {
-  const { policy, entries } = undeclaredPolicy(declared, "delete");
   const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
   const live = (await listAllEnveloped(ctx, section, ENDPOINTS.listVariables, "variables", {
     params: { environment_name: envName },
@@ -444,23 +560,20 @@ function environmentSecretsScope(envName: string): SecretsScope {
 
 /**
  * Reconcile one environment's declared `secrets` list through the shared
- * secrets engine. The default WITHIN a declared key is "keep", an explicit
- * literal on purpose: a deleted secret's value is unrecoverable, so deletion
- * is opt-in exactly like the top-level secret families, and nested lists
- * never inherit a policy through the multi-repo defaults merge (environment
- * entries merge as whole array elements). prepareSecretValues runs PER
- * ENVIRONMENT - per scope - because its lookup is keyed by secret name
- * alone: one global call would silently collide same-named secrets across
- * environments and seal the wrong plaintext.
+ * secrets engine, under the policy the caller unwrapped against the table
+ * default. prepareSecretValues runs PER ENVIRONMENT - per scope - because
+ * its lookup is keyed by secret name alone: one global call would silently
+ * collide same-named secrets across environments and seal the wrong
+ * plaintext.
  */
 async function reconcileEnvironmentSecrets(
   ctx: SectionContext,
   section: SectionModule<"environments">,
   envName: string,
-  declared: EnvironmentSecretConfig[] | UndeclaredPolicyList<EnvironmentSecretConfig>,
+  policy: UndeclaredPolicy,
+  entries: readonly EnvironmentSecretConfig[],
   result: SectionResult,
 ): Promise<void> {
-  const { policy, entries } = undeclaredPolicy(declared, "keep");
   const resolvedValueOf = prepareSecretValues(ctx, section, entries);
   const scoped = await reconcileSecrets(ctx, section, environmentSecretsScope(envName), {
     entries,
