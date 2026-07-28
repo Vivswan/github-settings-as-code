@@ -1,0 +1,35 @@
+# A declared App slug the available-Apps listing does not carry is a hard
+# section error naming the available slugs: the App is not installed on the
+# repository (or provides no rule for this environment), and no call this
+# action can make would change that. The environment PUT has already landed
+# by then - the resolver runs only when a declared rule is missing - but the
+# resolvable deploy-gate sibling is NOT enabled either: every missing slug
+# resolves before the first POST, so the environment is never
+# half-reconciled.
+name: environment-protection-rules-unknown-app
+settings:
+  environments:
+    - name: production
+      deployment_protection_rules:
+        - app: deploy-gate
+        - app: not-installed
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules: []
+token_permissions:
+  environments: write
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    environments: failed
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+  never:
+    - "POST /repos/{repo}/environments/production/deployment_protection_rules"
+    - "DELETE /repos/{repo}/environments"
+  stdout_contains:
+    - 'the deployment protection rule App "not-installed" is not available to environment "production"'
+    - 'the available Apps are "deploy-gate", "region-guard", "change-window"'

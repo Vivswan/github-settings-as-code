@@ -22,8 +22,9 @@ const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
 
 /**
  * The {undeclared, entries} knobs nested INSIDE a section entry rather than
- * at the top level (environments[].variables, environments[].secrets, and
- * environments[].deployment_branch_policies), each contributing one wrapper
+ * at the top level (environments[].variables, environments[].secrets,
+ * environments[].deployment_branch_policies, and
+ * environments[].deployment_protection_rules), each contributing one wrapper
  * definition beyond the knobbed sections. Named by the entry type so the
  * presence check below fails loudly when the generator renames one.
  */
@@ -31,6 +32,7 @@ const NESTED_POLICY_LISTS = [
   "UndeclaredPolicyList<EnvironmentVariableConfig>",
   "UndeclaredPolicyList<EnvironmentSecretConfig>",
   "UndeclaredPolicyList<DeploymentBranchPolicyConfig>",
+  "UndeclaredPolicyList<DeploymentProtectionRuleConfig>",
 ] as const;
 
 const wrappers = Object.entries(schema.definitions ?? {}).filter(([name]) =>

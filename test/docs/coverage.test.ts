@@ -97,8 +97,20 @@ describe("COVERAGE gaps anti-test", () => {
         }
       }
     }
-    expect(found, "the gaps parser matched no endpoints; the table format changed").toBeGreaterThan(
-      10,
-    );
+    // Structural, not a tuned constant: EVERY gap row must spell at least one
+    // METHOD /path endpoint in its Endpoints cell, so a single row losing its
+    // endpoint syntax (or the whole table changing format) fails here by
+    // name. Implementing a gap deletes its whole row, so this bar never
+    // needs retuning.
+    const gapRows = tableRows(gapLines);
+    expect(gapRows.length).toBeGreaterThan(0);
+    expect(found).toBeGreaterThan(0);
+    for (const row of gapRows) {
+      const endpointCell = row[1] ?? "";
+      expect(
+        [...endpointCell.matchAll(methodPath)].length,
+        `gap row "${row[0] ?? ""}" spells no parseable METHOD /path endpoint; the anti-match sweep above cannot see it`,
+      ).toBeGreaterThan(0);
+    }
   });
 });

@@ -1,0 +1,73 @@
+# Apply reconciles a declared per-environment deployment_protection_rules list
+# AFTER the environment PUT: the missing deploy-gate rule is enabled (one
+# available-Apps fetch resolves its slug to the integration id), the live
+# region-guard rule already satisfies its entry, and the undeclared
+# change-window rule is KEPT with a note (the default WITHIN a declared key:
+# disabling a deployment gate is opt-in). The staging entry's wrapped
+# "undeclared: delete" form opts in, disabling its live rule by id. A check
+# rerun lists the reconciled rules and sees them satisfied, so it converges.
+# Warms the list, apps, create, and remove routes for the coverage tripwire.
+name: environment-protection-rules
+settings:
+  environments:
+    - name: production
+      deployment_protection_rules:
+        - app: deploy-gate
+        - app: region-guard
+    - name: staging
+      deployment_protection_rules:
+        undeclared: delete
+        entries: []
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules: []
+    staging:
+      name: staging
+      protection_rules: []
+  environment_protection_rules:
+    production:
+      - id: 7100
+        node_id: DPR_7100
+        enabled: true
+        app:
+          id: 3516
+          slug: region-guard
+          integration_url: https://api.github.com/apps/region-guard
+          node_id: MDQ6R2F0ZTM1MTY=
+      - id: 7101
+        node_id: DPR_7101
+        enabled: true
+        app:
+          id: 3517
+          slug: change-window
+          integration_url: https://api.github.com/apps/change-window
+          node_id: MDQ6R2F0ZTM1MTc=
+    staging:
+      - id: 7001
+        node_id: DPR_7001
+        enabled: true
+        app:
+          id: 3517
+          slug: change-window
+          integration_url: https://api.github.com/apps/change-window
+          node_id: MDQ6R2F0ZTM1MTc=
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+    - "POST /repos/{repo}/environments/production/deployment_protection_rules"
+    - "PUT /repos/{repo}/environments/staging"
+    - "DELETE /repos/{repo}/environments/staging/deployment_protection_rules/7001"
+  requests_contain:
+    - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment_protection_rules"
+    - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment_protection_rules/apps"
+  stdout_contains:
+    - 'deployment protection rule "change-window" is enabled on environment "production" but is not declared'
+  converges: true

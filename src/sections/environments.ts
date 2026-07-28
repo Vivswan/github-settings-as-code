@@ -13,13 +13,20 @@
  * the singular `deployment_branch_policy` sibling to set
  * `custom_branch_policies: true`; a pattern's type is immutable upstream, so
  * a type change is delete plus recreate, and undeclared patterns WITHIN a
- * declared key are deleted by default).
+ * declared key are deleted by default). A declared nested
+ * `deployment_protection_rules` key reconciles that environment's custom
+ * deployment protection rules - GitHub App gates, enable/disable only,
+ * declared by App slug and resolved to the integration id at apply time
+ * (undeclared rules WITHIN a declared key are KEPT by default; disabling a
+ * deployment gate is security-relevant, so `{undeclared: delete, entries}`
+ * opts in).
  */
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
 import type {
   DeploymentBranchPolicyConfig,
+  DeploymentProtectionRuleConfig,
   EnvironmentConfig,
   EnvironmentSecretConfig,
   EnvironmentVariableConfig,
@@ -55,14 +62,16 @@ import {
 const permission: SectionPermission = { repo: ["environments"] };
 
 /**
- * The grant caveat for the branch-policy pattern endpoints, which GitHub
- * gates OUTSIDE the Environments permission (verified against the
- * fine-grained permissions reference): the list read needs Actions read and
- * the create/delete writes need Administration write. Appended to the
- * section grant so a denial anywhere in the section names the extra grants.
+ * The grant caveat for the branch-policy pattern and protection-rule
+ * endpoints, which GitHub gates OUTSIDE the Environments permission
+ * (verified against the fine-grained permissions reference): the pattern
+ * list and the protection-rule list need Actions read, while the available
+ * protection-rule Apps read and the writes of both families need
+ * Administration. Appended to the section grant so a denial anywhere in the
+ * section names the extra grants.
  */
-const BRANCH_POLICIES_CAVEAT =
-  'a declared "deployment_branch_policies" key additionally needs "Actions" (read) and "Administration" (read and write)';
+const NESTED_OVERRIDES_CAVEAT =
+  'declared "deployment_branch_policies" and "deployment_protection_rules" keys additionally need "Actions" (read) and "Administration" (read and write)';
 
 /**
  * The 404 on the pattern endpoints is ambiguous: besides a missing grant it
@@ -71,6 +80,12 @@ const BRANCH_POLICIES_CAVEAT =
  */
 const BRANCH_POLICIES_DENIAL_HINT =
   "a 404 here can also mean the environment does not exist, or that its deployment_branch_policy does not set custom_branch_policies: true";
+
+/**
+ * The 404 on the protection-rule endpoints is ambiguous the same way:
+ * besides a missing grant it can mean the environment does not exist.
+ */
+const PROTECTION_RULES_DENIAL_HINT = "a 404 here can also mean the environment does not exist";
 
 const ENDPOINTS = {
   probe: {
@@ -150,6 +165,37 @@ const ENDPOINTS = {
     permission: { repo: ["administration"] },
     denialHint: BRANCH_POLICIES_DENIAL_HINT,
   },
+  // The protection-rule endpoints spell their path segment with UNDERSCORES
+  // (deployment_protection_rules), unlike the hyphenated branch-policy
+  // family. GitHub gates them outside the Environments permission too:
+  // the enabled-rules list under Actions, everything else under
+  // Administration (fine-grained permissions reference).
+  listProtectionRules: {
+    route: "GET /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules",
+    statuses: { 200: "the enabled custom deployment protection rules" },
+    permission: { repo: ["actions"] },
+    denialHint: PROTECTION_RULES_DENIAL_HINT,
+  },
+  listProtectionRuleApps: {
+    route:
+      "GET /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules/apps",
+    statuses: { 200: "the protection-rule Apps available to this environment" },
+    permission: { repo: ["administration"] },
+    denialHint: PROTECTION_RULES_DENIAL_HINT,
+  },
+  createProtectionRule: {
+    route: "POST /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules",
+    statuses: { 201: "custom deployment protection rule enabled" },
+    permission: { repo: ["administration"] },
+    denialHint: PROTECTION_RULES_DENIAL_HINT,
+  },
+  removeProtectionRule: {
+    route:
+      "DELETE /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules/{protection_rule_id}",
+    statuses: { 204: "custom deployment protection rule disabled" },
+    permission: { repo: ["administration"] },
+    denialHint: PROTECTION_RULES_DENIAL_HINT,
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
 /**
@@ -157,12 +203,14 @@ const ENDPOINTS = {
  * each is a sub-resource with its own endpoint family, reconciled AFTER the
  * PUT succeeds by its NESTED_RECONCILERS entry. splitEntry strips them in
  * one place, so a nested key can never leak into the passthrough PUT
- * payload or the check-mode environment diff.
+ * payload or the check-mode environment diff. Exported so the docs test can
+ * pin the undeclared-policy guide's nested-knob enumeration to this list.
  */
-const NESTED_KEYS = [
+export const NESTED_KEYS = [
   "variables",
   "secrets",
   "deployment_branch_policies",
+  "deployment_protection_rules",
 ] as const satisfies readonly (keyof EnvironmentConfig)[];
 type NestedKey = (typeof NESTED_KEYS)[number];
 
@@ -275,6 +323,18 @@ const NESTED_RECONCILERS: { [K in NestedKey]: NestedReconciler<K> } = {
     validate: validateBranchPolicies,
     reconcile: reconcileBranchPolicies,
   },
+  deployment_protection_rules: {
+    // "keep" like the secret families, for a security reason instead of an
+    // unrecoverable one: Apps can enable themselves as deployment gates, and
+    // silently disabling a gate the file never named would weaken a
+    // protection nobody asked to weaken. Disabling is opt-in via the wrapped
+    // form.
+    defaultPolicy: "keep",
+    missingNote: (envName) =>
+      `environments[${envName}].deployment_protection_rules: not verifiable while the environment is missing; apply will create the environment and reconcile the declared protection rules`,
+    validate: validateProtectionRules,
+    reconcile: reconcileProtectionRules,
+  },
 };
 
 /**
@@ -352,7 +412,7 @@ export const environmentsSection: SectionModule<"environments"> = {
   key: "environments",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(permission, BRANCH_POLICIES_CAVEAT),
+  grant: grantFor(permission, NESTED_OVERRIDES_CAVEAT),
   endpoints: ENDPOINTS,
   shape: z.array(
     z
@@ -379,6 +439,12 @@ export const environmentsSection: SectionModule<"environments"> = {
         // upstream enum.
         deployment_branch_policies: undeclaredPolicyShape(
           z.array(z.looseObject({ name: z.string(), type: z.string().optional() })),
+        ).optional(),
+        // STRICT entries, like secrets: the enable POST is built solely from
+        // the App's resolved integration_id, so an extra entry key has no
+        // destination and would silently do nothing.
+        deployment_protection_rules: undeclaredPolicyShape(
+          z.array(z.strictObject({ app: z.string() })),
         ).optional(),
         // Secrets live under the plural `secrets` list; a singular entry-level
         // `secret` would pass the loose shape into the environment PUT body
@@ -892,6 +958,223 @@ async function reconcileBranchPolicies(
       });
       result.changes.push(
         `DELETED undeclared deployment branch policy "${name}" from environment "${envName}"`,
+      );
+    }
+  }
+}
+
+/**
+ * The fields of a live custom deployment protection rule this section reads.
+ * The spec marks every field required, but the identity fields are still
+ * extracted loudly (the livePolicyName precedent): a rule without an App
+ * slug has no identity to reconcile by, and silently skipping it would let
+ * check report falsely clean.
+ */
+interface LiveProtectionRule {
+  id?: number;
+  app?: { id?: number; slug?: string };
+}
+
+/** The App slug a rule reconciles by, or a loud error when the response omitted it. */
+function liveRuleSlug(rule: LiveProtectionRule, envName: string): string {
+  const slug = rule.app?.slug;
+  if (typeof slug !== "string") {
+    throw new Error(
+      `environments: the deployment protection rule list for environment "${envName}" returned a rule without an app slug, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+    );
+  }
+  return slug;
+}
+
+/** The id a disable addresses, or a loud error when the response omitted it. */
+function liveRuleId(rule: LiveProtectionRule, envName: string): string {
+  // Only a real number may address the DELETE: a null or string id would
+  // otherwise serialize into the path (".../deployment_protection_rules/null").
+  if (typeof rule.id !== "number") {
+    throw new Error(
+      `environments: the deployment protection rule list for environment "${envName}" returned a rule without a numeric id, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+    );
+  }
+  return String(rule.id);
+}
+
+/**
+ * The enabled rules of one environment. A single call(), NOT
+ * listAllEnveloped: this endpoint documents no page/per_page parameters, so
+ * the page loop would append a query GitHub never specified. Both envelope
+ * keys are optional in the spec, so an ABSENT list reads as empty - but a
+ * PRESENT non-array value is a contract break that fails loudly.
+ */
+async function listProtectionRules(
+  ctx: SectionContext,
+  section: SectionModule<"environments">,
+  envName: string,
+): Promise<LiveProtectionRule[]> {
+  const data = (await call(ctx, section, ENDPOINTS.listProtectionRules, {
+    params: { environment_name: envName },
+    describe: `listing deployment protection rules of environment "${envName}"`,
+  })) as { custom_deployment_protection_rules?: unknown } | null;
+  const rules = data?.custom_deployment_protection_rules;
+  if (rules === undefined) {
+    return [];
+  }
+  if (!Array.isArray(rules)) {
+    throw new Error(
+      `environments: the deployment protection rule list for environment "${envName}" returned a custom_deployment_protection_rules value that is not a list, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+    );
+  }
+  return rules as LiveProtectionRule[];
+}
+
+/**
+ * Resolve each declared App slug to its integration id via the
+ * available-Apps listing (fetched by the caller only when a declared rule is
+ * missing). A slug the listing does not carry is a hard error naming the
+ * available slugs: the App is not installed or does not provide a rule for
+ * this environment, and no API call this section may make can change that.
+ */
+function resolveIntegrationId(
+  apps: readonly LiveProtectionRuleApp[],
+  slug: string,
+  envName: string,
+): number {
+  const app = apps.find((candidate) => candidate.slug === slug);
+  if (app === undefined) {
+    const available =
+      apps.length > 0
+        ? `the available Apps are ${apps.map((candidate) => `"${candidate.slug}"`).join(", ")}`
+        : "no protection-rule Apps are available to it";
+    throw new Error(
+      `environments: the deployment protection rule App "${slug}" is not available to environment "${envName}" (${available}). Install the GitHub App providing the rule on this repository, or declare one of the available slugs`,
+    );
+  }
+  return app.id;
+}
+
+/** The fields of an available protection-rule App this section reads. */
+interface LiveProtectionRuleApp {
+  id: number;
+  slug: string;
+}
+
+/**
+ * The available-Apps listing, with the identity fields extracted loudly
+ * (an App without a slug or id could neither be offered in the
+ * unknown-slug error nor resolve a declared rule).
+ */
+async function listProtectionRuleApps(
+  ctx: SectionContext,
+  section: SectionModule<"environments">,
+  envName: string,
+): Promise<LiveProtectionRuleApp[]> {
+  const apps = (await listAllEnveloped(
+    ctx,
+    section,
+    ENDPOINTS.listProtectionRuleApps,
+    "available_custom_deployment_protection_rule_integrations",
+    { params: { environment_name: envName } },
+  )) as Array<{ id?: unknown; slug?: unknown }>;
+  return apps.map((app) => {
+    if (typeof app.id !== "number" || typeof app.slug !== "string") {
+      throw new Error(
+        `environments: the available protection-rule App list for environment "${envName}" returned an App without an id or slug, so declared rules cannot be resolved. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+      );
+    }
+    return { id: app.id, slug: app.slug };
+  });
+}
+
+/**
+ * Upfront rejection of duplicate declared App slugs: the same gate enabled
+ * twice would fight itself on every run.
+ */
+function validateProtectionRules(
+  env: EnvironmentConfig,
+  entries: readonly DeploymentProtectionRuleConfig[],
+): void {
+  const seen = new Set<string>();
+  for (const rule of entries) {
+    if (seen.has(rule.app)) {
+      throw new Error(
+        `environments: the "${env.name}" entry declares the deployment protection rule App "${rule.app}" twice. Keep exactly one entry per App`,
+      );
+    }
+    seen.add(rule.app);
+  }
+}
+
+/**
+ * Reconcile one environment's declared `deployment_protection_rules` list
+ * against the enabled rules. Enable/disable only - GitHub offers no update
+ * call - so a missing declared rule is enabled (its slug resolved to the
+ * integration id through ONE available-Apps fetch, made only when something
+ * is missing) and a live undeclared rule follows the policy the caller
+ * unwrapped against the table default ("keep": disabling a deployment gate
+ * is opt-in).
+ */
+async function reconcileProtectionRules(
+  ctx: SectionContext,
+  section: SectionModule<"environments">,
+  envName: string,
+  policy: UndeclaredPolicy,
+  entries: readonly DeploymentProtectionRuleConfig[],
+  result: SectionResult,
+): Promise<void> {
+  const live = await listProtectionRules(ctx, section, envName);
+  const liveBySlug = new Map<string, LiveProtectionRule>();
+  for (const rule of live) {
+    liveBySlug.set(liveRuleSlug(rule, envName), rule);
+  }
+  const declared = new Set(entries.map((rule) => rule.app));
+
+  const missing = entries.filter((rule) => !liveBySlug.has(rule.app));
+  if (ctx.check) {
+    for (const rule of missing) {
+      result.drift.push(
+        `environments[${envName}].deployment_protection_rules[${rule.app}]: missing - declared in the settings file but not enabled on the environment; apply will enable it`,
+      );
+    }
+  } else if (missing.length > 0) {
+    const apps = await listProtectionRuleApps(ctx, section, envName);
+    // Resolve EVERY missing slug before the first POST: an unknown slug is a
+    // hard error, and discovering it mid-loop would leave the environment
+    // half-reconciled - the same validate-before-write posture as the
+    // section's upfront duplicate checks.
+    const resolved = missing.map((rule) => ({
+      rule,
+      integrationId: resolveIntegrationId(apps, rule.app, envName),
+    }));
+    for (const { rule, integrationId } of resolved) {
+      await call(ctx, section, ENDPOINTS.createProtectionRule, {
+        params: { environment_name: envName },
+        payload: { integration_id: integrationId },
+        describe: `enabling deployment protection rule "${rule.app}" in environment "${envName}"`,
+      });
+      result.changes.push(
+        `enabled deployment protection rule "${rule.app}" in environment "${envName}"`,
+      );
+    }
+  }
+
+  for (const [slug, rule] of liveBySlug) {
+    if (declared.has(slug)) {
+      continue;
+    }
+    if (policy === "keep") {
+      result.notes.push(
+        `deployment protection rule "${slug}" is enabled on environment "${envName}" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DISABLE it`,
+      );
+    } else if (ctx.check) {
+      result.drift.push(
+        `environments[${envName}].deployment_protection_rules[${slug}]: undeclared - not in the settings file, so apply will DISABLE it; add it to the settings file to keep it`,
+      );
+    } else {
+      await call(ctx, section, ENDPOINTS.removeProtectionRule, {
+        params: { environment_name: envName, protection_rule_id: liveRuleId(rule, envName) },
+        describe: `disabling undeclared deployment protection rule "${slug}" in environment "${envName}"`,
+      });
+      result.changes.push(
+        `DISABLED undeclared deployment protection rule "${slug}" in environment "${envName}"`,
       );
     }
   }
