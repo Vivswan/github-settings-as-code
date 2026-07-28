@@ -75,23 +75,23 @@ field GitHub ships tomorrow must never read as an error (see
 
 ## Guides
 
-The guides live in [docs/](docs/README.md), in four
-groups. [Getting started](docs/start/getting-started.md),
-[migrating from Probot](docs/start/migrating-from-probot.md), and the
-[examples cookbook](docs/start/examples.md) get a repository under
-management. The reference pages are the normative model:
-[semantics](docs/reference/semantics.md),
-[token permissions](docs/reference/permissions.md),
-[the undeclared policy](docs/reference/undeclared-policy.md),
-[forward compatibility](docs/reference/forward-compatibility.md), and
-[secrets and vaults](docs/reference/secrets-and-vaults.md) (the `$NAME`
-references secret fields take). Day-to-day operation is covered by
-[check mode](docs/operate/check-mode.md),
-[multi-repo mode](docs/operate/multi-repo.md),
-[private repositories](docs/operate/private-repositories.md), and
-[troubleshooting](docs/operate/troubleshooting.md), and the
-[playbooks](docs/playbooks/README.md) compose it all into complete
-workflows.
+The guides live in [docs/](docs/README.md), in four groups:
+
+- Start: [getting started](docs/start/getting-started.md),
+  [migrating from Probot](docs/start/migrating-from-probot.md), and the
+  [examples cookbook](docs/start/examples.md).
+- Reference: [semantics](docs/reference/semantics.md),
+  [token permissions](docs/reference/permissions.md),
+  [the undeclared policy](docs/reference/undeclared-policy.md),
+  [forward compatibility](docs/reference/forward-compatibility.md), and
+  [secrets and vaults](docs/reference/secrets-and-vaults.md) (the `$NAME`
+  references secret fields take).
+- Operate: [check mode](docs/operate/check-mode.md),
+  [multi-repo mode](docs/operate/multi-repo.md),
+  [private repositories](docs/operate/private-repositories.md), and
+  [troubleshooting](docs/operate/troubleshooting.md), which also covers
+  per-call debug tracing.
+- Playbooks: [complete workflows to adapt](docs/playbooks/README.md).
 
 ## Versioning
 

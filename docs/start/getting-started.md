@@ -9,11 +9,9 @@ only gets you to a first green run.
 
 ## 1. Create the token
 
-The action authenticates with a fine-grained personal access token. The
-default `GITHUB_TOKEN` covers at most the few sections that run on Issues
-permissions, such as `labels` and `milestones`; most sections need the
-Administration permission, which workflow tokens can never hold, so plan on
-a PAT.
+The action authenticates with a fine-grained personal access token. Many
+sections need the Administration permission, which the default workflow
+`GITHUB_TOKEN` can never hold, so plan on a PAT.
 
 The [pre-filled token form linked in the README](../../README.md#usage) starts
 you off with every repository permission the Sections table can need. Pick
