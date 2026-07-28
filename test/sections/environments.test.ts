@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SectionContext } from "../../src/sections/contract.js";
-import { environmentsSection } from "../../src/sections/environments.js";
+import { environmentsSection, flattenEnvironment } from "../../src/sections/environments.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
@@ -728,5 +728,313 @@ describe("environments deployment branch policies validation and shape", () => {
     );
     // The wrapper stays strict: its keys are this action's own vocabulary.
     expect(shape.safeParse([envWithPolicies({ entires: [], entries: [] })]).success).toBe(false);
+  });
+});
+
+// --- Nested deployment protection rules --------------------------------------
+
+const RULES_LIST = "GET /repos/o/r/environments/prod/deployment_protection_rules";
+const RULE_APPS_LIST =
+  "GET /repos/o/r/environments/prod/deployment_protection_rules/apps?per_page=100&page=1";
+const RULE_CREATE = "POST /repos/o/r/environments/prod/deployment_protection_rules";
+
+/** A spec-shaped enabled-rules list body. */
+function rulesBody(rules: Array<Record<string, unknown>>) {
+  return { data: { total_count: rules.length, custom_deployment_protection_rules: rules } };
+}
+
+/** A live enabled rule for a fixture app. */
+function liveRule(id: number, slug: string): Record<string, unknown> {
+  return {
+    id,
+    node_id: `DPR_${id}`,
+    enabled: true,
+    app: {
+      id: id + 500,
+      slug,
+      integration_url: `https://api.github.com/apps/${slug}`,
+      node_id: "n",
+    },
+  };
+}
+
+/** A spec-shaped available-Apps list body. */
+function ruleAppsBody(apps: Array<{ id: number; slug: string }>) {
+  return {
+    data: {
+      total_count: apps.length,
+      available_custom_deployment_protection_rule_integrations: apps,
+    },
+  };
+}
+
+describe("environments deployment protection rules apply mode", () => {
+  test("enables a missing rule via ONE apps fetch, keeps an undeclared one by default", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [RULES_LIST]: rulesBody([liveRule(41, "region-guard"), liveRule(42, "change-window")]),
+      [RULE_APPS_LIST]: ruleAppsBody([
+        { id: 3515, slug: "deploy-gate" },
+        { id: 3516, slug: "region-guard" },
+      ]),
+    }).allowMutations(RULE_CREATE);
+    const result = await environmentsSection.run(ctx(api), [
+      {
+        name: "prod",
+        wait_timer: 5,
+        deployment_protection_rules: [{ app: "deploy-gate" }, { app: "region-guard" }],
+      },
+    ]);
+    // The nested key never reaches the PUT body.
+    const put = api.calls.find((c) => c.method === "PUT");
+    expect(put?.payload).toEqual({ wait_timer: 5 });
+    // One create, resolved to the App's integration id; region-guard already
+    // enabled, so no second POST.
+    const posts = api.calls.filter((c) => c.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.payload).toEqual({ integration_id: 3515 });
+    // The undeclared change-window rule is KEPT (the default): a note, no DELETE.
+    expect(api.calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(result.notes.join("\n")).toContain(
+      'deployment protection rule "change-window" is enabled on environment "prod" but is not declared',
+    );
+    expect(result.changes).toEqual([
+      'applied environment "prod"',
+      'enabled deployment protection rule "deploy-gate" in environment "prod"',
+    ]);
+  });
+
+  test("nothing missing: the apps listing is never fetched", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [RULES_LIST]: rulesBody([liveRule(41, "deploy-gate")]),
+    });
+    const result = await environmentsSection.run(ctx(api), [
+      { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
+    ]);
+    expect(api.calls.some((c) => c.path.includes("/apps"))).toBe(false);
+    expect(result.changes).toEqual(['applied environment "prod"']);
+  });
+
+  test("the wrapped undeclared:delete form DISABLES a live undeclared rule by id", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
+    }).allowMutations("DELETE /repos/o/r/environments/prod/deployment_protection_rules/41");
+    const result = await environmentsSection.run(ctx(api), [
+      { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
+    ]);
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PUT /repos/o/r/environments/prod",
+      "DELETE /repos/o/r/environments/prod/deployment_protection_rules/41",
+    ]);
+    expect(result.changes).toContain(
+      'DISABLED undeclared deployment protection rule "change-window" in environment "prod"',
+    );
+  });
+
+  test("a declared slug the apps listing does not carry fails loudly, naming the available slugs", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [RULES_LIST]: rulesBody([]),
+      [RULE_APPS_LIST]: ruleAppsBody([
+        { id: 3515, slug: "deploy-gate" },
+        { id: 3516, slug: "region-guard" },
+      ]),
+    });
+    await expect(
+      environmentsSection.run(ctx(api), [
+        {
+          name: "prod",
+          // The resolvable deploy-gate entry comes FIRST: every missing slug
+          // resolves before the first POST, so the unknown sibling aborts the
+          // whole list and the environment is never half-reconciled.
+          deployment_protection_rules: [{ app: "deploy-gate" }, { app: "not-installed" }],
+        },
+      ]),
+    ).rejects.toThrow(
+      'environments: the deployment protection rule App "not-installed" is not available to environment "prod" (the available Apps are "deploy-gate", "region-guard"). Install the GitHub App providing the rule on this repository, or declare one of the available slugs',
+    );
+    // Nothing was enabled, not even the resolvable entry.
+    expect(api.calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  test("an EMPTY apps listing says no Apps are available at all", async () => {
+    // A real user state, not a contract break: no protection-rule App is
+    // installed on the repository, so there is nothing to list in the error.
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [RULES_LIST]: rulesBody([]),
+      [RULE_APPS_LIST]: ruleAppsBody([]),
+    });
+    await expect(
+      environmentsSection.run(ctx(api), [
+        { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
+      ]),
+    ).rejects.toThrow(
+      'environments: the deployment protection rule App "deploy-gate" is not available to environment "prod" (no protection-rule Apps are available to it). Install the GitHub App providing the rule on this repository, or declare one of the available slugs',
+    );
+    expect(api.calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  test("a live rule without an app slug fails loudly instead of being silently skipped", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [RULES_LIST]: rulesBody([{ id: 41, node_id: "n", enabled: true, app: {} }]),
+    });
+    await expect(
+      environmentsSection.run(ctx(api), [
+        { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
+      ]),
+    ).rejects.toThrow(/returned a rule without an app slug/);
+  });
+
+  test("absent envelope keys read as an empty list (the spec marks both optional)", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [RULES_LIST]: { data: { total_count: 0 } },
+      [RULE_APPS_LIST]: ruleAppsBody([{ id: 3515, slug: "deploy-gate" }]),
+    }).allowMutations(RULE_CREATE);
+    const result = await environmentsSection.run(ctx(api), [
+      { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
+    ]);
+    expect(result.changes).toContain(
+      'enabled deployment protection rule "deploy-gate" in environment "prod"',
+    );
+  });
+
+  test("a PRESENT non-array envelope value is a loud contract violation, never an empty list", async () => {
+    // null is present-but-not-a-list too: the spec types the key as a plain
+    // array, so only a genuinely ABSENT key may read as empty.
+    for (const garbage of ["garbage", null]) {
+      const api = new MockApi({
+        "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+        [RULES_LIST]: { data: { custom_deployment_protection_rules: garbage } },
+      });
+      await expect(
+        environmentsSection.run(ctx(api), [
+          { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
+        ]),
+      ).rejects.toThrow(/custom_deployment_protection_rules value that is not a list/);
+    }
+  });
+
+  test("a live rule with a non-numeric id fails loudly before any disable", async () => {
+    // A null or string id would otherwise serialize into the DELETE path
+    // (".../deployment_protection_rules/null") and address nothing.
+    for (const id of [null, "41"]) {
+      const api = new MockApi({
+        "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+        [RULES_LIST]: rulesBody([{ ...liveRule(41, "change-window"), id }]),
+      });
+      await expect(
+        environmentsSection.run(ctx(api), [
+          { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
+        ]),
+      ).rejects.toThrow(/rule without a numeric id/);
+      expect(api.mutations().filter((m) => m.method === "DELETE")).toEqual([]);
+    }
+  });
+});
+
+describe("environments deployment protection rules check mode", () => {
+  test("missing declared rules are drift; undeclared ones split by policy; nothing written", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/environments/prod": { data: { name: "prod", protection_rules: [] } },
+      [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
+    });
+    const kept = await environmentsSection.run(ctx(api, true), [
+      { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
+    ]);
+    expect(kept.drift).toEqual([
+      "environments[prod].deployment_protection_rules[deploy-gate]: missing - declared in the settings file but not enabled on the environment; apply will enable it",
+    ]);
+    expect(kept.notes.join("\n")).toContain('deployment protection rule "change-window"');
+    // The apps listing is an apply-time resolver; check mode never reads it.
+    expect(api.calls.some((c) => c.path.includes("/apps"))).toBe(false);
+    expect(api.mutations()).toEqual([]);
+
+    const api2 = new MockApi({
+      "GET /repos/o/r/environments/prod": { data: { name: "prod", protection_rules: [] } },
+      [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
+    });
+    const deleted = await environmentsSection.run(ctx(api2, true), [
+      { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
+    ]);
+    expect(deleted.drift).toEqual([
+      "environments[prod].deployment_protection_rules[change-window]: undeclared - not in the settings file, so apply will DISABLE it; add it to the settings file to keep it",
+    ]);
+  });
+
+  test("a missing environment earns the unverifiable-rules note", async () => {
+    const api = new MockApi({});
+    const result = await environmentsSection.run(ctx(api, true), [
+      { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
+    ]);
+    expect(result.notes).toContain(
+      "environments[prod].deployment_protection_rules: not verifiable while the environment is missing; apply will create the environment and reconcile the declared protection rules",
+    );
+    expect(api.calls.some((c) => c.path.includes("deployment_protection_rules"))).toBe(false);
+  });
+});
+
+describe("environments deployment protection rules validation and shape", () => {
+  test("duplicate App slugs are rejected upfront, naming the environment", async () => {
+    const api = new MockApi({});
+    await expect(
+      environmentsSection.run(ctx(api), [
+        {
+          name: "prod",
+          deployment_protection_rules: [{ app: "deploy-gate" }, { app: "deploy-gate" }],
+        },
+      ]),
+    ).rejects.toThrow(
+      'environments: the "prod" entry declares the deployment protection rule App "deploy-gate" twice. Keep exactly one entry per App',
+    );
+    expect(api.calls).toEqual([]);
+  });
+
+  test("both declared forms parse; entries are STRICT (the POST carries only the resolved id)", () => {
+    const shape = environmentsSection.shape;
+    expect(
+      shape.safeParse([{ name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] }])
+        .success,
+    ).toBe(true);
+    expect(
+      shape.safeParse([
+        {
+          name: "prod",
+          deployment_protection_rules: {
+            undeclared: "delete",
+            entries: [{ app: "deploy-gate" }],
+          },
+        },
+      ]).success,
+    ).toBe(true);
+    // An extra entry key has no destination (the enable POST sends only the
+    // resolved integration_id), so it is rejected rather than silently doing
+    // nothing.
+    expect(
+      shape.safeParse([
+        { name: "prod", deployment_protection_rules: [{ app: "deploy-gate", typo: 1 }] },
+      ]).success,
+    ).toBe(false);
+    // The wrapper stays strict: its keys are this action's own vocabulary.
+    expect(
+      shape.safeParse([{ name: "prod", deployment_protection_rules: { entires: [], entries: [] } }])
+        .success,
+    ).toBe(false);
+  });
+
+  test("a custom-rule protection_rules entry flattens without leaking keys", () => {
+    // The environment GET surfaces an enabled custom rule as the spec's third
+    // protection_rules variant ({id, node_id, type}); flattenEnvironment's
+    // generic branch filters exactly those keys, so the entry adds nothing to
+    // the flattened object and can never produce false environment drift.
+    const flattened = flattenEnvironment({
+      name: "prod",
+      protection_rules: [{ id: 41, node_id: "DPR_41", type: "deploy-gate" }],
+    });
+    expect(Object.keys(flattened).sort()).toEqual(["name", "protection_rules"]);
   });
 });

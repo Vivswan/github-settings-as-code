@@ -25,8 +25,9 @@ describe("published schema wrapper strictness", () => {
 
   /**
    * The nested {undeclared, entries} knobs inside a section entry
-   * (environments[].variables, environments[].secrets, and
-   * environments[].deployment_branch_policies), mirroring
+   * (environments[].variables, environments[].secrets,
+   * environments[].deployment_branch_policies, and
+   * environments[].deployment_protection_rules), mirroring
    * NESTED_POLICY_LISTS in finalize-schema.ts: each adds one wrapper
    * definition beyond the knobbed sections.
    */
@@ -34,6 +35,7 @@ describe("published schema wrapper strictness", () => {
     "UndeclaredPolicyList<EnvironmentVariableConfig>",
     "UndeclaredPolicyList<EnvironmentSecretConfig>",
     "UndeclaredPolicyList<DeploymentBranchPolicyConfig>",
+    "UndeclaredPolicyList<DeploymentProtectionRuleConfig>",
   ] as const;
 
   test("one wrapper definition per knobbed section and nested knob, each closed", () => {
@@ -139,6 +141,38 @@ describe("published schema wrapper strictness", () => {
               deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
               deployment_branch_policies: [{ name: "v*", type: "wildcard" }],
             },
+          ],
+        }),
+      ).toBe(false);
+    });
+
+    test("both forms of the nested protection-rules knob validate; the wrapper stays closed", () => {
+      expect(
+        validate({
+          environments: [{ name: "prod", deployment_protection_rules: [{ app: "my-gate-app" }] }],
+        }),
+      ).toBe(true);
+      expect(
+        validate({
+          environments: [
+            {
+              name: "prod",
+              deployment_protection_rules: {
+                undeclared: "delete",
+                entries: [{ app: "my-gate-app" }],
+              },
+            },
+          ],
+        }),
+      ).toBe(true);
+      // The wrapper is closed (this action's own vocabulary); the entry
+      // strictness itself is runtime-only, like the nested secrets entries -
+      // the generator opens every object for passthrough sections and
+      // finalize-schema closes only the wrappers.
+      expect(
+        validate({
+          environments: [
+            { name: "prod", deployment_protection_rules: { entires: [], entries: [] } },
           ],
         }),
       ).toBe(false);

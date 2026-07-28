@@ -21,6 +21,7 @@ import {
 import { undeclaredPolicy } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { LiveState } from "./mock/state.js";
+import { PROTECTION_RULE_APPS } from "./mock/state.js";
 import type { Rng } from "./prng.js";
 import {
   type DenialStyle,
@@ -255,6 +256,8 @@ function genEnvironments(rng: Rng): Json[] {
   const secretsRng = rng.fork("secrets");
   // And the branch-policy pattern draws are the newest, on their own fork.
   const policiesRng = rng.fork("branch-policies");
+  // Protection-rule draws, newer again, fork the same way.
+  const rulesRng = rng.fork("protection-rules");
   return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const env: Json = { name: `${rng.pick(["staging", "prod", "qa"])}-${i}` };
     if (rng.bool()) {
@@ -304,6 +307,18 @@ function genEnvironments(rng: Rng): Json[] {
       });
       env.deployment_branch_policies = policiesRng.bool(0.25) ? { entries } : entries;
       env.deployment_branch_policy = { protected_branches: false, custom_branch_policies: true };
+    }
+    if (rulesRng.bool(0.3)) {
+      // App slugs come ONLY from the shared PROTECTION_RULE_APPS fixture (the
+      // mock's available-Apps listing serves the same objects), so a declared
+      // rule can always resolve and enable. The slice keeps slugs unique per
+      // environment. The empty live baseline means an explicit `undeclared`
+      // policy would change no outcome, so the wrapped draw omits it (the
+      // keep-note and disable paths are pinned by curated scenarios).
+      const slugs = PROTECTION_RULE_APPS.map((app) => String(app.slug));
+      const count = rulesRng.int(slugs.length) + 1;
+      const entries: Json[] = slugs.slice(0, count).map((slug) => ({ app: slug }));
+      env.deployment_protection_rules = rulesRng.bool(0.25) ? { entries } : entries;
     }
     return env;
   });
@@ -700,21 +715,22 @@ export function stripSecretReferences(settings: Json): void {
 }
 
 /**
- * Strip every environment entry's `deployment_branch_policies` key when the
- * drawn mask constrains the permissions its endpoints carry as PER-ENDPOINT
- * overrides (Actions read for the list, Administration write for the
- * writes). The fuzz oracle grades permissions at SECTION level
- * (PERMISSION_BY_KEY), so a masked iteration keeping the key would be
- * mispredicted - the same reason genActions never emits
- * oidc_customization_sub. Unlike the OIDC key, this one IS generated: the
- * strip fires only under a constraining mask, so fully-granted iterations
- * (including the convergence and idempotence proofs) still exercise it, and
- * the curated environment-branch-policies-*-denied scenarios pin the denied
- * paths. Stripping consumes no draws, so the main stream stays stable. The
- * paired singular flag stays: it rides the environment PUT under the
- * section's own permission.
+ * Strip every environment entry's `deployment_branch_policies` AND
+ * `deployment_protection_rules` keys when the drawn mask constrains the
+ * permissions their endpoints carry as PER-ENDPOINT overrides (Actions read
+ * for the list reads, Administration for the available-Apps read and the
+ * writes - the same two resources gate both nested families). The fuzz
+ * oracle grades permissions at SECTION level (PERMISSION_BY_KEY), so a
+ * masked iteration keeping either key would be mispredicted - the same
+ * reason genActions never emits oidc_customization_sub. Unlike the OIDC
+ * key, these ARE generated: the strip fires only under a constraining mask,
+ * so fully-granted iterations (including the convergence and idempotence
+ * proofs) still exercise them, and the curated environment-*-denied
+ * scenarios pin the denied paths. Stripping consumes no draws, so the main
+ * stream stays stable. The paired singular flag stays: it rides the
+ * environment PUT under the section's own permission.
  */
-export function suppressMaskedBranchPolicies(
+export function suppressMaskedEnvironmentOverrides(
   settings: Json,
   mask: Partial<Record<MaskKey, MaskGrade>>,
 ): void {
@@ -728,6 +744,7 @@ export function suppressMaskedBranchPolicies(
   }
   for (const entry of settings.environments as Json[]) {
     delete entry.deployment_branch_policies;
+    delete entry.deployment_protection_rules;
   }
 }
 
@@ -1536,10 +1553,11 @@ export function genScenario(
       mask[resource] = rng.pick(["none", "read", "write"] as const);
     }
   }
-  // The branch-policy pattern endpoints carry per-endpoint permission
-  // overrides the oracle cannot grade at section level; strip the key when
-  // this mask constrains them (see suppressMaskedBranchPolicies).
-  suppressMaskedBranchPolicies(settings, mask);
+  // The branch-policy pattern and protection-rule endpoints carry
+  // per-endpoint permission overrides the oracle cannot grade at section
+  // level; strip the keys when this mask constrains them (see
+  // suppressMaskedEnvironmentOverrides).
+  suppressMaskedEnvironmentOverrides(settings, mask);
 
   const mode = rng.pick(["apply", "check"] as const);
   const policy = rng.pick(["fail", "warn"] as const);
@@ -1967,10 +1985,10 @@ export function genMultiScenario(
       }
     }
     // Same rule as the single-repo generator: a per-target mask constraining
-    // the branch-policy pattern overrides makes the key ungradeable, so it
-    // is stripped for this target (the global mask varies only on
-    // org_members, so the per-target mask alone decides).
-    suppressMaskedBranchPolicies(settings, mask);
+    // the branch-policy pattern and protection-rule overrides makes those
+    // keys ungradeable, so they are stripped for this target (the global
+    // mask varies only on org_members, so the per-target mask alone decides).
+    suppressMaskedEnvironmentOverrides(settings, mask);
     // A denied administration mask denies the visibility probe (GET /repos), so
     // the resolver reads "unknown" and redaction fails closed even for a public
     // target. Matches the redaction rule in multi.ts.

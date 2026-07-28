@@ -62,6 +62,13 @@ export interface LiveState {
    * custom_branch_policies (the endpoints 404 otherwise, like GitHub).
    */
   environment_branch_policies?: Record<string, Json[]>;
+  /**
+   * Per-environment enabled custom deployment protection rules (GET shape:
+   * {id, node_id, enabled, app: {id, slug, integration_url, node_id}}),
+   * keyed by environment name. Seeded apps should come from
+   * PROTECTION_RULE_APPS so the available-Apps listing agrees with them.
+   */
+  environment_protection_rules?: Record<string, Json[]>;
   /** Autolinks, replaces the baseline. */
   autolinks?: Json[];
   /** GET /actions/permissions body. */
@@ -160,6 +167,8 @@ export interface MockState {
   environment_variables: Record<string, Json[]>;
   /** Per-environment deployment branch-policy patterns, keyed by environment name. */
   environment_branch_policies: Record<string, Json[]>;
+  /** Per-environment enabled custom deployment protection rules, keyed by environment name. */
+  environment_protection_rules: Record<string, Json[]>;
   autolinks: Json[];
   actions_permissions: Json;
   selected_actions: Json;
@@ -288,6 +297,34 @@ export function completeHook(seed: Json, id: number): Json {
 }
 
 /**
+ * The GitHub Apps the mock offers as custom deployment protection rule
+ * providers, served by the available-Apps endpoint. The ONE source of
+ * available slugs: the mock's create handler resolves integration_id against
+ * it, and the fuzz generator draws declared App slugs from it, so a
+ * generated rule can always be enabled.
+ */
+export const PROTECTION_RULE_APPS: readonly Json[] = [
+  {
+    id: 3515,
+    slug: "deploy-gate",
+    integration_url: "https://api.github.com/apps/deploy-gate",
+    node_id: "MDQ6R2F0ZTM1MTU=",
+  },
+  {
+    id: 3516,
+    slug: "region-guard",
+    integration_url: "https://api.github.com/apps/region-guard",
+    node_id: "MDQ6R2F0ZTM1MTY=",
+  },
+  {
+    id: 3517,
+    slug: "change-window",
+    integration_url: "https://api.github.com/apps/change-window",
+    node_id: "MDQ6R2F0ZTM1MTc=",
+  },
+];
+
+/**
  * Materialize a MockState from a scenario's (possibly undefined) LiveState.
  * List families default to empty; the repo defaults to the fixture (deep-merged
  * with any overlay); the single-object families default to their fixtures.
@@ -331,6 +368,9 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     environment_variables: ls.environment_variables ? clone(ls.environment_variables) : {},
     environment_branch_policies: ls.environment_branch_policies
       ? clone(ls.environment_branch_policies)
+      : {},
+    environment_protection_rules: ls.environment_protection_rules
+      ? clone(ls.environment_protection_rules)
       : {},
     autolinks: ls.autolinks ? clone(ls.autolinks) : [],
     actions_permissions: ls.actions_permissions ? clone(ls.actions_permissions) : {},

@@ -66,18 +66,24 @@ The owner exemption for collaborators does not move with the knob: under
 `undeclared: delete` (the default) every undeclared direct collaborator is
 removed except the repository owner.
 
-## The nested variables, secrets, and branch-policy knobs
+## The nested variables, secrets, and deployment knobs
 
-Three lists carry the same wrapped form WITHOUT being top-level sections:
-`environments[].variables`, `environments[].secrets`, and
-`environments[].deployment_branch_policies`. Each environment entry's list
+Four lists carry the same wrapped form WITHOUT being top-level sections:
+`environments[].variables`, `environments[].secrets`,
+`environments[].deployment_branch_policies`, and
+`environments[].deployment_protection_rules`. Each environment entry's list
 accepts the plain array or `{undeclared, entries}`, with its own fixed
 default: within a declared `variables` key the default is delete (the file
 is that environment's variable inventory), and the same holds for a
 declared `deployment_branch_policies` key (patterns are readable,
 recreatable configuration), while within a declared `secrets` key the
 default is keep, matching the top-level secret sections - a deleted
-secret's value is unrecoverable, so deletion stays opt-in. The knob is set
+secret's value is unrecoverable, so deletion stays opt-in. A declared
+`deployment_protection_rules` key also defaults to keep, for a security
+reason rather than an unrecoverable one: GitHub Apps can enable themselves
+as deployment gates, and silently disabling a gate the file never named
+would weaken a protection nobody asked to weaken - `undeclared: delete`
+opts into disabling. The knob is set
 per environment entry, and it never inherits a policy through the
 multi-repo defaults merge: arrays replace wholesale in that merge, so a
 target that declares `environments` replaces the defaults' entire
@@ -137,8 +143,9 @@ deletions as drift before an apply performs them.
 One boundary to know about: HAVING a policy and INHERITING one are
 different things. The ten top-level section lists take the policy
 through the multi-repo defaults merge as described above. The nested
-`environments[].variables`, `environments[].secrets`, and
-`environments[].deployment_branch_policies` lists have their own knobs,
+`environments[].variables`, `environments[].secrets`,
+`environments[].deployment_branch_policies`, and
+`environments[].deployment_protection_rules` lists have their own knobs,
 set per environment entry with their own fixed defaults - they never
 inherit a policy from their section, from another list, or through the
 defaults merge.
