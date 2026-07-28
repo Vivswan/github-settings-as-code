@@ -43,6 +43,7 @@ const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   "actions-variables.ts": ["actions_variables"],
   // Kebab file name for the underscore section key, like code-scanning.ts.
   "custom-properties.ts": ["custom_properties"],
+  // Kebab file name for the underscore section key.
   "deploy-keys.ts": ["deploy_keys"],
   // roles.ts is the shared permission-vocabulary normalizer for both sections.
   "roles.ts": ["collaborators", "teams"],

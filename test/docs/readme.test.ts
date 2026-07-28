@@ -17,6 +17,7 @@ import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import type { PatResource } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
 import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
@@ -296,6 +297,53 @@ describe("README closed-sections claim", () => {
   });
 });
 
+describe("pre-filled PAT form URL", () => {
+  /**
+   * The form URL in Usage step 1 is hand-edited and nothing else checks it,
+   * so a new PatResource could land with its query parameter forgotten and
+   * every test would stay green. The slug map is total over PatResource
+   * (satisfies enforces it), so adding a resource forces a choice here:
+   * name the form parameter, or record a null exemption with its reason.
+   * The parameter names are GitHub's token-form spellings, which follow the
+   * App-permissions schema where they differ from ours (webhooks ->
+   * repository_hooks, custom_properties -> repository_custom_properties);
+   * the live form drops unknown parameters silently, so the exact strings
+   * still deserve the one-time manual check the README's history tracks.
+   */
+  const RESOURCE_SLUGS = {
+    administration: "administration",
+    issues: "issues",
+    environments: "environments",
+    actions: "actions",
+    pages: "pages",
+    // Rides the repo PATCH's security_and_analysis passthrough for setup;
+    // the alerts grant has no verified form parameter today.
+    code_scanning_alerts: null,
+    contents: "contents",
+    variables: "variables",
+    webhooks: "repository_hooks",
+    secrets: "secrets",
+    dependabot_secrets: "dependabot_secrets",
+    codespaces_secrets: "codespaces_secrets",
+    custom_properties: "repository_custom_properties",
+  } satisfies Record<PatResource, string | null>;
+
+  test("every PAT resource's form parameter appears in the URL", () => {
+    const url = readme.match(/personal-access-tokens\/new\?[^)\s]+/)?.[0] ?? "";
+    expect(url.length).toBeGreaterThan(0);
+    for (const [resource, slug] of Object.entries(RESOURCE_SLUGS)) {
+      if (slug !== null) {
+        // Boundary-anchored: "secrets=" is a substring of
+        // "dependabot_secrets=", so a bare includes() cannot miss it.
+        expect(
+          new RegExp(`[?&]${slug}=`).test(url),
+          `the pre-filled PAT form URL lacks "${slug}=" (the ${resource} resource)`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
 describe("knobbed-section count prose", () => {
   const countWord = COUNT_WORDS[UNDECLARED_POLICY_SECTIONS.length];
   if (countWord === undefined) {
@@ -315,6 +363,29 @@ describe("knobbed-section count prose", () => {
         section.includes(`\`${key}\``),
         `the README Undeclared resources enumeration omits \`${key}\``,
       ).toBe(true);
+    }
+  });
+
+  test("the README enumeration paragraph names ONLY knobbed sections", () => {
+    // The inclusion loop above cannot catch prose still naming a section
+    // that LOST its knob; scope the negative check to the enumeration
+    // paragraph so unrelated prose in the section stays free.
+    const lines = sectionLines(readme, "Undeclared resources");
+    const start = lines.findIndex((line) => line.includes("sections enumerate"));
+    expect(start).toBeGreaterThanOrEqual(0);
+    let end = start;
+    while (end < lines.length && (lines[end] ?? "").trim() !== "") {
+      end++;
+    }
+    const paragraph = lines.slice(start, end).join(" ");
+    const knobbed = new Set<string>(UNDECLARED_POLICY_SECTIONS);
+    for (const key of SECTION_KEYS) {
+      if (!knobbed.has(key)) {
+        expect(
+          paragraph.includes(`\`${key}\``),
+          `the enumeration paragraph names \`${key}\`, which carries no undeclared knob`,
+        ).toBe(false);
+      }
     }
   });
 

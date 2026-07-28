@@ -174,6 +174,55 @@ describe("section permissions", () => {
       }
     }
   });
+
+  test("sections declaring the same route agree on its contract", () => {
+    // GET /orgs/{org} is declared by more than one section, and the mock
+    // resolves a request to the FIRST matching declaration - a sibling that
+    // later diverged (an extra status, a different permission) would be
+    // silently validated against the other section's contract and no test
+    // would notice. Group by route and require the contract fields agree.
+    const byRoute = new Map<string, Array<{ key: string; contract: string }>>();
+    const sectionPermission = new Map(SECTIONS.map((section) => [section.key, section.permission]));
+    // Deep key sort: a replacer ARRAY would filter nested keys (statuses'
+    // "200"), so canonicalize recursively instead.
+    const canonical = (value: unknown): unknown =>
+      Array.isArray(value)
+        ? value.map(canonical)
+        : value !== null && typeof value === "object"
+          ? Object.fromEntries(
+              Object.entries(value)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([k, v]) => [k, canonical(v)]),
+            )
+          : value;
+    for (const [key, endpoint] of Object.entries(allEndpoints())) {
+      // The WHOLE declaration minus the route itself and the injected
+      // bookkeeping: a hand-picked field list would let a later EndpointDecl
+      // addition (alwaysRewrite feeds the idempotence proof through the same
+      // first-match resolution) diverge uncovered. The EFFECTIVE permission
+      // rides along too - two declarations can both omit an override while
+      // inheriting different section permissions, and the mock gates on the
+      // first match.
+      const { route: _route, section, role: _role, ...rest } = endpoint;
+      const projected = { ...rest, effective: rest.permission ?? sectionPermission.get(section) };
+      const contract = JSON.stringify(canonical(projected));
+      const group = byRoute.get(endpoint.route) ?? [];
+      group.push({ key, contract });
+      byRoute.set(endpoint.route, group);
+    }
+    for (const [route, group] of byRoute) {
+      if (group.length < 2) {
+        continue;
+      }
+      const [first, ...rest] = group;
+      for (const sibling of rest) {
+        expect(
+          sibling.contract,
+          `${sibling.key} and ${first?.key} both declare "${route}" but disagree on its contract; the mock resolves the first match, so they must stay identical`,
+        ).toBe(first?.contract ?? "");
+      }
+    }
+  });
 });
 
 describe("grantFor", () => {

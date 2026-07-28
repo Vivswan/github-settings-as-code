@@ -161,7 +161,10 @@ secret fields take); and when you come from elsewhere or something breaks,
   inaccessible, nothing is applied at all (per repository in multi-repo
   mode; earlier targets in the same run are already done). The API has no
   transactions; a read-but-not-write token can still fail mid-apply, and
-  re-running after fixing it converges because applies are idempotent.
+  a section whose reads need no grant at all (`custom_properties` - its
+  values read is Metadata-gated) surfaces a missing write grant only at
+  its first write. Re-running after fixing it converges because applies
+  are idempotent.
 
 See [COVERAGE.md](COVERAGE.md) for the full inventory: everything
 supported, every repo-scoped gap, and the user-scoped surface that is out of
