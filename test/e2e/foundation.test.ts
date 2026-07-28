@@ -209,6 +209,7 @@ describe("denial semantics", () => {
         "rulesets",
         "webhooks",
         "workflows",
+        "secret_scanning_custom_patterns",
       ].sort(),
     );
   });

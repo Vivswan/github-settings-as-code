@@ -71,6 +71,7 @@ describe("changed-sections file map", () => {
     expect(byFile["interaction-limits.ts"]).toEqual(["interaction_limits"]);
     expect(byFile["actions-variables.ts"]).toEqual(["actions_variables"]);
     expect(byFile["deploy-keys.ts"]).toEqual(["deploy_keys"]);
+    expect(byFile["secret-scanning-patterns.ts"]).toEqual(["secret_scanning_custom_patterns"]);
     expect(byFile["roles.ts"]).toEqual(["collaborators", "teams"]);
     // The shared engine fans out to every consuming section, environments
     // included (its nested per-environment secrets key).
@@ -84,7 +85,8 @@ describe("changed-sections file map", () => {
 
   test("each 1:1 section file maps to exactly its own key", () => {
     // The secret families, actions_variables, code_scanning_default_setup,
-    // interaction_limits, custom_properties, and deploy_keys live in
+    // interaction_limits, custom_properties, deploy_keys, and
+    // secret_scanning_custom_patterns live in
     // kebab-named files, so they have no <key>.ts entry; every other key does.
     const kebabNamed = new Set([
       "actions_secrets",
@@ -95,6 +97,7 @@ describe("changed-sections file map", () => {
       "interaction_limits",
       "custom_properties",
       "deploy_keys",
+      "secret_scanning_custom_patterns",
     ]);
     for (const key of SECTION_KEYS) {
       if (kebabNamed.has(key)) {
