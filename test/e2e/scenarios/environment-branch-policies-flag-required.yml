@@ -1,0 +1,29 @@
+# Declaring deployment_branch_policies without the singular
+# deployment_branch_policy sibling enabling custom_branch_policies is rejected
+# by upfront document validation, BEFORE any section writes in either mode:
+# without the flag the pattern POST would 404 only after the environment PUT
+# landed, leaving the run half-applied. The repository section here pins that
+# ordering - were the check inside the handler, repository would have PATCHed
+# first. The error names the environment and the required flag.
+name: environment-branch-policies-flag-required
+settings:
+  repository:
+    description: should never be written
+  environments:
+    - name: production
+      deployment_branch_policies:
+        - name: release/*
+token_permissions:
+  environments: write
+expect:
+  exit_code: 1
+  result: failed
+  never:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/environments"
+    - "POST /repos/{repo}/environments"
+    - "DELETE /repos/{repo}/environments"
+  stdout_contains:
+    - "environments[0].deployment_branch_policies"
+    - 'the "production" entry declares deployment_branch_policies'
+    - "custom_branch_policies: true"

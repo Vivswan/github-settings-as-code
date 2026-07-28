@@ -1,0 +1,37 @@
+# The pattern list read is gated by the Actions permission, not Environments
+# (a per-endpoint override): with Environments granted but Actions denied,
+# check mode's pattern list is refused and the section fails even though the
+# section-level permission is satisfied. The denial advice names the "Actions"
+# grant at the READ level the failing endpoint actually needs - not the
+# broader write grant.
+name: environment-branch-policies-read-denied
+settings:
+  environments:
+    - name: production
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+      deployment_branch_policies:
+        - name: release/*
+inputs:
+  mode: check
+denial_style: fine_grained
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules: []
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+token_permissions:
+  environments: write
+  actions: none
+  administration: none
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    environments: failed
+  stdout_contains:
+    - '"Actions" (read)'

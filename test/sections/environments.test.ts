@@ -497,3 +497,236 @@ describe("environments nested secrets validation and shape", () => {
     expect(environmentsSection.secretValues?.({ not: "a list" })).toEqual([]);
   });
 });
+
+// --- Nested deployment branch policies ---------------------------------------
+
+const POLICIES_LIST =
+  "GET /repos/o/r/environments/prod/deployment-branch-policies?per_page=100&page=1";
+
+/** A spec-shaped branch-policy list body. */
+function policiesBody(policies: Array<{ id?: number; name?: string; type?: string }>) {
+  return { data: { total_count: policies.length, branch_policies: policies } };
+}
+
+/** A declared entry with the flag pairing validation requires. */
+function envWithPolicies(policies: unknown): Record<string, unknown> {
+  return {
+    name: "prod",
+    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    deployment_branch_policies: policies,
+  };
+}
+
+describe("environments deployment branch policies apply mode", () => {
+  test("creates missing, replaces a type flip (delete + recreate), deletes undeclared", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [POLICIES_LIST]: policiesBody([
+        { id: 41, name: "v*", type: "branch" },
+        { id: 42, name: "legacy/*", type: "branch" },
+      ]),
+    }).allowMutations(
+      "POST /repos/o/r/environments/prod/deployment-branch-policies",
+      "DELETE /repos/o/r/environments/prod/deployment-branch-policies/41",
+      "DELETE /repos/o/r/environments/prod/deployment-branch-policies/42",
+    );
+    const result = await environmentsSection.run(ctx(api), [
+      envWithPolicies([{ name: "release/*" }, { name: "v*", type: "tag" }]),
+    ]);
+    // The nested key never reaches the PUT; the singular flag object does.
+    const put = api.calls.find((c) => c.method === "PUT");
+    expect(put?.payload).toEqual({
+      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    });
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PUT /repos/o/r/environments/prod",
+      "POST /repos/o/r/environments/prod/deployment-branch-policies",
+      "DELETE /repos/o/r/environments/prod/deployment-branch-policies/41",
+      "POST /repos/o/r/environments/prod/deployment-branch-policies",
+      "DELETE /repos/o/r/environments/prod/deployment-branch-policies/42",
+    ]);
+    // The recreate carries the declared type; the plain create omits it (the
+    // upstream default "branch" applies).
+    const posts = api.calls.filter((c) => c.method === "POST");
+    expect(posts[0]?.payload).toEqual({ name: "release/*" });
+    expect(posts[1]?.payload).toEqual({ name: "v*", type: "tag" });
+    expect(result.changes).toEqual([
+      'applied environment "prod"',
+      'created deployment branch policy "release/*" in environment "prod"',
+      'replaced deployment branch policy "v*" in environment "prod" (type is immutable; branch -> tag)',
+      'DELETED undeclared deployment branch policy "legacy/*" from environment "prod"',
+    ]);
+  });
+
+  test("a matching live pattern (type defaulted to branch) is a no-op", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      // The spec marks every field optional; a live policy without a type
+      // reads as the upstream default "branch".
+      [POLICIES_LIST]: policiesBody([{ id: 41, name: "release/*" }]),
+    });
+    const result = await environmentsSection.run(ctx(api), [
+      envWithPolicies([{ name: "release/*" }]),
+    ]);
+    expect(result.changes).toEqual(['applied environment "prod"']);
+  });
+
+  test("a live policy without a name fails loudly instead of being silently skipped", async () => {
+    // A nameless policy has no identity to reconcile by; dropping it would
+    // let the default delete policy neither remove nor note it, and check
+    // could report falsely clean. The spec marks the field optional, so the
+    // extraction fails as a contract violation naming the endpoint.
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [POLICIES_LIST]: policiesBody([{ id: 41, type: "branch" }]),
+    });
+    await expect(
+      environmentsSection.run(ctx(api), [envWithPolicies([{ name: "release/*" }])]),
+    ).rejects.toThrow(/returned a policy without a name/);
+  });
+
+  test("the wrapped undeclared:keep form keeps the live pattern as a note", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [POLICIES_LIST]: policiesBody([{ id: 41, name: "legacy/*", type: "branch" }]),
+    });
+    const result = await environmentsSection.run(ctx(api), [
+      envWithPolicies({ undeclared: "keep", entries: [] }),
+    ]);
+    expect(result.notes.join("\n")).toContain(
+      'deployment branch policy "legacy/*" exists on environment "prod" but is not declared',
+    );
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PUT /repos/o/r/environments/prod",
+    ]);
+  });
+});
+
+describe("environments deployment branch policies check mode", () => {
+  const liveProd = (custom: boolean) => ({
+    data: {
+      name: "prod",
+      protection_rules: [],
+      deployment_branch_policy: { protected_branches: !custom, custom_branch_policies: custom },
+    },
+  });
+
+  test("missing, type-flip, and undeclared patterns report drift without writing", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/environments/prod": liveProd(true),
+      [POLICIES_LIST]: policiesBody([
+        { id: 41, name: "v*", type: "branch" },
+        { id: 42, name: "legacy/*", type: "branch" },
+      ]),
+    });
+    const result = await environmentsSection.run(ctx(api, true), [
+      envWithPolicies([{ name: "release/*" }, { name: "v*", type: "tag" }]),
+    ]);
+    expect(result.drift).toEqual([
+      "environments[prod].deployment_branch_policies[release/*]: missing - declared in the settings file but not on the environment; apply will create it",
+      "environments[prod].deployment_branch_policies[v*]: the declared type differs from the live pattern's, and a policy's type is immutable; apply will delete and recreate it",
+      'environments[prod].deployment_branch_policies[v*].type: "tag" != "branch"',
+      "environments[prod].deployment_branch_policies[legacy/*]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+    ]);
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("a live environment with the flag off earns a note and never lists patterns", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/environments/prod": liveProd(false),
+    });
+    const result = await environmentsSection.run(ctx(api, true), [
+      envWithPolicies([{ name: "release/*" }]),
+    ]);
+    // The flag drift itself comes from the environment subsetDiff.
+    expect(result.drift.join("\n")).toContain(
+      "environments[prod].deployment_branch_policy.custom_branch_policies: true != false",
+    );
+    expect(result.notes).toContain(
+      "environments[prod].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and reconcile the declared patterns",
+    );
+    expect(api.calls.some((c) => c.path.includes("/deployment-branch-policies"))).toBe(false);
+  });
+
+  test("a missing environment earns the unverifiable-patterns note", async () => {
+    const api = new MockApi({});
+    const result = await environmentsSection.run(ctx(api, true), [
+      envWithPolicies([{ name: "release/*" }]),
+    ]);
+    expect(result.notes).toContain(
+      "environments[prod].deployment_branch_policies: not verifiable while the environment is missing; apply will create the environment and reconcile the declared patterns",
+    );
+    expect(api.calls.some((c) => c.path.includes("/deployment-branch-policies"))).toBe(false);
+  });
+});
+
+describe("environments deployment branch policies validation and shape", () => {
+  test("the flag pairing is a SHAPE rule: declaring the list without custom_branch_policies: true fails validation", () => {
+    // In the shape, not the run() hook, on purpose: upfront document
+    // validation rejects the document in both modes before ANY section
+    // writes (the apply-mode preflight swallows non-permission hook errors,
+    // so a hook check would fire only after earlier sections wrote).
+    const shape = environmentsSection.shape;
+    const failing: unknown[] = [
+      // No sibling flag object at all.
+      { name: "prod", deployment_branch_policies: [{ name: "release/*" }] },
+      // The flag present but false.
+      {
+        name: "prod",
+        deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+        deployment_branch_policies: [{ name: "release/*" }],
+      },
+      // The sibling nulled (a clear) while patterns are declared.
+      {
+        name: "prod",
+        deployment_branch_policy: null,
+        deployment_branch_policies: [{ name: "release/*" }],
+      },
+      // The wrapped form takes the same rule.
+      { name: "prod", deployment_branch_policies: { entries: [{ name: "release/*" }] } },
+    ];
+    for (const entry of failing) {
+      const parsed = shape.safeParse([entry]);
+      expect(parsed.success).toBe(false);
+      const messages = (parsed.error?.issues ?? []).map((issue) => issue.message).join("\n");
+      expect(messages).toContain('the "prod" entry declares deployment_branch_policies');
+      expect(messages).toContain("custom_branch_policies: true");
+      // The issue points at the offending key, so the document-validation
+      // error names environments[N].deployment_branch_policies.
+      const paths = (parsed.error?.issues ?? []).map((issue) => issue.path.join("."));
+      expect(paths).toContain("0.deployment_branch_policies");
+    }
+    // The paired form passes, and an entry without the plural key never
+    // triggers the rule.
+    expect(shape.safeParse([envWithPolicies([{ name: "release/*" }])]).success).toBe(true);
+    expect(shape.safeParse([{ name: "prod", deployment_branch_policy: null }]).success).toBe(true);
+  });
+
+  test("duplicate patterns are rejected upfront, naming the environment", async () => {
+    const api = new MockApi({});
+    await expect(
+      environmentsSection.run(ctx(api), [
+        envWithPolicies([{ name: "release/*" }, { name: "release/*", type: "tag" }]),
+      ]),
+    ).rejects.toThrow(
+      'environments: the "prod" entry declares the deployment branch policy "release/*" twice. Keep exactly one entry per pattern',
+    );
+    expect(api.calls).toEqual([]);
+  });
+
+  test("both declared forms parse; entries stay loose and the wrapper strict", () => {
+    const shape = environmentsSection.shape;
+    expect(shape.safeParse([envWithPolicies([{ name: "release/*", type: "tag" }])]).success).toBe(
+      true,
+    );
+    expect(
+      shape.safeParse([envWithPolicies({ undeclared: "keep", entries: [{ name: "v*" }] })]).success,
+    ).toBe(true);
+    // Loose entries: a field GitHub ships tomorrow rides the create verbatim.
+    expect(shape.safeParse([envWithPolicies([{ name: "release/*", future: "x" }])]).success).toBe(
+      true,
+    );
+    // The wrapper stays strict: its keys are this action's own vocabulary.
+    expect(shape.safeParse([envWithPolicies({ entires: [], entries: [] })]).success).toBe(false);
+  });
+});

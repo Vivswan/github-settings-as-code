@@ -321,6 +321,10 @@ describe("actions", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     const denied = thrown as PermissionDenied;
+    // The failing call is a GET, but the advice grades by the SECTION's need
+    // on the override permission: the OIDC PUT sibling writes with the same
+    // Actions permission, so read-only advice would cost a second round trip
+    // (grant read, pass preflight, fail on the write).
     expect(denied.detail).toContain(grantFor({ repo: ["actions"] }));
     expect(denied.detail).not.toContain('"Administration"');
   });

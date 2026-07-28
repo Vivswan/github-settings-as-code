@@ -1,0 +1,30 @@
+# The pattern writes are gated by the Administration permission (a
+# per-endpoint override): with Environments granted and Actions readable, the
+# preflight read pass succeeds and the environment PUT lands, but the pattern
+# create is refused mid-apply and the section fails. The denial advice names
+# the "Administration" grant the override requires.
+name: environment-branch-policies-write-denied
+settings:
+  environments:
+    - name: production
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+      deployment_branch_policies:
+        - name: release/*
+denial_style: fine_grained
+token_permissions:
+  environments: write
+  actions: read
+  administration: read
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    environments: failed
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+  never:
+    - "DELETE /repos/{repo}/environments"
+  stdout_contains:
+    - '"Administration" (read and write)'

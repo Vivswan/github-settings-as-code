@@ -253,6 +253,8 @@ function genEnvironments(rng: Rng): Json[] {
   // The nested secrets draws are NEWER still, so they fork off their own
   // stream for the same reason.
   const secretsRng = rng.fork("secrets");
+  // And the branch-policy pattern draws are the newest, on their own fork.
+  const policiesRng = rng.fork("branch-policies");
   return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const env: Json = { name: `${rng.pick(["staging", "prod", "qa"])}-${i}` };
     if (rng.bool()) {
@@ -287,6 +289,21 @@ function genEnvironments(rng: Rng): Json[] {
         value: `$${name}`,
       }));
       env.secrets = secretsRng.bool(0.25) ? { entries } : entries;
+    }
+    if (policiesRng.bool(0.3)) {
+      // The index suffix keeps names unique (the natural key is the exact
+      // pattern string). The generator ALWAYS pairs the list with the
+      // singular flag object set to custom_branch_policies: true, so the
+      // oracle never sees the section's validation-error path.
+      const entries: Json[] = Array.from({ length: policiesRng.int(2) + 1 }, (_, j) => {
+        const entry: Json = { name: `${policiesRng.pick(["release/*", "hotfix/*", "v*"])}-${j}` };
+        if (policiesRng.bool(0.4)) {
+          entry.type = policiesRng.pick(["branch", "tag"]);
+        }
+        return entry;
+      });
+      env.deployment_branch_policies = policiesRng.bool(0.25) ? { entries } : entries;
+      env.deployment_branch_policy = { protected_branches: false, custom_branch_policies: true };
     }
     return env;
   });
@@ -679,6 +696,38 @@ export function stripSecretReferences(settings: Json): void {
     for (const entry of settings.environments as Json[]) {
       delete entry.secrets;
     }
+  }
+}
+
+/**
+ * Strip every environment entry's `deployment_branch_policies` key when the
+ * drawn mask constrains the permissions its endpoints carry as PER-ENDPOINT
+ * overrides (Actions read for the list, Administration write for the
+ * writes). The fuzz oracle grades permissions at SECTION level
+ * (PERMISSION_BY_KEY), so a masked iteration keeping the key would be
+ * mispredicted - the same reason genActions never emits
+ * oidc_customization_sub. Unlike the OIDC key, this one IS generated: the
+ * strip fires only under a constraining mask, so fully-granted iterations
+ * (including the convergence and idempotence proofs) still exercise it, and
+ * the curated environment-branch-policies-*-denied scenarios pin the denied
+ * paths. Stripping consumes no draws, so the main stream stays stable. The
+ * paired singular flag stays: it rides the environment PUT under the
+ * section's own permission.
+ */
+export function suppressMaskedBranchPolicies(
+  settings: Json,
+  mask: Partial<Record<MaskKey, MaskGrade>>,
+): void {
+  const actionsDenied = (mask.actions ?? "write") === "none";
+  const administrationBelowWrite = (mask.administration ?? "write") !== "write";
+  if (!actionsDenied && !administrationBelowWrite) {
+    return;
+  }
+  if (!Array.isArray(settings.environments)) {
+    return;
+  }
+  for (const entry of settings.environments as Json[]) {
+    delete entry.deployment_branch_policies;
   }
 }
 
@@ -1487,6 +1536,10 @@ export function genScenario(
       mask[resource] = rng.pick(["none", "read", "write"] as const);
     }
   }
+  // The branch-policy pattern endpoints carry per-endpoint permission
+  // overrides the oracle cannot grade at section level; strip the key when
+  // this mask constrains them (see suppressMaskedBranchPolicies).
+  suppressMaskedBranchPolicies(settings, mask);
 
   const mode = rng.pick(["apply", "check"] as const);
   const policy = rng.pick(["fail", "warn"] as const);
@@ -1913,6 +1966,11 @@ export function genMultiScenario(
         delete mask[resource];
       }
     }
+    // Same rule as the single-repo generator: a per-target mask constraining
+    // the branch-policy pattern overrides makes the key ungradeable, so it
+    // is stripped for this target (the global mask varies only on
+    // org_members, so the per-target mask alone decides).
+    suppressMaskedBranchPolicies(settings, mask);
     // A denied administration mask denies the visibility probe (GET /repos), so
     // the resolver reads "unknown" and redaction fails closed even for a public
     // target. Matches the redaction rule in multi.ts.
