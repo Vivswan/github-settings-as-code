@@ -826,7 +826,7 @@
       "description": "One secret scanning custom pattern, matched by exact name. Only the fields below are accepted: `state` and `push_protection_enabled` are readable but NOT writable through the custom-pattern endpoints, so they cannot be declared. A delimiter, once set, cannot be cleared back to GitHub's default through the update PATCH (the endpoint updates provided fields only); remove the pattern and redeclare it without the field instead.",
       "properties": {
         "end_delimiter": {
-          "description": "Regular expression for the characters that must come after the secret.",
+          "description": "Regular expression for the characters that must come after the secret. An empty string is rejected, like start_delimiter.",
           "type": "string"
         },
         "must_match": {
@@ -852,7 +852,7 @@
           "type": "string"
         },
         "start_delimiter": {
-          "description": "Regular expression for the characters that must come before the secret.",
+          "description": "Regular expression for the characters that must come before the secret. An empty string is rejected: a delimiter cannot be cleared through the update call - remove the pattern and redeclare it without the field instead.",
           "type": "string"
         }
       },
