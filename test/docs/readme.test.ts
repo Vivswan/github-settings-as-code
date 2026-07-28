@@ -304,11 +304,12 @@ describe("pre-filled PAT form URL", () => {
    * every test would stay green. The slug map is total over PatResource
    * (satisfies enforces it), so adding a resource forces a choice here:
    * name the form parameter, or record a null exemption with its reason.
-   * The parameter names are GitHub's token-form spellings, which follow the
-   * App-permissions schema where they differ from ours (webhooks ->
-   * repository_hooks, custom_properties -> repository_custom_properties);
-   * the live form drops unknown parameters silently, so the exact strings
-   * still deserve the one-time manual check the README's history tracks.
+   * The parameter names follow the App-permissions schema where they differ
+   * from ours (webhooks -> repository_hooks, custom_properties ->
+   * repository_custom_properties, variables -> actions_variables); every
+   * non-null slug below was verified against the live token form on
+   * 2026-07-28 (each pre-selects its permission; the form drops unknown
+   * parameters silently, which is how the old variables= spelling failed).
    */
   const RESOURCE_SLUGS = {
     administration: "administration",
@@ -320,7 +321,7 @@ describe("pre-filled PAT form URL", () => {
     // the alerts grant has no verified form parameter today.
     code_scanning_alerts: null,
     contents: "contents",
-    variables: "variables",
+    variables: "actions_variables",
     webhooks: "repository_hooks",
     secrets: "secrets",
     dependabot_secrets: "dependabot_secrets",
