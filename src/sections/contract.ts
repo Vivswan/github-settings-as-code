@@ -64,7 +64,8 @@ export type PatResource =
   | "secrets"
   | "dependabot_secrets"
   | "codespaces_secrets"
-  | "custom_properties";
+  | "custom_properties"
+  | "secret_scanning_alerts";
 
 /**
  * The machine-readable permission a section requires. `repo` lists the
@@ -93,6 +94,7 @@ const RESOURCE_LABEL: Record<PatResource, string> = {
   dependabot_secrets: "Dependabot secrets",
   codespaces_secrets: "Codespaces secrets",
   custom_properties: "Custom properties",
+  secret_scanning_alerts: "Secret scanning alerts",
 };
 
 /** Human-facing label for each PAT organization resource. */
@@ -143,7 +145,11 @@ type SupplementalRoute =
   | "GET /repos/{owner}/{repo}/actions/cache/storage-limit"
   | "PUT /repos/{owner}/{repo}/actions/cache/storage-limit"
   | "PUT /repos/{owner}/{repo}/lfs"
-  | "DELETE /repos/{owner}/{repo}/lfs";
+  | "DELETE /repos/{owner}/{repo}/lfs"
+  | "GET /repos/{owner}/{repo}/secret-scanning/custom-patterns"
+  | "POST /repos/{owner}/{repo}/secret-scanning/custom-patterns"
+  | "PATCH /repos/{owner}/{repo}/secret-scanning/custom-patterns/{pattern_id}"
+  | "DELETE /repos/{owner}/{repo}/secret-scanning/custom-patterns";
 
 /**
  * A GitHub REST route as octokit spells it: "METHOD /path/{param}". Using

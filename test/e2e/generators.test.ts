@@ -467,6 +467,7 @@ describe("genScenario", () => {
     "dependabot_secrets",
     "codespaces_secrets",
     "custom_properties",
+    "secret_scanning_alerts",
     "org_members",
   ]);
 

@@ -160,6 +160,12 @@ export interface LiveState {
    * the PATCH handler's defined-property check agrees with them.
    */
   custom_property_values?: Json[];
+  /**
+   * Secret scanning custom patterns (GET shape: id, name, slug, pattern,
+   * state, push_protection_enabled, custom_pattern_version and the optional
+   * delimiter/must_match fields), replaces the (empty) baseline.
+   */
+  secret_scanning_patterns?: Json[];
 }
 
 /**
@@ -239,6 +245,15 @@ export interface MockState {
   issues: Json[];
   /** Custom property values set on the repo ({property_name, value}). */
   custom_property_values: Json[];
+  /** Secret scanning custom patterns in GET shape. */
+  secret_scanning_patterns: Json[];
+  /**
+   * Monotonic count of custom-pattern mutations against this state, feeding
+   * each write's fresh custom_pattern_version - deterministic, never a
+   * clock. Underscore prefix: mock bookkeeping, excluded from the
+   * idempotence snapshot (see snapshotFamilies in runner.ts).
+   */
+  _secret_scanning_version_counter: number;
   /** Next id handed to a created resource (label, ruleset, autolink, ...). */
   nextId: number;
 }
@@ -463,6 +478,8 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     deploy_keys: ls.deploy_keys ? clone(ls.deploy_keys) : [],
     issues: ls.issues ? clone(ls.issues) : [],
     custom_property_values: ls.custom_property_values ? clone(ls.custom_property_values) : [],
+    secret_scanning_patterns: ls.secret_scanning_patterns ? clone(ls.secret_scanning_patterns) : [],
+    _secret_scanning_version_counter: 0,
     nextId,
   };
 }

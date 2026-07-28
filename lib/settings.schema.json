@@ -822,6 +822,46 @@
       ],
       "type": "object"
     },
+    "SecretScanningPatternConfig": {
+      "description": "One secret scanning custom pattern, matched by exact name. Only the fields below are accepted: `state` and `push_protection_enabled` are readable but NOT writable through the custom-pattern endpoints, so they cannot be declared. A delimiter, once set, cannot be cleared back to GitHub's default through the update PATCH (the endpoint updates provided fields only); remove the pattern and redeclare it without the field instead.",
+      "properties": {
+        "end_delimiter": {
+          "description": "Regular expression for the characters that must come after the secret.",
+          "type": "string"
+        },
+        "must_match": {
+          "description": "Additional regular expressions a match must also satisfy, compared in order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "must_not_match": {
+          "description": "Regular expressions a match must NOT satisfy, compared in order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "The pattern name, the natural key; immutable upstream, so a rename creates the new name (the old one follows the undeclared policy).",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "The regular expression the secret format must match.",
+          "type": "string"
+        },
+        "start_delimiter": {
+          "description": "Regular expression for the characters that must come before the secret.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "pattern"
+      ],
+      "type": "object"
+    },
     "SettingsFile": {
       "description": "One settings.yml document: every top-level section is optional.",
       "properties": {
@@ -1026,6 +1066,20 @@
             }
           ],
           "description": "Repository rulesets, upserted by name; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`)."
+        },
+        "secret_scanning_custom_patterns": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/SecretScanningPatternConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CSecretScanningPatternConfig%3E"
+            }
+          ],
+          "description": "Repository-level secret scanning custom patterns, matched by name. The name is immutable upstream (the update PATCH takes no name field), so a renamed entry is applied as a create of the new name - plus, under `undeclared: delete`, deletion of the old one; under the default keep policy the old pattern stays live and is surfaced as a note. Undeclared patterns are kept by default: removing a pattern disposes of its alerts, so deletion stays a human opt-in (the wrapped form can set `undeclared: delete`). When this action deletes a pattern it always asks GitHub to RESOLVE the pattern's alerts rather than delete them, keeping the audit trail."
         },
         "teams": {
           "description": "Org team access to the repo; skipped on personal accounts.",
@@ -1384,6 +1438,27 @@
           "description": "The declared entries, exactly as the plain array form lists them.",
           "items": {
             "$ref": "#/definitions/RulesetConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "UndeclaredPolicyList<SecretScanningPatternConfig>": {
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/SecretScanningPatternConfig"
           },
           "type": "array"
         },
