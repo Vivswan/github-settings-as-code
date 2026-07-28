@@ -259,13 +259,18 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
           ),
         );
       }
-      // Deploy keys have no update endpoint; replace.
+      // Deploy keys have no update endpoint; replace. The recreate seeds the
+      // LIVE read_only first: an undeclared toggle is not managed by this
+      // file, and without the seed a rotated read-only key would come back
+      // with GitHub's read/write default - a privilege widening nothing in
+      // the settings file asked for. A declared value still wins via the
+      // spread.
       await call(ctx, this, ENDPOINTS.remove, {
         params: { key_id: String(existing.id) },
         describe: `deleting deploy key "${entry.title}" before recreating it`,
       });
       await call(ctx, this, ENDPOINTS.create, {
-        payload: { ...entry },
+        payload: { read_only: existing.read_only ?? false, ...entry },
         describe: `recreating deploy key "${entry.title}"`,
       });
       result.changes.push(`replaced deploy key "${entry.title}"`);
