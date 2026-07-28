@@ -1441,6 +1441,57 @@ const HANDLERS: Record<string, Handler> = {
     }
     return noContent();
   },
+
+  // deploy_keys ---------------------------------------------------------------
+  "deploy_keys.list": ({ state, query }) => ok(slicePage(state.deploy_keys, query)),
+  "deploy_keys.create": ({ state, body }) => {
+    const payload = asObject(body);
+    const stored = storedKeyMaterial(String(payload.key ?? ""));
+    // One repository per public key, account-wide on GitHub; this state is
+    // one repo, so a duplicate stored blob answers GitHub's 422. The section
+    // itself rejects duplicate declared material and cross-title conflicts
+    // upfront, so no section path reaches this branch anymore; it stays as
+    // defensive modeling of GitHub's real answer for any other mock client.
+    if (state.deploy_keys.some((k) => storedKeyMaterial(String(k.key)) === stored)) {
+      return {
+        status: 422,
+        body: {
+          message: "Validation Failed",
+          errors: [
+            {
+              resource: "PublicKey",
+              code: "custom",
+              field: "key",
+              message: "key is already in use",
+            },
+          ],
+          documentation_url:
+            "https://docs.github.com/rest/deploy-keys/deploy-keys#create-a-deploy-key",
+        },
+      };
+    }
+    const key: Json = {
+      id: state.nextId++,
+      key: stored,
+      url: `https://api.github.com/repos/e2e-owner/e2e-repo/keys/${state.nextId - 1}`,
+      title: String(payload.title ?? ""),
+      verified: true,
+      // Fixed so a repeat apply leaves the state byte-stable (idempotence).
+      created_at: "2026-07-01T00:00:00Z",
+      read_only: payload.read_only === true,
+    };
+    state.deploy_keys.push(key);
+    return { status: 201, body: key };
+  },
+  "deploy_keys.remove": ({ state, pathname }) => {
+    const id = lastSegment(pathname);
+    const index = state.deploy_keys.findIndex((k) => String(k.id) === id);
+    if (index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    state.deploy_keys.splice(index, 1);
+    return noContent();
+  },
 };
 
 /**
@@ -1633,6 +1684,21 @@ function maskHookSecret(hook: Json): Json {
 function nextNumber(items: Json[]): number {
   const max = items.reduce((acc, item) => Math.max(acc, Number(item.number) || 0), 0);
   return max + 1;
+}
+
+/**
+ * The deploy key material GitHub stores: the algorithm and base64 blob, with
+ * any trailing comment stripped. Mirrors GitHub's normalization so a
+ * converging e2e apply proves the section compares normalized material - and
+ * is deliberately an INDEPENDENT implementation, not an import of the
+ * section's normalizeKeyMaterial, so a bug there surfaces as a disagreement
+ * here instead of hiding (the oracle's globMatches pattern). Sub-two-field
+ * material is stored as-is; GitHub would reject it, but the mock never
+ * invents validation the exercised scenarios do not need.
+ */
+function storedKeyMaterial(key: string): string {
+  const match = key.trim().match(/^(\S+)\s+(\S+)/);
+  return match ? `${match[1]} ${match[2]}` : key.trim();
 }
 
 /**

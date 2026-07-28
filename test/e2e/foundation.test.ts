@@ -201,6 +201,7 @@ describe("denial semantics", () => {
         "autolinks",
         "code_scanning_default_setup",
         "collaborators",
+        "deploy_keys",
         "interaction_limits",
         "labels",
         "milestones",

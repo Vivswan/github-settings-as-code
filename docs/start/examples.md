@@ -149,6 +149,11 @@ collaborators:
   - username: octocat
     permission: push
 
+deploy_keys:
+  - title: deploy-bot
+    key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB5n2eXAMPLEeXAMPLEeXAMPLEeXAMPLEeXAMPLEeXAM deploy@example
+    read_only: true
+
 teams:
   - name: platform
     permission: maintain

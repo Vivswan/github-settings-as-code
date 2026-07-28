@@ -140,6 +140,13 @@ export interface LiveState {
    */
   hooks?: Json[];
   /**
+   * Deploy keys (GET shape: id, key, title, verified, created_at, read_only,
+   * url), replaces the (empty) baseline. Seeded key material should carry no
+   * trailing comment, mirroring GitHub's stored normalization (the create
+   * handler strips comments the same way).
+   */
+  deploy_keys?: Json[];
+  /**
    * Issues the repo already has (GET shape: number, title, body, state, labels,
    * html_url, pull_request?), replaces the baseline. The private-report issue
    * channel lists, creates, and patches these; a scenario seeds a pre-existing
@@ -226,6 +233,8 @@ export interface MockState {
   actions_variables: Json[];
   /** Repository webhooks; config.secret is stored real, GETs echo "********". */
   hooks: Json[];
+  /** Deploy keys in GET shape; stored key material carries no comment. */
+  deploy_keys: Json[];
   /** Report issues the private-report issue channel lists/creates/patches. */
   issues: Json[];
   /** Custom property values set on the repo ({property_name, value}). */
@@ -451,6 +460,7 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     interaction_limits_org_override: ls.interaction_limits_org_override ?? false,
     actions_variables: ls.actions_variables ? clone(ls.actions_variables) : [],
     hooks: (ls.hooks ?? []).map((hook) => completeHook(clone(hook), takeId())),
+    deploy_keys: ls.deploy_keys ? clone(ls.deploy_keys) : [],
     issues: ls.issues ? clone(ls.issues) : [],
     custom_property_values: ls.custom_property_values ? clone(ls.custom_property_values) : [],
     nextId,
