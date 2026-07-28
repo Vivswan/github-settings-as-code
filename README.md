@@ -127,6 +127,7 @@ secret fields take); and when you come from elsewhere or something breaks,
 | `actions_variables` | Actions variables CRUD | Variables: write | plain-text repository variables upserted by name; names are case-insensitive (GitHub stores them uppercased); values read back in full, so check mode diffs them exactly (secrets are write-only material and deliberately not this section); undeclared deleted by default (settable) |
 | `webhooks` | hooks CRUD + hook config sub-endpoint | Webhooks: write | one hook per `config.url`, the natural key (a changed url declares a NEW hook; the old one becomes undeclared); `config.secret` takes a whole-value `$NAME` reference resolved from the step env at apply time (see the [secrets guide](docs/concepts/secrets-and-vaults.md)) and is re-sent every run since GitHub never reveals it, so check notes it cannot verify the secret; events compared order-insensitively; hook urls appear in drift lines on purpose (they are configuration, not credentials); undeclared kept by default (settable) |
 | `custom_properties` | GET/PATCH properties/values (the values read is Metadata-gated, so only the PATCH needs the grant); probes GET /orgs/{owner} | Custom properties: write | values of org-defined properties, set per repo (definitions are org-scoped and out of scope); org repos only, skipped with a notice on personal accounts; `value: null` unsets (reverting to the org default, if any); booleans/numbers normalized to their string form (GitHub transports true_false as "true"/"false"); multi_select lists compared order-insensitively; one bulk PATCH per apply, skipped when nothing diverges; undeclared kept by default (settable; an unset can revert to an org default this action does not model, and org-actors-only properties reject the write) |
+| `deploy_keys` | deploy keys list/create/delete | Administration: write | matched by title; the declared material is a PUBLIC key, safe in a committed file; compared as algorithm + blob (GitHub may strip the trailing comment); immutable upstream, so changed entries are replaced; a public key can be attached to only one repository account-wide; undeclared kept by default (settable; deleting a live key breaks whatever authenticates with it) |
 
 ## Semantics
 
@@ -168,11 +169,11 @@ scope by design.
 
 ## Undeclared resources
 
-Eleven sections enumerate the live resources next to the declared ones, and
+Twelve sections enumerate the live resources next to the declared ones, and
 each has a default policy for the ones the file does not declare: `labels`,
 `autolinks`, `collaborators`, and `actions_variables` delete them;
-`rulesets`, `milestones`, `webhooks`, `custom_properties`, and the three
-secret sections (`actions_secrets`, `dependabot_secrets`,
+`rulesets`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`,
+and the three secret sections (`actions_secrets`, `dependabot_secrets`,
 `codespaces_secrets`) keep them
 and list each as a note. A section's list value can override that default
 with a wrapped form:

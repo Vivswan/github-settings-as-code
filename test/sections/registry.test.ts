@@ -105,6 +105,7 @@ const EXPECTED_GRANT: Record<string, string> = {
   actions_variables: `grant "Variables" (read and write) under the PAT's Repository permissions`,
   webhooks: `grant "Webhooks" (read and write) under the PAT's Repository permissions`,
   custom_properties: `grant "Custom properties" (read and write) under the PAT's Repository permissions`,
+  deploy_keys: `grant "Administration" (read and write) under the PAT's Repository permissions`,
 };
 
 describe("section permissions", () => {
