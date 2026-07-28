@@ -65,12 +65,13 @@ const CODE_SCANNING_CAVEAT =
 const ACTIONS_OIDC_CAVEAT =
   'the "oidc_customization_sub" key alone instead needs "Actions" (read and write)';
 
-// The caveat environments appends: its deployment branch-policy pattern
-// endpoints carry permission overrides (Actions for the list read,
-// Administration for the writes), so the section grant names the extra
-// grants wherever an environments endpoint is denied.
+// The caveat environments appends: its deployment branch-policy pattern and
+// custom deployment protection rule endpoints carry permission overrides
+// (Actions for the enabled-rules and pattern-list reads, Administration for
+// the available-Apps read and the writes), so the section grant names the
+// extra grants wherever an environments endpoint is denied.
 const ENVIRONMENTS_POLICIES_CAVEAT =
-  'a declared "deployment_branch_policies" key additionally needs "Actions" (read) and "Administration" (read and write)';
+  'declared "deployment_branch_policies" and "deployment_protection_rules" keys additionally need "Actions" (read) and "Administration" (read and write)';
 
 // The per-section caveats grantFor appends; the derivation test and the
 // literal snapshot both read this one map.
@@ -322,8 +323,9 @@ describe("section endpoints", () => {
     // endpoints in the whole registry legitimately override: the branches
     // probe (Contents), the teams org read (Members), the OIDC subject
     // claim pair (Actions instead of Administration), and the environments
-    // deployment branch-policy patterns (Actions for the list read,
-    // Administration for the writes).
+    // deployment branch-policy patterns and custom deployment protection
+    // rules (Actions for the list reads, Administration for the
+    // available-Apps read and the writes).
     const overridden = Object.entries(allEndpoints())
       .filter(([, endpoint]) => endpoint.permission !== undefined)
       .map(([key]) => key);
@@ -332,8 +334,12 @@ describe("section endpoints", () => {
       "actions.putOidcSub",
       "branches.branchProbe",
       "environments.createPolicy",
+      "environments.createProtectionRule",
       "environments.listPolicies",
+      "environments.listProtectionRuleApps",
+      "environments.listProtectionRules",
       "environments.removePolicy",
+      "environments.removeProtectionRule",
       "teams.org",
     ]);
   });

@@ -16,6 +16,7 @@ import { parse as parseYaml } from "yaml";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { SECTION_KEYS } from "../../src/schema.js";
+import { NESTED_KEYS } from "../../src/sections/environments.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
 import { fencedBlocks } from "./markdown.js";
 
@@ -228,6 +229,20 @@ describe("docs/ guide pages", () => {
       .map((page) => fencedBlocks(readFileSync(join(DOCS, page), "utf8"), "yaml settings").length)
       .reduce((a, b) => a + b, 0);
     expect(total).toBeGreaterThan(0);
+  });
+
+  test("the undeclared-policy guide names every nested per-environment knob", () => {
+    // The guide's "carry the same wrapped form" enumeration is prose; this
+    // pins it to NESTED_KEYS (the single source the reconciler loops over),
+    // so adding a nested knob without documenting its policy fails here
+    // instead of rotting silently.
+    const page = readFileSync(join(DOCS, "concepts", "undeclared-policy.md"), "utf8");
+    for (const key of NESTED_KEYS) {
+      expect(
+        page.includes(`environments[].${key}`),
+        `docs/concepts/undeclared-policy.md never names environments[].${key}; document the nested knob's default policy`,
+      ).toBe(true);
+    }
   });
 
   test("workflow snippets reference the current major tag", () => {

@@ -37,6 +37,7 @@ import {
   environmentFromPut,
   type MockState,
   type MultiMockState,
+  PROTECTION_RULE_APPS,
   protectionFromPut,
   teamRepoFromPut,
 } from "./state.js";
@@ -589,7 +590,21 @@ const HANDLERS: Record<string, Handler> = {
     if (!environment) {
       return { status: 404, body: { message: "Not Found" } };
     }
-    return ok(environment);
+    // Enabled custom deployment protection rules surface in the environment
+    // GET as the spec's third protection_rules variant ({id, node_id, type};
+    // the type names the gating App), like GitHub. Derived at read time so
+    // the stored body stays the PUT transformer's output, and appended to a
+    // copy so the handler never mutates the state it serves.
+    const custom = (state.environment_protection_rules[name] ?? []).map((rule) => ({
+      id: rule.id,
+      node_id: rule.node_id,
+      type: (rule.app as Json | undefined)?.slug ?? "custom",
+    }));
+    if (custom.length === 0) {
+      return ok(environment);
+    }
+    const rules = Array.isArray(environment.protection_rules) ? environment.protection_rules : [];
+    return ok({ ...environment, protection_rules: [...rules, ...custom] });
   },
   "environments.update": ({ state, pathname, body }) => {
     const name = lastSegment(pathname);
@@ -781,6 +796,68 @@ const HANDLERS: Record<string, Handler> = {
     const list = state.environment_branch_policies[env] ?? [];
     const index = list.findIndex((policy) => String(policy.id) === id);
     if (!branchPoliciesEnabled(state, env) || index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    list.splice(index, 1);
+    return noContent();
+  },
+  // The protection-rule handlers 404 for an environment that does not exist,
+  // like the variables family; there is no flag precondition here.
+  "environments.listProtectionRules": ({ state, pathname }) => {
+    const env = segmentFromEnd(pathname, 1); // .../environments/{name}/deployment_protection_rules
+    if (!state.environments[env]) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    const rules = state.environment_protection_rules[env] ?? [];
+    // The whole list in one body: this endpoint documents no page/per_page
+    // parameters, so there is nothing to slice.
+    return ok({ total_count: rules.length, custom_deployment_protection_rules: rules });
+  },
+  "environments.listProtectionRuleApps": ({ state, pathname, query }) => {
+    const env = segmentFromEnd(pathname, 2); // .../deployment_protection_rules/apps
+    if (!state.environments[env]) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    return ok({
+      total_count: PROTECTION_RULE_APPS.length,
+      available_custom_deployment_protection_rule_integrations: slicePage(
+        PROTECTION_RULE_APPS,
+        query,
+      ),
+    });
+  },
+  "environments.createProtectionRule": ({ state, pathname, body }) => {
+    const env = segmentFromEnd(pathname, 1);
+    if (!state.environments[env]) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    // An integration_id outside the available-Apps fixture answers a 422
+    // (the engine resolves ids from that same listing, so only a harness bug
+    // or a raced uninstall would reach this).
+    const payload = asObject(body);
+    const app = PROTECTION_RULE_APPS.find((candidate) => candidate.id === payload.integration_id);
+    if (!app) {
+      return {
+        status: 422,
+        body: { message: "Validation Failed", errors: [{ field: "integration_id" }] },
+      };
+    }
+    let list = state.environment_protection_rules[env];
+    if (!list) {
+      list = [];
+      state.environment_protection_rules[env] = list;
+    }
+    const id = state.nextId++;
+    const rule: Json = { id, node_id: `DPR_${id}`, enabled: true, app: { ...app } };
+    list.push(rule);
+    return { status: 201, body: rule };
+  },
+  "environments.removeProtectionRule": ({ state, pathname }) => {
+    const env = segmentFromEnd(pathname, 2); // .../deployment_protection_rules/{protection_rule_id}
+    const id = lastSegment(pathname);
+    const list = state.environment_protection_rules[env] ?? [];
+    const index = list.findIndex((rule) => String(rule.id) === id);
+    if (!state.environments[env] || index < 0) {
       return { status: 404, body: { message: "Not Found" } };
     }
     list.splice(index, 1);

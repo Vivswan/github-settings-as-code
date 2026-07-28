@@ -339,6 +339,19 @@
       ],
       "type": "object"
     },
+    "DeploymentProtectionRuleConfig": {
+      "description": "One custom deployment protection rule, matched by the slug of the GitHub App that provides it. No other key is accepted: the enable call sends only the App's resolved integration id, so an extra key would have no destination.",
+      "properties": {
+        "app": {
+          "description": "The slug of the GitHub App providing the gate (e.g. \"my-gate-app\"), the natural key.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "type": "object"
+    },
     "EnvironmentConfig": {
       "description": "One deployment environment, matched by name.",
       "properties": {
@@ -380,6 +393,20 @@
             }
           ],
           "description": "Which branches may deploy; null clears the policy."
+        },
+        "deployment_protection_rules": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/DeploymentProtectionRuleConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CDeploymentProtectionRuleConfig%3E"
+            }
+          ],
+          "description": "Custom deployment protection rules for this environment, reconciled only when this key is declared (an absent key leaves the live rules untouched). Each rule is a GitHub App gate, declared by its App slug and resolved to the App's integration id at apply time; GitHub offers no update call, so the model is enable/disable only. Within a declared key, live rules the entries do not declare are KEPT by default - Apps can enable themselves as gates, and silently removing a deployment gate is security-relevant - and the wrapped `{undeclared: delete, entries}` form opts into disabling them."
         },
         "name": {
           "description": "The environment name, the natural key.",
@@ -1102,6 +1129,27 @@
           "description": "The declared entries, exactly as the plain array form lists them.",
           "items": {
             "$ref": "#/definitions/DeploymentBranchPolicyConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "UndeclaredPolicyList<DeploymentProtectionRuleConfig>": {
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/DeploymentProtectionRuleConfig"
           },
           "type": "array"
         },

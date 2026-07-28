@@ -1,0 +1,35 @@
+# The available-Apps read is gated by the Administration permission (a
+# per-endpoint override): with Environments granted and the Actions-gated
+# rules list readable, the preflight read pass succeeds (check mode never
+# reads the Apps listing), the environment PUT lands, and then the mid-apply
+# resolver fetch is refused. The denial advice asks for "Administration"
+# at WRITE level even though the failing call is a read: the enable and
+# disable writes share that permission, so read-level advice would just fail
+# again one grant later.
+name: environment-protection-rules-read-denied
+settings:
+  environments:
+    - name: production
+      deployment_protection_rules:
+        - app: deploy-gate
+denial_style: fine_grained
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules: []
+token_permissions:
+  environments: write
+  actions: read
+  administration: none
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    environments: failed
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+  never:
+    - "POST /repos/{repo}/environments/production/deployment_protection_rules"
+  stdout_contains:
+    - '"Administration" (read and write)'

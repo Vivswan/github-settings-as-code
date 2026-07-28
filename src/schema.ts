@@ -220,6 +220,20 @@ export interface EnvironmentConfig {
     | DeploymentBranchPolicyConfig[]
     | UndeclaredPolicyList<DeploymentBranchPolicyConfig>;
   /**
+   * Custom deployment protection rules for this environment, reconciled only
+   * when this key is declared (an absent key leaves the live rules
+   * untouched). Each rule is a GitHub App gate, declared by its App slug and
+   * resolved to the App's integration id at apply time; GitHub offers no
+   * update call, so the model is enable/disable only. Within a declared key,
+   * live rules the entries do not declare are KEPT by default - Apps can
+   * enable themselves as gates, and silently removing a deployment gate is
+   * security-relevant - and the wrapped `{undeclared: delete, entries}` form
+   * opts into disabling them.
+   */
+  deployment_protection_rules?:
+    | DeploymentProtectionRuleConfig[]
+    | UndeclaredPolicyList<DeploymentProtectionRuleConfig>;
+  /**
    * Actions variables for this environment, reconciled only when this key is
    * declared (an absent key leaves the live variables untouched). Values are
    * plain text by design - use environment secrets for anything sensitive.
@@ -255,6 +269,17 @@ export interface DeploymentBranchPolicyConfig {
    * Immutable on GitHub, so changing it is applied as delete plus recreate.
    */
   type?: "branch" | "tag";
+}
+
+/**
+ * One custom deployment protection rule, matched by the slug of the GitHub
+ * App that provides it. No other key is accepted: the enable call sends only
+ * the App's resolved integration id, so an extra key would have no
+ * destination.
+ */
+export interface DeploymentProtectionRuleConfig {
+  /** The slug of the GitHub App providing the gate (e.g. "my-gate-app"), the natural key. */
+  app: string;
 }
 
 /** One per-environment Actions variable, matched by case-insensitive name. */

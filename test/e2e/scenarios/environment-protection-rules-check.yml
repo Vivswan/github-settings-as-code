@@ -1,0 +1,80 @@
+# Check mode reports protection-rule drift without writing: production's
+# declared deploy-gate rule is missing (apply would enable it) while its
+# undeclared change-window rule is kept as a note (the default), staging's
+# wrapped "undeclared: delete" form turns ITS undeclared rule into drift
+# (apply would disable it), and the qa environment does not exist, so its
+# declared rules are not verifiable - a note, while the missing environment
+# itself is drift. The available-Apps listing is an apply-time resolver and
+# is never read in check mode.
+name: environment-protection-rules-check
+settings:
+  environments:
+    - name: production
+      deployment_protection_rules:
+        - app: deploy-gate
+        - app: region-guard
+    - name: staging
+      deployment_protection_rules:
+        undeclared: delete
+        entries: []
+    - name: qa
+      deployment_protection_rules:
+        - app: deploy-gate
+inputs:
+  mode: check
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules: []
+    staging:
+      name: staging
+      protection_rules: []
+  environment_protection_rules:
+    production:
+      - id: 7100
+        node_id: DPR_7100
+        enabled: true
+        app:
+          id: 3516
+          slug: region-guard
+          integration_url: https://api.github.com/apps/region-guard
+          node_id: MDQ6R2F0ZTM1MTY=
+      - id: 7101
+        node_id: DPR_7101
+        enabled: true
+        app:
+          id: 3517
+          slug: change-window
+          integration_url: https://api.github.com/apps/change-window
+          node_id: MDQ6R2F0ZTM1MTc=
+    staging:
+      - id: 7001
+        node_id: DPR_7001
+        enabled: true
+        app:
+          id: 3517
+          slug: change-window
+          integration_url: https://api.github.com/apps/change-window
+          node_id: MDQ6R2F0ZTM1MTc=
+token_permissions:
+  environments: read
+  actions: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    environments: drift
+  summary_contains:
+    - "deployment_protection_rules[deploy-gate]: missing"
+    - "deployment_protection_rules[change-window]: undeclared"
+    - "environments[qa]: missing"
+  stdout_contains:
+    - 'deployment protection rule "change-window" is enabled on environment "production" but is not declared'
+    - "environments[qa].deployment_protection_rules: not verifiable while the environment is missing"
+  never:
+    - "PUT /repos/{repo}/environments"
+    - "POST /repos/{repo}/environments"
+    - "DELETE /repos/{repo}/environments"
+  requests_contain:
+    - "GET /repos/e2e-owner/e2e-repo/environments/staging/deployment_protection_rules"
