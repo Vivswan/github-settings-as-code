@@ -301,6 +301,23 @@ function noContent(): MockResponse {
   return { status: 204, body: null };
 }
 
+/**
+ * True when an environment exists AND its stored deployment_branch_policy
+ * enables custom_branch_policies - the precondition every branch-policy
+ * pattern endpoint shares (they answer 404 otherwise, like GitHub).
+ */
+function branchPoliciesEnabled(state: MockState, env: string): boolean {
+  const environment = state.environments[env];
+  if (!environment) {
+    return false;
+  }
+  const flags = environment.deployment_branch_policy as
+    | { custom_branch_policies?: unknown }
+    | null
+    | undefined;
+  return flags?.custom_branch_policies === true;
+}
+
 // --- Per-endpoint handlers ------------------------------------------------
 //
 // One entry per "section.role" key in allEndpoints(). Reads serve
@@ -704,6 +721,70 @@ const HANDLERS: Record<string, Handler> = {
       state.environment_secret_digests[env] ?? {},
       name,
     );
+  },
+  // The branch-policy pattern handlers 404 when the environment is missing OR
+  // its stored deployment_branch_policy does not enable
+  // custom_branch_policies, matching GitHub's documented "Not Found or
+  // custom_branch_policies is false" behavior on this endpoint family.
+  "environments.listPolicies": ({ state, pathname, query }) => {
+    const env = segmentFromEnd(pathname, 1); // .../environments/{name}/deployment-branch-policies
+    if (!branchPoliciesEnabled(state, env)) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    const policies = state.environment_branch_policies[env] ?? [];
+    return ok({
+      total_count: policies.length,
+      branch_policies: slicePage(policies, query),
+    });
+  },
+  "environments.createPolicy": ({ state, pathname, body }) => {
+    const env = segmentFromEnd(pathname, 1);
+    if (!branchPoliciesEnabled(state, env)) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    const payload = asObject(body);
+    // GitHub enforces the type enum server-side; settings pass through
+    // verbatim, so a user typo reaches this POST and must be answered with
+    // the real 422, not silently accepted. requestOffSpec exempts only the
+    // request-body SCHEMA check (the spec forbids this body by design; the
+    // rejection is the behavior under test), like the rulesets rule-type
+    // handler.
+    if (payload.type !== undefined && payload.type !== "branch" && payload.type !== "tag") {
+      return {
+        status: 422,
+        body: { message: "Validation Failed", errors: [{ field: "type", code: "invalid" }] },
+        requestOffSpec: true,
+      };
+    }
+    let list = state.environment_branch_policies[env];
+    if (!list) {
+      list = [];
+      state.environment_branch_policies[env] = list;
+    }
+    // A duplicate name pattern answers GitHub's documented 303 with NO body
+    // (the spec declares no content for it) and no Location header, so the
+    // client surfaces the response itself instead of chasing a redirect.
+    if (list.some((policy) => policy.name === payload.name)) {
+      return { status: 303, body: null };
+    }
+    const policy: Json = {
+      id: state.nextId++,
+      name: payload.name,
+      type: typeof payload.type === "string" ? payload.type : "branch",
+    };
+    list.push(policy);
+    return ok(policy);
+  },
+  "environments.removePolicy": ({ state, pathname }) => {
+    const env = segmentFromEnd(pathname, 2); // .../deployment-branch-policies/{branch_policy_id}
+    const id = lastSegment(pathname);
+    const list = state.environment_branch_policies[env] ?? [];
+    const index = list.findIndex((policy) => String(policy.id) === id);
+    if (!branchPoliciesEnabled(state, env) || index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    list.splice(index, 1);
+    return noContent();
   },
 
   // autolinks --------------------------------------------------------------

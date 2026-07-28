@@ -8,12 +8,18 @@
  * Actions secrets through the shared secrets engine, one scope per
  * environment (undeclared secrets WITHIN a declared key are KEPT by default
  * - their values are unrecoverable - and `{undeclared: delete, entries}`
- * opts into deletion).
+ * opts into deletion). A declared nested `deployment_branch_policies` key
+ * reconciles that environment's custom branch-policy patterns (it requires
+ * the singular `deployment_branch_policy` sibling to set
+ * `custom_branch_policies: true`; a pattern's type is immutable upstream, so
+ * a type change is delete plus recreate, and undeclared patterns WITHIN a
+ * declared key are deleted by default).
  */
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
 import type {
+  DeploymentBranchPolicyConfig,
   EnvironmentConfig,
   EnvironmentSecretConfig,
   EnvironmentVariableConfig,
@@ -47,6 +53,24 @@ import {
 } from "./secrets-engine.js";
 
 const permission: SectionPermission = { repo: ["environments"] };
+
+/**
+ * The grant caveat for the branch-policy pattern endpoints, which GitHub
+ * gates OUTSIDE the Environments permission (verified against the
+ * fine-grained permissions reference): the list read needs Actions read and
+ * the create/delete writes need Administration write. Appended to the
+ * section grant so a denial anywhere in the section names the extra grants.
+ */
+const BRANCH_POLICIES_CAVEAT =
+  'a declared "deployment_branch_policies" key additionally needs "Actions" (read) and "Administration" (read and write)';
+
+/**
+ * The 404 on the pattern endpoints is ambiguous: besides a missing grant it
+ * can mean the environment does not exist, or that its
+ * deployment_branch_policy does not enable custom_branch_policies.
+ */
+const BRANCH_POLICIES_DENIAL_HINT =
+  "a 404 here can also mean the environment does not exist, or that its deployment_branch_policy does not set custom_branch_policies: true";
 
 const ENDPOINTS = {
   probe: {
@@ -96,6 +120,36 @@ const ENDPOINTS = {
     route: "DELETE /repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",
     statuses: { 204: "environment secret deleted" },
   },
+  listPolicies: {
+    route: "GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies",
+    statuses: { 200: "the deployment branch-policy pattern list" },
+    // GitHub gates this read under Actions, not Environments (the OIDC
+    // customization pair in actions.ts is the precedent for the override).
+    permission: { repo: ["actions"] },
+    denialHint: BRANCH_POLICIES_DENIAL_HINT,
+  },
+  createPolicy: {
+    route: "POST /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies",
+    // GitHub documents 200 for the create (never 201), and 303 when a policy
+    // with the same name pattern already exists - desired state is there
+    // either way, so the handler treats 303 as converged.
+    statuses: {
+      200: "deployment branch policy created",
+      303: "a policy with this name pattern already exists",
+    },
+    permission: { repo: ["administration"] },
+    denialHint: BRANCH_POLICIES_DENIAL_HINT,
+    hints: {
+      422: 'Usually the pattern\'s "type" is not one of the values GitHub accepts ("branch" or "tag"); see the deployment branch policies endpoint documentation',
+    },
+  },
+  removePolicy: {
+    route:
+      "DELETE /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies/{branch_policy_id}",
+    statuses: { 204: "deployment branch policy deleted" },
+    permission: { repo: ["administration"] },
+    denialHint: BRANCH_POLICIES_DENIAL_HINT,
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
 /**
@@ -108,6 +162,7 @@ const ENDPOINTS = {
 const NESTED_KEYS = [
   "variables",
   "secrets",
+  "deployment_branch_policies",
 ] as const satisfies readonly (keyof EnvironmentConfig)[];
 type NestedKey = (typeof NESTED_KEYS)[number];
 
@@ -145,9 +200,9 @@ type _NestedListSound = MustBeNever<Exclude<NestedKey, NestedByType>>;
  * key added to NESTED_KEYS without a matching entry fails to compile (the
  * section-registry pattern). Function-valued properties on purpose, not
  * method shorthand: method parameters check bivariantly, properties
- * strictly. Today's two entry types are structurally identical, so a
- * swapped pairing is pinned by the unit tests either way; the strict
- * checking is for future keys whose types genuinely differ.
+ * strictly. The strict checking does real work now that the branch-policy
+ * entry type differs from the variable/secret ones - a swapped pairing is a
+ * compile error, not a runtime surprise.
  */
 interface NestedReconciler<K extends NestedKey> {
   /**
@@ -180,6 +235,15 @@ interface NestedReconciler<K extends NestedKey> {
     policy: UndeclaredPolicy,
     entries: readonly NestedEntry<K>[],
     result: SectionResult,
+    /**
+     * The probed live environment body, present in CHECK mode only: the
+     * branch-policy reconciler reads its custom_branch_policies flag to know
+     * whether the pattern list is even readable. Apply mode passes undefined
+     * on purpose - the PUT that just ran defines the live flags there, and
+     * the shape's flag-pairing refinement guarantees the declared flag is
+     * true.
+     */
+    liveEnv: Record<string, unknown> | undefined,
   ) => Promise<void>;
 }
 
@@ -202,18 +266,32 @@ const NESTED_RECONCILERS: { [K in NestedKey]: NestedReconciler<K> } = {
     validate: (env, entries) => rejectDuplicateSecrets(env.name, entries),
     reconcile: reconcileEnvironmentSecrets,
   },
+  deployment_branch_policies: {
+    // "delete" like the nested variables list: patterns are readable,
+    // recreatable configuration.
+    defaultPolicy: "delete",
+    missingNote: (envName) =>
+      `environments[${envName}].deployment_branch_policies: not verifiable while the environment is missing; apply will create the environment and reconcile the declared patterns`,
+    validate: validateBranchPolicies,
+    reconcile: reconcileBranchPolicies,
+  },
 };
 
 /**
  * Unwrap one nested key's declared value against its own table default.
  * Generic over K so the table lookup and the declared value stay correlated
  * to the same literal key; the union-typed loop variable in run() cannot
- * express that without casts. The one cast restates NestedDeclared[K] in the
- * spelling undeclaredPolicy infers its entry type from.
+ * express that without casts. The parameter is spelled
+ * NonNullable<EnvironmentConfig[K]> rather than the identical
+ * NestedDeclared[K]: tsc relates the guarded env[key] to the former
+ * directly, while the mapped-type spelling forces a fallback to the
+ * intersection over every key, which the differing entry types cannot
+ * satisfy. The one cast restates the type in the spelling undeclaredPolicy
+ * infers its entry type from.
  */
 function unwrapNested<K extends NestedKey>(
   key: K,
-  declared: NestedDeclared[K],
+  declared: NonNullable<EnvironmentConfig[K]>,
 ): { policy: UndeclaredPolicy; entries: readonly NestedEntry<K>[] } {
   return undeclaredPolicy(
     declared as readonly NestedEntry<K>[] | UndeclaredPolicyList<NestedEntry<K>>,
@@ -237,11 +315,20 @@ async function reconcileNested<K extends NestedKey>(
   envName: string,
   nested: Pick<EnvironmentConfig, NestedKey>,
   result: SectionResult,
+  liveEnv: Record<string, unknown> | undefined,
 ): Promise<void> {
   const declared = nested[key];
   if (declared !== undefined) {
     const { policy, entries } = unwrapNested(key, declared);
-    await NESTED_RECONCILERS[key].reconcile(ctx, section, envName, policy, entries, result);
+    await NESTED_RECONCILERS[key].reconcile(
+      ctx,
+      section,
+      envName,
+      policy,
+      entries,
+      result,
+      liveEnv,
+    );
   }
 }
 
@@ -265,36 +352,68 @@ export const environmentsSection: SectionModule<"environments"> = {
   key: "environments",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(permission),
+  grant: grantFor(permission, BRANCH_POLICIES_CAVEAT),
   endpoints: ENDPOINTS,
   shape: z.array(
-    z.looseObject({
-      name: z.string(),
-      // Loose like the repository actions_variables entries: the POST/PATCH
-      // bodies pass extra fields through verbatim, so a field GitHub ships
-      // tomorrow can be declared here the day it appears.
-      variables: undeclaredPolicyShape(
-        z.array(z.looseObject({ name: z.string(), value: z.string() })),
-      ).optional(),
-      // STRICT entries, unlike variables: a secret's PUT body is built from
-      // the sealed value alone, so an extra entry key has no destination and
-      // would silently do nothing (the actions_secrets closedSurface rule;
-      // closedSurface itself cannot reach a nested list, so the shape
-      // enforces it here).
-      secrets: undeclaredPolicyShape(
-        z.array(z.strictObject({ name: z.string(), value: z.string() })),
-      ).optional(),
-      // Secrets live under the plural `secrets` list; a singular entry-level
-      // `secret` would pass the loose shape into the environment PUT body
-      // verbatim and configure nothing, so the misplacement is rejected by
-      // name (the webhooks entry-level `secret` pin precedent).
-      secret: z
-        .undefined({
-          error:
-            "environment secrets belong under the entry's `secrets` list, not a singular `secret` key; here it would pass through to the environment PUT verbatim and configure nothing",
-        })
-        .optional(),
-    }),
+    z
+      .looseObject({
+        name: z.string(),
+        // Loose like the repository actions_variables entries: the POST/PATCH
+        // bodies pass extra fields through verbatim, so a field GitHub ships
+        // tomorrow can be declared here the day it appears.
+        variables: undeclaredPolicyShape(
+          z.array(z.looseObject({ name: z.string(), value: z.string() })),
+        ).optional(),
+        // STRICT entries, unlike variables: a secret's PUT body is built from
+        // the sealed value alone, so an extra entry key has no destination and
+        // would silently do nothing (the actions_secrets closedSurface rule;
+        // closedSurface itself cannot reach a nested list, so the shape
+        // enforces it here).
+        secrets: undeclaredPolicyShape(
+          z.array(z.strictObject({ name: z.string(), value: z.string() })),
+        ).optional(),
+        // Loose like the variables entries: the create POST passes extra
+        // fields through verbatim. `type` is checked as a plain string (the
+        // handler compares it against the live pattern); GitHub stays the
+        // authority on its values, and the published schema documents the
+        // upstream enum.
+        deployment_branch_policies: undeclaredPolicyShape(
+          z.array(z.looseObject({ name: z.string(), type: z.string().optional() })),
+        ).optional(),
+        // Secrets live under the plural `secrets` list; a singular entry-level
+        // `secret` would pass the loose shape into the environment PUT body
+        // verbatim and configure nothing, so the misplacement is rejected by
+        // name (the webhooks entry-level `secret` pin precedent).
+        secret: z
+          .undefined({
+            error:
+              "environment secrets belong under the entry's `secrets` list, not a singular `secret` key; here it would pass through to the environment PUT verbatim and configure nothing",
+          })
+          .optional(),
+      })
+      .superRefine((entry, refineCtx) => {
+        // The flag-pairing invariant lives HERE, in the shape, not in the
+        // section's validate hook: upfront document validation rejects the
+        // document in BOTH modes before ANY section writes. A hook-level check
+        // would fire only when this section runs (the apply-mode preflight
+        // ignores non-permission errors), after earlier sections already
+        // wrote - and the pattern POST itself would 404 only after the
+        // environment PUT landed, half-applying the run.
+        if (entry.deployment_branch_policies === undefined) {
+          return;
+        }
+        const flags = (entry as Record<string, unknown>).deployment_branch_policy as
+          | { custom_branch_policies?: unknown }
+          | null
+          | undefined;
+        if (flags?.custom_branch_policies !== true) {
+          refineCtx.addIssue({
+            code: "custom",
+            path: ["deployment_branch_policies"],
+            message: `the "${entry.name}" entry declares deployment_branch_policies, so it must also declare deployment_branch_policy with custom_branch_policies: true - GitHub rejects every pattern write while the flag is off`,
+          });
+        }
+      }),
   ),
   /**
    * The declared value of every entry's secrets list, across all declared
@@ -350,8 +469,9 @@ export const environmentsSection: SectionModule<"environments"> = {
           result.drift.push(
             ...subsetDiff(settings, flattenEnvironment(probe.data), `environments[${name}]`),
           );
+          const liveEnv = (probe.data ?? {}) as Record<string, unknown>;
           for (const key of NESTED_KEYS) {
-            await reconcileNested(ctx, this, key, name, nested, result);
+            await reconcileNested(ctx, this, key, name, nested, result, liveEnv);
           }
         }
       } else {
@@ -362,7 +482,7 @@ export const environmentsSection: SectionModule<"environments"> = {
         });
         result.changes.push(`applied environment "${name}"`);
         for (const key of NESTED_KEYS) {
-          await reconcileNested(ctx, this, key, name, nested, result);
+          await reconcileNested(ctx, this, key, name, nested, result, undefined);
         }
       }
     }
@@ -583,6 +703,198 @@ async function reconcileEnvironmentSecrets(
   result.changes.push(...scoped.changes);
   result.drift.push(...scoped.drift);
   result.notes.push(...scoped.notes);
+}
+
+/**
+ * The fields of a live branch policy this section reads. GitHub's spec marks
+ * every one of them optional, so each is read defensively: a missing type
+ * reads as the server-side default "branch", while a missing name or id is a
+ * contract break that fails loudly - a policy without a name has no identity
+ * to reconcile by, and silently skipping it would let check report falsely
+ * clean while the default delete policy neither removed nor noted it.
+ */
+interface LiveBranchPolicy {
+  id?: number;
+  name?: string;
+  type?: string;
+}
+
+/** A live policy's type; "branch" is GitHub's server-side default when absent. */
+function livePolicyType(policy: LiveBranchPolicy): string {
+  return typeof policy.type === "string" ? policy.type : "branch";
+}
+
+/** The id a delete addresses, or a loud error when the response omitted it. */
+function livePolicyId(policy: LiveBranchPolicy, envName: string): string {
+  if (policy.id === undefined) {
+    throw new Error(
+      `environments: the deployment branch-policy list for environment "${envName}" returned a policy without an id, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+    );
+  }
+  return String(policy.id);
+}
+
+/** The name a policy reconciles by, or a loud error when the response omitted it. */
+function livePolicyName(policy: LiveBranchPolicy, envName: string): string {
+  if (typeof policy.name !== "string") {
+    throw new Error(
+      `environments: the deployment branch-policy list for environment "${envName}" returned a policy without a name, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+    );
+  }
+  return policy.name;
+}
+
+/**
+ * Upfront rejection of duplicate declared patterns: exact-name matching
+ * would fight itself on every run. The flag pairing (a declared
+ * `deployment_branch_policies` needs `custom_branch_policies: true` on the
+ * sibling) is NOT checked here: it lives in the section's zod shape, so an
+ * invalid document fails upfront validation in both modes before ANY
+ * section writes - a hook-level check would fire only when this section
+ * runs, after earlier sections already wrote.
+ */
+function validateBranchPolicies(
+  env: EnvironmentConfig,
+  entries: readonly DeploymentBranchPolicyConfig[],
+): void {
+  const seen = new Set<string>();
+  for (const pattern of entries) {
+    if (seen.has(pattern.name)) {
+      throw new Error(
+        `environments: the "${env.name}" entry declares the deployment branch policy "${pattern.name}" twice. Keep exactly one entry per pattern`,
+      );
+    }
+    seen.add(pattern.name);
+  }
+}
+
+/**
+ * Create one branch-policy pattern. GitHub's documented 303 ("a policy with
+ * this name pattern already exists" - a race created it between the list and
+ * this POST) needs no special handling: the client throws only on 304 and
+ * >= 400, and fetch returns a Location-less 303 to the caller, so it arrives
+ * here as a plain non-error response and the run converges. Declared keys
+ * beyond name/type pass through verbatim.
+ */
+async function createBranchPolicy(
+  ctx: SectionContext,
+  section: SectionModule<"environments">,
+  envName: string,
+  pattern: DeploymentBranchPolicyConfig,
+): Promise<void> {
+  await call(ctx, section, ENDPOINTS.createPolicy, {
+    params: { environment_name: envName },
+    payload: pattern,
+    describe: `creating deployment branch policy "${pattern.name}" in environment "${envName}"`,
+  });
+}
+
+/**
+ * Reconcile one environment's declared `deployment_branch_policies` list
+ * against the live patterns (the autolinks pattern): create missing ones,
+ * delete-and-recreate a matching name whose type diverges (type is immutable
+ * upstream), and apply the undeclared policy to the rest. In check mode a
+ * live environment whose custom_branch_policies flag is off cannot list its
+ * patterns (the GET 404s), so the declared list earns a note instead - the
+ * environment diff itself already reports the flag drift.
+ */
+async function reconcileBranchPolicies(
+  ctx: SectionContext,
+  section: SectionModule<"environments">,
+  envName: string,
+  policy: UndeclaredPolicy,
+  entries: readonly DeploymentBranchPolicyConfig[],
+  result: SectionResult,
+  liveEnv: Record<string, unknown> | undefined,
+): Promise<void> {
+  if (ctx.check) {
+    const flags = liveEnv?.deployment_branch_policy as
+      | { custom_branch_policies?: unknown }
+      | null
+      | undefined;
+    if (flags?.custom_branch_policies !== true) {
+      // Returning before the list also means the apply-mode preflight never
+      // probes listPolicies for this environment, so an Actions-read denial
+      // surfaces only mid-apply, after the environment PUT - the same
+      // deliberately accepted shape as the missing-environment case for
+      // variables and secrets.
+      result.notes.push(
+        `environments[${envName}].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and reconcile the declared patterns`,
+      );
+      return;
+    }
+  }
+  const live = (await listAllEnveloped(ctx, section, ENDPOINTS.listPolicies, "branch_policies", {
+    params: { environment_name: envName },
+  })) as LiveBranchPolicy[];
+  const liveByName = new Map<string, LiveBranchPolicy>();
+  for (const pattern of live) {
+    liveByName.set(livePolicyName(pattern, envName), pattern);
+  }
+  const declared = new Set(entries.map((pattern) => pattern.name));
+
+  for (const pattern of entries) {
+    const label = `environments[${envName}].deployment_branch_policies[${pattern.name}]`;
+    const existing = liveByName.get(pattern.name);
+    if (!existing) {
+      if (ctx.check) {
+        result.drift.push(
+          `${label}: missing - declared in the settings file but not on the environment; apply will create it`,
+        );
+      } else {
+        await createBranchPolicy(ctx, section, envName, pattern);
+        result.changes.push(
+          `created deployment branch policy "${pattern.name}" in environment "${envName}"`,
+        );
+      }
+      continue;
+    }
+    const desiredType = pattern.type ?? "branch";
+    const liveType = livePolicyType(existing);
+    if (liveType === desiredType) {
+      continue;
+    }
+    if (ctx.check) {
+      result.drift.push(
+        `${label}: the declared type differs from the live pattern's, and a policy's type is immutable; apply will delete and recreate it`,
+      );
+      // Name the differing values; the generic line alone left the reader
+      // guessing which side says what.
+      result.drift.push(...subsetDiff({ type: desiredType }, { type: liveType }, label));
+    } else {
+      await call(ctx, section, ENDPOINTS.removePolicy, {
+        params: { environment_name: envName, branch_policy_id: livePolicyId(existing, envName) },
+        describe: `deleting deployment branch policy "${pattern.name}" in environment "${envName}" to change its immutable type`,
+      });
+      await createBranchPolicy(ctx, section, envName, pattern);
+      result.changes.push(
+        `replaced deployment branch policy "${pattern.name}" in environment "${envName}" (type is immutable; ${liveType} -> ${desiredType})`,
+      );
+    }
+  }
+
+  for (const [name, existing] of liveByName) {
+    if (declared.has(name)) {
+      continue;
+    }
+    if (policy === "keep") {
+      result.notes.push(
+        `deployment branch policy "${name}" exists on environment "${envName}" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+      );
+    } else if (ctx.check) {
+      result.drift.push(
+        `environments[${envName}].deployment_branch_policies[${name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
+      );
+    } else {
+      await call(ctx, section, ENDPOINTS.removePolicy, {
+        params: { environment_name: envName, branch_policy_id: livePolicyId(existing, envName) },
+        describe: `deleting undeclared deployment branch policy "${name}" from environment "${envName}"`,
+      });
+      result.changes.push(
+        `DELETED undeclared deployment branch policy "${name}" from environment "${envName}"`,
+      );
+    }
+  }
 }
 
 /**

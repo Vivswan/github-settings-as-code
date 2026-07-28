@@ -25,13 +25,15 @@ describe("published schema wrapper strictness", () => {
 
   /**
    * The nested {undeclared, entries} knobs inside a section entry
-   * (environments[].variables today), mirroring NESTED_POLICY_LISTS in
-   * finalize-schema.ts: each adds one wrapper definition beyond the knobbed
-   * sections.
+   * (environments[].variables, environments[].secrets, and
+   * environments[].deployment_branch_policies), mirroring
+   * NESTED_POLICY_LISTS in finalize-schema.ts: each adds one wrapper
+   * definition beyond the knobbed sections.
    */
   const NESTED_WRAPPERS = [
     "UndeclaredPolicyList<EnvironmentVariableConfig>",
     "UndeclaredPolicyList<EnvironmentSecretConfig>",
+    "UndeclaredPolicyList<DeploymentBranchPolicyConfig>",
   ] as const;
 
   test("one wrapper definition per knobbed section and nested knob, each closed", () => {
@@ -101,6 +103,86 @@ describe("published schema wrapper strictness", () => {
           environments: [{ name: "prod", variables: { entires: [], entries: [] } }],
         }),
       ).toBe(false);
+    });
+
+    test("both forms of the nested branch-policies knob validate; a bad type is rejected", () => {
+      expect(
+        validate({
+          environments: [
+            {
+              name: "prod",
+              deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+              deployment_branch_policies: [{ name: "release/*" }, { name: "v*", type: "tag" }],
+            },
+          ],
+        }),
+      ).toBe(true);
+      expect(
+        validate({
+          environments: [
+            {
+              name: "prod",
+              deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+              deployment_branch_policies: { undeclared: "keep", entries: [{ name: "main" }] },
+            },
+          ],
+        }),
+      ).toBe(true);
+      // The declared type is the documented upstream enum in the published
+      // schema (the runtime shape stays a loose string; GitHub is the
+      // authority there).
+      expect(
+        validate({
+          environments: [
+            {
+              name: "prod",
+              deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+              deployment_branch_policies: [{ name: "v*", type: "wildcard" }],
+            },
+          ],
+        }),
+      ).toBe(false);
+    });
+
+    test("the branch-policies flag pairing is enforced, matching the runtime shape", () => {
+      // The if/then finalize-schema stamps onto EnvironmentConfig: declaring
+      // deployment_branch_policies without the sibling flag object, with the
+      // flag false, or with the sibling nulled all fail - the same documents
+      // validateSettingsDoc rejects upfront.
+      expect(
+        validate({
+          environments: [{ name: "prod", deployment_branch_policies: [{ name: "release/*" }] }],
+        }),
+      ).toBe(false);
+      expect(
+        validate({
+          environments: [
+            {
+              name: "prod",
+              deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+              deployment_branch_policies: [{ name: "release/*" }],
+            },
+          ],
+        }),
+      ).toBe(false);
+      expect(
+        validate({
+          environments: [
+            {
+              name: "prod",
+              deployment_branch_policy: null,
+              deployment_branch_policies: [{ name: "release/*" }],
+            },
+          ],
+        }),
+      ).toBe(false);
+      // An entry without the plural key keeps its freedom: the flag object
+      // stays optional and nullable there.
+      expect(
+        validate({
+          environments: [{ name: "prod", deployment_branch_policy: null }],
+        }),
+      ).toBe(true);
     });
 
     test("an extra field on a variable entry validates - entries stay open", () => {

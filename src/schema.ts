@@ -202,9 +202,23 @@ export interface EnvironmentConfig {
   deployment_branch_policy?: {
     /** Restrict to branches with protection rules. */
     protected_branches: boolean;
-    /** Restrict to name patterns (declared separately, a known gap). */
+    /** Restrict to name patterns, declared under `deployment_branch_policies`. */
     custom_branch_policies: boolean;
   } | null;
+  /**
+   * Custom deployment branch-policy patterns for this environment, reconciled
+   * only when this key is declared (an absent key leaves the live patterns
+   * untouched). Declaring it requires the sibling `deployment_branch_policy`
+   * to set `custom_branch_policies: true`; without the flag GitHub rejects
+   * every pattern write. A pattern's `type` is immutable on GitHub, so a
+   * declared type that differs from the live one is applied as delete plus
+   * recreate. Within a declared key, live patterns the entries do not declare
+   * are DELETED by default; the wrapped `{undeclared: keep, entries}` form
+   * keeps them as notes.
+   */
+  deployment_branch_policies?:
+    | DeploymentBranchPolicyConfig[]
+    | UndeclaredPolicyList<DeploymentBranchPolicyConfig>;
   /**
    * Actions variables for this environment, reconciled only when this key is
    * declared (an absent key leaves the live variables untouched). Values are
@@ -227,6 +241,20 @@ export interface EnvironmentConfig {
    * `{undeclared: delete, entries}` form opts into deletion.
    */
   secrets?: EnvironmentSecretConfig[] | UndeclaredPolicyList<EnvironmentSecretConfig>;
+}
+
+/**
+ * One custom deployment branch-policy pattern, matched by exact name. Extra
+ * fields pass through to the create call verbatim.
+ */
+export interface DeploymentBranchPolicyConfig {
+  /** The name pattern branches or tags must match to deploy (e.g. "release/*"), the natural key. */
+  name: string;
+  /**
+   * What the pattern matches: "branch" (the upstream default) or "tag".
+   * Immutable on GitHub, so changing it is applied as delete plus recreate.
+   */
+  type?: "branch" | "tag";
 }
 
 /** One per-environment Actions variable, matched by case-insensitive name. */
