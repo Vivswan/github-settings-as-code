@@ -18,6 +18,7 @@ import type { Io } from "../../src/io.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
+import { STALE_VERSION_HINT } from "../../src/sections/secret-scanning-patterns.js";
 import { fencedBlocks } from "./markdown.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -223,6 +224,38 @@ describe("docs/ guide pages", () => {
       }
     });
   }
+
+  test("the examples cookbook shows every section at least once", () => {
+    // Two landings established the convention that a new section adds its
+    // cookbook block; this derives it from SECTION_KEYS so the next section
+    // cannot skip the cookbook silently. Nested environment lists ride the
+    // same pin (they live inside the environments block).
+    const markdown = readFileSync(join(DOCS, "start", "examples.md"), "utf8");
+    const fences = fencedBlocks(markdown, "yaml settings").join("\n");
+    for (const key of SECTION_KEYS) {
+      expect(
+        new RegExp(`^${key}:`, "m").test(fences),
+        `docs/start/examples.md never declares \`${key}\` in a settings fence`,
+      ).toBe(true);
+    }
+    for (const key of NESTED_KEYS) {
+      expect(
+        new RegExp(`^ +${key}:`, "m").test(fences),
+        `docs/start/examples.md never declares the nested environments[].${key}`,
+      ).toBe(true);
+    }
+  });
+
+  test("the troubleshooting guide quotes the stale-version hint verbatim", () => {
+    // The page quotes the hint character for character; pin the quote to the
+    // exported constant so editing the hint cannot leave the page silently
+    // wrong.
+    const markdown = readFileSync(join(DOCS, "help", "troubleshooting.md"), "utf8");
+    expect(
+      markdown.replace(/\n/g, " ").includes(STALE_VERSION_HINT),
+      "docs/help/troubleshooting.md no longer quotes STALE_VERSION_HINT verbatim",
+    ).toBe(true);
+  });
 
   test("the guides carry settings examples at all", () => {
     const total = guidePages()

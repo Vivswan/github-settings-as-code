@@ -112,8 +112,20 @@ environments:
       - type: Team
         id: 4501
     deployment_branch_policy:
-      protected_branches: true
-      custom_branch_policies: false
+      protected_branches: false
+      custom_branch_policies: true
+    deployment_branch_policies:
+      - name: release/*
+      - name: v*
+        type: tag
+    deployment_protection_rules:
+      - app: my-gate-app
+    variables:
+      - name: DEPLOY_REGION
+        value: eu-west-1
+    secrets:
+      - name: PROD_DEPLOY_KEY
+        value: $PROD_DEPLOY_KEY
 
 autolinks:
   - key_prefix: "TICKET-"
@@ -133,6 +145,30 @@ actions:
     days: 30
   cache:
     max_cache_retention_days: 7
+
+actions_variables:
+  - name: DEPLOY_REGION
+    value: us-east-1
+
+actions_secrets:
+  - name: DEPLOY_TOKEN
+    value: $DEPLOY_TOKEN
+
+dependabot_secrets:
+  - name: REGISTRY_TOKEN
+    value: $REGISTRY_TOKEN
+
+codespaces_secrets:
+  - name: DEVCONTAINER_PAT
+    value: $DEVCONTAINER_PAT
+
+webhooks:
+  - config:
+      url: https://ci.example.com/hook
+      content_type: json
+      secret: $HOOK_SECRET
+    events: [push, pull_request]
+    active: true
 
 workflows:
   - path: nightly-sync.yml
@@ -174,6 +210,11 @@ custom_properties:
     value: [soc2, pci]
   - property_name: pilot
     value: true
+
+secret_scanning_custom_patterns:
+  - name: Internal API token
+    pattern: "int_[a-z0-9]{32}"
+    start_delimiter: '\b'
 ```
 
 In `rulesets`, short ref names are auto-prefixed (`staging` becomes

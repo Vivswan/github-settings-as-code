@@ -658,9 +658,9 @@ export interface SecretScanningPatternConfig {
   name: string;
   /** The regular expression the secret format must match. */
   pattern: string;
-  /** Regular expression for the characters that must come before the secret. */
+  /** Regular expression for the characters that must come before the secret. An empty string is rejected: a delimiter cannot be cleared through the update call - remove the pattern and redeclare it without the field instead. */
   start_delimiter?: string;
-  /** Regular expression for the characters that must come after the secret. */
+  /** Regular expression for the characters that must come after the secret. An empty string is rejected, like start_delimiter. */
   end_delimiter?: string;
   /** Additional regular expressions a match must also satisfy, compared in order. */
   must_match?: string[];

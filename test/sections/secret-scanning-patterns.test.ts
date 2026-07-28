@@ -228,6 +228,23 @@ describe("secret_scanning_custom_patterns", () => {
     expect(api.calls).toHaveLength(0);
   });
 
+  test("an empty delimiter is rejected at document validation (clearing is not expressible)", async () => {
+    // "" cannot mean "clear it": the PATCH updates provided fields only, and
+    // a normalize-back-to-null would repeat the write forever. The rejection
+    // lives in the zod shape, so an invalid document fails BOTH modes before
+    // any repository is touched (the run() path below proves the shape is
+    // what rejects, with zero API calls).
+    for (const key of ["start_delimiter", "end_delimiter"] as const) {
+      const doc = {
+        secret_scanning_custom_patterns: [
+          { name: "internal-token", pattern: "int_[a-z0-9]{8}", [key]: "" },
+        ],
+      };
+      const invalid = validateSettingsDoc(doc, "test doc", new Set(), silentIo);
+      expect(invalid ?? "").toContain("cannot be cleared with an empty string");
+    }
+  });
+
   test("a live entry without a string name or numeric id is a loud contract violation", async () => {
     const api = new MockApi(listRoute([{ name: "no-id" }]));
     await expect(secretScanningPatternsSection.run(ctx(api), [])).rejects.toThrow(
@@ -235,36 +252,68 @@ describe("secret_scanning_custom_patterns", () => {
     );
   });
 
-  test("a write that needs a missing custom_pattern_version fails BEFORE any write", async () => {
-    // The version is resolved in the planning pass, so a violating live
-    // entry can never leave the run half-applied between the bulk calls.
+  test("a non-string, non-null live version is a loud contract violation, never a silent bypass", async () => {
+    // string = concurrency token; null/absent = none offered; a number (or
+    // anything else) must not quietly disable the 412 protection.
     const api = new MockApi(
-      listRoute([
-        livePattern({ id: 5, pattern: "old_[0-9]{4}", custom_pattern_version: undefined }),
-      ]),
-    ).allowMutations("POST /repos/o/r/secret-scanning/custom-patterns");
-    await expect(
-      secretScanningPatternsSection.run(ctx(api), [
-        { name: "internal-token", pattern: "int_[a-z0-9]{8}" },
-        { name: "vendor-key", pattern: "key-[0-9]{6}" },
-      ]),
-    ).rejects.toThrow(/custom_pattern_version/);
-    expect(api.mutations()).toEqual([]);
+      listRoute([livePattern({ id: 5, name: "stale", custom_pattern_version: 7 })]),
+    );
+    await expect(secretScanningPatternsSection.run(ctx(api), [])).rejects.toThrow(
+      /non-string custom_pattern_version \(7\)/,
+    );
   });
 
-  test("check mode is as loud as apply about a version-less pattern a delete would need", async () => {
-    // Without this, check prints a clean will-DELETE drift line that apply
-    // then throws on - the same contract violation must surface in BOTH
-    // modes. The keep policy never writes, so it stays quiet.
+  test("a version-less live pattern updates with custom_pattern_version: null", async () => {
+    // The GET marks the version optional AND nullable, and the PATCH body
+    // requires the key but accepts null: a pattern predating the versioning
+    // field writes without the concurrency check, as GitHub itself allows -
+    // it must never brick the run.
+    const api = new MockApi(
+      listRoute([
+        livePattern({
+          id: 5,
+          name: "internal-token",
+          pattern: "old_[0-9]{4}",
+          custom_pattern_version: undefined,
+        }),
+      ]),
+    ).allowMutations("PATCH /repos/o/r/secret-scanning/custom-patterns/5");
+    const result = await secretScanningPatternsSection.run(ctx(api), [
+      { name: "internal-token", pattern: "int_[a-z0-9]{8}" },
+    ]);
+    expect(result.changes).toEqual(['updated secret scanning custom pattern "internal-token"']);
+    expect(api.mutations()[0]?.payload).toEqual({
+      custom_pattern_version: null,
+      pattern: "int_[a-z0-9]{8}",
+    });
+  });
+
+  test("a version-less undeclared pattern deletes with the version field omitted", async () => {
+    // The bulk DELETE's per-entry schema requires only pattern_id; check
+    // mode reports the same will-DELETE drift without throwing, and keep
+    // stays a note.
     const versionless = livePattern({
       id: 5,
       name: "stale",
       custom_pattern_version: undefined,
     });
     const checkApi = new MockApi(listRoute([versionless]));
-    await expect(
-      secretScanningPatternsSection.run(ctx(checkApi, true), { undeclared: "delete", entries: [] }),
-    ).rejects.toThrow(/custom_pattern_version/);
+    const checked = await secretScanningPatternsSection.run(ctx(checkApi, true), {
+      undeclared: "delete",
+      entries: [],
+    });
+    expect(checked.drift.join("\n")).toContain("apply will DELETE it");
+    const applyApi = new MockApi(listRoute([versionless])).allowMutations(
+      "DELETE /repos/o/r/secret-scanning/custom-patterns",
+    );
+    await secretScanningPatternsSection.run(ctx(applyApi), {
+      undeclared: "delete",
+      entries: [],
+    });
+    expect(applyApi.mutations()[0]?.payload).toEqual({
+      patterns: [{ pattern_id: 5 }],
+      post_delete_action: "resolve_alerts",
+    });
     const keepApi = new MockApi(listRoute([versionless]));
     const kept = await secretScanningPatternsSection.run(ctx(keepApi, true), []);
     expect(kept.notes).toHaveLength(1);
