@@ -176,6 +176,38 @@ describe("deploy_keys reconcile", () => {
     ]);
   });
 
+  test("a rotated read-only key stays read-only when the declaration omits the flag", async () => {
+    // The recreate must seed the LIVE read_only: without it GitHub's
+    // read/write default silently widens a rotated read-only key's access.
+    // The mutation sequence is identical either way, so the assertion that
+    // matters is on the POST payload itself.
+    const api = new MockApi({
+      [LIST]: { data: [liveKey(10, "mirror-pull", "ssh-ed25519 AAAAC3staleblob", true)] },
+    }).allowMutations("DELETE /repos/o/r/keys/10", "POST /repos/o/r/keys");
+    await deployKeysSection.run(ctx(api), [
+      { title: "mirror-pull", key: `${MIRROR_KEY} mirror@new` },
+    ]);
+    const post = api.mutations().find((m) => m.method === "POST");
+    if (post === undefined) {
+      throw new Error("the replace issued no POST");
+    }
+    expect((post.payload as Record<string, unknown>).read_only).toBe(true);
+  });
+
+  test("a declared read_only: false beats a live true on the recreate (spread order)", async () => {
+    const api = new MockApi({
+      [LIST]: { data: [liveKey(10, "mirror-pull", "ssh-ed25519 AAAAC3staleblob", true)] },
+    }).allowMutations("DELETE /repos/o/r/keys/10", "POST /repos/o/r/keys");
+    await deployKeysSection.run(ctx(api), [
+      { title: "mirror-pull", key: `${MIRROR_KEY} mirror@new`, read_only: false },
+    ]);
+    const post = api.mutations().find((m) => m.method === "POST");
+    if (post === undefined) {
+      throw new Error("the replace issued no POST");
+    }
+    expect((post.payload as Record<string, unknown>).read_only).toBe(false);
+  });
+
   test("a divergent DECLARED read_only alone forces the replace", async () => {
     const api = new MockApi({
       [LIST]: { data: [liveKey(10, "deploy-bot", BOT_KEY, false)] },

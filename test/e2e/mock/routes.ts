@@ -1470,10 +1470,11 @@ const HANDLERS: Record<string, Handler> = {
         },
       };
     }
+    const id = state.nextId++;
     const key: Json = {
-      id: state.nextId++,
+      id,
       key: stored,
-      url: `https://api.github.com/repos/e2e-owner/e2e-repo/keys/${state.nextId - 1}`,
+      url: `https://api.github.com/repos/e2e-owner/e2e-repo/keys/${id}`,
       title: String(payload.title ?? ""),
       verified: true,
       // Fixed so a repeat apply leaves the state byte-stable (idempotence).
