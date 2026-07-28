@@ -3,13 +3,13 @@
 `mode: check` runs the whole pipeline read-only. Each declared section reads
 the live state and reports how it differs from the settings file instead of
 writing anything. The same declared-keys-only rule as apply holds: a key you
-do not declare is never compared (see [Semantics](../../README.md#semantics)).
+do not declare is never compared (see [Semantics](../reference/semantics.md)).
 Check mode changes no settings; the one write it can still perform is
 delivery of a private report when the `private-report` input is enabled.
 The issue channel updates a marker-labelled issue on the target, and on
 first delivery it creates that marker label; the artifact channel uploads
 an encrypted artifact. Neither touches anything else
-(see [Private repositories](../../README.md#private-repositories)).
+(see the [private repositories guide](private-repositories.md)).
 
 ## Exit behavior
 
@@ -31,7 +31,7 @@ exits 1. A green scheduled apply therefore says nothing about whether
 settings had drifted; a green scheduled check does. In multi-repo mode the
 worst result across all targets decides the exit code, so one drifted target
 fails the whole check run (see
-[Multi-repo mode](../../README.md#multi-repo-mode)).
+[multi-repo mode](multi-repo.md)).
 
 ## A scheduled check
 
@@ -111,9 +111,11 @@ One token note for this workflow. Repository secrets are readable from any
 workflow a push-access user can edit, so wiring `ADMIN_TOKEN` into a
 `pull_request` job widens where the write-capable token gets used, even
 though it grants nothing a pusher could not already reach. Check mode only
-reads, so the preview works with a second fine-grained PAT whose grants are
-read-only; on repositories where settings changes are more restricted than
-push access, give the preview that token instead.
+reads, so the preview works with a second fine-grained PAT whose grants
+are read-only (with one exception: GitHub gates even the Codespaces
+secrets reads at write, so drop `codespaces_secrets` from the preview or
+grant it); on repositories where settings changes are more restricted
+than push access, give the preview that token instead.
 
 ## What a "cannot verify" note means
 
@@ -147,7 +149,7 @@ rather than drift, and each note says what apply does about it:
 
 A note is not drift and not a failure. A section whose only findings are
 notes counts as clean, and the notes appear in that section's detail cell in
-the step summary. The [secrets guide](../concepts/secrets-and-vaults.md) goes deeper on
+the step summary. The [secrets guide](../reference/secrets-and-vaults.md) goes deeper on
 what check mode can and cannot promise for secret material.
 
 ## Where the output lands
@@ -164,6 +166,6 @@ A check run reports through three channels:
   multi-repo runs get a fleet rollup table plus one section table per target.
 
 For a redacted private target the public surfaces show only section statuses,
-and the full detail travels over the `private-report` channel; the README's
-[Private repositories](../../README.md#private-repositories) section explains
+and the full detail travels over the `private-report` channel; the
+[private repositories guide](private-repositories.md) explains
 both.

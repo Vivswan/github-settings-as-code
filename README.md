@@ -71,20 +71,27 @@ payload, branch protection, rule parameters) stay open objects on purpose.
 The schema is documentation, not a gate: unknown fields validate on
 purpose, because payloads pass through to the API verbatim and declaring a
 field GitHub ships tomorrow must never read as an error (see
-[Forward compatibility](#forward-compatibility)).
+[Forward compatibility](docs/reference/forward-compatibility.md)).
 
 ## Guides
 
-Task-oriented walkthroughs live in [docs/](docs/README.md). Start with
-[getting started](docs/start/getting-started.md) and the
-[examples cookbook](docs/start/examples.md); day-to-day operation is covered by
-[check mode](docs/operate/check-mode.md), [multi-repo mode](docs/operate/multi-repo.md), and
-the [playbooks](docs/playbooks/README.md); the deep dives are
-[the undeclared policy](docs/concepts/undeclared-policy.md) and
-[secrets and vaults](docs/concepts/secrets-and-vaults.md) (the `$NAME` references
-secret fields take); and when you come from elsewhere or something breaks,
-[migrating from Probot](docs/help/migrating-from-probot.md) and
-[troubleshooting](docs/help/troubleshooting.md).
+The guides live in [docs/](docs/README.md), in four
+groups. [Getting started](docs/start/getting-started.md),
+[migrating from Probot](docs/start/migrating-from-probot.md), and the
+[examples cookbook](docs/start/examples.md) get a repository under
+management. The reference pages are the normative model:
+[semantics](docs/reference/semantics.md),
+[token permissions](docs/reference/permissions.md),
+[the undeclared policy](docs/reference/undeclared-policy.md),
+[forward compatibility](docs/reference/forward-compatibility.md), and
+[secrets and vaults](docs/reference/secrets-and-vaults.md) (the `$NAME`
+references secret fields take). Day-to-day operation is covered by
+[check mode](docs/operate/check-mode.md),
+[multi-repo mode](docs/operate/multi-repo.md),
+[private repositories](docs/operate/private-repositories.md), and
+[troubleshooting](docs/operate/troubleshooting.md), and the
+[playbooks](docs/playbooks/README.md) compose it all into complete
+workflows.
 
 ## Versioning
 
@@ -105,154 +112,80 @@ secret fields take); and when you come from elsewhere or something breaks,
 
 ## Sections
 
-| Section | Endpoints | PAT permission | Notes |
-|---|---|---|---|
-| `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs, immutable-releases | Administration: write | Probot schema incl. `topics` as string or list; `enable_private_vulnerability_reporting` toggle; `enable_git_lfs` toggle (write-only API: check mode notes it cannot verify, apply re-asserts every run); `enable_immutable_releases` toggle (when the repository owner enforces it, writes answer 409 and apply reports a note instead of a change); declared fields only, siblings undeclared untouched |
-| `labels` | labels CRUD | Issues: write | upsert by name (rename via `new_name`); undeclared deleted by default (settable) |
-| `rulesets` | repo rulesets CRUD | Administration: write | branch, tag, and push targets; short ref names auto-prefixed (`staging` -> `refs/heads/staging`); `~DEFAULT_BRANCH` passes through; undeclared kept by default (settable) |
-| `branches` | classic branch protection + required-signatures sub-endpoint | Administration: write | `protection: null` removes protection; `required_signatures` applied via its own POST/DELETE (the protection PUT drops it); undeclared untouched; add Contents: read so check mode can tell a missing branch from an unprotected one |
-| `environments` | PUT environments + per-environment variables CRUD + per-environment secrets (list, public-key, sealed PUT, delete) + per-environment deployment branch policies (list, create, delete) + per-environment deployment protection rules (list, available apps, enable, disable) | Environments: write; `deployment_branch_policies` and `deployment_protection_rules` additionally need Actions: read and Administration: write | reviewers, wait timer, branch policies; a declared `variables` key reconciles that environment's Actions variables (plain-text values; within the declared key, undeclared variables are deleted by default, and the wrapped `undeclared: keep` form keeps them as notes); a declared `secrets` key reconciles that environment's Actions secrets like `actions_secrets` (sealed `$NAME` values, existence-only checks; within the declared key, undeclared secrets are kept by default, and the wrapped `undeclared: delete` form deletes them); a declared `deployment_branch_policies` key reconciles that environment's custom branch-policy patterns (requires `deployment_branch_policy` with `custom_branch_policies: true`; a pattern's type is immutable upstream, so a type change is delete + recreate; within the declared key, undeclared patterns are deleted by default, and the wrapped `undeclared: keep` form keeps them as notes); a declared `deployment_protection_rules` key reconciles that environment's custom deployment protection rules (GitHub App gates, enable/disable only, declared by App slug and resolved to the integration id at apply time; within the declared key, undeclared rules are KEPT by default - disabling a deployment gate is security-relevant - and the wrapped `undeclared: delete` form opts into disabling); undeclared untouched |
-| `autolinks` | autolinks CRUD | Administration: write | immutable upstream, so changed entries are replaced; undeclared deleted by default (settable) |
-| `actions` | actions permissions + selected-actions + workflow token + access level + artifact/log retention + cache limits + OIDC subject claim + fork PR policies | Administration: write; `oidc_customization_sub` alone needs Actions: write | `enabled`, `allowed_actions`, `selected_actions`, `default_workflow_permissions`, `can_approve_pull_request_reviews`, `access_level` (private repos only), `artifact_and_log_retention`, `cache` (retention/storage limits; a 403 on the cache endpoints can mean an org- or enterprise-managed policy rather than a missing grant), `oidc_customization_sub` (claim-key order counts), `fork_pr_contributor_approval` (when fork PR workflows need maintainer approval), `fork_pr_workflows_private_repos` (documented for private repos; all four toggles required, since GitHub does not document whether an omitted one is preserved); undeclared untouched |
-| `actions_secrets` | actions secrets list + public-key + sealed PUT + delete | Secrets: write | `{name, value}` entries where `value` is a whole-value `$NAME` reference to the step's env (never a literal; the file is committed plaintext), sealed client-side with libsodium and re-written on every apply so rotated values propagate; values cannot be read back, so check mode verifies existence only; undeclared kept by default (settable; a deleted secret's value is unrecoverable) |
-| `dependabot_secrets` | dependabot secrets list + public-key + sealed PUT + delete | Dependabot secrets: write | same `{name, value: $NAME}` shape and sealed existence-only semantics as `actions_secrets`, over the Dependabot secret store (private-registry credentials Dependabot uses); undeclared kept by default (settable; a deleted secret's value is unrecoverable) |
-| `codespaces_secrets` | codespaces secrets list + public-key + sealed PUT + delete | Codespaces secrets: write | same `{name, value: $NAME}` shape and sealed existence-only semantics as `actions_secrets`, over the Codespaces secret store (development environment secrets); undeclared kept by default (settable; a deleted secret's value is unrecoverable) |
-| `workflows` | list workflows, enable/disable | Actions: write | `{path, state: active or disabled}`; bare file names match `.github/workflows/`; undeclared untouched |
-| `pages` | POST/PUT/DELETE pages | Pages: write | `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`; `pages: null` disables the site; undeclared untouched |
-| `code_scanning_default_setup` | code scanning default setup | Administration or Code scanning alerts: write | `state`, `query_suite`, `languages` (compared as a set), and future PATCH fields; needs Advanced Security on private repos, where a 403 can mean Advanced Security is off or the repo is archived; undeclared untouched |
-| `collaborators` | direct collaborators | Administration: write | invitations for new users; undeclared deleted by default (settable; owner never touched) |
-| `teams` | org team repo permissions | Members: read (org permission) + Administration: write | org repos only, skipped with a notice on personal accounts; undeclared untouched |
-| `milestones` | milestones | Issues: write | upsert by title; undeclared kept by default (settable; deleting detaches issues) |
-| `interaction_limits` | interaction-limits | Administration: write | re-arms the self-expiring limit every apply run (expiry is write-only, max six_months); `null` clears it (in multi-repo mode a target's `null` is a defaults opt-out when the defaults declare one, like `pages`); a 409 (org/user-level limit overrides) becomes a note on apply, while check still reports drift; undeclared untouched |
-| `actions_variables` | Actions variables CRUD | Variables: write | plain-text repository variables upserted by name; names are case-insensitive (GitHub stores them uppercased); values read back in full, so check mode diffs them exactly (secrets are write-only material and deliberately not this section); undeclared deleted by default (settable) |
-| `webhooks` | hooks CRUD + hook config sub-endpoint | Webhooks: write | one hook per `config.url`, the natural key (a changed url declares a NEW hook; the old one becomes undeclared); `config.secret` takes a whole-value `$NAME` reference resolved from the step env at apply time (see the [secrets guide](docs/concepts/secrets-and-vaults.md)) and is re-sent every run since GitHub never reveals it, so check notes it cannot verify the secret; events compared order-insensitively; hook urls appear in drift lines on purpose (they are configuration, not credentials); undeclared kept by default (settable) |
-| `custom_properties` | GET/PATCH properties/values (the values read is Metadata-gated, so only the PATCH needs the grant); probes GET /orgs/{owner} | Custom properties: write | values of org-defined properties, set per repo (definitions are org-scoped and out of scope); org repos only, skipped with a notice on personal accounts; `value: null` unsets (reverting to the org default, if any); booleans/numbers normalized to their string form (GitHub transports true_false as "true"/"false"); multi_select lists compared order-insensitively; one bulk PATCH per apply, skipped when nothing diverges; undeclared kept by default (settable; an unset can revert to an org default this action does not model, and org-actors-only properties reject the write) |
-| `deploy_keys` | deploy keys list/create/delete | Administration: write | matched by title; the declared material is a PUBLIC key, safe in a committed file; compared as algorithm + blob (GitHub may strip the trailing comment); immutable upstream, so changed entries are replaced; a public key can be attached to only one repository account-wide; undeclared kept by default (settable; deleting a live key breaks whatever authenticates with it) |
-| `secret_scanning_custom_patterns` | secret-scanning custom patterns: paginated list + bulk POST + PATCH by id + bulk DELETE | Secret scanning alerts: write | repository-level custom patterns matched by name (`pattern`, delimiters, `must_match`/`must_not_match` lists); the name is immutable upstream, so a rename creates the new name and the old one follows the undeclared policy (deleted only under `undeclared: delete`; kept and noted by default); `state` and `push_protection_enabled` are read-only through these endpoints and cannot be declared; writes carry each pattern's `custom_pattern_version` whenever GitHub supplies one, so a pattern edited mid-run answers 412 (re-run) instead of clobbering the edit (a version-less pattern writes without the check, as the API allows); a 404 can also mean secret scanning is not enabled (Advanced Security on private repos); undeclared kept by default (settable; deleting a pattern RESOLVES its alerts - this action never sends the alert-deleting default) |
+| Section | Endpoints | PAT permission | Undeclared default | Notes |
+|---|---|---|---|---|
+| `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs, immutable-releases | Administration: write | untouched | Probot schema incl. `topics` as string or list; `enable_private_vulnerability_reporting` toggle; `enable_git_lfs` toggle (write-only API: check mode notes it cannot verify, apply re-asserts every run); `enable_immutable_releases` toggle (when the repository owner enforces it, writes answer 409 and apply reports a note instead of a change); declared fields only, siblings undeclared untouched |
+| `labels` | labels CRUD | Issues: write | deleted (settable) | upsert by name (rename via `new_name`); the delete-by-default is Probot parity |
+| `rulesets` | repo rulesets CRUD | Administration: write | kept (settable) | branch, tag, and push targets; short ref names auto-prefixed (`staging` -> `refs/heads/staging`); `~DEFAULT_BRANCH` passes through; deleting protection stays an explicit opt-in |
+| `branches` | classic branch protection + required-signatures sub-endpoint | Administration: write | untouched | `protection: null` removes protection; `required_signatures` applied via its own POST/DELETE (the protection PUT drops it); add Contents: read so check mode can tell a missing branch from an unprotected one |
+| `environments` | PUT environments + per-environment variables CRUD + per-environment secrets (list, public-key, sealed PUT, delete) + per-environment deployment branch policies (list, create, delete) + per-environment deployment protection rules (list, available apps, enable, disable) | Environments: write; `deployment_branch_policies` and `deployment_protection_rules` additionally need Actions: read and Administration: write | untouched | reviewers, wait timer, branch policies; a declared `variables` key reconciles that environment's Actions variables (plain-text values; within the declared key, undeclared variables are deleted by default, and the wrapped `undeclared: keep` form keeps them as notes); a declared `secrets` key reconciles that environment's Actions secrets like `actions_secrets` (sealed `$NAME` values, existence-only checks; within the declared key, undeclared secrets are kept by default, and the wrapped `undeclared: delete` form deletes them); a declared `deployment_branch_policies` key reconciles that environment's custom branch-policy patterns (requires `deployment_branch_policy` with `custom_branch_policies: true`; a pattern's type is immutable upstream, so a type change is delete + recreate; within the declared key, undeclared patterns are deleted by default, and the wrapped `undeclared: keep` form keeps them as notes); a declared `deployment_protection_rules` key reconciles that environment's custom deployment protection rules (GitHub App gates, enable/disable only, declared by App slug and resolved to the integration id at apply time; within the declared key, undeclared rules are KEPT by default - disabling a deployment gate is security-relevant - and the wrapped `undeclared: delete` form opts into disabling) |
+| `autolinks` | autolinks CRUD | Administration: write | deleted (settable) | immutable upstream, so changed entries are replaced |
+| `actions` | actions permissions + selected-actions + workflow token + access level + artifact/log retention + cache limits + OIDC subject claim + fork PR policies | Administration: write; `oidc_customization_sub` alone needs Actions: write | untouched | `enabled`, `allowed_actions`, `selected_actions`, `default_workflow_permissions`, `can_approve_pull_request_reviews`, `access_level` (private repos only), `artifact_and_log_retention`, `cache` (retention/storage limits; a 403 on the cache endpoints can mean an org- or enterprise-managed policy rather than a missing grant), `oidc_customization_sub` (claim-key order counts), `fork_pr_contributor_approval` (when fork PR workflows need maintainer approval), `fork_pr_workflows_private_repos` (documented for private repos; all four toggles required, since GitHub does not document whether an omitted one is preserved) |
+| `actions_secrets` | actions secrets list + public-key + sealed PUT + delete | Secrets: write | kept (settable) | `{name, value}` entries where `value` is a whole-value `$NAME` reference to the step's env (never a literal; the file is committed plaintext), sealed client-side with libsodium and re-written on every apply so rotated values propagate; values cannot be read back, so check mode verifies existence only; a deleted secret's value is unrecoverable |
+| `dependabot_secrets` | dependabot secrets list + public-key + sealed PUT + delete | Dependabot secrets: write | kept (settable) | same `{name, value: $NAME}` shape and sealed existence-only semantics as `actions_secrets`, over the Dependabot secret store (private-registry credentials Dependabot uses); a deleted secret's value is unrecoverable |
+| `codespaces_secrets` | codespaces secrets list + public-key + sealed PUT + delete | Codespaces secrets: write | kept (settable) | same `{name, value: $NAME}` shape and sealed existence-only semantics as `actions_secrets`, over the Codespaces secret store (development environment secrets); a deleted secret's value is unrecoverable |
+| `workflows` | list workflows, enable/disable | Actions: write | untouched | `{path, state: active or disabled}`; bare file names match `.github/workflows/` |
+| `pages` | POST/PUT/DELETE pages | Pages: write | untouched | `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`; `pages: null` disables the site |
+| `code_scanning_default_setup` | code scanning default setup | Administration or Code scanning alerts: write | untouched | `state`, `query_suite`, `languages` (compared as a set), and future PATCH fields; needs Advanced Security on private repos, where a 403 can mean Advanced Security is off or the repo is archived |
+| `collaborators` | direct collaborators | Administration: write | deleted (settable) | invitations for new users; the repository owner is never touched |
+| `teams` | org team repo permissions | Members: read (org permission) + Administration: write | untouched | org repos only, skipped with a notice on personal accounts |
+| `milestones` | milestones | Issues: write | kept (settable) | upsert by title; deleting a milestone detaches it from every issue carrying it, which is why keep is the default |
+| `interaction_limits` | interaction-limits | Administration: write | untouched | re-arms the self-expiring limit every apply run (expiry is write-only, max six_months); `null` clears it (in multi-repo mode a target's `null` is a defaults opt-out when the defaults declare one, like `pages`); a 409 (org/user-level limit overrides) becomes a note on apply, while check still reports drift |
+| `actions_variables` | Actions variables CRUD | Variables: write | deleted (settable) | plain-text repository variables upserted by name; names are case-insensitive (GitHub stores them uppercased); values read back in full, so check mode diffs them exactly (secrets are write-only material and deliberately not this section) |
+| `webhooks` | hooks CRUD + hook config sub-endpoint | Webhooks: write | kept (settable) | one hook per `config.url`, the natural key (a changed url declares a NEW hook; the old one becomes undeclared); `config.secret` takes a whole-value `$NAME` reference resolved from the step env at apply time (see the [secrets guide](docs/reference/secrets-and-vaults.md)) and is re-sent every run since GitHub never reveals it, so check notes it cannot verify the secret; events compared order-insensitively; hook urls appear in drift lines on purpose (they are configuration, not credentials) |
+| `custom_properties` | GET/PATCH properties/values (the values read is Metadata-gated, so only the PATCH needs the grant); probes GET /orgs/{owner} | Custom properties: write | kept (settable) | values of org-defined properties, set per repo (definitions are org-scoped and out of scope); org repos only, skipped with a notice on personal accounts; `value: null` unsets (reverting to the org default, if any); booleans/numbers normalized to their string form (GitHub transports true_false as "true"/"false"); multi_select lists compared order-insensitively; one bulk PATCH per apply, skipped when nothing diverges; an undeclared unset can revert to an org default this action does not model, and org-actors-only properties reject the write |
+| `deploy_keys` | deploy keys list/create/delete | Administration: write | kept (settable) | matched by title; the declared material is a PUBLIC key, safe in a committed file; compared as algorithm + blob (GitHub may strip the trailing comment); immutable upstream, so changed entries are replaced; a public key can be attached to only one repository account-wide; deleting a live key breaks whatever authenticates with it |
+| `secret_scanning_custom_patterns` | secret-scanning custom patterns: paginated list + bulk POST + PATCH by id + bulk DELETE | Secret scanning alerts: write | kept (settable) | repository-level custom patterns matched by name (`pattern`, delimiters, `must_match`/`must_not_match` lists); the name is immutable upstream, so a rename creates the new name and the old one follows the undeclared policy; `state` and `push_protection_enabled` are read-only through these endpoints and cannot be declared; writes carry each pattern's `custom_pattern_version` whenever GitHub supplies one, so a pattern edited mid-run answers 412 (re-run) instead of clobbering the edit (a version-less pattern writes without the check, as the API allows); a 404 can also mean secret scanning is not enabled (Advanced Security on private repos); deleting a pattern RESOLVES its alerts - this action never sends the alert-deleting default |
 
-## Semantics
+The Undeclared default column says what happens to live resources the
+settings file does not declare; `(settable)` means the wrapped
+`undeclared:` form can override it per file. [The undeclared policy](docs/reference/undeclared-policy.md)
+covers the knob and how it layers with a multi-repo defaults file.
 
-- Stateless, declared-keys-only: a key you do not declare is never
-  touched or compared. There is no state file; resources are matched by
-  their natural names.
-- Apply is convergent: re-running preserves the declared state (some
-  sections diff first and skip converged writes, others send idempotent
-  full-payload writes), and a check right after an apply reports clean.
-- Labels: declared labels are upserted (rename via `new_name`);
-  undeclared labels are DELETED by default (Probot parity), loudly. The
-  [`undeclared` policy](#undeclared-resources) can soften this to keep.
-- Rulesets: upserted by name with the full payload; undeclared
-  rulesets are never deleted by default, since removing protection stays a
-  human action. The [`undeclared` policy](#undeclared-resources) can opt
-  into deletion.
-- Milestones: upserted by title; undeclared ones are kept by default
-  (deleting a milestone detaches it from every issue carrying it) and
-  listed as notices. The [`undeclared` policy](#undeclared-resources) can
-  opt into deletion.
-- Permission failures (403, or 404 on admin endpoints with a fine-grained
-  token) are the only softenable errors; everything else always fails with
-  the API message verbatim.
-- Rate limits (429 and secondary limits) and transient 5xx or network
-  failures are retried automatically with backoff, honoring Retry-After
-  and the rate-limit reset, up to two retries; a reset more than 60
-  seconds away fails loudly instead of stalling the workflow. Permission
-  errors are never retried.
-- Preflight barrier: under `on-missing-permission: fail`, every
-  declared section is probed read-only before ANY write; if a section is
-  inaccessible, nothing is applied at all (per repository in multi-repo
-  mode; earlier targets in the same run are already done). The API has no
-  transactions; a read-but-not-write token can still fail mid-apply, and
-  a section whose reads need no grant at all (`custom_properties` - its
-  values read is Metadata-gated) surfaces a missing write grant only at
-  its first write. Re-running after fixing it converges because applies
-  are idempotent.
+The model in three lines: the engine is stateless and declared-keys-only
+(a key you do not declare is never touched or compared), applies are
+convergent (a check right after an apply reports clean), and every failure
+is loud, carrying the API's message verbatim.
+[Semantics](docs/reference/semantics.md) is the full model: softenable
+errors, retries, and the preflight barrier.
+
+Payloads pass through to the API verbatim except for documented
+normalizations, so fields and rule types GitHub ships tomorrow work the
+day they exist; a handful of sections are instead closed to catch typos
+that would otherwise misconfigure silently.
+[Forward compatibility](docs/reference/forward-compatibility.md) draws
+that line section by section.
 
 See [COVERAGE.md](COVERAGE.md) for the full inventory: everything
 supported, every repo-scoped gap, and the user-scoped surface that is out of
 scope by design.
 
-## Undeclared resources
-
-Thirteen sections enumerate the live resources next to the declared ones,
-and each has a default policy for the ones the file does not declare:
-`labels`, `autolinks`, `collaborators`, and `actions_variables` delete them;
-`rulesets`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`,
-`secret_scanning_custom_patterns`, and the three secret sections
-(`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`) keep them
-and list each as a note. A section's list value can override that default
-with a wrapped form:
-
-```yaml
-labels:
-  undeclared: keep        # or: delete
-  entries:
-    - name: bug
-      color: "d73a4a"
-```
-
-The plain array form stays exactly what it was (the section's default
-applies, unless a multi-repo defaults file sets a policy for the section -
-that policy is inherited), and `entries` holds the same items the array
-form would. A wrapper that omits `undeclared` behaves exactly like the
-plain array. The
-wrapper accepts only `undeclared` and `entries`; anything else is rejected
-upfront as a typo. One consequence to weigh before setting
-`milestones: {undeclared: delete, ...}`: deleting a milestone detaches it
-from every issue that carried it, which is why keep is the milestone
-default. The [undeclared policy guide](docs/concepts/undeclared-policy.md) covers the
-knob per section and how it layers with a multi-repo defaults file.
-
 ## Example settings.yml
 
 ```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/repo-settings-as-code/main/lib/settings.schema.json
+
 repository:
   description: My project
   topics: tooling, github-actions
   has_wiki: false
-  allow_squash_merge: true
-  allow_merge_commit: false
-  squash_merge_commit_title: PR_TITLE
   delete_branch_on_merge: true
-  enable_vulnerability_alerts: true
-  enable_private_vulnerability_reporting: true
-
-workflows:
-  - path: vendored-sync.yml
-    state: disabled
-
-code_scanning_default_setup:
-  state: configured
-  query_suite: default
 
 labels:
   - name: bug
     color: "d73a4a"
     description: Something isn't working
-
-rulesets:
-  - name: main
-    target: branch
-    enforcement: active
-    conditions:
-      ref_name:
-        include: ["~DEFAULT_BRANCH"]
-        exclude: []
-    rules:
-      - type: deletion
-      - type: non_fast_forward
-      - type: required_status_checks
-        parameters:
-          strict_required_status_checks_policy: false
-          do_not_enforce_on_create: true
-          required_status_checks:
-            - context: all-green
 ```
+
+The [examples cookbook](docs/start/examples.md) is the full tour: a
+full-featured file exercising every section, classic branch protection,
+and what `null` means where it is meaningful.
 
 ## Inputs
 
 | Input | Default | Meaning |
 |---|---|---|
-| `token` | `github.token` | Token for the API calls (see [Token permissions](#token-permissions)) |
+| `token` | `github.token` | Token for the API calls (see [Token permissions](docs/reference/permissions.md)) |
 | `repository` | current repo | Target `owner/name` (single-repo mode only) |
 | `settings-file` | `.github/settings.yml` | Settings file path (single-repo mode only) |
 | `mode` | `apply` | `apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered) |
@@ -282,305 +215,51 @@ its slug; see [Private repositories](#private-repositories).
 
 ## Multi-repo mode
 
-One run in an admin repository can manage a whole fleet, in the spirit of
-[safe-settings](https://github.com/github-community-projects/safe-settings)
-but without a hosted app. Two sourcing modes, usable together:
-
-- Central (`repos-dir`): a directory in the admin repo holds one settings
-  file per target: `<name>.yml` (same owner as the admin repo) or
-  `<owner>/<name>.yml`. Needs `actions/checkout`. These files are the
-  curated, code-reviewed source of truth.
-- Remote (`repos`): a comma- or newline-separated list of `owner/name`
-  targets, each applied from its own `.github/settings.yml` (default
-  branch). `repos: "*"` alone discovers every repository the token's user
-  owns (needs a user PAT; the workflow `GITHUB_TOKEN` cannot enumerate).
-  A target without a settings file is skipped with a notice.
-
-Discovery takes six filter inputs that apply only to `repos: "*"`; setting
-any of them in another mode fails the run. Repositories a filter drops are
-reported in one aggregate notice per reason.
-
-- `visibility` keeps public, private, or internal repositories.
-- `archived` defaults to `skip`, because settings writes fail on archived
-  repositories; `archived: only` is mostly useful with `mode: check`.
-- `forks` includes, excludes, or keeps only forks.
-- `topics` keeps repositories carrying at least one listed topic, so a
-  single marker topic can opt repositories in.
-- `exclude` takes wildcard patterns where `*` matches anything: a pattern
-  containing `/` is matched against the full `owner/name`, any other
-  against the name alone, case-insensitively.
-- `affiliation` selects which relationships to the token's user qualify:
-  `owner` (the default), `collaborator`, or `organization_member`. The
-  list replaces the default, so widening discovery beyond owned
-  repositories takes `owner,collaborator`.
-
-When the same repository appears in both, the central file wins (with a
-notice).
-
-`defaults-file` names a YAML document deep-merged UNDER every processed
-target's settings (a repository with no settings file is skipped outright,
-defaults included): target keys win, objects merge, arrays and scalars
-replace (an
-array is always a full payload, matching check-mode semantics).
-
-A `null` section in a target means one of two things in that merge:
-
-- When the defaults file declares the section with a non-null value,
-  `null` opts that repository out of the defaults section.
-- When the defaults do not override it, the `null` passes through to the
-  engine, where it can carry meaning of its own. So `pages: null` in the
-  defaults file disables Pages fleet-wide, while `pages: null` in a target
-  under a defaults file that declares a `pages` object means "leave this
-  repo's Pages alone", not "disable Pages".
-
-Targets run independently and sequentially: one repository's failure never
-stops the others; the run exits 1 at the end if any target failed (or, in
-check mode, drifted). The step summary shows a fleet rollup table plus a
-per-repository section table, and the `repos-result` output carries the
-per-repo results as JSON.
-
-`sections` and `required-sections` apply to all targets alike, and the
-token needs the same per-section permissions (see the
-[Sections](#sections) table) on every target.
-
-<!-- x-release-please-start-version -->
-
-```yaml
-# One admin repo managing the fleet
-- uses: actions/checkout@v7
-- uses: Vivswan/repo-settings-as-code@v1.0.1
-  with:
-    token: ${{ secrets.FLEET_TOKEN }}
-    repos-dir: .github/repos
-    defaults-file: .github/settings-defaults.yml
-    repos: |
-      other-org/service-a
-      other-org/service-b
-```
-
-<!-- x-release-please-end -->
+One run in an admin repository can manage a whole fleet. Two sourcing
+modes are usable together: `repos-dir` names a directory of per-repo
+settings files in the admin repository, and `repos` lists targets applied
+from their own `.github/settings.yml` (`repos: "*"` discovers them). When
+both name the same repository, the central file wins. A `defaults-file`
+merges under every target, and a target's `null` section opts out of a
+section the defaults declare. Targets run independently and sequentially;
+one failure never stops the rest. The
+[multi-repo guide](docs/operate/multi-repo.md) owns the rules: sourcing
+precedence, the discovery filters, the merge, and the fleet patterns.
 
 ## Private repositories
 
-GitHub Actions has no log-level access control. Run logs, step summaries, and
-uploaded artifacts inherit the repository's visibility, so a public admin repo
-managing a private target would print that target's slug, its live settings,
-and its API error bodies where anyone can read them. The only GitHub-ACL-private
-channel a public run has is another repository the token can reach.
-
-To stop the leak, `private-repos: redact` (the default) hides every private or
-internal target from the public view. The target's slug becomes a
-`private repository #N` placeholder, its live values and error bodies become
-`hidden (private repository)`, and each slug is registered with the runner's
-secret masker so it cannot resurface in a stray log line. The visibility check
-fails closed: a repository the probe cannot prove public is redacted anyway. A
-target equal to `GITHUB_REPOSITORY` is never redacted, because a repository
-acting on itself discloses nothing new. Set `private-repos: show` only when the
-run's own logs are already private.
-
-The decision comes down to the policy and what the visibility probe finds:
-
-| Condition | Redacted? |
-|---|---|
-| `private-repos: show` | no, everything is revealed |
-| target is `GITHUB_REPOSITORY` (self) | no, the carve-out applies |
-| probe proves the target public | no |
-| probe proves the target private or internal | yes |
-| probe cannot determine visibility | yes, redaction fails closed |
-
-### What a redacted run still shows
-
-Redaction hides values, not the shape of the outcome. The public surfaces still
-carry the safe skeleton of each target. The step summary shows, per target, the
-overall result (`applied`, `partial`, `clean`, `drift`, `failed`, `skipped`),
-each section's key and status, and the HTTP status code on a failed or skipped
-section; the `repos-result` output carries `{result, source, skippedSections}`
-per target, keyed by the placeholder. These are closed enumerations and numeric
-codes, safe to show, and enough to tell whether the fleet is healthy and which
-section broke. What they never carry is the slug, a live setting, a desired
-setting, or an API error message.
-
-### Seeing the full detail
-
-Three ways to read the unredacted detail, in rough order of convenience:
-
-- Run from a context whose logs are already private. Move the workflow into the
-  target repository itself (the self carve-out gives full logs safely), or keep
-  the admin repo private and set `private-repos: show`.
-- Reproduce locally. The action is a plain Node bundle, so the same PAT and the
-  same inputs reproduce the run on your machine, where the logs stay local. A
-  shell variable name cannot contain a hyphen, so pass the hyphenated inputs
-  through `env`:
-
-  ```bash
-  env INPUT_TOKEN=<your-pat> 'INPUT_REPOSITORY=owner/name' 'INPUT_PRIVATE-REPOS=show' \
-    node lib/index.js
-  ```
-
-  Every input maps to an `INPUT_<NAME>` variable, uppercased with dashes kept
-  (so `private-repos` is `INPUT_PRIVATE-REPOS`).
-- Have the run deliver a private report, described next.
-
-### Delivering a private report
-
-`private-report` sends the full unredacted report for each redacted target
-through a channel whose access control is not the public run. It defaults to
-`private-report: none`, which delivers nothing. Any other channel applies only
-to redacted targets, and only to those the visibility probe proves private or
-internal: an unknown visibility is redacted from the public view but excluded
-from delivery, so the report never reaches a repository that might be public.
-It is rejected alongside `private-repos: show`. The report mirrors the run's
-log, so it is written on every run, `mode: check` included, and a delivery
-failure only warns; it never changes the target's or the run's result.
-
-`private-report: issue` posts each target's report to a reused issue on that
-target repository, where the repository's own access control protects it. The
-action finds the issue by a marker label, replaces the body every run, and
-opens the issue when the target fails or drifts and closes it when the target
-is healthy. This needs the PAT to hold `"Issues"` (read and write) on every
-target repository, on top of the section permissions. Prefer this channel
-unless your readers lack GitHub access to the targets.
-
-`private-report: artifact` concatenates the report for every proven-private
-target into one document, encrypts it to an age recipient, and uploads it as the
-workflow artifact `settings-as-code-private-report` (file
-`private-report.md.age`). Use it when the people who need the report cannot be
-given repository access, since the archive travels with the run rather than
-living in the target repo. This channel needs the Actions artifact service, so
-it does not work on GitHub Enterprise Server (the `@actions/artifact` client has
-no GHES backend): there the run warns and uploads nothing. Access control here
-is key possession, so the key setup matters:
-
-- Generate a keypair on your own machine. The private key must never touch
-  GitHub:
-
-  ```bash
-  age-keygen -o key.txt
-  ```
-
-  `key.txt` holds the secret identity; keep it off GitHub. The command also
-  prints the public recipient (`age1...`), which is safe to commit.
-- Pass that recipient as `report-public-key`. It is required when
-  `private-report` is `artifact` and rejected otherwise; a malformed recipient
-  fails the run at startup.
-- Download and decrypt. The browser "Download" button gives a ZIP; unzip it,
-  then decrypt with the identity file (or use `gh run download`, which extracts
-  the artifact for you):
-
-  ```bash
-  gh run download <run-id> -n settings-as-code-private-report
-  age -d -i key.txt private-report.md.age
-  ```
-
-One caveat weighs against this channel: the ciphertext is downloadable by
-anyone during the artifact's retention window, and copies persist after that.
-If the age key is ever compromised, every archived run it encrypted becomes
-readable retroactively. The `issue` channel has no such standing exposure.
-
-### What redaction does and does not protect
-
-Redaction protects the target's live state and its errors. It does not
-retroactively hide a name you already published. In a public admin repo, the
-names in the `repos` input and the paths and contents of `repos-dir` files are
-already public, so redaction there is limited:
-
-| Target source | What is public regardless | What redaction protects |
-|---|---|---|
-| `repos` explicit list | the target name | live state, desired state, errors |
-| `repos-dir` central file | the target name and the desired settings in the committed file | live state, errors |
-| `repos: "*"` discovery | nothing | the name, live state, desired state, and errors |
-
-Only `repos: "*"` discovery gives a target true non-disclosure, because its
-name never appears in a committed file or input. For the other two sources, the
-name is self-disclosed the moment you commit the workflow.
-
-The visibility probe drives two decisions that fail closed in opposite
-directions. Redaction fails closed toward hiding: a target the probe cannot
-prove public is redacted. Delivery fails closed toward silence: a report is
-sent only when the probe proves the target private or internal, so an unknown
-visibility redacts the public view yet withholds the private report rather than
-risk posting it to a repository that might be public.
-
-A closing point on escape hatches: on a public repository, an unencrypted
-artifact or a debug log is not a private channel. Both inherit the run's public
-visibility. That is the whole reason the artifact channel encrypts, and the
-reason redaction cannot be waved away with `ACTIONS_STEP_DEBUG`.
-
-None of this requires a dedicated account. If you already run the fleet under a
-machine user, it happens to fit well here: you can scope its PAT to least
-privilege, point `repos: "*"` discovery at only what it owns, and get bot-named
-authorship on the report issues. That is a convenience, not a prerequisite; a
-personal PAT with the right permissions works the same way.
-
-## Token permissions
-
-The PAT permission column in the [Sections](#sections) table names the
-grant each section needs. Grant only the permissions for the sections your
-settings file declares; the action never needs more. In multi-repo mode
-the token needs the same permissions on every target repository.
-
-To manage everything in one PAT, grant Administration, Issues,
-Environments, Pages, Actions, Variables, Webhooks, Secrets, Dependabot
-secrets, Codespaces secrets, Custom properties, and Secret scanning alerts
-at write, plus Contents at read and (for org repos) the Members
-organization permission at read.
-The pre-filled token form linked under [Usage](#usage) grants exactly the
-repository half of that set.
-
-Three things worth knowing when a run fails on permissions:
-
-- `mode: check` never writes, so the read half of each permission is
-  enough for a drift-report-only workflow.
-- Fine-grained tokens surface a missing Administration permission as a
-  404, not a 403, on admin endpoints. The action treats both as
-  permission errors and its messages name the exact permission to grant.
-- `repos: "*"` discovery needs a user PAT; the workflow `GITHUB_TOKEN`
-  and GitHub App installation tokens cannot enumerate a user's
-  repositories. Remote multi-repo targets also need Contents: read on
-  every target, because each repository's own settings.yml is fetched
-  through the contents API.
-
-## Forward compatibility
-
-Passthrough-first by design: payloads are sent to the API verbatim
-except for documented normalizations (ref prefixes, topics splitting,
-vocabulary mapping), so new fields and rule types GitHub ships work the day
-they exist: declare them in `settings.yml`, no action update needed. This
-holds for `rulesets` (new rule types, bypass-actor fields, condition
-types), `repository`, `branches`, `environments`, `actions`, `pages`, and
-`code_scanning_default_setup`.
-
-Two deliberate boundaries:
-
-- A brand-new top-level settings *category* needs a handler: a new API
-  endpoint cannot be guessed, so unknown sections fail loudly rather
-  than no-op.
-- The pinned `X-GitHub-Api-Version` only changes intentionally.
-
-Eight sections are closed rather than passthrough: `collaborators`,
-`teams`, `workflows`, `custom_properties`,
-`secret_scanning_custom_patterns`, and the secret sections
-`actions_secrets`, `dependabot_secrets`, and `codespaces_secrets` reject
-entry keys they do not recognize. Their API calls carry at most the
-declared fields per entry (a `permission`, a property `value`, a sealed
-secret value, or a pattern's own fields; the workflow enable/disable calls
-carry none), so an extra key can only be a typo -
-and a misspelled `permission` would otherwise silently grant the default
-`push` role and never show up as drift, while a pattern's `state` and
-`push_protection_enabled` are read-only through the custom-pattern
-endpoints and would silently do nothing.
-
-One nested object is strict for the same reason: each key of the actions
-section's `cache` object is the entire body of its own endpoint, so an
-unrecognized cache key has nowhere to go and is rejected upfront; the
-rest of that section stays passthrough.
-
-The wrapped [`undeclared` form](#undeclared-resources) of the list sections
-is strict the same way: `undeclared` and `entries` are this action's own
-vocabulary, never sent to GitHub, so any other wrapper key is rejected
-upfront as a typo.
+A public admin repository managing private targets would leak their
+slugs, live settings, and API error bodies into public logs.
+`private-repos: redact` (the default) hides every private or internal
+target behind a placeholder, and the `private-report` input can deliver
+each target's full report over a private channel. The
+[private repositories guide](docs/operate/private-repositories.md) covers
+what is hidden, what stays visible, and how to read the full detail.
 
 ## Migrating from the Probot Settings app
+
+This action started as a replacement for the Probot Settings app
+(repository-settings/app), so the schema is a superset of Probot's: an
+existing settings.yml keeps working, and migration is swapping the app
+installation for a workflow.
+
+### Compared to the Probot Settings app
+
+| | Probot Settings app | This action |
+|---|---|---|
+| Delivery | GitHub App you install (hosted by a third party, or self-hosted) | A step in your own workflow; no app installation, no third party |
+| Failure visibility | Silent: no run log a repo owner can open; a misconfigured or uninstalled app just does nothing | Every apply is a workflow run with a log, annotations, a step summary, and a red X on failure |
+| Drift detection | None | mode: check reports drift between the file and the live repo, exits 1 when it finds any, changes no settings |
+| Rulesets | Experimental upstream feature; schema may change | First class: branch, tag, and push targets, upsert by name; undeclared rulesets kept by default, `undeclared: delete` opts into deletion |
+| Partial success policy | None | on-missing-permission: fail or warn, plus required-sections as a minimum-requirements floor |
+| Token | App installation token; its scope is invisible in the repo | A PAT you mint and scope yourself; permission errors name the exact missing permission |
+| Org-level shared config | Yes (org _settings repo with extends) | Yes, as multi-repo mode: an admin repo with a defaults-file plus per-repo files (repos-dir) or each repo's own settings.yml (repos input); no hosted app needed |
+| Call transparency | None | Every API call is traced as a debug line (method, path, payload, status, timing) when debug logging is on |
+
+The one Probot-family feature without a direct equivalent is suborg-level
+grouping (safe-settings' .github/suborgs layer); here the layers are the
+defaults-file and per-repo files. Everything else in Probot's schema is
+supported, plus the rows above.
 
 Your existing `settings.yml` works as-is for `repository`, `labels`,
 `branches`, `collaborators`, `teams`, and `milestones` (for the list
@@ -593,30 +272,8 @@ nothing except labels/autolinks/collaborators/Actions variables - plus,
 WITHIN a declared per-environment key, that environment's variables and
 deployment branch-policy patterns - is ever deleted implicitly.
 
-In short, what you gain over the app:
-
-- visible runs instead of silent no-ops
-- a drift-report check mode
-- first-class rulesets
-- a partial-success policy (`on-missing-permission` + `required-sections`)
-- a token you scope yourself
-- per-call debug tracing
-- multi-repo fleet management with a defaults layer (the `extends` role,
-  minus the hosted app)
-
-The full side-by-side table is in
-[COVERAGE.md](COVERAGE.md#compared-to-the-probot-settings-app).
-
-## Debugging
-
-Every API call the action makes is traced as a debug line: method, path,
-request payload, response status, and timing. Debug lines are hidden in
-normal runs; to see them, re-run the workflow with "[Enable debug logging](https://docs.github.com/en/actions/monitoring-and-troubleshooting-workflows/troubleshooting-workflows/enabling-debug-logging)"
-checked (or set the `ACTIONS_STEP_DEBUG` secret to `true`).
-
-Failures do not need debug mode: every error already carries the API's
-error message verbatim plus the fix, and the step summary table shows the
-outcome per section.
+The step-by-step move, including an org-scale shadow run alongside the
+app, is the [migration guide](docs/start/migrating-from-probot.md).
 
 ## Contributing
 
