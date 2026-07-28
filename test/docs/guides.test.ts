@@ -29,13 +29,26 @@ const REQUIRED_PAGES = [
   "README.md",
   "start/getting-started.md",
   "start/examples.md",
+  "start/migrating-from-probot.md",
+  "reference/semantics.md",
+  "reference/permissions.md",
+  "reference/undeclared-policy.md",
+  "reference/forward-compatibility.md",
+  "reference/secrets-and-vaults.md",
   "operate/check-mode.md",
   "operate/multi-repo.md",
+  "operate/private-repositories.md",
+  "operate/troubleshooting.md",
   "playbooks/README.md",
-  "concepts/undeclared-policy.md",
-  "concepts/secrets-and-vaults.md",
-  "help/migrating-from-probot.md",
-  "help/troubleshooting.md",
+  "playbooks/drift-attestation.md",
+  "playbooks/fleet-baseline-rings.md",
+  "playbooks/incident-freeze.md",
+  "playbooks/oidc-trust-contract.md",
+  "playbooks/preview-blast-radius.md",
+  "playbooks/private-fork-containment.md",
+  "playbooks/sunset-decommission.md",
+  "playbooks/teams-not-collaborators.md",
+  "playbooks/trust-tiers.md",
 ] as const;
 
 function guidePages(): string[] {
@@ -44,7 +57,7 @@ function guidePages(): string[] {
     .sort();
 }
 
-const ALLOWED_FENCE_INFO = new Set(["yaml settings", "yaml", "text"]);
+const ALLOWED_FENCE_INFO = new Set(["yaml settings", "yaml", "text", "bash"]);
 
 /**
  * Fence-policy violations for one markdown document. The fencedBlocks
@@ -93,38 +106,206 @@ function fenceViolations(markdown: string, allowed: ReadonlySet<string>): string
   return problems;
 }
 
-describe("docs/ guide pages", () => {
-  test("every required guide page exists", () => {
-    const pages = new Set(guidePages());
-    for (const page of REQUIRED_PAGES) {
-      expect(pages.has(page), `docs/${page} is missing`).toBe(true);
+/**
+ * GitHub's heading slugger, as the anchor-integrity test needs it: lowercase,
+ * spaces become hyphens, and punctuation (backticks, $, parentheses, slashes,
+ * dots, quotes) is STRIPPED rather than hyphenated; underscores and hyphens
+ * survive. Duplicate -1/-2 suffixes are handled by headingSlugs.
+ */
+function githubSlug(heading: string): string {
+  return heading
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+    .replace(/\s/g, "-");
+}
+
+/**
+ * The lines of a document that sit outside fenced code blocks. Tolerates
+ * indented fences (the README nests them in list items), unlike the guides'
+ * stricter column-zero policy, so it is safe over every markdown file the
+ * anchor test scans.
+ */
+function linesOutsideFences(markdown: string): string[] {
+  const lines: string[] = [];
+  let opener: string | null = null;
+  for (const line of markdown.split("\n")) {
+    if (opener === null) {
+      const open = line.match(/^[ \t]*(`{3,}|~{3,})/);
+      if (open) {
+        opener = open[1] ?? "";
+      } else {
+        lines.push(line);
+      }
+      continue;
     }
+    const close = line.match(/^[ \t]*(`{3,}|~{3,})[ \t]*$/);
+    if (close && close[1]?.[0] === opener[0] && (close[1]?.length ?? 0) >= opener.length) {
+      opener = null;
+    }
+  }
+  if (opener !== null) {
+    // An unclosed fence would silently swallow every heading and link after
+    // it; the guides' own fence policy catches this for docs/ pages, but the
+    // root files in the scan set have no such check, so fail here instead.
+    throw new Error(`unclosed ${opener} fence swallows the rest of the document`);
+  }
+  return lines;
+}
+
+/** Every fragment a file's headings answer to, duplicate suffixes included. */
+function headingSlugs(markdown: string): Set<string> {
+  const slugs = new Set<string>();
+  for (const line of linesOutsideFences(markdown)) {
+    // ATX headings may carry a closing hash run ("## Setup ##"), which is
+    // not part of the heading text GitHub slugs.
+    const heading = line.match(/^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
+    if (!heading) {
+      continue;
+    }
+    // GitHub resolves a duplicate by probing -1, -2, ... until the slug is
+    // free, so an explicit "Setup-1" heading pushes a later duplicate
+    // "Setup" to setup-2 rather than colliding on setup-1.
+    const base = githubSlug(heading[1] ?? "");
+    let slug = base;
+    for (let n = 1; slugs.has(slug); n++) {
+      slug = `${base}-${n}`;
+    }
+    slugs.add(slug);
+  }
+  return slugs;
+}
+
+describe("docs/ guide pages", () => {
+  test("every required guide page exists, and no page exists outside the set", () => {
+    // Exact equality, not inclusion: after the tree restructure this is what
+    // proves the old folders actually disappeared instead of lingering as
+    // orphaned copies next to the new pages.
+    expect(guidePages()).toEqual([...REQUIRED_PAGES].sort());
   });
 
-  test("every relative link in every guide resolves to a real file", () => {
+  /**
+   * Every markdown file whose outbound links the two link tests verify: the
+   * guides plus the root pages that link into docs/ (README, COVERAGE,
+   * CONTRIBUTING, SECURITY), which would otherwise go unchecked.
+   */
+  const linkScanFiles = () => [
+    ...guidePages().map((page) => ({ label: `docs/${page}`, path: join(DOCS, page) })),
+    { label: "README.md", path: join(ROOT, "README.md") },
+    { label: "COVERAGE.md", path: join(ROOT, "COVERAGE.md") },
+    { label: "CONTRIBUTING.md", path: join(ROOT, "CONTRIBUTING.md") },
+    { label: "SECURITY.md", path: join(ROOT, "SECURITY.md") },
+  ];
+
+  test("every relative link in the guides, README, and COVERAGE resolves to a real file", () => {
     // The guides moved into group folders, so every cross-link is a relative
     // path that a rename or move can silently break. Resolve each one
-    // against its page's directory (anchors stripped; external and
+    // against its file's directory (anchors stripped; external and
     // in-page links skipped) and require the target to exist.
     const broken: string[] = [];
-    for (const page of guidePages()) {
-      const markdown = readFileSync(join(DOCS, page), "utf8");
+    for (const file of linkScanFiles()) {
+      const markdown = linesOutsideFences(readFileSync(file.path, "utf8")).join("\n");
       for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
         const target = match[1] ?? "";
         if (/^[a-z]+:\/\//.test(target) || target.startsWith("#") || target.startsWith("mailto:")) {
           continue;
         }
-        const file = target.split("#")[0] ?? "";
-        if (file === "") {
+        const path = target.split("#")[0] ?? "";
+        if (path === "") {
           continue;
         }
-        const resolved = join(DOCS, page, "..", file);
+        const resolved = join(file.path, "..", path);
         if (!existsSync(resolved)) {
-          broken.push(`docs/${page}: (${target})`);
+          broken.push(`${file.label}: (${target})`);
         }
       }
     }
     expect(broken).toEqual([]);
+  });
+
+  test("every relative link with a #fragment points at a real heading", () => {
+    // The existence check above ignores fragments, so a heading rename or a
+    // section moved to another page used to break silently. Here every
+    // relative link carrying a fragment (same-page `#fragment` links
+    // included) from the guides, the README, or COVERAGE.md must match a
+    // GitHub-slugified heading of its target file.
+    const files = linkScanFiles();
+    const slugCache = new Map<string, Set<string>>();
+    const slugsOf = (path: string): Set<string> => {
+      let slugs = slugCache.get(path);
+      if (!slugs) {
+        slugs = headingSlugs(readFileSync(path, "utf8"));
+        slugCache.set(path, slugs);
+      }
+      return slugs;
+    };
+    const broken: string[] = [];
+    for (const file of files) {
+      const markdown = linesOutsideFences(readFileSync(file.path, "utf8")).join("\n");
+      for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
+        const target = match[1] ?? "";
+        if (/^[a-z]+:\/\//.test(target) || target.startsWith("mailto:")) {
+          continue;
+        }
+        const hash = target.indexOf("#");
+        if (hash === -1) {
+          continue;
+        }
+        const fragment = target.slice(hash + 1);
+        const path = target.slice(0, hash);
+        const resolved = path === "" ? file.path : join(file.path, "..", path);
+        if (!resolved.endsWith(".md")) {
+          continue; // only markdown targets have slugified headings
+        }
+        if (!existsSync(resolved)) {
+          broken.push(`${file.label}: (${target}) target file does not exist`);
+          continue;
+        }
+        if (!slugsOf(resolved).has(fragment)) {
+          broken.push(`${file.label}: (${target}) fragment matches no heading`);
+        }
+      }
+    }
+    expect(broken).toEqual([]);
+  });
+
+  test("headings in scanned files carry no markdown links, HTML, or brackets", () => {
+    // githubSlug slugs RAW heading text, so a markdown link, HTML tag, or
+    // entity inside a heading would slug to garbage the anchor test then
+    // trusts. Keep headings plain text and the slugger stays honest.
+    const offenders: string[] = [];
+    for (const file of linkScanFiles()) {
+      for (const line of linesOutsideFences(readFileSync(file.path, "utf8"))) {
+        const heading = line.match(/^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
+        if (heading && /[[\]<>&]/.test(heading[1] ?? "")) {
+          offenders.push(`${file.label}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test("marker-bearing markdown files equal the release-please extra-files set", () => {
+    // release-please's generic updater rewrites version pins only in files
+    // listed under extra-files; a page moved without updating
+    // release-please-config.json keeps its stale pin silently. A docs
+    // restructure is exactly when that happens, so pin the sets equal.
+    // Every root-level markdown file is scanned, not a named few, so a
+    // marker added to a new root page cannot escape the tripwire. The scan
+    // covers markdown only: an extra-files entry outside it (action.yml, a
+    // workflow) fails this equality and means the scan set needs widening.
+    const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
+      packages: Record<string, { "extra-files": string[] }>;
+    };
+    const extraFiles = config.packages["."]?.["extra-files"] ?? [];
+    const rootPages = readdirSync(ROOT)
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => ({ label: name, path: join(ROOT, name) }));
+    const marked = rootPages
+      .concat(guidePages().map((page) => ({ label: `docs/${page}`, path: join(DOCS, page) })))
+      .filter((file) => readFileSync(file.path, "utf8").includes("x-release-please-"))
+      .map((file) => file.label);
+    expect(marked.sort()).toEqual([...extraFiles].sort());
   });
 
   for (const page of guidePages()) {
@@ -250,10 +431,10 @@ describe("docs/ guide pages", () => {
     // The page quotes the hint character for character; pin the quote to the
     // exported constant so editing the hint cannot leave the page silently
     // wrong.
-    const markdown = readFileSync(join(DOCS, "help", "troubleshooting.md"), "utf8");
+    const markdown = readFileSync(join(DOCS, "operate", "troubleshooting.md"), "utf8");
     expect(
       markdown.replace(/\n/g, " ").includes(STALE_VERSION_HINT),
-      "docs/help/troubleshooting.md no longer quotes STALE_VERSION_HINT verbatim",
+      "docs/operate/troubleshooting.md no longer quotes STALE_VERSION_HINT verbatim",
     ).toBe(true);
   });
 
@@ -271,7 +452,7 @@ describe("docs/ guide pages", () => {
     // instead of rotting silently. check-mode.md carries the same
     // enumeration in its not-verifiable list, so both pages are pinned.
     for (const path of [
-      ["concepts", "undeclared-policy.md"],
+      ["reference", "undeclared-policy.md"],
       ["operate", "check-mode.md"],
     ] as const) {
       const page = readFileSync(join(DOCS, ...path), "utf8");
@@ -359,4 +540,63 @@ describe("fence policy guard (mutation checks)", () => {
       expect(fenceViolations(markdown, ALLOWED_FENCE_INFO).length).toBeGreaterThan(0);
     });
   }
+});
+
+describe("github heading slugger", () => {
+  // Real headings from this repo's pages, covering the punctuation GitHub
+  // strips: backticks, $, parentheses, slashes, dots, and quotes. A wrong
+  // slugging rule fails here, not as a false anchor break in the link test.
+  const CASES: Record<string, string> = {
+    "The `$NAME` pattern": "the-name-pattern",
+    "Behavior does not match src/ (stale bundle)": "behavior-does-not-match-src-stale-bundle",
+    "Example settings.yml": "example-settingsyml",
+    'What a "cannot verify" note means': "what-a-cannot-verify-note-means",
+    "Compared to the Probot Settings app": "compared-to-the-probot-settings-app",
+    "1. Create the token": "1-create-the-token",
+    "null as an opt-out": "null-as-an-opt-out",
+    "The nested variables, secrets, and deployment knobs":
+      "the-nested-variables-secrets-and-deployment-knobs",
+  };
+  for (const [heading, slug] of Object.entries(CASES)) {
+    test(`slugs "${heading}" to "${slug}"`, () => {
+      expect(githubSlug(heading)).toBe(slug);
+    });
+  }
+
+  test("duplicate headings get -1/-2 suffixes", () => {
+    expect(headingSlugs("# Setup\n\n## Setup\n\n### Setup\n")).toEqual(
+      new Set(["setup", "setup-1", "setup-2"]),
+    );
+  });
+
+  test("a duplicate probes past an explicit -1 heading, as GitHub does", () => {
+    expect(headingSlugs("# Setup\n\n## Setup-1\n\n### Setup\n")).toEqual(
+      new Set(["setup", "setup-1", "setup-2"]),
+    );
+  });
+
+  test("a closing hash run is not part of the heading text", () => {
+    expect(headingSlugs("## Setup ##\n")).toEqual(new Set(["setup"]));
+  });
+
+  test("tilde fences hide heading-looking lines like backtick fences do", () => {
+    expect(headingSlugs("~~~text\n# not a heading\n~~~\n\n# Real\n")).toEqual(new Set(["real"]));
+  });
+
+  test("heading-looking lines inside fenced blocks are not headings", () => {
+    const markdown = [
+      "```yaml settings",
+      "# yaml-language-server: $schema=https://example.com/schema.json",
+      "```",
+      "",
+      "## Real heading",
+      "",
+    ].join("\n");
+    expect(headingSlugs(markdown)).toEqual(new Set(["real-heading"]));
+  });
+
+  test("indented fences hide their contents too", () => {
+    const markdown = ["   ```yaml", "   # a comment", "   ```", "# Title"].join("\n");
+    expect(headingSlugs(markdown)).toEqual(new Set(["title"]));
+  });
 });

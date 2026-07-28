@@ -67,7 +67,7 @@ that creates it runs ungated; `FLEET_WRITE_TOKEN` itself is declared as a
 `secrets` entry on the environment above, whose `$FLEET_WRITE_TOKEN`
 reference resolves from the step's `env:` block in the workflow snippet -
 `with.token` alone does not expose it (see the
-[secrets guide](../concepts/secrets-and-vaults.md)). That reads back the same secret
+[secrets guide](../reference/secrets-and-vaults.md)). That reads back the same secret
 the apply writes, so the FIRST apply must source it from a repository
 secret (or a vault step); once the environment copy exists it overrides
 the same-named repository secret automatically, and the repository secret
