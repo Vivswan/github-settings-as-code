@@ -853,6 +853,36 @@ export function suppressMaskedCustomProperties(
   }
 }
 
+/**
+ * Names and regexes come from small fixed pools (the index suffix keeps
+ * names unique under the exact-name natural key); delimiters and the
+ * must_match/must_not_match extras ride along occasionally so the optional
+ * fields are exercised. The regexes are inert strings to this action
+ * (passthrough), so simple realistic shapes are enough.
+ */
+function genSecretScanningPatterns(rng: Rng): EntriesForm {
+  const entries: Json[] = Array.from({ length: rng.int(3) + 1 }, (_, i) => {
+    const entry: Json = {
+      name: `${rng.pick(["internal-api-token", "staging-key", "vendor-secret", "license-key"])}-${i}`,
+      pattern: rng.pick(["int_[a-z0-9]{8}", "key-[0-9]{6}", "tok_[A-Za-z0-9]{12}"]),
+    };
+    if (rng.bool(0.3)) {
+      entry.start_delimiter = "\\b";
+    }
+    if (rng.bool(0.3)) {
+      entry.end_delimiter = rng.pick(["\\b", "\\z"]);
+    }
+    if (rng.bool(0.2)) {
+      entry.must_match = ["^prefix_prod"];
+    }
+    if (rng.bool(0.2)) {
+      entry.must_not_match = ["test", "example"];
+    }
+    return entry;
+  });
+  return maybeWrapUndeclared(rng, entries);
+}
+
 const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   repository: genRepository,
   labels: genLabels,
@@ -875,6 +905,7 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   webhooks: genWebhooks,
   custom_properties: genCustomProperties,
   deploy_keys: genDeployKeys,
+  secret_scanning_custom_patterns: genSecretScanningPatterns,
 };
 
 /** A valid-shaped settings value for one section. */
@@ -1163,6 +1194,7 @@ const ARRAY_SECTIONS = [
   "webhooks",
   "custom_properties",
   "deploy_keys",
+  "secret_scanning_custom_patterns",
 ] as const satisfies readonly SectionKey[];
 
 /** The sections whose settings value is a plain record (anyRecord shapes). */
@@ -1205,6 +1237,7 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   webhooks: "config",
   custom_properties: "property_name",
   deploy_keys: "title",
+  secret_scanning_custom_patterns: "name",
 };
 
 /**
@@ -1488,6 +1521,7 @@ export const SECTION_PRIMARY_READ = {
   // owner_kind: "org", so the probe never diverts it).
   custom_properties: "custom_properties.list",
   deploy_keys: "deploy_keys.list",
+  secret_scanning_custom_patterns: "secret_scanning_custom_patterns.list",
 } as const satisfies Partial<Record<SectionKey, string>>;
 
 export type FaultableSection = keyof typeof SECTION_PRIMARY_READ;

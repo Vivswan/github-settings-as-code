@@ -28,6 +28,7 @@ import { milestonesSection } from "./milestones.js";
 import { pagesSection } from "./pages.js";
 import { repositorySection } from "./repository.js";
 import { rulesetsSection } from "./rulesets.js";
+import { secretScanningPatternsSection } from "./secret-scanning-patterns.js";
 import { teamsSection } from "./teams.js";
 import { webhooksSection } from "./webhooks.js";
 import { workflowsSection } from "./workflows.js";
@@ -54,6 +55,7 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   webhooks: webhooksSection,
   custom_properties: customPropertiesSection,
   deploy_keys: deployKeysSection,
+  secret_scanning_custom_patterns: secretScanningPatternsSection,
 };
 
 /** Every section module, in execution order. */

@@ -68,6 +68,12 @@ const FIXTURES: Record<SectionKey, unknown> = {
       { title: "deploy-bot", key: "ssh-ed25519 AAAAC3declared deploy@bot", read_only: true },
     ],
   },
+  // The declared pattern is missing from the live list (create drift) and
+  // the live one is undeclared under `undeclared: delete` (delete drift).
+  secret_scanning_custom_patterns: {
+    undeclared: "delete",
+    entries: [{ name: "internal-token", pattern: "int_[a-z0-9]{8}" }],
+  },
 };
 
 /** Live data that differs from every fixture; unrouted GETs answer 404. */
@@ -166,6 +172,21 @@ const ROUTES = {
     data: [
       { id: 1, title: "deploy-bot", key: "ssh-ed25519 AAAAC3live", read_only: false },
       { id: 2, title: "stale-key", key: "ssh-rsa AAAAB3stale", read_only: true },
+    ],
+  },
+  // A live pattern the fixture does not declare (delete drift under the
+  // wrapped `undeclared: delete`), while the declared one is missing.
+  "GET /repos/o/r/secret-scanning/custom-patterns?per_page=100&page=1": {
+    data: [
+      {
+        id: 9,
+        name: "stale-pattern",
+        slug: "stale-pattern",
+        pattern: "old_[0-9]{4}",
+        state: "published",
+        push_protection_enabled: false,
+        custom_pattern_version: "v1",
+      },
     ],
   },
 };

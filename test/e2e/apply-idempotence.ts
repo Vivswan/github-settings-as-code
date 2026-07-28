@@ -23,6 +23,10 @@
  * - deploy_keys (true): the delete-and-recreate fires only when the declared
  *   entry diverges from the live key (material compared as algorithm + blob,
  *   comments ignored; a declared read_only compared verbatim).
+ * - secret_scanning_custom_patterns (true): the bulk POST carries only the
+ *   missing patterns, each PATCH only the divergent declared fields, and the
+ *   bulk DELETE only undeclared patterns under `undeclared: delete` - a
+ *   converged repo produces none of the three.
  * - repository (false): the base PATCH, the topics PUT, and each feature
  *   toggle's PUT/DELETE run unconditionally (enable_git_lfs necessarily so:
  *   no read endpoint exists to compare against).
@@ -89,6 +93,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   webhooks: false,
   custom_properties: true,
   deploy_keys: true,
+  secret_scanning_custom_patterns: true,
 };
 
 /**

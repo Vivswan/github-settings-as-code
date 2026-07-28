@@ -106,6 +106,21 @@ export interface SettingsFile {
    * and the wrapped form can set `undeclared: delete`.
    */
   deploy_keys?: DeployKeyConfig[] | UndeclaredPolicyList<DeployKeyConfig>;
+  /**
+   * Repository-level secret scanning custom patterns, matched by name. The
+   * name is immutable upstream (the update PATCH takes no name field), so a
+   * renamed entry is applied as a create of the new name - plus, under
+   * `undeclared: delete`, deletion of the old one; under the default keep
+   * policy the old pattern stays live and is surfaced as a note. Undeclared
+   * patterns are kept by default: removing a pattern disposes of its alerts,
+   * so deletion stays a human opt-in (the wrapped form can set
+   * `undeclared: delete`). When this action deletes a pattern it always asks
+   * GitHub to RESOLVE the pattern's alerts rather than delete them, keeping
+   * the audit trail.
+   */
+  secret_scanning_custom_patterns?:
+    | SecretScanningPatternConfig[]
+    | UndeclaredPolicyList<SecretScanningPatternConfig>;
 }
 
 /**
@@ -630,6 +645,29 @@ export interface DeployKeyConfig {
   read_only?: boolean;
 }
 
+/**
+ * One secret scanning custom pattern, matched by exact name. Only the fields
+ * below are accepted: `state` and `push_protection_enabled` are readable but
+ * NOT writable through the custom-pattern endpoints, so they cannot be
+ * declared. A delimiter, once set, cannot be cleared back to GitHub's
+ * default through the update PATCH (the endpoint updates provided fields
+ * only); remove the pattern and redeclare it without the field instead.
+ */
+export interface SecretScanningPatternConfig {
+  /** The pattern name, the natural key; immutable upstream, so a rename creates the new name (the old one follows the undeclared policy). */
+  name: string;
+  /** The regular expression the secret format must match. */
+  pattern: string;
+  /** Regular expression for the characters that must come before the secret. */
+  start_delimiter?: string;
+  /** Regular expression for the characters that must come after the secret. */
+  end_delimiter?: string;
+  /** Additional regular expressions a match must also satisfy, compared in order. */
+  must_match?: string[];
+  /** Regular expressions a match must NOT satisfy, compared in order. */
+  must_not_match?: string[];
+}
+
 /** Every recognized top-level section, in execution order. */
 export const SECTION_KEYS = [
   "repository",
@@ -653,6 +691,15 @@ export const SECTION_KEYS = [
   "webhooks",
   "custom_properties",
   "deploy_keys",
+  // Last on purpose: when the repository section enables secret scanning
+  // (via security_and_analysis), the patterns run against a repository whose
+  // scanning is already on. That helps a warn-policy bootstrap and every
+  // later run, but it cannot make the pair land in ONE apply under the
+  // default fail policy: preflight probes every declared section read-only
+  // BEFORE any write, so the patterns list 404s (scanning still off) and
+  // aborts the run before the repository section could enable it. Enable
+  // scanning first, or bootstrap under on-missing-permission: warn.
+  "secret_scanning_custom_patterns",
 ] as const satisfies readonly (keyof SettingsFile)[];
 
 /** A recognized top-level section name. */
@@ -678,6 +725,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "webhooks",
   "custom_properties",
   "deploy_keys",
+  "secret_scanning_custom_patterns",
 ] as const satisfies readonly SectionKey[];
 
 /** A section key that takes the `undeclared` policy knob. */

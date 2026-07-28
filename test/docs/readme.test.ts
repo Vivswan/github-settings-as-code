@@ -326,6 +326,7 @@ describe("pre-filled PAT form URL", () => {
     dependabot_secrets: "dependabot_secrets",
     codespaces_secrets: "codespaces_secrets",
     custom_properties: "repository_custom_properties",
+    secret_scanning_alerts: "secret_scanning_alerts",
   } satisfies Record<PatResource, string | null>;
 
   test("every PAT resource's form parameter appears in the URL", () => {

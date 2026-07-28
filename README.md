@@ -9,7 +9,7 @@ silently.
 ## Usage
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token):
-   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&repository_custom_properties=write&contents=read)
+   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
    starts you off with every repository permission the
    [Sections](#sections) table can need. Pick the resource owner and
    repositories, and add Members: read by hand when the owner is an
@@ -128,6 +128,7 @@ secret fields take); and when you come from elsewhere or something breaks,
 | `webhooks` | hooks CRUD + hook config sub-endpoint | Webhooks: write | one hook per `config.url`, the natural key (a changed url declares a NEW hook; the old one becomes undeclared); `config.secret` takes a whole-value `$NAME` reference resolved from the step env at apply time (see the [secrets guide](docs/concepts/secrets-and-vaults.md)) and is re-sent every run since GitHub never reveals it, so check notes it cannot verify the secret; events compared order-insensitively; hook urls appear in drift lines on purpose (they are configuration, not credentials); undeclared kept by default (settable) |
 | `custom_properties` | GET/PATCH properties/values (the values read is Metadata-gated, so only the PATCH needs the grant); probes GET /orgs/{owner} | Custom properties: write | values of org-defined properties, set per repo (definitions are org-scoped and out of scope); org repos only, skipped with a notice on personal accounts; `value: null` unsets (reverting to the org default, if any); booleans/numbers normalized to their string form (GitHub transports true_false as "true"/"false"); multi_select lists compared order-insensitively; one bulk PATCH per apply, skipped when nothing diverges; undeclared kept by default (settable; an unset can revert to an org default this action does not model, and org-actors-only properties reject the write) |
 | `deploy_keys` | deploy keys list/create/delete | Administration: write | matched by title; the declared material is a PUBLIC key, safe in a committed file; compared as algorithm + blob (GitHub may strip the trailing comment); immutable upstream, so changed entries are replaced; a public key can be attached to only one repository account-wide; undeclared kept by default (settable; deleting a live key breaks whatever authenticates with it) |
+| `secret_scanning_custom_patterns` | secret-scanning custom patterns: paginated list + bulk POST + PATCH by id + bulk DELETE | Secret scanning alerts: write | repository-level custom patterns matched by name (`pattern`, delimiters, `must_match`/`must_not_match` lists); the name is immutable upstream, so a rename creates the new name and the old one follows the undeclared policy (deleted only under `undeclared: delete`; kept and noted by default); `state` and `push_protection_enabled` are read-only through these endpoints and cannot be declared; writes carry each pattern's `custom_pattern_version`, so a pattern edited mid-run answers 412 (re-run) instead of clobbering the edit; a 404 can also mean secret scanning is not enabled (Advanced Security on private repos); undeclared kept by default (settable; deleting a pattern RESOLVES its alerts - this action never sends the alert-deleting default) |
 
 ## Semantics
 
@@ -172,12 +173,12 @@ scope by design.
 
 ## Undeclared resources
 
-Twelve sections enumerate the live resources next to the declared ones, and
-each has a default policy for the ones the file does not declare: `labels`,
-`autolinks`, `collaborators`, and `actions_variables` delete them;
+Thirteen sections enumerate the live resources next to the declared ones,
+and each has a default policy for the ones the file does not declare:
+`labels`, `autolinks`, `collaborators`, and `actions_variables` delete them;
 `rulesets`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`,
-and the three secret sections (`actions_secrets`, `dependabot_secrets`,
-`codespaces_secrets`) keep them
+`secret_scanning_custom_patterns`, and the three secret sections
+(`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`) keep them
 and list each as a note. A section's list value can override that default
 with a wrapped form:
 
@@ -520,8 +521,9 @@ the token needs the same permissions on every target repository.
 
 To manage everything in one PAT, grant Administration, Issues,
 Environments, Pages, Actions, Variables, Webhooks, Secrets, Dependabot
-secrets, Codespaces secrets, and Custom properties at write, plus Contents
-at read and (for org repos) the Members organization permission at read.
+secrets, Codespaces secrets, Custom properties, and Secret scanning alerts
+at write, plus Contents at read and (for org repos) the Members
+organization permission at read.
 The pre-filled token form linked under [Usage](#usage) grants exactly the
 repository half of that set.
 
@@ -555,15 +557,18 @@ Two deliberate boundaries:
   than no-op.
 - The pinned `X-GitHub-Api-Version` only changes intentionally.
 
-Seven sections are closed rather than passthrough: `collaborators`,
-`teams`, `workflows`, `custom_properties`, and the secret sections
+Eight sections are closed rather than passthrough: `collaborators`,
+`teams`, `workflows`, `custom_properties`,
+`secret_scanning_custom_patterns`, and the secret sections
 `actions_secrets`, `dependabot_secrets`, and `codespaces_secrets` reject
-entry keys they do not recognize. Their API calls carry at most a single
-setting per entry (a `permission`, a property `value`, or a sealed secret
-value; the workflow enable/disable calls carry none), so an extra key can
-only be a typo -
+entry keys they do not recognize. Their API calls carry at most the
+declared fields per entry (a `permission`, a property `value`, a sealed
+secret value, or a pattern's own fields; the workflow enable/disable calls
+carry none), so an extra key can only be a typo -
 and a misspelled `permission` would otherwise silently grant the default
-`push` role and never show up as drift.
+`push` role and never show up as drift, while a pattern's `state` and
+`push_protection_enabled` are read-only through the custom-pattern
+endpoints and would silently do nothing.
 
 One nested object is strict for the same reason: each key of the actions
 section's `cache` object is the entire body of its own endpoint, so an
