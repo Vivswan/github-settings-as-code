@@ -59,6 +59,15 @@ const FIXTURES: Record<SectionKey, unknown> = {
     },
   ],
   custom_properties: [{ property_name: "team", value: "platform" }],
+  // The declared key's material differs from the live one (a replace, which
+  // in check mode must stay a drift line), and `undeclared: delete` walks
+  // the undeclared-deletion drift branch over the stale live key.
+  deploy_keys: {
+    undeclared: "delete",
+    entries: [
+      { title: "deploy-bot", key: "ssh-ed25519 AAAAC3declared deploy@bot", read_only: true },
+    ],
+  },
 };
 
 /** Live data that differs from every fixture; unrouted GETs answer 404. */
@@ -150,6 +159,14 @@ const ROUTES = {
   // A live custom property value differing from the declared one -> drift.
   "GET /repos/o/r/properties/values": {
     data: [{ property_name: "team", value: "core" }],
+  },
+  // A live key whose material diverges from the declared one, plus a stale
+  // undeclared key the wrapped `undeclared: delete` fixture must flag.
+  "GET /repos/o/r/keys?per_page=100&page=1": {
+    data: [
+      { id: 1, title: "deploy-bot", key: "ssh-ed25519 AAAAC3live", read_only: false },
+      { id: 2, title: "stale-key", key: "ssh-rsa AAAAB3stale", read_only: true },
+    ],
   },
 };
 

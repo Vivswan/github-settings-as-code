@@ -49,4 +49,5 @@ export const DENIAL_SEMANTICS: Record<SectionKey, DenialSemantics> = {
   // custom_properties outright (see suppressMaskedCustomProperties) and a
   // curated scenario pins the write-denied path.
   custom_properties: "absent",
+  deploy_keys: "denied",
 };

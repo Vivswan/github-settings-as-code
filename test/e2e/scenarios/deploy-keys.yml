@@ -1,0 +1,49 @@
+name: deploy-keys
+description: >-
+  Deploy keys converge under apply: a declared-but-missing key is created, a
+  declared key whose material rotated is replaced (deploy keys are immutable
+  upstream, so the change is DELETE then POST), and a live key the wrapped
+  "undeclared: delete" form does not declare is DELETEd. The mock strips the
+  trailing comment from stored material the way GitHub normalizes it, so the
+  converging check rerun proves the section compares algorithm + blob, not
+  the raw string; the second-apply fixpoint proves the compare-before-write
+  skip.
+settings:
+  deploy_keys:
+    undeclared: delete
+    entries:
+      - title: deploy-bot
+        key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDeployBotDeployBotDeployBotDeployBot deploy@bot
+        read_only: true
+      - title: mirror-pull
+        key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIRotatedRotatedRotatedRotatedRotated mirror@new
+live_state:
+  deploy_keys:
+    - id: 10
+      key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStaleStaleStaleStaleStaleStaleStale
+      url: https://api.github.com/repos/e2e-owner/e2e-repo/keys/10
+      title: mirror-pull
+      verified: true
+      created_at: "2026-01-01T00:00:00Z"
+      read_only: false
+    - id: 20
+      key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCRetiredRetiredRetiredRetired
+      url: https://api.github.com/repos/e2e-owner/e2e-repo/keys/20
+      title: retired-service
+      verified: true
+      created_at: "2026-01-01T00:00:00Z"
+      read_only: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    deploy_keys: applied
+  mutations:
+    - "POST /repos/{repo}/keys"
+    - "DELETE /repos/{repo}/keys/10"
+    - "POST /repos/{repo}/keys"
+    - "DELETE /repos/{repo}/keys/20"
+  converges: true
+  apply_idempotent: true

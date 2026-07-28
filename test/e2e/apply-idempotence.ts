@@ -20,6 +20,9 @@
  *   subsetDiff clean against the live milestone.
  * - actions_variables (true): the PATCH is skipped when the live value (and
  *   any declared passthrough fields) already match the declaration.
+ * - deploy_keys (true): the delete-and-recreate fires only when the declared
+ *   entry diverges from the live key (material compared as algorithm + blob,
+ *   comments ignored; a declared read_only compared verbatim).
  * - repository (false): the base PATCH, the topics PUT, and each feature
  *   toggle's PUT/DELETE run unconditionally (enable_git_lfs necessarily so:
  *   no read endpoint exists to compare against).
@@ -85,6 +88,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   actions_variables: true,
   webhooks: false,
   custom_properties: true,
+  deploy_keys: true,
 };
 
 /**

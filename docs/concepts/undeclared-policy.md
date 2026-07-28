@@ -1,13 +1,13 @@
 # The undeclared policy
 
-Eleven sections list the live resources sitting next to the declared ones:
+Twelve sections list the live resources sitting next to the declared ones:
 `labels`, `autolinks`, `collaborators`, `actions_variables`, `rulesets`,
-`milestones`, `webhooks`, `custom_properties`, `actions_secrets`,
-`dependabot_secrets`, and `codespaces_secrets`. Each has a default answer
-for a live resource the
-settings file does not declare, and each accepts a wrapped form that
-overrides it per file. This page covers the knob, the defaults per section,
-and how it layers with a multi-repo defaults file.
+`milestones`, `webhooks`, `custom_properties`, `deploy_keys`,
+`actions_secrets`, `dependabot_secrets`, and `codespaces_secrets`. Each has
+a default answer for a live resource the settings file does not declare,
+and each accepts a wrapped form that overrides it per file. This page
+covers the knob, the defaults per section, and how it layers with a
+multi-repo defaults file.
 The normative claims live in the README's
 [Sections table](../../README.md#sections) and
 [Undeclared resources](../../README.md#undeclared-resources) section.
@@ -59,6 +59,7 @@ written.
 | `rulesets` | keep | `delete`: make the file the complete ruleset inventory |
 | `milestones` | keep | `delete`: prune stale milestones, with the caveat below |
 | `webhooks` | keep (integrations create their own hooks) | `delete`: make the file the complete hook inventory |
+| `deploy_keys` | keep (deployment tooling installs its own keys, and deleting a live key breaks whatever authenticates with it) | `delete`: make the file the complete key inventory |
 | `actions_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `dependabot_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `codespaces_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
@@ -143,7 +144,7 @@ section, so omitting targets keep them. A check run shows the resulting
 deletions as drift before an apply performs them.
 
 One boundary to know about: HAVING a policy and INHERITING one are
-different things. The eleven top-level section lists take the policy
+different things. The twelve top-level section lists take the policy
 through the multi-repo defaults merge as described above. The nested
 `environments[].variables`, `environments[].secrets`,
 `environments[].deployment_branch_policies`, and

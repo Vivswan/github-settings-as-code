@@ -1,0 +1,51 @@
+name: deploy-keys-check
+description: >-
+  Check mode reports deploy-key drift without writing: a declared-but-missing
+  key (apply would create it), a declared key whose live material and
+  read_only diverge (immutable upstream, so apply would delete and recreate
+  it, with the differing fields named), and - under the plain array form's
+  keep default - a live undeclared key surfaces as a kept note, not drift.
+settings:
+  deploy_keys:
+    - title: deploy-bot
+      key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDeployBotDeployBotDeployBotDeployBot deploy@bot
+      read_only: true
+    - title: mirror-pull
+      key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIRotatedRotatedRotatedRotatedRotated mirror@new
+      read_only: true
+inputs:
+  mode: check
+live_state:
+  deploy_keys:
+    - id: 10
+      key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStaleStaleStaleStaleStaleStaleStale
+      url: https://api.github.com/repos/e2e-owner/e2e-repo/keys/10
+      title: mirror-pull
+      verified: true
+      created_at: "2026-01-01T00:00:00Z"
+      read_only: false
+    - id: 20
+      key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCRetiredRetiredRetiredRetired
+      url: https://api.github.com/repos/e2e-owner/e2e-repo/keys/20
+      title: retired-service
+      verified: true
+      created_at: "2026-01-01T00:00:00Z"
+      read_only: true
+token_permissions:
+  administration: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    deploy_keys: drift
+  summary_contains:
+    - "deploy_keys[deploy-bot]: missing"
+    - "deploy_keys[mirror-pull]: live settings differ from the settings file, and deploy keys cannot be edited; apply will delete and recreate it"
+    - "deploy_keys[mirror-pull].key: declared material"
+    - "deploy_keys[mirror-pull].read_only: declared true != live false"
+  stdout_contains:
+    - "deploy key \"retired-service\" exists on the repo but is not declared"
+    - "kept under \"undeclared: keep\""
+  never:
+    - "POST /repos/{repo}/keys"
+    - "DELETE /repos/{repo}/keys"
