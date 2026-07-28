@@ -15,9 +15,11 @@ declares, plus the two cross-cutting grants that belong to no section:
 Contents at read when the action must fetch a settings file it does not
 have checked out (remote multi-repo targets), and Issues at read and
 write only when the `private-report` issue channel is enabled
-(see [private repositories](../operate/private-repositories.md)). Beyond
-those the action never needs more. In multi-repo mode the token needs
-the same permissions on every target repository.
+(see [private repositories](../operate/private-repositories.md)). The
+Contents grant earns its keep twice: as the Sections table notes, it
+also lets `branches` tell a missing branch from an unprotected one in
+check mode. Beyond those the action never needs more. In multi-repo
+mode the token needs the same permissions on every target repository.
 
 To manage everything in one PAT, grant Administration, Issues,
 Environments, Pages, Actions, Variables, Webhooks, Secrets, Dependabot

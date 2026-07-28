@@ -8,7 +8,9 @@ ships work the day they exist - declare them in `settings.yml`, no action
 update needed. This page draws the line: where the passthrough tenet
 holds, and where the surface is deliberately closed.
 
-The passthrough holds for `rulesets` (new rule types, bypass-actor
+The passthrough is the default: every section not named in the closed
+list below accepts fields it does not recognize and sends them through.
+The richest surfaces are `rulesets` (new rule types, bypass-actor
 fields, condition types), `repository`, `branches`, `environments`,
 `actions`, `pages`, and `code_scanning_default_setup`. The published JSON
 Schema follows the same tenet: it is documentation, not a gate, so
@@ -37,10 +39,13 @@ and a misspelled `permission` would otherwise silently grant the default
 `push_protection_enabled` are read-only through the custom-pattern
 endpoints and would silently do nothing.
 
-One nested object is strict for the same reason: each key of the actions
-section's `cache` object is the entire body of its own endpoint, so an
-unrecognized cache key has nowhere to go and is rejected upfront; the
-rest of that section stays passthrough.
+A few nested surfaces are strict for the same reason. Each key of the
+actions section's `cache` object is the entire body of its own endpoint,
+so an unrecognized cache key has nowhere to go and is rejected upfront;
+the rest of that section stays passthrough. Inside a declared
+environment, the `secrets` and `deployment_protection_rules` entries are
+strict the same way: their write bodies are built from the named fields
+alone, so an extra entry key would silently do nothing.
 
 The wrapped [`undeclared` form](undeclared-policy.md) of the list sections
 is strict the same way: `undeclared` and `entries` are this action's own
