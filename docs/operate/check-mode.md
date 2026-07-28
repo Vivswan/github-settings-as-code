@@ -134,10 +134,15 @@ rather than drift, and each note says what apply does about it:
   `secrets`): the API returns names only, so check mode verifies existence
   and apply re-seals and rewrites every declared value on each run. One
   note per family (or per environment), not per entry.
-- `environments[].variables` and `environments[].secrets` declared on an
-  environment that does not exist yet: nothing can be listed until apply
-  creates the environment, and the missing environment itself is already
-  drift.
+- `environments[].variables`, `environments[].secrets`, and
+  `environments[].deployment_branch_policies` declared on an environment
+  that does not exist yet: nothing can be listed until apply creates the
+  environment, and the missing environment itself is already drift.
+- `environments[].deployment_branch_policies` declared on a LIVE environment
+  whose `deployment_branch_policy` does not enable `custom_branch_policies`:
+  the patterns cannot be listed until apply turns the flag on, so the
+  declared list surfaces as a note - while the flag mismatch itself is
+  reported as ordinary environment drift.
 
 A note is not drift and not a failure. A section whose only findings are
 notes counts as clean, and the notes appear in that section's detail cell in

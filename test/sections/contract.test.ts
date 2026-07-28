@@ -7,6 +7,7 @@ import {
   type SectionMeta,
   throwFor,
 } from "../../src/sections/contract.js";
+import { environmentsSection } from "../../src/sections/environments.js";
 import { rulesetsSection } from "../../src/sections/rulesets.js";
 
 const section: SectionMeta = rulesetsSection;
@@ -152,7 +153,7 @@ describe("throwFor context enrichment", () => {
     try {
       throwFor(
         section,
-        "GET",
+        "POST",
         "/repos/o/r/actions/oidc/customization/sub",
         { status: 403, message: "Resource not accessible", body: "" },
         { endpoint: endpoint({ permission: { repo: ["actions"] } }) },
@@ -162,8 +163,55 @@ describe("throwFor context enrichment", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     const denied = thrown as PermissionDenied;
-    expect(denied.detail).toContain(grantFor({ repo: ["actions"] }));
+    // The synthetic override has no sibling in the rulesets section carrying
+    // the same permission, so the sibling scan finds no write and the advice
+    // asks for read - what matters here is the RESOURCE: the endpoint's own
+    // grant renders, never the section's.
+    expect(denied.detail).toContain(grantFor({ repo: ["actions"] }, undefined, "read"));
     expect(denied.detail).not.toContain(section.grant);
+  });
+
+  test("override advice grades by the section's need: a write sibling on the same permission advises write", () => {
+    // The real OIDC pair: the failing call is the GET, but putOidcSub writes
+    // with the same Actions permission, so read-only advice would cost a
+    // second round trip (grant read, pass the read-only preflight, fail on
+    // the write). The sibling scan restores the write-level advice.
+    let thrown: unknown;
+    try {
+      throwFor(
+        actionsSection,
+        "GET",
+        "/repos/o/r/actions/oidc/customization/sub",
+        { status: 403, message: "Resource not accessible", body: "" },
+        { endpoint: actionsSection.endpoints.getOidcSub as EndpointDecl },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    expect((thrown as PermissionDenied).detail).toContain(grantFor({ repo: ["actions"] }));
+  });
+
+  test("override advice grades by the section's need: a read-only permission advises read", () => {
+    // The real branch-policy list: its write siblings (create/remove) carry
+    // Administration, a DIFFERENT permission, so the Actions grant is only
+    // ever read for this section and the advice matches the README PAT cell.
+    let thrown: unknown;
+    try {
+      throwFor(
+        environmentsSection,
+        "GET",
+        "/repos/o/r/environments/prod/deployment-branch-policies",
+        { status: 404, message: "Not Found", body: "" },
+        { endpoint: environmentsSection.endpoints.listPolicies as EndpointDecl },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    const denied = thrown as PermissionDenied;
+    expect(denied.detail).toContain(grantFor({ repo: ["actions"] }, undefined, "read"));
+    expect(denied.detail).not.toContain("read and write");
   });
 
   test('a public endpoint ("none") cannot be a missing-grant failure', () => {

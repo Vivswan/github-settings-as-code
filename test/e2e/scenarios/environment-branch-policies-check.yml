@@ -1,0 +1,93 @@
+# Check mode reports pattern drift without writing: a declared pattern is
+# missing, a matching pattern's type differs (immutable upstream, so apply
+# would delete and recreate), and an undeclared live pattern falls under the
+# default delete policy. The staging entry's wrapped "undeclared: keep" form
+# softens its undeclared pattern to a note, and the qa environment's live
+# custom_branch_policies flag is off, so its declared patterns are not
+# verifiable - a note, while the flag drift itself comes from the environment
+# diff.
+name: environment-branch-policies-check
+settings:
+  environments:
+    - name: production
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+      deployment_branch_policies:
+        - name: release/*
+        - name: v*
+          type: tag
+    - name: staging
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+      deployment_branch_policies:
+        undeclared: keep
+        entries:
+          - name: main
+    - name: qa
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+      deployment_branch_policies:
+        - name: qa/*
+inputs:
+  mode: check
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules: []
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+    staging:
+      name: staging
+      protection_rules: []
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+    qa:
+      name: qa
+      protection_rules: []
+      deployment_branch_policy:
+        protected_branches: true
+        custom_branch_policies: false
+  environment_branch_policies:
+    production:
+      - id: 4001
+        name: v*
+        type: branch
+      - id: 4002
+        name: legacy/*
+        type: branch
+    staging:
+      - id: 4003
+        name: main
+        type: branch
+      - id: 4004
+        name: old/*
+        type: branch
+token_permissions:
+  environments: read
+  actions: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    environments: drift
+  summary_contains:
+    - "deployment_branch_policies[release/*]: missing"
+    - "type is immutable"
+    - 'deployment_branch_policies[v*].type: "tag" != "branch"'
+    - "deployment_branch_policies[legacy/*]: undeclared"
+    - "environments[qa].deployment_branch_policy.custom_branch_policies: true != false"
+  stdout_contains:
+    - 'deployment branch policy "old/*" exists on environment "staging" but is not declared'
+    - "environments[qa].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true"
+  never:
+    - "PUT /repos/{repo}/environments"
+    - "POST /repos/{repo}/environments/production/deployment-branch-policies"
+    - "DELETE /repos/{repo}/environments"
+  requests_contain:
+    - "GET /repos/e2e-owner/e2e-repo/environments/staging/deployment-branch-policies"

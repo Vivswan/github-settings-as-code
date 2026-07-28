@@ -66,20 +66,23 @@ The owner exemption for collaborators does not move with the knob: under
 `undeclared: delete` (the default) every undeclared direct collaborator is
 removed except the repository owner.
 
-## The nested variables and secrets knobs
+## The nested variables, secrets, and branch-policy knobs
 
-Two lists carry the same wrapped form WITHOUT being top-level sections:
-`environments[].variables` and `environments[].secrets`. Each environment
-entry's list accepts the plain array or `{undeclared, entries}`, with its
-own fixed default: within a declared `variables` key the default is delete
-(the file is that environment's variable inventory), while within a
-declared `secrets` key the default is keep, matching the top-level secret
-sections - a deleted secret's value is unrecoverable, so deletion stays
-opt-in. The knob is set per environment entry, and it never inherits a
-policy through the multi-repo defaults merge: arrays replace wholesale in
-that merge, so a target that declares `environments` replaces the defaults'
-entire environments array - individual entries never merge, and neither do
-the knobs inside them.
+Three lists carry the same wrapped form WITHOUT being top-level sections:
+`environments[].variables`, `environments[].secrets`, and
+`environments[].deployment_branch_policies`. Each environment entry's list
+accepts the plain array or `{undeclared, entries}`, with its own fixed
+default: within a declared `variables` key the default is delete (the file
+is that environment's variable inventory), and the same holds for a
+declared `deployment_branch_policies` key (patterns are readable,
+recreatable configuration), while within a declared `secrets` key the
+default is keep, matching the top-level secret sections - a deleted
+secret's value is unrecoverable, so deletion stays opt-in. The knob is set
+per environment entry, and it never inherits a policy through the
+multi-repo defaults merge: arrays replace wholesale in that merge, so a
+target that declares `environments` replaces the defaults' entire
+environments array - individual entries never merge, and neither do the
+knobs inside them.
 
 ## Deleting milestones detaches issues
 
@@ -134,7 +137,8 @@ deletions as drift before an apply performs them.
 One boundary to know about: HAVING a policy and INHERITING one are
 different things. The ten top-level section lists take the policy
 through the multi-repo defaults merge as described above. The nested
-`environments[].variables` and `environments[].secrets` lists have their
-own knobs, set per environment entry with their own fixed defaults - they
-never inherit a policy from their section, from another list, or through
-the defaults merge.
+`environments[].variables`, `environments[].secrets`, and
+`environments[].deployment_branch_policies` lists have their own knobs,
+set per environment entry with their own fixed defaults - they never
+inherit a policy from their section, from another list, or through the
+defaults merge.

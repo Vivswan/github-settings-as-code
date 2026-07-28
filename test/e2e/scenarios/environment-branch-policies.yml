@@ -1,0 +1,49 @@
+# Apply reconciles a declared per-environment deployment_branch_policies list
+# through the pattern endpoints AFTER the environment PUT: the missing pattern
+# is created, the pattern whose live type differs is replaced (type is
+# immutable upstream, so delete + recreate), and the undeclared one is DELETED
+# (the default policy WITHIN a declared key). A check rerun lists the
+# reconciled patterns and sees them satisfied, so it converges. Warms all
+# three pattern routes (list, create, remove) for the coverage tripwire.
+name: environment-branch-policies
+settings:
+  environments:
+    - name: production
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+      deployment_branch_policies:
+        - name: release/*
+        - name: v*
+          type: tag
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules: []
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+  environment_branch_policies:
+    production:
+      - id: 4001
+        name: v*
+        type: branch
+      - id: 4002
+        name: legacy/*
+        type: branch
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+    - "POST /repos/{repo}/environments/production/deployment-branch-policies"
+    - "DELETE /repos/{repo}/environments/production/deployment-branch-policies/4001"
+    - "DELETE /repos/{repo}/environments/production/deployment-branch-policies/4002"
+  requests_contain:
+    - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment-branch-policies"
+  converges: true

@@ -100,16 +100,27 @@ const RESOURCE_LABEL_ORG: Record<NonNullable<SectionPermission["org"]>, string> 
 
 /**
  * Render a SectionPermission into the grant prose used verbatim in
- * permission errors. `caveat`, when given, is appended after "; ". The
+ * permission errors. `caveat`, when given, is appended after "; ". `access`
+ * names the level the advice asks for: section grants keep the "write"
+ * default (a section both reads and writes), while a denial on an endpoint
+ * with its own permission override passes the level the SECTION needs on
+ * that permission (overrideAdviceLevel: read unless a sibling endpoint
+ * writes with it), so the advice never asks for a broader grant than the
+ * section can use - nor a narrower one than it will need next. The default
  * output must stay byte-identical to the hand-written strings this
  * replaces - these are user-facing error prose and the README table mirrors
  * them.
  */
-export function grantFor(permission: SectionPermission, caveat?: string): string {
+export function grantFor(
+  permission: SectionPermission,
+  caveat?: string,
+  access: "read" | "write" = "write",
+): string {
+  const level = access === "read" ? "read" : "read and write";
   const resources = permission.repo.map((resource) => `"${RESOURCE_LABEL[resource]}"`).join(" or ");
   const repoClause = permission.org
-    ? `${resources} (read and write) under its Repository permissions`
-    : `${resources} (read and write) under the PAT's Repository permissions`;
+    ? `${resources} (${level}) under its Repository permissions`
+    : `${resources} (${level}) under the PAT's Repository permissions`;
   const orgClause = permission.org
     ? `"${RESOURCE_LABEL_ORG[permission.org]}" (read) under the PAT's Organization permissions and `
     : "";
@@ -761,6 +772,50 @@ export function rejectDuplicates<T>(
   }
 }
 
+/**
+ * Structural equality of two effective endpoint permissions. The override
+ * declarations are separate object literals (the OIDC pair declares two
+ * distinct {repo: ["actions"]} values), so reference equality cannot group
+ * them; compare the repo resources as a set plus the org grant.
+ */
+function samePermission(a: SectionPermission | "none", b: SectionPermission | "none"): boolean {
+  if (a === "none" || b === "none") {
+    return a === b;
+  }
+  if (a.org !== b.org || a.repo.length !== b.repo.length) {
+    return false;
+  }
+  const sortedA = [...a.repo].sort();
+  const sortedB = [...b.repo].sort();
+  return sortedA.every((resource, index) => resource === sortedB[index]);
+}
+
+/**
+ * The access level denial advice should ask for on an override permission:
+ * "write" when ANY of the section's endpoints carrying that same effective
+ * permission is write-graded, else "read". Grading by the SECTION's need
+ * rather than the failing endpoint keeps the fix to one round trip: the
+ * apply-mode preflight probes with reads, so a read-level advice on a
+ * permission the section also writes with (the OIDC GET/PUT pair) would
+ * have the user grant read, pass preflight, and then fail again on the
+ * write. A permission the section only reads with (the branch-policy list;
+ * its write siblings live on a different permission) still advises read.
+ */
+export function overrideAdviceLevel(
+  section: SectionMeta,
+  effective: SectionPermission,
+): "read" | "write" {
+  for (const endpoint of Object.values(section.endpoints)) {
+    if (
+      samePermission(endpointPermission(section, endpoint), effective) &&
+      endpointKind(endpoint) === "write"
+    ) {
+      return "write";
+    }
+  }
+  return "read";
+}
+
 export function throwFor(
   section: SectionMeta,
   method: string,
@@ -802,10 +857,13 @@ export function throwFor(
       : "";
     // The section's grant prose carries its caveats, so it stays the default;
     // an endpoint override names a DIFFERENT permission, so only then is the
-    // advice re-derived from the override.
+    // advice re-derived from the override - at the level the SECTION needs
+    // on that permission (see overrideAdviceLevel), so a denied read never
+    // asks for a write grant the section cannot use, and never advises a
+    // read grant a sibling write on the same permission would outgrow.
     const grant =
       effective !== undefined && effective !== section.permission
-        ? grantFor(effective)
+        ? grantFor(effective, undefined, overrideAdviceLevel(section, effective))
         : section.grant;
     throw new PermissionDenied(
       section.key,
