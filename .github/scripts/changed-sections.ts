@@ -45,6 +45,8 @@ const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   "custom-properties.ts": ["custom_properties"],
   // Kebab file name for the underscore section key.
   "deploy-keys.ts": ["deploy_keys"],
+  // Kebab file name for the longer underscore section key.
+  "secret-scanning-patterns.ts": ["secret_scanning_custom_patterns"],
   // roles.ts is the shared permission-vocabulary normalizer for both sections.
   "roles.ts": ["collaborators", "teams"],
   // secrets-engine.ts is the shared sealing/reconciliation engine, consumed
@@ -77,6 +79,7 @@ const KEYS_WITHOUT_MATCHING_FILE = new Set<SectionKey>([
   "actions_variables",
   "custom_properties",
   "deploy_keys",
+  "secret_scanning_custom_patterns",
 ]);
 
 /** src/sections/<file> -> the section key(s) a change to it can affect. */

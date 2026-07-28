@@ -1252,3 +1252,42 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(result.error.documentationUrl).toBe("https://docs.github.com/rest");
   });
 });
+
+describe("DELETE request bodies reach the wire", () => {
+  test("a DELETE payload transmits end-to-end through a real HTTP server", async () => {
+    // The secret-scanning custom-pattern bulk DELETE is the one endpoint
+    // whose DELETE carries a REQUIRED request body ({patterns, and this
+    // action's fixed post_delete_action}). tryRequest is method-agnostic,
+    // but octokit/undici dropping a DELETE body would surface as a 400 only
+    // deep inside the e2e suite - so this pins the transport property
+    // directly, against a real server rather than a fetch stub.
+    const received: Array<{ method: string; body: string }> = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        received.push({ method: request.method, body: await request.text() });
+        return new Response(null, { status: 204 });
+      },
+    });
+    try {
+      const client = new GithubApi("t", `http://localhost:${server.port}`, "2022-11-28", 1);
+      const result = await client.tryRequest(
+        "DELETE",
+        "/repos/o/r/secret-scanning/custom-patterns",
+        {
+          patterns: [{ pattern_id: 7, custom_pattern_version: "v2" }],
+          post_delete_action: "resolve_alerts",
+        },
+      );
+      expect(result).toEqual({ data: null });
+      expect(received).toHaveLength(1);
+      expect(received[0]?.method).toBe("DELETE");
+      expect(JSON.parse(received[0]?.body ?? "")).toEqual({
+        patterns: [{ pattern_id: 7, custom_pattern_version: "v2" }],
+        post_delete_action: "resolve_alerts",
+      });
+    } finally {
+      await server.stop(true);
+    }
+  });
+});

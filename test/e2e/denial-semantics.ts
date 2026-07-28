@@ -50,4 +50,5 @@ export const DENIAL_SEMANTICS: Record<SectionKey, DenialSemantics> = {
   // curated scenario pins the write-denied path.
   custom_properties: "absent",
   deploy_keys: "denied",
+  secret_scanning_custom_patterns: "denied",
 };

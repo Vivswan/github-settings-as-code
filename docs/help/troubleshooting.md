@@ -40,7 +40,34 @@ not a 403, on admin endpoints; GitHub hides the resource rather than admit
 it exists. The action treats both statuses as permission errors, and a
 404 denial appends "(a 404 here can also mean the resource does not
 exist)". Check the grant first. If the grant is right, check the resource:
-the repository slug, a branch name, a workflow file path.
+the repository slug, a branch name, a workflow file path. On the
+`secret_scanning_custom_patterns` endpoints a 404 has a third reading,
+which the denial message carries: secret scanning is not enabled for the
+repository (it requires GitHub Advanced Security on private repositories).
+Enabling scanning and declaring patterns cannot land in ONE apply under the
+default `on-missing-permission: fail`: the preflight barrier probes every
+declared section read-only before anything is written, so the patterns
+list 404s and aborts the run before the `repository` section could enable
+scanning via `security_and_analysis`. Either enable scanning first (a
+separate run, or by hand in the repository's security settings), or set
+`on-missing-permission: warn` for the bootstrap run - the first apply then
+enables scanning and skips the patterns section with a warning, and the
+next apply converges.
+
+## A 412 on secret scanning custom patterns
+
+What you see: a `secret_scanning_custom_patterns` write fails with a 412
+and the advice "the pattern changed on GitHub between this run's read and
+its write (stale custom_pattern_version); re-run the workflow".
+
+What it means: the pattern updates and deletes carry the version each
+pattern had when this run listed them, so a pattern someone edited on
+GitHub mid-run is not silently overwritten - GitHub rejects the stale
+write instead. Nothing is broken and nothing was clobbered.
+
+What to do: re-run the workflow. The fresh run reads the current versions
+and converges; if the 412 repeats, someone (or something) is editing the
+patterns concurrently on every run, and that editor is the thing to find.
 
 ## A 403 that is not about a grant
 
