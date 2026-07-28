@@ -432,10 +432,12 @@ export interface SectionModule<K extends SectionKey = SectionKey> extends Sectio
    * Loose zod shape for the declared value: only the natural keys the
    * handler needs are checked, and unknown fields pass through untouched,
    * so validation does not fight the passthrough-first forward-compatibility
-   * tenet. The sanctioned exception is a STRICT nested sub-object for a
-   * value whose endpoint offers no passthrough destination (actions.cache:
-   * each key is the entire body of its own endpoint), where an extra key
-   * can only be a typo.
+   * tenet. The sanctioned exceptions are STRICT nested sub-shapes for
+   * values whose endpoint offers no passthrough destination (actions.cache,
+   * where each key is the entire body of its own endpoint, and the
+   * environment secrets and deployment_protection_rules entries, whose
+   * write bodies are built from the named fields alone), where an extra
+   * key can only be a typo.
    */
   shape: z.ZodType;
   /**
