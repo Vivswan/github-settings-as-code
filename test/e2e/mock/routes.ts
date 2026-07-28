@@ -1501,10 +1501,12 @@ const HANDLERS: Record<string, Handler> = {
   // counter) and both write handlers answer 412 on a stale one, so a section
   // that reuses a version across writes - instead of re-reading - fails a
   // single-threaded e2e run instead of only failing against real GitHub.
-  // One asymmetry, spec-faithful: the bulk DELETE's per-pattern version is
-  // OPTIONAL upstream (only pattern_id is required), so a delete that omits
-  // it passes here - the section always SENDING the version is pinned by
-  // its unit test's payload assertion, not by this gate.
+  // Two escapes, both spec-faithful: a PATCH may send version: null (the
+  // body requires the key but marks it nullable - the no-concurrency form
+  // the section uses for a version-less live pattern), and the bulk
+  // DELETE's per-pattern version is OPTIONAL upstream (only pattern_id is
+  // required) - the section sending versions whenever it HAS them is pinned
+  // by its unit tests' payload assertions, not by this gate.
   "secret_scanning_custom_patterns.list": ({ state, query }) =>
     ok(slicePage(state.secret_scanning_patterns, query)),
   "secret_scanning_custom_patterns.create": ({ state, body }) => {
@@ -1555,7 +1557,12 @@ const HANDLERS: Record<string, Handler> = {
       return { status: 404, body: { message: "Not Found" } };
     }
     const payload = asObject(body);
-    if (payload.custom_pattern_version !== pattern.custom_pattern_version) {
+    // A null version skips the concurrency check (the body marks the key
+    // required but nullable); a present string must match the stored one.
+    if (
+      payload.custom_pattern_version !== null &&
+      payload.custom_pattern_version !== pattern.custom_pattern_version
+    ) {
       return SECRET_SCANNING_STALE_VERSION;
     }
     // The endpoint requires at least one updatable field alongside the
@@ -1826,6 +1833,9 @@ function secretScanningPatternFromCreate(state: MockState, payload: Json): Json 
     name,
     slug: secretScanningSlug(name),
     pattern: payload.pattern ?? "",
+    // ASSUMPTION, not spec: the enum documents no creation default. If real
+    // GitHub lands bulk-created patterns unpublished, the created-then-clean
+    // story overstates enforcement (COVERAGE documents the caveat).
     state: "published",
     push_protection_enabled: false,
     custom_pattern_version: mintSecretScanningVersion(state),

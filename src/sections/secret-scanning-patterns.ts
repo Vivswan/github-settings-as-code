@@ -13,9 +13,11 @@
  * audit trail.
  *
  * Writes ride the pattern's custom_pattern_version (optimistic
- * concurrency): the list GET supplies each live pattern's version, and the
- * PATCH/DELETE send it back, so a pattern edited on GitHub between this
- * run's read and its write answers 412 instead of clobbering the edit.
+ * concurrency) whenever GitHub supplies one: the list GET carries each live
+ * pattern's version, the PATCH/DELETE send it back, and a pattern edited on
+ * GitHub between this run's read and its write answers 412 instead of
+ * clobbering the edit. A version-less live pattern (the GET marks the field
+ * optional and nullable) writes without the check, as the API allows.
  */
 
 import { z } from "zod";
@@ -67,8 +69,11 @@ type UpdatableKey = (typeof UPDATABLE_KEYS)[number];
 const NOT_ENABLED_HINT =
   "a 404 can also mean secret scanning is not enabled for the repository (it requires GitHub Advanced Security on private repositories)";
 
-/** The 412 advice both versioned writes share (see the module doc). */
-const STALE_VERSION_HINT =
+/**
+ * The 412 advice both versioned writes share (see the module doc); exported
+ * so the troubleshooting guide's verbatim quote is test-pinned.
+ */
+export const STALE_VERSION_HINT =
   "the pattern changed on GitHub between this run's read and its write (stale custom_pattern_version); re-run the workflow";
 
 const ENDPOINTS = {
@@ -111,14 +116,23 @@ interface LivePattern {
  * Extract the fields the handler needs from one live list entry, loudly: an
  * entry without a string name or a numeric id cannot be reconciled at all,
  * so it is a contract violation, not something to skip. The version is
- * optional HERE (the GET marks it optional); the write paths demand it via
- * requireVersion, only when a write actually needs it.
+ * genuinely OPTIONAL (the GET marks it optional and nullable, and the write
+ * bodies accept a null or absent version): a version-less pattern simply
+ * forgoes optimistic concurrency, exactly where GitHub declines to offer it.
  */
 function liveFrom(entry: unknown): LivePattern {
   const raw = (entry ?? {}) as Record<string, unknown>;
   if (typeof raw.name !== "string" || typeof raw.id !== "number") {
     throw new Error(
       `secret_scanning_custom_patterns: the custom-pattern list returned an entry without a string "name" and numeric "id" (got ${JSON.stringify(entry)}). Check the "api-version" input against the GitHub REST docs for this endpoint`,
+    );
+  }
+  // string = concurrency token; null/absent = GitHub offers none. Anything
+  // else is off-contract and must not silently bypass the 412 protection.
+  const rawVersion = raw.custom_pattern_version;
+  if (rawVersion !== undefined && rawVersion !== null && typeof rawVersion !== "string") {
+    throw new Error(
+      `secret_scanning_custom_patterns: the custom-pattern list returned "${raw.name}" with a non-string custom_pattern_version (${JSON.stringify(rawVersion)}). Check the "api-version" input against the GitHub REST docs for this endpoint`,
     );
   }
   const fields: Partial<Record<UpdatableKey, unknown>> = {};
@@ -130,20 +144,9 @@ function liveFrom(entry: unknown): LivePattern {
   return {
     id: raw.id,
     name: raw.name,
-    version:
-      typeof raw.custom_pattern_version === "string" ? raw.custom_pattern_version : undefined,
+    version: typeof rawVersion === "string" ? rawVersion : undefined,
     fields,
   };
-}
-
-/** The version a PATCH/DELETE must send; its absence from the GET is a contract violation. */
-function requireVersion(live: LivePattern): string {
-  if (live.version === undefined) {
-    throw new Error(
-      `secret_scanning_custom_patterns: the custom-pattern list returned "${live.name}" without a string "custom_pattern_version", which the update/delete calls require. Check the "api-version" input against the GitHub REST docs for this endpoint`,
-    );
-  }
-  return live.version;
 }
 
 /** The POST body entry for one declared pattern: name, pattern, and the declared optionals. */
@@ -168,8 +171,23 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
       z.looseObject({
         name: z.string(),
         pattern: z.string(),
-        start_delimiter: z.string().optional(),
-        end_delimiter: z.string().optional(),
+        // min(1): "" cannot mean "clear the delimiter" - the PATCH updates
+        // provided fields only - so the spelling fails at document
+        // validation, before any repository is touched.
+        start_delimiter: z
+          .string()
+          .min(
+            1,
+            "a delimiter cannot be cleared with an empty string; remove the pattern and redeclare it without the field instead",
+          )
+          .optional(),
+        end_delimiter: z
+          .string()
+          .min(
+            1,
+            "a delimiter cannot be cleared with an empty string; remove the pattern and redeclare it without the field instead",
+          )
+          .optional(),
         must_match: z.array(z.string()).optional(),
         must_not_match: z.array(z.string()).optional(),
       }),
@@ -200,15 +218,15 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
     const live = (await listAll(ctx, this, ENDPOINTS.list)).map(liveFrom);
     const liveByName = new Map(live.map((p) => [p.name, p]));
 
-    // Resolve EVERYTHING before the first write - liveFrom and
-    // requireVersion throw on a contract violation, and both run in THIS
-    // planning pass - so a failure between the bulk POST, the PATCHes, and
-    // the bulk DELETE can only be GitHub's own rejection, never a
-    // half-applied run this section could have avoided.
+    // Resolve EVERYTHING before the first write - liveFrom throws on a
+    // contract violation, and every extraction runs in THIS planning pass -
+    // so a failure between the bulk POST, the PATCHes, and the bulk DELETE
+    // can only be GitHub's own rejection, never a half-applied run this
+    // section could have avoided.
     const toCreate: SecretScanningPatternConfig[] = [];
     const toUpdate: Array<{
       live: LivePattern;
-      version: string;
+      version: string | undefined;
       divergent: Record<string, unknown>;
     }> = [];
     const declaredNames = new Set(desired.map((p) => p.name));
@@ -248,23 +266,23 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
         }
         divergent[key] = declaredValue;
         if (ctx.check) {
+          // JSON.stringify(undefined) is not a string; spell absence out.
+          const liveRendered = liveValue === undefined ? "(absent)" : JSON.stringify(liveValue);
           result.drift.push(
-            `secret_scanning_custom_patterns[${declared.name}].${key}: declared ${JSON.stringify(declaredValue)} != live ${JSON.stringify(liveValue)}; apply will set the declared value`,
+            `secret_scanning_custom_patterns[${declared.name}].${key}: declared ${JSON.stringify(declaredValue)} != live ${liveRendered}; apply will set the declared value`,
           );
         }
       }
       if (Object.keys(divergent).length > 0) {
-        toUpdate.push({ live: existing, version: requireVersion(existing), divergent });
+        toUpdate.push({ live: existing, version: existing.version, divergent });
       }
     }
 
     // Undeclared live patterns - a renamed-away one included: a declared
     // name matching nothing stays a create even when an undeclared live
     // pattern carries identical fields (no rename inference; the name is
-    // the identity). The version is required in BOTH modes: check would
-    // otherwise print a clean will-DELETE drift line for a version-less
-    // pattern that apply then throws on.
-    const toDelete: Array<{ live: LivePattern; version: string }> = [];
+    // the identity).
+    const toDelete: Array<{ live: LivePattern; version: string | undefined }> = [];
     for (const pattern of live) {
       if (declaredNames.has(pattern.name)) {
         continue;
@@ -275,13 +293,12 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
         );
         continue;
       }
-      const version = requireVersion(pattern);
       if (ctx.check) {
         result.drift.push(
           `secret_scanning_custom_patterns[${pattern.name}]: undeclared - not in the settings file, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it`,
         );
       } else {
-        toDelete.push({ live: pattern, version });
+        toDelete.push({ live: pattern, version: pattern.version });
       }
     }
     if (ctx.check) {
@@ -301,7 +318,10 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
     for (const { live: existing, version, divergent } of toUpdate) {
       await call(ctx, this, ENDPOINTS.update, {
         params: { pattern_id: String(existing.id) },
-        payload: { custom_pattern_version: version, ...divergent },
+        // The PATCH body REQUIRES the version key but accepts null: a
+        // version-less live pattern (predating the versioning field) writes
+        // without the concurrency check, as GitHub itself allows.
+        payload: { custom_pattern_version: version ?? null, ...divergent },
         describe: `updating secret scanning pattern "${existing.name}"`,
       });
       result.changes.push(`updated secret scanning custom pattern "${existing.name}"`);
@@ -309,13 +329,15 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
     if (toDelete.length > 0) {
       // ONE bulk DELETE. post_delete_action is ALWAYS "resolve_alerts", by
       // policy: this action never destroys alert history (upstream defaults
-      // to delete_alerts), and there is no user knob.
+      // to delete_alerts), and there is no user knob. A version-less
+      // pattern's entry omits the optional version field.
       await call(ctx, this, ENDPOINTS.remove, {
         payload: {
-          patterns: toDelete.map((p) => ({
-            pattern_id: p.live.id,
-            custom_pattern_version: p.version,
-          })),
+          patterns: toDelete.map((p) =>
+            p.version === undefined
+              ? { pattern_id: p.live.id }
+              : { pattern_id: p.live.id, custom_pattern_version: p.version },
+          ),
           post_delete_action: "resolve_alerts",
         },
         describe: `deleting undeclared secret scanning pattern(s) ${toDelete.map((p) => `"${p.live.name}"`).join(", ")}`,
