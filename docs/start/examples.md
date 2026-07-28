@@ -308,5 +308,6 @@ labels:
 [Check mode](../operate/check-mode.md) is the safe way to try any of these files
 against a real repository before applying. [Multi-repo mode](../operate/multi-repo.md)
 reuses the same documents across a fleet, and
-[the undeclared policy](../reference/undeclared-policy.md) explains the `undeclared` knob
-several of the examples above set.
+[the undeclared policy](../reference/undeclared-policy.md) explains what happens
+to live resources these files do not declare, and the `undeclared` knob
+that changes it.
