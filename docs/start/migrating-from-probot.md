@@ -4,11 +4,11 @@ This page walks through moving a repository from the
 [Probot Settings app](https://github.com/repository-settings/app) to this
 action. The short version, and the claim the contract tests pin, is the
 [README's migration paragraph](../../README.md#migrating-from-the-probot-settings-app);
-the full side-by-side comparison is in
-[COVERAGE.md](../../COVERAGE.md#compared-to-the-probot-settings-app). If this
-page and those two ever disagree, they win. What this page adds is the
-walkthrough: what to expect, in what order to do things, and how to read the
-first check run.
+the full side-by-side comparison sits right next to it, under
+[Compared to the Probot Settings app](../../README.md#compared-to-the-probot-settings-app).
+If this page and the README ever disagree, the README wins. What this page
+adds is the walkthrough: what to expect, in what order to do things, and
+how to read the first check run.
 
 ## Why migrate
 
@@ -17,11 +17,11 @@ something goes wrong it does nothing: there is no run log a repository owner
 can open, so a misconfigured or uninstalled app looks exactly like a healthy
 one. This action is a step in your own workflow instead. Every apply is a
 visible run with a log, annotations, a step summary, and a red X on failure,
-and `mode: check` reports every difference between the file and the live
-repository without writing anything. On top of that you get rulesets, a
+and `mode: check` reports drift between the file and the live
+repository without changing any settings. On top of that you get rulesets, a
 partial-success policy, a token you scope yourself, and per-call debug
 tracing. The
-[comparison table in COVERAGE.md](../../COVERAGE.md#compared-to-the-probot-settings-app)
+[comparison table in the README](../../README.md#compared-to-the-probot-settings-app)
 lists the differences one by one.
 
 ## What carries over as-is
@@ -44,17 +44,18 @@ as-is.
 The delivery model is a workflow plus a fine-grained PAT, not an app
 installation. You mint the token, scope it to exactly the sections your file
 declares, and save it as a repository secret; permission errors name the
-exact grant to add. See [Token permissions](../../README.md#token-permissions).
+exact grant to add. See [Token permissions](../reference/permissions.md).
 
 Failures are loud. An unknown top-level key in the settings file is a hard
 error, not a silent no-op, because a misspelled section that quietly did
 nothing is the app's failure mode this action exists to replace. Prefix a
-deliberate private key with an underscore to keep notes in the file. Three
-sections also reject entry keys they do not recognize: in `collaborators`
-and `teams` a misspelled `permission` key would silently grant the default
-role, and in `workflows` the enable/disable calls send no payload, so an
-unrecognized key would silently do nothing. See
-[Forward compatibility](../../README.md#forward-compatibility).
+deliberate private key with an underscore to keep notes in the file. The
+closed sections also reject entry keys they do not recognize: in
+`collaborators` and `teams` a misspelled `permission` key would silently
+grant the default role, and in `workflows` the enable/disable calls send
+no payload, so an unrecognized key would silently do nothing.
+[Forward compatibility](../reference/forward-compatibility.md) lists the
+full closed set.
 
 The engine is stateless. There is no state file and nothing is stored
 between runs; resources are matched by their natural names, and only declared
@@ -68,11 +69,13 @@ explicit opt-in (`undeclared: delete`), so removing protection stays a
 deliberate action.
 
 Deletions still exist where the app had them: undeclared labels are deleted
-by default
-(Probot parity), and so are undeclared autolinks and collaborators. Nothing
-else is ever deleted implicitly (see
-[Semantics](../../README.md#semantics)), and the check run lists everything an
-apply would delete before you let it.
+by default (Probot parity), and so are undeclared autolinks, collaborators,
+and Actions variables - plus, within a declared per-environment key, that
+environment's variables and deployment branch-policy patterns. Nothing else
+is ever deleted implicitly; the README's
+[Sections table](../../README.md#sections) states each section's default in
+its Undeclared default column, and the check run lists everything an apply
+would delete before you let it.
 
 ## Step by step
 
@@ -82,7 +85,7 @@ apply would delete before you let it.
    settings.
 3. Create a fine-grained PAT and save it as a repository secret. Grant only
    the permissions for the sections your file declares; the
-   [getting started guide](../start/getting-started.md) walks through this.
+   [getting started guide](getting-started.md) walks through this.
 4. Add the workflow with `mode: check` for the first run:
 
 ```yaml
@@ -143,9 +146,9 @@ The app's `extends` inheritance, where repositories pull shared settings from
 an org settings repository, maps to this action's multi-repo mode: one admin
 repository applies a `defaults-file` merged under per-repo files
 (`repos-dir`) or under each repository's own settings.yml (`repos`), with no
-hosted app in the loop. See
-[Multi-repo mode](../../README.md#multi-repo-mode) for the pinned behavior and
-the [multi-repo guide](../operate/multi-repo.md) for the walkthrough.
+hosted app in the loop. The
+[multi-repo guide](../operate/multi-repo.md) owns the rules and the
+walkthrough.
 
 ## At org scale: the shadow run
 

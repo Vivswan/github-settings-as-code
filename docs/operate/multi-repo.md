@@ -1,11 +1,13 @@
 # Multi-repo mode
 
-One workflow in an admin repository can manage settings for a whole fleet.
-This page walks through choosing targets, layering a defaults file, opting a
-single repository out, and one worked fleet pattern. The normative rules (the
-input semantics, the discovery filters, precedence) live in the README's
-[Multi-repo mode](../../README.md#multi-repo-mode) section; this page shows how
-the pieces fit together in practice.
+One workflow in an admin repository can manage settings for a whole fleet,
+in the spirit of
+[safe-settings](https://github.com/github-community-projects/safe-settings)
+but without a hosted app. This page owns the rules of that mode - the two
+sourcing modes and their precedence, the discovery filters, the defaults
+merge, and what `null` means in it - and walks through choosing targets,
+layering a defaults file, opting a single repository out, and one worked
+fleet pattern.
 
 ## How targets are chosen
 
@@ -19,10 +21,8 @@ Two sourcing modes exist, and one run can use both:
 - `repos` lists `owner/name` targets directly, comma- or newline-separated.
   Each of these is applied from its own `.github/settings.yml` on its default
   branch. `repos: "*"` alone discovers every repository the token's user
-  owns by default (the `affiliation` input widens or moves discovery to
-  collaborator or organization repositories), filtered by the
-  `visibility`, `archived`, `forks`, `exclude`, and `topics` inputs
-  described in the [README](../../README.md#multi-repo-mode).
+  owns (needs a user PAT; the workflow `GITHUB_TOKEN` cannot enumerate),
+  filtered by the six discovery inputs described below.
 
 When the same repository appears in both, the repos-dir file wins and the run
 says so with a notice. The checked-in file is the curated, code-reviewed
@@ -66,6 +66,30 @@ in check mode). The step summary shows a fleet rollup table plus one section
 table per target, and the `repos-result` output carries the per-repo results
 as JSON.
 
+The `sections` and `required-sections` inputs apply to all targets alike,
+and the token needs the same per-section permissions (see the README's
+[Sections table](../../README.md#sections)) on every target repository.
+
+## Discovery filters
+
+Discovery takes six filter inputs that apply only to `repos: "*"`; setting
+any of them in another mode fails the run. Repositories a filter drops are
+reported in one aggregate notice per reason.
+
+- `visibility` keeps public, private, or internal repositories.
+- `archived` defaults to `skip`, because settings writes fail on archived
+  repositories; `archived: only` is mostly useful with `mode: check`.
+- `forks` includes, excludes, or keeps only forks.
+- `topics` keeps repositories carrying at least one listed topic, so a
+  single marker topic can opt repositories in.
+- `exclude` takes wildcard patterns where `*` matches anything: a pattern
+  containing `/` is matched against the full `owner/name`, any other
+  against the name alone, case-insensitively.
+- `affiliation` selects which relationships to the token's user qualify:
+  `owner` (the default), `collaborator`, or `organization_member`. The
+  list replaces the default, so widening discovery beyond owned
+  repositories takes `owner,collaborator`.
+
 ## Layering a defaults file
 
 `defaults-file` names a YAML settings document merged under every processed
@@ -73,7 +97,8 @@ target's settings, with the target's keys winning (a repository with no
 settings file is skipped before the merge, defaults included). Objects
 merge recursively, key by
 key. Arrays and scalars replace wholesale; the merge never concatenates
-lists.
+lists, because an array is always a full payload, matching check-mode
+semantics.
 
 Say the defaults file declares the house rules:
 
@@ -116,7 +141,7 @@ merge: the target's list replaced the defaults' list, so `bug` is not
 declared for this repository at all. Since the labels section deletes
 undeclared labels by default, a target that wants the fleet labels plus its
 own must repeat the fleet labels in its list. The alternative is the
-[undeclared policy](../concepts/undeclared-policy.md): a defaults file declaring
+[undeclared policy](../reference/undeclared-policy.md): a defaults file declaring
 `labels: {undeclared: keep, entries: [...]}` hands every target the keep
 policy, so a target that declares only its own labels leaves the fleet
 labels (and any others) in place instead of deleting them - unmanaged, but
@@ -144,8 +169,7 @@ the defaults do not declare it, the `null` passes through to the engine,
 where only some sections give it a meaning of its own: `pages: null` then
 disables the Pages site, and `interaction_limits: null` clears a live
 limit, while a section without null semantics (such as `actions`) rejects
-it as a validation error. The
-[README](../../README.md#multi-repo-mode) states the normative rule.
+it as a validation error.
 
 ## Fleet pattern: disabling Actions on satellite repositories
 
@@ -177,6 +201,6 @@ section.
 When a public admin repository manages private targets, the default
 `private-repos: redact` hides their slugs and details from the run's public
 logs, summary, and outputs, and the `private-report` input can deliver each
-target's full report over a private channel; the README's
-[Private repositories](../../README.md#private-repositories) section covers
+target's full report over a private channel; the
+[private repositories guide](private-repositories.md) covers
 what is hidden, what stays visible, and how to read the full detail.

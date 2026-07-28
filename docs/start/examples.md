@@ -5,7 +5,7 @@ through the real document validation in CI, so the shapes stay current. What
 each section manages, which token permission it needs, and whether its
 undeclared entries are deleted or kept is specified in the
 [README Sections table](../../README.md#sections); the cross-section rules live
-under [Semantics](../../README.md#semantics). This page shows shapes, not
+under [Semantics](../reference/semantics.md). This page shows shapes, not
 behavior.
 
 One rule frames everything below: only declared keys are applied or
@@ -220,7 +220,7 @@ secret_scanning_custom_patterns:
 In `rulesets`, short ref names are auto-prefixed (`staging` becomes
 `refs/heads/staging`) and `~DEFAULT_BRANCH` passes through; rule parameters
 go to the API verbatim, so rule types GitHub ships tomorrow work unchanged
-(see [Forward compatibility](../../README.md#forward-compatibility)).
+(see [Forward compatibility](../reference/forward-compatibility.md)).
 `custom_properties` sets values for properties the organization has already
 defined (a `value: null` unsets one), so it applies to org-owned
 repositories only - on a personal account the section skips with a note.
@@ -281,7 +281,7 @@ branches:
 
 Under a multi-repo defaults file, a target's `null` section can instead mean
 "opt out of the defaults for this repository"; the rules for that merge are
-in [Multi-repo mode](../../README.md#multi-repo-mode). A few individual fields
+in the [multi-repo guide](../operate/multi-repo.md). A few individual fields
 accept `null` as a value of their own too, such as `pages.cname` to remove
 a custom domain; the [published schema](../../lib/settings.schema.json) marks
 those.
@@ -291,7 +291,7 @@ those.
 Unknown top-level sections are hard errors, so a typo cannot silently do
 nothing (the one exception: under a `sections` allowlist, unknown keys
 outside the allowlist warn instead of failing, which eases version skew;
-the [troubleshooting guide](../help/troubleshooting.md) covers it). Keys starting
+the [troubleshooting guide](../operate/troubleshooting.md) covers it). Keys starting
 with an underscore are the escape hatch: they are ignored, which makes
 them usable as private notes.
 
@@ -308,5 +308,5 @@ labels:
 [Check mode](../operate/check-mode.md) is the safe way to try any of these files
 against a real repository before applying. [Multi-repo mode](../operate/multi-repo.md)
 reuses the same documents across a fleet, and
-[the undeclared policy](../concepts/undeclared-policy.md) explains the `undeclared` knob
+[the undeclared policy](../reference/undeclared-policy.md) explains the `undeclared` knob
 several of the examples above set.

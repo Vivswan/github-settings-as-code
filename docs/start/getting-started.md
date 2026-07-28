@@ -24,7 +24,7 @@ permissions once an organization is selected.
 
 You can also grant less. The token only needs the permissions for the
 sections your settings file declares, and
-[Token permissions](../../README.md#token-permissions) explains which grant maps
+[Token permissions](../reference/permissions.md) explains which grant maps
 to which section.
 
 Save the token as a repository secret. The examples below call it
@@ -95,7 +95,7 @@ The schedule catches drift: in check mode a weekly run turns red when the
 live settings diverge from the file, and after the switch to apply it
 re-asserts the declared keys and reverts anything changed through the UI in
 the meantime (apply is convergent, see
-[Semantics](../../README.md#semantics)).
+[Semantics](../reference/semantics.md)).
 
 ## 4. Run check mode first
 
@@ -157,4 +157,4 @@ input.
 The [examples cookbook](examples.md) has a full-featured settings file and
 the null semantics. [Multi-repo mode](../operate/multi-repo.md) scales this setup from
 one repository to a fleet. When a run fails,
-[troubleshooting](../help/troubleshooting.md) covers the common failure shapes.
+[troubleshooting](../operate/troubleshooting.md) covers the common failure shapes.

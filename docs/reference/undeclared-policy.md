@@ -6,12 +6,12 @@ ones: `labels`, `autolinks`, `collaborators`, `actions_variables`,
 `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, and
 `secret_scanning_custom_patterns`. Each has
 a default answer for a live resource the settings file does not declare,
-and each accepts a wrapped form that overrides it per file. This page
-covers the knob, the defaults per section, and how it layers with a
-multi-repo defaults file.
-The normative claims live in the README's
-[Sections table](../../README.md#sections) and
-[Undeclared resources](../../README.md#undeclared-resources) section.
+and each accepts a wrapped form that overrides it per file. This page is
+the normative statement of that policy: the knob, the defaults per
+section, and how it layers with a multi-repo defaults file. The README's
+[Sections table](../../README.md#sections) states each section's default
+in its Undeclared default column; this page says what the defaults mean
+and how to change them.
 
 ## The two forms
 

@@ -53,6 +53,6 @@ green scheduled check is exactly the claim the auditor needs. For a fleet
 with private repositories, add `private-repos: redact` (the default) and
 deliver the full detail through `private-report: artifact` with an age
 key, which keeps slugs and settings out of the public run while preserving
-the evidence; the README's
-[Private repositories](../../README.md#private-repositories) section covers
+the evidence; the
+[private repositories guide](../operate/private-repositories.md) covers
 the setup.
