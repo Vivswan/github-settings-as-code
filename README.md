@@ -9,7 +9,7 @@ silently.
 ## Usage
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token):
-   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
+   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
    starts you off with every repository permission the
    [Sections](#sections) table can need. Pick the resource owner and
    repositories, and add Members: read by hand when the owner is an
