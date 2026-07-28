@@ -1090,7 +1090,22 @@ describe("handler statuses obey the realism rule", () => {
           workflows: [{ id: 9, name: "CI", path: ".github/workflows/ci.yml", state: "active" }],
           collaborators: [{ login: "carol", role_name: "write" }],
           milestones: [{ number: 1, title: "v1", state: "open" }],
-          environments: { prod: { name: "prod", protection_rules: [] } },
+          environments: {
+            prod: { name: "prod", protection_rules: [] },
+            // "gated" enables custom branch policies, so the pattern
+            // endpoints serve it; "prod" (flag absent) exercises their 404s.
+            gated: {
+              name: "gated",
+              protection_rules: [],
+              deployment_branch_policy: {
+                protected_branches: false,
+                custom_branch_policies: true,
+              },
+            },
+          },
+          environment_branch_policies: {
+            gated: [{ id: 77, name: "release/*", type: "branch" }],
+          },
           environment_variables: {
             prod: [
               {
@@ -1238,6 +1253,62 @@ describe("handler statuses obey the realism rule", () => {
         "DELETE",
         `/repos/${OWNER}/${REPO}/environments/prod/variables/SEEDED`,
       ], // 404 already gone
+      // deployment branch policies: list (200, flag-off 404, missing-env 404),
+      // create (200, duplicate 303, invalid-type 422, flag-off 404), remove
+      // (204 + 404). NOTE: this tuple list is hand-maintained and deliberately
+      // PARTIAL (whole endpoint families - secrets, webhooks, variables at the
+      // repo level - are exercised by their own suites), so a completeness
+      // sweep against allEndpoints() cannot live here; a new handler's
+      // branches must be added by hand.
+      [
+        "environments.listPolicies",
+        "GET",
+        `/repos/${OWNER}/${REPO}/environments/gated/deployment-branch-policies`,
+      ],
+      [
+        "environments.listPolicies",
+        "GET",
+        `/repos/${OWNER}/${REPO}/environments/prod/deployment-branch-policies`,
+      ], // 404 custom_branch_policies off
+      [
+        "environments.listPolicies",
+        "GET",
+        `/repos/${OWNER}/${REPO}/environments/ghost/deployment-branch-policies`,
+      ], // 404 missing environment
+      [
+        "environments.createPolicy",
+        "POST",
+        `/repos/${OWNER}/${REPO}/environments/gated/deployment-branch-policies`,
+        { name: "v*", type: "tag" },
+      ],
+      [
+        "environments.createPolicy",
+        "POST",
+        `/repos/${OWNER}/${REPO}/environments/gated/deployment-branch-policies`,
+        { name: "release/*" },
+      ], // 303 duplicate name pattern (declared, no body)
+      [
+        "environments.createPolicy",
+        "POST",
+        `/repos/${OWNER}/${REPO}/environments/gated/deployment-branch-policies`,
+        { name: "bad", type: "wildcard" },
+      ], // 422 invalid type (GitHub enforces the enum server-side)
+      [
+        "environments.createPolicy",
+        "POST",
+        `/repos/${OWNER}/${REPO}/environments/prod/deployment-branch-policies`,
+        { name: "release/*" },
+      ], // 404 custom_branch_policies off
+      [
+        "environments.removePolicy",
+        "DELETE",
+        `/repos/${OWNER}/${REPO}/environments/gated/deployment-branch-policies/77`,
+      ],
+      [
+        "environments.removePolicy",
+        "DELETE",
+        `/repos/${OWNER}/${REPO}/environments/gated/deployment-branch-policies/999`,
+      ], // 404 unknown id
       // autolinks: list, create, remove (both)
       ["autolinks.list", "GET", `/repos/${OWNER}/${REPO}/autolinks`],
       [

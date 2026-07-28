@@ -55,6 +55,13 @@ export interface LiveState {
   environments?: Record<string, Json>;
   /** Per-environment Actions variables (GET shape), keyed by environment name. */
   environment_variables?: Record<string, Json[]>;
+  /**
+   * Per-environment deployment branch-policy patterns (GET shape:
+   * {id, name, type}), keyed by environment name. Served only while the
+   * environment's stored deployment_branch_policy enables
+   * custom_branch_policies (the endpoints 404 otherwise, like GitHub).
+   */
+  environment_branch_policies?: Record<string, Json[]>;
   /** Autolinks, replaces the baseline. */
   autolinks?: Json[];
   /** GET /actions/permissions body. */
@@ -151,6 +158,8 @@ export interface MockState {
   branches: string[];
   environments: Record<string, Json>;
   environment_variables: Record<string, Json[]>;
+  /** Per-environment deployment branch-policy patterns, keyed by environment name. */
+  environment_branch_policies: Record<string, Json[]>;
   autolinks: Json[];
   actions_permissions: Json;
   selected_actions: Json;
@@ -320,6 +329,9 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     branches: ls.branches ? clone(ls.branches) : [],
     environments: ls.environments ? clone(ls.environments) : {},
     environment_variables: ls.environment_variables ? clone(ls.environment_variables) : {},
+    environment_branch_policies: ls.environment_branch_policies
+      ? clone(ls.environment_branch_policies)
+      : {},
     autolinks: ls.autolinks ? clone(ls.autolinks) : [],
     actions_permissions: ls.actions_permissions ? clone(ls.actions_permissions) : {},
     selected_actions: ls.selected_actions ? clone(ls.selected_actions) : {},

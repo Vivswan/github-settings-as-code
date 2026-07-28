@@ -65,11 +65,19 @@ const CODE_SCANNING_CAVEAT =
 const ACTIONS_OIDC_CAVEAT =
   'the "oidc_customization_sub" key alone instead needs "Actions" (read and write)';
 
+// The caveat environments appends: its deployment branch-policy pattern
+// endpoints carry permission overrides (Actions for the list read,
+// Administration for the writes), so the section grant names the extra
+// grants wherever an environments endpoint is denied.
+const ENVIRONMENTS_POLICIES_CAVEAT =
+  'a declared "deployment_branch_policies" key additionally needs "Actions" (read) and "Administration" (read and write)';
+
 // The per-section caveats grantFor appends; the derivation test and the
 // literal snapshot both read this one map.
 const GRANT_CAVEATS: Record<string, string> = {
   code_scanning_default_setup: CODE_SCANNING_CAVEAT,
   actions: ACTIONS_OIDC_CAVEAT,
+  environments: ENVIRONMENTS_POLICIES_CAVEAT,
 };
 
 // The exact grant prose each section shows in permission errors, captured
@@ -80,7 +88,7 @@ const EXPECTED_GRANT: Record<string, string> = {
   labels: `grant "Issues" (read and write) under the PAT's Repository permissions`,
   rulesets: `grant "Administration" (read and write) under the PAT's Repository permissions`,
   branches: `grant "Administration" (read and write) under the PAT's Repository permissions`,
-  environments: `grant "Environments" (read and write) under the PAT's Repository permissions`,
+  environments: `grant "Environments" (read and write) under the PAT's Repository permissions; ${ENVIRONMENTS_POLICIES_CAVEAT}`,
   autolinks: `grant "Administration" (read and write) under the PAT's Repository permissions`,
   actions: `grant "Administration" (read and write) under the PAT's Repository permissions; ${ACTIONS_OIDC_CAVEAT}`,
   actions_secrets: `grant "Secrets" (read and write) under the PAT's Repository permissions`,
@@ -312,8 +320,10 @@ describe("section endpoints", () => {
     // An override equal to the section permission would be redundant; this
     // guards against redundant or stray overrides creeping in. Exactly these
     // endpoints in the whole registry legitimately override: the branches
-    // probe (Contents), the teams org read (Members), and the OIDC subject
-    // claim pair (Actions instead of Administration).
+    // probe (Contents), the teams org read (Members), the OIDC subject
+    // claim pair (Actions instead of Administration), and the environments
+    // deployment branch-policy patterns (Actions for the list read,
+    // Administration for the writes).
     const overridden = Object.entries(allEndpoints())
       .filter(([, endpoint]) => endpoint.permission !== undefined)
       .map(([key]) => key);
@@ -321,6 +331,9 @@ describe("section endpoints", () => {
       "actions.getOidcSub",
       "actions.putOidcSub",
       "branches.branchProbe",
+      "environments.createPolicy",
+      "environments.listPolicies",
+      "environments.removePolicy",
       "teams.org",
     ]);
   });
