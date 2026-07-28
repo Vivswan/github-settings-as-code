@@ -104,6 +104,7 @@ const EXPECTED_GRANT: Record<string, string> = {
   interaction_limits: `grant "Administration" (read and write) under the PAT's Repository permissions`,
   actions_variables: `grant "Variables" (read and write) under the PAT's Repository permissions`,
   webhooks: `grant "Webhooks" (read and write) under the PAT's Repository permissions`,
+  custom_properties: `grant "Custom properties" (read and write) under the PAT's Repository permissions`,
 };
 
 describe("section permissions", () => {
@@ -322,10 +323,12 @@ describe("section endpoints", () => {
     // guards against redundant or stray overrides creeping in. Exactly these
     // endpoints in the whole registry legitimately override: the branches
     // probe (Contents), the teams org read (Members), the OIDC subject
-    // claim pair (Actions instead of Administration), and the environments
+    // claim pair (Actions instead of Administration), the environments
     // deployment branch-policy patterns and custom deployment protection
     // rules (Actions for the list reads, Administration for the
-    // available-Apps read and the writes).
+    // available-Apps read and the writes), and the custom_properties reads
+    // (the org probe is public and the values GET is Metadata-gated only,
+    // so both are "none").
     const overridden = Object.entries(allEndpoints())
       .filter(([, endpoint]) => endpoint.permission !== undefined)
       .map(([key]) => key);
@@ -333,6 +336,8 @@ describe("section endpoints", () => {
       "actions.getOidcSub",
       "actions.putOidcSub",
       "branches.branchProbe",
+      "custom_properties.list",
+      "custom_properties.org",
       "environments.createPolicy",
       "environments.createProtectionRule",
       "environments.listPolicies",

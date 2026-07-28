@@ -21,7 +21,7 @@ import {
 import { undeclaredPolicy } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { LiveState } from "./mock/state.js";
-import { PROTECTION_RULE_APPS } from "./mock/state.js";
+import { CUSTOM_PROPERTY_DEFINITIONS, PROTECTION_RULE_APPS } from "./mock/state.js";
 import type { Rng } from "./prng.js";
 import {
   type DenialStyle,
@@ -630,6 +630,46 @@ function genWebhooks(rng: Rng): EntriesForm {
   return maybeWrapUndeclared(rng, entries);
 }
 
+/**
+ * Custom property values, drawn ONLY from CUSTOM_PROPERTY_DEFINITIONS (the
+ * mock's org-level definition fixture, shared with the values PATCH handler)
+ * with type-appropriate values, so a generated declaration never trips the
+ * undefined-property 422 the oracle does not model. A small null draw
+ * exercises the unset path (a declared null over an empty live baseline is
+ * simply already-converged).
+ */
+function genCustomProperties(rng: Rng): EntriesForm {
+  const entries: Json[] = [];
+  for (const definition of CUSTOM_PROPERTY_DEFINITIONS) {
+    if (!rng.bool(0.6)) {
+      continue;
+    }
+    let value: Json[keyof Json];
+    if (rng.bool(0.15)) {
+      value = null;
+    } else if (definition.value_type === "string") {
+      value = rng.pick(["platform", "payments", "infra"]);
+    } else if (definition.value_type === "true_false") {
+      // Both spellings on purpose: a declared boolean must normalize to the
+      // "true"/"false" string GitHub stores.
+      value = rng.pick([true, false, "true", "false"] as const);
+    } else {
+      const allowed = [...(definition.allowed_values ?? [])];
+      const picked = allowed.slice(0, rng.int(allowed.length) + 1);
+      // Sometimes reversed: multi_select compares order-insensitively.
+      value = rng.bool(0.5) ? picked : picked.reverse();
+    }
+    entries.push({ property_name: definition.property_name, value });
+  }
+  if (entries.length === 0) {
+    const definition = rng.pick(
+      CUSTOM_PROPERTY_DEFINITIONS.filter((d) => d.value_type === "string"),
+    );
+    entries.push({ property_name: definition.property_name, value: "platform" });
+  }
+  return maybeWrapUndeclared(rng, entries);
+}
+
 /** The top-level sections whose entries are {name, value: $NAME} secret lists. */
 const SECRET_LIST_SECTIONS = [
   "actions_secrets",
@@ -748,6 +788,41 @@ export function suppressMaskedEnvironmentOverrides(
   }
 }
 
+/**
+ * Strip a declared `custom_properties` section when the drawn mask denies the
+ * custom_properties resource OUTRIGHT. The section's reads are
+ * permission-"none" (the values GET is Metadata-gated only, the org probe is
+ * public), so they can never be denied - but the oracle's grade-none fold
+ * assumes a denied section's READ is deniable (under the 403 style it
+ * predicts a preflight denial that cannot happen). A "read" grade stays: the
+ * reads pass and the PATCH is denied mid-apply, which the "absent" semantics
+ * model exactly. The curated custom-properties-write-denied scenario pins
+ * the denial path this strip removes from the random stream. When the
+ * section is the ONLY one declared, the mask entry is softened to "read"
+ * instead, so the scenario never degenerates to an empty settings document.
+ * The strip itself consumes no draws and generation stays deterministic per
+ * seed - but it DOES shorten the section list, and later per-element draws
+ * (requiredSections, the allowlist roll) walk that list, so draw alignment
+ * between a stripped and an unstripped run of the same seed is NOT
+ * preserved. That is fine: the strip is itself a pure function of the
+ * seed's own mask roll, so every replay of a seed strips identically.
+ */
+export function suppressMaskedCustomProperties(
+  settings: Json,
+  mask: Partial<Record<MaskKey, MaskGrade>>,
+  sections: SectionKey[],
+): void {
+  if ((mask.custom_properties ?? "write") !== "none" || settings.custom_properties === undefined) {
+    return;
+  }
+  if (sections.length > 1) {
+    delete settings.custom_properties;
+    sections.splice(sections.indexOf("custom_properties"), 1);
+  } else {
+    mask.custom_properties = "read";
+  }
+}
+
 const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   repository: genRepository,
   labels: genLabels,
@@ -768,6 +843,7 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   interaction_limits: genInteractionLimits,
   actions_variables: genActionsVariables,
   webhooks: genWebhooks,
+  custom_properties: genCustomProperties,
 };
 
 /** A valid-shaped settings value for one section. */
@@ -1054,6 +1130,7 @@ const ARRAY_SECTIONS = [
   "milestones",
   "actions_variables",
   "webhooks",
+  "custom_properties",
 ] as const satisfies readonly SectionKey[];
 
 /** The sections whose settings value is a plain record (anyRecord shapes). */
@@ -1094,6 +1171,7 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   // webhooks' natural key is the nested config.url, but the required
   // entry-level field the shape enforces is `config` itself.
   webhooks: "config",
+  custom_properties: "property_name",
 };
 
 /**
@@ -1372,6 +1450,10 @@ export const SECTION_PRIMARY_READ = {
   dependabot_secrets: "dependabot_secrets.list",
   codespaces_secrets: "codespaces_secrets.list",
   webhooks: "webhooks.list",
+  // The values GET runs right after the org probe, in both modes, whenever
+  // the section is declared on an org owner (the fault batteries pin
+  // owner_kind: "org", so the probe never diverts it).
+  custom_properties: "custom_properties.list",
 } as const satisfies Partial<Record<SectionKey, string>>;
 
 export type FaultableSection = keyof typeof SECTION_PRIMARY_READ;
@@ -1558,6 +1640,10 @@ export function genScenario(
   // level; strip the keys when this mask constrains them (see
   // suppressMaskedEnvironmentOverrides).
   suppressMaskedEnvironmentOverrides(settings, mask);
+  // custom_properties' permission-"none" reads make a full denial ungradeable
+  // at section level; strip (or soften) it under that mask (see
+  // suppressMaskedCustomProperties).
+  suppressMaskedCustomProperties(settings, mask, chosen);
 
   const mode = rng.pick(["apply", "check"] as const);
   const policy = rng.pick(["fail", "warn"] as const);
@@ -1989,6 +2075,9 @@ export function genMultiScenario(
     // keys ungradeable, so they are stripped for this target (the global
     // mask varies only on org_members, so the per-target mask alone decides).
     suppressMaskedEnvironmentOverrides(settings, mask);
+    // And a per-target mask denying custom_properties outright strips (or
+    // softens) that section, as in the single-repo generator.
+    suppressMaskedCustomProperties(settings, mask, sections);
     // A denied administration mask denies the visibility probe (GET /repos), so
     // the resolver reads "unknown" and redaction fails closed even for a public
     // target. Matches the redaction rule in multi.ts.

@@ -45,6 +45,23 @@ describe("toJsonSchema", () => {
     expect(toJsonSchema({ nullable: true, description: "x" })).toEqual({ description: "x" });
   });
 
+  test("nullable beside a bare oneOf gains a null branch (the custom property value shape)", () => {
+    // GitHub's custom-property `value` schema is `oneOf [string, string[]]`
+    // with nullable:true and NO sibling type; a null value must validate.
+    const input = {
+      nullable: true,
+      oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
+    };
+    // Request-body variant: oneOf survives, null matches exactly its branch.
+    expect(toJsonSchema(input, true)).toEqual({
+      oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
+    });
+    // Relaxed variant: the oneOf becomes anyOf first and still gains null.
+    expect(toJsonSchema(input)).toEqual({
+      anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
+    });
+  });
+
   test("strips required from a response schema (presence relaxed) by default", () => {
     expect(
       toJsonSchema({ type: "object", required: ["id"], properties: { id: { type: "integer" } } }),

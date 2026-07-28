@@ -40,6 +40,7 @@ export const MASK_KEYS = [
   "secrets",
   "dependabot_secrets",
   "codespaces_secrets",
+  "custom_properties",
   "org_members",
 ] as const satisfies readonly (PatResource | "org_members")[];
 

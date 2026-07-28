@@ -9,7 +9,7 @@ silently.
 ## Usage
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token):
-   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&contents=read)
+   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&repository_custom_properties=write&contents=read)
    starts you off with every repository permission the
    [Sections](#sections) table can need. Pick the resource owner and
    repositories, and add Members: read by hand when the owner is an
@@ -126,6 +126,7 @@ secret fields take); and when you come from elsewhere or something breaks,
 | `interaction_limits` | interaction-limits | Administration: write | re-arms the self-expiring limit every apply run (expiry is write-only, max six_months); `null` clears it (in multi-repo mode a target's `null` is a defaults opt-out when the defaults declare one, like `pages`); a 409 (org/user-level limit overrides) becomes a note on apply, while check still reports drift; undeclared untouched |
 | `actions_variables` | Actions variables CRUD | Variables: write | plain-text repository variables upserted by name; names are case-insensitive (GitHub stores them uppercased); values read back in full, so check mode diffs them exactly (secrets are write-only material and deliberately not this section); undeclared deleted by default (settable) |
 | `webhooks` | hooks CRUD + hook config sub-endpoint | Webhooks: write | one hook per `config.url`, the natural key (a changed url declares a NEW hook; the old one becomes undeclared); `config.secret` takes a whole-value `$NAME` reference resolved from the step env at apply time (see the [secrets guide](docs/concepts/secrets-and-vaults.md)) and is re-sent every run since GitHub never reveals it, so check notes it cannot verify the secret; events compared order-insensitively; hook urls appear in drift lines on purpose (they are configuration, not credentials); undeclared kept by default (settable) |
+| `custom_properties` | GET/PATCH properties/values (the values read is Metadata-gated, so only the PATCH needs the grant); probes GET /orgs/{owner} | Custom properties: write | values of org-defined properties, set per repo (definitions are org-scoped and out of scope); org repos only, skipped with a notice on personal accounts; `value: null` unsets (reverting to the org default, if any); booleans/numbers normalized to their string form (GitHub transports true_false as "true"/"false"); multi_select lists compared order-insensitively; one bulk PATCH per apply, skipped when nothing diverges; undeclared kept by default (settable; an unset can revert to an org default this action does not model, and org-actors-only properties reject the write) |
 
 ## Semantics
 
@@ -167,11 +168,12 @@ scope by design.
 
 ## Undeclared resources
 
-Ten sections enumerate the live resources next to the declared ones, and
+Eleven sections enumerate the live resources next to the declared ones, and
 each has a default policy for the ones the file does not declare: `labels`,
 `autolinks`, `collaborators`, and `actions_variables` delete them;
-`rulesets`, `milestones`, `webhooks`, and the three secret sections
-(`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`) keep them
+`rulesets`, `milestones`, `webhooks`, `custom_properties`, and the three
+secret sections (`actions_secrets`, `dependabot_secrets`,
+`codespaces_secrets`) keep them
 and list each as a note. A section's list value can override that default
 with a wrapped form:
 
@@ -514,10 +516,10 @@ the token needs the same permissions on every target repository.
 
 To manage everything in one PAT, grant Administration, Issues,
 Environments, Pages, Actions, Variables, Webhooks, Secrets, Dependabot
-secrets, and Codespaces secrets at write, plus Contents at read and (for
-org repos) the Members organization permission at read. The pre-filled
-token form linked under [Usage](#usage) grants exactly the repository half
-of that set.
+secrets, Codespaces secrets, and Custom properties at write, plus Contents
+at read and (for org repos) the Members organization permission at read.
+The pre-filled token form linked under [Usage](#usage) grants exactly the
+repository half of that set.
 
 Three things worth knowing when a run fails on permissions:
 
@@ -549,12 +551,13 @@ Two deliberate boundaries:
   than no-op.
 - The pinned `X-GitHub-Api-Version` only changes intentionally.
 
-Six sections are closed rather than passthrough: `collaborators`,
-`teams`, `workflows`, and the secret sections `actions_secrets`,
-`dependabot_secrets`, and `codespaces_secrets` reject entry keys they do
-not recognize. Their API calls carry at most a single setting per entry (a
-`permission`, or a sealed secret value; the workflow enable/disable calls
-carry none), so an extra key can only be a typo -
+Seven sections are closed rather than passthrough: `collaborators`,
+`teams`, `workflows`, `custom_properties`, and the secret sections
+`actions_secrets`, `dependabot_secrets`, and `codespaces_secrets` reject
+entry keys they do not recognize. Their API calls carry at most a single
+setting per entry (a `permission`, a property `value`, or a sealed secret
+value; the workflow enable/disable calls carry none), so an extra key can
+only be a typo -
 and a misspelled `permission` would otherwise silently grant the default
 `push` role and never show up as drift.
 

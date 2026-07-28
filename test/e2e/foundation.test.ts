@@ -182,9 +182,11 @@ describe("denial semantics", () => {
     expect(Object.keys(DENIAL_SEMANTICS).sort()).toEqual([...SECTION_KEYS].sort() as string[]);
   });
 
-  test("the four absent sections are exactly branches, environments, pages, teams", () => {
+  test("the five absent sections are exactly branches, custom_properties, environments, pages, teams", () => {
     const absent: string[] = SECTION_KEYS.filter((k) => DENIAL_SEMANTICS[k] === "absent");
-    expect(absent.sort()).toEqual(["branches", "environments", "pages", "teams"].sort());
+    expect(absent.sort()).toEqual(
+      ["branches", "custom_properties", "environments", "pages", "teams"].sort(),
+    );
   });
 
   test("every other section is denied", () => {

@@ -133,6 +133,17 @@ export function toJsonSchema(node: unknown, keepRequired = false): unknown {
     if (!types.includes("null")) {
       out.type = [...types, "null"];
     }
+  } else if (input.nullable === true) {
+    // nullable beside a bare oneOf/anyOf (no sibling type; the custom
+    // property `value` schema is the known case): add a null branch. A null
+    // value matches exactly that branch, so oneOf's exactly-one semantics
+    // survive; every non-null value matches its original branch unchanged.
+    for (const combinator of ["oneOf", "anyOf"] as const) {
+      const branches = out[combinator];
+      if (Array.isArray(branches)) {
+        out[combinator] = [...branches, { type: "null" }];
+      }
+    }
   }
   return out;
 }

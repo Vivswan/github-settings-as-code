@@ -16,7 +16,7 @@ import {
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
-import { PROBOT_PARITY_KEYS, SECTION_KEYS } from "../../src/schema.js";
+import { PROBOT_PARITY_KEYS, SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
 import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
@@ -244,6 +244,27 @@ describe("schema.ts SettingsFile JSDoc deletion claims", () => {
   });
 });
 
+// The written-out counts the prose uses; extend deliberately when a derived
+// list outgrows it (the lookup failing IS the tripwire).
+const COUNT_WORDS = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+] as const;
+
 describe("README closed-sections claim", () => {
   test("the forward-compatibility prose names exactly the closedSurface sections", () => {
     // closedSurface is the module-level source of which sections reject
@@ -256,6 +277,14 @@ describe("README closed-sections claim", () => {
     const paragraph = sectionLines(readme, "Forward compatibility").join(" ");
     const sentence = paragraph.match(/[^.]*closed rather than passthrough[^.]*\./)?.[0];
     expect(sentence).toBeDefined();
+    // The sentence opens with the count in words; pin it to the derived list
+    // so the next closed section cannot leave the number stale.
+    const word = COUNT_WORDS[closed.length];
+    if (word === undefined) {
+      throw new Error("extend COUNT_WORDS: more closed sections than the lookup covers");
+    }
+    const capitalized = word.charAt(0).toUpperCase() + word.slice(1);
+    expect(sentence).toContain(`${capitalized} sections are closed`);
     for (const key of closed) {
       expect(sentence).toContain(`\`${key}\``);
     }
@@ -263,6 +292,64 @@ describe("README closed-sections claim", () => {
       if (!closed.includes(key)) {
         expect(sentence).not.toContain(`\`${key}\``);
       }
+    }
+  });
+});
+
+describe("knobbed-section count prose", () => {
+  const countWord = COUNT_WORDS[UNDECLARED_POLICY_SECTIONS.length];
+  if (countWord === undefined) {
+    throw new Error("extend COUNT_WORDS: more knobbed sections than the lookup covers");
+  }
+  const capitalized = countWord[0]?.toUpperCase() + countWord.slice(1);
+  const policyDoc = readFileSync(join(ROOT, "docs", "concepts", "undeclared-policy.md"), "utf8");
+
+  test("the README Undeclared resources section counts and names every knobbed section", () => {
+    const section = sectionLines(readme, "Undeclared resources").join(" ");
+    expect(
+      section.includes(`${capitalized} sections enumerate`),
+      `README must say "${capitalized} sections enumerate" (UNDECLARED_POLICY_SECTIONS has ${UNDECLARED_POLICY_SECTIONS.length})`,
+    ).toBe(true);
+    for (const key of UNDECLARED_POLICY_SECTIONS) {
+      expect(
+        section.includes(`\`${key}\``),
+        `the README Undeclared resources enumeration omits \`${key}\``,
+      ).toBe(true);
+    }
+  });
+
+  test("the undeclared-policy guide's intro counts and names every knobbed section", () => {
+    const intro = policyDoc.slice(0, policyDoc.indexOf("\n## "));
+    expect(
+      intro.includes(`${capitalized} sections list`),
+      `the guide's intro must say "${capitalized} sections list"`,
+    ).toBe(true);
+    for (const key of UNDECLARED_POLICY_SECTIONS) {
+      expect(intro.includes(`\`${key}\``), `the guide's intro omits \`${key}\``).toBe(true);
+    }
+    // The layering boundary paragraph restates the count in words.
+    expect(
+      policyDoc.includes(`The ${countWord} top-level section lists`),
+      `the layering boundary must say "The ${countWord} top-level section lists"`,
+    ).toBe(true);
+  });
+
+  test("the guide's Defaults table has exactly one row per knobbed section, stating its default", () => {
+    const rows = tableRows(sectionLines(policyDoc, "Defaults per section"));
+    const byKey = new Map(
+      rows.map((cells) => [(cells[0] ?? "").replace(/`/g, ""), cells[1] ?? ""]),
+    );
+    // Size equality first: the Map would silently collapse a duplicated row,
+    // and "exactly one row per section" is the claim under test.
+    expect(byKey.size).toBe(rows.length);
+    expect([...byKey.keys()].sort()).toEqual([...UNDECLARED_POLICY_SECTIONS].sort());
+    const defaults = new Map(SECTIONS.map((section) => [section.key, section.undeclaredDefault]));
+    for (const key of UNDECLARED_POLICY_SECTIONS) {
+      const cell = byKey.get(key) ?? "";
+      expect(
+        cell.startsWith(defaults.get(key) ?? ""),
+        `the Defaults row for \`${key}\` must state its "${defaults.get(key)}" default, got: ${cell}`,
+      ).toBe(true);
     }
   });
 });

@@ -83,8 +83,8 @@ describe("changed-sections file map", () => {
 
   test("each 1:1 section file maps to exactly its own key", () => {
     // The secret families, actions_variables, code_scanning_default_setup,
-    // and interaction_limits live in kebab-named files, so they have no
-    // <key>.ts entry; every other key does.
+    // interaction_limits, and custom_properties live in kebab-named files,
+    // so they have no <key>.ts entry; every other key does.
     const kebabNamed = new Set([
       "actions_secrets",
       "dependabot_secrets",
@@ -92,6 +92,7 @@ describe("changed-sections file map", () => {
       "actions_variables",
       "code_scanning_default_setup",
       "interaction_limits",
+      "custom_properties",
     ]);
     for (const key of SECTION_KEYS) {
       if (kebabNamed.has(key)) {
