@@ -63,7 +63,8 @@ export type PatResource =
   | "webhooks"
   | "secrets"
   | "dependabot_secrets"
-  | "codespaces_secrets";
+  | "codespaces_secrets"
+  | "custom_properties";
 
 /**
  * The machine-readable permission a section requires. `repo` lists the
@@ -91,6 +92,7 @@ const RESOURCE_LABEL: Record<PatResource, string> = {
   secrets: "Secrets",
   dependabot_secrets: "Dependabot secrets",
   codespaces_secrets: "Codespaces secrets",
+  custom_properties: "Custom properties",
 };
 
 /** Human-facing label for each PAT organization resource. */

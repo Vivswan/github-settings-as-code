@@ -32,6 +32,7 @@ import {
   unsealSecretValue,
 } from "./secrets.js";
 import {
+  CUSTOM_PROPERTY_DEFINITIONS,
   collaboratorFromPut,
   completeHook,
   environmentFromPut,
@@ -325,6 +326,21 @@ function branchPoliciesEnabled(state: MockState, env: string): boolean {
 // fixture-backed MockState; writes mutate it via the state.ts transformers and
 // reply with a body/status drawn ONLY from the endpoint's declared statuses
 // (a startup check proves every status a handler can return is declared).
+
+/**
+ * The bare organization probe (GET /orgs/{org}) that teams and
+ * custom_properties both declare: 200 with the org body, 404 on a personal
+ * account. ONE handler registered under both keys, so the two cannot drift.
+ * matchEndpoint resolves the shared route to the FIRST declaring section
+ * (teams), so the custom_properties registration exists for the
+ * completeness assertion.
+ */
+const orgProbeHandler: Handler = ({ state }) => {
+  if (state.org === null) {
+    return { status: 404, body: { message: "Not Found" } };
+  }
+  return ok(state.org);
+};
 
 const HANDLERS: Record<string, Handler> = {
   // repository -------------------------------------------------------------
@@ -1161,13 +1177,7 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   // teams ------------------------------------------------------------------
-  "teams.org": ({ state, pathname }) => {
-    if (state.org === null) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    void pathname;
-    return ok(state.org);
-  },
+  "teams.org": orgProbeHandler,
   "teams.probe": ({ state, pathname }) => {
     const slug = segmentFromEnd(pathname, 3); // .../teams/{slug}/repos/{owner}/{repo}
     const access = state.teams[slug];
@@ -1380,6 +1390,55 @@ const HANDLERS: Record<string, Handler> = {
       return { status: 404, body: { message: "Not Found" } };
     }
     state.hooks.splice(index, 1);
+    return noContent();
+  },
+
+  // custom_properties --------------------------------------------------------
+  "custom_properties.org": orgProbeHandler,
+  // Not paginated upstream: the single GET returns every value.
+  "custom_properties.list": ({ state }) => ok(state.custom_property_values),
+  "custom_properties.update": ({ state, body }) => {
+    const properties = asObject(body).properties;
+    if (!Array.isArray(properties)) {
+      return {
+        status: 422,
+        body: { message: 'Invalid request.\n\n"properties" wasn\'t supplied.' },
+      };
+    }
+    // GitHub rejects the whole PATCH when any named property is not DEFINED
+    // at the organization level; the fixture is the single source of defined
+    // names (the fuzz generator draws from the same list).
+    for (const entry of properties) {
+      const name = asObject(entry).property_name;
+      const defined = CUSTOM_PROPERTY_DEFINITIONS.some((d) => d.property_name === name);
+      if (!defined) {
+        return {
+          status: 422,
+          body: {
+            message: `Custom property '${String(name)}' is not defined for this organization`,
+            documentation_url:
+              "https://docs.github.com/rest/repos/custom-properties#create-or-update-custom-property-values-for-a-repository",
+          },
+        };
+      }
+    }
+    for (const entry of properties) {
+      const { property_name, value } = asObject(entry);
+      const index = state.custom_property_values.findIndex(
+        (p) => p.property_name === property_name,
+      );
+      if (value === null || value === undefined) {
+        if (index >= 0) {
+          state.custom_property_values.splice(index, 1);
+        }
+        continue;
+      }
+      if (index >= 0) {
+        (state.custom_property_values[index] as Json).value = value;
+      } else {
+        state.custom_property_values.push({ property_name, value });
+      }
+    }
     return noContent();
   },
 };

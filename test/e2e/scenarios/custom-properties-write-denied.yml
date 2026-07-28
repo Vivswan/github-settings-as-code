@@ -1,0 +1,26 @@
+# The values READ is gated by Metadata only, which every fine-grained token
+# holds, so a token WITHOUT the Custom properties grant still lists cleanly
+# (and passes the apply-mode preflight); the denial surfaces mid-apply when
+# the bulk PATCH is refused. The advice names the "Custom properties" grant
+# plus the org-actors caveat (a 403 can also mean the org restricts the
+# property's values to org actors, which no repository-scoped token fixes).
+name: custom-properties-write-denied
+settings:
+  custom_properties:
+    - property_name: team
+      value: platform
+denial_style: fine_grained
+token_permissions:
+  custom_properties: read
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    custom_properties: failed
+  requests_contain:
+    - GET /repos/e2e-owner/e2e-repo/properties/values
+  stdout_contains:
+    - '"Custom properties" (read and write)'
+    - "values_editable_by: org_actors"

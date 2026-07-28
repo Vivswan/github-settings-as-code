@@ -1,0 +1,39 @@
+name: custom-properties-apply-converges
+description: >
+  Apply folds every custom-property operation into ONE bulk PATCH: set a
+  property with no live value, change a drifted true_false property (the
+  declared boolean normalizes to the "true" string on the wire), unset one
+  via `value: null`, and unset an undeclared live property under the wrapped
+  `undeclared: delete` form. The section compares before writing, so the
+  idempotence re-run must issue zero writes.
+settings:
+  custom_properties:
+    undeclared: delete
+    entries:
+      - property_name: team
+        value: platform
+      - property_name: pilot
+        value: true
+      - property_name: compliance
+        value: null
+live_state:
+  custom_property_values:
+    - property_name: pilot
+      value: "false"
+    - property_name: compliance
+      value: [soc2]
+    - property_name: tier
+      value: gold
+inputs:
+  mode: apply
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    custom_properties: applied
+  mutations:
+    - PATCH /repos/{repo}/properties/values
+  requests_contain:
+    - GET /orgs/e2e-owner
+    - GET /repos/e2e-owner/e2e-repo/properties/values
+  apply_idempotent: true

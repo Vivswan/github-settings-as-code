@@ -161,12 +161,23 @@ milestones:
 interaction_limits:
   limit: collaborators_only
   expiry: one_week
+
+custom_properties:
+  - property_name: team
+    value: payments
+  - property_name: compliance
+    value: [soc2, pci]
+  - property_name: pilot
+    value: true
 ```
 
 In `rulesets`, short ref names are auto-prefixed (`staging` becomes
 `refs/heads/staging`) and `~DEFAULT_BRANCH` passes through; rule parameters
 go to the API verbatim, so rule types GitHub ships tomorrow work unchanged
 (see [Forward compatibility](../../README.md#forward-compatibility)).
+`custom_properties` sets values for properties the organization has already
+defined (a `value: null` unsets one), so it applies to org-owned
+repositories only - on a personal account the section skips with a note.
 
 ## Classic branch protection
 

@@ -1,0 +1,44 @@
+name: custom-properties-check
+description: >
+  Check mode surfaces every custom-property drift kind at once: a declared
+  value the repo has never set, a drifted true_false value, and a declared
+  null over a live value (which apply would unset). The order-flipped
+  multi_select declaration must NOT drift (a multi_select value is a set),
+  and the undeclared live property earns a keep note under the default
+  policy, not drift. The run reports drift, exits 1, and writes nothing.
+settings:
+  custom_properties:
+    - property_name: team
+      value: null
+    - property_name: pilot
+      value: true
+    - property_name: compliance
+      value: [hipaa, soc2]
+live_state:
+  custom_property_values:
+    - property_name: team
+      value: core
+    - property_name: pilot
+      value: "false"
+    - property_name: compliance
+      value: [soc2, hipaa]
+    - property_name: tier
+      value: gold
+inputs:
+  mode: check
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    custom_properties: drift
+  never:
+    - PATCH /repos/{repo}/properties/values
+  summary_contains:
+    - "custom_properties[team]: declared null but the live value is"
+    - "apply will unset it (reverting to the org default, if any)"
+    - 'custom_properties[pilot]: declared "true" != live "false"'
+  summary_lacks:
+    - "custom_properties[compliance]"
+  stdout_contains:
+    - 'custom property "tier" is set on the repo but not declared'
+    - 'kept under "undeclared: keep"'
