@@ -968,10 +968,14 @@ async function reconcileBranchPolicies(
  * The spec marks every field required, but the identity fields are still
  * extracted loudly (the livePolicyName precedent): a rule without an App
  * slug has no identity to reconcile by, and silently skipping it would let
- * check report falsely clean.
+ * check report falsely clean. The endpoint documents that it returns
+ * enabled rules only, so presence in the list is the enablement signal;
+ * `enabled` is read anyway as a belt over that contract - a rule the API
+ * ever reported as disabled must not satisfy a declared gate.
  */
 interface LiveProtectionRule {
   id?: number;
+  enabled?: boolean;
   app?: { id?: number; slug?: string };
 }
 
@@ -1123,6 +1127,14 @@ async function reconcileProtectionRules(
   const live = await listProtectionRules(ctx, section, envName);
   const liveBySlug = new Map<string, LiveProtectionRule>();
   for (const rule of live) {
+    // The map models gates that are ON (see the LiveProtectionRule JSDoc):
+    // skipping a disabled rule makes apply re-enable a declared gate instead
+    // of reading falsely clean, and in the undeclared direction a disabled
+    // rule is not an active gate, so neither the keep-note nor the disable
+    // applies to it.
+    if (rule.enabled === false) {
+      continue;
+    }
     liveBySlug.set(liveRuleSlug(rule, envName), rule);
   }
   const declared = new Set(entries.map((rule) => rule.app));
@@ -1131,7 +1143,7 @@ async function reconcileProtectionRules(
   if (ctx.check) {
     for (const rule of missing) {
       result.drift.push(
-        `environments[${envName}].deployment_protection_rules[${rule.app}]: missing - declared in the settings file but not enabled on the environment; apply will enable it`,
+        `environments[${envName}].deployment_protection_rules[${rule.app}]: missing - declared in the settings file but not enabled on the environment; apply will enable it if the App is available to this environment`,
       );
     }
   } else if (missing.length > 0) {

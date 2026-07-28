@@ -935,6 +935,40 @@ describe("environments deployment protection rules apply mode", () => {
       expect(api.mutations().filter((m) => m.method === "DELETE")).toEqual([]);
     }
   });
+
+  test("a live rule reported as disabled does not satisfy its declared gate", async () => {
+    // The endpoint documents enabled rules only, so this is a belt over the
+    // contract: a declared gate whose live rule says enabled: false must be
+    // re-enabled, never read as clean.
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [RULES_LIST]: rulesBody([{ ...liveRule(41, "deploy-gate"), enabled: false }]),
+      [RULE_APPS_LIST]: ruleAppsBody([{ id: 3515, slug: "deploy-gate" }]),
+    }).allowMutations(RULE_CREATE);
+    const result = await environmentsSection.run(ctx(api), [
+      { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
+    ]);
+    expect(result.changes).toContain(
+      'enabled deployment protection rule "deploy-gate" in environment "prod"',
+    );
+  });
+
+  test("a disabled undeclared rule is not an active gate: neither noted nor disabled", async () => {
+    // The other half of the enabled-false skip: under undeclared: delete the
+    // goal is "no undeclared gate is on", which a disabled rule already
+    // satisfies - and a DELETE aimed at a disabled id would likely 404
+    // mid-apply for a no-op.
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      [RULES_LIST]: rulesBody([{ ...liveRule(41, "change-window"), enabled: false }]),
+    });
+    const result = await environmentsSection.run(ctx(api), [
+      { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
+    ]);
+    expect(api.mutations().filter((m) => m.method === "DELETE")).toEqual([]);
+    expect(result.notes.join("\n")).not.toContain("change-window");
+    expect(result.changes.join("\n")).not.toContain("change-window");
+  });
 });
 
 describe("environments deployment protection rules check mode", () => {
@@ -947,7 +981,7 @@ describe("environments deployment protection rules check mode", () => {
       { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
     ]);
     expect(kept.drift).toEqual([
-      "environments[prod].deployment_protection_rules[deploy-gate]: missing - declared in the settings file but not enabled on the environment; apply will enable it",
+      "environments[prod].deployment_protection_rules[deploy-gate]: missing - declared in the settings file but not enabled on the environment; apply will enable it if the App is available to this environment",
     ]);
     expect(kept.notes.join("\n")).toContain('deployment protection rule "change-window"');
     // The apps listing is an apply-time resolver; check mode never reads it.

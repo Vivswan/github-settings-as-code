@@ -232,16 +232,22 @@ describe("docs/ guide pages", () => {
   });
 
   test("the undeclared-policy guide names every nested per-environment knob", () => {
-    // The guide's "carry the same wrapped form" enumeration is prose; this
-    // pins it to NESTED_KEYS (the single source the reconciler loops over),
+    // The guides' "carry the same wrapped form" enumerations are prose; this
+    // pins them to NESTED_KEYS (the single source the reconciler loops over),
     // so adding a nested knob without documenting its policy fails here
-    // instead of rotting silently.
-    const page = readFileSync(join(DOCS, "concepts", "undeclared-policy.md"), "utf8");
-    for (const key of NESTED_KEYS) {
-      expect(
-        page.includes(`environments[].${key}`),
-        `docs/concepts/undeclared-policy.md never names environments[].${key}; document the nested knob's default policy`,
-      ).toBe(true);
+    // instead of rotting silently. check-mode.md carries the same
+    // enumeration in its not-verifiable list, so both pages are pinned.
+    for (const path of [
+      ["concepts", "undeclared-policy.md"],
+      ["operate", "check-mode.md"],
+    ] as const) {
+      const page = readFileSync(join(DOCS, ...path), "utf8");
+      for (const key of NESTED_KEYS) {
+        expect(
+          page.includes(`environments[].${key}`),
+          `docs/${path.join("/")} never names environments[].${key}; document the nested knob`,
+        ).toBe(true);
+      }
     }
   });
 
