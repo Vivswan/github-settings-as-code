@@ -84,6 +84,19 @@ export interface SettingsFile {
    * own hooks (the wrapped form can set `undeclared: delete`).
    */
   webhooks?: WebhookConfig[] | UndeclaredPolicyList<WebhookConfig>;
+  /**
+   * Values of organization-defined custom properties, set per repository
+   * (the property DEFINITIONS are organization-scoped and out of scope);
+   * organization repos only, skipped with a note on personal accounts.
+   * `value: null` unsets a property (reverting to the org default, if any),
+   * and booleans/numbers are normalized to their string form (GitHub
+   * transports true_false values as the strings "true"/"false"). Undeclared
+   * live values are kept by default - an unset can revert to an org default
+   * this action does not model, and a property whose values only org actors
+   * may edit would reject the write - and the wrapped form can set
+   * `undeclared: delete` to opt into unsetting them.
+   */
+  custom_properties?: CustomPropertyConfig[] | UndeclaredPolicyList<CustomPropertyConfig>;
 }
 
 /**
@@ -568,6 +581,27 @@ export interface WebhookDeliveryConfig {
   [key: string]: unknown;
 }
 
+/**
+ * One custom property value, matched by the API's property_name verbatim.
+ * Keys other than property_name and value are rejected: the bulk PATCH body
+ * is built from exactly these two fields, so an extra key would have no
+ * destination.
+ */
+export interface CustomPropertyConfig {
+  /** The organization-defined property's name, the natural key. */
+  property_name: string;
+  /**
+   * The value to set: a string (single_select and string properties), a list
+   * of strings (multi_select, compared as a set - list each option once), or
+   * a boolean (true_false, normalized to the "true"/"false" string GitHub
+   * transports). Numbers are likewise sent as their string form - through
+   * YAML's parsed number, so quote any numeric value you want sent verbatim
+   * (unquoted, 1.10 arrives as "1.1" and 1e21 as "1e+21"). `null` unsets the
+   * property, reverting to the org default, if any.
+   */
+  value: string | string[] | boolean | number | null;
+}
+
 /** Every recognized top-level section, in execution order. */
 export const SECTION_KEYS = [
   "repository",
@@ -589,6 +623,7 @@ export const SECTION_KEYS = [
   "interaction_limits",
   "actions_variables",
   "webhooks",
+  "custom_properties",
 ] as const satisfies readonly (keyof SettingsFile)[];
 
 /** A recognized top-level section name. */
@@ -612,6 +647,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "milestones",
   "actions_variables",
   "webhooks",
+  "custom_properties",
 ] as const satisfies readonly SectionKey[];
 
 /** A section key that takes the `undeclared` policy knob. */

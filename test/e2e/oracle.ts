@@ -135,10 +135,10 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
   ) {
     return { key, grade, allowed: new Set(["excluded"]), mayWrite: false };
   }
-  // teams on a personal account no-ops regardless of mask: the org probe 404s,
-  // the section returns with only a note, so check reports clean and apply
-  // reports applied - never both in one mode.
-  if (key === "teams" && meta.ownerKind === "user") {
+  // teams and custom_properties on a personal account no-op regardless of
+  // mask: their org probe 404s, the section returns with only a note, so
+  // check reports clean and apply reports applied - never both in one mode.
+  if ((key === "teams" || key === "custom_properties") && meta.ownerKind === "user") {
     return { key, grade, allowed: new Set([check ? "clean" : "applied"]), mayWrite: false };
   }
 

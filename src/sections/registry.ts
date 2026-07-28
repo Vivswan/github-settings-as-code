@@ -18,6 +18,7 @@ import { codeScanningDefaultSetupSection } from "./code-scanning.js";
 import { codespacesSecretsSection } from "./codespaces-secrets.js";
 import { collaboratorsSection } from "./collaborators.js";
 import type { EndpointDecl, SectionModule } from "./contract.js";
+import { customPropertiesSection } from "./custom-properties.js";
 import { dependabotSecretsSection } from "./dependabot-secrets.js";
 import { environmentsSection } from "./environments.js";
 import { interactionLimitsSection } from "./interaction-limits.js";
@@ -50,6 +51,7 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   interaction_limits: interactionLimitsSection,
   actions_variables: actionsVariablesSection,
   webhooks: webhooksSection,
+  custom_properties: customPropertiesSection,
 };
 
 /** Every section module, in execution order. */

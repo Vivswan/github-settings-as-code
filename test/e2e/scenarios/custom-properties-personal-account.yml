@@ -1,0 +1,20 @@
+name: custom-properties-personal-account
+description: >-
+  Custom properties only exist on organization-owned repositories: on a
+  personal account the org probe 404s, so the section notes and skips with
+  ZERO property calls even though the token holds every permission.
+settings:
+  custom_properties:
+    - property_name: team
+      value: platform
+owner_kind: user
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    custom_properties: applied
+  never:
+    - "GET /repos/{repo}/properties/values"
+    - "PATCH /repos/{repo}/properties/values"
+  stdout_contains:
+    - "organization-owned repository"

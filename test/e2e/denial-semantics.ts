@@ -40,4 +40,13 @@ export const DENIAL_SEMANTICS: Record<SectionKey, DenialSemantics> = {
   interaction_limits: "denied",
   actions_variables: "denied",
   webhooks: "denied",
+  // The primary read (GET .../properties/values) is Metadata-gated only, so a
+  // fine-grained denial never touches it: like the "absent" sections, the
+  // denial surfaces on the first write (the bulk PATCH answers 403). The
+  // 403-style caveat the "absent" model carries does not even apply to the
+  // reads here (they are permission-"none" and cannot be denied at all), so
+  // the generator strips the section under a mask that denies
+  // custom_properties outright (see suppressMaskedCustomProperties) and a
+  // curated scenario pins the write-denied path.
+  custom_properties: "absent",
 };

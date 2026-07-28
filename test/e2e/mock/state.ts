@@ -146,6 +146,13 @@ export interface LiveState {
    * report issue here to exercise the reuse (update-in-place) path.
    */
   issues?: Json[];
+  /**
+   * Custom property values set on the repo (GET shape:
+   * {property_name, value: string | string[] | null}), replaces the (empty)
+   * baseline. Seeded names should come from CUSTOM_PROPERTY_DEFINITIONS so
+   * the PATCH handler's defined-property check agrees with them.
+   */
+  custom_property_values?: Json[];
 }
 
 /**
@@ -221,6 +228,8 @@ export interface MockState {
   hooks: Json[];
   /** Report issues the private-report issue channel lists/creates/patches. */
   issues: Json[];
+  /** Custom property values set on the repo ({property_name, value}). */
+  custom_property_values: Json[];
   /** Next id handed to a created resource (label, ruleset, autolink, ...). */
   nextId: number;
 }
@@ -325,6 +334,27 @@ export const PROTECTION_RULE_APPS: readonly Json[] = [
 ];
 
 /**
+ * The organization-level custom property DEFINITIONS the mock's org is
+ * assumed to carry (names + value_type; one of each shape). The ONE source of
+ * defined names: the values PATCH handler answers 422 for a property_name
+ * outside it, and the fuzz generator draws declared names (with
+ * type-appropriate values) from it, so a generated declaration can never
+ * trip the undefined-property rejection.
+ */
+export const CUSTOM_PROPERTY_DEFINITIONS: ReadonlyArray<{
+  property_name: string;
+  value_type: "string" | "true_false" | "multi_select";
+  allowed_values?: readonly string[];
+}> = [
+  { property_name: "team", value_type: "string" },
+  // A second string property, so a scenario can seed an UNDECLARED live
+  // value on a defined name without colliding with the declared ones.
+  { property_name: "tier", value_type: "string" },
+  { property_name: "pilot", value_type: "true_false" },
+  { property_name: "compliance", value_type: "multi_select", allowed_values: ["soc2", "hipaa"] },
+];
+
+/**
  * Materialize a MockState from a scenario's (possibly undefined) LiveState.
  * List families default to empty; the repo defaults to the fixture (deep-merged
  * with any overlay); the single-object families default to their fixtures.
@@ -422,6 +452,7 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     actions_variables: ls.actions_variables ? clone(ls.actions_variables) : [],
     hooks: (ls.hooks ?? []).map((hook) => completeHook(clone(hook), takeId())),
     issues: ls.issues ? clone(ls.issues) : [],
+    custom_property_values: ls.custom_property_values ? clone(ls.custom_property_values) : [],
     nextId,
   };
 }

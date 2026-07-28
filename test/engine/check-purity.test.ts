@@ -58,6 +58,7 @@ const FIXTURES: Record<SectionKey, unknown> = {
       events: ["push"],
     },
   ],
+  custom_properties: [{ property_name: "team", value: "platform" }],
 };
 
 /** Live data that differs from every fixture; unrouted GETs answer 404. */
@@ -145,6 +146,10 @@ const ROUTES = {
         config: { url: "https://ci.example.com/hook", content_type: "form" },
       },
     ],
+  },
+  // A live custom property value differing from the declared one -> drift.
+  "GET /repos/o/r/properties/values": {
+    data: [{ property_name: "team", value: "core" }],
   },
 };
 
