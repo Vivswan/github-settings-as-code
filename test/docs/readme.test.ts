@@ -25,11 +25,11 @@ import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 const ROOT = join(import.meta.dir, "..", "..");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 
-/** The claim each undeclaredDefault value must appear as in a Sections row. */
-const DELETION_CLAIM: Record<string, string> = {
-  delete: "undeclared deleted by default (settable",
-  keep: "undeclared kept by default (settable",
-  untouched: "undeclared untouched",
+/** The Undeclared default column's display form of each undeclaredDefault. */
+const UNDECLARED_DEFAULT_DISPLAY: Record<string, string> = {
+  delete: "deleted (settable)",
+  keep: "kept (settable)",
+  untouched: "untouched",
 };
 
 describe("README Sections table", () => {
@@ -40,20 +40,20 @@ describe("README Sections table", () => {
     expect(names).toEqual([...SECTION_KEYS]);
   });
 
-  test("each row's deletion claim derives from the section's undeclaredDefault", () => {
+  test("each row's Undeclared default column derives from the section's undeclaredDefault", () => {
     const byKey = new Map(SECTIONS.map((section) => [section.key, section]));
     for (const cells of rows) {
       const key = (cells[0] ?? "").replace(/`/g, "");
-      const notes = cells.at(-1) ?? ""; // Notes is the table's last column
+      // Section | Endpoints | PAT permission | Undeclared default | Notes
+      const cell = cells[3] ?? "";
       const section = byKey.get(key as (typeof SECTION_KEYS)[number]);
       if (!section) {
         throw new Error(`README Sections row "${key}" is not a section key`);
       }
-      const claim = DELETION_CLAIM[section.undeclaredDefault] as string;
       expect(
-        notes.includes(claim),
-        `README Sections row "${key}" must state "${claim}" (its undeclaredDefault is "${section.undeclaredDefault}"), got notes: ${notes}`,
-      ).toBe(true);
+        cell,
+        `README Sections row "${key}" must state "${UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault]}" in its Undeclared default column (its undeclaredDefault is "${section.undeclaredDefault}")`,
+      ).toBe(UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault] as string);
     }
   });
 });
@@ -175,8 +175,11 @@ describe("README migration paragraph", () => {
   });
 });
 
-describe("README Private repositories section", () => {
-  const section = sectionLines(readme, "Private repositories").join("\n");
+describe("private repositories guide", () => {
+  // The guide is a standalone page whose title is a single `#`, so it is
+  // read whole-document rather than via sectionLines() - the stronger pin
+  // anyway, since each claim must live somewhere on the page.
+  const section = readFileSync(join(ROOT, "docs", "operate", "private-repositories.md"), "utf8");
 
   test("names every private-report channel the code accepts", () => {
     // A channel added to PRIVATE_REPORT_CHANNELS but never documented (or a
@@ -184,7 +187,7 @@ describe("README Private repositories section", () => {
     for (const channel of PRIVATE_REPORT_CHANNELS) {
       expect(
         section.includes(`\`private-report: ${channel}\``) || channel === "none",
-        `the Private repositories section does not document the "${channel}" channel`,
+        `the private repositories guide does not document the "${channel}" channel`,
       ).toBe(true);
     }
     // `none` is the default (it delivers nothing), so it is named as the input
@@ -266,16 +269,20 @@ const COUNT_WORDS = [
   "fifteen",
 ] as const;
 
-describe("README closed-sections claim", () => {
-  test("the forward-compatibility prose names exactly the closedSurface sections", () => {
+describe("forward-compatibility closed-sections claim", () => {
+  test("the guide's prose names exactly the closedSurface sections", () => {
     // closedSurface is the module-level source of which sections reject
-    // unrecognized keys; the README paragraph must list those and no others,
-    // the same way undeclaredDefault pins the Sections table.
+    // unrecognized keys; the forward-compatibility page must list those and
+    // no others, the same way undeclaredDefault pins the Sections table.
+    // The page's title is a single `#`, so it is read whole-document.
     const closed = SECTIONS.filter((section) => section.closedSurface !== undefined).map(
       (section) => section.key,
     );
     expect(closed.length).toBeGreaterThan(0);
-    const paragraph = sectionLines(readme, "Forward compatibility").join(" ");
+    const paragraph = readFileSync(
+      join(ROOT, "docs", "reference", "forward-compatibility.md"),
+      "utf8",
+    ).replace(/\n/g, " ");
     const sentence = paragraph.match(/[^.]*closed rather than passthrough[^.]*\./)?.[0];
     expect(sentence).toBeDefined();
     // The sentence opens with the count in words; pin it to the derived list
@@ -352,44 +359,7 @@ describe("knobbed-section count prose", () => {
     throw new Error("extend COUNT_WORDS: more knobbed sections than the lookup covers");
   }
   const capitalized = countWord[0]?.toUpperCase() + countWord.slice(1);
-  const policyDoc = readFileSync(join(ROOT, "docs", "concepts", "undeclared-policy.md"), "utf8");
-
-  test("the README Undeclared resources section counts and names every knobbed section", () => {
-    const section = sectionLines(readme, "Undeclared resources").join(" ");
-    expect(
-      section.includes(`${capitalized} sections enumerate`),
-      `README must say "${capitalized} sections enumerate" (UNDECLARED_POLICY_SECTIONS has ${UNDECLARED_POLICY_SECTIONS.length})`,
-    ).toBe(true);
-    for (const key of UNDECLARED_POLICY_SECTIONS) {
-      expect(
-        section.includes(`\`${key}\``),
-        `the README Undeclared resources enumeration omits \`${key}\``,
-      ).toBe(true);
-    }
-  });
-
-  test("the README enumeration paragraph names ONLY knobbed sections", () => {
-    // The inclusion loop above cannot catch prose still naming a section
-    // that LOST its knob; scope the negative check to the enumeration
-    // paragraph so unrelated prose in the section stays free.
-    const lines = sectionLines(readme, "Undeclared resources");
-    const start = lines.findIndex((line) => line.includes("sections enumerate"));
-    expect(start).toBeGreaterThanOrEqual(0);
-    let end = start;
-    while (end < lines.length && (lines[end] ?? "").trim() !== "") {
-      end++;
-    }
-    const paragraph = lines.slice(start, end).join(" ");
-    const knobbed = new Set<string>(UNDECLARED_POLICY_SECTIONS);
-    for (const key of SECTION_KEYS) {
-      if (!knobbed.has(key)) {
-        expect(
-          paragraph.includes(`\`${key}\``),
-          `the enumeration paragraph names \`${key}\`, which carries no undeclared knob`,
-        ).toBe(false);
-      }
-    }
-  });
+  const policyDoc = readFileSync(join(ROOT, "docs", "reference", "undeclared-policy.md"), "utf8");
 
   test("the undeclared-policy guide's intro counts and names every knobbed section", () => {
     const intro = policyDoc.slice(0, policyDoc.indexOf("\n## "));
@@ -405,6 +375,22 @@ describe("knobbed-section count prose", () => {
       policyDoc.includes(`The ${countWord} top-level section lists`),
       `the layering boundary must say "The ${countWord} top-level section lists"`,
     ).toBe(true);
+  });
+
+  test("the guide's intro names ONLY knobbed sections", () => {
+    // The inclusion loop above cannot catch prose still naming a section
+    // that LOST its knob; scope the negative check to the intro so the
+    // rest of the page stays free to mention any section.
+    const intro = policyDoc.slice(0, policyDoc.indexOf("\n## "));
+    const knobbed = new Set<string>(UNDECLARED_POLICY_SECTIONS);
+    for (const key of SECTION_KEYS) {
+      if (!knobbed.has(key)) {
+        expect(
+          intro.includes(`\`${key}\``),
+          `the intro names \`${key}\`, which carries no undeclared knob`,
+        ).toBe(false);
+      }
+    }
   });
 
   test("the guide's Defaults table has exactly one row per knobbed section, stating its default", () => {

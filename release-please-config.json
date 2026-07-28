@@ -12,7 +12,7 @@
         "docs/start/getting-started.md",
         "docs/operate/check-mode.md",
         "docs/operate/multi-repo.md",
-        "docs/help/migrating-from-probot.md",
+        "docs/start/migrating-from-probot.md",
         "docs/playbooks/drift-attestation.md",
         "docs/playbooks/fleet-baseline-rings.md",
         "docs/playbooks/incident-freeze.md",
