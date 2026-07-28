@@ -50,6 +50,9 @@
  *   nothing to compare against and re-sending is how rotations propagate);
  *   the events/active PATCH and the no-secret config PATCH do diff first,
  *   but one unconditional write path makes the section unconditional here.
+ * - custom_properties (true): the ONE bulk PATCH carries only divergent
+ *   properties and is skipped entirely when every declared value already
+ *   matches the live one (and no undeclared unset is due).
  *
  * This table lives in the harness (like DENIAL_SEMANTICS): the engine has no
  * use for it, and the apply-idempotence re-run is its contradiction path - a
@@ -81,6 +84,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   interaction_limits: false,
   actions_variables: true,
   webhooks: false,
+  custom_properties: true,
 };
 
 /**
