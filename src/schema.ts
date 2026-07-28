@@ -97,6 +97,15 @@ export interface SettingsFile {
    * `undeclared: delete` to opt into unsetting them.
    */
   custom_properties?: CustomPropertyConfig[] | UndeclaredPolicyList<CustomPropertyConfig>;
+  /**
+   * Deploy keys, matched by title. The declared material is a PUBLIC key,
+   * safe in a committed settings file. Keys are immutable upstream, so any
+   * change is applied as delete plus recreate. Undeclared keys are kept by
+   * default - deleting a live deploy key breaks whatever service
+   * authenticates with it, and deployment tooling installs its own keys -
+   * and the wrapped form can set `undeclared: delete`.
+   */
+  deploy_keys?: DeployKeyConfig[] | UndeclaredPolicyList<DeployKeyConfig>;
 }
 
 /**
@@ -602,6 +611,25 @@ export interface CustomPropertyConfig {
   value: string | string[] | boolean | number | null;
 }
 
+/**
+ * One deploy key, matched by exact title (GitHub documents no case folding
+ * for titles). Extra fields pass through to the create call verbatim.
+ */
+export interface DeployKeyConfig {
+  /** The key title shown in the settings UI, the natural key. */
+  title: string;
+  /**
+   * The PUBLIC key material, e.g. "ssh-ed25519 AAAAC3... comment". Public by
+   * nature, so it is safe in a committed file. Compared as algorithm + blob
+   * with the trailing comment ignored (GitHub may strip or rewrite comments
+   * on storage); keys are immutable upstream, so a changed key is applied as
+   * delete plus recreate.
+   */
+  key: string;
+  /** Whether the key is restricted to read-only access; GitHub defaults to false (read/write). */
+  read_only?: boolean;
+}
+
 /** Every recognized top-level section, in execution order. */
 export const SECTION_KEYS = [
   "repository",
@@ -624,6 +652,7 @@ export const SECTION_KEYS = [
   "actions_variables",
   "webhooks",
   "custom_properties",
+  "deploy_keys",
 ] as const satisfies readonly (keyof SettingsFile)[];
 
 /** A recognized top-level section name. */
@@ -648,6 +677,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "actions_variables",
   "webhooks",
   "custom_properties",
+  "deploy_keys",
 ] as const satisfies readonly SectionKey[];
 
 /** A section key that takes the `undeclared` policy knob. */

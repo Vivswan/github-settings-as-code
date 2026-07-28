@@ -355,6 +355,28 @@
       ],
       "type": "object"
     },
+    "DeployKeyConfig": {
+      "description": "One deploy key, matched by exact title (GitHub documents no case folding for titles). Extra fields pass through to the create call verbatim.",
+      "properties": {
+        "key": {
+          "description": "The PUBLIC key material, e.g. \"ssh-ed25519 AAAAC3... comment\". Public by nature, so it is safe in a committed file. Compared as algorithm + blob with the trailing comment ignored (GitHub may strip or rewrite comments on storage); keys are immutable upstream, so a changed key is applied as delete plus recreate.",
+          "type": "string"
+        },
+        "read_only": {
+          "description": "Whether the key is restricted to read-only access; GitHub defaults to false (read/write).",
+          "type": "boolean"
+        },
+        "title": {
+          "description": "The key title shown in the settings UI, the natural key.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "key"
+      ],
+      "type": "object"
+    },
     "DeploymentBranchPolicyConfig": {
       "description": "One custom deployment branch-policy pattern, matched by exact name. Extra fields pass through to the create call verbatim.",
       "properties": {
@@ -916,6 +938,20 @@
           ],
           "description": "Repository Dependabot secrets (private-registry credentials Dependabot uses), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable)."
         },
+        "deploy_keys": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/DeployKeyConfig"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CDeployKeyConfig%3E"
+            }
+          ],
+          "description": "Deploy keys, matched by title. The declared material is a PUBLIC key, safe in a committed settings file. Keys are immutable upstream, so any change is applied as delete plus recreate. Undeclared keys are kept by default - deleting a live deploy key breaks whatever service authenticates with it, and deployment tooling installs its own keys - and the wrapped form can set `undeclared: delete`."
+        },
         "environments": {
           "description": "Deployment environments, upserted by name.",
           "items": {
@@ -1180,6 +1216,27 @@
           "description": "The declared entries, exactly as the plain array form lists them.",
           "items": {
             "$ref": "#/definitions/DependabotSecretConfig"
+          },
+          "type": "array"
+        },
+        "undeclared": {
+          "$ref": "#/definitions/UndeclaredPolicy",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "UndeclaredPolicyList<DeployKeyConfig>": {
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "properties": {
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "items": {
+            "$ref": "#/definitions/DeployKeyConfig"
           },
           "type": "array"
         },

@@ -670,6 +670,36 @@ function genCustomProperties(rng: Rng): EntriesForm {
   return maybeWrapUndeclared(rng, entries);
 }
 
+/**
+ * The fixed pool deploy-key entries draw from: plausible
+ * "algorithm blob comment" strings whose blobs are DISTINCT (GitHub rejects a
+ * reused public key with a 422, account-wide, and the mock mirrors that per
+ * repo). The comments are load-bearing for the corpus: the mock strips them on
+ * storage the way GitHub normalizes stored material, so a converging apply
+ * proves the section compares algorithm + blob, not the raw string.
+ */
+const DEPLOY_KEY_POOL = [
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzAlphaAlphaAlphaAlphaAlphaAlphaAlph deploy@alpha",
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzBravoBravoBravoBravoBravoBravoBrav deploy@bravo",
+  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCe2eFuzzCharlieCharlieCharlieCharlieCharlie deploy@charlie",
+  "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTZAAAAIbmlzdHAyNTYAAABBBe2e deploy@delta",
+] as const;
+
+function genDeployKeys(rng: Rng): EntriesForm {
+  // Distinct keys AND distinct titles per document: the pool is sliced, never
+  // sampled with replacement, because a duplicated blob 422s on create and a
+  // duplicated title is rejected by the section's own duplicate check.
+  const count = rng.int(DEPLOY_KEY_POOL.length) + 1;
+  const entries: Json[] = DEPLOY_KEY_POOL.slice(0, count).map((key, i) => {
+    const entry: Json = { title: `deploy-${rng.pick(["bot", "ci", "mirror"])}-${i}`, key };
+    if (rng.bool(0.5)) {
+      entry.read_only = rng.bool();
+    }
+    return entry;
+  });
+  return maybeWrapUndeclared(rng, entries);
+}
+
 /** The top-level sections whose entries are {name, value: $NAME} secret lists. */
 const SECRET_LIST_SECTIONS = [
   "actions_secrets",
@@ -844,6 +874,7 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   actions_variables: genActionsVariables,
   webhooks: genWebhooks,
   custom_properties: genCustomProperties,
+  deploy_keys: genDeployKeys,
 };
 
 /** A valid-shaped settings value for one section. */
@@ -1131,6 +1162,7 @@ const ARRAY_SECTIONS = [
   "actions_variables",
   "webhooks",
   "custom_properties",
+  "deploy_keys",
 ] as const satisfies readonly SectionKey[];
 
 /** The sections whose settings value is a plain record (anyRecord shapes). */
@@ -1172,6 +1204,7 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   // entry-level field the shape enforces is `config` itself.
   webhooks: "config",
   custom_properties: "property_name",
+  deploy_keys: "title",
 };
 
 /**
@@ -1454,6 +1487,7 @@ export const SECTION_PRIMARY_READ = {
   // the section is declared on an org owner (the fault batteries pin
   // owner_kind: "org", so the probe never diverts it).
   custom_properties: "custom_properties.list",
+  deploy_keys: "deploy_keys.list",
 } as const satisfies Partial<Record<SectionKey, string>>;
 
 export type FaultableSection = keyof typeof SECTION_PRIMARY_READ;

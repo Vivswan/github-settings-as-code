@@ -20,6 +20,7 @@ import { collaboratorsSection } from "./collaborators.js";
 import type { EndpointDecl, SectionModule } from "./contract.js";
 import { customPropertiesSection } from "./custom-properties.js";
 import { dependabotSecretsSection } from "./dependabot-secrets.js";
+import { deployKeysSection } from "./deploy-keys.js";
 import { environmentsSection } from "./environments.js";
 import { interactionLimitsSection } from "./interaction-limits.js";
 import { labelsSection } from "./labels.js";
@@ -52,6 +53,7 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   actions_variables: actionsVariablesSection,
   webhooks: webhooksSection,
   custom_properties: customPropertiesSection,
+  deploy_keys: deployKeysSection,
 };
 
 /** Every section module, in execution order. */
