@@ -384,8 +384,8 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
   permission: SectionPermission;
   /**
    * How to grant a fine-grained PAT access to this section's endpoints,
-   * used verbatim in permission errors. The README's "Token permissions
-   * by section" table mirrors these.
+   * used verbatim in permission errors. The README's "Sections" table
+   * mirrors these in its PAT permission column.
    */
   grant: string;
   /**
@@ -398,21 +398,18 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
   /**
    * The DEFAULT policy for live resources this section does NOT declare, the
    * single source the README Sections table and COVERAGE derive their
-   * deletion claims from. For the sections that enumerate sibling resources,
-   * the settings file can override the default per run with the wrapped
-   * `{undeclared, entries}` form (see undeclaredPolicy below):
+   * deletion claims from. Which sections sit in each bucket is read off the
+   * registry (./registry.ts), not restated here. For the sections that
+   * enumerate sibling resources, the settings file can override the default
+   * per run with the wrapped `{undeclared, entries}` form (see
+   * undeclaredPolicy below):
    * - "delete": the section lists live resources and DELETES undeclared ones
-   *   by default (labels, autolinks, collaborators - though the owner is
-   *   always exempt - and actions_variables); `undeclared: keep` softens
-   *   that to notes.
+   *   by default; `undeclared: keep` softens that to notes.
    * - "keep": the section lists live resources but KEEPS undeclared ones by
-   *   default, surfacing each as a note (rulesets, milestones, since removing
-   *   them stays a human action); `undeclared: delete` hardens that to
-   *   deletion.
+   *   default, surfacing each as a note; `undeclared: delete` hardens that
+   *   to deletion.
    * - "untouched": the section never enumerates sibling resources, so an
-   *   undeclared one is simply never seen (repository, branches, environments,
-   *   actions, workflows, pages, code_scanning_default_setup, teams,
-   *   interaction_limits) and no policy applies.
+   *   undeclared one is simply never seen and no policy applies.
    *
    * The conditional type makes the pairing unrepresentable to get wrong: a
    * section in UNDECLARED_POLICY_SECTIONS must say "delete" or "keep",
