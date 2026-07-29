@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { FILTER_INPUTS } from "../../src/action/inputs.js";
 import { RESERVED_REF_PREFIXES } from "../../src/action/secret-refs.js";
+import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import type { MustBeNever } from "../../src/schema.js";
 import type { PatResource } from "../../src/sections/contract.js";
 import type { LiveState } from "./mock/state.js";
@@ -109,6 +110,14 @@ export const ExpectSchema = z
     exit_code: z.union([z.number().int(), z.array(z.number().int()).min(1)]),
     /** The `result` output ("clean", "drift", "applied", "failed", ...). */
     result: z.string().optional(),
+    /**
+     * The published `skipped-sections` output as a set: the comma-joined
+     * value must contain exactly these section keys, in any order. This is
+     * the skipped-sections projection's end-to-end pin - a section skipped
+     * under on-missing-permission: warn must surface here, not only in the
+     * summary table.
+     */
+    skipped_sections: z.array(z.string()).optional(),
     /** Per-section outcome parsed from the step-summary table. */
     outcomes: z.record(z.string(), z.string()).optional(),
     /**
@@ -424,6 +433,54 @@ export type Fault = z.infer<typeof FaultSchema>;
 export type Scenario = z.infer<typeof ScenarioSchema>;
 
 /**
+ * Where a scenario re-types MARKER_LABEL_CONFIG as fixture data because .yml
+ * files cannot import the constant: DECLARED settings (top-level, per-repo,
+ * defaults file) and expectation blocks. live_state is deliberately out of
+ * scope - seeding a DRIFTED marker label there is how a future scenario
+ * would test that the report path repairs a mangled marker, so the pin must
+ * not make that inexpressible. Walk each in-scope root and compare any
+ * object named MARKER_LABEL against the config; a config change then fails
+ * scenario load with the offending values instead of silently drifting the
+ * declared fixtures. Returns "field: fixture value != config value" lines.
+ */
+export function markerLabelFixtureMismatches(scenario: Scenario): string[] {
+  const roots: Array<[string, unknown]> = [
+    ["settings", scenario.settings],
+    ["defaults_file", scenario.defaults_file],
+    ["expect", scenario.expect],
+  ];
+  for (const [slug, repo] of Object.entries(scenario.repos ?? {})) {
+    roots.push([`repos.${slug}.settings`, repo.settings], [`repos.${slug}.expect`, repo.expect]);
+  }
+  return roots.flatMap(([path, root]) => markerMismatchesIn(root, path));
+}
+
+/** The recursive comparison markerLabelFixtureMismatches applies per root. */
+function markerMismatchesIn(value: unknown, path: string): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, i) => markerMismatchesIn(item, `${path}[${i}]`));
+  }
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  const record = value as Record<string, unknown>;
+  const mismatches: string[] = [];
+  if (record.name === MARKER_LABEL) {
+    for (const field of ["color", "description"] as const) {
+      if (field in record && record[field] !== MARKER_LABEL_CONFIG[field]) {
+        mismatches.push(
+          `${path}.${field}: ${JSON.stringify(record[field])} != MARKER_LABEL_CONFIG's ${JSON.stringify(MARKER_LABEL_CONFIG[field])}`,
+        );
+      }
+    }
+  }
+  for (const [key, nested] of Object.entries(record)) {
+    mismatches.push(...markerMismatchesIn(nested, `${path}.${key}`));
+  }
+  return mismatches;
+}
+
+/**
  * Parse and validate one scenario object. On failure, throw an error naming
  * the source file and every offending zod path, so a malformed scenario is
  * diagnosable without reading the schema.
@@ -435,6 +492,12 @@ export function parseScenario(raw: unknown, sourcePath: string): Scenario {
       .map((issue) => `  ${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("\n");
     throw new Error(`invalid scenario ${sourcePath}:\n${detail}`);
+  }
+  const markerMismatches = markerLabelFixtureMismatches(result.data);
+  if (markerMismatches.length > 0) {
+    throw new Error(
+      `invalid scenario ${sourcePath}: marker-label fixture data drifted from MARKER_LABEL_CONFIG (src/report/issue-report.ts):\n  ${markerMismatches.join("\n  ")}`,
+    );
   }
   return result.data;
 }

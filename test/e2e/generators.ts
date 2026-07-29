@@ -16,10 +16,12 @@ import {
   type MustBeNever,
   SECTION_KEYS,
   type SectionKey,
+  type SettingsFile,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
-import { undeclaredPolicy } from "../../src/sections/contract.js";
-import { SECTIONS } from "../../src/sections/registry.js";
+import { endpointMethod, undeclaredPolicy } from "../../src/sections/contract.js";
+import { allEndpoints, SECTIONS } from "../../src/sections/registry.js";
+import { ADMIN_SLUG } from "./constants.js";
 import type { LiveState } from "./mock/state.js";
 import { CUSTOM_PROPERTY_DEFINITIONS, PROTECTION_RULE_APPS } from "./mock/state.js";
 import type { Rng } from "./prng.js";
@@ -1533,7 +1535,7 @@ export type FaultableSection = keyof typeof SECTION_PRIMARY_READ;
  * section that lands unclassified fails this exhaustiveness check instead of
  * silently escaping fault fuzzing.
  */
-const UNFAULTABLE_SECTIONS = [
+export const UNFAULTABLE_SECTIONS = [
   "repository",
   "branches",
   "environments",
@@ -1541,8 +1543,93 @@ const UNFAULTABLE_SECTIONS = [
   "code_scanning_default_setup",
   "interaction_limits",
 ] as const satisfies readonly SectionKey[];
-type FaultClassified = FaultableSection | (typeof UNFAULTABLE_SECTIONS)[number];
+export type UnfaultableSection = (typeof UNFAULTABLE_SECTIONS)[number];
+type FaultClassified = FaultableSection | UnfaultableSection;
 type _UnclassifiedFaultSection = MustBeNever<Exclude<SectionKey, FaultClassified>>;
+
+/**
+ * Trigger-avoiding apply settings, one entry per UNFAULTABLE_SECTIONS member
+ * (the Record type keeps the list and the catalog in lockstep). MAXIMAL on
+ * purpose: each entry declares every key it can WITHOUT reaching a read -
+ * reads here are check-mode-only or gated on the few keys deliberately left
+ * out (environments' nested lists, branches' protection: null) - so the
+ * battery's claim is "a full-width apply of this section issues no read",
+ * not "an apply too small to read anything stays quiet". The fuzz battery
+ * arms one-shot faults on EVERY one of the section's GET endpoints
+ * (unfaultableReadKeys, derived from the ENDPOINTS declaration, never
+ * hand-picked) and requires none to fire, so a section gaining ANY
+ * unconditional apply read fails the battery no matter which endpoint
+ * carries it.
+ */
+export const UNFAULTABLE_APPLY_SETTINGS: {
+  // The real section config types, so a typo'd key here fails typecheck
+  // instead of silently shrinking the battery's declared width.
+  [K in UnfaultableSection]: NonNullable<SettingsFile[K]>;
+} = {
+  // Apply PATCHes the base fields, PUTs topics, and toggles every declared
+  // feature unconditionally; the section GET and each toggle's GET run only
+  // in check mode, so every readable toggle is declared here.
+  repository: {
+    description: "unfaultable battery",
+    topics: ["fuzz-topic"],
+    enable_vulnerability_alerts: true,
+    enable_automated_security_fixes: true,
+    enable_private_vulnerability_reporting: true,
+    enable_immutable_releases: true,
+    enable_git_lfs: true,
+  },
+  // getProtection probes only for a `protection: null` removal, and the
+  // advisory branchProbe runs only inside that check-mode probe; a declared
+  // (non-null) protection is PUT unconditionally and the signatures toggle
+  // rides its own POST.
+  branches: [{ name: "main", protection: { enforce_admins: true, required_signatures: true } }],
+  // The environment probe and every nested list read run only in check mode
+  // or when an entry declares a nested key (variables/secrets/policies/
+  // protection rules), so those stay deliberately undeclared.
+  environments: [{ name: "prod", wait_timer: 30 }],
+  // Every endpoint group PUTs unconditionally in apply mode and its GET runs
+  // only under check, so every group with a GET is declared.
+  actions: {
+    enabled: true,
+    allowed_actions: "selected",
+    selected_actions: { github_owned_allowed: true, verified_allowed: true },
+    default_workflow_permissions: "read",
+    can_approve_pull_request_reviews: false,
+    access_level: "none",
+    artifact_and_log_retention: { days: 90 },
+    cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
+    oidc_customization_sub: { use_default: true },
+    fork_pr_contributor_approval: { approval_policy: "first_time_contributors" },
+    fork_pr_workflows_private_repos: {
+      run_workflows_from_fork_pull_requests: false,
+      send_write_tokens_to_workflows: false,
+      send_secrets_and_variables: false,
+      require_approval_for_fork_pr_workflows: true,
+    },
+  },
+  // The default-setup GET runs only in check mode; apply PATCHes directly.
+  code_scanning_default_setup: {
+    state: "configured",
+    query_suite: "default",
+    languages: ["javascript-typescript"],
+    threat_model: "remote",
+  },
+  // The limits GET runs only in check mode; apply re-arms via PUT.
+  interaction_limits: { limit: "collaborators_only", expiry: "one_week" },
+};
+
+/**
+ * Every GET endpoint of a section as "section.role" fault keys, derived from
+ * the registry's ENDPOINTS declarations - the same single source the mock
+ * routes and USED_PATHS derive from - so the battery cannot arm a stale
+ * hand-copied key while the section reads somewhere else.
+ */
+export function unfaultableReadKeys(section: UnfaultableSection): string[] {
+  return Object.entries(allEndpoints())
+    .filter(([key, ep]) => key.startsWith(`${section}.`) && endpointMethod(ep.route) === "GET")
+    .map(([key]) => key)
+    .sort();
+}
 
 let validator: ValidateFunction | undefined;
 
@@ -1969,9 +2056,8 @@ export function genMultiScenario(
   const privateReport =
     force === "issue-report" ? "issue" : force === "idempotence-eligible" ? "none" : rolledReport;
   // The admin repo the runner runs as (GITHUB_REPOSITORY); a target whose slug
-  // equals it is never redacted (the self carve-out). Kept in sync with
-  // runner.ts's REPO_SLUG.
-  const selfSlug = "e2e-owner/e2e-repo";
+  // equals it is never redacted (the self carve-out).
+  const selfSlug = ADMIN_SLUG;
   // The GLOBAL token mask for the run, varied ONLY on org_members: the mock
   // grades org-scoped endpoints (teams' org routes) against the global mask
   // while repo-scoped ones use the per-slug overlay, so any other global

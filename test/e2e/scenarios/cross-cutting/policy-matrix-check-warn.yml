@@ -20,6 +20,10 @@ expect:
   outcomes:
     repository: clean
     labels: skipped
+  # The skip must reach the published skipped-sections output, not just the
+  # summary table (the projection consumers key off).
+  skipped_sections:
+    - labels
   never:
     - POST /repos/{repo}/labels
     - PATCH /repos/{repo}/labels

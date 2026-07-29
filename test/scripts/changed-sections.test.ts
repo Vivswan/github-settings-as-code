@@ -136,6 +136,11 @@ describe("changed-sections selection", () => {
     expect(renderSelection(selection)).toBe("none");
   });
 
+  test("the selection machinery selects all: a selector-only or checks.yml-only PR must not skip the smoke job", () => {
+    expect(sectionsForFiles([".github/scripts/changed-sections.ts"]).kind).toBe("all");
+    expect(sectionsForFiles([".github/workflows/checks.yml"]).kind).toBe("all");
+  });
+
   test("a single section file selects just that section", () => {
     const selection = sectionsForFiles(["src/sections/labels.ts"]);
     expect(renderSelection(selection)).toBe("labels");

@@ -11,10 +11,12 @@
  * handler (or leaving a stale handler behind) fails loudly at construction.
  */
 
+import { MAX_RETRIES } from "../../../src/github/api.js";
 import {
   ISSUE_REPORT_ENDPOINTS,
   ISSUE_REPORT_PERMISSION,
   MARKER_LABEL,
+  MARKER_LABEL_CONFIG,
 } from "../../../src/report/issue-report.js";
 import type { SectionKey } from "../../../src/schema.js";
 import {
@@ -27,6 +29,7 @@ import {
   toleratedStatuses,
 } from "../../../src/sections/contract.js";
 import { allEndpoints, SECTIONS, type TaggedEndpoint } from "../../../src/sections/registry.js";
+import { ADMIN_SLUG, TOKEN_USER_LOGIN } from "../constants.js";
 import { DENIAL_SEMANTICS } from "../denial-semantics.js";
 import type { DenialStyle, MaskGrade, MaskKey, Scenario } from "../schema.js";
 import {
@@ -448,7 +451,7 @@ const HANDLERS: Record<string, Handler> = {
       ...payload,
       id: state.nextId++,
       node_id: `MDU6TGFiZWw${state.nextId}`,
-      url: `https://api.github.com/repos/e2e-owner/e2e-repo/labels/${String(payload.name)}`,
+      url: `https://api.github.com/repos/${ADMIN_SLUG}/labels/${String(payload.name)}`,
       name: payload.name,
       color: payload.color ?? "ededed",
       default: false,
@@ -580,7 +583,7 @@ const HANDLERS: Record<string, Handler> = {
     // The documented 200 body carries {url, enabled}; the url stays out of
     // the stored state so the flattener sees the same shape a GET serves.
     return ok({
-      url: `https://api.github.com/repos/e2e-owner/e2e-repo/branches/${branch}/protection/required_signatures`,
+      url: `https://api.github.com/repos/${ADMIN_SLUG}/branches/${branch}/protection/required_signatures`,
       enabled: true,
     });
   },
@@ -1119,8 +1122,7 @@ const HANDLERS: Record<string, Handler> = {
         status: 202,
         body: {
           run_id: state.nextId++,
-          run_url:
-            "https://api.github.com/repos/e2e-owner/e2e-repo/code-scanning/default-setup/runs/1",
+          run_url: `https://api.github.com/repos/${ADMIN_SLUG}/code-scanning/default-setup/runs/1`,
         },
       };
     }
@@ -1152,7 +1154,7 @@ const HANDLERS: Record<string, Handler> = {
     const invitationPermission =
       permission === "pull" ? "read" : permission === "push" ? "write" : permission;
     const id = state.nextId++;
-    const slug = String(state.repo.full_name ?? "e2e-owner/e2e-repo");
+    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
     const ownerLogin = String((state.repo.owner as Json | undefined)?.login ?? slug.split("/")[0]);
     return {
       status: 201,
@@ -1478,7 +1480,7 @@ const HANDLERS: Record<string, Handler> = {
     const key: Json = {
       id,
       key: stored,
-      url: `https://api.github.com/repos/e2e-owner/e2e-repo/keys/${id}`,
+      url: `https://api.github.com/repos/${ADMIN_SLUG}/keys/${id}`,
       title: String(payload.title ?? ""),
       verified: true,
       // Fixed so a repeat apply leaves the state byte-stable (idempotence).
@@ -1733,7 +1735,7 @@ const IMMUTABLE_OWNER_CONFLICT = {
 // --- Handler-local helpers ------------------------------------------------
 
 function pagesUrl(): string {
-  return "https://api.github.com/repos/e2e-owner/e2e-repo/pages";
+  return `https://api.github.com/repos/${ADMIN_SLUG}/pages`;
 }
 
 /**
@@ -2414,12 +2416,10 @@ function contentsSlug(pathname: string): string | null {
 // infrastructure that writes even in check mode); they are served inline before
 // section matching, exactly like the contents fetch, and gated on the Issues
 // permission per ISSUE_REPORT_PERMISSION. GET /user is the fallback creator
-// scan and is a user-level call, so it is ungated. The marker-label POST goes
-// through the existing labels.create section route (Issues-gated, 422 on
-// duplicate), so it is not modeled here.
-
-/** The token user GET /user reports; the report module reads only `login`. */
-const TOKEN_USER_LOGIN = "e2e-token-user";
+// scan and is a user-level call, so it is ungated (it reports TOKEN_USER_LOGIN
+// from ../constants.js; the report module reads only `login`). The
+// marker-label POST goes through the existing labels.create section route
+// (Issues-gated, 422 on duplicate), so it is not modeled here.
 
 /** A repo's proven visibility from its mock state (defaults public via the fixture). */
 function visibilityOfState(state: MockState | undefined): string {
@@ -2525,9 +2525,18 @@ function issueMatchesQuery(issue: Json, query: Record<string, string>): boolean 
   return true;
 }
 
-/** Expand a label name into the object shape the issues list returns. */
+/**
+ * Expand a label name into the object shape the issues list returns. Only
+ * the marker label carries its configured color (the report path is the one
+ * that materializes label objects on issues); any other name gets neutral
+ * filler.
+ */
 function labelObject(name: string): Json {
-  return { name, color: "0e2a47", default: false };
+  return {
+    name,
+    color: name === MARKER_LABEL ? MARKER_LABEL_CONFIG.color : "ededed",
+    default: false,
+  };
 }
 
 /**
@@ -2782,21 +2791,19 @@ function handleIssueReport(
   return { response: violationResponse(message), violation: message };
 }
 
-/**
- * The admin repo the e2e runner runs as (its GITHUB_REPOSITORY). Kept in sync
- * with runner.ts's REPO_SLUG. The redaction self carve-out never probes this
- * slug, so a repository.get for it is always a section read, never the probe.
- */
-const ADMIN_SLUG = "e2e-owner/e2e-repo";
+// The admin repo the e2e runner runs as (ADMIN_SLUG, its GITHUB_REPOSITORY)
+// is imported from ../constants.js; the redaction self carve-out never probes
+// that slug, so a repository.get for it is always a section read, never the
+// probe.
 
 /**
  * How many wire attempts the visibility probe can make: one plus the client's
- * retry budget (MAX_RETRIES = 2 in src/github/api.ts). Once a slug's
- * repository.get has faulted this many times the probe has exhausted its
- * retries and given up, so the next repository.get is a section read - not a
- * probe retry - and the exemption expires.
+ * retry budget, derived from the client's own MAX_RETRIES (src/github/api.ts).
+ * Once a slug's repository.get has faulted this many times the probe has
+ * exhausted its retries and given up, so the next repository.get is a section
+ * read - not a probe retry - and the exemption expires.
  */
-const PROBE_RETRY_BUDGET = 3;
+const PROBE_RETRY_BUDGET = 1 + MAX_RETRIES;
 
 /**
  * Whether the redaction visibility probe is EXPECTED to issue a

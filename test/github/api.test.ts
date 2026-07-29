@@ -8,6 +8,7 @@ import {
   GithubApi,
   isPermissionError,
   isRateLimitError,
+  MAX_RETRIES,
   redactingOctokitLog,
   registerRedactedSlug,
   SECRET_RESPONSE_WITHHELD,
@@ -66,7 +67,7 @@ describe("retry and throttling", () => {
   test("exhausted rate-limit retries surface the API message", async () => {
     const state = stubFetch([rateLimited]);
     const result = await api().tryRequest("GET", "/hopeless");
-    expect(state.calls).toBe(3); // 1 + MAX_RETRIES
+    expect(state.calls).toBe(1 + MAX_RETRIES);
     expect("error" in result && result.error.status).toBe(429);
     expect("error" in result && result.error.message).toContain("rate limited");
   });

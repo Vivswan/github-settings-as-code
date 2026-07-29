@@ -16,8 +16,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
+import type { OUTPUT_NAMES } from "../../src/action/io.js";
 import { MARKER_LABEL } from "../../src/report/issue-report.js";
+import type { SectionKey } from "../../src/schema.js";
 import { ALWAYS_REWRITE_STATE_FAMILIES, COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
+import { ADMIN_SLUG as REPO_SLUG } from "./constants.js";
 import { endpointForRequest, type LoggedRequest, sectionForRequest } from "./mock/routes.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./mock/server.js";
 import type { MockState } from "./mock/state.js";
@@ -26,9 +29,6 @@ import type { Expect, Scenario } from "./schema.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const BUNDLE = join(ROOT, "lib", "index.js");
-const OWNER = "e2e-owner";
-const REPO = "e2e-repo";
-const REPO_SLUG = `${OWNER}/${REPO}`;
 /**
  * The inert token every child run authenticates with (INPUT_TOKEN). Exported
  * as the single source for the token-leak invariant's needle: a consumer that
@@ -36,6 +36,12 @@ const REPO_SLUG = `${OWNER}/${REPO}`;
  * duplicated string would silently make the invariant vacuous.
  */
 export const E2E_TOKEN = "e2e-token";
+/**
+ * The published output the skipped-sections assertion reads, pinned to the
+ * action's own OUTPUT_NAMES declaration (src/action/io.ts): a rename there
+ * fails compilation here instead of leaving a stale string reading nothing.
+ */
+const SKIPPED_SECTIONS_OUTPUT = "skipped-sections" satisfies (typeof OUTPUT_NAMES)[number];
 /** Hard cap so a hung child never wedges the suite. */
 const KILL_AFTER_MS = 30_000;
 
@@ -697,6 +703,91 @@ export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
 }
 
 /**
+ * The inverse leg of COMPARE_BEFORE_WRITE: a wrong `true` fails the first
+ * idempotence run that touches the section, but a wrong `false` merely
+ * weakens the proof (the zero-write assertion above stops binding) without
+ * failing anything. So every idempotence re-run accumulates, per
+ * false-listed section, how many first- and second-apply writes the CORPUS
+ * issued, and the corpus-level verdict demands both a witness and the
+ * re-issued writes. Corpus-level on purpose: one scenario can legitimately
+ * go second-apply-quiet on a false section (a one-shot removal, a webhook
+ * without a declared secret), but across the corpus the unconditional write
+ * path must fire somewhere or the `false` is unwitnessed.
+ */
+export type UnconditionalWriteWitness = Map<SectionKey, { first: number; second: number }>;
+
+/** The witness map THIS process's idempotence re-runs accumulate into. */
+const corpusWriteWitness: UnconditionalWriteWitness = new Map();
+
+/**
+ * Accumulate one idempotence re-run's writes into a witness map. Pure over
+ * its arguments (the corpus map is passed in), so the corpus verdict is
+ * provably able to fire - the same testability contract the sibling
+ * secondApplyWriteFailures/missingSecondApplyRewrites helpers keep.
+ */
+export function recordUnconditionalWrites(
+  witness: UnconditionalWriteWitness,
+  firstWrites: LoggedRequest[],
+  secondWrites: LoggedRequest[],
+): void {
+  const bump = (writes: LoggedRequest[], side: "first" | "second"): void => {
+    for (const write of writes) {
+      const section = sectionForRequest(write.method, write.pathname);
+      if (section === null || COMPARE_BEFORE_WRITE[section]) {
+        continue;
+      }
+      const counts = witness.get(section) ?? { first: 0, second: 0 };
+      counts[side]++;
+      witness.set(section, counts);
+    }
+  };
+  bump(firstWrites, "first");
+  bump(secondWrites, "second");
+}
+
+/**
+ * The corpus-level verdict over a witness map, demanded for EVERY
+ * false-listed section - one failure line per section that is either
+ * unwitnessed (no idempotence re-run wrote to it on a first apply, so
+ * nothing contradicts a wrong `false`) or contradicted (its first applies
+ * wrote but no second apply ever did). The two messages name opposite
+ * remedies: an unwitnessed section needs corpus coverage, a contradicted
+ * one needs its table entry flipped.
+ */
+export function unwitnessedUnconditionalSections(witness: UnconditionalWriteWitness): string[] {
+  const failures: string[] = [];
+  for (const [section, compares] of Object.entries(COMPARE_BEFORE_WRITE) as Array<
+    [SectionKey, boolean]
+  >) {
+    if (compares) {
+      continue;
+    }
+    const counts = witness.get(section);
+    if (counts === undefined || counts.first === 0) {
+      failures.push(
+        `apply-idempotence corpus: "${section}" is listed as unconditional (COMPARE_BEFORE_WRITE false) but NO apply_idempotent scenario in the corpus writes to it, so a wrong \`false\` would go uncontradicted - declare the section in an apply_idempotent scenario (e.g. apply-idempotent-unconditional.yml)`,
+      );
+      continue;
+    }
+    if (counts.second === 0) {
+      failures.push(
+        `apply-idempotence corpus: "${section}" is listed as unconditional (COMPARE_BEFORE_WRITE false) but its ${counts.first} first-apply write(s) were never re-issued by any second apply - either the section now compares before writing (flip the table entry) or the corpus lost its unconditional-write witness`,
+      );
+    }
+  }
+  return failures.sort();
+}
+
+/**
+ * The verdict over the writes this process recorded. run.ts consults it
+ * after the FULL corpus only - a --sections or --scenario slice legitimately
+ * starves sections.
+ */
+export function corpusUnwitnessedUnconditionalSections(): string[] {
+  return unwitnessedUnconditionalSections(corpusWriteWitness);
+}
+
+/**
  * The always-rewrite half of the idempotence proof: every secret PUT the
  * first apply issued must be issued AGAIN by the second apply, path for path.
  * Which PUTs bind comes from the EndpointDecl `alwaysRewrite` flag (resolved
@@ -781,6 +872,7 @@ async function assertApplyIdempotent(
   failures.push(...secondApplyWriteFailures(writes));
   const firstWrites = handle.requests.slice(0, requestsBefore).filter((r) => r.method !== "GET");
   failures.push(...missingSecondApplyRewrites(firstWrites, writes));
+  recordUnconditionalWrites(corpusWriteWitness, firstWrites, writes);
   const changed = changedFamilies(before, snapshotFamilies(handle));
   if (changed.length > 0) {
     failures.push(`apply-idempotence: second apply changed mock state: ${changed.join(", ")}`);
@@ -888,6 +980,25 @@ export async function runScenario(
     // 3. The `result` output.
     if (exp.result !== undefined && first.outputs.result !== exp.result) {
       failures.push(`result "${first.outputs.result}" != expected "${exp.result}"`);
+    }
+    // 3a. The `skipped-sections` output, compared as a set (the engine emits
+    // a comma-joined list whose order is SECTION_KEYS order; the expectation
+    // should not have to restate that). An ABSENT output is a failure even
+    // against an empty expectation - the action publishing nothing is a
+    // different regression from it publishing an empty list.
+    if (exp.skipped_sections !== undefined) {
+      const published = first.outputs[SKIPPED_SECTIONS_OUTPUT];
+      if (published === undefined) {
+        failures.push(`the ${SKIPPED_SECTIONS_OUTPUT} output was not published at all`);
+      } else {
+        const live = published.split(",").filter(Boolean).sort();
+        const want = [...exp.skipped_sections].sort();
+        if (JSON.stringify(live) !== JSON.stringify(want)) {
+          failures.push(
+            `${SKIPPED_SECTIONS_OUTPUT} output [${live.join(", ")}] != expected [${want.join(", ")}]`,
+          );
+        }
+      }
     }
     // 3b. Multi-repo per-target rollup. The expected map merges the top-level
     // expect.repos_result with any per-repo repos.*.expect.result (the latter
