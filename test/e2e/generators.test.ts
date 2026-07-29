@@ -6,6 +6,7 @@ import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
+  canariesOf,
   genDiscoveryScenario,
   genInvalidSettings,
   genLiveWitness,
@@ -614,7 +615,7 @@ describe("genMultiScenario", () => {
         // Never the milestones opt-out target (there is no mapping to null a
         // section in) and never the guaranteed leak-canary target.
         expect(meta.milestonesOptOutSlug).not.toBe(repo.slug);
-        expect(repo.canaries).toEqual([]);
+        expect(canariesOf(repo)).toEqual([]);
       }
     }
     expect(sawUnparseable).toBeGreaterThan(0);
@@ -665,7 +666,7 @@ describe("genMultiScenario", () => {
           redact &&
           repo.slug !== meta.selfSlug &&
           (repo.visibility !== "public" || repo.probeDenied);
-        expect(repo.redacted).toBe(expected);
+        expect(repo.redaction.kind === "redacted").toBe(expected);
       }
       // The action input echoes the policy the meta records.
       expect(scenario.inputs?.private_repos).toBe(meta.privateRepos);
@@ -718,7 +719,7 @@ describe("genMultiScenario", () => {
       if (meta.privateRepos !== "redact") {
         continue;
       }
-      expect(meta.repos.some((r) => r.redacted)).toBe(true);
+      expect(meta.repos.some((r) => r.redaction.kind === "redacted")).toBe(true);
     }
   });
 
@@ -735,7 +736,7 @@ describe("genMultiScenario", () => {
         continue;
       }
       const fullyGrantedRedacted = meta.repos.some((r) => {
-        if (!r.redacted || r.canaries.length === 0) {
+        if (r.redaction.kind !== "redacted" || r.redaction.canaries.length === 0) {
           return false;
         }
         const spec = scenario.repos?.[r.slug] as { permissions?: Record<string, string> };
@@ -750,12 +751,12 @@ describe("genMultiScenario", () => {
     for (let i = 0; i < 200; i++) {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       for (const repo of meta.repos) {
-        if (!repo.redacted) {
-          // A shown target plants no canaries.
-          expect(repo.canaries).toEqual([]);
+        if (repo.redaction.kind !== "redacted") {
+          // A shown target carries no redaction facts - and so no canaries.
           continue;
         }
-        if (repo.canaries.length === 0) {
+        const canaries = repo.redaction.canaries;
+        if (canaries.length === 0) {
           // Only a normal target has surfaces to plant into: a redacted
           // missing-settings or raw-invalid target legitimately has none.
           expect(repo.target.kind).not.toBe("normal");
@@ -769,10 +770,10 @@ describe("genMultiScenario", () => {
             repo?: { description?: string };
           };
         };
-        const nameCanary = repo.canaries.find((c) => c.endsWith("-name"));
-        const declaredDescCanary = repo.canaries.find((c) => c.endsWith("-declared"));
-        const liveDescCanary = repo.canaries.find((c) => c.endsWith("-live"));
-        const repoCanary = repo.canaries.find((c) => c.endsWith("-repo"));
+        const nameCanary = canaries.find((c) => c.endsWith("-name"));
+        const declaredDescCanary = canaries.find((c) => c.endsWith("-declared"));
+        const liveDescCanary = canaries.find((c) => c.endsWith("-live"));
+        const repoCanary = canaries.find((c) => c.endsWith("-repo"));
         // The canary label is declared and mirrored in live by NAME, but with a
         // DIFFERENT description, so it drifts (check) / updates (apply) - the name
         // and description flow into the detail a suppression regression would leak.
@@ -847,8 +848,11 @@ describe("battery forces (constructed eligibility, never rejection-sampled)", ()
       const { meta } = genMultiScenario(new Rng(i), "plain-first-target");
       expect(meta.privateRepos).toBe("show");
       const first = meta.repos[0];
-      expect(first?.target.kind).not.toBe("raw-invalid");
-      expect(first?.canaries).toEqual([]);
+      if (first === undefined) {
+        throw new Error("genMultiScenario built no repos");
+      }
+      expect(first.target.kind).not.toBe("raw-invalid");
+      expect(canariesOf(first)).toEqual([]);
     }
   });
 
