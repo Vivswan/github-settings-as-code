@@ -14,6 +14,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { GithubApi } from "../../../src/github/api.js";
 import { endpointPermission } from "../../../src/sections/contract.js";
 import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
+import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
 import { parseScenario, type Scenario } from "../schema.js";
 import {
   assertFaultKeys,
@@ -25,8 +26,6 @@ import {
 import { type MockHandle, type ServerOptions, startMockServer } from "./server.js";
 import type { MockState } from "./state.js";
 
-const OWNER = "e2e-owner";
-const REPO = "e2e-repo";
 const AUTH = { authorization: "Bearer test-token", "x-github-api-version": "2022-11-28" };
 
 /** A minimal valid scenario; each test overrides only what it exercises. */

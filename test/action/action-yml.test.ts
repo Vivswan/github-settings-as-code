@@ -13,6 +13,7 @@ import {
   DEFAULT_MODE,
   DEFAULT_ON_MISSING_PERMISSION,
   DEFAULT_SETTINGS_FILE,
+  FILTER_INPUTS,
   INPUT_NAMES,
 } from "../../src/action/inputs.js";
 import { OUTPUT_NAMES } from "../../src/action/io.js";
@@ -87,8 +88,6 @@ describe("action.yml outputs", () => {
 });
 
 describe("action.yml <-> discovery defaults", () => {
-  const FILTER_INPUTS = ["visibility", "archived", "forks", "exclude", "topics", "affiliation"];
-
   test("every discovery filter input has an empty action.yml default", () => {
     // The bottom layer of the two-layer model: the code detects an
     // explicitly-set filter by comparing the raw input against "", and

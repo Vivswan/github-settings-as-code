@@ -17,6 +17,7 @@
  * independent predictDiscovery mirror).
  */
 
+import { MAX_RETRIES } from "../../src/github/api.js";
 import type { SectionKey } from "../../src/schema.js";
 import {
   canariesOf,
@@ -39,7 +40,11 @@ import {
   type ScenarioMeta,
   SECTION_PRIMARY_READ,
   scenarioSecretEnv,
+  UNFAULTABLE_APPLY_SETTINGS,
+  UNFAULTABLE_SECTIONS,
   UNPARSEABLE_YAML,
+  type UnfaultableSection,
+  unfaultableReadKeys,
   validateAgainstPublishedSchema,
   WITNESS_KINDS,
   WITNESS_SECTIONS,
@@ -1225,11 +1230,12 @@ type FaultKind = (typeof FAULT_KINDS)[number];
 
 /**
  * One full round of client attempts: the first request plus MAX_RETRIES
- * retries (src/github/api.ts). A fault budget of RETRY_BUDGET outlasts the
- * retries and surfaces as a failure; a budget of 1 is a transient the retry
- * plugin absorbs (for the kinds it retries at all - see faultKills).
+ * retries, derived from the client's own constant (src/github/api.ts). A
+ * fault budget of RETRY_BUDGET outlasts the retries and surfaces as a
+ * failure; a budget of 1 is a transient the retry plugin absorbs (for the
+ * kinds it retries at all - see faultKills).
  */
-const RETRY_BUDGET = 3;
+const RETRY_BUDGET = 1 + MAX_RETRIES;
 
 /**
  * The histogram label for one fired fault, keyed by ENDPOINT so per-endpoint
@@ -1339,6 +1345,60 @@ async function faultedSectionRun(seed: number, plan: SectionFaultPlan): Promise<
   return faultKills(plan.kind, plan.exhausting)
     ? exhaustedSectionRun(scenario, plan.section, plan.key, label)
     : runPredicted(scenario, meta, { faultKey: plan.key, faultClass: label });
+}
+
+/**
+ * The negative leg of the fault battery: an UNFAULTABLE_SECTIONS entry is
+ * exempt from fault fuzzing because every read it could make is conditional
+ * or check-mode-only. Prove the exemption is still earned - arm a one-shot
+ * fault on EVERY GET endpoint the section declares (unfaultableReadKeys, so
+ * no hand-picked endpoint can go stale) in a trigger-avoiding apply, and
+ * require a healthy run in which NONE of them fires, the inverse of
+ * assertFaultFired's non-vacuity check. A firing means the section gained an
+ * unconditional read and belongs in SECTION_PRIMARY_READ so the positive
+ * battery covers it.
+ */
+async function unfaultableSectionRun(
+  seed: number,
+  section: UnfaultableSection,
+): Promise<IterationResult> {
+  const readKeys = unfaultableReadKeys(section);
+  const problems: string[] = [];
+  if (readKeys.length === 0) {
+    // No GETs at all would make this run vacuous; every unfaultable section
+    // declares read endpoints today, so an empty derivation is a rename bug.
+    problems.push(`no GET endpoints derived for "${section}" - the battery run is vacuous`);
+    return iterationResult(problems, { sections: [section] }, `[unfaultable ${section}] `);
+  }
+  const scenario: Scenario = {
+    name: `fuzz-unfaultable-${section}-${seed}`,
+    tiers: ["mock"],
+    settings: { [section]: UNFAULTABLE_APPLY_SETTINGS[section] },
+    inputs: { mode: "apply", on_missing_permission: "warn" },
+    denial_style: "fine_grained",
+    owner_kind: "org",
+    faults: readKeys.map((key) => ({ endpoint: key, kind: "server_error" as const, times: 1 })),
+    // The outcome pin is the run's non-vacuity guard: under warn policy a
+    // SKIPPED section would also exit 0 with every fault cold, proving
+    // nothing. The section must actually apply.
+    expect: { exit_code: 0, outcomes: { [section]: "applied" } },
+  };
+  const report = await runScenario(scenario);
+  if (!report.ok) {
+    problems.push(...report.failures);
+  }
+  for (const key of readKeys) {
+    if ((report.faultsFired[key] ?? 0) > 0) {
+      problems.push(
+        `fault on ${key} FIRED during an apply of "${section}" - the read is unconditional after all; move the section into SECTION_PRIMARY_READ so the fault battery covers it`,
+      );
+    }
+  }
+  return iterationResult(
+    problems,
+    { artifactDir: report.artifactDir, sections: [section] },
+    `[unfaultable ${section}] `,
+  );
 }
 
 /**
@@ -1967,6 +2027,28 @@ async function main(): Promise<number> {
       }
       batteryFailures++;
       console.log(`  ${label} [${mode}] seed ${seed} FAIL: ${result.failure}`);
+      console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
+      if (result.artifactDir) {
+        console.log(`    artifact: ${result.artifactDir}`);
+      }
+    }
+
+    // Negative fault battery: each UNFAULTABLE_SECTIONS exemption must still
+    // be earned - one-shot faults armed on EVERY GET endpoint the section
+    // declares must all stay cold in a trigger-avoiding apply
+    // (unfaultableSectionRun's doc has the full contract). Once per soak,
+    // like the positive battery above.
+    console.log("\nunfaultable battery (declared reads stay cold in apply):");
+    for (const [index, section] of UNFAULTABLE_SECTIONS.entries()) {
+      const seed = iterationSeed(master, 0x310000 + index);
+      const result = await unfaultableSectionRun(seed, section);
+      recordCoverage(result.coverage);
+      if (result.ok) {
+        console.log(`  ${section} ok`);
+        continue;
+      }
+      batteryFailures++;
+      console.log(`  ${section} seed ${seed} FAIL: ${result.failure}`);
       console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
       if (result.artifactDir) {
         console.log(`    artifact: ${result.artifactDir}`);

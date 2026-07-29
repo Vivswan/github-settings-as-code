@@ -13,6 +13,7 @@
  */
 
 import { roleForPermission } from "../../../src/sections/roles.js";
+import { ADMIN_SLUG } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
 import type { OwnerKind } from "../schema.js";
@@ -291,7 +292,7 @@ function generateLabels(gen: LabelsGenerate, startId: number): Json[] {
     out.push({
       id: startId + i,
       node_id: `MDU6TGFiZWw${startId + i}`,
-      url: `https://api.github.com/repos/e2e-owner/e2e-repo/labels/${name}`,
+      url: `https://api.github.com/repos/${ADMIN_SLUG}/labels/${name}`,
       name,
       color: gen.color,
       default: false,
@@ -319,10 +320,10 @@ export function completeHook(seed: Json, id: number): Json {
     config: {},
     created_at: "2026-07-01T00:00:00Z",
     updated_at: "2026-07-01T00:00:00Z",
-    url: `https://api.github.com/repos/e2e-owner/e2e-repo/hooks/${hookId}`,
-    test_url: `https://api.github.com/repos/e2e-owner/e2e-repo/hooks/${hookId}/test`,
-    ping_url: `https://api.github.com/repos/e2e-owner/e2e-repo/hooks/${hookId}/pings`,
-    deliveries_url: `https://api.github.com/repos/e2e-owner/e2e-repo/hooks/${hookId}/deliveries`,
+    url: `https://api.github.com/repos/${ADMIN_SLUG}/hooks/${hookId}`,
+    test_url: `https://api.github.com/repos/${ADMIN_SLUG}/hooks/${hookId}/test`,
+    ping_url: `https://api.github.com/repos/${ADMIN_SLUG}/hooks/${hookId}/pings`,
+    deliveries_url: `https://api.github.com/repos/${ADMIN_SLUG}/hooks/${hookId}/deliveries`,
     last_response: { code: null, status: "unused", message: null },
     id: hookId,
     ...seed,

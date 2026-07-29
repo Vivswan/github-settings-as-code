@@ -6,6 +6,7 @@ import type { ApiError, GithubClient } from "../github/api.js";
 import { isPermissionError, isRateLimitError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
 import type {
+  MustBeNever,
   SectionKey,
   SettingsFile,
   UndeclaredPolicy,
@@ -136,8 +137,9 @@ export function grantFor(
  * Routes GitHub documents but the pinned @octokit/types release does not
  * carry yet (its release cadence trails the API). Only the route STRING is
  * consumed (never octokit's parameter/response typing), so a literal union
- * is enough. Audit on every @octokit/types bump: delete entries the
- * upstream Endpoints map has gained.
+ * is enough. The _SupplementalRoutesStillMissing pin below turns the
+ * per-bump audit into a compile error: delete entries the upstream
+ * Endpoints map has gained.
  */
 type SupplementalRoute =
   | "GET /repos/{owner}/{repo}/actions/cache/retention-limit"
@@ -150,6 +152,13 @@ type SupplementalRoute =
   | "POST /repos/{owner}/{repo}/secret-scanning/custom-patterns"
   | "PATCH /repos/{owner}/{repo}/secret-scanning/custom-patterns/{pattern_id}"
   | "DELETE /repos/{owner}/{repo}/secret-scanning/custom-patterns";
+
+/**
+ * The audit above, enforced by the compiler: a supplemental route that HAS
+ * landed in the pinned @octokit/types Endpoints map fails here on the bump,
+ * naming the entry to delete (the _UnlistedSection idiom from schema.ts).
+ */
+type _SupplementalRoutesStillMissing = MustBeNever<Extract<SupplementalRoute, keyof Endpoints>>;
 
 /**
  * A GitHub REST route as octokit spells it: "METHOD /path/{param}". Using

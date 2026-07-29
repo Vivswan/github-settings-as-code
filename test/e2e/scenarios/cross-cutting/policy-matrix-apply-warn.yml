@@ -19,6 +19,10 @@ expect:
   outcomes:
     repository: applied
     labels: skipped
+  # The skip must reach the published skipped-sections output, not just the
+  # summary table (the projection consumers key off).
+  skipped_sections:
+    - labels
   mutations:
     - PATCH /repos/{repo}
   never:
