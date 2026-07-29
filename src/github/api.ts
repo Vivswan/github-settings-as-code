@@ -437,10 +437,13 @@ export const redactingOctokitLog: { debug: Log; info: Log; warn: Log; error: Log
 })();
 
 // Never wait out a rate-limit reset longer than this: failing loudly with
-// the API message beats stalling a workflow for an hour.
-const MAX_RETRY_WAIT_S = 60;
-// Exported so the test harness derives its retry budgets (1 + MAX_RETRIES)
-// from the one real value instead of hand-mirroring it.
+// the API message beats stalling a workflow for an hour. Exported so the
+// docs contradiction test pins the semantics guide's number to this value.
+export const MAX_RETRY_WAIT_S = 60;
+// Exported so consumers derive from the one real value instead of
+// hand-mirroring it: the test harness builds its retry budgets
+// (1 + MAX_RETRIES) from it, and the docs contradiction test pins the
+// semantics guide's retry count to it.
 export const MAX_RETRIES = 2; // total attempts = 1 + MAX_RETRIES
 
 const ActionOctokit = Octokit.plugin(retry, throttling);

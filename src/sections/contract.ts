@@ -112,9 +112,9 @@ const RESOURCE_LABEL_ORG: Record<NonNullable<SectionPermission["org"]>, string> 
  * that permission (overrideAdviceLevel: read unless a sibling endpoint
  * writes with it), so the advice never asks for a broader grant than the
  * section can use - nor a narrower one than it will need next. The default
- * output must stay byte-identical to the hand-written strings this
- * replaces - these are user-facing error prose and the README table mirrors
- * them.
+ * output is user-facing error prose: the EXPECTED_GRANT snapshot in
+ * test/sections/registry.test.ts pins every section's grant character for
+ * character, and the README's Sections table mirrors those grants.
  */
 export function grantFor(
   permission: SectionPermission,
