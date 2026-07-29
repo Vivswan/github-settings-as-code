@@ -18,6 +18,7 @@ import {
   type FaultOption,
   type LoggedRequest,
   newPipelineRunState,
+  type PipelineOptions,
   runPipeline,
 } from "./routes.js";
 import { mockSodiumReady } from "./secrets.js";
@@ -129,9 +130,13 @@ export async function startMockServer(
   await mockSodiumReady();
 
   // Multi-repo scenarios run per-slug state; single-repo scenarios keep the one
-  // MockState. Exactly one is populated, and the pipeline dispatches on which.
+  // MockState. The discriminated `working` carries exactly one, and the
+  // pipeline dispatches on its mode.
   const multi = multiStateFor(scenario);
-  const state = multi ? undefined : buildState(scenario.live_state, scenario.owner_kind);
+  const working: PipelineOptions["working"] = multi
+    ? { mode: "multi", multi }
+    : { mode: "single", state: buildState(scenario.live_state, scenario.owner_kind) };
+  const state = working.mode === "single" ? working.state : undefined;
   const requests: LoggedRequest[] = [];
   const violations: string[] = [];
   // All mutable per-run pipeline state (chaos/fault counts + barrier bookkeeping)
@@ -161,8 +166,7 @@ export async function startMockServer(
         },
         {
           scenario,
-          state,
-          multi,
+          working,
           basePrefix: options.basePrefix,
           corrupt: options.corrupt,
           faults: options.faults,
@@ -173,7 +177,9 @@ export async function startMockServer(
 
       // Mark responses that are deliberately off the OpenAPI contract so the
       // validator skips them ENTIRELY (status and body):
-      //   - the chaos raw case (a deliberately-corrupt, non-JSON body);
+      //   - ANY wire override (chaos raw text, the connection drop): derived
+      //     from `wire` presence here, not the constructor's offSpecBody flag,
+      //     so a future wire kind cannot forget to opt out of validation;
       //   - synthetic transport faults (rate-limit 403 / 429 / connection drop),
       //     whose statuses no per-endpoint spec lists;
       //   - any response to a request that asked for a RAW media type: the raw
@@ -182,7 +188,7 @@ export async function startMockServer(
       //     REQUEST media type - not an endpoint name - means every future raw
       //     endpoint inherits the exemption automatically.
       const rawMediaType = (request.headers.get("accept") ?? "").includes(".raw");
-      const offSpec = result.raw !== undefined || result.offSpecBody || rawMediaType;
+      const offSpec = result.wire !== undefined || result.offSpecBody || rawMediaType;
       result.log.offSpec = offSpec;
       // SNAPSHOT the body: handlers return LIVE state objects (ok(state.repo),
       // in-place Object.assigns), and validateLog runs at scenario end, so
@@ -197,7 +203,7 @@ export async function startMockServer(
       // connection_drop: Bun.serve cannot abort before the status line, so the
       // drop happens mid-response via an erroring body stream; undici surfaces
       // that as a network read failure (a real drop can occur at any phase).
-      if (result.drop) {
+      if (result.wire?.kind === "drop") {
         return new Response(
           new ReadableStream({
             start(controller) {
@@ -209,9 +215,9 @@ export async function startMockServer(
       }
 
       const status = result.response.status;
-      if (result.raw !== undefined) {
+      if (result.wire?.kind === "raw") {
         // Chaos invalid_json: send the raw unparseable text verbatim.
-        return new Response(result.raw, {
+        return new Response(result.wire.text, {
           status,
           headers: { "content-type": "application/json" },
         });

@@ -2218,16 +2218,16 @@ export function newPipelineRunState(): PipelineRunState {
 /** Options the server passes into the pipeline for each request. */
 export interface PipelineOptions extends PipelineRunState {
   scenario: Scenario;
-  /** Single-repo working state; absent in multi-repo mode (see `multi`). */
-  state?: MockState;
   /**
-   * Multi-repo working state (per-slug repos + discovery pool). When set, the
+   * The working state, discriminated on the run shape so exactly one store
+   * exists by construction. "single" carries the one MockState every request
+   * dispatches into. "multi" carries the per-slug repos + discovery pool: the
    * pipeline resolves the target slug from the request path, dispatches into
    * that slug's MockState, and grades against that slug's permission mask; the
    * `/user/repos` and `/repos/{slug}/contents/{path}` endpoints are served from
-   * here. Absent in single-repo mode.
+   * here.
    */
-  multi?: MultiMockState;
+  working: { mode: "single"; state: MockState } | { mode: "multi"; multi: MultiMockState };
   basePrefix?: string;
   corrupt?: CorruptOption;
   /** Transport-level faults to inject on matching requests (see fault barrier). */
@@ -2247,23 +2247,25 @@ export interface PipelineResult {
   log: LoggedRequest;
   /** A violation message, when the request broke the wire/route contract. */
   violation?: string;
-  /** When set, the response body must be sent RAW (chaos invalid_json). */
-  raw?: string;
   /**
-   * When true, the server drops the connection MID-RESPONSE (an erroring body
-   * stream; Bun.serve cannot abort before the status line) - the
-   * connection_drop fault, modeling a network failure the client surfaces after
-   * its retries are spent. The log entry still records the attempt (status 0).
+   * How the response leaves the wire when it is NOT the normal JSON delivery
+   * of `response.body` (the absent case). "raw" sends `text` verbatim (chaos
+   * invalid_json, an unparseable body). "drop" makes the server drop the
+   * connection MID-RESPONSE (an erroring body stream; Bun.serve cannot abort
+   * before the status line) - the connection_drop fault, modeling a network
+   * failure the client surfaces after its retries are spent. The log entry
+   * still records the attempt (status 0).
    */
-  drop?: boolean;
+  wire?: { kind: "raw"; text: string } | { kind: "drop" };
   /**
    * When true, this response is a DELIBERATE off-contract body the validator
    * must skip, else it re-reports a corruption/fault the test already asserts.
    * Set for: synthetic transport faults (rate-limit 403 / 429 - GitHub returns
    * these on ANY endpoint, off any per-endpoint spec), the chaos corruptions
-   * (wrong_shape / missing_envelope; invalid_json uses `raw`), and the
-   * connection_drop status-0 log. (Raw-MEDIA-TYPE bodies are exempted separately
-   * in server.ts, keyed on the request's raw Accept header, not this flag.)
+   * (wrong_shape / missing_envelope; invalid_json uses the "raw" wire kind),
+   * and the connection_drop status-0 log. (Raw-MEDIA-TYPE bodies are exempted
+   * separately in server.ts, keyed on the request's raw Accept header, not
+   * this flag.)
    */
   offSpecBody?: boolean;
 }
@@ -2579,15 +2581,49 @@ function issueRouteKey(method: string, issueNumber: number | undefined): CoreFau
 }
 
 /**
- * The issue channel's decision for one request: a transport fault passed
- * through verbatim (`faulted`), or a handled response. `coreKey` names the
- * core route a HANDLER response came from, so the caller can apply the chaos
- * corruption hook to it; denials and violations carry no coreKey and are never
- * corrupted, matching the section pipeline.
+ * The issue channel's decision for one request, one branch per marker: a
+ * transport fault passed through verbatim (`faulted`); a HANDLER response
+ * tagged with the core route it came from (`coreKey`), so the caller can apply
+ * the chaos corruption hook to it; a permission denial (`deniedBy`); or a
+ * contract violation (`violation`). Denials and violations carry no coreKey
+ * and are never corrupted, matching the section pipeline. Each branch declares
+ * the OTHER markers `?: never` (a structural XOR, like RejectionSpec in
+ * fuzz.ts): without the exclusions, the union's excess-property check would
+ * accept a literal carrying two markers (any property declared on ANY member
+ * is legal excess) and the consumer's first check would silently win; with
+ * them, a two-marker literal fails to compile. The consumer narrows by marker
+ * TRUTHINESS, which the `?: never` optionals make total - `in` checks cannot
+ * narrow this shape, since an optional property never rules a member out.
  */
 type IssueReportOutcome =
-  | { faulted: PipelineResult }
-  | { response: MockResponse; coreKey?: CoreFaultKey; deniedBy?: MaskKey; violation?: string };
+  | {
+      faulted: PipelineResult;
+      response?: never;
+      coreKey?: never;
+      deniedBy?: never;
+      violation?: never;
+    }
+  | {
+      response: MockResponse;
+      coreKey: CoreFaultKey;
+      faulted?: never;
+      deniedBy?: never;
+      violation?: never;
+    }
+  | {
+      response: MockResponse;
+      deniedBy: MaskKey;
+      faulted?: never;
+      coreKey?: never;
+      violation?: never;
+    }
+  | {
+      response: MockResponse;
+      violation: string;
+      faulted?: never;
+      coreKey?: never;
+      deniedBy?: never;
+    };
 
 /**
  * Serve the private-report issue routes against a repo's `issues` state:
@@ -2830,7 +2866,12 @@ export function runPipeline(
   },
   options: PipelineOptions,
 ): PipelineResult {
-  const { scenario } = options;
+  const { scenario, working } = options;
+  // The two working-state views the shared helpers below take: multi-repo
+  // routing state, and the single-repo MockState (each undefined in the other
+  // mode - the discriminated `working` is the source of truth).
+  const multi = working.mode === "multi" ? working.multi : undefined;
+  const singleState = working.mode === "single" ? working.state : undefined;
   // The logged pathname has the GHES prefix stripped when the scenario opts
   // in; when the prefix is required but missing, there is nothing to strip, so
   // the raw path is logged with the resulting violation.
@@ -2890,7 +2931,7 @@ export function runPipeline(
   // per-slug permission-gated (it is a user-level call), so it is served before
   // route matching. Its fault/corruption hooks fire only on the legit route
   // (never masking a violation), mirroring the section pipeline's order.
-  const userRepos = handleUserRepos(request.method, pathname, request.query, options.multi);
+  const userRepos = handleUserRepos(request.method, pathname, request.query, multi);
   if (userRepos) {
     if (!userRepos.violation) {
       const faulted = takeCoreFault("core.discoveryList");
@@ -2916,7 +2957,7 @@ export function runPipeline(
   // drives the action's 404 disambiguation + "grant Contents: read" advice).
   const cSlug = contentsSlug(pathname);
   if (cSlug !== null) {
-    if (!options.multi) {
+    if (!multi) {
       const message = "settings-file fetch (contents) is not implemented in single-repo mode";
       return {
         response: violationResponse(message),
@@ -2947,23 +2988,20 @@ export function runPipeline(
     // fires before the permission gate (a wire failure happens regardless of
     // permissions), and always after the mode/method/Accept violations above,
     // which stay unmaskable.
-    const knownTarget = options.multi.repos.has(cSlug);
+    const knownTarget = multi.repos.has(cSlug);
     if (knownTarget) {
       const contentsFault = takeCoreFault("core.contentsGet");
       if (contentsFault) {
         return contentsFault;
       }
     }
-    const mask = effectiveMask(
-      scenario.token_permissions ?? {},
-      options.multi.permissions.get(cSlug),
-    );
+    const mask = effectiveMask(scenario.token_permissions ?? {}, multi.permissions.get(cSlug));
     const grading = gradeResource(mask, "contents", "read");
     if (!grading.allowed) {
       const response = denialResponse(scenario.denial_style, "read");
       return { response, log: { ...baseLog, status: response.status, deniedBy: grading.deniedBy } };
     }
-    const response = contentsResponse(options.multi, cSlug);
+    const response = contentsResponse(multi, cSlug);
     if (knownTarget) {
       const corrupted = takeCorruption("core.contentsGet", options, response, baseLog);
       if (corrupted) {
@@ -2988,13 +3026,13 @@ export function runPipeline(
     request.query,
     request.body,
     scenario,
-    options.multi,
-    options.state,
+    multi,
+    singleState,
     options.faults,
     takeCoreFault,
   );
   if (issueReport) {
-    if ("faulted" in issueReport) {
+    if (issueReport.faulted) {
       return issueReport.faulted;
     }
     if (issueReport.coreKey) {
@@ -3052,69 +3090,68 @@ export function runPipeline(
   //     route (/orgs/{org}/teams/.../repos/{owner}/{repo}) still carries a repo
   //     tail, so it resolves to the addressed slug's state, but org endpoints
   //     never get a per-slug mask.
-  let state = options.state;
+  let state: MockState;
   let mask: PermissionMask = scenario.token_permissions ?? {};
   // The target slug for keying the per-target denied-read barrier ("" in
-  // single-repo mode). Set inside the multi block below.
+  // single-repo mode). Set inside the multi arm below.
   let targetSlug = "";
-  if (options.multi) {
-    const repoScoped = endpointPath(endpoint.route).startsWith("/repos/");
-    const slug = slugFromPath(pathname);
-    const repoState = slug ? options.multi.repos.get(slug) : undefined;
-    if (repoScoped) {
-      if (!slug || !repoState) {
-        const message = `multi-repo request ${request.method} ${pathname} names no known target slug`;
-        return {
-          response: violationResponse(message),
-          log: { ...baseLog, status: 400 },
-          violation: message,
-        };
-      }
-      state = repoState;
-      mask = effectiveMask(scenario.token_permissions ?? {}, options.multi.permissions.get(slug));
-      targetSlug = slug;
-    } else {
-      // Org endpoint. A team-repo route carries a {owner}/{repo} tail: it MUST
-      // resolve to that slug's state, so an unknown slug is the same violation
-      // the repo-scoped branch raises (falling back to orgState would let a
-      // buggy write silently mutate shared org state). Only the BARE org probe
-      // (no slug in the path, e.g. GET /orgs/{org}) uses orgState.
-      if (slug && !repoState) {
-        const message = `multi-repo request ${request.method} ${pathname} names no known target slug`;
-        return {
-          response: violationResponse(message),
-          log: { ...baseLog, status: 400 },
-          violation: message,
-        };
-      }
-      state = repoState ?? options.multi.orgState;
-      targetSlug = slug ?? "";
-      // HYBRID grading for a team-repo route: real GitHub treats administration
-      // as a REPOSITORY permission on the ADDRESSED repo (fine-grained PATs
-      // grant it per selected repo - adding a repo to a team needs admin on
-      // that repo), while org_members is org-wide. So the repo resources grade
-      // against the addressed slug's effective per-slug mask and org_members
-      // against the GLOBAL mask. This matches the oracle's orgMask model by
-      // construction. The bare org probe (no slug) has no repo resources and is
-      // permission-none anyway, so the global mask stands.
-      const global = scenario.token_permissions ?? {};
-      if (slug) {
-        mask = {
-          ...effectiveMask(global, options.multi.permissions.get(slug)),
-          org_members: global.org_members,
-        };
-      } else {
-        mask = global;
-      }
+  switch (working.mode) {
+    case "single": {
+      state = working.state;
+      break;
     }
-  }
-  if (!state) {
-    const message = `no working state for ${request.method} ${pathname}`;
-    return {
-      response: violationResponse(message),
-      log: { ...baseLog, status: 400 },
-      violation: message,
-    };
+    case "multi": {
+      const repoScoped = endpointPath(endpoint.route).startsWith("/repos/");
+      const slug = slugFromPath(pathname);
+      const repoState = slug ? working.multi.repos.get(slug) : undefined;
+      if (repoScoped) {
+        if (!slug || !repoState) {
+          const message = `multi-repo request ${request.method} ${pathname} names no known target slug`;
+          return {
+            response: violationResponse(message),
+            log: { ...baseLog, status: 400 },
+            violation: message,
+          };
+        }
+        state = repoState;
+        mask = effectiveMask(scenario.token_permissions ?? {}, working.multi.permissions.get(slug));
+        targetSlug = slug;
+      } else {
+        // Org endpoint. A team-repo route carries a {owner}/{repo} tail: it MUST
+        // resolve to that slug's state, so an unknown slug is the same violation
+        // the repo-scoped branch raises (falling back to orgState would let a
+        // buggy write silently mutate shared org state). Only the BARE org probe
+        // (no slug in the path, e.g. GET /orgs/{org}) uses orgState.
+        if (slug && !repoState) {
+          const message = `multi-repo request ${request.method} ${pathname} names no known target slug`;
+          return {
+            response: violationResponse(message),
+            log: { ...baseLog, status: 400 },
+            violation: message,
+          };
+        }
+        state = repoState ?? working.multi.orgState;
+        targetSlug = slug ?? "";
+        // HYBRID grading for a team-repo route: real GitHub treats administration
+        // as a REPOSITORY permission on the ADDRESSED repo (fine-grained PATs
+        // grant it per selected repo - adding a repo to a team needs admin on
+        // that repo), while org_members is org-wide. So the repo resources grade
+        // against the addressed slug's effective per-slug mask and org_members
+        // against the GLOBAL mask. This matches the oracle's orgMask model by
+        // construction. The bare org probe (no slug) has no repo resources and is
+        // permission-none anyway, so the global mask stands.
+        const global = scenario.token_permissions ?? {};
+        if (slug) {
+          mask = {
+            ...effectiveMask(global, working.multi.permissions.get(slug)),
+            org_members: global.org_members,
+          };
+        } else {
+          mask = global;
+        }
+      }
+      break;
+    }
   }
 
   // Identify the redaction visibility probe so its denial never arms the
@@ -3147,7 +3184,7 @@ export function runPipeline(
   // delivery so any later repository.get for the slug is a section read.
   const isVisibilityProbe =
     key === "repository.get" &&
-    probeExpected(targetSlug, scenario, options.multi) &&
+    probeExpected(targetSlug, scenario, multi) &&
     !options.probeGetDelivered.has(targetSlug) &&
     (options.probeGetFaults.get(targetSlug) ?? 0) < PROBE_RETRY_BUDGET;
   if (key === "repository.get") {
@@ -3322,19 +3359,20 @@ function applyFault(kind: FaultOption["kind"], log: LoggedRequest, fired: number
   return {
     response: { status: 0, body: null },
     log: { ...log, status: 0 },
-    drop: true,
+    wire: { kind: "drop" },
     offSpecBody: true,
   };
 }
 
 /**
  * Corrupt a response per the chaos mode: invalid_json emits an unparseable
- * body (raw), wrong_shape replaces a list/object body with a scalar, and
- * missing_envelope strips the wrapper key from an enveloped list. All three are
- * DELIBERATE off-contract bodies, so each marks offSpecBody (invalid_json via
- * the `raw` path, the others explicitly) - the validator must skip them, else
- * it re-reports the corruption the chaos test already asserts. The mock's own
- * status-subset invariant still guards real handler statuses.
+ * body (the "raw" wire kind), wrong_shape replaces a list/object body with a
+ * scalar, and missing_envelope strips the wrapper key from an enveloped list.
+ * All three are DELIBERATE off-contract bodies, so each marks offSpecBody
+ * (invalid_json via the raw wire kind, the others explicitly) - the validator
+ * must skip them, else it re-reports the corruption the chaos test already
+ * asserts. The mock's own status-subset invariant still guards real handler
+ * statuses.
  */
 function applyCorruption(
   mode: CorruptOption["mode"],
@@ -3345,7 +3383,7 @@ function applyCorruption(
     return {
       response: { status: response.status, body: undefined },
       log,
-      raw: "{ this is not json",
+      wire: { kind: "raw", text: "{ this is not json" },
     };
   }
   if (mode === "wrong_shape") {

@@ -27,6 +27,7 @@ import {
   type DenialStyle,
   type MaskGrade,
   type MaskKey,
+  type MultiRepo,
   type OwnerKind,
   MASK_KEYS as SCHEMA_MASK_KEYS,
   type Scenario,
@@ -1817,20 +1818,36 @@ export interface MultiRepoMeta {
    */
   probeDenied: boolean;
   /**
-   * True when the oracle expects this target hidden from the public view:
-   * policy is redact, the slug is not the self slug, and it is private/internal
-   * OR its probe was denied. Its repos-result key is a placeholder, and its
-   * canaries must leak into no public surface.
+   * Whether the oracle expects this target hidden from the public view (policy
+   * is redact, the slug is not the self slug, and it is private/internal OR
+   * its probe was denied). A redacted target carries the redaction facts a
+   * shown one cannot have:
+   *   - `placeholder`: the "private repository #N" repos-result key the action
+   *     emits for it (numbered per redacted target in target order, the exact
+   *     numbering planRedaction assigns).
+   *   - `canaries`: unique strings planted in the target's private surfaces
+   *     (live label name/description, repo description, remote settings.yml)
+   *     that may appear in no public surface (the leak invariant).
    */
-  redacted: boolean;
-  /** The repos-result KEY the action emits: the placeholder when redacted, else the slug. */
-  displayKey: string;
-  /**
-   * Unique strings planted in this target's private surfaces (live label
-   * name/description, repo description, remote settings.yml). When the target
-   * is redacted, none may appear in any public surface (the leak invariant).
-   */
-  canaries: string[];
+  redaction: { kind: "shown" } | { kind: "redacted"; placeholder: string; canaries: string[] };
+}
+
+/** The repos-result KEY the action emits: the placeholder when redacted, else the slug. */
+export function displayKeyOf(meta: MultiRepoMeta): string {
+  return meta.redaction.kind === "redacted" ? meta.redaction.placeholder : meta.slug;
+}
+
+/** The canaries planted on a target; only a redacted one carries any. */
+export function canariesOf(meta: MultiRepoMeta): string[] {
+  return meta.redaction.kind === "redacted" ? meta.redaction.canaries : [];
+}
+
+/**
+ * The repos-result key redaction assigns the Nth redacted target - the one
+ * place the placeholder format lives, mirroring planRedaction's numbering.
+ */
+export function redactionPlaceholder(ordinal: number): string {
+  return `private repository #${ordinal}`;
 }
 
 /** The generation facts a multi-repo scenario's oracle rollup consumes. */
@@ -1974,8 +1991,13 @@ export function genMultiScenario(
   // One repo (chosen up front) is missing its settings file, so it is skipped.
   const missingIndex = rng.int(count);
 
-  const repos: Record<string, unknown> = {};
+  const repos: Record<string, MultiRepo> = {};
   const repoMetas: MultiRepoMeta[] = [];
+  // The normal targets' settings mappings, collected by the branch that builds
+  // them: only these can take the milestones: null opt-out below (the missing
+  // target has no settings file and the raw one no mapping to null a section
+  // in).
+  const optOutCandidates: Array<{ slug: string; settings: Json }> = [];
   // Under redact, force ONE non-missing target private so the run always has a
   // redacted target: otherwise a run where every target rolled public would give
   // an empty forbidden set and a vacuous leak check. Pick any index != missing
@@ -1987,6 +2009,15 @@ export function genMultiScenario(
   // The running placeholder ordinal, incremented per redacted target in target
   // order - the exact numbering planRedaction assigns (self and public skipped).
   let redactedOrdinal = 0;
+  // Build a target's redaction facts: a redacted target takes the next
+  // placeholder ordinal and carries its canaries; a shown one carries neither.
+  const redactionFor = (redacted: boolean, canaries: string[] = []): MultiRepoMeta["redaction"] => {
+    if (!redacted) {
+      return { kind: "shown" };
+    }
+    redactedOrdinal += 1;
+    return { kind: "redacted", placeholder: redactionPlaceholder(redactedOrdinal), canaries };
+  };
   // With ~1/5 probability one further target serves RAW settings text: an
   // unparseable body (the "cannot parse <slug>" gate) or one parsing to a
   // non-mapping (the top-level validator gate). Never the missing target (its
@@ -2020,11 +2051,7 @@ export function genMultiScenario(
       const probeDenied = false;
       const redacted =
         privateRepos === "redact" && slug !== selfSlug && (visibility !== "public" || probeDenied);
-      if (redacted) {
-        redactedOrdinal += 1;
-      }
-      const displayKey = redacted ? `private repository #${redactedOrdinal}` : slug;
-      const repoSpec: Record<string, unknown> = { settings: null };
+      const repoSpec: MultiRepo = { settings: null };
       if (visibility !== "public") {
         repoSpec.live_state = { repo: { private: true, visibility } };
       }
@@ -2034,9 +2061,7 @@ export function genMultiScenario(
         target: { kind: "missing" },
         visibility,
         probeDenied,
-        redacted,
-        displayKey,
-        canaries: [],
+        redaction: redactionFor(redacted),
       });
       continue;
     }
@@ -2051,11 +2076,7 @@ export function genMultiScenario(
       const probeDenied = false;
       const redacted =
         privateRepos === "redact" && slug !== selfSlug && (visibility !== "public" || probeDenied);
-      if (redacted) {
-        redactedOrdinal += 1;
-      }
-      const displayKey = redacted ? `private repository #${redactedOrdinal}` : slug;
-      const repoSpec: Record<string, unknown> = { settings_raw: raw };
+      const repoSpec: MultiRepo = { settings_raw: raw };
       if (visibility !== "public") {
         repoSpec.live_state = { repo: { private: true, visibility } };
       }
@@ -2065,9 +2086,7 @@ export function genMultiScenario(
         target: { kind: "raw-invalid", raw: rawKind },
         visibility,
         probeDenied,
-        redacted,
-        displayKey,
-        canaries: [],
+        redaction: redactionFor(redacted),
       });
       continue;
     }
@@ -2152,10 +2171,6 @@ export function genMultiScenario(
     const probeDenied = mask.administration === "none";
     const redacted =
       privateRepos === "redact" && slug !== selfSlug && (visibility !== "public" || probeDenied);
-    if (redacted) {
-      redactedOrdinal += 1;
-    }
-    const displayKey = redacted ? `private repository #${redactedOrdinal}` : slug;
 
     // Seed each target's live state the same way single-repo genScenario does,
     // so a target's declared branches/workflows exist and converge instead of
@@ -2209,13 +2224,12 @@ export function genMultiScenario(
       ...(hasLive ? { live_state: live } : {}),
       ...(Object.keys(mask).length > 0 ? { permissions: mask } : {}),
     };
+    optOutCandidates.push({ slug, settings });
     repoMetas.push({
       slug,
       visibility,
       probeDenied,
-      redacted,
-      displayKey,
-      canaries,
+      redaction: redactionFor(redacted, canaries),
       target: {
         kind: "normal",
         meta: {
@@ -2244,20 +2258,11 @@ export function genMultiScenario(
     labels: [{ name: "shared-default", color: "cccccc" }],
     milestones: [{ title: "shared-milestone", state: "open" }],
   };
-  const optOutSlugs = Object.entries(repos)
-    .filter(([, spec]) => {
-      // Only a target with a REAL settings mapping can opt out: null marks
-      // the missing-settings target, and undefined the raw-settings one
-      // (writing milestones: null into its absent mapping would crash).
-      const settings = (spec as { settings?: unknown }).settings;
-      return settings !== null && settings !== undefined;
-    })
-    .map(([slug]) => slug);
   let optedOutSlug: string | undefined;
-  if (optOutSlugs.length > 0 && rng.bool(0.3)) {
-    optedOutSlug = rng.pick(optOutSlugs);
-    const spec = repos[optedOutSlug] as { settings: Json };
-    spec.settings.milestones = null;
+  if (optOutCandidates.length > 0 && rng.bool(0.3)) {
+    const optedOut = rng.pick(optOutCandidates);
+    optedOutSlug = optedOut.slug;
+    optedOut.settings.milestones = null;
   }
 
   // Fold the defaults-inherited sections into each target's oracle meta: every
@@ -2305,7 +2310,7 @@ export function genMultiScenario(
     ...(Object.keys(globalMask).length > 0 ? { token_permissions: globalMask } : {}),
     // Occasionally a GHES-style base URL prefix, as in genScenario.
     ...(rng.fork("base-prefix").bool(0.15) ? { base_prefix: "/api/v3" } : {}),
-    repos: repos as Scenario["repos"],
+    repos,
     defaults_file: defaultsFile,
     expect: { exit_code: 0 },
   };
@@ -2427,7 +2432,7 @@ export function genDiscoveryScenario(
   // the non-archived pool - which provably contains repo 0.
   const filters: DiscoveryScenarioMeta["filters"] = force === "converges" ? {} : rolledFilters;
 
-  const repos: Record<string, unknown> = {};
+  const repos: Record<string, MultiRepo> = {};
   for (const repo of pool) {
     repos[repo.slug] = {
       settings: { labels: [{ name: "managed", color: "00ff00" }] },
@@ -2453,7 +2458,7 @@ export function genDiscoveryScenario(
     denial_style: "fine_grained",
     owner_kind: "org",
     discovery: { pool, inputs },
-    repos: repos as Scenario["repos"],
+    repos,
     token_permissions: { issues: "write", contents: "read" },
     expect: { exit_code: 0 },
   };
