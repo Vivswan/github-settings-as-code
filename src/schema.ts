@@ -206,20 +206,26 @@ export interface RulesetConfig {
   bypass_actors?: Array<Record<string, unknown>>;
 }
 
+/** The protection PUT payload, passed through verbatim except its one routed key. */
+export interface BranchProtectionConfig {
+  /**
+   * Require signed commits on the branch. The one protection key the PUT
+   * silently drops, so it is applied through the
+   * POST/DELETE .../protection/required_signatures sub-endpoint after the
+   * PUT. GitHub does not document whether the protection PUT preserves an
+   * existing signature requirement, so declare the toggle on any branch
+   * that carries one - a declared value is pinned either way.
+   */
+  required_signatures?: boolean;
+  [key: string]: unknown;
+}
+
 /** Classic protection for one branch. */
 export interface BranchConfig {
   /** The branch name. */
   name: string;
-  /**
-   * PUT .../protection payload; null removes protection (Probot parity).
-   * `required_signatures` (a boolean) is the one key the PUT does not
-   * accept, so it is applied through its own
-   * POST/DELETE .../protection/required_signatures sub-endpoint instead.
-   * GitHub does not document whether the protection PUT preserves an
-   * existing signature requirement, so declare the toggle on any branch
-   * that carries one - a declared value is pinned either way.
-   */
-  protection: Record<string, unknown> | null;
+  /** PUT .../protection payload; null removes protection (Probot parity). */
+  protection: BranchProtectionConfig | null;
 }
 
 /** One deployment environment, matched by name. */
