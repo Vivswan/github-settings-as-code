@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { dedupeTargets, type Target } from "../../src/discovery/targets.js";
+import {
+  type CentralTarget,
+  dedupeTargets,
+  type RemoteTarget,
+} from "../../src/discovery/targets.js";
 
 describe("dedupeTargets", () => {
-  const central: Target[] = [
+  const central: CentralTarget[] = [
     { slug: "o/x", source: "central", origin: "repos/x.yml", filePath: "repos/x.yml" },
   ];
-  const remote: Target[] = [
+  const remote: RemoteTarget[] = [
     { slug: "O/X", source: "remote", origin: 'the "repos" input' },
     { slug: "o/z", source: "remote", origin: 'the "repos" input' },
   ];
