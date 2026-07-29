@@ -36,7 +36,7 @@ function request(state: MockState, method: string, path: string, body?: unknown)
       headers: new Headers({ authorization: "token t", "x-github-api-version": "2022-11-28" }),
       body,
     },
-    { scenario, state, ...newPipelineRunState(), checkMode: false },
+    { scenario, working: { mode: "single", state }, ...newPipelineRunState(), checkMode: false },
   );
 }
 

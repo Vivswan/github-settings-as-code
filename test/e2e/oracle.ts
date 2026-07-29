@@ -15,7 +15,7 @@ import {
 } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { DENIAL_SEMANTICS } from "./denial-semantics.js";
-import type { MultiScenarioMeta, ScenarioMeta } from "./generators.js";
+import { displayKeyOf, type MultiScenarioMeta, type ScenarioMeta } from "./generators.js";
 import type { DenialStyle, MaskGrade, MaskKey } from "./schema.js";
 
 /** A section outcome the step summary can report. */
@@ -499,7 +499,11 @@ function settingsGateResult(denialStyle: DenialStyle, adminGrade: MaskGrade): Se
  */
 export function predictMulti(meta: MultiScenarioMeta): MultiPrediction {
   const repos: RepoPrediction[] = meta.repos.map((repo) => {
-    const common = { slug: repo.slug, displayKey: repo.displayKey, redacted: repo.redacted };
+    const common = {
+      slug: repo.slug,
+      displayKey: displayKeyOf(repo),
+      redacted: repo.redaction.kind === "redacted",
+    };
     if (repo.target.kind === "missing") {
       // No settings file: the contents read 404s and the target is skipped.
       return { ...common, run: null, allowedResults: new Set(["skipped"]) };
@@ -557,8 +561,8 @@ export function predictMulti(meta: MultiScenarioMeta): MultiPrediction {
   // its planted canaries. Under `show` nothing is redacted, so the set is empty.
   const forbidden: string[] = [];
   for (const repo of meta.repos) {
-    if (repo.redacted) {
-      forbidden.push(repo.slug, ...repo.canaries);
+    if (repo.redaction.kind === "redacted") {
+      forbidden.push(repo.slug, ...repo.redaction.canaries);
     }
   }
   return { repos, allowedExitCodes: exitCodes, forbidden };
