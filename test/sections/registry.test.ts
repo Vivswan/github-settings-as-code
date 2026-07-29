@@ -22,18 +22,20 @@ import {
 import { allEndpoints, SECTIONS, sectionModule } from "../../src/sections/registry.js";
 
 describe("registry <-> README", () => {
-  test("the README Sections table lists every section, in order, naming each granted permission", () => {
-    const readme = readFileSync("README.md", "utf8");
-    const start = readme.indexOf("\n## Sections\n");
-    expect(start).toBeGreaterThan(-1);
-    const end = readme.indexOf("\n## ", start + 1);
-    const section = end === -1 ? readme.slice(start) : readme.slice(start, end);
+  const readme = readFileSync("README.md", "utf8");
+  const start = readme.indexOf("\n## Sections\n");
+  const end = readme.indexOf("\n## ", start + 1);
+  const section = end === -1 ? readme.slice(start) : readme.slice(start, end);
 
-    // Key from column 1, PAT permission from column 3 (column 2 is Endpoints).
-    const rows = [...section.matchAll(/^\| `([a-z_]+)` \| [^|]+ \| ([^|]+) \|/gm)].map((match) => ({
-      key: match[1] ?? "",
-      permission: match[2] ?? "",
-    }));
+  // Key from column 1, Endpoints from column 2, PAT permission from column 3.
+  const rows = [...section.matchAll(/^\| `([a-z_]+)` \| ([^|]+) \| ([^|]+) \|/gm)].map((match) => ({
+    key: match[1] ?? "",
+    endpoints: match[2] ?? "",
+    permission: match[3] ?? "",
+  }));
+
+  test("the README Sections table lists every section, in order, naming each granted permission", () => {
+    expect(start).toBeGreaterThan(-1);
     // One row per section, in SECTION_KEYS order - a new section without a
     // README row (or a stale row) fails here. The raw line count catches
     // malformed rows the key regex would otherwise skip silently.
@@ -53,6 +55,111 @@ describe("registry <-> README", () => {
       for (const name of granted) {
         expect(row?.permission).toContain(name);
       }
+    }
+  });
+
+  test("each row's Endpoints cell names every distinct leading resource segment its section calls", () => {
+    // The COVERAGE.md Supported table gets the same pin from
+    // test/docs/coverage.test.ts; the README cells are terser summaries
+    // ("labels CRUD"), so the pin here is the leading resource segment of
+    // each endpoint tail, matched case- and separator-insensitively as a
+    // WHOLE word (or its controlled singular form, so "branch protection"
+    // satisfies "branches" while "homepage" can never satisfy "pages").
+    const normalize = (text: string): string => text.toLowerCase().replace(/[-_]/g, " ");
+    const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Curated compound mentions: a compound word satisfies its base segment
+    // only where the compound IS the resource's common name. Whole-word
+    // matching is deliberate ("monkeys" must never satisfy "keys"), so
+    // without this entry a legitimate reword of the webhooks cell from
+    // "hooks" to "webhooks" would fail; extend the map, not the matching.
+    const COMPOUND_MENTIONS: Record<string, readonly string[]> = { hooks: ["webhooks"] };
+    for (const endpoint of Object.values(allEndpoints())) {
+      const tail = endpointPath(endpoint.route)
+        .replace("/repos/{owner}/{repo}", "")
+        .replace(/\{[^}]+\}/g, "")
+        .replace(/\/+$/g, "");
+      if (tail === "" || tail === "/") {
+        continue; // the bare repo endpoint has no distinctive resource
+      }
+      const needle = normalize(tail.replace(/^\//, "").split("/")[0] ?? "");
+      // Controlled singular variants of the LAST word only: strip a plural
+      // "s" or "es" suffix ("branches" -> "branch", "orgs" -> "org"). Each
+      // variant is matched as a whole word, so an over-stripped form
+      // ("pages" -> "pag") can never match inside an unrelated word.
+      const words = needle.split(" ");
+      const last = words.pop() ?? "";
+      const lastForms = new Set([last]);
+      if (last.endsWith("es")) {
+        lastForms.add(last.slice(0, -2));
+      }
+      if (last.endsWith("s")) {
+        lastForms.add(last.slice(0, -1));
+      }
+      const variants = [
+        ...[...lastForms].map((form) => [...words, form].join(" ")),
+        ...(COMPOUND_MENTIONS[needle] ?? []),
+      ];
+      const cell = normalize(rows.find((row) => row.key === endpoint.section)?.endpoints ?? "");
+      expect(
+        variants.some((variant) => new RegExp(`\\b${escapeRe(variant)}\\b`).test(cell)),
+        `the README Endpoints cell for "${endpoint.section}" never mentions "${needle}" from endpoint ${endpoint.route}`,
+      ).toBe(true);
+    }
+  });
+
+  test("each row's PAT cell states every granted resource at its access level, caveats included", () => {
+    // The cells paraphrase sectionGrant ("Administration: write" for
+    // `grant "Administration" (read and write) under the PAT's Repository
+    // permissions`), so the pin is the load-bearing tokens: each grant
+    // clause's resource names at their level, plus - for a section whose
+    // grantCaveat names extra grants or settings keys - those tokens too.
+    const shortLevel = (level: string): string => (level === "read and write" ? "write" : "read");
+    for (const module of SECTIONS) {
+      const row = rows.find((r) => r.key === module.key);
+      const clauses = [
+        ...sectionGrant(module).matchAll(
+          /"(.+?)" \((read and write|read)\) under (?:the PAT's|its) (?:Repository|Organization) permissions/g,
+        ),
+      ];
+      // Zero clauses means the extraction went blind on a grant-prose
+      // rewording; fail loudly rather than pass on an empty list.
+      expect(clauses.length, `no grant clause extracted for "${module.key}"`).toBeGreaterThan(0);
+      for (const clause of clauses) {
+        const names = (clause[1] ?? "").split('" or "');
+        const expected = `${names.join(" or ")}: ${shortLevel(clause[2] ?? "")}`;
+        expect(
+          row?.permission.includes(expected),
+          `the README PAT cell for "${module.key}" must state "${expected}", got: ${row?.permission}`,
+        ).toBe(true);
+      }
+      const caveat = module.grantCaveat ?? "";
+      // A caveat's extra grants ('"Actions" (read)') paraphrase to the same
+      // "Actions: read" cell form; its quoted snake_case settings keys must
+      // appear verbatim. Per-caveat accounting below: EVERY quoted token in
+      // the caveat must be claimed by one of the two extractors, so a
+      // reworded caveat one regex no longer parses fails on ITS OWN row
+      // instead of hiding behind another caveat's extractions.
+      let extracted = 0;
+      for (const pair of caveat.matchAll(/"([^"]+)" \((read and write|read)\)/g)) {
+        extracted++;
+        const expected = `${pair[1]}: ${shortLevel(pair[2] ?? "")}`;
+        expect(
+          row?.permission.includes(expected),
+          `the README PAT cell for "${module.key}" must carry its caveat grant "${expected}", got: ${row?.permission}`,
+        ).toBe(true);
+      }
+      for (const key of caveat.matchAll(/"([a-z_]+)"(?! \((?:read and write|read)\))/g)) {
+        extracted++;
+        expect(
+          row?.permission.includes(key[1] ?? ""),
+          `the README PAT cell for "${module.key}" must name its caveat key "${key[1]}", got: ${row?.permission}`,
+        ).toBe(true);
+      }
+      const quoted = [...caveat.matchAll(/"[^"]+"/g)].length;
+      expect(
+        extracted,
+        `the "${module.key}" caveat quotes ${quoted} token(s) but the extractors understood ${extracted}; extend the extraction or reword the caveat`,
+      ).toBe(quoted);
     }
   });
 });
