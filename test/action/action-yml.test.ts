@@ -31,6 +31,7 @@ interface ActionInput {
 interface ActionYml {
   inputs: Record<string, ActionInput>;
   outputs: Record<string, { description?: string }>;
+  runs: { using?: string; main?: string };
 }
 
 const actionYml = parseYaml(readFileSync(join(ROOT, "action.yml"), "utf8")) as ActionYml;
@@ -84,6 +85,21 @@ describe("action.yml outputs", () => {
       missing,
       `the action.yml "result" output description omits RepoResult value(s): ${missing.join(", ")}`,
     ).toEqual([]);
+  });
+});
+
+describe("action.yml runtime", () => {
+  test("runs.using is node24 and AGENTS.md documents the same runtime", () => {
+    // The runtime is a conscious pin: bumping it changes what Node the
+    // committed bundle must run on, so the change has to land here too.
+    expect(actionYml.runs.using).toBe("node24");
+    // AGENTS.md tells agents which runtime the bundle targets; it must name
+    // the one action.yml declares.
+    const agents = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+    expect(
+      agents.includes(`(${actionYml.runs.using})`),
+      `AGENTS.md must document the bundle runtime as (${actionYml.runs.using})`,
+    ).toBe(true);
   });
 });
 

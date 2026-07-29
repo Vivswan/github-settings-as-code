@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
@@ -13,13 +13,14 @@ import {
   PRIVATE_REPORT_CHANNELS,
   REDACTED_DETAIL,
 } from "../../src/action/redact.js";
-import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { REPO_RESULTS, validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import type { PatResource } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
+import { CLAIM_FAMILY, CLAIM_STEMS, defaultClaimProblems, stemNegation } from "./claims.js";
 import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -55,6 +56,78 @@ describe("README Sections table", () => {
         `README Sections row "${key}" must state "${UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault]}" in its Undeclared default column (its undeclaredDefault is "${section.undeclaredDefault}")`,
       ).toBe(UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault] as string);
     }
+  });
+
+  test("a knobbed row's Notes cell never claims the opposite of its undeclaredDefault", () => {
+    // The Notes column restates the default in passing ("the
+    // delete-by-default is Probot parity", "keep is the default"). Wherever a
+    // Notes cell makes such a claim - a claim-family word joined to "default"
+    // by "by" or "is/are/stays/remains the" - the effective family (negation
+    // resolved by the shared stemNegation rule from ./claims.ts, so "No
+    // labels are deleted by default" reads as keep) must be the section's
+    // own; prose that merely mentions deletion elsewhere (opt-ins, upstream
+    // behavior) carries no such joint and stays free. A cell that TALKS
+    // about the section default ("by default", "the default") without a
+    // parseable claim fails loudly, so a reworded claim cannot silently drop
+    // out of the sweep - phrases about OTHER defaults ("the org default")
+    // carry neither trigger.
+    const claimRe = new RegExp(
+      String.raw`\b(${CLAIM_STEMS})\b(?:[\s-]by[\s-]|\s+(?:is|are|stays?|remains?)\s+the\s+)default`,
+      "gi",
+    );
+    const trigger = /by[\s-]default|\bthe default\b/i;
+    const byKey = new Map(SECTIONS.map((section) => [section.key, section]));
+    for (const cells of rows) {
+      const key = (cells[0] ?? "").replace(/`/g, "");
+      const section = byKey.get(key as (typeof SECTION_KEYS)[number]);
+      if (!section || section.undeclaredDefault === "untouched") {
+        continue;
+      }
+      const cell = cells[4] ?? "";
+      const claims = [...cell.matchAll(claimRe)];
+      if (trigger.test(cell)) {
+        // Per-row tripwire: THIS row mentions its default, so at least one
+        // claim must parse here - a global counter would let one row's
+        // unrecognized grammar hide behind another row's claims.
+        expect(
+          claims.length,
+          `README Sections row "${key}" mentions a default in its Notes cell but no claim parses; reword the cell or extend the claim grammar`,
+        ).toBeGreaterThan(0);
+      }
+      for (const claim of claims) {
+        const family = CLAIM_FAMILY.delete.test(claim[1] ?? "") ? "delete" : "keep";
+        const negation = stemNegation(cell.slice(0, claim.index));
+        if ("doubleNegation" in negation) {
+          throw new Error(
+            `README Sections row "${key}": a double negation governs "${negation.doubleNegation} ${claim[1]}" in its Notes cell; reword it - double negatives are not resolved`,
+          );
+        }
+        const flipped = family === "delete" ? "keep" : "delete";
+        const effective = negation.negated ? flipped : family;
+        expect(
+          effective,
+          `README Sections row "${key}" claims "${claim[0]}"${negation.negated ? " (negated)" : ""} in its Notes cell, contradicting its "${section.undeclaredDefault}" undeclaredDefault`,
+        ).toBe(section.undeclaredDefault);
+      }
+    }
+  });
+});
+
+describe("README Outputs paragraph", () => {
+  test("the result value list names exactly the REPO_RESULTS members", () => {
+    // Same pin the action-yml contract test applies to the output
+    // description: REPO_RESULTS (src/engine/orchestrate.ts) is the canonical
+    // value list. Here the parenthesized enumeration after "Outputs:
+    // `result`" must carry each value backticked, and nothing else backticked
+    // may sit inside it, so a new value cannot skip the README and a dropped
+    // one cannot linger.
+    const parenthesized = readme.match(/Outputs: `result` \(([^)]*)\)/)?.[1];
+    expect(
+      parenthesized,
+      'README must enumerate the result values in "Outputs: `result` (...)"',
+    ).toBeDefined();
+    const listed = [...(parenthesized ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
+    expect(listed.sort()).toEqual([...REPO_RESULTS].sort());
   });
 });
 
@@ -125,15 +198,82 @@ describe("README version pins", () => {
   });
 });
 
-describe("README schema link", () => {
-  test("the $schema line points at lib/settings.schema.json's $id", () => {
-    const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8"));
-    const id = schema.$id as string;
+describe("schema $schema hints and $id", () => {
+  const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8"));
+  const id = schema.$id as string;
+
+  /** Every markdown page that may carry a yaml-language-server hint. */
+  const hintPages = (): Array<{ label: string; path: string }> => [
+    { label: "README.md", path: join(ROOT, "README.md") },
+    ...readdirSync(join(ROOT, "docs"), { recursive: true, encoding: "utf8" })
+      .filter((name) => name.endsWith(".md"))
+      .sort()
+      .map((name) => ({ label: `docs/${name}`, path: join(ROOT, "docs", name) })),
+  ];
+
+  test("every yaml-language-server line in the README and the guides names the schema $id", () => {
     expect(id, "lib/settings.schema.json has no $id").toBeTruthy();
+    // Per-file counts, pinned: a global total would let one of the README's
+    // two hints disappear while the guides' hint keeps the sum positive.
+    // Adding a hint to a new page is a conscious edit here.
+    const EXPECTED_HINTS: Record<string, number> = {
+      "README.md": 2, // the Usage step and the example block
+      "docs/start/getting-started.md": 1,
+    };
+    for (const page of hintPages()) {
+      const markdown = readFileSync(page.path, "utf8");
+      const hints = [...markdown.matchAll(/yaml-language-server: \$schema=(\S+)/g)];
+      expect(
+        hints.length,
+        `${page.label} carries ${hints.length} $schema hint(s), expected ${EXPECTED_HINTS[page.label] ?? 0}; update EXPECTED_HINTS if the move is deliberate`,
+      ).toBe(EXPECTED_HINTS[page.label] ?? 0);
+      for (const match of hints) {
+        expect(match[1], `${page.label} carries a $schema hint that is not the schema's $id`).toBe(
+          id,
+        );
+      }
+    }
+  });
+
+  test("the $id points at this repository's raw default-branch copy of the build output", () => {
+    // The $id is minted by the build:schema script's --id flag, so the
+    // committed schema must carry exactly that value...
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+      name: string;
+      scripts: Record<string, string>;
+    };
+    const buildSchema = pkg.scripts["build:schema"] ?? "";
+    const idFlag = buildSchema.match(/--id (\S+)/)?.[1];
+    const outFlag = buildSchema.match(/--out (\S+)/)?.[1];
+    expect(idFlag, "package.json build:schema lost its --id flag").toBeDefined();
+    expect(outFlag, "package.json build:schema lost its --out flag").toBeDefined();
+    expect(id).toBe(idFlag as string);
+    // ...and the URL's parts must each match their own single source:
+    // https://raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>.
+    const url = new URL(id);
+    expect(url.protocol).toBe("https:");
+    expect(url.hostname).toBe("raw.githubusercontent.com");
+    const [owner, repo, branch, ...rest] = url.pathname.split("/").filter(Boolean);
+    // <path> is the committed build output, exactly where --out writes it.
+    expect(rest.join("/")).toBe(outFlag as string);
+    // <repo> matching the package name is a convention witness, not an
+    // authority - nothing forces a repository to be named after its package,
+    // but this one is, and the equality catches a rename on either side.
+    expect(repo).toBe(pkg.name);
+    // <owner>/<repo> is the slug the README's own workflow snippet installs
+    // (that pin is itself anchored by the "README version pins" test). An
+    // includes() cannot prove EVERY install line agrees - third-party
+    // actions share the uses: syntax - but a $id naming a slug no snippet
+    // installs fails here.
     expect(
-      readme.includes(`$schema=${id}`),
-      `README's yaml-language-server line must reference the schema $id ${id}`,
+      readme.includes(`uses: ${owner}/${repo}@`),
+      `the README never installs "uses: ${owner}/${repo}@...", so the $id's slug matches no workflow snippet`,
     ).toBe(true);
+    // <branch> is the repository's own declared default branch.
+    const settings = parseYaml(readFileSync(join(ROOT, ".github", "settings.yml"), "utf8")) as {
+      repository?: { default_branch?: string };
+    };
+    expect(branch).toBe(settings.repository?.default_branch);
   });
 });
 
@@ -222,28 +362,42 @@ describe("private repositories guide", () => {
     // A downloaded artifact is a ZIP; the docs give an extraction path.
     expect(section).toContain("gh run download");
   });
+
+  test("the overall-result enumeration names exactly the REPO_RESULTS members", () => {
+    // The safe-skeleton paragraph enumerates every result value a redacted
+    // target can show; pin the parenthesized list to REPO_RESULTS the same
+    // way the action-yml contract test pins the output description.
+    const parenthesized = section.replace(/\n/g, " ").match(/the overall result \(([^)]*)\)/)?.[1];
+    expect(
+      parenthesized,
+      'the guide must enumerate the result values in "the overall result (...)"',
+    ).toBeDefined();
+    const listed = [...(parenthesized ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
+    expect(listed.sort()).toEqual([...REPO_RESULTS].sort());
+  });
 });
 
 describe("schema.ts SettingsFile JSDoc deletion claims", () => {
   const schemaSrc = readFileSync(join(ROOT, "src", "schema.ts"), "utf8");
-  const CLAIM_WORD: Record<string, RegExp> = {
-    delete: /delete|remove/i,
-    keep: /kept|keep/i,
-  };
 
-  test("the JSDoc for delete/keep sections matches undeclaredDefault", () => {
+  test("the JSDoc for delete/keep sections claims its own policy and never the opposite", () => {
+    // Each knobbed JSDoc states its default in a "... by default" clause and
+    // may mention the opposite word elsewhere (the `undeclared:` opt-in it
+    // documents). The claim windows, families, and negator handling live in
+    // ./claims.ts, shared with the COVERAGE sweep.
     for (const section of SECTIONS) {
-      const pattern = CLAIM_WORD[section.undeclaredDefault];
-      if (!pattern) {
+      if (section.undeclaredDefault === "untouched") {
         continue; // "untouched" sections make no per-key deletion claim
       }
       const propRe = new RegExp(`/\\*\\*([^*]|\\*(?!/))*\\*/\\s*\\n\\s*${section.key}\\?:`, "m");
       const match = schemaSrc.match(propRe);
       expect(match, `no JSDoc found above SettingsFile.${section.key}`).not.toBeNull();
-      expect(
-        pattern.test(match?.[0] ?? ""),
-        `SettingsFile.${section.key} JSDoc must state a "${section.undeclaredDefault}" policy (matching ${pattern})`,
-      ).toBe(true);
+      // Flatten the comment decoration so a claim wrapped across lines still
+      // sits in one window.
+      const flat = (match?.[0] ?? "").replace(/\s*\n\s*\*\s*/g, " ");
+      for (const problem of defaultClaimProblems(flat, section.undeclaredDefault)) {
+        throw new Error(`SettingsFile.${section.key} JSDoc: ${problem}`);
+      }
     }
   });
 });
