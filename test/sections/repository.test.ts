@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { validateSectionShapes } from "../../src/engine/validate.js";
 import { PermissionDenied, toleratedStatuses } from "../../src/sections/contract.js";
 import {
   FEATURE_TOGGLES,
@@ -160,12 +161,14 @@ describe("repository", () => {
     expect(off.changes).toEqual(["private vulnerability reporting: disabled"]);
   });
 
-  test("non-boolean security toggles are rejected with the YAML hint", async () => {
-    const api = new MockApi({});
-    await expect(
-      repositorySection.run(ctx(api), { enable_vulnerability_alerts: "no" }),
-    ).rejects.toThrow(/not a boolean/);
-    expect(api.calls).toHaveLength(0);
+  test("non-boolean security toggles are rejected by upfront shape validation with the YAML hint", () => {
+    const error = validateSectionShapes(
+      { repository: { enable_vulnerability_alerts: "no" } },
+      "f.yml",
+    );
+    expect(error).toContain("repository.enable_vulnerability_alerts");
+    expect(error).toContain("not a boolean");
+    expect(error).toContain('"no"');
   });
 
   test("git LFS applies blindly: PUT on true, DELETE on false, never in the PATCH", async () => {
@@ -190,12 +193,36 @@ describe("repository", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /repos/o/r"]);
   });
 
-  test("non-boolean git LFS values hit the shared toggle guard", async () => {
-    const api = new MockApi({});
-    await expect(repositorySection.run(ctx(api), { enable_git_lfs: "yes" })).rejects.toThrow(
-      /not a boolean/,
+  test("non-boolean git LFS values hit the shared toggle shape, booleans pass", () => {
+    const error = validateSectionShapes({ repository: { enable_git_lfs: "yes" } }, "f.yml");
+    expect(error).toContain("repository.enable_git_lfs");
+    expect(error).toContain("not a boolean");
+    // The section stays loose otherwise: booleans and passthrough keys pass.
+    expect(
+      validateSectionShapes({ repository: { enable_git_lfs: true, future_field: "x" } }, "f.yml"),
+    ).toBeNull();
+  });
+
+  test("a cyclic toggle value is rejected with a message, never a formatter throw", () => {
+    // A YAML alias cycle (enable_git_lfs: &v { self: *v }) reaches the shape
+    // as a self-referential object; the error text must be built without
+    // JSON.stringify on it, or validation itself would die and the run would
+    // lose its normal failed result.
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const error = validateSectionShapes({ repository: { enable_git_lfs: cyclic } }, "f.yml");
+    expect(error).toContain("repository.enable_git_lfs");
+    expect(error).toContain("a mapping is not a boolean");
+  });
+
+  test("the section accepts plain mappings only, like anyRecord always did", () => {
+    // The toggle check rides ON anyRecord, so moving it upfront must not
+    // widen the accepted set: a YAML !!timestamp document parses to a Date,
+    // which is not a plain mapping and fails shape validation.
+    expect(validateSectionShapes({ repository: new Date("2020-01-01") }, "f.yml")).toContain(
+      "repository",
     );
-    expect(api.calls).toHaveLength(0);
+    expect(validateSectionShapes({ repository: [1, 2] }, "f.yml")).toContain("repository");
   });
 
   test("immutable releases toggles its own endpoint: PUT on true, DELETE on false", async () => {

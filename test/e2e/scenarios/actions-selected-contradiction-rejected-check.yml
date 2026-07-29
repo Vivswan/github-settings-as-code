@@ -1,0 +1,25 @@
+# Check-mode twin of actions-selected-contradiction-rejected: upfront
+# validation runs in both modes, so the same contradictory document fails a
+# mode: check run too, before any section reads. The never list pins that no
+# section GET fired (the core repo fetch and settings read are allowed).
+name: actions-selected-contradiction-rejected-check
+settings:
+  repository:
+    description: should never be compared
+  actions:
+    allowed_actions: all
+    selected_actions:
+      github_owned_allowed: true
+inputs:
+  mode: check
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  never:
+    - "GET /repos/{repo}/actions/permissions"
+    - "PATCH /repos/{repo}"
+  stdout_contains:
+    - "actions.selected_actions"
+    - 'an allowlist only applies under allowed_actions: "selected"'

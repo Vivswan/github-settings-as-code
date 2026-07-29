@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { validateSectionShapes } from "../../src/engine/validate.js";
 import { actionsSection } from "../../src/sections/actions.js";
 import { grantFor, PermissionDenied } from "../../src/sections/contract.js";
 import { MockApi } from "../mock-api.js";
@@ -89,17 +90,37 @@ describe("actions", () => {
     expect(api.mutations()).toEqual([]);
   });
 
-  test("selected_actions implies allowed_actions: selected and rejects contradictions", async () => {
+  test("selected_actions implies allowed_actions: selected; a contradiction fails upfront shape validation", async () => {
     const api = new MockApi({}).allowMutations(...ACTIONS_WRITES);
     await actionsSection.run(ctx(api), { selected_actions: { github_owned_allowed: true } });
     const base = api.mutations()[0]?.payload as Record<string, unknown>;
     expect(base.allowed_actions).toBe("selected");
-    await expect(
-      actionsSection.run(ctx(new MockApi({}).allowMutations(...ACTIONS_WRITES)), {
-        allowed_actions: "all",
-        selected_actions: { github_owned_allowed: true },
-      }),
-    ).rejects.toThrow(/allowed_actions/);
+    // The contradiction is a shape rejection (both modes, before any section
+    // writes), not a run()-time throw.
+    const error = validateSectionShapes(
+      { actions: { allowed_actions: "all", selected_actions: { github_owned_allowed: true } } },
+      "f.yml",
+    );
+    expect(error).toContain("actions.selected_actions");
+    expect(error).toContain('an allowlist only applies under allowed_actions: "selected"');
+    // The valid pairing and the inferred form both pass validation.
+    expect(
+      validateSectionShapes(
+        {
+          actions: {
+            allowed_actions: "selected",
+            selected_actions: { github_owned_allowed: true },
+          },
+        },
+        "f.yml",
+      ),
+    ).toBeNull();
+    expect(
+      validateSectionShapes(
+        { actions: { selected_actions: { github_owned_allowed: true } } },
+        "f.yml",
+      ),
+    ).toBeNull();
   });
 
   test("retention and cache route to their endpoints, never the base PUT", async () => {
