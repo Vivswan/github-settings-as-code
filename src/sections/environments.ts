@@ -39,7 +39,6 @@ import {
   type EndpointDecl,
   type EntryOf,
   emptyResult,
-  grantFor,
   listAllEnveloped,
   probeAbsent,
   rejectDuplicates,
@@ -412,7 +411,7 @@ export const environmentsSection: SectionModule<"environments"> = {
   key: "environments",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(permission, NESTED_OVERRIDES_CAVEAT),
+  grantCaveat: NESTED_OVERRIDES_CAVEAT,
   endpoints: ENDPOINTS,
   shape: z.array(
     z

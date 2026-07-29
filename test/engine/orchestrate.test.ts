@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { runForRepo, validateSettingsDoc, worstOf } from "../../src/engine/orchestrate.js";
+import {
+  runForRepo,
+  skippedSectionKeys,
+  validateSettingsDoc,
+  worstOf,
+} from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { prefixedIo } from "../../src/io.js";
 import type { SettingsFile } from "../../src/schema.js";
@@ -54,7 +59,7 @@ describe("runForRepo", () => {
     const { io, annotations } = captureIo();
     const result = await runForRepo(api, opts({ onMissingPermission: "warn" }), io);
     expect(result.result).toBe("partial");
-    expect(result.skippedSections).toEqual(["repository"]);
+    expect(skippedSectionKeys(result.outcomes)).toEqual(["repository"]);
     expect(annotations.some((a) => a.startsWith("warning: repository: skipped"))).toBe(true);
   });
 

@@ -10,7 +10,6 @@ import {
   call,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   probeAbsent,
   type SectionModule,
   type SectionPermission,
@@ -36,7 +35,6 @@ export const pagesSection: SectionModule<"pages"> = {
   key: "pages",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   // The handler dereferences source.path before the API sees it, so the
   // shape must catch source: null or a source without a branch.

@@ -15,7 +15,6 @@ import {
   type EndpointDecl,
   emptyResult,
   expand,
-  grantFor,
   probeAbsent,
   rejectDuplicates,
   type SectionModule,
@@ -77,7 +76,6 @@ export const branchesSection: SectionModule<"branches"> = {
   key: "branches",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   // protection stays a passthrough record except its one routed key: the
   // signature toggle is typed so a YAML-quoted "true" fails upfront in

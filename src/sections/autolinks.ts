@@ -12,7 +12,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
@@ -43,7 +42,6 @@ export const autolinksSection: SectionModule<"autolinks"> = {
   key: "autolinks",
   undeclaredDefault: "delete",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: undeclaredPolicyShape(
     z.array(z.looseObject({ key_prefix: z.string(), url_template: z.string() })),

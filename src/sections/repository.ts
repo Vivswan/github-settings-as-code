@@ -10,7 +10,6 @@ import {
   call,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   probeAbsent,
   type SectionModule,
   type SectionPermission,
@@ -267,7 +266,6 @@ export const repositorySection: SectionModule<"repository"> = {
   key: "repository",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape,
   async run(ctx, desiredRaw): Promise<SectionResult> {

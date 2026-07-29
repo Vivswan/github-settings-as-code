@@ -13,7 +13,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   probeAbsent,
   rejectDuplicates,
   type SectionModule,
@@ -136,7 +135,6 @@ export const customPropertiesSection: SectionModule<"custom_properties"> = {
   key: "custom_properties",
   undeclaredDefault: "keep",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: undeclaredPolicyShape(
     z.array(

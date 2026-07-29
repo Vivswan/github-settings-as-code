@@ -24,7 +24,6 @@ import { MockApi } from "../mock-api.js";
 const section: SectionMeta = {
   key: "actions_secrets",
   permission: { repo: ["secrets"] },
-  grant: "grant",
   endpoints: {},
   undeclaredDefault: "keep",
 };

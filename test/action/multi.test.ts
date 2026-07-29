@@ -470,7 +470,6 @@ describe("toPublicView", () => {
       origin: 'the "repos" input',
       result: "drift",
       outcomes: [{ key: "repository", status: "drift", detail: ["has_wiki: true != false"] }],
-      skippedSections: [],
       display: "o/pub",
       redacted: false,
     });
@@ -488,7 +487,6 @@ describe("toPublicView", () => {
         { key: "repository", status: "applied", detail: ["changed description to SECRET"] },
         { key: "labels", status: "failed", detail: ["denied SECRET"], httpStatus: 403 },
       ],
-      skippedSections: [],
       note: "boom SECRET",
       display: "private repository #2",
       redacted: true,
