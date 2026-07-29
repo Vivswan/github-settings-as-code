@@ -127,13 +127,15 @@ describe("throwFor context enrichment", () => {
   });
 
   test("rate-limit and 5xx branches do not render the hint", () => {
+    // A 5xx-keyed hint is unrepresentable (HintableStatus), so the fixture
+    // carries a 422 one; the 500 branch must throw its own advice without it.
     expect(() =>
       throwFor(
         section,
         "GET",
         "/repos/o/r/rulesets",
         { status: 500, message: "Server Error", body: "" },
-        { endpoint: endpoint({ hints: { 500: "never rendered here" } }) },
+        { endpoint: endpoint({ hints: { 422: "never rendered here" } }) },
       ),
     ).toThrow(/server error/);
     try {
@@ -142,7 +144,7 @@ describe("throwFor context enrichment", () => {
         "GET",
         "/repos/o/r/rulesets",
         { status: 500, message: "Server Error", body: "" },
-        { endpoint: endpoint({ hints: { 500: "never rendered here" } }) },
+        { endpoint: endpoint({ hints: { 422: "never rendered here" } }) },
       );
     } catch (error) {
       expect(String(error)).not.toContain("never rendered here");

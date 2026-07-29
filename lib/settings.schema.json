@@ -197,20 +197,30 @@
         "protection": {
           "anyOf": [
             {
-              "additionalProperties": {},
-              "type": "object"
+              "$ref": "#/definitions/BranchProtectionConfig"
             },
             {
               "type": "null"
             }
           ],
-          "description": "PUT .../protection payload; null removes protection (Probot parity). `required_signatures` (a boolean) is the one key the PUT does not accept, so it is applied through its own POST/DELETE .../protection/required_signatures sub-endpoint instead. GitHub does not document whether the protection PUT preserves an existing signature requirement, so declare the toggle on any branch that carries one - a declared value is pinned either way."
+          "description": "PUT .../protection payload; null removes protection (Probot parity)."
         }
       },
       "required": [
         "name",
         "protection"
       ],
+      "type": "object"
+    },
+    "BranchProtectionConfig": {
+      "additionalProperties": {},
+      "description": "The protection PUT payload, passed through verbatim except its one routed key.",
+      "properties": {
+        "required_signatures": {
+          "description": "Require signed commits on the branch. The one protection key the PUT silently drops, so it is applied through the POST/DELETE .../protection/required_signatures sub-endpoint after the PUT. GitHub does not document whether the protection PUT preserves an existing signature requirement, so declare the toggle on any branch that carries one - a declared value is pinned either way.",
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "CodeScanningDefaultSetupConfig": {

@@ -124,13 +124,11 @@ export const branchesSection: SectionModule<"branches"> = {
         }
         continue;
       }
-      // The classic API rejects payloads missing the core keys; fill nulls.
-      const payload: Record<string, unknown> = { ...branch.protection };
       // GitHub's protection PUT silently DROPS required_signatures, so it
       // must never ride the payload; the sub-endpoint calls after the PUT
       // apply the declared toggle instead.
-      const requiredSignatures = payload.required_signatures as boolean | undefined;
-      delete payload.required_signatures;
+      const { required_signatures: requiredSignatures, ...payload } = branch.protection;
+      // The classic API rejects payloads missing the core keys; fill nulls.
       for (const key of REQUIRED_PROTECTION_KEYS) {
         if (!(key in payload)) {
           payload[key] = null;

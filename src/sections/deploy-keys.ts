@@ -150,25 +150,27 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
       (entry) => entry.title,
       (entry) => entry.title,
     );
-    // Validate every declared key's material BEFORE any read or write, so a
-    // malformed entry can never leave earlier entries already applied.
-    const materials = new Map(desired.map((entry) => [entry.title, declaredMaterial(entry)]));
+    // Validate every declared key's material BEFORE any read or write (the
+    // .map is eager), so a malformed entry can never leave earlier entries
+    // already applied. Each declared entry travels with its parsed material
+    // from here on.
+    const parsed = desired.map((entry) => ({ entry, material: declaredMaterial(entry) }));
     // Two entries with the same MATERIAL under different titles would fight
     // upstream, not here: GitHub attaches a public key to one repository
     // once, so the second POST answers 422 mid-section with the repo
     // half-applied. Rejected upfront, keyed on the normalized material.
     rejectDuplicates(
       this,
-      desired,
-      (entry) => materials.get(entry.title) as string,
-      (entry) => entry.title,
+      parsed,
+      (p) => p.material,
+      (p) => p.entry.title,
     );
     const { live, materialById } = extractLive(await listAll(ctx, this, ENDPOINTS.list));
 
     // Ambiguity and upstream key conflicts are rejected BEFORE any write
     // (the webhooks precedent): a hard error mid-loop would leave earlier
     // declared keys already written.
-    for (const entry of desired) {
+    for (const { entry, material } of parsed) {
       const matches = live.filter((candidate) => candidate.title === entry.title);
       if (matches.length > 1) {
         // GitHub does not enforce title uniqueness, and replacing one of N
@@ -189,8 +191,7 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
       // the conflict is right here, so name the holder instead.
       const holder = live.find(
         (candidate) =>
-          candidate.title !== entry.title &&
-          materialById.get(candidate.id) === materials.get(entry.title),
+          candidate.title !== entry.title && materialById.get(candidate.id) === material,
       );
       if (holder) {
         throw new Error(
@@ -200,9 +201,8 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
     }
 
     const declared = new Set(desired.map((entry) => entry.title));
-    for (const entry of desired) {
+    for (const { entry, material } of parsed) {
       const existing = live.find((candidate) => candidate.title === entry.title);
-      const material = materials.get(entry.title) as string;
       const { title: _title, key: _key, read_only, ...extraKeys } = entry;
       if (!existing) {
         if (ctx.check) {
