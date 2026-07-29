@@ -16,7 +16,12 @@
  * if any target failed.
  */
 
-import { runForRepo, validateSettingsDoc, worstOf } from "../engine/orchestrate.js";
+import {
+  runForRepo,
+  skippedSectionKeys,
+  validateSettingsDoc,
+  worstOf,
+} from "../engine/orchestrate.js";
 import { GithubApi, type GithubClient, registerRedactedSlug } from "../github/api.js";
 import { createVisibilityResolver } from "../github/repo-visibility.js";
 import { deliverArtifactReport } from "../report/artifact-report.js";
@@ -95,12 +100,15 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
         Object.fromEntries(
           views.map((v) => [
             v.display,
-            { result: v.result, source: v.source, skippedSections: v.skippedSections },
+            { result: v.result, source: v.source, skippedSections: skippedSectionKeys(v.outcomes) },
           ]),
         ),
       ),
     );
-    setOutput("skipped-sections", [...new Set(views.flatMap((v) => v.skippedSections))].join(","));
+    setOutput(
+      "skipped-sections",
+      [...new Set(views.flatMap((v) => skippedSectionKeys(v.outcomes)))].join(","),
+    );
     const overall = worstOf(views, cfg.mode === "check");
     setOutput("result", overall);
     console.log(`result: ${overall}`);
@@ -215,7 +223,7 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
   } else {
     writeSummary(result.outcomes, cfg.mode);
   }
-  setOutput("skipped-sections", result.skippedSections.join(","));
+  setOutput("skipped-sections", skippedSectionKeys(result.outcomes).join(","));
 
   if (result.result === "failed") {
     if (redacted) {

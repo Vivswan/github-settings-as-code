@@ -21,7 +21,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   listAll,
   rejectDuplicates,
   type SectionModule,
@@ -127,7 +126,6 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
   key: "deploy_keys",
   undeclaredDefault: "keep",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: undeclaredPolicyShape(
     z.array(

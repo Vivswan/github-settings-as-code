@@ -5,6 +5,7 @@ import {
   grantFor,
   PermissionDenied,
   type SectionMeta,
+  sectionGrant,
   throwFor,
 } from "../../src/sections/contract.js";
 import { environmentsSection } from "../../src/sections/environments.js";
@@ -86,7 +87,7 @@ describe("throwFor context enrichment", () => {
     expect(thrown).toBeInstanceOf(PermissionDenied);
     const denied = thrown as PermissionDenied;
     expect(denied.detail).toContain('creating ruleset "quality" failed - POST');
-    expect(denied.detail).toContain(section.grant);
+    expect(denied.detail).toContain(sectionGrant(section));
     expect(denied.detail).not.toContain("never rendered here");
   });
 
@@ -109,7 +110,7 @@ describe("throwFor context enrichment", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     const denied = thrown as PermissionDenied;
-    expect(denied.detail).toContain(section.grant);
+    expect(denied.detail).toContain(sectionGrant(section));
     expect(denied.detail).toContain(
       ". Note: a 403 here can also mean LFS is disabled account-wide",
     );
@@ -168,7 +169,7 @@ describe("throwFor context enrichment", () => {
     // asks for read - what matters here is the RESOURCE: the endpoint's own
     // grant renders, never the section's.
     expect(denied.detail).toContain(grantFor({ repo: ["actions"] }, undefined, "read"));
-    expect(denied.detail).not.toContain(section.grant);
+    expect(denied.detail).not.toContain(sectionGrant(section));
   });
 
   test("override advice grades by the section's need: a write sibling on the same permission advises write", () => {
@@ -235,9 +236,9 @@ describe("throwFor context enrichment", () => {
   });
 
   test("a no-override denial keeps the section grant's caveat", () => {
-    // section.grant and grantFor(effective) coincide for a caveat-free
+    // sectionGrant(section) and grantFor(effective) coincide for a caveat-free
     // section, so only a caveat-bearing one can pin the difference: the
-    // no-override path must render section.grant (caveat included), and a
+    // no-override path must render the section grant (caveat included), and a
     // refactor that re-derives the grant from the resolved permission
     // would silently drop every caveat while caveat-free fixtures stay
     // green.

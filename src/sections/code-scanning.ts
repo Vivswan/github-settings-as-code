@@ -10,7 +10,6 @@ import {
   type EndpointDecl,
   emptyResult,
   expand,
-  grantFor,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
@@ -38,10 +37,8 @@ export const codeScanningDefaultSetupSection: SectionModule<"code_scanning_defau
   key: "code_scanning_default_setup",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(
-    permission,
+  grantCaveat:
     "a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived",
-  ),
   endpoints: ENDPOINTS,
   shape: anyRecord,
   async run(ctx, desiredRaw): Promise<SectionResult> {

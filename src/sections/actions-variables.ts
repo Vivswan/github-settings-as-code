@@ -17,7 +17,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   listAllEnveloped,
   rejectDuplicates,
   type SectionModule,
@@ -65,7 +64,6 @@ export const actionsVariablesSection: SectionModule<"actions_variables"> = {
   key: "actions_variables",
   undeclaredDefault: "delete",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: undeclaredPolicyShape(z.array(z.looseObject({ name: z.string(), value: z.string() }))),
   async run(ctx, desiredRaw): Promise<SectionResult> {

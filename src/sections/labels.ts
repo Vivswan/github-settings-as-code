@@ -13,7 +13,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   listAll,
   type SectionModule,
   type SectionPermission,
@@ -62,7 +61,6 @@ export const labelsSection: SectionModule<"labels"> = {
   key: "labels",
   undeclaredDefault: "delete",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: undeclaredPolicyShape(
     z.array(z.looseObject({ name: z.string(), new_name: z.string().optional() })),

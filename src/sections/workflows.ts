@@ -10,7 +10,6 @@ import {
   call,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   listAllEnveloped,
   rejectDuplicates,
   type SectionModule,
@@ -50,7 +49,6 @@ export const workflowsSection: SectionModule<"workflows"> = {
   key: "workflows",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: z.array(z.looseObject({ path: z.string(), state: z.enum(["active", "disabled"]) })),
   // Closed surface: the enable/disable PUTs carry no body at all, so an
