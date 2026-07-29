@@ -26,7 +26,7 @@ export interface ApiError {
    * the message, which the wholesale replacement destroys, and a secondary
    * rate limit arriving as 403 must not be misread as a permission failure.
    */
-  rateLimited?: boolean;
+  rateLimited?: true;
 }
 
 /**

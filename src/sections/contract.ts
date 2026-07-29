@@ -18,7 +18,7 @@ export class PermissionDenied extends Error {
     readonly section: string,
     readonly detail: string,
     /** The HTTP status that raised the denial, for the redacted view's safe code. */
-    readonly status?: number,
+    readonly status: number,
   ) {
     super(`${section}: ${detail}`);
   }
@@ -74,9 +74,9 @@ export type PatResource =
  */
 export interface SectionPermission {
   /** Fine-grained PAT repository permissions; ANY one of these grants access. */
-  repo: readonly [PatResource, ...PatResource[]];
+  readonly repo: readonly [PatResource, ...PatResource[]];
   /** Additional organization permission required (teams only). */
-  org?: "members";
+  readonly org?: "members";
 }
 
 /** Human-facing label for each PAT resource, as shown in the token UI. */
@@ -158,6 +158,15 @@ type SupplementalRoute =
 export type Route = keyof Endpoints | SupplementalRoute;
 
 /**
+ * The statuses a hint may key: the payload-rejection classes throwFor's
+ * generic branch renders. 403 and 404 are excluded - the permission branch
+ * swallows them before hints are read (and a public "none" endpoint's
+ * 403/404 is never about a grant); ambiguity on those statuses belongs in
+ * `denialHint`.
+ */
+export type HintableStatus = 400 | 412 | 422;
+
+/**
  * One REST endpoint a section may call. `route` is octokit's canonical
  * "METHOD /path/{param}" string. `statuses` maps each HTTP status the handler
  * treats as a normal (non-throwing) outcome to a short plain-prose meaning;
@@ -168,8 +177,8 @@ export type Route = keyof Endpoints | SupplementalRoute;
  * declared.
  */
 export interface EndpointDecl {
-  route: Route;
-  statuses: Readonly<Record<number, string>>;
+  readonly route: Route;
+  readonly statuses: Readonly<Record<number, string>>;
   /**
    * Overrides the section's permission for this one endpoint. "none" means
    * the endpoint is public (no token permission needed). Omit it when the
@@ -177,36 +186,30 @@ export interface EndpointDecl {
    * override equal to the section permission is redundant. Downstream
    * consumers resolve the effective permission via endpointPermission().
    */
-  permission?: SectionPermission | "none";
+  readonly permission?: SectionPermission | "none";
   /**
    * True for an advisory READ whose non-404 failures are tolerated (the section
    * proceeds without it rather than failing). The e2e mock derives its
    * advisory-read exemption from this flag via allEndpoints(), so the exemption
    * stays in one place - the declaration - instead of a hard-coded list.
    */
-  advisory?: boolean;
+  readonly advisory?: boolean;
   /**
-   * Advice for known 4xx failure classes, keyed by the HTTP status each one
-   * explains; throwFor appends the matching entry (if any) to that status's
-   * generic rejection message, so advice never fires on a status it does not
-   * describe. On permission-requiring endpoints 403 and 404 NEVER reach
-   * these entries - the permission branch short-circuits first; ambiguity
-   * on those statuses belongs in `denialHint` below (a public "none"
-   * endpoint's 403/404 does take the generic branch, so the registry.test
-   * sweep forbids 403/404 hints outright rather than relying on the
-   * short-circuit). Payloads pass through verbatim (GitHub stays the
-   * authority on valid values), so a hint names the failure CLASS and
-   * points at the endpoint documentation; it never lists valid values that
-   * could go stale. One or two sentences, no trailing period.
+   * Advice for known 4xx failure classes, appended by throwFor to that
+   * status's generic rejection message. Payloads pass through verbatim
+   * (GitHub stays the authority on valid values), so a hint names the
+   * failure CLASS and points at the endpoint documentation; it never lists
+   * valid values that could go stale. One or two sentences, no trailing
+   * period.
    */
-  hints?: Readonly<Record<number, string>>;
+  readonly hints?: Readonly<Partial<Record<HintableStatus, string>>>;
   /**
    * Appended to the PermissionDenied message (which never reads `hints`) for
    * an endpoint whose 403/404 is ambiguous - it can mean something other
    * than a missing token grant (e.g. Git LFS disabled account-wide). One
    * sentence, no trailing period.
    */
-  denialHint?: string;
+  readonly denialHint?: string;
   /**
    * True for a WRITE the section issues for every declared entry on EVERY
    * apply by contract - the sealed secret PUTs, whose values cannot be read
@@ -216,7 +219,7 @@ export interface EndpointDecl {
    * The e2e apply-idempotence proof derives its required-rewrite set from
    * this flag, so the contract lives on the declaration it describes.
    */
-  alwaysRewrite?: true;
+  readonly alwaysRewrite?: true;
   /**
    * The access grade GitHub gates this endpoint at, when it differs from the
    * method-derived one (GET = read). Codespaces repository secrets are the
@@ -225,7 +228,7 @@ export interface EndpointDecl {
    * mock's permission gate and the fuzz oracle model the real gating - a
    * read-only grant then denies those reads exactly as production does.
    */
-  accessGrade?: "write";
+  readonly accessGrade?: "write";
   /**
    * The largest per_page this LIST endpoint accepts, when it is smaller than
    * the standard 100 (the Actions variables list caps at 30). The page loop
@@ -234,7 +237,7 @@ export interface EndpointDecl {
    * truncate the walk after page one. Omit on endpoints that take the
    * standard 100.
    */
-  pageSize?: number;
+  readonly pageSize?: number;
 }
 
 /** The method half of a route ("PATCH /repos/..." -> "PATCH"). */
@@ -376,26 +379,26 @@ export function expand(
  * advice always travels with the section that owns it.
  */
 export interface SectionMeta<K extends SectionKey = SectionKey> {
-  key: K;
+  readonly key: K;
   /**
    * The machine-readable permission this section requires, from which its
    * grant prose is derived via sectionGrant.
    */
-  permission: SectionPermission;
+  readonly permission: SectionPermission;
   /**
    * Extra prose sectionGrant appends to the derived grant advice, for a
    * section whose denials need more than the permission grant (an ambiguous
    * 403, a per-key permission override). Omit it when the derived grant
    * says everything.
    */
-  grantCaveat?: string;
+  readonly grantCaveat?: string;
   /**
    * Every REST endpoint this section may call, keyed by role (list, create,
    * update, remove, probe, ...). Handlers build their paths by passing these
    * declarations to the request helpers; the mock server and USED_PATHS
    * derivation iterate Object.values(...).
    */
-  endpoints: Readonly<Record<string, EndpointDecl>>;
+  readonly endpoints: Readonly<Record<string, EndpointDecl>>;
   /**
    * The DEFAULT policy for live resources this section does NOT declare, the
    * single source the README Sections table and COVERAGE derive their
@@ -417,7 +420,7 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
    * and one outside it must say "untouched" - so defaultUndeclaredPolicy
    * can never be reached for a section the merge does not normalize.
    */
-  undeclaredDefault: K extends UndeclaredPolicySection ? UndeclaredPolicy : "untouched";
+  readonly undeclaredDefault: K extends UndeclaredPolicySection ? UndeclaredPolicy : "untouched";
 }
 
 /**
@@ -641,7 +644,7 @@ export async function tryCall<E extends EndpointDecl>(
     {
       query?: Readonly<Record<string, string>>;
       payload?: unknown;
-      tolerate?: number[];
+      tolerate?: readonly (keyof E["statuses"] & number)[];
       describe?: string;
     }
   >
@@ -649,7 +652,7 @@ export async function tryCall<E extends EndpointDecl>(
   const opts = args[0];
   const method = endpointMethod(endpoint.route);
   const path = expand(endpoint, ctx, opts?.params, opts?.query);
-  const tolerate = opts?.tolerate ?? toleratedStatuses(endpoint);
+  const tolerate: readonly number[] = opts?.tolerate ?? toleratedStatuses(endpoint);
   const result = await ctx.api.tryRequest(method, path, opts?.payload);
   if ("error" in result && !tolerate.includes(result.error.status)) {
     throwFor(section, method, path, result.error, {
@@ -675,7 +678,7 @@ export async function probeAbsent<E extends EndpointDecl>(
     E,
     {
       query?: Readonly<Record<string, string>>;
-      tolerate?: number[];
+      tolerate?: readonly (keyof E["statuses"] & number)[];
       accept?: string;
       describe?: string;
     }
@@ -683,7 +686,7 @@ export async function probeAbsent<E extends EndpointDecl>(
 ): Promise<{ data: unknown } | { missing: true }> {
   const options = args[0];
   const path = expand(endpoint, ctx, options?.params, options?.query);
-  const tolerate = options?.tolerate ?? toleratedStatuses(endpoint);
+  const tolerate: readonly number[] = options?.tolerate ?? toleratedStatuses(endpoint);
   const result = await ctx.api.tryRequest("GET", path, undefined, { accept: options?.accept });
   if ("error" in result) {
     if (tolerate.includes(result.error.status)) {
@@ -899,7 +902,7 @@ export function throwFor(
       `${section.key}: ${cause}. The token was rejected as invalid or expired; update the token input (or the secret it reads) with a valid, unexpired PAT`,
     );
   }
-  const advice = context?.endpoint?.hints?.[error.status];
+  const advice = context?.endpoint?.hints?.[error.status as HintableStatus];
   const hint = advice ? `. ${advice}` : "";
   const docs = error.documentationUrl
     ? `. The fields and values this endpoint accepts are documented at ${error.documentationUrl}`
