@@ -108,9 +108,8 @@ export function planRedaction(
   };
 }
 
-/** One recorded line from a captured Io, preserving its emission channel. */
+/** One recorded line from a captured Io: annotations carry a level, log lines do not. */
 export interface CapturedLine {
-  kind: "annotate" | "log";
   level?: "notice" | "warning" | "error";
   line: string;
 }
@@ -126,8 +125,8 @@ export function capturingIo(io: Io): { io: Io; drain(): CapturedLine[] } {
   const captured: CapturedLine[] = [];
   return {
     io: {
-      annotate: (level, message) => captured.push({ kind: "annotate", level, line: message }),
-      log: (line) => captured.push({ kind: "log", line }),
+      annotate: (level, message) => captured.push({ level, line: message }),
+      log: (line) => captured.push({ line }),
       mask: (value) => io.mask(value),
     },
     drain: () => captured,

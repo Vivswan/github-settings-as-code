@@ -88,7 +88,7 @@ export interface MultiConfig {
  * that view, never from this record directly.
  */
 export type TargetOutcome = Pick<Target, "slug" | "source" | "origin"> &
-  Pick<RepoRunResult, "result" | "outcomes" | "skippedSections"> & {
+  Pick<RepoRunResult, "result" | "outcomes"> & {
     /** Human line for skips/failures that produced no section outcomes. */
     note?: string;
     /** The public label: the slug, or its "private repository #N" placeholder. */
@@ -137,7 +137,6 @@ export interface PublicTargetView {
   display: string;
   source: Target["source"];
   result: RepoRunResult["result"];
-  skippedSections: string[];
   outcomes: Array<{
     key: string;
     status: RepoRunResult["outcomes"][number]["status"];
@@ -153,7 +152,6 @@ export function toPublicView(target: TargetOutcome): PublicTargetView {
       display: target.slug,
       source: target.source,
       result: target.result,
-      skippedSections: target.skippedSections,
       outcomes: target.outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
       note: target.note,
     };
@@ -162,7 +160,6 @@ export function toPublicView(target: TargetOutcome): PublicTargetView {
     display: target.display,
     source: target.source,
     result: target.result,
-    skippedSections: target.skippedSections,
     outcomes: redactOutcomes(target.outcomes),
     note: REDACTED_NOTE,
   };
@@ -181,7 +178,6 @@ export function isPrivateVisibility(visibility: RepoVisibility): boolean {
 interface TargetResult {
   result: RepoRunResult["result"];
   outcomes: RepoRunResult["outcomes"];
-  skippedSections: string[];
   note?: string;
   /** Failed section keys with their HTTP codes, for the safe public annotation. */
   failedSections: string[];
@@ -212,7 +208,6 @@ function targetFailure(
   return {
     result: "failed",
     outcomes: [],
-    skippedSections: [],
     note: redacted ? REDACTED_NOTE : richMessage,
     failedSections: [],
     driftSections: [],
@@ -257,7 +252,6 @@ async function processTarget(ctx: {
     return {
       result: "skipped",
       outcomes: [],
-      skippedSections: [],
       note: redacted ? REDACTED_NOTE : `no ${DEFAULT_SETTINGS_FILE} on the default branch`,
       failedSections: [],
       driftSections: [],
@@ -336,7 +330,6 @@ async function processTarget(ctx: {
   return {
     result: run.result,
     outcomes: run.outcomes,
-    skippedSections: run.skippedSections,
     note,
     failedSections: run.outcomes
       .filter((o) => o.status === "failed")
@@ -661,7 +654,6 @@ export async function runMulti(
       origin: target.origin,
       result: outcome.result,
       outcomes: outcome.outcomes,
-      skippedSections: outcome.skippedSections,
       note,
       display,
       redacted,

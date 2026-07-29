@@ -28,7 +28,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   listAll,
   rejectDuplicates,
   type SectionContext,
@@ -151,7 +150,6 @@ export const webhooksSection: SectionModule<"webhooks"> = {
   key: "webhooks",
   undeclaredDefault: "keep",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   // name is pinned to "web" upfront: it is the only value GitHub's hooks API
   // accepts today, and any other value could only be a typo or a legacy
