@@ -17,7 +17,6 @@ import {
   call,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
@@ -60,7 +59,6 @@ export const interactionLimitsSection: SectionModule<"interaction_limits"> = {
   key: "interaction_limits",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   // Loose on purpose: the PUT forwards the object verbatim, so future fields
   // ride along; only the natural key is checked. null = clear the limit.

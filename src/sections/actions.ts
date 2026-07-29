@@ -13,7 +13,6 @@ import {
   call,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   probeAbsent,
   type SectionModule,
   type SectionPermission,
@@ -266,10 +265,7 @@ export const actionsSection: SectionModule<"actions"> = {
   key: "actions",
   undeclaredDefault: "untouched",
   permission,
-  grant: grantFor(
-    permission,
-    'the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
-  ),
+  grantCaveat: 'the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
   endpoints: ENDPOINTS,
   shape,
   async run(ctx, desiredRaw): Promise<SectionResult> {

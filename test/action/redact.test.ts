@@ -91,9 +91,9 @@ describe("capturingIo", () => {
     io.log("third");
     expect(emitted).toEqual([]);
     expect(drain()).toEqual([
-      { kind: "log", line: "first" },
-      { kind: "annotate", level: "warning", line: "second" },
-      { kind: "log", line: "third" },
+      { line: "first" },
+      { level: "warning", line: "second" },
+      { line: "third" },
     ]);
   });
 
@@ -121,7 +121,7 @@ describe("capturingIo", () => {
     io.log("changed a label");
     io.mask("o/secret");
     expect(emitted).toEqual([]);
-    expect(drain()).toEqual([{ kind: "log", line: "changed a label" }]);
+    expect(drain()).toEqual([{ line: "changed a label" }]);
     expect(masks).toEqual(["o/secret"]);
   });
 });

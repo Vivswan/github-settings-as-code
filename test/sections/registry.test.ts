@@ -16,6 +16,7 @@ import {
   type SectionContext,
   type SectionMeta,
   type SectionPermission,
+  sectionGrant,
   toleratedStatuses,
 } from "../../src/sections/contract.js";
 import { allEndpoints, SECTIONS, sectionModule } from "../../src/sections/registry.js";
@@ -41,11 +42,13 @@ describe("registry <-> README", () => {
     expect(rows.map((row) => row.key)).toEqual([...SECTION_KEYS]);
 
     // Every permission the grant advice names (the quoted words in
-    // SectionMeta.grant) must appear in that section's README row, so the
-    // table cannot drift from the advice users see in errors.
+    // sectionGrant's derived prose) must appear in that section's README row,
+    // so the table cannot drift from the advice users see in errors.
     for (const module of SECTIONS) {
       const row = rows.find((r) => r.key === module.key);
-      const granted = [...module.grant.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? "");
+      const granted = [...sectionGrant(module).matchAll(/"([^"]+)"/g)].map(
+        (match) => match[1] ?? "",
+      );
       expect(granted.length).toBeGreaterThan(0);
       for (const name of granted) {
         expect(row?.permission).toContain(name);
@@ -146,9 +149,9 @@ describe("section permissions", () => {
     }
   });
 
-  test("each section's grant matches grantFor(permission)", () => {
+  test("each section's grant caveat matches the pinned per-section caveats", () => {
     for (const module of SECTIONS) {
-      expect(module.grant).toBe(grantFor(module.permission, GRANT_CAVEATS[module.key]));
+      expect(sectionGrant(module)).toBe(grantFor(module.permission, GRANT_CAVEATS[module.key]));
     }
   });
 
@@ -156,7 +159,7 @@ describe("section permissions", () => {
     // A section without an expected literal (a new one) fails here.
     expect(Object.keys(EXPECTED_GRANT).sort()).toEqual([...SECTION_KEYS].sort());
     for (const module of SECTIONS) {
-      expect(module.grant).toBe(EXPECTED_GRANT[module.key] ?? "");
+      expect(sectionGrant(module)).toBe(EXPECTED_GRANT[module.key] ?? "");
     }
   });
 
@@ -404,7 +407,6 @@ describe("section endpoints", () => {
     const section: SectionMeta = {
       key: "branches",
       permission: { repo: ["administration"] },
-      grant: "grant",
       endpoints: {},
       undeclaredDefault: "untouched",
     };
@@ -625,7 +627,6 @@ describe("probeAbsent tolerance derivation", () => {
   const section: SectionMeta = {
     key: "repository",
     permission: { repo: ["administration"] },
-    grant: "grant",
     endpoints: {},
     undeclaredDefault: "untouched",
   };

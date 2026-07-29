@@ -13,7 +13,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   listAll,
   rejectDuplicates,
   type SectionModule,
@@ -107,7 +106,6 @@ export const rulesetsSection: SectionModule<"rulesets"> = {
   key: "rulesets",
   undeclaredDefault: "keep",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: undeclaredPolicyShape(
     z.array(

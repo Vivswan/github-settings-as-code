@@ -27,7 +27,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   listAll,
   rejectDuplicates,
   type SectionModule,
@@ -164,7 +163,6 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
   key: "secret_scanning_custom_patterns",
   undeclaredDefault: "keep",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: undeclaredPolicyShape(
     z.array(
@@ -226,7 +224,6 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
     const toCreate: SecretScanningPatternConfig[] = [];
     const toUpdate: Array<{
       live: LivePattern;
-      version: string | undefined;
       divergent: Record<string, unknown>;
     }> = [];
     const declaredNames = new Set(desired.map((p) => p.name));
@@ -274,7 +271,7 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
         }
       }
       if (Object.keys(divergent).length > 0) {
-        toUpdate.push({ live: existing, version: existing.version, divergent });
+        toUpdate.push({ live: existing, divergent });
       }
     }
 
@@ -282,7 +279,7 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
     // name matching nothing stays a create even when an undeclared live
     // pattern carries identical fields (no rename inference; the name is
     // the identity).
-    const toDelete: Array<{ live: LivePattern; version: string | undefined }> = [];
+    const toDelete: LivePattern[] = [];
     for (const pattern of live) {
       if (declaredNames.has(pattern.name)) {
         continue;
@@ -298,7 +295,7 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
           `secret_scanning_custom_patterns[${pattern.name}]: undeclared - not in the settings file, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it`,
         );
       } else {
-        toDelete.push({ live: pattern, version: pattern.version });
+        toDelete.push(pattern);
       }
     }
     if (ctx.check) {
@@ -315,13 +312,13 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
         result.changes.push(`created secret scanning custom pattern "${declared.name}"`);
       }
     }
-    for (const { live: existing, version, divergent } of toUpdate) {
+    for (const { live: existing, divergent } of toUpdate) {
       await call(ctx, this, ENDPOINTS.update, {
         params: { pattern_id: String(existing.id) },
         // The PATCH body REQUIRES the version key but accepts null: a
         // version-less live pattern (predating the versioning field) writes
         // without the concurrency check, as GitHub itself allows.
-        payload: { custom_pattern_version: version ?? null, ...divergent },
+        payload: { custom_pattern_version: existing.version ?? null, ...divergent },
         describe: `updating secret scanning pattern "${existing.name}"`,
       });
       result.changes.push(`updated secret scanning custom pattern "${existing.name}"`);
@@ -335,16 +332,16 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
         payload: {
           patterns: toDelete.map((p) =>
             p.version === undefined
-              ? { pattern_id: p.live.id }
-              : { pattern_id: p.live.id, custom_pattern_version: p.version },
+              ? { pattern_id: p.id }
+              : { pattern_id: p.id, custom_pattern_version: p.version },
           ),
           post_delete_action: "resolve_alerts",
         },
-        describe: `deleting undeclared secret scanning pattern(s) ${toDelete.map((p) => `"${p.live.name}"`).join(", ")}`,
+        describe: `deleting undeclared secret scanning pattern(s) ${toDelete.map((p) => `"${p.name}"`).join(", ")}`,
       });
       for (const pattern of toDelete) {
         result.changes.push(
-          `DELETED undeclared secret scanning custom pattern "${pattern.live.name}" (alerts resolved, not deleted)`,
+          `DELETED undeclared secret scanning custom pattern "${pattern.name}" (alerts resolved, not deleted)`,
         );
       }
     }

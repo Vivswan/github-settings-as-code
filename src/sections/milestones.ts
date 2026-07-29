@@ -13,7 +13,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   listAll,
   rejectDuplicates,
   type SectionModule,
@@ -52,7 +51,6 @@ export const milestonesSection: SectionModule<"milestones"> = {
   key: "milestones",
   undeclaredDefault: "keep",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: undeclaredPolicyShape(z.array(z.looseObject({ title: z.string() }))),
   async run(ctx, desiredRaw): Promise<SectionResult> {

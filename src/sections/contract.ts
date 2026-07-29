@@ -379,15 +379,16 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
   key: K;
   /**
    * The machine-readable permission this section requires, from which its
-   * grant prose is derived via grantFor.
+   * grant prose is derived via sectionGrant.
    */
   permission: SectionPermission;
   /**
-   * How to grant a fine-grained PAT access to this section's endpoints,
-   * used verbatim in permission errors. The README's "Sections" table
-   * mirrors these in its PAT permission column.
+   * Extra prose sectionGrant appends to the derived grant advice, for a
+   * section whose denials need more than the permission grant (an ambiguous
+   * 403, a per-key permission override). Omit it when the derived grant
+   * says everything.
    */
-  grant: string;
+  grantCaveat?: string;
   /**
    * Every REST endpoint this section may call, keyed by role (list, create,
    * update, remove, probe, ...). Handlers build their paths by passing these
@@ -417,6 +418,16 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
    * can never be reached for a section the merge does not normalize.
    */
   undeclaredDefault: K extends UndeclaredPolicySection ? UndeclaredPolicy : "untouched";
+}
+
+/**
+ * A section's fine-grained-PAT grant advice, used verbatim in permission
+ * errors: the prose grantFor derives from the section's permission, plus its
+ * caveat when one is declared. The README's "Sections" table mirrors these
+ * in its PAT permission column.
+ */
+export function sectionGrant(section: Pick<SectionMeta, "permission" | "grantCaveat">): string {
+  return grantFor(section.permission, section.grantCaveat);
 }
 
 /**
@@ -871,7 +882,7 @@ export function throwFor(
     const grant =
       effective !== undefined && effective !== section.permission
         ? grantFor(effective, undefined, overrideAdviceLevel(section, effective))
-        : section.grant;
+        : sectionGrant(section);
     throw new PermissionDenied(
       section.key,
       `the token was denied ${cause}${alsoMissing}. To fix, ${grant}${denialHint}`,

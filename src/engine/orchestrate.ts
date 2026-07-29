@@ -79,9 +79,15 @@ export interface RepoRunResult {
   repo: string;
   result: RepoResult;
   outcomes: SectionOutcome[];
-  skippedSections: string[];
   /** Non-empty when the preflight barrier refused to write anything. */
   preflightDenied: string[];
+}
+
+/** The keys of the skipped outcomes, derived at the read site. */
+export function skippedSectionKeys(
+  outcomes: ReadonlyArray<Pick<SectionOutcome, "key" | "status">>,
+): string[] {
+  return outcomes.filter((o) => o.status === "skipped").map((o) => o.key);
 }
 
 /**
@@ -207,7 +213,6 @@ export async function runForRepo(
       repo: opts.repo,
       result: "failed",
       outcomes,
-      skippedSections: [],
       preflightDenied: [],
     };
   };
@@ -243,7 +248,6 @@ export async function runForRepo(
         repo: opts.repo,
         result: "failed",
         outcomes: [],
-        skippedSections: [],
         preflightDenied: denied,
       };
     }
@@ -400,7 +404,6 @@ export async function runForRepo(
     repo: opts.repo,
     result,
     outcomes,
-    skippedSections: outcomes.filter((o) => o.status === "skipped").map((o) => o.key),
     preflightDenied: [],
   };
 }

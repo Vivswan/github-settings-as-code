@@ -11,7 +11,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
-  grantFor,
   listAll,
   rejectDuplicates,
   type SectionModule,
@@ -53,7 +52,6 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
   key: "collaborators",
   undeclaredDefault: "delete",
   permission,
-  grant: grantFor(permission),
   endpoints: ENDPOINTS,
   shape: undeclaredPolicyShape(z.array(z.looseObject({ username: z.string() }))),
   // Closed surface: the PUT accepts exactly one setting ("permission"), so
