@@ -18,6 +18,8 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 
 /** The sentinel the CLI prints (and the job branches on) when every section is in play. */
@@ -30,7 +32,7 @@ export const NONE = "none";
  * than one section. Every other src/sections/<key>.ts maps to <key>; the
  * SECTIONS_BY_FILE builder fills those in from SECTION_KEYS.
  */
-const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
+export const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   // Kebab file names for underscore section keys.
   "actions-secrets.ts": ["actions_secrets"],
   "dependabot-secrets.ts": ["dependabot_secrets"],
@@ -66,28 +68,17 @@ const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
  */
 const ALL_SELECTING_SECTION_FILES = new Set(["contract.ts", "registry.ts"]);
 
-/**
- * Section keys whose handler file is NOT named `<key>.ts`, so the 1:1 builder
- * must skip them; their real filename is wired through SPECIAL_SECTION_FILES.
- */
-const KEYS_WITHOUT_MATCHING_FILE = new Set<SectionKey>([
-  "actions_secrets",
-  "dependabot_secrets",
-  "codespaces_secrets",
-  "code_scanning_default_setup",
-  "interaction_limits",
-  "actions_variables",
-  "custom_properties",
-  "deploy_keys",
-  "secret_scanning_custom_patterns",
-]);
+const SECTIONS_DIR = join(import.meta.dir, "..", "..", "src", "sections");
 
 /** src/sections/<file> -> the section key(s) a change to it can affect. */
 export function buildSectionsByFile(): Record<string, SectionKey[]> {
   const map: Record<string, SectionKey[]> = {};
-  // The 1:1 files: <key>.ts -> [key], except keys whose file has another name.
+  // The 1:1 files: <key>.ts -> [key], for every key whose handler file is on
+  // disk under that name. A key with no <key>.ts (kebab-named handlers) must
+  // instead be reachable through SPECIAL_SECTION_FILES, or the map's unit
+  // test fails.
   for (const key of SECTION_KEYS) {
-    if (!KEYS_WITHOUT_MATCHING_FILE.has(key)) {
+    if (existsSync(join(SECTIONS_DIR, `${key}.ts`))) {
       map[`${key}.ts`] = [key];
     }
   }
@@ -101,17 +92,21 @@ const SECTIONS_BY_FILE = buildSectionsByFile();
 
 /**
  * Path prefixes/files that select every section: the shared engine, transport,
- * action layer, discovery, the entrypoint and schema, and the e2e harness
- * itself (a harness change can change every scenario). `lib/` is deliberately
- * NOT here: it regenerates on every `src/` change, so treating it as
- * all-selecting would make almost every PR run every section and defeat the
- * diff scoping. lib is handled as a special case below.
+ * action layer, discovery, reporting, the io seam, the entrypoint and schema,
+ * and the e2e harness itself (a harness change can change every scenario).
+ * `lib/` is deliberately NOT here: it regenerates on every `src/` change, so
+ * treating it as all-selecting would make almost every PR run every section
+ * and defeat the diff scoping. lib is handled as a special case below. A unit
+ * test checks every top-level `src/` entry other than `sections/` is listed,
+ * so a new top-level module cannot be silently skipped.
  */
-const ALL_SELECTING_PREFIXES = [
+export const ALL_SELECTING_PREFIXES = [
   "src/engine/",
   "src/github/",
   "src/action/",
   "src/discovery/",
+  "src/report/",
+  "src/io.ts",
   "src/main.ts",
   "src/schema.ts",
   "test/e2e/",
