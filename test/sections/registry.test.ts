@@ -167,8 +167,16 @@ describe("section permissions", () => {
     // On permission-requiring endpoints, throwFor classifies 403/404 as
     // PermissionDenied before consulting `hints`, so an entry there is dead
     // advice; on a public ("none") endpoint the generic branch WOULD render
-    // it, which is why this sweep forbids 403/404 hints outright - ambiguity
-    // on those statuses belongs in `denialHint` (see the EndpointDecl JSDoc).
+    // it, which is why 403/404 hints are forbidden outright - ambiguity on
+    // those statuses belongs in `denialHint` (see the EndpointDecl JSDoc).
+    // HintableStatus rejects a fresh 403/404 literal - the inline `as const
+    // satisfies` declarations every section currently uses - at the
+    // declaration site. It cannot catch a NON-FRESH assignment: a hoisted
+    // const with a mixed key set ({422: legal, 403: illegal} is non-fresh
+    // and the shared 422 satisfies the weak-type check), or one annotated
+    // Record<number, string> (the index signature suppresses that check),
+    // compiles - and sections already hoist shared hint strings, so this
+    // sweep stays as the runtime backstop for the hoisted-object path.
     for (const [key, endpoint] of Object.entries(allEndpoints())) {
       for (const status of Object.keys(endpoint.hints ?? {})) {
         expect(

@@ -72,7 +72,10 @@ export function sectionModule<K extends SectionKey>(key: K): SectionModule<K> {
 }
 
 /** One endpoint in the flattened cross-section view, tagged with its owner. */
-export type TaggedEndpoint = EndpointDecl & { section: SectionKey; role: string };
+export type TaggedEndpoint = EndpointDecl & {
+  readonly section: SectionKey;
+  readonly role: string;
+};
 
 /**
  * Every section's endpoints flattened into one dictionary keyed
