@@ -220,23 +220,59 @@ export const FEATURE_TOGGLES = [...READABLE_TOGGLES, ...WRITE_ONLY_TOGGLES];
  */
 export const SPECIAL_KEYS = new Set(["topics", ...FEATURE_TOGGLES.map((toggle) => toggle.key)]);
 
+/**
+ * Cycle-safe description of a rejected toggle value for the shape error:
+ * scalars verbatim (strings quoted, so a YAML "no" stays visibly a string),
+ * containers by kind only - JSON.stringify on an arbitrary YAML value would
+ * throw on a cyclic alias and kill the run before the normal failure path.
+ */
+function describeToggleValue(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
+  if (typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return "a list";
+  }
+  if (typeof value === "object") {
+    return "a mapping";
+  }
+  return String(value);
+}
+
+/**
+ * The toggle-type invariant lives HERE, on the shape, not in run(): upfront
+ * document validation rejects the document in BOTH modes before ANY section
+ * writes - a run()-time throw would fire only after earlier sections already
+ * wrote (the environments flag-pairing precedent). The base stays anyRecord,
+ * so the accepted surface is unchanged: unknown keys still ride the PATCH
+ * verbatim, and non-mapping documents are rejected as before. Derived from
+ * FEATURE_TOGGLES so a new toggle is covered automatically.
+ */
+const shape = anyRecord.superRefine((declared, refineCtx) => {
+  for (const toggle of FEATURE_TOGGLES) {
+    if (toggle.key in declared && typeof declared[toggle.key] !== "boolean") {
+      refineCtx.addIssue({
+        code: "custom",
+        path: [toggle.key],
+        message: `${describeToggleValue(declared[toggle.key])} is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
+      });
+    }
+  }
+});
+
 export const repositorySection: SectionModule<"repository"> = {
   key: "repository",
   undeclaredDefault: "untouched",
   permission,
   grant: grantFor(permission),
   endpoints: ENDPOINTS,
-  shape: anyRecord,
+  shape,
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as Record<string, unknown>;
-    for (const toggle of FEATURE_TOGGLES) {
-      if (toggle.key in desired && typeof desired[toggle.key] !== "boolean") {
-        throw new Error(
-          `repository.${toggle.key} is ${JSON.stringify(desired[toggle.key])}, which is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
-        );
-      }
-    }
     const patch: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(desired)) {
       if (!SPECIAL_KEYS.has(key)) {
