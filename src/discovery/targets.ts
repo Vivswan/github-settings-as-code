@@ -5,14 +5,21 @@
  * artifact; the remote file is self-service.
  */
 
-export interface Target {
+interface TargetBase {
   slug: string; // owner/name, original casing
-  source: "central" | "remote";
   /** Where this target came from, for messages: a file path or the input name. */
   origin: string;
-  /** Central targets only: the settings file to read. */
-  filePath?: string;
 }
+
+export type CentralTarget = TargetBase & {
+  source: "central";
+  /** The checked-in settings file to read. */
+  filePath: string;
+};
+
+export type RemoteTarget = TargetBase & { source: "remote" };
+
+export type Target = CentralTarget | RemoteTarget;
 
 export const SLUG_RE = /^[\w.-]+\/[\w.-]+$/;
 
@@ -28,20 +35,20 @@ export const SLUG_RE = /^[\w.-]+\/[\w.-]+$/;
  * leaking the name right next to its placeholder.
  */
 export function dedupeTargets(
-  central: Target[],
-  remote: Target[],
+  central: CentralTarget[],
+  remote: RemoteTarget[],
   notice: (message: string) => void,
   display: (slug: string) => string,
   isRedacted: (slug: string) => boolean = () => false,
 ): Target[] {
-  const centralBySlug = new Map<string, Target>();
+  const centralBySlug = new Map<string, CentralTarget>();
   for (const target of central) {
     const key = target.slug.toLowerCase();
     if (!centralBySlug.has(key)) {
       centralBySlug.set(key, target);
     }
   }
-  const out = [...central];
+  const out: Target[] = [...central];
   for (const target of remote) {
     const winner = centralBySlug.get(target.slug.toLowerCase());
     if (winner) {

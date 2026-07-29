@@ -264,12 +264,12 @@ export async function deliverIssueReport(
  * manages it, so no injection is needed. But an entry that RENAMES the marker
  * AWAY (name is the marker, new_name is something else) would break the
  * next run's marker lookup, so its rename is refused: the new_name is stripped
- * and `renameRefused` is set. Pure: the input settings object is never mutated.
+ * and the outcome is "rename-refused". Pure: the input settings object is
+ * never mutated.
  */
 export function injectMarkerLabel(settings: SettingsFile): {
   settings: SettingsFile;
-  injected: boolean;
-  renameRefused: boolean;
+  outcome: "unchanged" | "injected" | "rename-refused";
 } {
   // The labels section takes the undeclared-policy knob, so the declaration
   // is either the plain entry array or the wrapped {undeclared, entries}
@@ -283,7 +283,7 @@ export function injectMarkerLabel(settings: SettingsFile): {
       : null
     : declaration;
   if (labels === null || !Array.isArray(labels)) {
-    return { settings, injected: false, renameRefused: false };
+    return { settings, outcome: "unchanged" };
   }
   const rebuild = (entries: LabelConfig[]): SettingsFile["labels"] =>
     wrapped ? { ...(declaration as UndeclaredPolicyList<LabelConfig>), entries } : entries;
@@ -300,19 +300,17 @@ export function injectMarkerLabel(settings: SettingsFile): {
     );
     return {
       settings: { ...settings, labels: rebuild(guarded) },
-      injected: false,
-      renameRefused: true,
+      outcome: "rename-refused",
     };
   }
   const declared = labels.some(
     (label) => nameKey(label.name) === marker || nameKey(label.new_name ?? label.name) === marker,
   );
   if (declared) {
-    return { settings, injected: false, renameRefused: false };
+    return { settings, outcome: "unchanged" };
   }
   return {
     settings: { ...settings, labels: rebuild([...labels, MARKER_LABEL_CONFIG]) },
-    injected: true,
-    renameRefused: false,
+    outcome: "injected",
   };
 }
