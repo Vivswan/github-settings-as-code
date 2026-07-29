@@ -439,7 +439,9 @@ export const redactingOctokitLog: { debug: Log; info: Log; warn: Log; error: Log
 // Never wait out a rate-limit reset longer than this: failing loudly with
 // the API message beats stalling a workflow for an hour.
 const MAX_RETRY_WAIT_S = 60;
-const MAX_RETRIES = 2; // total attempts = 1 + MAX_RETRIES
+// Exported so the test harness derives its retry budgets (1 + MAX_RETRIES)
+// from the one real value instead of hand-mirroring it.
+export const MAX_RETRIES = 2; // total attempts = 1 + MAX_RETRIES
 
 const ActionOctokit = Octokit.plugin(retry, throttling);
 

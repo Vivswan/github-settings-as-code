@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ADMIN_SLUG } from "./constants.js";
 import type { MultiRepoTarget, MultiScenarioMeta, ScenarioMeta } from "./generators.js";
 import {
   foldRepoResults,
@@ -442,7 +443,7 @@ describe("predictMulti rollup", () => {
       policy: "fail",
       privateRepos: "show",
       privateReport: "none",
-      selfSlug: "e2e-owner/e2e-repo",
+      selfSlug: ADMIN_SLUG,
       globalMask: {},
     };
   }
@@ -536,7 +537,7 @@ describe("predictMulti rollup", () => {
       policy: "warn",
       privateRepos: "show",
       privateReport: "none",
-      selfSlug: "e2e-owner/e2e-repo",
+      selfSlug: ADMIN_SLUG,
       globalMask: {},
     });
     expect(p.repos[0]?.allowedResults.has("partial")).toBe(true);
@@ -633,7 +634,7 @@ describe("predictMulti rollup", () => {
       policy: "fail",
       privateRepos: "redact",
       privateReport: "none",
-      selfSlug: "e2e-owner/e2e-repo",
+      selfSlug: ADMIN_SLUG,
       globalMask: {},
     });
     // The result prediction keys on the placeholder; the real slug never appears.

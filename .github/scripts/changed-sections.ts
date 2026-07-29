@@ -110,6 +110,11 @@ export const ALL_SELECTING_PREFIXES = [
   "src/main.ts",
   "src/schema.ts",
   "test/e2e/",
+  // The selection machinery itself: a PR touching only this selector, a
+  // sibling CI script, or the smoke job's own workflow would otherwise
+  // select "none" and skip the very job it configures.
+  ".github/scripts/",
+  ".github/workflows/checks.yml",
 ];
 
 /** True for a committed generated-bundle path, which every `src/` change touches. */

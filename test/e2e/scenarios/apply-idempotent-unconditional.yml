@@ -1,0 +1,49 @@
+# The unconditional half of the COMPARE_BEFORE_WRITE table needs a corpus
+# witness per false-listed section: run.ts fails (unwitnessedUnconditionalSections)
+# when a false-listed section has no apply_idempotent scenario writing to it,
+# because a wrong `false` merely weakens the zero-write proof and nothing else
+# would contradict it. apply-idempotent-mixed carries the compare-before-write
+# sections plus rulesets and environments; the secrets *-apply-converges
+# scenarios carry the three secret sections and webhooks. This scenario covers
+# the rest: each section here writes unconditionally, so the second apply must
+# write to every one of them again while leaving the mock state byte-identical,
+# and the final check run reads back clean.
+name: apply-idempotent-unconditional
+settings:
+  repository:
+    description: unconditional PATCH witness
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+  actions:
+    default_workflow_permissions: read
+  pages:
+    cname: docs.example.com
+    https_enforced: true
+  code_scanning_default_setup:
+    state: configured
+    languages:
+      - python
+  teams:
+    - name: platform
+      permission: push
+  interaction_limits:
+    limit: collaborators_only
+    expiry: one_week
+owner_kind: org
+live_state:
+  # A live Pages site, so both applies take the unconditional update PUT (a
+  # create would be a POST whose body needs source and build_type instead).
+  pages:
+    url: https://api.github.com/repos/e2e-owner/e2e-repo/pages
+    build_type: workflow
+    cname: old.example.com
+    https_enforced: true
+    source:
+      branch: main
+      path: /
+expect:
+  exit_code: 0
+  result: applied
+  apply_idempotent: true

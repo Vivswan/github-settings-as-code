@@ -12,7 +12,7 @@
  */
 
 import { join } from "node:path";
-import { runScenario } from "./runner.js";
+import { corpusUnwitnessedUnconditionalSections, runScenario } from "./runner.js";
 import { loadScenarios, type Scenario } from "./schema.js";
 
 const SCENARIO_DIR = join(import.meta.dir, "scenarios");
@@ -117,8 +117,27 @@ async function main(): Promise<number> {
     }
   }
 
+  // Corpus-level inverse of the per-run idempotence proof, only meaningful
+  // over the FULL corpus: a --sections/--scenario slice can legitimately
+  // starve a false-listed section's unconditional write path. Counted as its
+  // own line item so the pass/fail tally stays honest.
+  let total = scenarios.length;
+  if (!flags.sections && !flags.scenario) {
+    total++;
+    const unwitnessed = corpusUnwitnessedUnconditionalSections();
+    if (unwitnessed.length > 0) {
+      failed++;
+      table.push("  FAIL  apply-idempotence corpus witness");
+      for (const failure of unwitnessed) {
+        table.push(`          ${failure}`);
+      }
+    } else {
+      table.push("  PASS  apply-idempotence corpus witness");
+    }
+  }
+
   console.log(`\n${table.join("\n")}`);
-  console.log(`\n${scenarios.length - failed}/${scenarios.length} passed`);
+  console.log(`\n${total - failed}/${total} passed`);
   if (artifacts.length > 0) {
     console.log(`\nartifacts:\n  ${artifacts.join("\n  ")}`);
   }

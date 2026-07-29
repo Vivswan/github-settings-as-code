@@ -62,10 +62,15 @@
  *   matches the live one (and no undeclared unset is due).
  *
  * This table lives in the harness (like DENIAL_SEMANTICS): the engine has no
- * use for it, and the apply-idempotence re-run is its contradiction path - a
- * wrong `true` fails the first idempotent run that touches the section, and a
- * wrong `false` weakens the proof without breaking it. The Record type gives
- * compile-time completeness (a missing or unknown key fails tsc).
+ * use for it, and both sides are guarded. A wrong `true` fails the first
+ * apply_idempotent run that touches the section (the zero-write assertion).
+ * A wrong `false` is caught corpus-wide by unwitnessedUnconditionalSections
+ * (runner.ts, consulted by run.ts over the full corpus), which demands every
+ * false-listed section BOTH appears in some apply_idempotent scenario's
+ * first-apply writes AND is re-written by some second apply - so a section
+ * that quietly becomes compare-before-write, or that loses its corpus
+ * witness, fails there. The Record type gives compile-time completeness (a
+ * missing or unknown key fails tsc).
  */
 
 import type { SectionKey } from "../../src/schema.js";
