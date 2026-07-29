@@ -8,13 +8,16 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
+  ALL_SELECTING_PREFIXES,
   buildSectionsByFile,
   renderSelection,
+  SPECIAL_SECTION_FILES,
   sectionsForFiles,
 } from "../../.github/scripts/changed-sections.js";
-import { SECTION_KEYS } from "../../src/schema.js";
+import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 
-const SECTIONS_DIR = join(import.meta.dir, "..", "..", "src", "sections");
+const SRC_DIR = join(import.meta.dir, "..", "..", "src");
+const SECTIONS_DIR = join(SRC_DIR, "sections");
 
 describe("changed-sections file map", () => {
   const byFile = buildSectionsByFile();
@@ -63,48 +66,65 @@ describe("changed-sections file map", () => {
     }
   });
 
-  test("the special-named files map to their real keys", () => {
-    expect(byFile["actions-secrets.ts"]).toEqual(["actions_secrets"]);
-    expect(byFile["dependabot-secrets.ts"]).toEqual(["dependabot_secrets"]);
-    expect(byFile["codespaces-secrets.ts"]).toEqual(["codespaces_secrets"]);
-    expect(byFile["code-scanning.ts"]).toEqual(["code_scanning_default_setup"]);
-    expect(byFile["interaction-limits.ts"]).toEqual(["interaction_limits"]);
-    expect(byFile["actions-variables.ts"]).toEqual(["actions_variables"]);
-    expect(byFile["deploy-keys.ts"]).toEqual(["deploy_keys"]);
-    expect(byFile["secret-scanning-patterns.ts"]).toEqual(["secret_scanning_custom_patterns"]);
-    expect(byFile["roles.ts"]).toEqual(["collaborators", "teams"]);
-    // The shared engine fans out to every consuming section, environments
-    // included (its nested per-environment secrets key).
-    expect(byFile["secrets-engine.ts"]).toEqual([
-      "actions_secrets",
-      "dependabot_secrets",
-      "codespaces_secrets",
-      "environments",
-    ]);
+  test("every special-named file maps to exactly its declared keys", () => {
+    // A literal golden copy of the special mappings: changing one is a
+    // two-place edit on purpose, so a dropped or reworded fan-out cannot
+    // slip through. The reachability and on-disk tests above police the
+    // declaration in the other direction.
+    const golden: Record<string, SectionKey[]> = {
+      "actions-secrets.ts": ["actions_secrets"],
+      "dependabot-secrets.ts": ["dependabot_secrets"],
+      "codespaces-secrets.ts": ["codespaces_secrets"],
+      "code-scanning.ts": ["code_scanning_default_setup"],
+      "interaction-limits.ts": ["interaction_limits"],
+      "actions-variables.ts": ["actions_variables"],
+      "custom-properties.ts": ["custom_properties"],
+      "deploy-keys.ts": ["deploy_keys"],
+      "secret-scanning-patterns.ts": ["secret_scanning_custom_patterns"],
+      "roles.ts": ["collaborators", "teams"],
+      "secrets-engine.ts": [
+        "actions_secrets",
+        "dependabot_secrets",
+        "codespaces_secrets",
+        "environments",
+      ],
+    };
+    expect(Object.keys(SPECIAL_SECTION_FILES).sort()).toEqual(Object.keys(golden).sort());
+    for (const [file, keys] of Object.entries(golden)) {
+      expect(byFile[file], `special file ${file} lost its mapping`).toEqual(keys);
+    }
   });
 
   test("each 1:1 section file maps to exactly its own key", () => {
-    // The secret families, actions_variables, code_scanning_default_setup,
-    // interaction_limits, custom_properties, deploy_keys, and
-    // secret_scanning_custom_patterns live in
-    // kebab-named files, so they have no <key>.ts entry; every other key does.
-    const kebabNamed = new Set([
-      "actions_secrets",
-      "dependabot_secrets",
-      "codespaces_secrets",
-      "actions_variables",
-      "code_scanning_default_setup",
-      "interaction_limits",
-      "custom_properties",
-      "deploy_keys",
-      "secret_scanning_custom_patterns",
-    ]);
+    // A key has a <key>.ts entry exactly when that file exists on disk; a
+    // kebab-named handler reaches its key through SPECIAL_SECTION_FILES only.
+    const onDisk = new Set(readdirSync(SECTIONS_DIR));
     for (const key of SECTION_KEYS) {
-      if (kebabNamed.has(key)) {
+      if (onDisk.has(`${key}.ts`)) {
+        expect(byFile[`${key}.ts`]).toEqual([key]);
+      } else {
         expect(byFile[`${key}.ts`]).toBeUndefined();
+      }
+    }
+  });
+
+  test("every top-level src entry is either sections/ or all-selecting", () => {
+    // A new top-level src module the selector does not know about would make
+    // PRs touching only it skip the smoke job; force a prefix entry instead.
+    // Only directories and .ts files count: stray artifacts like .DS_Store
+    // are not selector inputs.
+    for (const entry of readdirSync(SRC_DIR, { withFileTypes: true })) {
+      if (!entry.isDirectory() && !entry.name.endsWith(".ts")) {
         continue;
       }
-      expect(byFile[`${key}.ts`]).toEqual([key]);
+      const path = entry.isDirectory() ? `src/${entry.name}/` : `src/${entry.name}`;
+      if (path === "src/sections/") {
+        continue;
+      }
+      expect(
+        ALL_SELECTING_PREFIXES.includes(path),
+        `${path} is not in ALL_SELECTING_PREFIXES, so the selector would ignore changes to it`,
+      ).toBe(true);
     }
   });
 });
@@ -133,6 +153,12 @@ describe("changed-sections selection", () => {
     );
   });
 
+  test("secrets-engine.ts fans out to all four consuming sections", () => {
+    expect(renderSelection(sectionsForFiles(["src/sections/secrets-engine.ts"]))).toBe(
+      "environments,actions_secrets,dependabot_secrets,codespaces_secrets",
+    );
+  });
+
   test("multiple section files union in SECTION_KEYS order", () => {
     const selection = sectionsForFiles(["src/sections/milestones.ts", "src/sections/labels.ts"]);
     // labels precedes milestones in SECTION_KEYS, so the list is ordered.
@@ -151,6 +177,8 @@ describe("changed-sections selection", () => {
       "src/github/api.ts",
       "src/action/inputs.ts",
       "src/discovery/discover.ts",
+      "src/report/issue-report.ts",
+      "src/io.ts",
       "src/main.ts",
       "src/schema.ts",
       "test/e2e/runner.ts",
