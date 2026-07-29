@@ -10,7 +10,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { endpointMethod, endpointPath, matchesTemplate } from "../../src/sections/contract.js";
-import { allEndpoints } from "../../src/sections/registry.js";
+import { allEndpoints, SECTIONS } from "../../src/sections/registry.js";
+import { defaultClaimProblems } from "./claims.js";
 import { sectionLines, tableRows } from "./markdown.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -18,6 +19,12 @@ const coverage = readFileSync(join(ROOT, "COVERAGE.md"), "utf8");
 
 describe("COVERAGE Supported table", () => {
   const rows = tableRows(sectionLines(coverage, "Supported"));
+  // Every row's notes, concatenated per section key (a section may span rows).
+  const rowsByKey = new Map<string, string>();
+  for (const cells of rows) {
+    const key = (cells[1] ?? "").replace(/`/g, "").split(" ")[0] ?? "";
+    rowsByKey.set(key, `${rowsByKey.get(key) ?? ""} ${cells[2] ?? ""}`);
+  }
 
   test("every section key appears in at least one Supported row", () => {
     const mentioned = rows.map((cells) => cells[1] ?? "").join(" ");
@@ -33,13 +40,6 @@ describe("COVERAGE Supported table", () => {
     // For every registered endpoint, the section's Supported row(s) must name
     // the distinctive tail of its path, so the coverage doc cannot omit an
     // endpoint the code calls.
-    const rowsByKey = new Map<string, string>();
-    for (const cells of rows) {
-      const section = cells[1] ?? "";
-      const notes = cells[2] ?? "";
-      const key = section.replace(/`/g, "").split(" ")[0] ?? "";
-      rowsByKey.set(key, `${rowsByKey.get(key) ?? ""} ${notes}`);
-    }
     for (const endpoint of Object.values(allEndpoints())) {
       const tail = endpointPath(endpoint.route)
         .replace("/repos/{owner}/{repo}", "")
@@ -54,6 +54,35 @@ describe("COVERAGE Supported table", () => {
         notes.includes(needle),
         `COVERAGE Supported row for "${endpoint.section}" never mentions "${needle}" from endpoint ${endpoint.route}`,
       ).toBe(true);
+    }
+  });
+
+  test("each knobbed section's kept/deleted-by-default wording matches its undeclaredDefault", () => {
+    // SectionMeta.undeclaredDefault's JSDoc (src/sections/contract.ts) names
+    // this table as a consumer of the declaration; this test is that guard.
+    // Both names must stay in that JSDoc (word order free) so the pointer and
+    // the guard cannot part ways silently.
+    const contractSrc = readFileSync(join(ROOT, "src", "sections", "contract.ts"), "utf8");
+    const undeclaredDoc = contractSrc.match(
+      /\/\*\*([^*]|\*(?!\/))*\*\/\s*\n\s*readonly undeclaredDefault:/m,
+    )?.[0];
+    expect(undeclaredDoc, "no JSDoc found above SectionMeta.undeclaredDefault").toBeDefined();
+    for (const name of ["README Sections table", "COVERAGE"]) {
+      expect(
+        undeclaredDoc?.includes(name),
+        `the undeclaredDefault JSDoc no longer names "${name}" as a consumer; realign it with this test`,
+      ).toBe(true);
+    }
+    // Every knobbed row states its default in a "... by default" clause; the
+    // claim windows, families, and negator handling live in ./claims.ts.
+    for (const section of SECTIONS) {
+      if (section.undeclaredDefault === "untouched") {
+        continue;
+      }
+      const notes = rowsByKey.get(section.key) ?? "";
+      for (const problem of defaultClaimProblems(notes, section.undeclaredDefault)) {
+        throw new Error(`COVERAGE Supported row for "${section.key}": ${problem}`);
+      }
     }
   });
 });
