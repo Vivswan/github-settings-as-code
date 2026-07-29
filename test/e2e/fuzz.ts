@@ -20,6 +20,8 @@
 import { rmSync } from "node:fs";
 import type { SectionKey } from "../../src/schema.js";
 import {
+  canariesOf,
+  displayKeyOf,
   type FaultableSection,
   genDiscoveryScenario,
   genInvalidSettings,
@@ -34,6 +36,7 @@ import {
   type MultiScenarioMeta,
   NON_MAPPING_YAML,
   presenceLiveState,
+  redactionPlaceholder,
   type ScenarioMeta,
   SECTION_PRIMARY_READ,
   scenarioSecretEnv,
@@ -122,9 +125,8 @@ function masterSeed(flags: Flags): { seed: number; explicit: boolean } {
   return { seed: crypto.getRandomValues(new Uint32Array(1))[0] as number, explicit: false };
 }
 
-interface IterationResult {
-  ok: boolean;
-  failure?: string;
+/** The facts every iteration reports alongside its pass/fail verdict. */
+interface IterationBase {
   artifactDir?: string;
   sections: SectionKey[];
   /** Mutation classes this run provably reached (witnessed sections only). */
@@ -133,6 +135,23 @@ interface IterationResult {
   faultClass?: string;
   /** The fixpoint re-run proof this iteration armed, for the stats counts. */
   proof?: "apply_idempotent" | "converges";
+}
+
+/** An iteration's verdict: a failing one always carries its failure text. */
+type IterationResult = IterationBase &
+  ({ ok: true; failure?: never } | { ok: false; failure: string });
+
+/**
+ * Fold an iteration's collected problems into its result: ok exactly when the
+ * list is empty, else the joined problems behind the caller's failure prefix
+ * (e.g. "[persist wrong_shape] "). The one place the ok/failure pair is
+ * derived, so the two can never disagree.
+ */
+function iterationResult(problems: string[], base: IterationBase, prefix = ""): IterationResult {
+  if (problems.length === 0) {
+    return { ok: true, ...base };
+  }
+  return { ok: false, failure: `${prefix}${problems.join("; ")}`, ...base };
 }
 
 /**
@@ -390,15 +409,13 @@ async function runPredicted(
   // separate fuzz-side sweep exists - a duplicate here would double-report
   // every failure.
 
-  return {
-    ok: problems.length === 0,
-    failure: problems.length > 0 ? problems.join("; ") : undefined,
+  return iterationResult(problems, {
     artifactDir: report.artifactDir,
     sections: meta.sections,
     coverage: witnessCoverage(report.requests, meta, observed),
     faultClass,
     proof,
-  };
+  });
 }
 
 /**
@@ -472,17 +489,19 @@ async function witnessIteration(
 
 /**
  * The specification of one rejection scenario: what the settings file contains
- * (a document or raw text - exactly one) and the tokens the action's error
- * must name. Shared by the random input stream and the directed input battery.
+ * (a document or raw text - the structural XOR admits exactly one) and the
+ * tokens the action's error must name. Shared by the random input stream and
+ * the directed input battery.
  */
-interface RejectionSpec {
+type RejectionSpec = {
   label: string;
-  settings?: Record<string, unknown>;
-  settingsRaw?: string;
   tokens: string[];
   /** Pinned run mode; absent means a seeded random pick (the fuzz stream). */
   mode?: "apply" | "check";
-}
+} & (
+  | { settings: Record<string, unknown>; settingsRaw?: never }
+  | { settingsRaw: string; settings?: never }
+);
 
 /**
  * Run one settings-rejection scenario: the action must exit 1, its error must
@@ -499,7 +518,7 @@ async function rejectionIteration(seed: number, spec: RejectionSpec): Promise<It
     tiers: ["mock"],
     ...(spec.settingsRaw !== undefined
       ? { settings_raw: spec.settingsRaw }
-      : { settings: spec.settings ?? {} }),
+      : { settings: spec.settings }),
     inputs: { mode: spec.mode ?? rng.pick(["apply", "check"]) },
     denial_style: "fine_grained",
     owner_kind: "org",
@@ -517,12 +536,11 @@ async function rejectionIteration(seed: number, spec: RejectionSpec): Promise<It
     );
   }
   assertNoTokenLeak(report, problems);
-  return {
-    ok: problems.length === 0,
-    failure: problems.length > 0 ? `[${spec.label}] ${problems.join("; ")}` : undefined,
-    artifactDir: report.artifactDir,
-    sections: [],
-  };
+  return iterationResult(
+    problems,
+    { artifactDir: report.artifactDir, sections: [] },
+    `[${spec.label}] `,
+  );
 }
 
 /** A random validator-rejection spec drawn from the invalid-settings catalog. */
@@ -640,15 +658,17 @@ async function singleShotChaosIteration(
     problems.push(`labels observed "${observed.labels}" under ${mode}, expected applied`);
   }
   assertNoTokenLeak(report, problems);
-  return {
-    ok: problems.length === 0,
-    failure: problems.length > 0 ? `[single ${mode}] ${problems.join("; ")}` : undefined,
-    artifactDir: report.artifactDir,
-    sections: ["labels"],
-    // The scenario armed converges above; label it so the fixpoint-proof
-    // stats count this real convergence proof instead of printing "(none)".
-    proof: "converges",
-  };
+  return iterationResult(
+    problems,
+    {
+      artifactDir: report.artifactDir,
+      sections: ["labels"],
+      // The scenario armed converges above; label it so the fixpoint-proof
+      // stats count this real convergence proof instead of printing "(none)".
+      proof: "converges",
+    },
+    `[single ${mode}] `,
+  );
 }
 
 /** Corruption on every attempt: retries are exhausted, so the run fails loudly. */
@@ -691,12 +711,11 @@ async function persistentChaosIteration(
     );
   }
   assertNoTokenLeak(report, problems);
-  return {
-    ok: problems.length === 0,
-    failure: problems.length > 0 ? `[persist ${mode}] ${problems.join("; ")}` : undefined,
-    artifactDir: report.artifactDir,
-    sections: ["labels"],
-  };
+  return iterationResult(
+    problems,
+    { artifactDir: report.artifactDir, sections: ["labels"] },
+    `[persist ${mode}] `,
+  );
 }
 
 /**
@@ -862,10 +881,10 @@ async function runMultiPredicted(
       continue;
     }
     const wording = repo.target.raw === "unparseable" ? "cannot parse" : "must be a YAML mapping";
-    if (repo.redacted) {
+    if (repo.redaction.kind === "redacted") {
       if (renderedPublic.includes(wording)) {
         problems.push(
-          `raw target ${repo.displayKey}: gate wording "${wording}" leaked to a public surface despite redaction`,
+          `raw target ${displayKeyOf(repo)}: gate wording "${wording}" leaked to a public surface despite redaction`,
         );
       }
     } else if (!renderedPublic.includes(wording)) {
@@ -916,7 +935,7 @@ async function runMultiPredicted(
   // label's name always reaches the rendered detail under show. Only canaries
   // are checked (not slugs), since it is DETAIL suppression this guards.
   if (meta.privateRepos === "redact") {
-    const canaries = meta.repos.flatMap((r) => r.canaries);
+    const canaries = meta.repos.flatMap(canariesOf);
     if (canaries.length > 0) {
       const shown = await runScenario({
         ...scenario,
@@ -983,7 +1002,8 @@ async function runMultiPredicted(
     }
   } else if (meta.privateReport === "issue") {
     for (const repo of meta.repos) {
-      if (!repo.redacted || !reportDelivers(repo) || repo.canaries.length === 0) {
+      const canaries = canariesOf(repo);
+      if (!reportDelivers(repo) || canaries.length === 0) {
         continue;
       }
       const body = deliveredIssueBody(report.requests, repo.slug);
@@ -997,7 +1017,7 @@ async function runMultiPredicted(
       // mode and are already covered by the leak invariant. A delivering target
       // that carries canaries MUST have a `-name` one - if the naming convention
       // changes out from under this check, that is a failure, not a silent skip.
-      const nameCanary = repo.canaries.find((c) => c.endsWith("-name"));
+      const nameCanary = canaries.find((c) => c.endsWith("-name"));
       if (nameCanary === undefined) {
         problems.push(
           `report: ${repo.slug} has canaries but no -name canary to assert in the body`,
@@ -1057,14 +1077,12 @@ async function runMultiPredicted(
   }
   assertNoTokenLeak(report, problems);
 
-  return {
-    ok: problems.length === 0,
-    failure: problems.length > 0 ? problems.join("; ") : undefined,
+  return iterationResult(problems, {
     artifactDir: report.artifactDir,
     sections: [],
     faultClass,
     proof: idempotent ? "apply_idempotent" : undefined,
-  };
+  });
 }
 
 /**
@@ -1079,7 +1097,7 @@ async function runMultiPredicted(
  */
 function reportDelivers(repo: MultiRepoMeta): boolean {
   return (
-    repo.redacted &&
+    repo.redaction.kind === "redacted" &&
     repo.target.kind === "normal" &&
     Object.keys(repo.target.meta.mask).length === 0
   );
@@ -1140,7 +1158,7 @@ async function runDiscoveryPredicted(
     const isPrivate = redact && visibilityOf.get(slug) !== "public";
     if (isPrivate) {
       ordinal += 1;
-      expectedKeys.add(`private repository #${ordinal}`);
+      expectedKeys.add(redactionPlaceholder(ordinal));
     } else {
       expectedKeys.add(slug);
     }
@@ -1185,17 +1203,16 @@ async function runDiscoveryPredicted(
     }
   }
   assertNoTokenLeak(report, problems);
-  return {
-    ok: problems.length === 0,
-    failure:
-      problems.length > 0
-        ? `filters ${JSON.stringify(meta.filters)}: ${problems.join("; ")}`
-        : undefined,
-    artifactDir: report.artifactDir,
-    sections: [],
-    faultClass,
-    proof: converges ? "converges" : undefined,
-  };
+  return iterationResult(
+    problems,
+    {
+      artifactDir: report.artifactDir,
+      sections: [],
+      faultClass,
+      proof: converges ? "converges" : undefined,
+    },
+    `filters ${JSON.stringify(meta.filters)}: `,
+  );
 }
 
 // --- Transport-fault fuzz ---------------------------------------------------
@@ -1350,13 +1367,15 @@ async function exhaustedSectionRun(
     problems.push("unhandled stack in stderr under an exhausted fault");
   }
   assertNoTokenLeak(report, problems);
-  return {
-    ok: problems.length === 0,
-    failure: problems.length > 0 ? `[fault ${faultKey}] ${problems.join("; ")}` : undefined,
-    artifactDir: report.artifactDir,
-    sections: [section],
-    faultClass: fired ? faultClass : undefined,
-  };
+  return iterationResult(
+    problems,
+    {
+      artifactDir: report.artifactDir,
+      sections: [section],
+      faultClass: fired ? faultClass : undefined,
+    },
+    `[fault ${faultKey}] `,
+  );
 }
 
 /**
@@ -1373,25 +1392,44 @@ async function exhaustedSectionRun(
 async function multiContentsFaultIteration(seed: number): Promise<IterationResult> {
   const { scenario, meta } = genMultiScenario(new Rng(seed));
   const victim = meta.repos[0];
-  if (victim === undefined || victim.target.kind === "raw-invalid" || victim.canaries.length > 0) {
+  if (
+    victim === undefined ||
+    victim.target.kind === "raw-invalid" ||
+    canariesOf(victim).length > 0
+  ) {
     return runMultiPredicted(scenario, meta);
   }
   const roll = new Rng(seed ^ 0x51ed2701);
   const kind = roll.pick([...FAULT_KINDS]);
   const exhausting = roll.bool();
+  return runMultiPredicted(scenario, meta, injectContentsFault(scenario, meta, kind, exhausting));
+}
+
+/**
+ * Inject the core.contentsGet fault into a multi scenario: the scenario's
+ * fault option and the oracle's coreFault verdict are ONE decision, written
+ * together here so a caller cannot set one and forget the other. The verdict
+ * is faultKills; the budget follows it: rate_limit_403 kills the fetch on its
+ * FIRST firing, so a full budget would spill the remaining firings into the
+ * NEXT targets' fetches and fail them too - beyond the oracle's single-victim
+ * model. One firing is exactly one dead target for that kind; retried kinds
+ * need the full RETRY_BUDGET to exhaust. Returns the run options the caller
+ * hands to runMultiPredicted.
+ */
+function injectContentsFault(
+  scenario: Scenario,
+  meta: MultiScenarioMeta,
+  kind: FaultKind,
+  exhausting: boolean,
+): { faultKey: string; faultClass: string } {
   const fatal = faultKills(kind, exhausting);
-  // rate_limit_403 kills the fetch on its FIRST firing, so a full budget
-  // would spill the remaining firings into the NEXT targets' fetches and fail
-  // them too - beyond the oracle's single-victim model. One firing is exactly
-  // one dead target for that kind; retried kinds need the full RETRY_BUDGET
-  // to exhaust.
   const times = kind === "rate_limit_403" ? 1 : exhausting ? RETRY_BUDGET : 1;
   scenario.faults = [{ endpoint: "core.contentsGet", kind, times }];
   meta.coreFault = { key: "core.contentsGet", fatal };
-  return runMultiPredicted(scenario, meta, {
+  return {
     faultKey: "core.contentsGet",
     faultClass: faultClassLabel("core.contentsGet", kind, fatal),
-  });
+  };
 }
 
 /**
@@ -1449,13 +1487,15 @@ async function fatalDiscoveryRun(
     );
   }
   assertNoTokenLeak(report, problems);
-  return {
-    ok: problems.length === 0,
-    failure: problems.length > 0 ? `[fault core.discoveryList] ${problems.join("; ")}` : undefined,
-    artifactDir: report.artifactDir,
-    sections: [],
-    faultClass: fired ? faultClass : undefined,
-  };
+  return iterationResult(
+    problems,
+    {
+      artifactDir: report.artifactDir,
+      sections: [],
+      faultClass: fired ? faultClass : undefined,
+    },
+    "[fault core.discoveryList] ",
+  );
 }
 
 /** Battery entry: the discovery-fatal contract with a pinned kind and budget. */
@@ -1510,13 +1550,15 @@ async function preflightFaultRun(seed: number, surviving: boolean): Promise<Iter
     );
   }
   assertNoTokenLeak(report, problems);
-  return {
-    ok: problems.length === 0,
-    failure: problems.length > 0 ? `[preflight consumed] ${problems.join("; ")}` : undefined,
-    artifactDir: report.artifactDir,
-    sections: ["labels"],
-    faultClass: fired ? faultClass : undefined,
-  };
+  return iterationResult(
+    problems,
+    {
+      artifactDir: report.artifactDir,
+      sections: ["labels"],
+      faultClass: fired ? faultClass : undefined,
+    },
+    "[preflight consumed] ",
+  );
 }
 
 /**
@@ -1585,20 +1627,23 @@ async function contentsFaultBatteryRun(seed: number): Promise<IterationResult> {
   // every master seed by generator structure.
   const { scenario, meta } = genMultiScenario(new Rng(seed), "plain-first-target");
   const victim = meta.repos[0];
-  if (victim === undefined || victim.target.kind === "raw-invalid" || victim.canaries.length > 0) {
-    return {
-      ok: false,
-      failure:
+  if (
+    victim === undefined ||
+    victim.target.kind === "raw-invalid" ||
+    canariesOf(victim).length > 0
+  ) {
+    return iterationResult(
+      [
         "the plain-first-target force produced an ineligible first target - the force and the victim guard drifted apart",
-      sections: [],
-    };
+      ],
+      { sections: [] },
+    );
   }
-  scenario.faults = [{ endpoint: "core.contentsGet", kind: "server_error", times: RETRY_BUDGET }];
-  meta.coreFault = { key: "core.contentsGet", fatal: true };
-  return runMultiPredicted(scenario, meta, {
-    faultKey: "core.contentsGet",
-    faultClass: faultClassLabel("core.contentsGet", "server_error", true),
-  });
+  return runMultiPredicted(
+    scenario,
+    meta,
+    injectContentsFault(scenario, meta, "server_error", true),
+  );
 }
 
 function reportFaultBatteryRun(seed: number): Promise<IterationResult> {
