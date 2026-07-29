@@ -17,7 +17,6 @@
  * independent predictDiscovery mirror).
  */
 
-import { rmSync } from "node:fs";
 import type { SectionKey } from "../../src/schema.js";
 import {
   canariesOf,
@@ -324,19 +323,18 @@ async function runPredicted(
   opts: { faultKey?: string; faultClass?: string } = {},
 ): Promise<IterationResult> {
   const prediction = predictOutcomes(meta);
-  // The runner requires an expect.exit_code; we assert the exit code against
-  // the oracle's ALLOWED SET in fuzz.ts instead (a set cannot be expressed as
-  // a single expect), so set a placeholder here and filter the runner's own
-  // exit-code check out of its failures below. A fully-granted apply is a
-  // FIXPOINT: prove it with the runner's apply-idempotence machinery (second
-  // apply exit 0, write-quiet compare-before-write sections, byte-identical
-  // state, then a clean check run - which subsumes the converges re-run).
-  // Fault-carrying iterations keep the lighter converges proof: the
-  // idempotence gate requires no injected faults.
+  // The oracle predicts a SET of allowed exit codes; the expectation carries
+  // the whole set, so the runner's own exit-code check asserts membership. A
+  // fully-granted apply is a FIXPOINT: prove it with the runner's
+  // apply-idempotence machinery (second apply exit 0, write-quiet
+  // compare-before-write sections, byte-identical state, then a clean check
+  // run - which subsumes the converges re-run). Fault-carrying iterations
+  // keep the lighter converges proof: the idempotence gate requires no
+  // injected faults.
   const fixpoint = prediction.fullyGranted && meta.mode === "apply";
   const idempotent = fixpoint && opts.faultKey === undefined;
   scenario.expect = {
-    exit_code: 0,
+    exit_code: [...prediction.allowedExitCodes],
     ...(idempotent ? { apply_idempotent: true } : fixpoint ? { converges: true } : {}),
   };
   const proof: IterationResult["proof"] = idempotent
@@ -348,20 +346,9 @@ async function runPredicted(
   const report = await runScenario(scenario);
   const problems: string[] = [];
 
-  // The runner folds mock violations and (for converges) the barrier/re-run
-  // checks into failures; anything there but the exit-code mismatch is a real
-  // problem, since we set a permissive exit_code.
-  for (const failure of report.failures) {
-    if (!failure.startsWith("exit code ")) {
-      problems.push(failure);
-    }
-  }
-  // Exit code must be in the oracle's allowed set.
-  if (!prediction.allowedExitCodes.has(report.exitCode)) {
-    problems.push(
-      `exit code ${report.exitCode} not in predicted {${[...prediction.allowedExitCodes].join(",")}}`,
-    );
-  }
+  // The runner folds the exit-code membership check, mock violations, and
+  // (for converges) the barrier/re-run checks into failures.
+  problems.push(...report.failures);
   let faultClass: string | undefined;
   if (opts.faultKey !== undefined) {
     const fired = assertFaultFired(report.faultsFired, opts.faultKey, problems);
@@ -809,7 +796,10 @@ async function runMultiPredicted(
     meta.coreFault === undefined &&
     prediction.allowedExitCodes.size === 1 &&
     prediction.allowedExitCodes.has(0);
-  scenario.expect = { exit_code: 0, ...(idempotent ? { apply_idempotent: true } : {}) };
+  scenario.expect = {
+    exit_code: [...prediction.allowedExitCodes],
+    ...(idempotent ? { apply_idempotent: true } : {}),
+  };
 
   const report = await runScenario(scenario);
   const problems: string[] = [];
@@ -825,16 +815,7 @@ async function runMultiPredicted(
   if (meta.privateRepos === "redact" && prediction.forbidden.length === 0) {
     problems.push("redact run produced an empty forbidden set - the leak check would be vacuous");
   }
-  for (const failure of report.failures) {
-    if (!failure.startsWith("exit code ")) {
-      problems.push(failure);
-    }
-  }
-  if (!prediction.allowedExitCodes.has(report.exitCode)) {
-    problems.push(
-      `exit code ${report.exitCode} not in predicted {${[...prediction.allowedExitCodes].join(",")}}`,
-    );
-  }
+  problems.push(...report.failures);
   // Redaction keys a private/probe-denied target by its "private repository #N"
   // placeholder, so the results and predictions are compared on displayKey, not
   // the real slug.
@@ -937,6 +918,17 @@ async function runMultiPredicted(
   if (meta.privateRepos === "redact") {
     const canaries = meta.repos.flatMap(canariesOf);
     if (canaries.length > 0) {
+      // The counterfactual is fault-free, so the PRIMARY expectation (whose
+      // exit set prices an injected fatal fault in) does not apply to it;
+      // recompute the exit set with the core fault stripped. coreFault (the
+      // contents fetch) is the only fault the oracle prices into exit codes;
+      // the multi path's other injected fault, the report channel's
+      // core.issuesList lookup, never changes the exit set because a report
+      // failure never fails the run.
+      const shownExits =
+        meta.coreFault === undefined
+          ? prediction.allowedExitCodes
+          : predictMulti({ ...meta, coreFault: undefined }).allowedExitCodes;
       const shown = await runScenario({
         ...scenario,
         // Drop the whole report config: a delivering channel (`issue` or
@@ -948,6 +940,7 @@ async function runMultiPredicted(
         // an exhausting fault could kill the very target whose canary must
         // surface, falsely reading as vacuous.
         faults: undefined,
+        expect: { exit_code: [...shownExits] },
         inputs: {
           ...scenario.inputs,
           private_repos: "show",
@@ -955,6 +948,15 @@ async function runMultiPredicted(
           report_public_key: undefined,
         },
       });
+      // Propagate the counterfactual's own runner failures (exit-code
+      // membership, mock violations): a rejected counterfactual proves
+      // nothing about canary flow, and swallowing it would strand the
+      // artifact the runner dumped. The failure text carries the artifact
+      // path, and a failing iteration keeps its artifacts by design.
+      if (!shown.ok) {
+        const where = shown.artifactDir === undefined ? "" : ` (artifact: ${shown.artifactDir})`;
+        problems.push(`counterfactual run${where}: ${shown.failures.join("; ")}`);
+      }
       const rendered = [
         stripDebugLines(stripMaskLines(shown.stdout)),
         stripDebugLines(stripMaskLines(shown.stderr)),
@@ -1840,14 +1842,6 @@ async function main(): Promise<number> {
         break;
       }
     } else {
-      // The runner dumps an artifact whenever ITS expect check fails, and fuzz
-      // sets a placeholder expect.exit_code:0 - so a legitimately-exit-1
-      // iteration the ORACLE deems ok still leaves an artifact dir behind. Remove
-      // it here so .artifacts holds ONLY real fuzz failures and the nightly
-      // issue filer's count stays honest.
-      if (result.artifactDir) {
-        rmSync(result.artifactDir, { recursive: true, force: true });
-      }
       console.log(`  iter ${i} [${mode}] seed ${seed} ok`);
     }
   }
@@ -1871,9 +1865,6 @@ async function main(): Promise<number> {
       const result = await witnessIteration(seed, key, kind, mode);
       recordCoverage(result.coverage);
       if (result.ok) {
-        if (result.artifactDir) {
-          rmSync(result.artifactDir, { recursive: true, force: true });
-        }
         console.log(`  ${key}/${kind}/${mode} ok`);
         continue;
       }
@@ -1928,9 +1919,6 @@ async function main(): Promise<number> {
       const mode = index % 2 === 0 ? ("apply" as const) : ("check" as const);
       const result = await rejectionIteration(seed, { ...spec(new Rng(seed)), mode });
       if (result.ok) {
-        if (result.artifactDir) {
-          rmSync(result.artifactDir, { recursive: true, force: true });
-        }
         console.log(`  ${name} [${mode}] ok`);
         continue;
       }
@@ -1974,9 +1962,6 @@ async function main(): Promise<number> {
       recordCoverage(result.coverage);
       recordFaultClass(result.faultClass);
       if (result.ok) {
-        if (result.artifactDir) {
-          rmSync(result.artifactDir, { recursive: true, force: true });
-        }
         console.log(`  ${label} [${mode}] ok`);
         continue;
       }
@@ -2005,9 +1990,6 @@ async function main(): Promise<number> {
       recordCoverage(result.coverage);
       recordFaultClass(result.faultClass);
       if (result.ok) {
-        if (result.artifactDir) {
-          rmSync(result.artifactDir, { recursive: true, force: true });
-        }
         console.log(`  ${name} ok`);
         continue;
       }
@@ -2033,9 +2015,6 @@ async function main(): Promise<number> {
       const result = await run(seed);
       recordCoverage(result.coverage);
       if (result.ok) {
-        if (result.artifactDir) {
-          rmSync(result.artifactDir, { recursive: true, force: true });
-        }
         console.log(`  ${name} ok`);
         continue;
       }
