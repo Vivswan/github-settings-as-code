@@ -11,7 +11,11 @@
  * handler (or leaving a stale handler behind) fails loudly at construction.
  */
 
-import { ISSUE_REPORT_PERMISSION, MARKER_LABEL } from "../../../src/report/issue-report.js";
+import {
+  ISSUE_REPORT_ENDPOINTS,
+  ISSUE_REPORT_PERMISSION,
+  MARKER_LABEL,
+} from "../../../src/report/issue-report.js";
 import type { SectionKey } from "../../../src/schema.js";
 import {
   endpointKind,
@@ -2000,16 +2004,17 @@ export function assertHandlerCompleteness(
  * channel exactly like a section endpoint. Each fires at the same pipeline
  * point a section fault does: after route and target resolution (a fault never
  * masks an unknown-target violation) and before the permission gate. The
- * values document the route each key names.
+ * values document the route each key names; the issue-report ones are built
+ * from ISSUE_REPORT_ENDPOINTS so they cannot drift from the declared routes.
  */
 export const CORE_FAULT_KEYS = {
   "core.discoveryList": "GET /user/repos (multi-repo discovery listing)",
   "core.contentsGet": "GET /repos/{owner}/{repo}/contents/{path} (settings-file fetch)",
-  "core.userGet": "GET /user (report fallback creator scan)",
-  "core.reportLabelCreate": "POST /repos/{owner}/{repo}/labels (report marker-label ensure-create)",
-  "core.issuesList": "GET /repos/{owner}/{repo}/issues (report issue lookup)",
-  "core.issueCreate": "POST /repos/{owner}/{repo}/issues (report issue create)",
-  "core.issuePatch": "PATCH /repos/{owner}/{repo}/issues/{number} (report issue update)",
+  "core.userGet": `${ISSUE_REPORT_ENDPOINTS.user.route} (report fallback creator scan)`,
+  "core.reportLabelCreate": `${ISSUE_REPORT_ENDPOINTS.createLabel.route} (report marker-label ensure-create)`,
+  "core.issuesList": `${ISSUE_REPORT_ENDPOINTS.list.route} (report issue lookup)`,
+  "core.issueCreate": `${ISSUE_REPORT_ENDPOINTS.create.route} (report issue create)`,
+  "core.issuePatch": `${ISSUE_REPORT_ENDPOINTS.update.route} (report issue update)`,
 } as const;
 
 export type CoreFaultKey = keyof typeof CORE_FAULT_KEYS;
