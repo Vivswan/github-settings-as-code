@@ -9,6 +9,7 @@ import type { LoggedRequest } from "./mock/routes.js";
 import {
   changedFamilies,
   checkLeaks,
+  exitCodeFailure,
   forbiddenPresent,
   isSubsequence,
   missingSecondApplyRewrites,
@@ -26,6 +27,36 @@ describe("ARTIFACT_TEST_RECIPIENT", () => {
     // into the config-rejection path instead. Pin it against the same validator
     // the action uses at config parse.
     expect(parseRecipient(ARTIFACT_TEST_RECIPIENT)).toEqual({ ok: true });
+  });
+});
+
+describe("exitCodeFailure (expect.exit_code membership)", () => {
+  test("a matching plain-number expectation passes", () => {
+    expect(exitCodeFailure(0, 0)).toBeUndefined();
+  });
+
+  test("a plain-number mismatch keeps the single-code message", () => {
+    expect(exitCodeFailure(1, 0)).toBe("exit code 1 != expected 0");
+  });
+
+  test("an allowed-set member passes", () => {
+    expect(exitCodeFailure(1, [0, 1])).toBeUndefined();
+  });
+
+  test("an exit outside the allowed set names the whole set", () => {
+    expect(exitCodeFailure(2, [0, 1])).toBe("exit code 2 not in [0, 1]");
+  });
+
+  test("the multi-element message renders sorted, whatever the set order", () => {
+    // The fuzz expectation is spread from a Set, whose insertion order varies
+    // by seed; the failure text must not.
+    expect(exitCodeFailure(2, [1, 0])).toBe("exit code 2 not in [0, 1]");
+  });
+
+  test("a one-element set keeps the single-code message", () => {
+    // The fuzz oracle often predicts exactly one legal exit; the message must
+    // stay byte-identical to the plain-number form either way it is spelled.
+    expect(exitCodeFailure(1, [0])).toBe("exit code 1 != expected 0");
   });
 });
 
