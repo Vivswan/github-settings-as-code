@@ -28,7 +28,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: test/e2e/openapi/github-openapi.trimmed.json
-          key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/sections/**', 'src/schema.ts', 'src/github/api.ts') }}
+          key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**', 'src/schema.ts', 'src/github/api.ts') }}
       - name: Fetch the trimmed OpenAPI spec (cache miss)
         if: steps.openapi-cache.outputs.cache-hit != 'true'
         run: bun .github/scripts/trim-openapi.ts
@@ -107,7 +107,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: test/e2e/openapi/github-openapi.trimmed.json
-          key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/sections/**', 'src/schema.ts', 'src/github/api.ts') }}
+          key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**', 'src/schema.ts', 'src/github/api.ts') }}
       - name: Fetch the trimmed OpenAPI spec (cache miss)
         if: steps.openapi-cache.outputs.cache-hit != 'true'
         run: bun .github/scripts/trim-openapi.ts
