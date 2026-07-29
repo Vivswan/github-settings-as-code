@@ -110,6 +110,16 @@ describe("scenario schema", () => {
     ).toThrow(/denial_style/);
   });
 
+  test("accepts an allowed-set exit_code, rejects an empty one", () => {
+    // The array form carries the fuzz oracle's allowed exit set; an empty set
+    // would fail every exit code, so the schema refuses it at load time.
+    const s = parseScenario({ name: "e", settings: {}, expect: { exit_code: [0, 1] } }, "e.yml");
+    expect(s.expect.exit_code).toEqual([0, 1]);
+    expect(() =>
+      parseScenario({ name: "e", settings: {}, expect: { exit_code: [] } }, "e.yml"),
+    ).toThrow(/exit_code/);
+  });
+
   test("a scenario declaring neither settings nor settings_raw is rejected", () => {
     expect(() => parseScenario({ name: "x", expect: { exit_code: 0 } }, "d.yml")).toThrow(
       /one of `settings` or `settings_raw` is required/,

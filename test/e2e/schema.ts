@@ -99,8 +99,14 @@ export const InputsSchema = z
  */
 export const ExpectSchema = z
   .object({
-    /** The process exit code (0 clean/applied, 1 failed). */
-    exit_code: z.number().int(),
+    /**
+     * The process exit code (0 clean/applied, 1 failed). A non-empty array
+     * lists every ALLOWED code: the fuzz oracle predicts a set of legal exits
+     * (per-section outcome classes can land on either side of the worst-of
+     * fold), and the runner asserts membership. Curated scenarios keep the
+     * plain number.
+     */
+    exit_code: z.union([z.number().int(), z.array(z.number().int()).min(1)]),
     /** The `result` output ("clean", "drift", "applied", "failed", ...). */
     result: z.string().optional(),
     /** Per-section outcome parsed from the step-summary table. */
