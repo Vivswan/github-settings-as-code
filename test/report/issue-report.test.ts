@@ -197,8 +197,8 @@ describe("deliverIssueReport", () => {
 describe("injectMarkerLabel", () => {
   test("appends the marker to a declared labels section without mutating the input", () => {
     const settings: SettingsFile = { labels: [{ name: "bug", color: "d73a4a" }] };
-    const { settings: injected, injected: didInject } = injectMarkerLabel(settings);
-    expect(didInject).toBe(true);
+    const { settings: injected, outcome } = injectMarkerLabel(settings);
+    expect(outcome).toBe("injected");
     expect(injected.labels).toEqual([{ name: "bug", color: "d73a4a" }, MARKER_LABEL_CONFIG]);
     expect(settings.labels).toHaveLength(1);
   });
@@ -210,7 +210,7 @@ describe("injectMarkerLabel", () => {
       labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
     };
     const result = injectMarkerLabel(settings);
-    expect(result.injected).toBe(true);
+    expect(result.outcome).toBe("injected");
     expect(result.settings.labels).toEqual({
       undeclared: "keep",
       entries: [{ name: "bug", color: "d73a4a" }, MARKER_LABEL_CONFIG],
@@ -230,8 +230,7 @@ describe("injectMarkerLabel", () => {
       },
     };
     const result = injectMarkerLabel(settings);
-    expect(result.injected).toBe(false);
-    expect(result.renameRefused).toBe(true);
+    expect(result.outcome).toBe("rename-refused");
     expect(result.settings.labels).toEqual({
       undeclared: "keep",
       entries: [{ name: MARKER_LABEL, new_name: undefined, color: "0e2a47" }],
@@ -247,7 +246,7 @@ describe("injectMarkerLabel", () => {
     // wrote, for no gain on either path.
     const settings: SettingsFile = { labels: { entries: [{ name: "bug" }] } };
     const result = injectMarkerLabel(settings);
-    expect(result.injected).toBe(true);
+    expect(result.outcome).toBe("injected");
     expect(Object.keys(result.settings.labels as object)).toEqual(["entries"]);
     expect(result.settings.labels).toEqual({ entries: [{ name: "bug" }, MARKER_LABEL_CONFIG] });
   });
@@ -257,20 +256,20 @@ describe("injectMarkerLabel", () => {
       labels: { entries: [{ name: MARKER_LABEL, new_name: "something-else" }] },
     };
     const result = injectMarkerLabel(settings);
-    expect(result.renameRefused).toBe(true);
+    expect(result.outcome).toBe("rename-refused");
     expect(Object.keys(result.settings.labels as object)).toEqual(["entries"]);
   });
 
   test("an already-declared marker (any case) is left alone", () => {
     const settings: SettingsFile = { labels: [{ name: "Settings-As-Code-Report" }] };
     const result = injectMarkerLabel(settings);
-    expect(result.injected).toBe(false);
+    expect(result.outcome).toBe("unchanged");
     expect(result.settings).toBe(settings);
   });
 
   test("a rename resolving to the marker counts as declared", () => {
     const settings: SettingsFile = { labels: [{ name: "old-report", new_name: MARKER_LABEL }] };
-    expect(injectMarkerLabel(settings).injected).toBe(false);
+    expect(injectMarkerLabel(settings).outcome).toBe("unchanged");
   });
 
   test("a rename moving the marker AWAY is refused (new_name stripped), not injected", () => {
@@ -280,8 +279,7 @@ describe("injectMarkerLabel", () => {
       labels: [{ name: MARKER_LABEL, new_name: "something-else", color: "0e2a47" }],
     };
     const result = injectMarkerLabel(settings);
-    expect(result.injected).toBe(false);
-    expect(result.renameRefused).toBe(true);
+    expect(result.outcome).toBe("rename-refused");
     // the entry survives but its new_name is gone, so the marker keeps its name
     expect(result.settings.labels).toEqual([
       { name: MARKER_LABEL, new_name: undefined, color: "0e2a47" },
@@ -296,14 +294,13 @@ describe("injectMarkerLabel", () => {
       labels: [{ name: MARKER_LABEL, new_name: "Settings-As-Code-Report" }],
     };
     const result = injectMarkerLabel(settings);
-    expect(result.renameRefused).toBe(false);
-    expect(result.injected).toBe(false);
+    expect(result.outcome).toBe("unchanged");
   });
 
   test("no labels section means nothing to inject", () => {
     const settings: SettingsFile = { repository: { has_wiki: false } };
     const result = injectMarkerLabel(settings);
-    expect(result.injected).toBe(false);
+    expect(result.outcome).toBe("unchanged");
     expect(result.settings).toBe(settings);
   });
 });
