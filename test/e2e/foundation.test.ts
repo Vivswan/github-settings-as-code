@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { DENIAL_SEMANTICS } from "./denial-semantics.js";
 import { mulberry32, Rng } from "./prng.js";
-import { parseScenario } from "./schema.js";
+import { markerLabelFixtureMismatches, parseScenario } from "./schema.js";
 
 describe("prng", () => {
   test("mulberry32 is deterministic for a seed", () => {
@@ -184,6 +185,68 @@ describe("scenario schema", () => {
       "d.yml",
     );
     expect(s.denial_style).toBe(403);
+  });
+});
+
+describe("marker-label fixture pin (markerLabelFixtureMismatches)", () => {
+  const driftedMarker = {
+    name: MARKER_LABEL,
+    color: "ffffff",
+    description: MARKER_LABEL_CONFIG.description,
+  };
+  const canonicalMarker = { ...MARKER_LABEL_CONFIG };
+
+  test("a drifted marker in DECLARED settings fails scenario load, naming the field", () => {
+    expect(() =>
+      parseScenario(
+        { name: "m", settings: { labels: [driftedMarker] }, expect: { exit_code: 0 } },
+        "m.yml",
+      ),
+    ).toThrow(/settings\.labels\[0\]\.color/);
+  });
+
+  test("a drifted marker in a multi-repo target's settings is flagged with its slug path", () => {
+    const scenarioFor = (marker: Record<string, unknown>) =>
+      parseScenario(
+        {
+          name: "m",
+          settings: {},
+          repos: { "e2e-owner/svc-a": { settings: { labels: [marker] } } },
+          expect: { exit_code: 0 },
+        },
+        "m.yml",
+      );
+    expect(markerLabelFixtureMismatches(scenarioFor(canonicalMarker))).toEqual([]);
+    expect(() => scenarioFor(driftedMarker)).toThrow(
+      /repos\.e2e-owner\/svc-a\.settings\.labels\[0\]\.color/,
+    );
+  });
+
+  test("a drifted marker in live_state LOADS - seeding stale marker state is legitimate", () => {
+    // The pin covers declared fixtures only: a future scenario testing that
+    // the report path repairs a mangled live marker must stay expressible.
+    const s = parseScenario(
+      {
+        name: "m",
+        settings: {},
+        live_state: { labels: [driftedMarker] },
+        expect: { exit_code: 0 },
+      },
+      "m.yml",
+    );
+    expect(markerLabelFixtureMismatches(s)).toEqual([]);
+  });
+
+  test("non-marker labels and field-less marker references are never compared", () => {
+    const s = parseScenario(
+      {
+        name: "m",
+        settings: { labels: [{ name: "bug", color: "ffffff" }, { name: MARKER_LABEL }] },
+        expect: { exit_code: 0 },
+      },
+      "m.yml",
+    );
+    expect(markerLabelFixtureMismatches(s)).toEqual([]);
   });
 });
 

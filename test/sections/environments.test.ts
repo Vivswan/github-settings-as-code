@@ -6,6 +6,7 @@ import {
   mockSodiumReady,
   unsealSecretValue,
 } from "../e2e/mock/secrets.js";
+import { FIXTURE_ENV_NAME, FLAG_PAIRING_FIXTURES } from "../fixtures/environment-flag-pairing.js";
 import { MockApi } from "../mock-api.js";
 import { ctx } from "./context.js";
 
@@ -665,41 +666,26 @@ describe("environments deployment branch policies validation and shape", () => {
     // In the shape, not the run() hook, on purpose: upfront document
     // validation rejects the document in both modes before ANY section
     // writes (the apply-mode preflight swallows non-permission hook errors,
-    // so a hook check would fire only after earlier sections wrote).
+    // so a hook check would fire only after earlier sections wrote). The
+    // fixtures are the SHARED set the published-schema test also runs, so
+    // the zod refinement and the schema's if/then face the same cases.
     const shape = environmentsSection.shape;
-    const failing: unknown[] = [
-      // No sibling flag object at all.
-      { name: "prod", deployment_branch_policies: [{ name: "release/*" }] },
-      // The flag present but false.
-      {
-        name: "prod",
-        deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
-        deployment_branch_policies: [{ name: "release/*" }],
-      },
-      // The sibling nulled (a clear) while patterns are declared.
-      {
-        name: "prod",
-        deployment_branch_policy: null,
-        deployment_branch_policies: [{ name: "release/*" }],
-      },
-      // The wrapped form takes the same rule.
-      { name: "prod", deployment_branch_policies: { entries: [{ name: "release/*" }] } },
-    ];
-    for (const entry of failing) {
+    for (const { name, entry, valid } of FLAG_PAIRING_FIXTURES) {
       const parsed = shape.safeParse([entry]);
-      expect(parsed.success).toBe(false);
+      expect(parsed.success, name).toBe(valid);
+      if (valid) {
+        continue;
+      }
       const messages = (parsed.error?.issues ?? []).map((issue) => issue.message).join("\n");
-      expect(messages).toContain('the "prod" entry declares deployment_branch_policies');
+      expect(messages).toContain(
+        `the "${FIXTURE_ENV_NAME}" entry declares deployment_branch_policies`,
+      );
       expect(messages).toContain("custom_branch_policies: true");
       // The issue points at the offending key, so the document-validation
       // error names environments[N].deployment_branch_policies.
       const paths = (parsed.error?.issues ?? []).map((issue) => issue.path.join("."));
       expect(paths).toContain("0.deployment_branch_policies");
     }
-    // The paired form passes, and an entry without the plural key never
-    // triggers the rule.
-    expect(shape.safeParse([envWithPolicies([{ name: "release/*" }])]).success).toBe(true);
-    expect(shape.safeParse([{ name: "prod", deployment_branch_policy: null }]).success).toBe(true);
   });
 
   test("duplicate patterns are rejected upfront, naming the environment", async () => {

@@ -115,4 +115,19 @@ describe("checks.yml openapi-trimmed cache keys", () => {
       ).toBe(true);
     }
   });
+
+  test("every hashFiles pattern matches at least one file on disk", () => {
+    // hashFiles() silently skips a pattern that matches nothing (a moved or
+    // renamed input), so the key would stop changing with that input while
+    // the coverage test above still sees the stale pattern string.
+    for (const pattern of hashFilesPatterns(keys[0] ?? "")) {
+      // dot: true because the trim script lives under .github/, which the
+      // glob scanner skips by default (hashFiles itself does not).
+      const matches = [...new Bun.Glob(pattern).scanSync({ cwd: ROOT, dot: true })];
+      expect(
+        matches.length,
+        `hashFiles pattern '${pattern}' matches no file on disk, so it contributes nothing to the cache key`,
+      ).toBeGreaterThan(0);
+    }
+  });
 });

@@ -11,7 +11,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
+import { validateSectionShapes } from "../src/engine/validate.js";
 import { UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
+import { FLAG_PAIRING_FIXTURES } from "./fixtures/environment-flag-pairing.js";
 
 const ROOT = join(import.meta.dir, "..");
 const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8")) as {
@@ -178,45 +180,39 @@ describe("published schema wrapper strictness", () => {
       ).toBe(false);
     });
 
-    test("the branch-policies flag pairing is enforced, matching the runtime shape", () => {
-      // The if/then finalize-schema stamps onto EnvironmentConfig: declaring
-      // deployment_branch_policies without the sibling flag object, with the
-      // flag false, or with the sibling nulled all fail - the same documents
-      // validateSettingsDoc rejects upfront.
+    test("branch protection required_signatures is a real boolean: true and absent accepted, a quoted string rejected", () => {
+      // BranchProtectionConfig is a passthrough record EXCEPT its one routed
+      // key: required_signatures is typed boolean so a YAML-quoted "yes"
+      // fails upfront instead of silently riding the protection PUT (which
+      // drops the key) and never reaching the signatures sub-endpoint.
       expect(
-        validate({
-          environments: [{ name: "prod", deployment_branch_policies: [{ name: "release/*" }] }],
-        }),
-      ).toBe(false);
-      expect(
-        validate({
-          environments: [
-            {
-              name: "prod",
-              deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
-              deployment_branch_policies: [{ name: "release/*" }],
-            },
-          ],
-        }),
-      ).toBe(false);
-      expect(
-        validate({
-          environments: [
-            {
-              name: "prod",
-              deployment_branch_policy: null,
-              deployment_branch_policies: [{ name: "release/*" }],
-            },
-          ],
-        }),
-      ).toBe(false);
-      // An entry without the plural key keeps its freedom: the flag object
-      // stays optional and nullable there.
-      expect(
-        validate({
-          environments: [{ name: "prod", deployment_branch_policy: null }],
-        }),
+        validate({ branches: [{ name: "main", protection: { required_signatures: true } }] }),
       ).toBe(true);
+      expect(validate({ branches: [{ name: "main", protection: { enforce_admins: true } }] })).toBe(
+        true,
+      );
+      expect(
+        validate({ branches: [{ name: "main", protection: { required_signatures: "yes" } }] }),
+      ).toBe(false);
+    });
+
+    test("the branch-policies flag pairing is enforced, agreeing with the runtime per fixture", () => {
+      // The if/then finalize-schema stamps onto EnvironmentConfig, run
+      // against the ONE shared fixture set the zod superRefine is also
+      // tested with - and, per fixture, the AJV verdict must agree with
+      // validateSectionShapes (null = valid), so the schema copy of the
+      // invariant cannot drift from the runtime copy. The class counts pin
+      // the SET: a deleted fixture would silently weaken both consumers.
+      expect(FLAG_PAIRING_FIXTURES.filter((f) => !f.valid)).toHaveLength(4);
+      expect(FLAG_PAIRING_FIXTURES.filter((f) => f.valid)).toHaveLength(3);
+      for (const { name, entry, valid } of FLAG_PAIRING_FIXTURES) {
+        const doc = { environments: [entry] };
+        expect(validate(doc), `published schema: ${name}`).toBe(valid);
+        expect(
+          validateSectionShapes(doc, "fixture") === null,
+          `runtime validateSectionShapes disagrees with the published schema: ${name}`,
+        ).toBe(valid);
+      }
     });
 
     test("an extra field on a variable entry validates - entries stay open", () => {

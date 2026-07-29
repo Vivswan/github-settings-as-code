@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { parseRecipient } from "../../src/report/artifact-report.js";
+import type { SectionKey } from "../../src/schema.js";
 import {
   ALWAYS_REWRITE_ENDPOINT_FAMILIES,
   alwaysRewriteEndpointKeys,
+  COMPARE_BEFORE_WRITE,
 } from "./apply-idempotence.js";
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
 import type { LoggedRequest } from "./mock/routes.js";
@@ -15,9 +17,12 @@ import {
   missingSecondApplyRewrites,
   parseGithubOutput,
   parseSummaryOutcomes,
+  recordUnconditionalWrites,
   secondApplyWriteFailures,
   stripDebugLines,
   stripMaskLines,
+  type UnconditionalWriteWitness,
+  unwitnessedUnconditionalSections,
 } from "./runner.js";
 
 describe("ARTIFACT_TEST_RECIPIENT", () => {
@@ -393,6 +398,64 @@ describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)",
     expect(failures.join("\n")).toContain("codespaces/secrets/DOTFILES_PAT");
     expect(failures.join("\n")).toContain("environments/prod/secrets/DEPLOY_KEY");
     expect(failures.join("\n")).not.toContain("environments/prod but");
+  });
+});
+
+describe("unwitnessedUnconditionalSections (apply-idempotence corpus witness)", () => {
+  const write = (method: string, pathname: string): LoggedRequest => ({
+    method,
+    pathname,
+    query: "",
+    status: 200,
+  });
+  /** A witness map with every false-listed section fully covered. */
+  const coveredWitness = (): UnconditionalWriteWitness => {
+    const witness: UnconditionalWriteWitness = new Map();
+    for (const [section, compares] of Object.entries(COMPARE_BEFORE_WRITE)) {
+      if (!compares) {
+        witness.set(section as SectionKey, { first: 1, second: 1 });
+      }
+    }
+    return witness;
+  };
+
+  test("a fully covered corpus produces no failures", () => {
+    expect(unwitnessedUnconditionalSections(coveredWitness())).toEqual([]);
+  });
+
+  test("an empty corpus flags EVERY false-listed section as unwitnessed", () => {
+    const failures = unwitnessedUnconditionalSections(new Map());
+    const falseListed = Object.values(COMPARE_BEFORE_WRITE).filter((v) => !v).length;
+    expect(failures).toHaveLength(falseListed);
+    for (const failure of failures) {
+      expect(failure).toContain("NO apply_idempotent scenario");
+    }
+  });
+
+  test("first-apply writes without any second-apply write name the opposite remedy", () => {
+    const witness = coveredWitness();
+    witness.set("teams", { first: 2, second: 0 });
+    const failures = unwitnessedUnconditionalSections(witness);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain('"teams"');
+    expect(failures[0]).toContain("never re-issued by any second apply");
+  });
+
+  test("recordUnconditionalWrites counts only false-listed sections, per side", () => {
+    const witness: UnconditionalWriteWitness = new Map();
+    recordUnconditionalWrites(
+      witness,
+      [
+        // labels compares before writing, so it never enters the witness;
+        // report traffic matches no section endpoint and is skipped too.
+        write("POST", "/repos/e2e-owner/e2e-repo/labels"),
+        write("POST", "/repos/e2e-owner/svc-private/issues"),
+        write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000"),
+      ],
+      [write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000")],
+    );
+    expect([...witness.keys()]).toEqual(["rulesets"]);
+    expect(witness.get("rulesets")).toEqual({ first: 1, second: 1 });
   });
 });
 
