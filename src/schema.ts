@@ -1,13 +1,10 @@
 /**
- * Types for the settings file. The sections in PROBOT_PARITY_KEYS keep the
- * Probot Settings app schema (https://github.com/repository-settings/app) in
- * their plain-array form, so an existing Probot config applies to them
- * unchanged; the remaining sections
- * (rulesets, autolinks, actions, actions_secrets, dependabot_secrets,
- * codespaces_secrets, workflows, pages, code_scanning_default_setup,
- * interaction_limits, actions_variables, webhooks)
- * are additions. Only DECLARED keys are ever applied or compared, so omitting a
- * key means "leave it alone".
+ * Types for the settings file. The sections in PROBOT_PARITY_KEYS (declared
+ * below) keep the Probot Settings app schema
+ * (https://github.com/repository-settings/app) in their plain-array form, so
+ * an existing Probot config applies to them unchanged; every section not in
+ * PROBOT_PARITY_KEYS is an addition. Only DECLARED keys are ever applied or
+ * compared, so omitting a key means "leave it alone".
  */
 
 /** One settings.yml document: every top-level section is optional. */

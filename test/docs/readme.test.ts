@@ -248,6 +248,72 @@ describe("schema.ts SettingsFile JSDoc deletion claims", () => {
   });
 });
 
+describe("schema.ts file-header additions claim", () => {
+  const schemaSrc = readFileSync(join(ROOT, "src", "schema.ts"), "utf8");
+  // The header block, with URLs removed so a section-key word inside a link
+  // (e.g. "repository" in the repository-settings/app URL) cannot match.
+  const header = schemaSrc.slice(0, schemaSrc.indexOf("*/")).replace(/https?:\/\/\S+/g, "");
+
+  test("the header defers to PROBOT_PARITY_KEYS", () => {
+    // The header must define the additions by exclusion over
+    // PROBOT_PARITY_KEYS; the pointer to the constant IS the derivation.
+    expect(
+      header.includes("PROBOT_PARITY_KEYS"),
+      "the schema.ts file header must define the additions via PROBOT_PARITY_KEYS",
+    ).toBe(true);
+  });
+
+  test("the header names no addition section", () => {
+    // An enumeration of the non-parity sections is the copy that drifts, so
+    // no section key outside PROBOT_PARITY_KEYS may appear in the header.
+    const parity = new Set<string>(PROBOT_PARITY_KEYS);
+    for (const key of SECTION_KEYS) {
+      if (parity.has(key)) {
+        continue;
+      }
+      expect(
+        new RegExp(`\\b${key}\\b`).test(header),
+        `the schema.ts file header names the addition section "${key}"; defer to PROBOT_PARITY_KEYS instead of enumerating`,
+      ).toBe(false);
+    }
+  });
+});
+
+describe("contract.ts README-heading references", () => {
+  const contractSrc = readFileSync(join(ROOT, "src", "sections", "contract.ts"), "utf8");
+  // Headings count only outside fenced code blocks: the README carries a
+  // "# yaml-language-server:" line inside a yaml fence that is not a heading.
+  const readmeProse = readme.replace(/```[\s\S]*?```/g, "");
+
+  test('every README "..." name quoted in the JSDoc is a real README heading', () => {
+    // Every quoted name following a README mention must exist as a markdown
+    // heading, so a heading rename (or a JSDoc typo) fails here. All quoted
+    // names on the mention's line count, not just the first.
+    const named: string[] = [];
+    for (const line of contractSrc.split("\n")) {
+      const mention = line.search(/README'?s?\b/);
+      if (mention === -1) {
+        continue;
+      }
+      named.push(...[...line.slice(mention).matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? ""));
+    }
+    // Zero extracted names while contract.ts still mentions the README means
+    // the extraction went blind (e.g. a rewrap split a mention from its
+    // quotes); fail loudly rather than pass on an empty list.
+    expect(
+      named.length,
+      "contract.ts mentions the README but no quoted heading name was extracted; fix the JSDoc line wrap or this extraction",
+    ).toBeGreaterThan(0);
+    for (const name of named) {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect(
+        new RegExp(`^#{1,6} ${escaped}\\s*$`, "m").test(readmeProse),
+        `contract.ts JSDoc names the README's "${name}", but README.md has no such heading`,
+      ).toBe(true);
+    }
+  });
+});
+
 // The written-out counts the prose uses; extend deliberately when a derived
 // list outgrows it (the lookup failing IS the tripwire).
 const COUNT_WORDS = [
