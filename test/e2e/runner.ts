@@ -140,6 +140,24 @@ async function assertBundleFresh(): Promise<void> {
 }
 
 /**
+ * The expect.exit_code assertion: a plain number pins one code, an array pins
+ * the allowed set (the fuzz oracle predicts a set of legal exits). Returns the
+ * failure text, or undefined when the exit code is accepted. A one-element
+ * expectation keeps the single-code message the curated corpus grew up with;
+ * a multi-element set renders sorted, so the text is stable regardless of the
+ * set's insertion order.
+ */
+export function exitCodeFailure(actual: number, expected: number | number[]): string | undefined {
+  const allowed = Array.isArray(expected) ? expected : [expected];
+  if (allowed.includes(actual)) {
+    return undefined;
+  }
+  return allowed.length === 1
+    ? `exit code ${actual} != expected ${allowed[0]}`
+    : `exit code ${actual} not in [${[...allowed].sort((a, b) => a - b).join(", ")}]`;
+}
+
+/**
  * Parse a GITHUB_OUTPUT file, honoring @actions/core's two forms: the simple
  * `name=value` line and the heredoc block `name<<ghadelimiter_UUID\n...\ndelim`
  * that core uses for values that may contain newlines.
@@ -849,9 +867,11 @@ export async function runScenario(
     if (handle.violations.length > 0) {
       failures.push(`mock violations:\n  ${handle.violations.join("\n  ")}`);
     }
-    // 2. Exit code.
-    if (first.exitCode !== exp.exit_code) {
-      failures.push(`exit code ${first.exitCode} != expected ${exp.exit_code}`);
+    // 2. Exit code: a plain number pins one code, an array pins the allowed
+    // set (the fuzz oracle predicts a set of legal exits).
+    const exitFailure = exitCodeFailure(first.exitCode, exp.exit_code);
+    if (exitFailure !== undefined) {
+      failures.push(exitFailure);
     }
     // 2b. Zero-request invariant: a failure that must fire before any API
     // contact (e.g. a settings_raw parse failure, read from the local
