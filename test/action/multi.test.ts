@@ -941,4 +941,15 @@ describe("applyMarkerInjection", () => {
     expect(result.notice).toBeUndefined();
     expect(result.settings.labels).toHaveLength(1);
   });
+
+  test("on with a rename moving the marker away: the rename-refused notice, not the injected one", () => {
+    const settings = { labels: [{ name: MARKER, new_name: "something-else", color: "0e2a47" }] };
+    const result = applyMarkerInjection(settings, true);
+    expect(result.notice).toBe(
+      `refused to rename the "${MARKER}" marker label: private reporting reuses its issue by that exact name, so the rename was dropped`,
+    );
+    expect(result.settings.labels).toEqual([
+      { name: MARKER, new_name: undefined, color: "0e2a47" },
+    ]);
+  });
 });

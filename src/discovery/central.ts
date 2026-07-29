@@ -5,7 +5,7 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { SLUG_RE, type Target } from "./targets.js";
+import { type CentralTarget, SLUG_RE } from "./targets.js";
 
 const YAML_EXT = /\.ya?ml$/;
 
@@ -16,13 +16,13 @@ const YAML_EXT = /\.ya?ml$/;
 export function resolveCentralTargets(
   reposDir: string,
   adminOwner: string,
-): { targets: Target[]; warnings: string[] } | { error: string } {
+): { targets: CentralTarget[]; warnings: string[] } | { error: string } {
   if (!existsSync(reposDir)) {
     return {
       error: `repos-dir "${reposDir}" does not exist in the workspace, so there are no central settings files to read. Add an actions/checkout step before this action, or fix the repos-dir path`,
     };
   }
-  const targets: Target[] = [];
+  const targets: CentralTarget[] = [];
   const warnings: string[] = [];
   const seen = new Map<string, string>(); // lowercased slug -> origin
   const addTarget = (slug: string, filePath: string): string | null => {

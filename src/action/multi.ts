@@ -17,7 +17,12 @@ import { readFileSync } from "node:fs";
 import { resolveCentralTargets } from "../discovery/central.js";
 import { type DiscoveryFilters, discoverRepos, formatSkipNotice } from "../discovery/discover.js";
 import { parseReposInput } from "../discovery/repos-input.js";
-import { dedupeTargets, type Target } from "../discovery/targets.js";
+import {
+  type CentralTarget,
+  dedupeTargets,
+  type RemoteTarget,
+  type Target,
+} from "../discovery/targets.js";
 import { applyDefaults } from "../engine/merge.js";
 import { type RepoRunResult, runForRepo, validateSettingsDoc } from "../engine/orchestrate.js";
 import { targetSecretSource } from "../engine/secrets.js";
@@ -350,9 +355,9 @@ async function readTargetSettings(
   target: Target,
 ): Promise<{ raw: string; sourceLabel: string } | { missing: true } | { error: string }> {
   if (target.source === "central") {
-    const sourceLabel = target.filePath ?? target.origin;
+    const sourceLabel = target.filePath;
     try {
-      return { raw: readFileSync(target.filePath ?? "", "utf8"), sourceLabel };
+      return { raw: readFileSync(target.filePath, "utf8"), sourceLabel };
     } catch (error) {
       return {
         error: `cannot read settings from ${sourceLabel}: ${String(error)}. Fix the file, or delete it to stop managing this repository`,
@@ -426,7 +431,7 @@ export async function runMulti(
     }
   }
 
-  let central: Target[] = [];
+  let central: CentralTarget[] = [];
   if (cfg.reposDir) {
     const resolved = resolveCentralTargets(cfg.reposDir, cfg.adminOwner);
     if ("error" in resolved) {
@@ -436,7 +441,7 @@ export async function runMulti(
     central = resolved.targets;
   }
 
-  let remote: Target[] = [];
+  let remote: RemoteTarget[] = [];
   let filteredOutCount = 0;
   const skipGroups: Array<{
     reason: string;
@@ -770,19 +775,20 @@ export function applyMarkerInjection(
     return { settings };
   }
   const injection = injectMarkerLabel(settings);
-  if (injection.renameRefused) {
-    return {
-      settings: injection.settings,
-      notice: `refused to rename the "${MARKER_LABEL}" marker label: private reporting reuses its issue by that exact name, so the rename was dropped`,
-    };
+  switch (injection.outcome) {
+    case "rename-refused":
+      return {
+        settings: injection.settings,
+        notice: `refused to rename the "${MARKER_LABEL}" marker label: private reporting reuses its issue by that exact name, so the rename was dropped`,
+      };
+    case "unchanged":
+      return { settings: injection.settings };
+    case "injected":
+      return {
+        settings: injection.settings,
+        notice: `added the "${MARKER_LABEL}" marker label to the managed labels so private reporting can reuse its issue; it is managed like any declared label`,
+      };
   }
-  if (!injection.injected) {
-    return { settings: injection.settings };
-  }
-  return {
-    settings: injection.settings,
-    notice: `added the "${MARKER_LABEL}" marker label to the managed labels so private reporting can reuse its issue; it is managed like any declared label`,
-  };
 }
 
 /**
