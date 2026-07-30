@@ -5,16 +5,6 @@ on:
     # 5:28 am EST, randomly chosen.
     - cron: "28 10 * * *"
   workflow_dispatch:
-    inputs:
-      seed:
-        description: Fuzz master seed (blank for a random one)
-        required: false
-        type: string
-      iterations:
-        description: Fuzz iterations
-        required: false
-        type: string
-        default: "300"
 
 permissions:
   contents: read
@@ -52,18 +42,6 @@ jobs:
       - name: Curated corpus
         run: bun test/e2e/run.ts
 
-      - name: Fuzz
-        id: fuzz
-        env:
-          SEED: ${{ inputs.seed }}
-          ITERATIONS: ${{ inputs.iterations || '300' }}
-        run: |
-          if [ -z "$SEED" ]; then
-            SEED="$RANDOM$RANDOM"
-          fi
-          echo "seed=$SEED" >> "$GITHUB_OUTPUT"
-          bun test/e2e/fuzz.ts --iterations "$ITERATIONS" --seed "$SEED"
-
       # Tripwire: every "section.role" route in allEndpoints() must be hit at
       # least once by the curated corpus. The checker runs the corpus and reads
       # each run's request log, then fails naming any route no scenario reached.
@@ -83,7 +61,6 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
-          FUZZ_SEED: ${{ steps.fuzz.outputs.seed }}
         run: bun .github/scripts/file-fuzz-issue.ts
 
       # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.

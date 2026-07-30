@@ -1,26 +1,28 @@
-# Nightly fuzzing starter. Generated once by Vivswan/repo-platform
-# and never overwritten by template sync, so edit freely. Replace the
-# placeholder fuzz step with your fuzzer; as long as it writes failure
-# reports under the artifacts directory per the contract in repo-platform's
-# docs/fuzzer.md, the issue filing, replay inputs, and auto-close steps
-# below keep working unchanged.
+# Nightly fuzzing for the e2e property fuzzer (test/e2e/fuzz.ts): each
+# iteration generates a random scenario, predicts its outcome class with the
+# oracle, and runs the committed bundle against the mock. Failing iterations
+# dump artifact directories with contract-shaped report.md files (title +
+# replay block), which the fuzz-issue steps below turn into one deduplicated
+# tracking issue. Repo-owned: generated once by Vivswan/repo-platform and
+# never overwritten by template sync.
 name: Nightly Fuzz
 
 on:
   schedule:
-    # Off-peak and off the top of the hour; pick your repo's own minute so
-    # the fleet's nightlies do not all land on GitHub at once.
-    - cron: "13 3 * * *"
+    # Off-peak, off the top of the hour, and distinct from the fleet's other
+    # nightlies (chromium-bridge 47 4, litellm-vscode-chat 59 7, this repo's
+    # e2e-nightly 28 10).
+    - cron: "41 5 * * *"
   workflow_dispatch:
     inputs:
       seed:
-        description: Fuzz seed (blank for a random one)
+        description: Fuzz master seed (blank for a random one)
         required: false
         default: ""
       iterations:
         description: Fuzz iterations
         required: false
-        default: "1000"
+        default: "300"
 
 concurrency:
   group: nightly-fuzz
@@ -42,49 +44,40 @@ jobs:
     # (wall-clock flag, `timeout` wrapper) below this value so a hang
     # surfaces as a failure.
     timeout-minutes: 60
-    # Sharding multiplies nightly coverage at the same wall-clock cost: give
-    # each shard its own seed and slice of the work. BUT with a matrix the
-    # issue-filing and resolve steps below must move to a separate
-    # `needs: fuzz` job with `if: always()` that first downloads every
-    # shard's failure artifact - as steps of a matrixed job they race, and
-    # shard 1's green resolve step can close the issue shard 2 just filed.
-    # See docs/fuzzer.md before enabling:
-    # strategy:
-    #   fail-fast: false
-    #   matrix:
-    #     shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
-      # Set up your fuzzer's toolchain here (rust nightly + cargo-fuzz,
-      # docker, extra runtimes, a persistent corpus cache, ...).
+      # The trimmed OpenAPI spec is a fetched, gitignored artifact the mock
+      # validates responses against. Always fetched fresh (no cache), same as
+      # e2e-nightly: the fetch doubles as an upstream-drift tripwire.
+      - name: Fetch the trimmed OpenAPI spec
+        run: bun .github/scripts/trim-openapi.ts
 
       - name: Fuzz
         env:
           SEED: ${{ inputs.seed }}
-          ITERATIONS: ${{ inputs.iterations || '1000' }}
+          ITERATIONS: ${{ inputs.iterations || '300' }}
         run: |
           if [ -z "$SEED" ]; then
             SEED="$RANDOM$RANDOM"
           fi
           echo "fuzzing with seed $SEED, $ITERATIONS iterations"
-          # Replace this placeholder with your fuzzer. Contract (docs/fuzzer.md):
-          # run seeded with $SEED for $ITERATIONS iterations, and on failure
-          # write one .fuzz-failures/<name>/report.md per crash whose first
-          # line is a `# title` heading and whose body carries the exact
-          # replay command in a fenced block (include the seed there too, so
-          # the issue records it). Until then this step is a green no-op on
-          # purpose: an uncustomized starter must not file issues.
-          echo "::warning::nightly-fuzz starter not customized yet - replace the placeholder fuzz step (see repo-platform's docs/fuzzer.md)"
+          timeout 50m bun test/e2e/fuzz.ts --seed "$SEED" --iterations "$ITERATIONS"
 
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-failures-${{ github.run_attempt }}
-          # Point this at your failure-report directory (and anything else
-          # worth keeping: crashing inputs, logs).
-          path: .fuzz-failures/
+          path: test/e2e/.artifacts/
           if-no-files-found: ignore
 
       - name: File or update the fuzz issue
@@ -94,7 +87,7 @@ jobs:
         with:
           mode: report
           label: "fuzz-nightly"
-          artifacts-dir: .fuzz-failures
+          artifacts-dir: test/e2e/.artifacts
           artifact-name: fuzz-failures-${{ github.run_attempt }}
 
       # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.

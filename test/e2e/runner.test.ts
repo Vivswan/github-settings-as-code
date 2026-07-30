@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseRecipient } from "../../src/report/artifact-report.js";
 import type { SectionKey } from "../../src/schema.js";
 import {
@@ -13,7 +16,9 @@ import {
   checkLeaks,
   exitCodeFailure,
   forbiddenPresent,
+  insertReplay,
   isSubsequence,
+  markReportTitle,
   missingSecondApplyRewrites,
   parseGithubOutput,
   parseSummaryOutcomes,
@@ -480,5 +485,48 @@ describe("changedFamilies (apply-idempotence state stability)", () => {
   test("a family present on only one side counts as changed", () => {
     expect(changedFamilies(new Map(), new Map([["a/b.issues", "[]"]]))).toEqual(["a/b.issues"]);
     expect(changedFamilies(new Map([["a/b.issues", "[]"]]), new Map())).toEqual(["a/b.issues"]);
+  });
+});
+
+describe("insertReplay (fuzz-issue report contract)", () => {
+  test("puts the fenced replay block right after the title, inside the report head", () => {
+    const dir = mkdtempSync(join(tmpdir(), "insert-replay-"));
+    try {
+      writeFileSync(
+        join(dir, "report.md"),
+        "# fuzz-42\n\n## Failures\n\n- exit code 1 != expected 0\n\nExit code: 1\n",
+      );
+      insertReplay(dir, "bun test/e2e/fuzz.ts --seed 42 --iterations 1");
+      const lines = readFileSync(join(dir, "report.md"), "utf8").split("\n");
+      expect(lines[0]).toBe("# fuzz-42");
+      expect(lines.slice(1, 7)).toEqual([
+        "",
+        "## Replay",
+        "",
+        "```sh",
+        "bun test/e2e/fuzz.ts --seed 42 --iterations 1",
+        "```",
+      ]);
+      // The original body survives below the inserted section.
+      expect(lines).toContain("## Failures");
+      expect(lines).toContain("Exit code: 1");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("markReportTitle (counterfactual disambiguation)", () => {
+  test("appends the marker to the title line only", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mark-title-"));
+    try {
+      writeFileSync(join(dir, "report.md"), "# fuzz-multi-42\n\n## Failures\n\n- leak\n");
+      markReportTitle(dir, "redaction counterfactual");
+      const lines = readFileSync(join(dir, "report.md"), "utf8").split("\n");
+      expect(lines[0]).toBe("# fuzz-multi-42 (redaction counterfactual)");
+      expect(lines.slice(1)).toEqual(["", "## Failures", "", "- leak", ""]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
