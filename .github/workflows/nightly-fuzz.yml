@@ -1,0 +1,113 @@
+# Nightly fuzzing starter. Generated once by Vivswan/repo-platform
+# and never overwritten by template sync, so edit freely. Replace the
+# placeholder fuzz step with your fuzzer; as long as it writes failure
+# reports under the artifacts directory per the contract in repo-platform's
+# docs/fuzzer.md, the issue filing, replay inputs, and auto-close steps
+# below keep working unchanged.
+name: Nightly Fuzz
+
+on:
+  schedule:
+    # Off-peak and off the top of the hour; pick your repo's own minute so
+    # the fleet's nightlies do not all land on GitHub at once.
+    - cron: "13 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Fuzz seed (blank for a random one)
+        required: false
+        default: ""
+      iterations:
+        description: Fuzz iterations
+        required: false
+        default: "1000"
+
+concurrency:
+  group: nightly-fuzz
+  cancel-in-progress: false
+
+# issues: write lets the fuzz-issue action file/close the tracking issue;
+# actions: write lets the failure path dispatch auto-assign at it.
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    # If the job hits this timeout it is CANCELLED, not failed, and the
+    # `if: failure()` reporting steps below never run - a silent night for
+    # exactly the hang a fuzzer exists to find. Bound the fuzz run itself
+    # (wall-clock flag, `timeout` wrapper) below this value so a hang
+    # surfaces as a failure.
+    timeout-minutes: 60
+    # Sharding multiplies nightly coverage at the same wall-clock cost: give
+    # each shard its own seed and slice of the work. BUT with a matrix the
+    # issue-filing and resolve steps below must move to a separate
+    # `needs: fuzz` job with `if: always()` that first downloads every
+    # shard's failure artifact - as steps of a matrixed job they race, and
+    # shard 1's green resolve step can close the issue shard 2 just filed.
+    # See docs/fuzzer.md before enabling:
+    # strategy:
+    #   fail-fast: false
+    #   matrix:
+    #     shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+
+      # Set up your fuzzer's toolchain here (rust nightly + cargo-fuzz,
+      # docker, extra runtimes, a persistent corpus cache, ...).
+
+      - name: Fuzz
+        env:
+          SEED: ${{ inputs.seed }}
+          ITERATIONS: ${{ inputs.iterations || '1000' }}
+        run: |
+          if [ -z "$SEED" ]; then
+            SEED="$RANDOM$RANDOM"
+          fi
+          echo "fuzzing with seed $SEED, $ITERATIONS iterations"
+          # Replace this placeholder with your fuzzer. Contract (docs/fuzzer.md):
+          # run seeded with $SEED for $ITERATIONS iterations, and on failure
+          # write one .fuzz-failures/<name>/report.md per crash whose first
+          # line is a `# title` heading and whose body carries the exact
+          # replay command in a fenced block (include the seed there too, so
+          # the issue records it). Until then this step is a green no-op on
+          # purpose: an uncustomized starter must not file issues.
+          echo "::warning::nightly-fuzz starter not customized yet - replace the placeholder fuzz step (see repo-platform's docs/fuzzer.md)"
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-failures-${{ github.run_attempt }}
+          # Point this at your failure-report directory (and anything else
+          # worth keeping: crashing inputs, logs).
+          path: .fuzz-failures/
+          if-no-files-found: ignore
+
+      - name: File or update the fuzz issue
+        id: file-issue
+        if: failure()
+        uses: Vivswan/repo-platform/actions/fuzz-issue@main
+        with:
+          mode: report
+          label: "fuzz-nightly"
+          artifacts-dir: .fuzz-failures
+          artifact-name: fuzz-failures-${{ github.run_attempt }}
+
+      # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
+      - name: Trigger auto-assign for the filed issue
+        if: failure() && steps.file-issue.outputs.issue-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.file-issue.outputs.issue-number }}
+        run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
+
+      - name: Close the fuzz issue on a green night
+        if: success()
+        uses: Vivswan/repo-platform/actions/fuzz-issue@main
+        with:
+          mode: resolve
+          label: "fuzz-nightly"

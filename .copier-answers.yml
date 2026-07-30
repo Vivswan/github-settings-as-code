@@ -1,10 +1,11 @@
 # This file is managed by Vivswan/repo-platform.
 # Copier uses it to track the template source and version - do not delete.
-_commit: 1e44504
+_commit: d97a355
 _src_path: gh:Vivswan/repo-platform
 channel: staging
 description: 'GitHub Action applying declarative repository settings: rulesets, labels,
     branch protection, and more. A loud, stateless Probot Settings replacement.'
+fuzzer_label: fuzz-nightly
 github_username: Vivswan
 modules:
 - agents
@@ -13,6 +14,7 @@ modules:
 - issue-templates
 - pr-title
 - auto-assign
+- fuzzer
 private: false
 project_name: Settings as Code
 project_slug: repo-settings-as-code
