@@ -1212,6 +1212,31 @@ export async function runScenario(
 }
 
 /**
+ * Insert a `## Replay` section right after the title line of an artifact
+ * directory's report.md. The fuzz-issue action's failure-report contract
+ * wants the exact replay command in a fenced block, and it only keeps the
+ * head of the report, so the block goes at the top rather than appended
+ * after the failure list.
+ */
+export function insertReplay(artifactDir: string, replay: string): void {
+  const path = join(artifactDir, "report.md");
+  const [title, ...rest] = readFileSync(path, "utf8").split("\n");
+  writeFileSync(path, [title, "", "## Replay", "", "```sh", replay, "```", ...rest].join("\n"));
+}
+
+/**
+ * Append a marker to a report.md's title line. The fuzz-issue action heads
+ * each issue section with that line, and the redaction counterfactual re-runs
+ * the SAME scenario name - unmarked, its failure section would be
+ * indistinguishable from the primary run's.
+ */
+export function markReportTitle(artifactDir: string, marker: string): void {
+  const path = join(artifactDir, "report.md");
+  const [title, ...rest] = readFileSync(path, "utf8").split("\n");
+  writeFileSync(path, [`${title} (${marker})`, ...rest].join("\n"));
+}
+
+/**
  * Write a failing scenario's inputs and observed I/O for debugging, and
  * return the directory so the CLI can point the reader at it. Keyed by
  * scenario name and pid so parallel or repeated runs never collide.
