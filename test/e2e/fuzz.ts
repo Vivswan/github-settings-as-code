@@ -63,6 +63,8 @@ import {
   checkLeaks,
   deliveredIssueBody,
   E2E_TOKEN,
+  insertReplay,
+  markReportTitle,
   parseReposResult,
   parseSummaryOutcomes,
   type RerunCapture,
@@ -112,6 +114,21 @@ function parseFlags(argv: string[]): Flags {
 }
 
 /**
+ * Log every artifact directory a failing iteration dumped (primary run plus
+ * the redaction counterfactual's) and insert the replay block into each
+ * report.md, per the fuzz-issue action's failure-report contract.
+ */
+function reportArtifacts(result: IterationResult, replay: string): void {
+  for (const dir of [result.artifactDir, ...(result.extraArtifactDirs ?? [])]) {
+    if (dir === undefined) {
+      continue;
+    }
+    console.log(`    artifact: ${dir}`);
+    insertReplay(dir, replay);
+  }
+}
+
+/**
  * The master seed and whether it was explicitly pinned: flag, else FUZZ_SEED
  * env, else a crypto-random 32-bit value. `explicit` covers BOTH pinning
  * styles, so replay detection treats `FUZZ_SEED=X --iterations 1` exactly
@@ -132,6 +149,8 @@ function masterSeed(flags: Flags): { seed: number; explicit: boolean } {
 /** The facts every iteration reports alongside its pass/fail verdict. */
 interface IterationBase {
   artifactDir?: string;
+  /** Artifact dirs beyond the primary run's (the redaction counterfactual). */
+  extraArtifactDirs?: string[];
   sections: SectionKey[];
   /** Mutation classes this run provably reached (witnessed sections only). */
   coverage?: CoverageEvent[];
@@ -808,6 +827,9 @@ async function runMultiPredicted(
 
   const report = await runScenario(scenario);
   const problems: string[] = [];
+  // Secondary artifact dirs this iteration dumps beyond the primary run's
+  // (the redaction counterfactual re-run) - they need replay blocks too.
+  const extraArtifactDirs: string[] = [];
   let faultClass: string | undefined;
   if (opts.faultKey !== undefined) {
     const fired = assertFaultFired(report.faultsFired, opts.faultKey, problems);
@@ -962,6 +984,10 @@ async function runMultiPredicted(
         const where = shown.artifactDir === undefined ? "" : ` (artifact: ${shown.artifactDir})`;
         problems.push(`counterfactual run${where}: ${shown.failures.join("; ")}`);
       }
+      if (shown.artifactDir !== undefined) {
+        markReportTitle(shown.artifactDir, "redaction counterfactual");
+        extraArtifactDirs.push(shown.artifactDir);
+      }
       const rendered = [
         stripDebugLines(stripMaskLines(shown.stdout)),
         stripDebugLines(stripMaskLines(shown.stderr)),
@@ -1086,6 +1112,7 @@ async function runMultiPredicted(
 
   return iterationResult(problems, {
     artifactDir: report.artifactDir,
+    extraArtifactDirs,
     sections: [],
     faultClass,
     proof: idempotent ? "apply_idempotent" : undefined,
@@ -1892,11 +1919,10 @@ async function main(): Promise<number> {
       // full section pool and produce a different scenario. Echo it per failure.
       const sectionsFlag =
         mode === "standard" && flags.sections ? ` --sections ${flags.sections.join(",")}` : "";
+      const replay = `bun test/e2e/fuzz.ts --seed ${seed} --iterations 1${sectionsFlag}`;
       console.log(`  iter ${i} [${mode}] seed ${seed} FAIL: ${result.failure}`);
-      console.log(`    replay: bun test/e2e/fuzz.ts --seed ${seed} --iterations 1${sectionsFlag}`);
-      if (result.artifactDir) {
-        console.log(`    artifact: ${result.artifactDir}`);
-      }
+      console.log(`    replay: ${replay}`);
+      reportArtifacts(result, replay);
       if (failures >= FAILURE_CAP) {
         console.log(`\nfailure cap (${FAILURE_CAP}) reached; stopping`);
         break;
@@ -1934,9 +1960,7 @@ async function main(): Promise<number> {
       // this command reproduces exactly the failing battery (which derives
       // from the master seed alone) without re-running the random stream.
       console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      if (result.artifactDir) {
-        console.log(`    artifact: ${result.artifactDir}`);
-      }
+      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
     }
 
     // Directed input battery: every catalog case plus every raw pool entry,
@@ -1985,9 +2009,7 @@ async function main(): Promise<number> {
       batteryFailures++;
       console.log(`  ${name} [${mode}] seed ${seed} FAIL: ${result.failure}`);
       console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      if (result.artifactDir) {
-        console.log(`    artifact: ${result.artifactDir}`);
-      }
+      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
     }
 
     // Directed fault battery: every fault kind x budget, with the SECTION
@@ -2028,9 +2050,7 @@ async function main(): Promise<number> {
       batteryFailures++;
       console.log(`  ${label} [${mode}] seed ${seed} FAIL: ${result.failure}`);
       console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      if (result.artifactDir) {
-        console.log(`    artifact: ${result.artifactDir}`);
-      }
+      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
     }
 
     // Negative fault battery: each UNFAULTABLE_SECTIONS exemption must still
@@ -2050,9 +2070,7 @@ async function main(): Promise<number> {
       batteryFailures++;
       console.log(`  ${section} seed ${seed} FAIL: ${result.failure}`);
       console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      if (result.artifactDir) {
-        console.log(`    artifact: ${result.artifactDir}`);
-      }
+      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
     }
 
     // Directed core-fault battery: the contentsGet victim rule and the
@@ -2078,9 +2096,7 @@ async function main(): Promise<number> {
       batteryFailures++;
       console.log(`  ${name} seed ${seed} FAIL: ${result.failure}`);
       console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      if (result.artifactDir) {
-        console.log(`    artifact: ${result.artifactDir}`);
-      }
+      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
     }
 
     // Directed fixpoint battery: one multi apply-idempotence proof and one
@@ -2103,9 +2119,7 @@ async function main(): Promise<number> {
       batteryFailures++;
       console.log(`  ${name} seed ${seed} FAIL: ${result.failure}`);
       console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      if (result.artifactDir) {
-        console.log(`    artifact: ${result.artifactDir}`);
-      }
+      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
     }
   }
 
