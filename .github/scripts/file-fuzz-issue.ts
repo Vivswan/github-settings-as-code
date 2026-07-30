@@ -8,9 +8,8 @@
  * issue instead of opening a duplicate.
  *
  * Usage: `bun .github/scripts/file-fuzz-issue.ts`. Context from the
- * environment: GH_TOKEN (gh auth), GITHUB_SERVER_URL / GITHUB_REPOSITORY /
- * GITHUB_RUN_ID (the run link), and FUZZ_SEED (the nightly master seed, used
- * when a failure directory carries no seed of its own).
+ * environment: GH_TOKEN (gh auth) and GITHUB_SERVER_URL / GITHUB_REPOSITORY /
+ * GITHUB_RUN_ID (the run link).
  */
 
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
