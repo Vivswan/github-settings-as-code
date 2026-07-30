@@ -50,6 +50,17 @@ labels:
   - name: fix-lint
     color: "fbca04"
     description: Lint / formatting fixes
+  # nightly-fuzz.yml files the fuzz tracking issue under this label (the
+  # fuzz-issue action keys its one-open-issue dedup on it), so it must
+  # survive the label sync.
+  - name: fuzz-nightly
+    color: "B60205"
+    description: Automated nightly fuzz failure
+  # e2e-nightly.yml's file-fuzz-issue.ts files under this label, so it must
+  # survive the label sync too.
+  - name: e2e-fuzz
+    color: "B60205"
+    description: Automated e2e nightly failure
   # release-please manages these two; listing them here keeps the settings
   # sync from deleting them (it removes any label not declared in this file).
   - name: "autorelease: pending"
