@@ -1,0 +1,45 @@
+# Repo-owned gitleaks config, read by the CI gitleaks job (and local
+# `gitleaks git` runs). Seeded once by repo-platform's template and never
+# overwritten by sync, so allowlists added here survive updates.
+# [extend] pulls in gitleaks' default ruleset - without it, this file
+# would REPLACE the defaults and disable every stock rule.
+# minVersion is honored only by binaries new enough to know it (an older
+# one skips the check silently), so the CI job pins GITLEAKS_VERSION to a
+# release above the floor.
+minVersion = "8.30.1"
+
+[extend]
+useDefault = true
+
+# Generated lockfiles: integrity hashes occasionally trip the generic
+# entropy rules, and secrets do not belong in generated files.
+[[allowlists]]
+description = "generated lockfiles"
+paths = ['''(^|/)(bun\.lock|bun\.lockb|uv\.lock|Cargo\.lock)$''']
+
+# Add further false-positive allowlists here; for a one-off finding,
+# prefer an inline "gitleaks:allow" comment on the flagged line -
+# finding-level, so it never excuses future secrets in the same file.
+
+# The committed bundle: third-party strings (libsodium constant-name
+# tables, the public Azurite emulator AccountKey) trip the entropy-based
+# generic rule at line numbers that shift on every rebuild. Only that rule
+# is exempted; specific credential rules still scan the bundle, and the
+# src/ sources it is built from stay fully scanned.
+[[allowlists]]
+description = "committed bundle trips the generic entropy rule"
+paths = ['''^lib/index\.js$''']
+targetRules = ["generic-api-key"]
+
+# Pinned fake keys in test fixtures. The flagged lines carry inline
+# gitleaks:allow comments at HEAD, but the scheduled scan walks full
+# history, where the old copies of those lines have no comment; these
+# exact-value regexes cover the historical blobs.
+[[allowlists]]
+description = "test fixtures carry fake keys"
+condition = "AND"
+paths = ['''^test/(e2e/mock/secrets\.ts|report/artifact-report\.test\.ts)$''']
+regexes = [
+  '''RoPFQaBuTO6VMxNqrLqb3QyW2FOWCmRBwDpyziVyXHs=''',
+  '''age1shortandinvalid''',
+]
