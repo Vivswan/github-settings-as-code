@@ -14,7 +14,8 @@ needs. Grant only the permissions for the sections your settings file
 declares, plus the two cross-cutting grants that belong to no section:
 Contents at read when the action must fetch a settings file it does not
 have checked out (remote multi-repo targets), and Issues at read and
-write only when the `private-report` issue channel is enabled
+write only when a `private-report` issue channel (`issue` or
+`issue-on-failure`) is enabled
 (see [private repositories](../operate/private-repositories.md)). The
 Contents grant earns its keep twice: as the Sections table notes, it
 also lets `branches` tell a missing branch from an unprotected one in
@@ -43,8 +44,9 @@ when a run fails on permissions:
   is enough for a drift-report-only workflow - with two exceptions.
   GitHub gates even the Codespaces secrets reads at write, so
   `codespaces_secrets` needs its write grant in check mode too. And the
-  `private-report` issue channel writes its report issue even in check
-  mode, which takes the Issues grant.
+  `private-report` issue channels can write even in check mode (`issue`
+  writes its report issue on every run; `issue-on-failure` opens it on
+  drift and closes it on recovery), which takes the Issues grant.
 - Fine-grained tokens surface a missing Administration permission as a
   404, not a 403, on admin endpoints. The action treats both as
   permission errors and its messages name the exact permission to grant.

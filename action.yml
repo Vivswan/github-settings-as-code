@@ -139,14 +139,21 @@ inputs:
     default: redact
   private-report:
     description: >-
-      none (default), issue, or artifact. Delivers the full unredacted report
-      only for redacted targets the visibility probe proves private or internal
-      (an unknown visibility is redacted but excluded from delivery). Under
-      issue, each such target's report is delivered as a reused, marker-labelled
-      issue on that target repository itself (the one GitHub-private channel a
-      public run has): the body is replaced every run, and the issue is opened
-      when the target fails or drifts and closed when it is healthy. Under
-      artifact, those reports are concatenated, age-encrypted to
+      none (default), issue, issue-on-failure, or artifact. Delivers the full
+      unredacted report only for redacted targets the visibility probe proves
+      private or internal (an unknown visibility is redacted but excluded from
+      delivery). Under issue, each such target's report is delivered as a
+      reused, marker-labelled issue on that target repository itself (the one
+      GitHub-private channel a public run has): the body is replaced every run,
+      and the issue is opened when the target fails or drifts and closed when
+      it is healthy. issue-on-failure is the quiet variant: a failing or
+      drifting target gets the same issue, but a healthy run only closes a
+      still-open issue from a previous failure and otherwise writes nothing -
+      no issue ever appears on a repository that never needed attention
+      (though a declared labels section still creates the marker label, and a
+      manually-removed marker label defers the close: the next failing run
+      reattaches it, and the first healthy run after that closes the issue).
+      Under artifact, those reports are concatenated, age-encrypted to
       report-public-key, and uploaded as one workflow artifact
       (settings-as-code-private-report) for readers who hold the key but no
       GitHub access to the targets; the artifact channel needs the Actions

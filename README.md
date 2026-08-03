@@ -197,7 +197,7 @@ and what `null` means where it is meaningful.
 | `repos-dir` | (empty) | Multi-repo central mode: directory of per-repo settings files in this repo |
 | `defaults-file` | (empty) | YAML merged under every multi-repo target's settings (multi-repo mode only) |
 | `private-repos` | `redact` | `redact` hides private and internal targets from public logs, summary, and outputs; `show` reveals them |
-| `private-report` | `none` | `issue` delivers each redacted target's full report to a reused issue on that target repository; `artifact` uploads all reports as one age-encrypted workflow artifact; rejected with `private-repos: show` |
+| `private-report` | `none` | `issue` delivers each redacted target's full report to a reused issue on that target repository; `issue-on-failure` writes that issue only when the target fails or drifts, closing it once healthy; `artifact` uploads all reports as one age-encrypted workflow artifact; rejected with `private-repos: show` |
 | `report-public-key` | (empty) | The `age1...` recipient the `artifact` channel encrypts reports to; required with `private-report: artifact`, rejected otherwise |
 | `visibility` | `all` | Discovery-only: keep `public`, `private`, or `internal` repositories |
 | `archived` | `skip` | Discovery-only: `skip`, `include`, or `only` archived repositories |

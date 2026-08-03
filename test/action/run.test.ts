@@ -341,6 +341,17 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(api.calls).toHaveLength(0);
   });
 
+  test("issue-on-failure combined with private-repos: show is a hard config error too", async () => {
+    setDiscoveryEnv();
+    process.env.INPUT_REPOSITORY = "o/r";
+    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
+    process.env["INPUT_PRIVATE-REPOS"] = "show";
+    process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
+    const api = new MockApi({});
+    expect(await run({ api: api })).toBe(1);
+    expect(api.calls).toHaveLength(0);
+  });
+
   test("single-repo cross-repo redacted target delivers a report to its own issue", async () => {
     setDiscoveryEnv();
     delete process.env.INPUT_REPOS;
@@ -396,6 +407,63 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
   });
 
+  test("single-repo drifting redacted target under issue-on-failure delivers and opens", async () => {
+    setDiscoveryEnv();
+    delete process.env.INPUT_REPOS;
+    process.env.INPUT_REPOSITORY = "o/priv";
+    process.env.GITHUB_REPOSITORY = "admin/repo";
+    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
+    process.env["INPUT_PRIVATE-REPOS"] = "redact";
+    process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
+    process.env.INPUT_MODE = "check";
+    delete process.env.GITHUB_STEP_SUMMARY;
+    const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
+    // has_wiki drifts (single.yml wants false): check-mode drift needs
+    // attention, so on-failure takes the same upsert path as issue.
+    const api = new MockApi({
+      "GET /repos/o/priv": { data: { has_wiki: true, private: true } },
+      "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
+      "GET /repos/o/priv/issues?state=all&labels=settings-as-code-report&per_page=100": {
+        data: [{ number: 3, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/3" }],
+      },
+      "PATCH /repos/o/priv/issues/3": { data: { number: 3 } },
+    });
+    expect(await run({ api: api })).toBe(1); // check-mode drift exits 1
+    const patch = api.calls.find(
+      (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/3",
+    );
+    const payload = (patch?.payload ?? {}) as { body?: unknown; state?: unknown };
+    expect(String(payload.body ?? "")).toContain("o/priv");
+    expect(payload.state).toBe("open");
+  });
+
+  test("single-repo clean redacted target under issue-on-failure writes nothing", async () => {
+    setDiscoveryEnv();
+    delete process.env.INPUT_REPOS;
+    process.env.INPUT_REPOSITORY = "o/priv";
+    process.env.GITHUB_REPOSITORY = "admin/repo";
+    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
+    process.env["INPUT_PRIVATE-REPOS"] = "redact";
+    process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
+    process.env.INPUT_MODE = "check";
+    delete process.env.GITHUB_STEP_SUMMARY;
+    // has_wiki matches single.yml: healthy, and no open issue to close.
+    const api = new MockApi({
+      "GET /repos/o/priv": { data: { has_wiki: false, private: true } },
+      "GET /repos/o/priv/issues?state=open&labels=settings-as-code-report&per_page=100": {
+        data: [],
+      },
+    });
+    expect(await run({ api: api })).toBe(0);
+    // the quiet path: one open-issue lookup, zero writes, no label traffic
+    expect(api.mutations()).toEqual([]);
+    const issueCalls = api.calls.filter((c) => c.path.includes("/issues"));
+    expect(issueCalls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "GET /repos/o/priv/issues?state=open&labels=settings-as-code-report&per_page=100",
+    ]);
+    expect(api.calls.some((c) => c.path.includes("/labels"))).toBe(false);
+  });
+
   test("private-report: artifact without report-public-key is a hard config error", async () => {
     setDiscoveryEnv();
     process.env.INPUT_REPOSITORY = "o/r";
@@ -428,6 +496,19 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
     process.env["INPUT_PRIVATE-REPOS"] = "redact";
     process.env["INPUT_PRIVATE-REPORT"] = "issue";
+    process.env["INPUT_REPORT-PUBLIC-KEY"] = recipient;
+    const api = new MockApi({});
+    expect(await run({ api: api })).toBe(1);
+    expect(api.calls).toHaveLength(0);
+  });
+
+  test("report-public-key with issue-on-failure is a hard config error too", async () => {
+    const recipient = await identityToRecipient(await generateX25519Identity());
+    setDiscoveryEnv();
+    process.env.INPUT_REPOSITORY = "o/r";
+    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
+    process.env["INPUT_PRIVATE-REPOS"] = "redact";
+    process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
     process.env["INPUT_REPORT-PUBLIC-KEY"] = recipient;
     const api = new MockApi({});
     expect(await run({ api: api })).toBe(1);

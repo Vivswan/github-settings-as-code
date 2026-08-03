@@ -81,7 +81,7 @@ export const InputsSchema = z
     required_sections: z.string().optional(),
     sections: z.string().optional(),
     private_repos: z.enum(["redact", "show"]).optional(),
-    private_report: z.enum(["none", "issue", "artifact"]).optional(),
+    private_report: z.enum(["none", "issue", "issue-on-failure", "artifact"]).optional(),
     /**
      * The age recipient the `artifact` channel encrypts the report to,
      * forwarded as INPUT_REPORT-PUBLIC-KEY. A config-rejection scenario sets a
@@ -168,6 +168,10 @@ export const ExpectSchema = z
      *     this is asserted unconditionally, not gated by a field.
      *   - `lookup_by_label`: assert the issues list GET used the labels=<marker>
      *     filter (the one-indexed-request lookup the reuse path depends on).
+     *   - `labels`: the exact label-name array carried by the LAST issue write
+     *     (create or PATCH) that set a labels field - the marker-reattach
+     *     witness: a fallback-scan hit must reattach the stripped marker
+     *     WITHOUT clobbering human-added labels.
      *   - `state`: the final open/closed state after all create/patch writes.
      *   - `created_count`: how many report issues were POSTed for the slug (1 =
      *     created once; 0 = none, e.g. the permission-denied or reuse path).
@@ -181,6 +185,7 @@ export const ExpectSchema = z
         state: z.enum(["open", "closed"]).optional(),
         created_count: z.number().int().optional(),
         lookup_by_label: z.boolean().optional(),
+        labels: z.array(z.string()).optional(),
       })
       .strict()
       .optional(),

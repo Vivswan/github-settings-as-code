@@ -38,11 +38,18 @@ import type { Io } from "../io.js";
 import { prefixedIo } from "../io.js";
 import { type ArtifactUploader, deliverArtifactReport } from "../report/artifact-report.js";
 import { composeReport, type TranscriptLine } from "../report/composer.js";
-import { deliverIssueReport, injectMarkerLabel, MARKER_LABEL } from "../report/issue-report.js";
+import {
+  deliverIssueReport,
+  type IssueReportMode,
+  injectMarkerLabel,
+  MARKER_LABEL,
+} from "../report/issue-report.js";
 import type { SettingsFile } from "../schema.js";
 import { DEFAULT_SETTINGS_FILE, quoteList } from "./inputs.js";
 import {
   capturingIo,
+  type IssueChannel,
+  isIssueChannel,
   type PrivateReportChannel,
   type PrivateReposPolicy,
   planRedaction,
@@ -596,8 +603,8 @@ export async function runMulti(
         cfg,
         redacted,
         // The marker label is an issue-channel mechanism (its report reuses the
-        // labelled issue); inject it only when the issue channel will deliver.
-        injectMarker: deliverable && cfg.privateReport === "issue",
+        // labelled issue); inject it only when an issue channel will deliver.
+        injectMarker: deliverable && isIssueChannel(cfg.privateReport),
         io,
         targetIo,
       });
@@ -624,7 +631,7 @@ export async function runMulti(
           cfg.mode === "check",
         );
         artifactReports.push({ display, body });
-      } else {
+      } else if (isIssueChannel(cfg.privateReport)) {
         const reportNote = await deliverReport(
           api,
           meta,
@@ -634,6 +641,7 @@ export async function runMulti(
           outcome.outcomes,
           transcript,
           cfg.mode === "check",
+          cfg.privateReport,
           io,
         );
         if (reportNote) {
@@ -814,10 +822,12 @@ export function composeTargetReport(
 
 /**
  * Compose the full unredacted report for a redacted target and deliver it to
- * the issue channel. Runs on EVERY result (the report is the private mirror of
- * the run log). Returns a safe summary-row note on delivery failure - and emits
- * one public-safe warning naming only the placeholder and the HTTP status - or
- * undefined on success; the target's result is never changed either way.
+ * the issue channel. Under `always` this runs on EVERY result (the report is
+ * the private mirror of the run log); under `on-failure` a healthy run at
+ * most closes a leftover open issue and its no-op skip is silent. Returns a
+ * safe summary-row note on delivery failure - and emits one public-safe
+ * warning naming only the placeholder and the HTTP status - or undefined on
+ * success; the target's result is never changed either way.
  */
 export async function deliverReport(
   api: GithubClient,
@@ -828,6 +838,7 @@ export async function deliverReport(
   outcomes: RepoRunResult["outcomes"],
   transcript: TranscriptLine[],
   check: boolean,
+  channel: IssueChannel,
   io: Io,
 ): Promise<string | undefined> {
   const { body, needsAttention } = composeTargetReport(
@@ -838,7 +849,18 @@ export async function deliverReport(
     transcript,
     check,
   );
-  const delivery = await deliverIssueReport(api, slug, body, needsAttention);
+  // The one channel-to-mode conversion, exhaustive over IssueChannel: a future
+  // issue channel fails to compile here instead of inheriting a default.
+  let mode: IssueReportMode;
+  switch (channel) {
+    case "issue":
+      mode = "always";
+      break;
+    case "issue-on-failure":
+      mode = "on-failure";
+      break;
+  }
+  const delivery = await deliverIssueReport(api, slug, body, needsAttention, mode);
   if ("warning" in delivery) {
     io.annotate("warning", `${display}: ${delivery.warning}`);
     return delivery.warning;

@@ -1950,6 +1950,9 @@ export interface MultiScenarioMeta {
    * it as a workflow artifact (which fails with a safe warning in the harness,
    * where the runner token is absent); `none` sends nothing. Only ever `issue`
    * or `artifact` under redact (the config rejects a delivering channel + show).
+   * `issue-on-failure` is deliberately absent: it stays out of the fuzz
+   * rotation until the oracle can predict per-target needsAttention (follow-up);
+   * the curated multi-report-issue-on-failure-* scenarios cover it meanwhile.
    */
   privateReport: "none" | "issue" | "artifact";
   /** GITHUB_REPOSITORY: a target whose slug equals it is never redacted. */
@@ -2050,7 +2053,10 @@ export function genMultiScenario(
   // runner token is absent). Both are only valid under redact (the config rejects
   // a delivering channel + show, since show redacts nothing), so they are picked
   // only then. Randomized so the fuzzer covers delivery, reuse, denial, and the
-  // artifact upload-attempt path.
+  // artifact upload-attempt path. `issue-on-failure` is deliberately NOT in the
+  // rotation: the oracle cannot yet predict per-target needsAttention, so its
+  // conditional writes would be unpredictable (follow-up); the curated
+  // scenarios cover the channel until then.
   const rolledReport =
     privateRepos === "redact" ? rng.pick(["none", "issue", "artifact"] as const) : "none";
   const privateReport =
