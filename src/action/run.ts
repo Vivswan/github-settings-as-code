@@ -35,7 +35,7 @@ import {
   runMulti,
   toPublicView,
 } from "./multi.js";
-import { capturingIo, REDACTED_NOTE } from "./redact.js";
+import { capturingIo, isIssueChannel, REDACTED_NOTE } from "./redact.js";
 import { readSettingsFile } from "./settings-read.js";
 import { writeMultiSummary, writeRedactedSummary, writeSummary } from "./summary.js";
 
@@ -145,7 +145,7 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
   const reportOn = deliverable && cfg.privateReport !== "none";
   const capture = redacted ? capturingIo(io) : null;
   const runIo = capture ? capture.io : io;
-  const injected = applyMarkerInjection(settings, reportOn && cfg.privateReport === "issue");
+  const injected = applyMarkerInjection(settings, reportOn && isIssueChannel(cfg.privateReport));
   if (injected.notice) {
     runIo.annotate("notice", injected.notice);
   }
@@ -189,7 +189,7 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
       if ("warning" in delivery) {
         annotate("warning", delivery.warning);
       }
-    } else {
+    } else if (isIssueChannel(cfg.privateReport)) {
       await deliverReport(
         api,
         meta,
@@ -199,6 +199,7 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
         result.outcomes,
         capture.drain(),
         cfg.mode === "check",
+        cfg.privateReport,
         io,
       );
     }

@@ -81,9 +81,9 @@ applies only to redacted targets, and only to those the visibility probe
 proves private or internal: an unknown visibility is redacted from the
 public view but excluded from delivery, so the report never reaches a
 repository that might be public. It is rejected alongside
-`private-repos: show`. The report mirrors the run's log, so it is written
-on every run, `mode: check` included, and a delivery failure only warns;
-it never changes the target's or the run's result.
+`private-repos: show`. The report mirrors the run's log, delivery stays
+live in `mode: check`, and a delivery failure only warns; it never
+changes the target's or the run's result.
 
 `private-report: issue` posts each target's report to a reused issue on
 that target repository, where the repository's own access control protects
@@ -93,6 +93,26 @@ when the target is healthy. This needs the PAT to hold
 `"Issues"` (read and write) on every target repository, on top of the
 section permissions.
 Prefer this channel unless your readers lack GitHub access to the targets.
+
+`private-report: issue-on-failure` is the quiet variant of `issue`. When
+a target fails (or drifts in check mode) it behaves identically: the
+reused, marker-labelled report issue is written and opened. On a healthy
+run it only looks up an open report issue; one left over from an earlier
+failure is updated with the healthy report and closed, and when there is
+none, nothing is written - no issue, no label, zero notification noise.
+A repository that never fails never sees an issue, at the cost that
+healthy runs' reports are not delivered anywhere; choose `issue` or
+`artifact` when you need the report mirror on every run.
+
+Two caveats on the quiet variant. If the settings declare a `labels`
+section, the `settings-as-code-report` marker label is still injected
+into it, so the apply creates the label even on healthy repositories (a
+label, not a notification). And if someone removes the marker label
+while a report issue is open, the healthy path cannot find the issue, so
+it stays open until the next failing run recreates the label and
+reclaims it. Everything else matches `issue`: the same delivery gate,
+the same Issues grant (the healthy lookup is a read; the open and close
+are writes), and delivery still runs in `mode: check`.
 
 `private-report: artifact` concatenates the report for every proven-private
 target into one document, encrypts it to an age recipient, and uploads it

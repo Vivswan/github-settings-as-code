@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import type { OUTPUT_NAMES } from "../../src/action/io.js";
+import { isIssueChannel } from "../../src/action/redact.js";
 import { MARKER_LABEL } from "../../src/report/issue-report.js";
 import type { SectionKey } from "../../src/schema.js";
 import { ALWAYS_REWRITE_STATE_FAMILIES, COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
@@ -532,6 +533,28 @@ export function assertIssueReport(
       );
     }
   }
+  // The exact label-name array the last labels-setting write carried: the
+  // marker-reattach witness. A fallback-scan hit must reattach the stripped
+  // marker without clobbering human-added labels, so order and content are
+  // both pinned.
+  if (spec.labels) {
+    const labelWrites = [...creates, ...patches]
+      .map((r) => (r.body as { labels?: unknown } | undefined)?.labels)
+      .filter((l): l is unknown[] => Array.isArray(l));
+    const written = labelWrites.at(-1)?.map(String);
+    if (written === undefined) {
+      failures.push(
+        `issue_report: no issue write for ${spec.slug} carried a labels array, expected [${spec.labels.join(", ")}]`,
+      );
+    } else if (
+      written.length !== spec.labels.length ||
+      spec.labels.some((name, i) => written[i] !== name)
+    ) {
+      failures.push(
+        `issue_report: issue labels written for ${spec.slug} were [${written.join(", ")}], expected [${spec.labels.join(", ")}]`,
+      );
+    }
+  }
   for (const needle of spec.body_contains ?? []) {
     if (deliveredBody === undefined) {
       failures.push(
@@ -830,9 +853,10 @@ export function missingSecondApplyRewrites(
  * A final check-mode run then converges (exit 0, zero writes) - the same proof
  * `converges` makes, so scenarios set one or the other, not both.
  *
- * The issue report channel is rejected, not neutralized: its delivery embeds a
- * fresh ISO timestamp (the report issue legitimately moves every run), and it
- * injects the marker label into the labels section's declared set - so
+ * The issue report channels are rejected, not neutralized: their delivery embeds
+ * a fresh ISO timestamp (the report issue legitimately moves every run), and
+ * both `issue` and `issue-on-failure` inject the marker label into the labels
+ * section's declared set - so
  * flipping the channel off for the re-run would change what the labels section
  * deletes, which is a different scenario, not a second run of this one.
  */
@@ -844,10 +868,11 @@ async function assertApplyIdempotent(
   if (scenario.inputs?.mode === "check") {
     return { failures: ["apply_idempotent requires an apply-mode scenario"], reruns: [] };
   }
-  if (scenario.inputs?.private_report === "issue") {
+  const channel = scenario.inputs?.private_report;
+  if (channel !== undefined && isIssueChannel(channel)) {
     return {
       failures: [
-        "apply_idempotent cannot run under private_report: issue - the report issue embeds a fresh timestamp (state moves every run) and the injected marker label ties the labels declaration to the channel; use private_report: none or artifact",
+        `apply_idempotent cannot run under private_report: ${channel} - the report issue embeds a fresh timestamp (state moves every run) and the injected marker label ties the labels declaration to the channel; use private_report: none or artifact`,
       ],
       reruns: [],
     };
