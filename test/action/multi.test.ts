@@ -737,6 +737,151 @@ describe("runMulti private-report: issue wiring", () => {
   });
 });
 
+describe("runMulti private-report: issue-on-failure wiring", () => {
+  const MARKER = "settings-as-code-report";
+  const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
+  const allListPath = (slug: string) =>
+    `GET /repos/${slug}/issues?state=all&labels=${MARKER}&per_page=100`;
+  const openListPath = (slug: string) =>
+    `GET /repos/${slug}/issues?state=open&labels=${MARKER}&per_page=100`;
+  const issue7 = { number: 7, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/7" };
+
+  test("a needs-attention target delivers exactly like the issue channel (opened)", async () => {
+    // check-mode drift needs attention, so on-failure takes the full upsert path
+    const api = new MockApi({
+      "GET /repos/o/priv": { data: { description: "CANARY-live", private: true } },
+      "GET /repos/o/priv/contents/.github/settings.yml": {
+        data: 'repository:\n  description: "CANARY-want"\n',
+      },
+      "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
+      [allListPath("o/priv")]: { data: [issue7] },
+      "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
+    });
+    const { io, annotations, logs } = captureIo();
+    const { targets } = await runMulti(
+      api,
+      cfg({
+        reposInput: "o/priv",
+        mode: "check",
+        privateRepos: "redact",
+        privateReport: "issue-on-failure",
+        selfSlug: "admin/repo",
+      }),
+      io,
+    );
+    expect(targets[0]?.result).toBe("drift");
+    const patch = api.calls.find(
+      (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
+    );
+    const payload = (patch?.payload ?? {}) as { body?: unknown; state?: unknown };
+    expect(String(payload.body ?? "")).toContain("CANARY-live");
+    expect(payload.state).toBe("open");
+    const publicText = [...annotations, ...logs].join("\n");
+    expect(publicText).not.toContain("CANARY-live");
+    expect(publicText).not.toContain("o/priv");
+  });
+
+  test("a clean target performs zero issue/label writes and adds no note", async () => {
+    const api = new MockApi({
+      "GET /repos/o/priv": { data: { description: "same", private: true } },
+      "GET /repos/o/priv/contents/.github/settings.yml": {
+        data: 'repository:\n  description: "same"\n',
+      },
+      [openListPath("o/priv")]: { data: [] },
+    });
+    const { io, annotations } = captureIo();
+    const { targets } = await runMulti(
+      api,
+      cfg({
+        reposInput: "o/priv",
+        mode: "check",
+        privateRepos: "redact",
+        privateReport: "issue-on-failure",
+        selfSlug: "admin/repo",
+      }),
+      io,
+    );
+    expect(targets[0]?.result).toBe("clean");
+    // the silent skip: no note on the summary row, no annotation about delivery
+    expect(targets[0]?.note).toBeUndefined();
+    expect(annotations.some((a) => a.includes("report"))).toBe(false);
+    // no mutation of any kind, and the only issue traffic is the open lookup
+    expect(api.mutations()).toEqual([]);
+    const issueCalls = api.calls.filter((c) => c.path.includes("/issues"));
+    expect(issueCalls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      `GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100`,
+    ]);
+  });
+
+  test("a leftover open issue on a clean target is closed with the healthy report", async () => {
+    const api = new MockApi({
+      "GET /repos/o/priv": { data: { description: "same", private: true } },
+      "GET /repos/o/priv/contents/.github/settings.yml": {
+        data: 'repository:\n  description: "same"\n',
+      },
+      [openListPath("o/priv")]: { data: [issue7] },
+      "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
+    });
+    const { io } = captureIo();
+    await runMulti(
+      api,
+      cfg({
+        reposInput: "o/priv",
+        mode: "check",
+        privateRepos: "redact",
+        privateReport: "issue-on-failure",
+        selfSlug: "admin/repo",
+      }),
+      io,
+    );
+    const patch = api.calls.find(
+      (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
+    );
+    const payload = (patch?.payload ?? {}) as { body?: unknown; state?: unknown };
+    expect(payload.state).toBe("closed");
+    // the closing PATCH carries the full unredacted healthy report
+    expect(String(payload.body ?? "")).toContain("o/priv");
+  });
+
+  test("marker injection still fires; its notice lands in the closing report only", async () => {
+    // a healthy apply that manages labels: injection must add the marker to the
+    // managed set, and the quiet path's closing PATCH must carry the notice
+    const api = new MockApi({
+      "GET /repos/o/priv": { data: { private: true } },
+      "GET /repos/o/priv/contents/.github/settings.yml": {
+        data: 'labels:\n  - name: bug\n    color: "d73a4a"\n',
+      },
+      "GET /repos/o/priv/labels?per_page=100&page=1": { data: [] },
+      [openListPath("o/priv")]: { data: [issue7] },
+      "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
+    }).allowMutations("POST /repos/o/priv/labels");
+    const { io, annotations } = captureIo();
+    await runMulti(
+      api,
+      cfg({
+        reposInput: "o/priv",
+        mode: "apply",
+        privateRepos: "redact",
+        privateReport: "issue-on-failure",
+        selfSlug: "admin/repo",
+      }),
+      io,
+    );
+    // the labels section created the injected marker like any declared label
+    const created = api
+      .mutations()
+      .filter((c) => c.method === "POST" && c.path === "/repos/o/priv/labels")
+      .map((c) => (c.payload as { name?: string }).name);
+    expect(created).toContain(MARKER);
+    const patch = api.calls.find(
+      (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
+    );
+    const body = String(((patch?.payload ?? {}) as { body?: unknown }).body ?? "");
+    expect(body).toContain(`added the "${MARKER}" marker label`);
+    expect(annotations.some((a) => a.includes(MARKER))).toBe(false);
+  });
+});
+
 describe("runMulti private-report: artifact wiring", () => {
   /** A capturing uploader plus the age keypair the ciphertext decrypts with. */
   async function artifactHarness() {

@@ -23,17 +23,28 @@ export type PrivateReposPolicy = (typeof PRIVATE_REPOS_POLICIES)[number];
 /**
  * The `private-report` channel values. `none` delivers nothing; `issue` posts
  * the full unredacted report to the private target repo itself (the one
- * GitHub-ACL-private channel a public run has); `artifact` uploads every
- * redacted target's report as one age-encrypted workflow artifact, for readers
- * who hold the key but no GitHub access to the targets. The single source its
+ * GitHub-ACL-private channel a public run has); `issue-on-failure` is the
+ * quiet variant of `issue` - it writes the issue only when the run needs
+ * attention (failed, or check-mode drift) and closes it on recovery, so a
+ * healthy repo never sees an issue at all; `artifact` uploads every redacted
+ * target's report as one age-encrypted workflow artifact, for readers who
+ * hold the key but no GitHub access to the targets. The single source its
  * type derives from.
  */
-export const PRIVATE_REPORT_CHANNELS = ["none", "issue", "artifact"] as const;
+export const PRIVATE_REPORT_CHANNELS = ["none", "issue", "issue-on-failure", "artifact"] as const;
 
 /** Default `private-report`, pinned against action.yml by the contract test. */
 export const DEFAULT_PRIVATE_REPORT = "none";
 
 export type PrivateReportChannel = (typeof PRIVATE_REPORT_CHANNELS)[number];
+
+/** The channels that deliver through the target repo's report issue. */
+export type IssueChannel = Extract<PrivateReportChannel, "issue" | "issue-on-failure">;
+
+/** Narrow a channel to the issue-delivering pair. */
+export function isIssueChannel(channel: PrivateReportChannel): channel is IssueChannel {
+  return channel === "issue" || channel === "issue-on-failure";
+}
 
 /**
  * The note appended to every redacted line: it names the two escape hatches

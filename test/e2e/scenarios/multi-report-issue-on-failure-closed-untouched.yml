@@ -1,0 +1,69 @@
+# The issue-on-failure channel leaves a CLOSED report issue completely
+# untouched: svc-closed resolved its last failure already (the seeded report
+# issue is closed), and this run is clean, so the healthy path's state=open
+# lookup finds nothing and writes NOTHING - no PATCH re-closing or touching the
+# closed issue, no create-guard traffic. This pins the state=open filter end to
+# end: only a still-open issue from a previous failure is ever written to.
+name: multi-report-issue-on-failure-closed-untouched
+settings: {}
+inputs:
+  mode: check
+  private_report: issue-on-failure
+repos:
+  e2e-owner/svc-closed:
+    settings:
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: settings-as-code-report
+          color: "0e2a47"
+          description: "managed by settings-as-code private reporting - do not remove"
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: settings-as-code-report
+          color: "0e2a47"
+          description: "managed by settings-as-code private reporting - do not remove"
+      issues:
+        - number: 7
+          title: "[automated] settings-as-code: private settings report"
+          body: "OLD REPORT BODY"
+          state: closed
+          labels:
+            - name: settings-as-code-report
+          user:
+            login: e2e-token-user
+          html_url: "https://github.com/e2e-owner/svc-closed/issues/7"
+    permissions:
+      issues: write
+      contents: read
+      administration: read
+expect:
+  exit_code: 0
+  result: clean
+  repos_result:
+    "private repository #1": clean
+  summary_lacks:
+    - "svc-closed"
+  stdout_lacks:
+    - "svc-closed"
+  # Zero report issues created; the marker-label lookup happened (asserted
+  # below) and the never-list above proves no write and no fallback scan.
+  issue_report:
+    slug: e2e-owner/svc-closed
+    created_count: 0
+    lookup_by_label: true
+  # The closed issue is left alone: no PATCH at all, no issue create, no
+  # marker-label ensure, and no fallback creator scan.
+  never:
+    - "POST /repos/e2e-owner/svc-closed/issues"
+    - "PATCH /repos/e2e-owner/svc-closed/issues"
+    - "POST /repos/e2e-owner/svc-closed/labels"
+    - "GET /user"
+  # The single read: an indexed lookup for an OPEN report issue by the marker.
+  requests_contain:
+    - "GET /repos/e2e-owner/svc-closed/issues?state=open&labels=settings-as-code-report&per_page=100"

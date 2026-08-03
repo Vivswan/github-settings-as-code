@@ -11,6 +11,7 @@
  * handler (or leaving a stale handler behind) fails loudly at construction.
  */
 
+import { isIssueChannel } from "../../../src/action/redact.js";
 import { MAX_RETRIES } from "../../../src/github/api.js";
 import {
   ISSUE_REPORT_ENDPOINTS,
@@ -2464,8 +2465,21 @@ function probeCanProveVisibility(
 }
 
 /**
+ * Whether the scenario's report channel delivers through the target repo's
+ * report issue: `issue` or `issue-on-failure` (isIssueChannel, single-sourced
+ * from the action). The two differ only in WHEN they write - `issue-on-failure`
+ * reads (and at most closes) on a healthy run - so the mock serves the same
+ * issue routes for both and lets the recorded traffic prove the difference.
+ */
+function usesIssueChannel(scenario: Scenario): boolean {
+  const channel = scenario.inputs?.private_report;
+  return channel !== undefined && isIssueChannel(channel);
+}
+
+/**
  * Whether a slug is a report-DELIVERY target this run: the report channel is
- * `issue`, redaction is on, the slug is not the admin repo, its FIXTURE
+ * an issue channel (see usesIssueChannel), redaction is on, the slug is not
+ * the admin repo, its FIXTURE
  * visibility is private or internal, AND the action could actually PROVE that
  * visibility (see probeCanProveVisibility). This mirrors the action's delivery
  * rule exactly - deliver only when PROVEN private/internal, so a probe the
@@ -2481,7 +2495,7 @@ function isReportDeliveryTarget(
   multi: MultiMockState | undefined,
   faults: FaultOption[] | undefined,
 ): boolean {
-  if (scenario.inputs?.private_report !== "issue") {
+  if (!usesIssueChannel(scenario)) {
     return false;
   }
   if ((scenario.inputs?.private_repos ?? "redact") !== "redact") {
@@ -2664,10 +2678,10 @@ function handleIssueReport(
   takeCoreFault: (key: CoreFaultKey) => PipelineResult | null,
 ): IssueReportOutcome | null {
   // GET /user is the fallback creator scan - served only when the run enables
-  // the issue channel at all (otherwise it is not report traffic and falls
+  // an issue channel at all (otherwise it is not report traffic and falls
   // through to a loud no-route violation).
   if (matchesTemplate("/user", pathname)) {
-    if (method !== "GET" || scenario.inputs?.private_report !== "issue") {
+    if (method !== "GET" || !usesIssueChannel(scenario)) {
       return null;
     }
     const faulted = takeCoreFault("core.userGet");
@@ -2784,6 +2798,11 @@ function handleIssueReport(
     }
     if (payload.state !== undefined) {
       issue.state = payload.state;
+    }
+    // The marker-reattach path PATCHes a labels array (names); apply it the
+    // way the create route does, so the repaired label set is observable.
+    if (Array.isArray(payload.labels)) {
+      issue.labels = payload.labels.map((l) => labelObject(String(l)));
     }
     return { response: ok(issue), coreKey: "core.issuePatch" };
   }
