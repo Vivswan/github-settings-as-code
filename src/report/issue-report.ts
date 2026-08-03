@@ -7,6 +7,12 @@
  * semantics (open = needs attention, closed = latest report inside, all
  * well).
  *
+ * Two delivery modes, one per channel value: `always` (the `issue` channel)
+ * writes the issue on every run; `on-failure` (the `issue-on-failure`
+ * channel) writes only when the run needs attention - a healthy run does one
+ * read-only lookup and closes a still-open issue from a previous failure, or
+ * touches nothing at all.
+ *
  * Shaped like a SectionModule where it matters - an ENDPOINTS dictionary
  * and a permission declaration - so the mock route table, USED_PATHS, and
  * the PAT grant prose pick it up through the existing machinery. It is NOT
@@ -69,8 +75,19 @@ export const ISSUE_REPORT_ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/** Success carries the issue URL for the run summary; failure a safe warning. */
-export type IssueDelivery = { url: string } | { warning: string };
+/**
+ * When to write the report issue: `always` mirrors every run into it;
+ * `on-failure` writes only on needs-attention runs, closing (never creating)
+ * on healthy ones.
+ */
+export type IssueReportMode = "always" | "on-failure";
+
+/**
+ * Success carries the issue URL for the run summary; failure a safe warning;
+ * `skipped` is the on-failure mode's healthy path when no open issue needed
+ * closing - nothing was written, by design.
+ */
+export type IssueDelivery = { url: string } | { skipped: true } | { warning: string };
 
 /** The owner/repo halves expand() needs, from an owner/name slug. */
 function repoRef(slug: string): { owner: string; repo: string } {
@@ -98,9 +115,11 @@ function malformedWarning(): { warning: string } {
 
 /**
  * The report issue in a page of issue-list entries: skips pull requests
- * (the issues list includes them) and demands the exact title.
+ * (the issues list includes them) and demands the exact title. Carries the
+ * issue's current label names so a fallback-scan hit can reattach the
+ * stripped marker without clobbering human-added labels.
  */
-function reportIssueIn(items: unknown[]): { number: number; url: string } | null {
+function reportIssueIn(items: unknown[]): { number: number; url: string; labels: string[] } | null {
   for (const item of items) {
     if (typeof item !== "object" || item === null) {
       continue;
@@ -112,7 +131,20 @@ function reportIssueIn(items: unknown[]): { number: number; url: string } | null
     if (typeof issue.number !== "number") {
       continue;
     }
-    return { number: issue.number, url: typeof issue.html_url === "string" ? issue.html_url : "" };
+    const labels = Array.isArray(issue.labels)
+      ? issue.labels.flatMap((label) => {
+          if (typeof label === "string") {
+            return [label];
+          }
+          const name = (label as { name?: unknown } | null)?.name;
+          return typeof name === "string" ? [name] : [];
+        })
+      : [];
+    return {
+      number: issue.number,
+      url: typeof issue.html_url === "string" ? issue.html_url : "",
+      labels,
+    };
   }
   return null;
 }
@@ -125,7 +157,7 @@ function reportIssueIn(items: unknown[]): { number: number; url: string } | null
 async function fallbackScan(
   api: GithubClient,
   ref: { owner: string; repo: string },
-): Promise<{ found: { number: number; url: string } | null } | { warning: string }> {
+): Promise<{ found: ReturnType<typeof reportIssueIn> } | { warning: string }> {
   const user = await api.tryRequest("GET", expand(ISSUE_REPORT_ENDPOINTS.user, ref));
   if ("error" in user) {
     return deliveryWarning(user.error);
@@ -150,13 +182,58 @@ async function fallbackScan(
   return { found: reportIssueIn(page.items) };
 }
 
+/**
+ * The on-failure mode's healthy path: one indexed lookup for an OPEN report
+ * issue (a previous failure), closed with the healthy report when found;
+ * otherwise nothing is written at all. The label ensure-create and the
+ * fallback creator scan are skipped on purpose - both exist only to keep a
+ * CREATE from duplicating, and this path never creates. The trade-off: a
+ * human-stripped marker label leaves a stale open issue until the next
+ * needs-attention run repairs the label.
+ */
+async function closeIfOpen(
+  api: GithubClient,
+  ref: { owner: string; repo: string },
+  body: string,
+): Promise<IssueDelivery> {
+  const listPath = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, {
+    state: "open",
+    labels: MARKER_LABEL,
+    per_page: "100",
+  });
+  const listed = await api.tryRequest("GET", listPath);
+  if ("error" in listed) {
+    return deliveryWarning(listed.error);
+  }
+  if (!Array.isArray(listed.data)) {
+    return malformedWarning();
+  }
+  const found = reportIssueIn(listed.data);
+  if (!found) {
+    return { skipped: true };
+  }
+  const closed = await api.tryRequest(
+    "PATCH",
+    expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
+    { body, state: "closed" },
+  );
+  if ("error" in closed) {
+    return deliveryWarning(closed.error);
+  }
+  return { url: found.url };
+}
+
 async function deliver(
   api: GithubClient,
   slug: string,
   body: string,
   needsAttention: boolean,
+  mode: IssueReportMode,
 ): Promise<IssueDelivery> {
   const ref = repoRef(slug);
+  if (mode === "on-failure" && !needsAttention) {
+    return closeIfOpen(api, ref, body);
+  }
   // Ensure the marker label exists so lookup stays one indexed request;
   // a 422 means it already does.
   const label = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.createLabel, ref), {
@@ -180,19 +257,28 @@ async function deliver(
     return malformedWarning();
   }
   let found = reportIssueIn(listed.data);
+  // The PATCH normally leaves labels alone (a human may have added their own).
+  // But when the label lookup missed and the creator scan hit, the marker was
+  // stripped from the issue; without reattaching it here, every future
+  // label-filtered lookup - including the on-failure healthy close - misses
+  // this issue forever.
+  let relabel: string[] | undefined;
   if (!found) {
     const scanned = await fallbackScan(api, ref);
     if ("warning" in scanned) {
       return scanned;
     }
     found = scanned.found;
+    if (found && !found.labels.includes(MARKER_LABEL)) {
+      relabel = [...found.labels, MARKER_LABEL];
+    }
   }
   const state = needsAttention ? "open" : "closed";
   if (found) {
     const updated = await api.tryRequest(
       "PATCH",
       expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
-      { body, state },
+      relabel ? { body, state, labels: relabel } : { body, state },
     );
     if ("error" in updated) {
       return deliveryWarning(updated.error);
@@ -231,18 +317,21 @@ async function deliver(
  * the issue by label (one request) or by the early-exit creator scan, then
  * PATCH the body and state - or POST it with the marker label attached.
  * `needsAttention` opens the issue (failed / check-mode drift, exactly the
- * results that fail the run) and anything else closes it. Never throws:
- * report delivery is auxiliary, so every failure comes back as a safe
- * warning and the run's result stays untouched.
+ * results that fail the run) and anything else closes it. Under the
+ * `on-failure` mode a healthy run only closes an already-open issue (or does
+ * nothing); a needs-attention run behaves exactly like `always`. Never
+ * throws: report delivery is auxiliary, so every failure comes back as a
+ * safe warning and the run's result stays untouched.
  */
 export async function deliverIssueReport(
   api: GithubClient,
   slug: string,
   body: string,
   needsAttention: boolean,
+  mode: IssueReportMode,
 ): Promise<IssueDelivery> {
   try {
-    return await deliver(api, slug, body, needsAttention);
+    return await deliver(api, slug, body, needsAttention, mode);
   } catch {
     // A throw is a network-level failure whose message embeds the request
     // path (the private slug), so nothing from it may escape.

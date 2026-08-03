@@ -1,0 +1,81 @@
+# The marker-reattach witness: a human stripped the marker label from the OPEN
+# report issue on svc-reattach (seeded without it, carrying only a human-added
+# "keep-me" label), and the marker LABEL itself is gone from the repo too. This
+# run drifts (undeclared REATTACHLEAK-sentinel), so the on-failure channel takes
+# the attention path: the marker label is ensure-created, the label-filtered
+# lookup misses, the fallback creator scan (GET /user) finds the issue by title,
+# and the upsert PATCH reattaches the marker WITHOUT clobbering the human label -
+# no duplicate issue is ever created. (Future label-filtered lookups finding the
+# issue again is the fix's point, but that next run is outside this scenario;
+# the PATCH's labels array is what is pinned here.)
+name: multi-report-issue-on-failure-reattach
+settings: {}
+inputs:
+  mode: check
+  private_report: issue-on-failure
+repos:
+  e2e-owner/svc-reattach:
+    settings:
+      labels:
+        - name: declared
+          color: "00ff00"
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: REATTACHLEAK-sentinel
+          color: "abcdef"
+      issues:
+        - number: 9
+          title: "[automated] settings-as-code: private settings report"
+          body: "OLD REPORT BODY"
+          state: open
+          labels:
+            - name: keep-me
+          user:
+            login: e2e-token-user
+          html_url: "https://github.com/e2e-owner/svc-reattach/issues/9"
+    permissions:
+      issues: write
+      contents: read
+      administration: read
+expect:
+  exit_code: 1
+  result: drift
+  repos_result:
+    "private repository #1": drift
+  # The marker label is ensure-created (it was gone from the repo), then the
+  # existing issue is repaired in place - never a second POST /issues.
+  mutations:
+    - "POST /repos/e2e-owner/svc-reattach/labels"
+    - "PATCH /repos/e2e-owner/svc-reattach/issues/9"
+  never:
+    - "POST /repos/e2e-owner/svc-reattach/issues"
+  summary_contains:
+    - "private repository #1"
+  summary_lacks:
+    - "svc-reattach"
+    - "REATTACHLEAK-sentinel"
+  stdout_lacks:
+    - "svc-reattach"
+    - "REATTACHLEAK-sentinel"
+  # The stripped marker forces the fallback creator scan before any create.
+  requests_contain:
+    - "GET /user"
+    - "creator=e2e-token-user"
+  # The upsert PATCH reattaches the marker after the human label, zero creates,
+  # opened because the run drifted.
+  issue_report:
+    slug: e2e-owner/svc-reattach
+    created_count: 0
+    state: open
+    lookup_by_label: true
+    labels:
+      - "keep-me"
+      - "settings-as-code-report"
+    body_contains:
+      - "e2e-owner/svc-reattach"
+      - "REATTACHLEAK-sentinel"
