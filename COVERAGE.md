@@ -12,9 +12,9 @@ comparison with the Probot Settings app lives in the README, under
 | Area | Section | Notes |
 |---|---|---|
 | [Repository core settings](https://docs.github.com/en/rest/repos/repos) (name, description, homepage, visibility/private, has_issues, has_wiki, has_projects, has_discussions, merge-strategy toggles, squash/merge commit title+message, delete_branch_on_merge, allow_update_branch, allow_auto_merge, web_commit_signoff_required, is_template, archived, default_branch) | `repository` | PATCH /repos/{owner}/{repo} verbatim passthrough (src/sections/repository.ts). Any current or FUTURE field GitHub adds to the repo PATCH body works day one with no action update, the future-compatibility tenet's strongest case. Check mode = subsetDiff of declared keys against GET /repos. |
-| [security_and_analysis](https://docs.github.com/en/rest/repos/repos) (GitHub Advanced Security, secret scanning, push protection, and any future nested toggles) | `repository` | Nested object inside the same PATCH /repos passthrough; flows through untouched. New sub-toggles GitHub adds (e.g. secret_scanning_ai_detection) work automatically. |
+| [security_and_analysis](https://docs.github.com/en/rest/repos/repos) (GitHub Advanced Security, secret scanning, push protection, and any future nested toggles) | `repository` | Nested object inside the same PATCH /repos passthrough; flows through untouched. New sub-toggles GitHub adds (e.g. secret_scanning_ai_detection) work automatically. That includes the delegated-bypass surface: secret_scanning_delegated_bypass and secret_scanning_delegated_bypass_options (reviewers as {reviewer_id, reviewer_type, mode}) nest here per the OpenAPI spec, covering the "who can bypass push protection" UI including per-actor Exempt mode, and the GET echoes them so check mode verifies them. secret_scanning_validity_checks likewise nests here (the dotcom docs omit it, but the GHEC flavor documents it and GitHub's validity-checks page points at this endpoint). |
 | [Topics](https://docs.github.com/en/rest/repos/repos) | `repository (topics key)` | PUT /repos/{owner}/{repo}/topics. Only normalization: string-to-list splitting (normalizeTopics) and order-insensitive compare in check mode. |
-| [Dependabot alerts](https://docs.github.com/en/rest/repos/repos) (vulnerability alerts) | `repository (enable_vulnerability_alerts)` | PUT/DELETE /repos/{owner}/{repo}/vulnerability-alerts; check mode probes GET and treats 404 as disabled. |
+| [Dependabot alerts](https://docs.github.com/en/rest/repos/repos) (vulnerability alerts) | `repository (enable_vulnerability_alerts)` | PUT/DELETE /repos/{owner}/{repo}/vulnerability-alerts; check mode probes GET and treats 404 as disabled. GitHub couples the dependency graph to this endpoint: the PUT/DELETE also enable/disable the graph as a side effect (the graph toggle itself has no API of its own; see No public API). |
 | [Dependabot security updates](https://docs.github.com/en/rest/repos/repos) (automated security fixes) | `repository (enable_automated_security_fixes)` | PUT/DELETE /repos/{owner}/{repo}/automated-security-fixes; check handles both 204-empty and {enabled} body shapes. |
 | [Private vulnerability reporting](https://docs.github.com/en/rest/repos/repos) | `repository (enable_private_vulnerability_reporting)` | PUT/DELETE /repos/{owner}/{repo}/private-vulnerability-reporting; check reads the {enabled} body from GET. Repositories where the feature does not apply (observed: private repos) answer 404 or 422, which check treats as "not enabled" and disable treats as already done. |
 | [Git LFS enable/disable](https://docs.github.com/en/rest/repos/lfs) | `repository (enable_git_lfs)` | PUT /repos/{owner}/{repo}/lfs (202) or DELETE (204). GitHub exposes NO endpoint to read the state back, so check mode emits a cannot-verify note instead of drift, apply re-asserts the declared state on every run, and the apply-mode preflight cannot probe it (a denied LFS write surfaces only after the section's other writes landed). A 403 can mean LFS is disabled account-wide or for the root of the repository network, or a credential without billing access, rather than a missing token grant; the error says so. GitHub's OpenAPI descriptor does not document this endpoint (real per the REST docs), so the e2e validator carries it in UNDOCUMENTED_ROUTES. |
@@ -24,7 +24,7 @@ comparison with the Probot Settings app lives in the README, under
 | [Rulesets](https://docs.github.com/en/rest/repos/rules) (branch, tag, and push targets; all rule types, conditions, bypass_actors) | `rulesets` | GET/POST/PUT/DELETE /repos/{owner}/{repo}/rulesets: upsert-by-name, full-payload PUT, verbatim passthrough except ref-name prefixing (staging -> refs/heads/staging, ~DEFAULT_BRANCH passes through). New rule types/bypass fields/condition types GitHub ships work day one. Undeclared rulesets kept by default (notes only); the wrapped `undeclared: delete` form deletes them. Org-sourced rulesets filtered out via source_type. |
 | [Merge queue](https://docs.github.com/en/rest/repos/rules) | `rulesets` | Configured as the merge_queue rule type inside a branch ruleset; passes through verbatim like every other rule type. No dedicated endpoint exists; rulesets ARE the API for merge queue. |
 | [Tag protection (modern)](https://docs.github.com/en/rest/repos/rules) | `rulesets` | target: tag rulesets cover everything the retired legacy tag-protection API did (legacy API itself is out of scope, removed by GitHub). |
-| [Classic branch protection](https://docs.github.com/en/rest/branches/branch-protection) | `branches` | PUT /repos/{owner}/{repo}/branches/{branch}/protection passthrough; the four required keys are null-filled; protection: null issues DELETE. Check mode flattens the GET shape ({enabled} wrappers, actor objects -> login/slug strings, *_url dropped) to compare like with like (src/sections/branches.ts flattenProtection). required_signatures is the one toggle the PUT does not accept, so it is stripped from the payload and routed through its own POST/DELETE .../protection/required_signatures sub-endpoint after the PUT (declared true POSTs, false DELETEs, undeclared untouched by this action; a GET that omits the field reads as false in check mode). GitHub does not document whether the protection PUT itself preserves an existing signature requirement, so declare the toggle on any branch that carries one. |
+| [Classic branch protection](https://docs.github.com/en/rest/branches/branch-protection) | `branches` | PUT /repos/{owner}/{repo}/branches/{branch}/protection passthrough; the four required keys are null-filled; protection: null issues DELETE. Check mode flattens the GET shape ({enabled} wrappers, actor objects -> login/slug strings, *_url dropped) to compare like with like (src/sections/branches.ts flattenProtection). required_signatures is the one toggle the PUT does not accept, so it is stripped from the payload and routed through its own POST/DELETE .../protection/required_signatures sub-endpoint after the PUT (declared true POSTs, false DELETEs, undeclared untouched by this action; a GET that omits the field reads as false in check mode). GitHub does not document whether the protection PUT itself preserves an existing signature requirement, so declare the toggle on any branch that carries one. CAVEAT: rules are addressed by literal branch name - the REST endpoints cannot express wildcard patterns (their docs point wildcard use at the GraphQL API), so a classic rule whose pattern is a glob (release/*) is invisible to this section in both modes; see the gaps table. |
 | [Environments](https://docs.github.com/en/rest/deployments/environments) (wait_timer, reviewers, prevent_self_review, deployment_branch_policy protected_branches/custom_branch_policies flags), their [Actions variables](https://docs.github.com/en/rest/actions/variables), their [Actions secrets](https://docs.github.com/en/rest/actions/secrets), their [deployment branch policies](https://docs.github.com/en/rest/deployments/branch-policies) (custom patterns), and their [custom deployment protection rules](https://docs.github.com/en/rest/deployments/protection-rules) (GitHub App gates) | `environments` | PUT /repos/{owner}/{repo}/environments/{name} passthrough; check mode flattens GET's protection_rules[] back into the PUT shape. A declared per-environment `variables` key reconciles that environment's Actions variables AFTER the PUT, through GET/POST /repos/{owner}/{repo}/environments/{name}/variables and PATCH/DELETE .../variables/{name}: create missing, update divergent values, and delete undeclared ones by default (the wrapped `undeclared: keep` form keeps them as notes); names match case-insensitively, values are plain text by design. A declared per-environment `secrets` key reconciles that environment's Actions secrets the same way the shipped secret sections do - GET .../environments/{name}/secrets (names + timestamps), GET .../secrets/public-key, sealed PUT/DELETE .../secrets/{secret_name} - one sealing scope per environment, so same-named secrets in sibling environments resolve independently; undeclared secrets within a declared key are KEPT by default (values unrecoverable; `undeclared: delete` opts in). A declared per-environment `deployment_branch_policies` key reconciles that environment's custom branch-policy patterns through GET/POST .../environments/{name}/deployment-branch-policies and DELETE .../deployment-branch-policies/{branch_policy_id}: create missing patterns, delete undeclared ones by default (`undeclared: keep` softens to notes), and replace a matching pattern whose type differs (type is immutable upstream, so the change is delete + recreate; the upstream PUT is deliberately unused - its body is the name alone, and the name is the pattern's identity, so it can never help reconciliation). Declaring the key requires the singular `deployment_branch_policy` sibling with custom_branch_policies: true (rejected upfront otherwise, since the pattern writes would 404 only after the environment PUT landed), and its endpoints sit outside the Environments PAT permission: the list read needs Actions read, the writes need Administration write. A declared per-environment `deployment_protection_rules` key reconciles that environment's custom deployment protection rules (GitHub App gates) through GET/POST .../environments/{name}/deployment_protection_rules (the list documents NO pagination, so it is fetched in one call; the POST body is {integration_id}) and DELETE .../deployment_protection_rules/{protection_rule_id}: enable/disable ONLY, since GitHub offers no update call. Rules are declared by App slug and resolved to the integration id at apply time via ONE GET .../deployment_protection_rules/apps fetch (made only when a declared rule is missing; a slug the listing does not carry is a hard error naming the available slugs). Undeclared rules within a declared key are KEPT by default - Apps can enable themselves as gates, and silently disabling a deployment gate is security-relevant - with `undeclared: delete` opting into disabling; these endpoints also sit outside the Environments PAT permission (the enabled-rules list under Actions read, the Apps read and both writes under Administration). In check mode against a missing environment the declared variables, secrets, patterns, and protection rules cannot be listed, so notes say they are unverifiable until it exists; against a live environment whose custom_branch_policies flag is off, the patterns earn the same note while the flag drift comes from the environment diff. Undeclared environments are left untouched. |
 | [Autolinks](https://docs.github.com/en/rest/repos/autolinks) | `autolinks` | GET/POST/DELETE /repos/{owner}/{repo}/autolinks; immutable upstream so changed entries are delete+recreate; undeclared autolinks DELETED by default, kept as notes under the wrapped `undeclared: keep` form. |
 | [Actions permissions](https://docs.github.com/en/rest/actions/permissions) (enabled, allowed_actions + any future base-permission fields; selected_actions policy; workflow token default permissions + can_approve_pull_request_reviews; workflows access_level; artifact/log retention; cache limits; OIDC subject claim customization; fork PR contributor approval and private-repo fork PR workflow policies) | `actions` | Key routing (src/sections/actions.ts): the two known workflow-token keys -> PUT .../actions/permissions/workflow, selected_actions -> PUT .../permissions/selected-actions, access_level -> PUT .../permissions/access (private repositories only), artifact_and_log_retention -> PUT .../permissions/artifact-and-log-retention (body {days}, verbatim), cache.max_cache_retention_days -> PUT .../actions/cache/retention-limit, cache.max_cache_size_gb -> PUT .../actions/cache/storage-limit (each limit is its own single-field endpoint, so unrecognized cache keys are rejected), oidc_customization_sub -> GET/PUT .../actions/oidc/customization/sub (201 on write; needs the "Actions" PAT permission instead of Administration, and include_claim_keys is compared positionally because claim-key order defines the subject format), fork_pr_contributor_approval -> GET/PUT .../permissions/fork-pr-contributor-approval (the approval_policy object, verbatim), fork_pr_workflows_private_repos -> GET/PUT .../permissions/fork-pr-workflows-private-repos (all four toggles are required by this action - GitHub does not document whether the PUT preserves or resets an omitted one, so the file declares the complete policy; the pair is documented for private repositories, so a denial on it can also mean the repository is public), EVERYTHING else -> base PUT .../actions/permissions verbatim. Whenever any base-permissions key is present in that PUT body, an undeclared `enabled` is defaulted to `true` (declaring a permissions field implies Actions are on), and selected_actions with no allowed_actions infers allowed_actions: selected. RISK: a future key that belongs on a NEW sub-endpoint gets routed to the base PUT where GitHub ignores it; audit the routing whenever GitHub adds a permissions sub-endpoint. |
@@ -32,7 +32,7 @@ comparison with the Probot Settings app lives in the README, under
 | [Dependabot secrets](https://docs.github.com/en/rest/dependabot/secrets) | `dependabot_secrets` | GET /repos/{owner}/{repo}/dependabot/secrets, GET .../dependabot/secrets/public-key, sealed PUT/DELETE .../dependabot/secrets/{secret_name}. Same shape, sealing, and existence-only semantics as `actions_secrets`, over the Dependabot secret store (private-registry credentials Dependabot uses). Undeclared secrets kept by default; `undeclared: delete` opts into deletion. |
 | [Codespaces repository secrets](https://docs.github.com/en/rest/codespaces/repository-secrets) | `codespaces_secrets` | GET /repos/{owner}/{repo}/codespaces/secrets, GET .../codespaces/secrets/public-key, sealed PUT/DELETE .../codespaces/secrets/{secret_name}. Same shape, sealing, and existence-only semantics as `actions_secrets`, over the Codespaces secret store (development environment secrets); the only repo-scoped Codespaces configuration surface. CAVEAT: GitHub's fine-grained "Codespaces secrets" permission gates even the reads at WRITE, so a read-only grant cannot run this section in check mode either. Undeclared secrets kept by default; `undeclared: delete` opts into deletion. |
 | [Workflow enable/disable state](https://docs.github.com/en/rest/actions/workflows) | `workflows` | GET /repos/{owner}/{repo}/actions/workflows (paginated envelope), then PUT .../workflows/{id}/enable or /disable. Declared as {path, state: active or disabled}; a bare file name matches .github/workflows/<name>; every live disabled_* state counts as disabled and a live "deleted" workflow counts as absent; undeclared workflows are never touched. |
-| [GitHub Pages](https://docs.github.com/en/rest/pages/pages) (build_type, source, cname, https_enforced and future PUT fields; pages: null disables the site) | `pages` | POST /repos/{owner}/{repo}/pages (create accepts only build_type/source) then PUT for the rest; existing sites get straight PUT passthrough; pages: null issues DELETE, mirroring branches' protection: null. In multi-repo mode, pages: null in a target is a defaults opt-out instead when the defaults file declares a non-null pages value. |
+| [GitHub Pages](https://docs.github.com/en/rest/pages/pages) (build_type, source, cname, https_enforced and future PUT fields; pages: null disables the site) | `pages` | POST /repos/{owner}/{repo}/pages (create accepts only build_type/source) then PUT for the rest; existing sites get straight PUT passthrough; pages: null issues DELETE, mirroring branches' protection: null. In multi-repo mode, pages: null in a target is a defaults opt-out instead when the defaults file declares a non-null pages value. The Enterprise Cloud site-visibility boolean `public` (public vs repo-members-only) rides the PUT passthrough too - the dotcom docs omit it but the GHEC flavor documents it, and the GET echoes it in both, so declaring it applies and check-verifies today. |
 | [Code scanning default setup](https://docs.github.com/en/rest/code-scanning/code-scanning) | `code_scanning_default_setup` | GET/PATCH /repos/{owner}/{repo}/code-scanning/default-setup, PATCH body verbatim (state, query_suite, languages, runner_type, runner_label, threat_model). A 202 answer means GitHub rolls the change out in a configuration run, which the log names. Check compares declared keys only, languages as a set. Needs GitHub Advanced Security on private repositories; a 403 can mean that (or an archived repository) rather than a missing permission. |
 | [Collaborators](https://docs.github.com/en/rest/collaborators/collaborators) (direct) | `collaborators` | PUT/DELETE /repos/{owner}/{repo}/collaborators/{username} (affiliation=direct); vocabulary mapping push<->write, pull<->read for check mode; custom org role names pass through; undeclared direct collaborators REMOVED by default (kept as notes under the wrapped `undeclared: keep` form), owner never touched; new users get invitations. |
 | [Team repository permissions](https://docs.github.com/en/rest/teams/teams) (org repos) | `teams` | PUT /orgs/{org}/teams/{slug}/repos/{owner}/{repo}; probes GET /orgs/{owner} and no-ops with a note on personal accounts (404 only; 403/5xx still fail). Check mode uses the v3.repository media type to read role_name. |
@@ -46,16 +46,32 @@ comparison with the Probot Settings app lives in the README, under
 
 ## Repo-scoped gaps (not built yet)
 
-Ordered roughly by value. PRs welcome; each needs a new section handler.
+Ordered roughly by value. PRs welcome; most need a new section handler,
+and several rows extend an existing section instead (each row says
+which).
 
 | Area | Endpoints | Why it matters |
 |---|---|---|
 | [Pending invitation reconciliation](https://docs.github.com/en/rest/collaborators/invitations) | GET /repos/{owner}/{repo}/invitations; PATCH/DELETE /repos/{owner}/{repo}/invitations/{invitation_id} | The collaborators section sends invitations but never lists pending ones, so an outstanding invite with a stale permission (or to an undeclared user) is invisible to check mode and never corrected/cancelled. Completeness fix for an existing section. |
+| [Copilot agents secrets](https://docs.github.com/en/rest/agents/secrets) | GET /repos/{owner}/{repo}/agents/secrets; GET .../agents/secrets/public-key; sealed PUT/DELETE .../agents/secrets/{secret_name} | A fourth repo-scoped sealed-box secret store, identical in shape to the supported actions_secrets/dependabot_secrets/codespaces_secrets sections (list names, fetch public key, libsodium-sealed PUT of {encrypted_value, key_id}, DELETE); the established existence-only reconciliation pattern drops in unchanged. (GET .../agents/organization-secrets is a read-only view of org-inherited secrets, not a reconciliation target.) |
+| [Copilot agents variables](https://docs.github.com/en/rest/agents/variables) | GET/POST /repos/{owner}/{repo}/agents/variables; GET/PATCH/DELETE .../agents/variables/{name} | Plain-text agent variables with full repo-level CRUD and values readable back, the direct analog of the supported actions_variables section, so exact check-mode diffing works the same way. (GET .../agents/organization-variables is the read-only org-inherited view, out of scope.) |
+| [Code quality setup](https://docs.github.com/en/rest/code-quality/code-quality) | GET/PATCH /repos/{owner}/{repo}/code-quality/setup | Near field-for-field mirror of the supported code_scanning_default_setup section: PATCH body carries state, runner_type, runner_label, languages, and ai_findings_option, and a 202 answer means GitHub rolls the change out in a configuration run, just like code scanning. A handler also needs 409 (a configuration run is already in progress), 422 (the change cannot be made), and 403 (archived repository, or the feature unavailable) handling. The sibling /code-quality/findings endpoints are read-only and stay out of scope. |
+| [Pull request creation cap and bypass list](https://docs.github.com/en/rest/interactions/repos) | GET/PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap; GET/PUT/DELETE .../interaction-limits/pulls/bypass-list | Sub-endpoints of the supported interaction_limits area that the current section never touches. Unlike the base limit, the cap is persistent desired state with no self-expiry (an enabled flag plus max_open_pull_requests 1-1000 that read back verbatim, and a reconcilable bypass-user list written via {users: [logins]}, max 100 per request), so it fits declarative reconciliation even better than the base limit does. |
+| [Check suite preferences](https://docs.github.com/en/rest/checks/suites) | PATCH /repos/{owner}/{repo}/check-suites/preferences | Per-app auto_trigger_checks toggles ({app_id, setting} pairs) controlling whether pushes auto-create check suites, a persistent repo preference (fine-grained PATs with Checks read+write work; the token owner must be a repo admin). No companion GET exists (the PATCH's 200 does echo the resulting preferences), so check mode cannot verify without writing: apply re-asserts the declared state every run and check emits a cannot-verify note. |
+| [Sponsor button](https://docs.github.com/en/graphql/reference/mutations#updaterepository) (the "Display a Sponsor button" checkbox under Settings > General > Features) | POST /graphql: mutation updateRepository, input field hasSponsorshipsEnabled; readable via Repository.hasSponsorshipsEnabled | A repo setting whose write surface is GraphQL-ONLY (like the other POST /graphql rows below): PATCH /repos carries no such field, so building any of these means this REST-only action's first GraphQL call. Distinct from FUNDING.yml (repo content, out of scope): the checkbox is a stored repository boolean independent of that file. |
+| [Issue creation policy](https://docs.github.com/en/graphql/reference/input-objects#updaterepositoryinput) (the Issues "Creation allowed by" control: everyone vs collaborators only) | POST /graphql: mutation updateRepository, input field issueCreationPolicy (enum ALL / COLLABORATORS_ONLY); readable via Repository.issueCreationPolicy | GraphQL-only like the Sponsor button: PATCH /repos carries pull_request_creation_policy (which rides the supported passthrough) but no issue_creation_policy, so the passthrough cannot absorb it. Shipped mid-2026; a persistent two-value enum with full read-back, so exact check-mode diffing works. Worth a live probe of whether the REST PATCH accepts issue_creation_policy undocumented before building the GraphQL path - the has_discussions precedent (see the discussion-categories note under No public API) shows the PATCH sometimes accepts fields the docs omit. |
+| [Pinned environments](https://docs.github.com/en/graphql/reference/mutations#pinenvironment) (the deployments-sidebar pin and its ordering) | POST /graphql: mutations pinEnvironment ({environmentId, pinned}) and reorderEnvironment ({environmentId, position}); readable via Repository.pinnedEnvironments, Environment.isPinned and pinnedPosition | Per-environment display state: which environments are pinned on the repo home page (max 10) and in what order, fully readable back so exact drift detection works - distinct from the "Include in the home page" sidebar checkboxes (No public API), which control section visibility, not pins. The REST environments PUT carries no pin or order field, so this is GraphQL-only; it would slot into the existing environments section as a per-environment sub-key. |
+| [Classic branch protection force-push bypass actors](https://docs.github.com/en/graphql/reference/input-objects#updatebranchprotectionruleinput) | POST /graphql: mutations createBranchProtectionRule/updateBranchProtectionRule, input field bypassForcePushActorIds; read via BranchProtectionRule.bypassForcePushAllowances | GraphQL-only sub-field of the supported branches section: the REST protection PUT's allow_force_pushes is a bare boolean with no actor list of its own (the PUT's actor lists - restrictions, dismissal_restrictions, bypass_pull_request_allowances - all govern other controls) and the REST GET does not expose the force-push allowance list at all, so the passthrough can neither apply nor check it. Terraform's github_branch_protection force_push_bypassers proves it buildable; needs branch-to-rule-node and actor-to-node-ID resolution. The modern equivalent, bypass_actors on a non_fast_forward ruleset rule, is already supported via rulesets. |
+| [Classic branch protection required deployments](https://docs.github.com/en/graphql/reference/input-objects#updatebranchprotectionruleinput) (the "Require deployments to succeed before merging" checkbox and its environment list) | POST /graphql: mutations createBranchProtectionRule/updateBranchProtectionRule, input fields requiresDeployments and requiredDeploymentEnvironments; read back via the same-named BranchProtectionRule fields | Second GraphQL-only classic-protection sub-field: the REST protection PUT body has no deployments field and the GET response has no required_deployments key, so the branches passthrough can neither apply nor check it. Read-back is complete, so exact diffing works. The modern equivalent, the required_deployments ruleset rule, is already supported via rulesets. |
+| [Classic branch protection wildcard patterns](https://docs.github.com/en/graphql/reference/mutations#createbranchprotectionrule) (rules like release/*) | POST /graphql: mutations createBranchProtectionRule/updateBranchProtectionRule/deleteBranchProtectionRule (glob pattern field); read via Repository.branchProtectionRules and BranchProtectionRule.pattern | Rule ADDRESSING rather than a rule field: every REST protection endpoint takes a literal branch name whose docs say wildcards require the GraphQL API, so a glob-pattern classic rule can be neither created, read, nor reconciled by the supported branches section - check mode cannot even see one (see that row's caveat). Terraform's github_branch_protection is built on these mutations, proving it buildable. Rulesets (supported) express the same matching via fnmatch conditions and are the recommended path for new configuration. |
 
 ## No public API (cannot be built)
 
-Repo-scoped settings the GitHub UI offers but no REST or GraphQL endpoint
-exposes. These stay unsupported until GitHub ships an API for them:
+Repo-scoped settings the GitHub UI offers but no REST or GraphQL
+endpoint can write independently (a few carry a read-only GET, and the
+dependency graph flips only as a side effect of another endpoint; both
+noted inline). These stay unsupported until GitHub ships a write API
+for them:
 
 - The "Include in the home page" sidebar checkboxes (Releases, Packages,
   Deployments/Environments). [PATCH /repos/{owner}/{repo}](https://docs.github.com/en/rest/repos/repos) has toggles for
@@ -73,9 +89,12 @@ exposes. These stay unsupported until GitHub ships an API for them:
   wiki field anywhere is the has_wiki on/off toggle (supported via the
   repository PATCH passthrough); no REST or GraphQL surface controls who
   may edit.
-- The Copilot Autofix repository checkbox for code scanning. The
-  code-scanning REST surface only exposes imperative autofix operations
-  on individual alerts; no endpoint reads or writes the repo toggle.
+- The Copilot Autofix repository checkboxes for code scanning: the main
+  toggle and the separate "Copilot Autofix for third-party tools" one,
+  independently settable stored booleans (each has its own repo.* audit
+  log event pair). The code-scanning REST surface only exposes
+  imperative autofix operations on individual alerts; no endpoint reads
+  or writes either repo toggle.
 - Dependabot auto-triage rules (custom alert-handling rules). UI-only;
   the Dependabot REST category has alerts, dismissal requests, and
   secrets, but no rules endpoints.
@@ -83,12 +102,130 @@ exposes. These stay unsupported until GitHub ships an API for them:
   Actions submit build-time dependencies). No repo REST endpoint reads
   or writes it; org-side enablement goes through org-scoped code
   security configurations.
-- GitHub Pages site visibility on Enterprise Cloud (public vs
-  repo-members-only). The GET response reports it as `public`, but the
-  Pages PUT accepts no field to change it.
 - Codespaces prebuild configurations. A real per-repo settings surface
   (branch, devcontainer path, triggers, regions) with no REST or GraphQL
   management endpoints; the builds themselves run as Actions workflows.
+- Copilot coding agent repository configuration (MCP servers, firewall
+  and custom allowlist, enabled tools, Actions workflow approval,
+  automations; Settings > Copilot). Writes are UI-only; the sole API is
+  the read-only GET /repos/{owner}/{repo}/copilot/cloud-agent/configuration
+  (public preview), enough to audit drift but not to apply. The org-side
+  PUTs control which repositories may use the agent, not this per-repo
+  configuration; a shipped write endpoint would move this to the gaps
+  table. (Copilot code review is NOT missing: it is the copilot_code_review
+  rule type, already covered by the rulesets passthrough.)
+- Repo-level Copilot content exclusion ("Paths to exclude in this
+  repository"). The content-exclusion REST surface has only org- and
+  enterprise-level GET/PUT; repo names in the org payload edit the org
+  layer, and the repository's own layer has no endpoint.
+- The Copilot Memory repository toggle (Settings > Copilot > Memory;
+  lets repo admins disable storing and reading repository-level
+  memories; public preview since May 2026). UI-only: the REST Copilot
+  category has no memory endpoints, no GraphQL surface exists, and
+  unlike the coding agent configuration above there is not even a
+  read-only GET to audit it.
+- The dependency graph toggle. No standalone field anywhere (not in
+  security_and_analysis); PUT/DELETE /repos/{owner}/{repo}/vulnerability-alerts
+  flips the graph only as a coupled side effect of Dependabot alerts
+  (see the Supported table), and the graph-on/alerts-off combination is
+  neither writable nor readable. A live decision since June 2025, when
+  new public repositories started defaulting the graph to off.
+- Code review limits (Settings > Moderation options: "Limit to users
+  explicitly granted read or higher access"). UI-only; a different
+  setting from the supported interaction limits, and neither PATCH /repos
+  nor any GraphQL mutation carries it.
+- Email notifications for pushes (up to two addresses under Settings).
+  The legacy write path (email service hooks) died with the GitHub
+  Services sunset; the webhooks API now accepts only name "web".
+- Reported content / "allow contributors to report abuse" (Settings >
+  Moderation options on public org-owned repositories). UI-only; the
+  nearest API, the minimizeComment GraphQL mutation, is imperative
+  per-comment triage, not this setting.
+- The "Include Git LFS objects in archives" checkbox (Settings >
+  General > Archives). Distinct from LFS enable/disable (supported); no
+  REST or GraphQL surface reads or writes it.
+- The push policy ("Limit how many branches and tags can be updated in
+  a single push", Settings > General > Pushes). max_ref_updates appears
+  nowhere in GitHub's REST OpenAPI description, and GraphQL's
+  RepositoryRuleType enum carries MAX_REF_UPDATES with no corresponding
+  parameters type in RuleParameters or RuleParametersInput, so neither
+  the rulesets passthrough nor GraphQL can write it. Given the rulesets
+  row's day-one promise for new rule types and that enum value's
+  existence, probe the rulesets POST with a max_ref_updates rule once
+  before treating it as unwritable.
+- The grouped security updates toggle (Settings > Advanced Security >
+  Dependabot). No REST or GraphQL field; distinct from
+  automated-security-fixes (supported) and from dependabot.yml's groups
+  key (repo content, out of scope). A future security_and_analysis
+  subfield would be absorbed by the existing passthrough automatically.
+- The secret scanning "Extended metadata" sub-toggle (Settings >
+  Advanced Security > Secret Protection > Validity checks; public
+  preview, requires validity checks on). Writable only through org- and
+  enterprise-level code security configurations
+  (secret_scanning_extended_metadata); no repo-level field exists even
+  in the GHEC docs, and the per-repo GET
+  /repos/{owner}/{repo}/code-security-configuration is read-only. (The
+  parent validity-checks toggle IS writable:
+  security_and_analysis.secret_scanning_validity_checks rides the
+  supported passthrough; see the Supported table.)
+- Code scanning delegated alert dismissal (the "Prevent direct alert
+  dismissals" checkbox under Settings > Advanced Security). The only
+  writable code_scanning_delegated_alert_dismissal field lives on org-
+  and enterprise-level code security configurations; PATCH /repos'
+  security_and_analysis carries only the SECRET-scanning delegated
+  fields (absorbed by the passthrough), and the repo-scoped
+  dismissal-requests endpoints are imperative per-alert triage. A
+  future security_and_analysis subfield would be absorbed
+  automatically.
+- The code scanning "AI findings" toggle (AI-powered findings for
+  CodeQL default setup, public preview; repos can opt out of the org
+  default individually). The default-setup PATCH body carries no
+  AI-findings field - ai_findings_option exists only on the separate
+  code-quality setup endpoints, tracked in the gaps table - and no
+  security_and_analysis subfield or GraphQL surface exists; the only
+  trace is the repo.code_scanning_ai_findings_* audit events. A future
+  default-setup field would be absorbed by that section's verbatim
+  PATCH passthrough.
+- The "Dependabot on self-hosted runners" toggle (Settings > Advanced
+  Security > Dependabot, private repositories). No REST or GraphQL
+  read or write surface; the Dependabot REST category has only alerts,
+  dismissal requests, and secrets. Distinct from out-of-scope runner
+  registration: this is a stored repo boolean (audit events
+  repository_dependency_updates_self_hosted.enabled/.disabled).
+- The "Access to alerts" list (Settings > Advanced Security; extra
+  users/teams granted Dependabot/security alert access on private org
+  repositories). A persistent, reconcilable actor list - the natural
+  sibling of the collaborators section - but UI-only: no REST endpoint
+  or GraphQL mutation manages it (the org-scoped PATCH
+  /orgs/{org}/dependabot/repository-access is a different surface).
+- Pinned workflows in the Actions tab (up to 5, repo-wide display
+  state). No pin route exists among the REST workflows endpoints and
+  GraphQL has no pinWorkflow mutation - unlike environments, whose
+  pinEnvironment mutation puts them in the gaps table. Only the
+  workflows.pin_workflow/unpin_workflow audit events betray that it is
+  stored repo state.
+- The "Auto-close issues with merged linked pull requests" toggle
+  (Settings > General > Issues; shipped April 2025, default on).
+  Neither PATCH /repos (per the OpenAPI descriptor) nor GraphQL
+  updateRepository carries a corresponding field. Probe the PATCH for
+  an undocumented field (the has_discussions precedent) before treating
+  it as unbuildable.
+- The GitHub Archive Program opt-in (the "Preserve this repository"
+  checkbox under Settings > General > Features on public repositories;
+  default on, admin-only). No field on PATCH /repos in either doc
+  flavor, no standalone endpoint, no GraphQL surface; the supported
+  `archived` PATCH boolean is the unrelated read-only-archive toggle.
+- Workflow execution protections (Settings > Actions > Policies; public
+  preview since June 2026): repository-level rulesets with actor allow
+  rules (users, repo roles, GitHub Apps, Copilot, Dependabot) and event
+  allow rules (push, pull_request, pull_request_target,
+  workflow_dispatch), plus an evaluate mode. Built on the rulesets
+  framework, but the REST rulesets endpoints accept only branch, tag,
+  and push targets and the feature docs name no API, so the supported
+  rulesets passthrough cannot reach it - its day-one promise covers new
+  rule types within documented targets, not a new target flavor. Probe
+  the rulesets endpoints with the new flavor once before treating it as
+  unwritable; a shipped write API moves this to the gaps table.
 
 ## Out of scope (user or org account surface)
 
@@ -97,6 +234,7 @@ exposes. These stay unsupported until GitHub ships an API for them:
 - GitHub Packages: Package namespaces and their settings belong to the user or org account even when a package is linked to a repo; explicitly user/account territory under the tenet.
 - Legacy tag protection API: Deprecated and removed by GitHub (sunset August 2024); no endpoints remain. Its function is fully covered by tag-target rulesets, which are supported.
 - Projects: Classic repo projects are sunset; Projects v2 are user/org-owned GraphQL objects merely linked to repos. The repo-level has_projects flag rides the repository PATCH passthrough.
+- Pinned issues: GraphQL pinIssue/unpinIssue exist (max 3 pins, readable back via Repository.pinnedIssues), but a pin's value is an issue number - per-repo work-item content, not repository configuration - and re-asserting pins from YAML would fight ongoing triage. Named here because the surface is real and settings-adjacent; deliberately not a gap row, unlike pinned environments, whose values are environment names the settings file already owns.
 - Releases: Releases are content/artifacts, not configuration. The one release-policy setting with a REST surface, immutable releases, is supported via the repository section's enable_immutable_releases toggle (see the Supported table); anything else GitHub ships as a field on PATCH /repos gets picked up by the repository passthrough automatically.
 - Repo-content-borne configuration (CODEOWNERS, dependabot.yml, workflow files, issue/PR templates, FUNDING.yml, .gitattributes): These are versioned files in the repository tree, managed by commits/PRs (e.g. by the copier template layer), not by the settings REST API. Writing repo content is a different tool's job.
 - Self-hosted runners (repo-level registration, labels): Operational infrastructure lifecycle: registration requires short-lived tokens and a live agent process; there is no meaningful declarative desired-state to reconcile from a YAML file.
