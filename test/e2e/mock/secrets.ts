@@ -17,7 +17,7 @@ import sodium from "libsodium-wrappers";
 export const MOCK_SECRETS_PUBLIC_KEY = "G68uvmju1lvQh0Pd06U8yh3vlO0JsWLMQR7v3mIpSWc=";
 
 /** The matching private half, used ONLY to unseal-verify uploads. */
-const MOCK_SECRETS_PRIVATE_KEY = "RoPFQaBuTO6VMxNqrLqb3QyW2FOWCmRBwDpyziVyXHs=";
+const MOCK_SECRETS_PRIVATE_KEY = "RoPFQaBuTO6VMxNqrLqb3QyW2FOWCmRBwDpyziVyXHs="; // gitleaks:allow
 
 /** The key_id paired with the public key, GitHub-shaped (a numeric string). */
 export const MOCK_SECRETS_KEY_ID = "568250167242549743";
