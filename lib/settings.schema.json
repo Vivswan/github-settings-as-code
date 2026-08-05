@@ -694,6 +694,10 @@
           "description": "Whether HTTPS is enforced for the site.",
           "type": "boolean"
         },
+        "public": {
+          "description": "Enterprise Cloud site visibility: true for public, false for repository members only. Documented only in the GHEC flavor of the Pages PUT; the GET echoes it everywhere.",
+          "type": "boolean"
+        },
         "source": {
           "description": "The update PUT requires both branch and path when source is sent.",
           "properties": {
