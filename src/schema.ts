@@ -523,6 +523,8 @@ export interface PagesConfig {
   cname?: string | null;
   /** Whether HTTPS is enforced for the site. */
   https_enforced?: boolean;
+  /** Enterprise Cloud site visibility: true for public, false for repository members only. Documented only in the GHEC flavor of the Pages PUT; the GET echoes it everywhere. */
+  public?: boolean;
 }
 
 /** One direct collaborator, matched by username. Keys other than username and permission are rejected (a misspelled "permission" would otherwise silently grant the default role). */
