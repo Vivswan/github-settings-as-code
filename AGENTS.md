@@ -98,9 +98,10 @@ Settings as Code: GitHub Action applying declarative repository settings: rulese
   tolerated statuses derive from `allEndpoints()`, so `assertHandlerCompleteness()`
   fails at construction if a declared endpoint has no handler or a handler names
   no endpoint. Core routes the action calls outside the sections (the repo
-  fetch, the settings-file contents read, and `repos: "*"` discovery) are served
-  by a separate core-path handler, and a request that matches no registered
-  section or core route fails loudly. `USED_PATHS` (in
+  fetch, the settings-file contents read, `repos: "*"` discovery, and the
+  private-report issue channel) are served by a separate core-path handler,
+  and a request that matches no registered section or core route fails
+  loudly. `USED_PATHS` (in
   `test/e2e/openapi/paths.ts`) picks the new path up automatically, so beyond
   the handler a new endpoint needs a corpus scenario that reaches it (the
   coverage tripwire fails on a cold route) and a regenerated trimmed spec (`bun
