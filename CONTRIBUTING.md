@@ -1,50 +1,42 @@
-# Contributing
+# Contributing to repo-settings-as-code
 
-## Toolchain
+Thanks for contributing! This document covers the conventions every change
+in this repository goes through.
 
-`src/` is TypeScript built with [bun](https://bun.com); `lib/` holds the two
-committed generated artifacts: `index.js`, the bundle the action executes,
-and `settings.schema.json`, the published settings.yml schema. `bun run
-build` regenerates both; CI fails on drift.
-
-Runtime dependencies (@octokit/rest with the retry and throttling plugins,
-@actions/core, zod, yaml) are compiled into that single bundle.
-
-Run `bun run check` for lint + typecheck + tests + generated-artifact
-freshness.
-
-[COVERAGE.md](COVERAGE.md) is the honest inventory of the supported API
-surface: what works today, the repo-scoped gaps, and what is out of scope
-by design. A change that adds or extends a section should keep it in step.
-
-## End-to-end tests
-
-The end-to-end tests run the committed bundle as a real subprocess against a
-mock GitHub API, so they exercise the same `lib/index.js` a user ships, not the
-TypeScript source. `bun run test:e2e` runs the curated scenario corpus, and
-`bun run fuzz` runs seeded property fuzzing: it generates random scenarios and
-checks each run's outcome against an oracle that predicts the outcome class from
-the token mask, policy, and mode.
-
-The fuzzer is deterministic. It prints a master seed and a per-iteration seed
-for each run; a whole run reproduces with `FUZZ_SEED=<masterSeed> bun run
-fuzz`, and a single failing iteration replays with `bun test/e2e/fuzz.ts --seed
-<iterationSeed> --iterations 1`.
-
-The mock serves the section endpoints plus the handful of core routes the
-action calls (the repo fetch, the settings-file contents read, and
-`repos: "*"` discovery), so a request that matches no registered section or
-core route fails loudly rather than returning a made-up response.
-
-PR CI runs a diff-aware subset, scoped to the sections a pull request
-changed, and a nightly workflow runs the full fuzz and files an issue labeled
-`e2e-fuzz` on a scenario or fuzz failure with a replay command.
+CI, settings, and standards files here (including this document above the
+marker at the bottom) are managed by
+[Vivswan/repo-platform](https://github.com/vivswan/repo-platform);
+local edits to managed files are replaced on the next template sync.
 
 ## Pull requests
 
-PR titles must be [Conventional Commits](https://www.conventionalcommits.org)
-(`feat:`, `fix:`, `feat!:`, `chore:`, ...). PRs are squash-merged, so the PR
-title becomes the commit subject and drives release versioning; CI validates
-it. The single required check is `all-green`, which gates on every other CI
-job; the release job runs downstream of that gate, so releases only happen
-from a green main.
+- Changes land through pull requests and are squash-merged; the PR title
+  becomes the commit subject on the default branch.
+- The PR title and every pushed commit subject must be a
+  [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/),
+  for example `feat: add X` or `fix(parser): handle Y`. Releases are
+  versioned from these subjects.
+
+## CI
+
+- CI gates on a single status check, `all-green`, which needs every
+  gating CI job (the convention is documented in
+  [repo-platform's all-green guide](https://github.com/vivswan/repo-platform/blob/main/docs/all-green.md)).
+- Repository-specific checks live in `.github/workflows/checks.yml`; run
+  the commands it lists locally before pushing.
+- A typography gate enforces plain ASCII punctuation: no curly quotes,
+  em-dashes, or invisible unicode.
+
+## Security
+
+Never report vulnerabilities in issues or pull requests - see
+[SECURITY.md](SECURITY.md) for the private reporting route.
+
+## Code of conduct
+
+Participation in this project is governed by the
+[code of conduct](CODE_OF_CONDUCT.md).
+
+<!-- Repository-specific contributing documentation (dev setup, build and
+     test commands, review expectations) goes below this line. It survives
+     template updates via three-way merge. -->
