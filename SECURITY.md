@@ -26,29 +26,4 @@ a key.
 <!-- Repository-specific security documentation (scope, threat model, review
      expectations for security-relevant changes) goes below this line. It
      survives template updates via three-way merge. -->
-
-## What counts as a vulnerability here
-
-This action holds a repository-admin token and writes repository settings,
-so the interesting surface is:
-
-- Token handling. The token is used only in the Authorization header and is
-  never printed, not even in debug traces. Any path that makes it appear in
-  logs, annotations, the step summary, or outputs is a vulnerability.
-- Workflow-command injection. API responses and settings-file content are
-  echoed into annotations and the step summary, escaped for workflow
-  commands (%, CR, LF) and for summary tables (pipes, backslashes). Input
-  that breaks out of that escaping and injects commands or forged log lines
-  is a vulnerability.
-- Settings escalation. A crafted settings file should never be able to
-  touch a repository or setting it does not declare, nor bypass the
-  preflight barrier or the required-sections policy.
-- Supply chain. lib/index.js is a committed bundle and CI fails unless it
-  byte-matches a fresh build of src/. A discrepancy CI accepts is a
-  vulnerability.
-
-Fixes ship in the next release and are not backported; upgrade the `uses:`
-pin to pick them up.
-
-Drift-detection false positives, confusing messages, and similar problems
-are ordinary bugs; use the issue tracker for those.
+<!-- repo-platform:local-section -->
