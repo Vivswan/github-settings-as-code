@@ -344,6 +344,3 @@ licenses.
      third-party components, differently licensed paths) go below this
      line. They survive template updates via three-way merge. -->
 <!-- repo-platform:local-section -->
-
-Releases v1.0.0 and v1.0.1 were published under the MIT License and
-remain available under it.
