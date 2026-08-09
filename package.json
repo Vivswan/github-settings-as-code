@@ -1,7 +1,7 @@
 {
   "name": "repo-settings-as-code",
   "private": true,
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "SEE LICENSE IN LICENSE.md",
   "description": "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more.",
   "type": "module",
   "scripts": {
