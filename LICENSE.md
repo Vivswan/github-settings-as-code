@@ -1,6 +1,6 @@
 # Individual and Small Organization License 1.0.0
 
-<https://github.com/Vivswan/repo-platform/blob/main/LICENSE>
+<https://github.com/Vivswan/repo-platform/blob/main/LICENSE.md>
 
 Required Notice: Copyright Vivswan Shah (https://github.com/Vivswan)
 
@@ -344,6 +344,3 @@ licenses.
      third-party components, differently licensed paths) go below this
      line. They survive template updates via three-way merge. -->
 <!-- repo-platform:local-section -->
-
-Releases v1.0.0 and v1.0.1 were published under the MIT License and
-remain available under it.
