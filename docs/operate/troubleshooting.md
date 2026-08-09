@@ -79,8 +79,8 @@ a 403 means something other than the token. An org- or enterprise-managed
 policy can lock the Actions cache limits, code scanning default setup needs
 Advanced Security on private repositories, and Git LFS can be disabled
 account-wide. For Git LFS the denial message itself carries a note saying
-so; for the others the caveat lives in the
-[Sections table](../../README.md#sections) notes for that section.
+so; for the others the caveat lives in that section's row of the
+[COVERAGE.md Supported table](../../COVERAGE.md#supported).
 
 ## Rate limited
 
