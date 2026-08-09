@@ -92,4 +92,7 @@ full fuzz and files under `fuzz-nightly`; both issues carry a replay command.
 ## Releases
 
 The release job runs downstream of the `all-green` gate, so releases and
-release-PR refreshes only happen from a green main.
+release-PR refreshes only happen from a green main. Releases are cut
+draft-first: release-please creates a draft with its tag already forced,
+the pipeline updates the draft and moves the moving major tag, and
+publishing is the last step.
