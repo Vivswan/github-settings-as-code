@@ -16,6 +16,11 @@ local edits to managed files are replaced on the next template sync.
   [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/),
   for example `feat: add X` or `fix(parser): handle Y`. Releases are
   versioned from these subjects.
+- By opening a pull request, or offering code in an issue or review for
+  inclusion, you agree to the Contributions section of the
+  [LICENSE](LICENSE), which licenses that code to the licensor -
+  including for relicensing under any terms - unless you conspicuously
+  say otherwise when you submit it.
 
 ## CI
 
@@ -40,6 +45,7 @@ Participation in this project is governed by the
 <!-- Repository-specific contributing documentation (dev setup, build and
      test commands, review expectations) goes below this line. It survives
      template updates via three-way merge. -->
+<!-- repo-platform:local-section -->
 
 ## Toolchain
 
@@ -86,4 +92,7 @@ full fuzz and files under `fuzz-nightly`; both issues carry a replay command.
 ## Releases
 
 The release job runs downstream of the `all-green` gate, so releases and
-release-PR refreshes only happen from a green main.
+release-PR refreshes only happen from a green main. Releases are cut
+draft-first: release-please creates a draft with its tag already forced,
+the pipeline updates the draft and moves the moving major tag, and
+publishing is the last step.

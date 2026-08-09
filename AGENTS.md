@@ -53,6 +53,7 @@ Settings as Code: GitHub Action applying declarative repository settings: rulese
 
 <!-- Add project-specific instructions below. This section survives template
      updates via three-way merge. -->
+<!-- repo-platform:local-section -->
 
 - `lib/index.js` is the COMMITTED bundled entrypoint the action runs
   (node24); `lib/settings.schema.json` is the COMMITTED JSON Schema for
