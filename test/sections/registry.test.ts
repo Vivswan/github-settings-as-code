@@ -169,6 +169,17 @@ describe("registry <-> README", () => {
 const CODE_SCANNING_CAVEAT =
   "a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived";
 
+// The caveat code-quality appends: same shape as code-scanning's, for the
+// feature-unavailable and archived-repository 403s.
+const CODE_QUALITY_CAVEAT =
+  "a 403 on this endpoint can also mean code quality is unavailable on the repository, or the repository is archived";
+
+// The caveat check-suite-preferences appends: the endpoint additionally
+// requires repo-admin ownership, and with no read endpoint there is no
+// preflight probe to catch a denial early.
+const CHECK_SUITE_PREFERENCES_CAVEAT =
+  "the token owner must be a repository administrator, and with no read endpoint there is nothing to preflight - a denied write surfaces only after other sections' writes landed";
+
 // The caveat actions appends: its OIDC endpoints carry a permission
 // override (Actions instead of Administration), so the section grant says
 // so wherever a NON-oidc actions endpoint is denied.
@@ -187,6 +198,8 @@ const ENVIRONMENTS_POLICIES_CAVEAT =
 // literal snapshot both read this one map.
 const GRANT_CAVEATS: Record<string, string> = {
   code_scanning_default_setup: CODE_SCANNING_CAVEAT,
+  code_quality_setup: CODE_QUALITY_CAVEAT,
+  check_suite_preferences: CHECK_SUITE_PREFERENCES_CAVEAT,
   actions: ACTIONS_OIDC_CAVEAT,
   environments: ENVIRONMENTS_POLICIES_CAVEAT,
 };
@@ -207,8 +220,10 @@ const EXPECTED_GRANT: Record<string, string> = {
   codespaces_secrets: `grant "Codespaces secrets" (read and write) under the PAT's Repository permissions`,
   agents_secrets: `grant "Agent secrets" (read and write) under the PAT's Repository permissions`,
   workflows: `grant "Actions" (read and write) under the PAT's Repository permissions`,
+  check_suite_preferences: `grant "Checks" (read and write) under the PAT's Repository permissions; ${CHECK_SUITE_PREFERENCES_CAVEAT}`,
   pages: `grant "Pages" (read and write) under the PAT's Repository permissions`,
   code_scanning_default_setup: `grant "Administration" or "Code scanning alerts" (read and write) under the PAT's Repository permissions; ${CODE_SCANNING_CAVEAT}`,
+  code_quality_setup: `grant "Administration" (read and write) under the PAT's Repository permissions; ${CODE_QUALITY_CAVEAT}`,
   collaborators: `grant "Administration" (read and write) under the PAT's Repository permissions`,
   teams: `grant "Members" (read) under the PAT's Organization permissions and "Administration" (read and write) under its Repository permissions`,
   milestones: `grant "Issues" (read and write) under the PAT's Repository permissions`,

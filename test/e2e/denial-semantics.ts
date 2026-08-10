@@ -33,8 +33,14 @@ export const DENIAL_SEMANTICS: Record<SectionKey, DenialSemantics> = {
   codespaces_secrets: "denied",
   agents_secrets: "denied",
   workflows: "denied",
+  // No read endpoint exists AT ALL: preflight and check mode issue zero
+  // requests, so nothing can read as denied OR absent up front - the denial
+  // can only ever surface on the apply-mode PATCH (403), which is the
+  // "absent" model in its purest form.
+  check_suite_preferences: "absent",
   pages: "absent",
   code_scanning_default_setup: "denied",
+  code_quality_setup: "denied",
   collaborators: "denied",
   teams: "absent",
   milestones: "denied",

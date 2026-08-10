@@ -46,8 +46,11 @@ const FIXTURES: Record<SectionKey, unknown> = {
   codespaces_secrets: [{ name: "DEVCONTAINER_PAT", value: "$DEVCONTAINER_PAT" }],
   agents_secrets: [{ name: "AGENT_TOKEN", value: "$AGENT_TOKEN" }],
   workflows: [{ path: "ci.yml", state: "active" }],
+  // Write-only upstream: check emits a cannot-verify note and calls nothing.
+  check_suite_preferences: { auto_trigger_checks: [{ app_id: 1, setting: false }] },
   pages: { build_type: "workflow" },
   code_scanning_default_setup: { state: "configured" },
+  code_quality_setup: { state: "configured" },
   collaborators: [{ username: "bob" }],
   teams: [{ name: "devs" }],
   milestones: [{ title: "v1" }],
@@ -131,6 +134,7 @@ const ROUTES = {
     },
   },
   "GET /repos/o/r/code-scanning/default-setup": { data: { state: "not-configured" } },
+  "GET /repos/o/r/code-quality/setup": { data: { state: "not-configured" } },
   "GET /repos/o/r/collaborators?affiliation=direct&per_page=100&page=1": {
     data: [{ login: "alice", role_name: "write" }],
   },
@@ -237,10 +241,13 @@ describe("check-mode purity", () => {
     );
     // Every section ran and every fixture produced drift: a "failed" or
     // "clean" outcome means a fixture stopped exercising its handler's
-    // drift paths, which would silently shrink coverage.
+    // drift paths, which would silently shrink coverage. The one exception
+    // is check_suite_preferences, which has NO drift path to exercise:
+    // GitHub exposes no read endpoint, so its check mode is a single
+    // cannot-verify note (clean) and zero requests, by contract.
     expect(result.outcomes.map((o) => o.key)).toEqual([...SECTION_KEYS]);
     for (const outcome of result.outcomes) {
-      expect(outcome.status).toBe("drift");
+      expect(outcome.status).toBe(outcome.key === "check_suite_preferences" ? "clean" : "drift");
     }
     // The invariant itself.
     expect(api.mutations()).toEqual([]);

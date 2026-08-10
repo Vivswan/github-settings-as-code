@@ -166,6 +166,58 @@ describe("predictSection rules", () => {
     );
   });
 
+  test("a no-read section is exactly clean in check mode, whatever the mask", () => {
+    // check_suite_preferences declares no read endpoint, so check mode makes
+    // ZERO requests: even a full 403-style denial has nothing to deny.
+    for (const grade of ["none", "read", "write"] as const) {
+      const p = predictSection(
+        "check_suite_preferences",
+        meta({
+          sections: ["check_suite_preferences"],
+          mask: { checks: grade },
+          denialStyle: 403,
+          mode: "check",
+          policy: "fail",
+        }),
+      );
+      expect([...p.allowed]).toEqual(["clean"]);
+      expect(p.mayWrite).toBe(false);
+    }
+  });
+
+  test("a no-read section never arms the preflight barrier", () => {
+    // Preflight probes reads only; with no reads the run proceeds and the
+    // denial surfaces mid-apply, so the summary is still rendered.
+    const p = predictOutcomes(
+      meta({
+        sections: ["check_suite_preferences"],
+        mask: { checks: "none" },
+        denialStyle: 403,
+        mode: "apply",
+        policy: "fail",
+      }),
+    );
+    expect(p.preflightAborts).toBe(false);
+  });
+
+  test("a denied no-read section can never land applied: its write is unconditional", () => {
+    // Every apply issues the PATCH, so with the write grant missing there is
+    // no "nothing to write" path - {failed} under fail, {skipped} under warn.
+    for (const grade of ["none", "read"] as const) {
+      const base = {
+        sections: ["check_suite_preferences"] as ScenarioMeta["sections"],
+        mask: { checks: grade as MaskGrade },
+        mode: "apply" as const,
+      };
+      expect([
+        ...predictSection("check_suite_preferences", meta({ ...base, policy: "fail" })).allowed,
+      ]).toEqual(["failed"]);
+      expect([
+        ...predictSection("check_suite_preferences", meta({ ...base, policy: "warn" })).allowed,
+      ]).toEqual(["skipped"]);
+    }
+  });
+
   test("a required denied section fails even under warn (apply)", () => {
     const p = predictSection(
       "labels",

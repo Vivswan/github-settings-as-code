@@ -16,6 +16,8 @@ import { agentsSecretsSection } from "./agents-secrets.js";
 import { agentsVariablesSection } from "./agents-variables.js";
 import { autolinksSection } from "./autolinks.js";
 import { branchesSection } from "./branches.js";
+import { checkSuitePreferencesSection } from "./check-suite-preferences.js";
+import { codeQualitySetupSection } from "./code-quality.js";
 import { codeScanningDefaultSetupSection } from "./code-scanning.js";
 import { codespacesSecretsSection } from "./codespaces-secrets.js";
 import { collaboratorsSection } from "./collaborators.js";
@@ -48,8 +50,10 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   codespaces_secrets: codespacesSecretsSection,
   agents_secrets: agentsSecretsSection,
   workflows: workflowsSection,
+  check_suite_preferences: checkSuitePreferencesSection,
   pages: pagesSection,
   code_scanning_default_setup: codeScanningDefaultSetupSection,
+  code_quality_setup: codeQualitySetupSection,
   collaborators: collaboratorsSection,
   teams: teamsSection,
   milestones: milestonesSection,

@@ -1,0 +1,33 @@
+# With no read endpoint there is nothing the apply-mode preflight can probe,
+# so a token without the Checks grant sails through the barrier and the
+# denial surfaces only mid-apply, AFTER an earlier section's write landed
+# (the Git LFS precedent): labels runs first and applies, then the
+# preferences PATCH is refused and the run fails. The advice names the
+# "Checks" grant plus the repository-administrator caveat.
+name: check-suite-preferences-write-denied
+settings:
+  labels:
+    - name: bug
+      color: d73a4a
+  check_suite_preferences:
+    auto_trigger_checks:
+      - app_id: 15368
+        setting: false
+denial_style: fine_grained
+token_permissions:
+  issues: write
+  checks: read
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    labels: applied
+    check_suite_preferences: failed
+  mutations:
+    - "POST /repos/{repo}/labels"
+    - "PATCH /repos/{repo}/check-suites/preferences"
+  stdout_contains:
+    - '"Checks" (read and write)'
+    - "repository administrator"

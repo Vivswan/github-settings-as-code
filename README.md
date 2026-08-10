@@ -9,7 +9,7 @@ silently.
 ## Usage
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token):
-   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
+   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&checks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
    starts you off with every repository permission the
    [Sections](#sections) table can need. Pick the resource owner and
    repositories, and add Members: read by hand when the owner is an
@@ -126,8 +126,10 @@ The guides live in [docs/](docs/README.md), in four groups:
 | `codespaces_secrets` | codespaces secrets list + public-key + sealed PUT + delete | Codespaces secrets: write | kept (settable) | as `actions_secrets`, over the Codespaces secret store |
 | `agents_secrets` | agents secrets list + public-key + sealed PUT + delete | Agent secrets: write | kept (settable) | as `actions_secrets`, over the Copilot agents secret store |
 | `workflows` | Actions workflows list, enable/disable | Actions: write | untouched | `{path, state: active or disabled}`; bare file names match `.github/workflows/` |
+| `check_suite_preferences` | check-suites preferences PATCH (no read endpoint exists upstream) | Checks: write | untouched | per-app `auto_trigger_checks` toggles; write-only: check mode cannot verify them (one note, zero requests) and apply re-asserts them every run; the token owner must be a repository administrator |
 | `pages` | POST/PUT/DELETE pages | Pages: write | untouched | `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`, `public` (GHEC site visibility); `pages: null` disables the site |
 | `code_scanning_default_setup` | code scanning default setup | Administration or Code scanning alerts: write | untouched | `state`, `query_suite`, `languages`; needs Advanced Security on private repositories |
+| `code_quality_setup` | code-quality setup | Administration: write | untouched | `state`, `languages`, runner and AI-findings options; a 202 means GitHub rolls the change out in a configuration run; needs code quality available on the repository |
 | `collaborators` | direct collaborators + pending invitations | Administration: write | deleted (settable) | invitations for new users, pending ones reconciled (stale permission updated, expired re-sent, undeclared cancelled); the repository owner is never touched |
 | `teams` | org team repo permissions | Members: read (org permission) + Administration: write | untouched | org repos only, skipped with a notice on personal accounts |
 | `milestones` | milestones | Issues: write | kept (settable) | upsert by title; deleting a milestone detaches it from every issue carrying it, which is why keep is the default |

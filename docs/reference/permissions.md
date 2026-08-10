@@ -23,13 +23,13 @@ check mode. Beyond those the action never needs more. In multi-repo
 mode the token needs the same permissions on every target repository.
 
 To manage everything in one PAT, grant Administration, Issues,
-Environments, Pages, Actions, Variables, Webhooks, Secrets, Dependabot
-secrets, Codespaces secrets, Agent secrets, Agent variables, Custom
-properties, and Secret scanning alerts
-at write, plus Contents at read and (for org repos) the Members
-organization permission at read. The pre-filled token form linked under
-the README's [Usage](../../README.md#usage) grants exactly the repository
-half of that set.
+Environments, Pages, Actions, Variables, Webhooks, Checks, Secrets,
+Dependabot secrets, Codespaces secrets, Agent secrets, Agent variables,
+Custom properties, and Secret scanning alerts at write, plus Contents at
+read and (for org repos) the Members organization permission at read.
+The pre-filled token form linked under the README's
+[Usage](../../README.md#usage) grants exactly the repository half of
+that set.
 
 The default `GITHUB_TOKEN` can never hold most of these grants
 (Administration in particular), so plan on a fine-grained PAT.

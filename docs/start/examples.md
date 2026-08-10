@@ -182,12 +182,21 @@ workflows:
   - path: nightly-sync.yml
     state: disabled
 
+check_suite_preferences:
+  auto_trigger_checks:
+    - app_id: 12345
+      setting: false
+
 pages:
   build_type: workflow
 
 code_scanning_default_setup:
   state: configured
   query_suite: default
+
+code_quality_setup:
+  state: configured
+  languages: [go, python]
 
 collaborators:
   - username: octocat

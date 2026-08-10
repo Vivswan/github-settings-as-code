@@ -1,0 +1,25 @@
+name: code-quality-check-drift
+description: >-
+  Check mode over a code quality setup whose ai_findings_option diverges from
+  the settings file reports drift and exits 1, writing nothing.
+settings:
+  code_quality_setup:
+    state: configured
+    ai_findings_option: on_push
+inputs:
+  mode: check
+live_state:
+  code_quality:
+    state: configured
+    languages:
+      - javascript-typescript
+    ai_findings_option: disabled
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    code_quality_setup: drift
+  never:
+    - "PATCH /repos/{repo}/code-quality/setup"
+  summary_contains:
+    - "code_quality_setup.ai_findings_option"

@@ -40,6 +40,10 @@ export const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   "agents-secrets.ts": ["agents_secrets"],
   // The file is code-scanning.ts but the section key is the longer form.
   "code-scanning.ts": ["code_scanning_default_setup"],
+  // The file is code-quality.ts but the section key is the longer form.
+  "code-quality.ts": ["code_quality_setup"],
+  // Kebab file name for the underscore section key, like code-scanning.ts.
+  "check-suite-preferences.ts": ["check_suite_preferences"],
   // Kebab file name for the underscore section key, like code-scanning.ts.
   "interaction-limits.ts": ["interaction_limits"],
   // Kebab file name for the underscore section key, like code-scanning.ts.

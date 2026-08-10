@@ -1,0 +1,20 @@
+# GitHub exposes no read endpoint for check suite preferences, so check mode
+# has nothing it could compare: the section emits exactly one cannot-verify
+# note, touches NO endpoint, and the run - with no other section declared -
+# contacts the mock zero times.
+name: check-suite-preferences-check-note
+settings:
+  check_suite_preferences:
+    auto_trigger_checks:
+      - app_id: 15368
+        setting: false
+inputs:
+  mode: check
+expect:
+  exit_code: 0
+  result: clean
+  outcomes:
+    check_suite_preferences: clean
+  zero_requests: true
+  summary_contains:
+    - "GitHub exposes no read endpoint for check suite preferences, so check mode cannot verify them; apply re-asserts the declared preferences on every run"

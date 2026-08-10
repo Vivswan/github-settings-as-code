@@ -25,6 +25,14 @@ settings:
     state: configured
     languages:
       - python
+  code_quality_setup:
+    state: configured
+    languages:
+      - python
+  check_suite_preferences:
+    auto_trigger_checks:
+      - app_id: 15368
+        setting: false
   teams:
     - name: platform
       permission: push

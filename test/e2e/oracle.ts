@@ -44,6 +44,23 @@ const READS_REQUIRE_WRITE: ReadonlySet<SectionKey> = new Set(
 
 const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 
+/**
+ * Sections that declare NO read endpoint at all (check_suite_preferences
+ * today): check mode issues zero requests for them - the cannot-verify note
+ * is not an outcome - so they are ALWAYS clean in check mode no matter what
+ * the mask says, and apply-mode preflight has nothing to probe, so the
+ * barrier can never arm on them (the denial surfaces mid-apply on the first
+ * write instead). Derived from the same ENDPOINTS declarations the mock
+ * routes read, so a section gaining a read drops out automatically. Exported
+ * for the fuzz unfaultable battery, whose empty-read-derivation guard stays
+ * armed for every section outside this set.
+ */
+export const NO_READ_SECTIONS: ReadonlySet<SectionKey> = new Set(
+  SECTIONS.filter((section) =>
+    Object.values(section.endpoints).every((endpoint) => endpointMethod(endpoint.route) !== "GET"),
+  ).map((section) => section.key),
+);
+
 /** Map a section's repo resources to the mask keys they use (org is separate). */
 function repoMaskKeys(permission: SectionPermission): MaskKey[] {
   return [...permission.repo];
@@ -141,6 +158,12 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
   if ((key === "teams" || key === "custom_properties") && meta.ownerKind === "user") {
     return { key, grade, allowed: new Set([check ? "clean" : "applied"]), mayWrite: false };
   }
+  // A section with no read endpoint makes NO request in check mode, so it is
+  // exactly clean regardless of the mask - there is nothing a denial could
+  // deny - and no witness kind is modeled for it.
+  if (check && NO_READ_SECTIONS.has(key)) {
+    return { key, grade, allowed: new Set(["clean"]), mayWrite: false };
+  }
 
   if (grade === "write") {
     if (witness === "matching") {
@@ -162,8 +185,13 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
   }
 
   // A denied read: whether it reads as a permission error or a missing resource
-  // depends on the denial style and the section's semantics.
-  const readsAsDenied = grade === "none" && (meta.denialStyle === 403 || semantics === "denied");
+  // depends on the denial style and the section's semantics. A section with no
+  // reads at all can never be read-denied, whatever the style: its denial
+  // surfaces on the apply-mode write, like the fine_grained "absent" model.
+  const readsAsDenied =
+    grade === "none" &&
+    !NO_READ_SECTIONS.has(key) &&
+    (meta.denialStyle === 403 || semantics === "denied");
 
   if (grade === "none" && readsAsDenied) {
     // Preflight (or the first read) classifies this as a permission denial.
@@ -208,12 +236,15 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
   }
   // Apply: a needed write is denied mid-run. A required section (or fail
   // policy) cannot be skipped, so it fails; warn skips a non-required section.
-  // In every case it may still be "applied" when no write was actually needed
-  // (the live state already matched).
+  // A COMPARING section may still land "applied" when no write was actually
+  // needed (the live state already matched) - but a no-read section has
+  // nothing to compare against, so its write is unconditional AND
+  // unavoidable: the denial is guaranteed and "applied" is unreachable.
+  const canSilentlyApply = !NO_READ_SECTIONS.has(key);
   const allowed: Set<Outcome> =
     required || meta.policy === "fail"
-      ? new Set(["applied", "failed"])
-      : new Set(["applied", "skipped"]);
+      ? new Set(canSilentlyApply ? ["applied", "failed"] : ["failed"])
+      : new Set(canSilentlyApply ? ["applied", "skipped"] : ["skipped"]);
   // In absent/read cases the section may attempt one write before the denial;
   // that write hits an "absent"-semantics family (mock rule 4 tolerates it).
   return { key, grade, allowed, mayWrite: semantics === "absent" };
@@ -267,6 +298,10 @@ function preflightDeniable(section: SectionPrediction, meta: ScenarioMeta): bool
   // Preflight only probes ACTIVE sections (orchestrate.ts filters by the
   // allowlist first), so an excluded section can never arm the barrier.
   if (section.allowed.has("excluded")) {
+    return false;
+  }
+  if (NO_READ_SECTIONS.has(section.key)) {
+    // No read endpoints: preflight probes nothing, so the barrier cannot arm.
     return false;
   }
   if (section.grade !== "none") {

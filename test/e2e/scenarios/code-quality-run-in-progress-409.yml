@@ -1,0 +1,24 @@
+# Code-quality configuration run in progress. The live state has a setup
+# configuration run already running, so the PATCH answers 409. The section
+# tolerates the 409 and gives its own advice (a run is in progress; re-run
+# after it finishes) rather than the generic fix-the-file error - and the
+# section fails, so the run exits 1.
+name: code-quality-run-in-progress-409
+settings:
+  code_quality_setup:
+    state: configured
+    languages: ["javascript-typescript"]
+live_state:
+  code_quality:
+    state: configured
+    languages: ["python"]
+    configuration_run_in_progress: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    code_quality_setup: failed
+  stdout_contains:
+    - "configuration run is already in progress"

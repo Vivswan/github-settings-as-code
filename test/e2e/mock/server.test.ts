@@ -1401,6 +1401,27 @@ describe("handler statuses obey the realism rule", () => {
         `/repos/${OWNER}/${REPO}/code-scanning/default-setup`,
         { state: "configured" },
       ],
+      // code-quality: get, update 200 (no language change), update 202
+      ["code_quality_setup.get", "GET", `/repos/${OWNER}/${REPO}/code-quality/setup`],
+      [
+        "code_quality_setup.update",
+        "PATCH",
+        `/repos/${OWNER}/${REPO}/code-quality/setup`,
+        { state: "configured" },
+      ],
+      [
+        "code_quality_setup.update",
+        "PATCH",
+        `/repos/${OWNER}/${REPO}/code-quality/setup`,
+        { state: "configured", languages: ["go"] },
+      ], // 202 async configuration run (languages changed)
+      // check-suite preferences: the one write-only PATCH (200 echo)
+      [
+        "check_suite_preferences.update",
+        "PATCH",
+        `/repos/${OWNER}/${REPO}/check-suites/preferences`,
+        { auto_trigger_checks: [{ app_id: 15368, setting: false }] },
+      ],
       // collaborators: list, update (invite = 201, refresh = 201, existing =
       // 204), the invitation trio (success + error branches), remove (both)
       ["collaborators.list", "GET", `/repos/${OWNER}/${REPO}/collaborators`],

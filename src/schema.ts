@@ -58,10 +58,20 @@ export interface SettingsFile {
   agents_secrets?: AgentsSecretConfig[] | UndeclaredPolicyList<AgentsSecretConfig>;
   /** Per-workflow enable/disable state; undeclared workflows are untouched. */
   workflows?: WorkflowConfig[];
+  /**
+   * Check suite preferences: per-GitHub-App `auto_trigger_checks` toggles
+   * controlling whether pushes automatically create check suites. Write-only
+   * upstream (GitHub exposes no read endpoint), so check mode cannot verify
+   * them and apply re-asserts the declared preferences on every run. The
+   * token owner must be a repository administrator.
+   */
+  check_suite_preferences?: CheckSuitePreferencesConfig;
   /** GitHub Pages configuration; null disables Pages on the repository. */
   pages?: PagesConfig | null;
   /** Code scanning default setup (CodeQL). */
   code_scanning_default_setup?: CodeScanningDefaultSetupConfig;
+  /** Code quality analysis setup. */
+  code_quality_setup?: CodeQualitySetupConfig;
   /** Direct collaborators, with pending invitations reconciled alongside; undeclared ones are REMOVED (pending invitations cancelled) by default (owner never touched; the wrapped form can set `undeclared: keep`). */
   collaborators?: CollaboratorConfig[] | UndeclaredPolicyList<CollaboratorConfig>;
   /** Org team access to the repo; skipped on personal accounts. */
@@ -555,6 +565,44 @@ export interface CodeScanningDefaultSetupConfig {
   threat_model?: "remote" | "remote_and_local";
 }
 
+/** PATCH /repos/{r}/code-quality/setup, sent verbatim. */
+export interface CodeQualitySetupConfig {
+  /** Turn code quality analysis on ("configured") or off ("not-configured"). */
+  state?: "configured" | "not-configured";
+  /** Languages to analyze, compared as a set; GitHub auto-detects when omitted. */
+  languages?: string[];
+  /** Run on GitHub-hosted ("standard") or labeled self-hosted runners. */
+  runner_type?: "standard" | "labeled";
+  /** Runner label when runner_type is "labeled"; null clears it. */
+  runner_label?: string | null;
+  /** AI-powered findings: "on_push" runs them on every push, "disabled" turns them off. */
+  ai_findings_option?: "disabled" | "on_push";
+}
+
+/**
+ * PATCH /repos/{r}/check-suites/preferences, sent verbatim. Write-only
+ * upstream: GitHub exposes no read endpoint for these preferences, so check
+ * mode cannot verify them and apply re-asserts the declared preferences on
+ * every run.
+ */
+export interface CheckSuitePreferencesConfig {
+  /** Per-app toggles for whether pushes automatically create check suites. */
+  auto_trigger_checks: AutoTriggerCheckConfig[];
+  /** Future preference fields pass through verbatim. */
+  [key: string]: unknown;
+}
+
+/** One per-app auto-trigger toggle. Extra fields pass through verbatim. */
+export interface AutoTriggerCheckConfig {
+  /**
+   * The id of the GitHub App the preference applies to.
+   * @asType integer
+   */
+  app_id: number;
+  /** Whether pushes automatically create check suites for this app; GitHub defaults each app to true. */
+  setting: boolean;
+}
+
 /** GitHub Pages site configuration; use `pages: null` to disable the site. */
 export interface PagesConfig {
   /** "workflow" (GitHub Actions) or "legacy" (branch). */
@@ -772,8 +820,10 @@ export const SECTION_KEYS = [
   "codespaces_secrets",
   "agents_secrets",
   "workflows",
+  "check_suite_preferences",
   "pages",
   "code_scanning_default_setup",
+  "code_quality_setup",
   "collaborators",
   "teams",
   "milestones",

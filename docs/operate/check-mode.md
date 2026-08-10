@@ -130,6 +130,9 @@ rather than drift, and each note says what apply does about it:
 - Write-only repository toggles - today `repository.enable_git_lfs`: GitHub
   offers no endpoint that reports the state, so apply re-asserts the
   declared value on every run.
+- The whole `check_suite_preferences` section: GitHub exposes no read
+  endpoint for check suite preferences, so check mode issues no request at
+  all for it and apply re-asserts the declared preferences on every run.
 - `interaction_limits.expiry`: GitHub accepts a duration but reads back only
   the computed `expires_at` timestamp, so apply re-arms the limit on every
   run.

@@ -54,6 +54,7 @@ import type { LoggedRequest } from "./mock/routes.js";
 import {
   foldRepoResults,
   foldSectionOutcomes,
+  NO_READ_SECTIONS,
   predictDiscovery,
   predictMulti,
   predictOutcomes,
@@ -1383,7 +1384,8 @@ async function faultedSectionRun(seed: number, plan: SectionFaultPlan): Promise<
  * require a healthy run in which NONE of them fires, the inverse of
  * assertFaultFired's non-vacuity check. A firing means the section gained an
  * unconditional read and belongs in SECTION_PRIMARY_READ so the positive
- * battery covers it.
+ * battery covers it. A NO_READ_SECTIONS member arms nothing (there is no GET
+ * to fault) and its run degrades to the outcome pin alone.
  */
 async function unfaultableSectionRun(
   seed: number,
@@ -1391,9 +1393,13 @@ async function unfaultableSectionRun(
 ): Promise<IterationResult> {
   const readKeys = unfaultableReadKeys(section);
   const problems: string[] = [];
-  if (readKeys.length === 0) {
-    // No GETs at all would make this run vacuous; every unfaultable section
-    // declares read endpoints today, so an empty derivation is a rename bug.
+  if (readKeys.length === 0 && !NO_READ_SECTIONS.has(section)) {
+    // Zero GETs would make this run vacuous. A section in NO_READ_SECTIONS
+    // (derived from the same ENDPOINTS declarations) is exempt by
+    // construction - there is genuinely nothing to arm, and the outcome pin
+    // below still proves the full-width apply stays healthy - but for every
+    // OTHER section an empty derivation is a keying bug in
+    // unfaultableReadKeys, not an exemption.
     problems.push(`no GET endpoints derived for "${section}" - the battery run is vacuous`);
     return iterationResult(problems, { sections: [section] }, `[unfaultable ${section}] `);
   }

@@ -497,6 +497,49 @@ function genCodeScanning(rng: Rng): Json {
   return cfg;
 }
 
+/** The languages the code-quality PATCH accepts (a subset of the GET enum). */
+const CODE_QUALITY_LANGUAGES = [
+  "csharp",
+  "go",
+  "java-kotlin",
+  "javascript-typescript",
+  "python",
+  "ruby",
+] as const;
+
+function genCodeQuality(rng: Rng): Json {
+  const cfg: Json = { state: rng.pick(["configured", "not-configured"]) };
+  if (rng.bool(0.3)) {
+    cfg.runner_type = rng.pick(["standard", "labeled"] as const);
+    if (cfg.runner_type === "labeled") {
+      // runner_label pairs with the labeled runner type (schema.ts).
+      cfg.runner_label = "e2e-runner";
+    }
+  }
+  if (rng.bool(0.5)) {
+    cfg.languages = Array.from({ length: rng.int(3) + 1 }, () => rng.pick(CODE_QUALITY_LANGUAGES));
+  }
+  if (rng.bool(0.3)) {
+    cfg.ai_findings_option = rng.pick(["disabled", "on_push"]);
+  }
+  return cfg;
+}
+
+/** GitHub App ids for auto_trigger_checks entries; count <= pool keeps them unique. */
+const AUTO_TRIGGER_APP_IDS = [15368, 29310, 62410] as const;
+
+function genCheckSuitePreferences(rng: Rng): Json {
+  return {
+    auto_trigger_checks: Array.from(
+      { length: rng.int(AUTO_TRIGGER_APP_IDS.length) + 1 },
+      (_, i) => ({
+        app_id: AUTO_TRIGGER_APP_IDS[i] as number,
+        setting: rng.bool(),
+      }),
+    ),
+  };
+}
+
 function genCollaborators(rng: Rng): EntriesForm {
   const used = new Set<string>();
   const out: Json[] = [];
@@ -971,8 +1014,10 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   codespaces_secrets: genSecretEntries,
   agents_secrets: genSecretEntries,
   workflows: genWorkflows,
+  check_suite_preferences: genCheckSuitePreferences,
   pages: genPages,
   code_scanning_default_setup: genCodeScanning,
+  code_quality_setup: genCodeQuality,
   collaborators: genCollaborators,
   teams: genTeams,
   milestones: genMilestones,
@@ -1276,11 +1321,13 @@ const ARRAY_SECTIONS = [
   "secret_scanning_custom_patterns",
 ] as const satisfies readonly SectionKey[];
 
-/** The sections whose settings value is a plain record (anyRecord shapes). */
+/** The sections whose settings value is a single object (anyRecord or looseObject shapes). */
 const RECORD_SECTIONS = [
   "repository",
   "actions",
+  "check_suite_preferences",
   "code_scanning_default_setup",
+  "code_quality_setup",
 ] as const satisfies readonly SectionKey[];
 
 /**
@@ -1575,13 +1622,14 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
  * A fault aimed here is guaranteed to fire, which the fuzz iteration's
  * faultsFired assertion turns into a non-vacuity proof. Sections whose first
  * read is conditional or check-mode-only are deliberately absent: repository,
- * environments, and code_scanning_default_setup read
+ * environments, code_scanning_default_setup, and code_quality_setup read
  * only under check (apply
  * writes unconditionally; environments' variables list additionally fires
- * only when an entry declares the nested key), and branches/actions/
+ * only when an entry declares the nested key), branches/actions/
  * interaction_limits gate their reads on the
  * declared keys (interaction_limits' base read is also check-mode-only; its
- * cap and bypass reads fire only when those keys are declared) - a fault
+ * cap and bypass reads fire only when those keys are declared), and
+ * check_suite_preferences declares no read endpoint at all - a fault
  * aimed at a read that never happens would fail the
  * non-vacuity assertion instead of testing anything.
  */
@@ -1622,7 +1670,9 @@ export const UNFAULTABLE_SECTIONS = [
   "branches",
   "environments",
   "actions",
+  "check_suite_preferences",
   "code_scanning_default_setup",
+  "code_quality_setup",
   "interaction_limits",
 ] as const satisfies readonly SectionKey[];
 export type UnfaultableSection = (typeof UNFAULTABLE_SECTIONS)[number];
@@ -1695,6 +1745,19 @@ export const UNFAULTABLE_APPLY_SETTINGS: {
     query_suite: "default",
     languages: ["javascript-typescript"],
     threat_model: "remote",
+  },
+  // The setup GET runs only in check mode; apply PATCHes directly,
+  // mirroring code_scanning_default_setup.
+  code_quality_setup: {
+    state: "configured",
+    languages: ["javascript-typescript"],
+    runner_type: "standard",
+    ai_findings_option: "disabled",
+  },
+  // The strongest member: the section declares NO read endpoint at all, so
+  // the battery has nothing to arm and the exemption holds by construction.
+  check_suite_preferences: {
+    auto_trigger_checks: [{ app_id: 15368, setting: false }],
   },
   // The base-limit GET runs only in check mode; apply re-arms via PUT. The
   // pull_request_creation_cap and pull_request_creation_bypass keys are

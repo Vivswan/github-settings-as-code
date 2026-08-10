@@ -116,6 +116,14 @@ export interface LiveState {
   pages?: Json | null;
   /** GET /code-scanning/default-setup body. */
   code_scanning?: Json;
+  /** GET /code-quality/setup body. */
+  code_quality?: Json;
+  /**
+   * The stored check suite preferences ({auto_trigger_checks}). Write-only
+   * on the real API (no GET exists); the PATCH echoes this back under a
+   * `preferences` wrapper.
+   */
+  check_suite_preferences?: Json;
   /** Direct collaborators (GET shape with role_name), replaces the baseline. */
   collaborators?: Json[];
   /**
@@ -269,6 +277,9 @@ export interface MockState {
   workflows: Json[];
   pages: Json | null;
   code_scanning: Json;
+  code_quality: Json;
+  /** Stored check suite preferences; the PATCH merges and echoes them. */
+  check_suite_preferences: Json;
   collaborators: Json[];
   /** Pending repository invitations in the repository-invitation GET shape. */
   invitations: Json[];
@@ -595,6 +606,22 @@ export function buildState(
     workflows: ls.workflows ? clone(ls.workflows) : [],
     pages: ls.pages !== undefined ? clone(ls.pages) : null,
     code_scanning: ls.code_scanning ? clone(ls.code_scanning) : {},
+    // GitHub's fresh-repo default, not {}: the GET body's nullable fields
+    // are spelled out so an unseeded read answers a realistic shape.
+    code_quality: ls.code_quality
+      ? clone(ls.code_quality)
+      : {
+          state: "not-configured",
+          languages: [],
+          runner_type: null,
+          runner_label: null,
+          updated_at: null,
+          schedule: null,
+          ai_findings_option: null,
+        },
+    check_suite_preferences: ls.check_suite_preferences
+      ? clone(ls.check_suite_preferences)
+      : { auto_trigger_checks: [] },
     collaborators: ls.collaborators ? clone(ls.collaborators) : [],
     invitations: (ls.invitations ?? []).map((invitation) =>
       completeInvitation(clone(invitation), takeId(), repo),

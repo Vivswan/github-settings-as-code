@@ -77,6 +77,8 @@ describe("changed-sections file map", () => {
       "codespaces-secrets.ts": ["codespaces_secrets"],
       "agents-secrets.ts": ["agents_secrets"],
       "code-scanning.ts": ["code_scanning_default_setup"],
+      "code-quality.ts": ["code_quality_setup"],
+      "check-suite-preferences.ts": ["check_suite_preferences"],
       "interaction-limits.ts": ["interaction_limits"],
       "actions-variables.ts": ["actions_variables"],
       "agents-variables.ts": ["agents_variables"],

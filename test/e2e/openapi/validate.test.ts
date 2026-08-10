@@ -39,6 +39,23 @@ describe("toJsonSchema", () => {
     });
   });
 
+  test("a nullable enum gains null (the code-quality runner_type shape)", () => {
+    // GitHub spells nullable enums as nullable:true beside an enum WITHOUT
+    // null; the widened type alone cannot get null past the enum keyword.
+    expect(toJsonSchema({ type: "string", nullable: true, enum: ["standard", "labeled"] })).toEqual(
+      { type: ["string", "null"], enum: ["standard", "labeled", null] },
+    );
+    expect(toJsonSchema({ type: "string", nullable: true, enum: ["weekly", null] })).toEqual({
+      type: ["string", "null"],
+      enum: ["weekly", null],
+    });
+    // Not nullable: the enum stays as declared.
+    expect(toJsonSchema({ type: "string", enum: ["standard"] })).toEqual({
+      type: "string",
+      enum: ["standard"],
+    });
+  });
+
   test("nullable without a type is dropped, not turned into a bare null type", () => {
     // No `type` to extend, so nullable simply disappears (ajv treats a
     // type-less schema as accept-anything, which is the safe reading).

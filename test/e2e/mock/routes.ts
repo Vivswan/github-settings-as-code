@@ -1150,6 +1150,44 @@ const HANDLERS: Record<string, Handler> = {
     return ok({});
   },
 
+  // code_quality_setup ------------------------------------------------------
+  "code_quality_setup.get": ({ state }) => ok(state.code_quality),
+  "code_quality_setup.update": ({ state, body }) => {
+    // Mirrors code_scanning_default_setup.update: the in-progress 409 flag
+    // (set via live_state.code_quality) is checked first so a scenario can
+    // trigger it independently, then the deterministic 200-vs-202 rule - a
+    // `languages` change starts an async configuration run.
+    if (state.code_quality.configuration_run_in_progress === true) {
+      return { status: 409, body: { message: "A configuration run is already in progress" } };
+    }
+    const payload = asObject(body);
+    const changesLanguages =
+      "languages" in payload &&
+      JSON.stringify(payload.languages) !== JSON.stringify(state.code_quality.languages);
+    Object.assign(state.code_quality, payload);
+    if (changesLanguages) {
+      return {
+        status: 202,
+        body: {
+          run_id: state.nextId++,
+          run_url: `https://api.github.com/repos/${ADMIN_SLUG}/code-quality/setup/runs/1`,
+        },
+      };
+    }
+    // Like code-scanning's, the spec's 200 response is an EMPTY object
+    // (additionalProperties: false); state is still updated above.
+    return ok({});
+  },
+
+  // check_suite_preferences --------------------------------------------------
+  "check_suite_preferences.update": ({ state, body }) => {
+    // The one write-only endpoint: no GET exists, so the stored preferences
+    // are visible only through this PATCH's echo ({preferences, repository}
+    // per the spec's check-suite-preference schema).
+    Object.assign(state.check_suite_preferences, asObject(body));
+    return ok({ preferences: state.check_suite_preferences, repository: state.repo });
+  },
+
   // collaborators ----------------------------------------------------------
   "collaborators.list": ({ state, query }) => ok(slicePage(state.collaborators, query)),
   "collaborators.update": ({ state, pathname, body }) => {

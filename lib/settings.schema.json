@@ -201,6 +201,24 @@
       ],
       "type": "object"
     },
+    "AutoTriggerCheckConfig": {
+      "description": "One per-app auto-trigger toggle. Extra fields pass through verbatim.",
+      "properties": {
+        "app_id": {
+          "description": "The id of the GitHub App the preference applies to.",
+          "type": "integer"
+        },
+        "setting": {
+          "description": "Whether pushes automatically create check suites for this app; GitHub defaults each app to true.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "app_id",
+        "setting"
+      ],
+      "type": "object"
+    },
     "AutolinkConfig": {
       "description": "One autolink reference, matched by key prefix.",
       "properties": {
@@ -255,6 +273,69 @@
         "required_signatures": {
           "description": "Require signed commits on the branch. The one protection key the PUT silently drops, so it is applied through the POST/DELETE .../protection/required_signatures sub-endpoint after the PUT. GitHub does not document whether the protection PUT preserves an existing signature requirement, so declare the toggle on any branch that carries one - a declared value is pinned either way.",
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "CheckSuitePreferencesConfig": {
+      "additionalProperties": {
+        "description": "Future preference fields pass through verbatim."
+      },
+      "description": "PATCH /repos/{r}/check-suites/preferences, sent verbatim. Write-only upstream: GitHub exposes no read endpoint for these preferences, so check mode cannot verify them and apply re-asserts the declared preferences on every run.",
+      "properties": {
+        "auto_trigger_checks": {
+          "description": "Per-app toggles for whether pushes automatically create check suites.",
+          "items": {
+            "$ref": "#/definitions/AutoTriggerCheckConfig"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "auto_trigger_checks"
+      ],
+      "type": "object"
+    },
+    "CodeQualitySetupConfig": {
+      "description": "PATCH /repos/{r}/code-quality/setup, sent verbatim.",
+      "properties": {
+        "ai_findings_option": {
+          "description": "AI-powered findings: \"on_push\" runs them on every push, \"disabled\" turns them off.",
+          "enum": [
+            "disabled",
+            "on_push"
+          ],
+          "type": "string"
+        },
+        "languages": {
+          "description": "Languages to analyze, compared as a set; GitHub auto-detects when omitted.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "runner_label": {
+          "description": "Runner label when runner_type is \"labeled\"; null clears it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runner_type": {
+          "description": "Run on GitHub-hosted (\"standard\") or labeled self-hosted runners.",
+          "enum": [
+            "standard",
+            "labeled"
+          ],
+          "type": "string"
+        },
+        "state": {
+          "description": "Turn code quality analysis on (\"configured\") or off (\"not-configured\").",
+          "enum": [
+            "configured",
+            "not-configured"
+          ],
+          "type": "string"
         }
       },
       "type": "object"
@@ -1016,6 +1097,14 @@
             "$ref": "#/definitions/BranchConfig"
           },
           "type": "array"
+        },
+        "check_suite_preferences": {
+          "$ref": "#/definitions/CheckSuitePreferencesConfig",
+          "description": "Check suite preferences: per-GitHub-App `auto_trigger_checks` toggles controlling whether pushes automatically create check suites. Write-only upstream (GitHub exposes no read endpoint), so check mode cannot verify them and apply re-asserts the declared preferences on every run. The token owner must be a repository administrator."
+        },
+        "code_quality_setup": {
+          "$ref": "#/definitions/CodeQualitySetupConfig",
+          "description": "Code quality analysis setup."
         },
         "code_scanning_default_setup": {
           "$ref": "#/definitions/CodeScanningDefaultSetupConfig",

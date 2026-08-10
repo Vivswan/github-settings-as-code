@@ -255,10 +255,17 @@ describe("denial semantics", () => {
     expect(Object.keys(DENIAL_SEMANTICS).sort()).toEqual([...SECTION_KEYS].sort() as string[]);
   });
 
-  test("the five absent sections are exactly branches, custom_properties, environments, pages, teams", () => {
+  test("the six absent sections are exactly branches, check_suite_preferences, custom_properties, environments, pages, teams", () => {
     const absent: string[] = SECTION_KEYS.filter((k) => DENIAL_SEMANTICS[k] === "absent");
     expect(absent.sort()).toEqual(
-      ["branches", "custom_properties", "environments", "pages", "teams"].sort(),
+      [
+        "branches",
+        "check_suite_preferences",
+        "custom_properties",
+        "environments",
+        "pages",
+        "teams",
+      ].sort(),
     );
   });
 
@@ -275,6 +282,7 @@ describe("denial semantics", () => {
         "codespaces_secrets",
         "autolinks",
         "code_scanning_default_setup",
+        "code_quality_setup",
         "collaborators",
         "deploy_keys",
         "interaction_limits",

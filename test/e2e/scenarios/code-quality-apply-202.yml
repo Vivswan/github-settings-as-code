@@ -1,0 +1,26 @@
+name: code-quality-apply-202
+description: >-
+  The settings file changes the code-quality languages. The PATCH answers
+  202 with a run_id (GitHub starts an async configuration run), and the
+  change line names that run. A check rerun converges over the mutated state.
+settings:
+  code_quality_setup:
+    state: configured
+    languages:
+      - javascript-typescript
+      - python
+live_state:
+  code_quality:
+    state: configured
+    languages:
+      - javascript-typescript
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    code_quality_setup: applied
+  mutations:
+    - "PATCH /repos/{repo}/code-quality/setup"
+  stdout_contains:
+    - "GitHub started configuration run"
+  converges: true

@@ -133,6 +133,13 @@ export function toJsonSchema(node: unknown, keepRequired = false): unknown {
     if (!types.includes("null")) {
       out.type = [...types, "null"];
     }
+    // A sibling enum must gain null too: OpenAPI 3.0 nullable permits null
+    // even when the enum omits it (GitHub's descriptor spells nullable
+    // enums exactly that way), and a widened type alone cannot get a null
+    // value past the enum keyword.
+    if (Array.isArray(out.enum) && !out.enum.includes(null)) {
+      out.enum = [...out.enum, null];
+    }
   } else if (input.nullable === true) {
     // nullable beside a bare oneOf/anyOf (no sibling type; the custom
     // property `value` schema is the known case): add a null branch. A null

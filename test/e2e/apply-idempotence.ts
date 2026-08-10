@@ -53,6 +53,11 @@
  *   the unsealed value, not the (per-seal random) ciphertext.
  * - pages (false): an existing site is PUT unconditionally.
  * - code_scanning_default_setup (false): the PATCH runs unconditionally.
+ * - code_quality_setup (false): the PATCH runs unconditionally, mirroring
+ *   code_scanning_default_setup (the GET runs only in check mode).
+ * - check_suite_preferences (false): no read endpoint exists to compare
+ *   against, so the PATCH re-asserts the declared preferences on every
+ *   apply by design.
  * - teams (false): team access is granted (PUT) unconditionally.
  * - interaction_limits (false): the PUT re-arms the self-expiring limit
  *   unconditionally on every apply - the re-arm IS the desired behavior. The
@@ -97,8 +102,10 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   codespaces_secrets: false,
   agents_secrets: false,
   workflows: true,
+  check_suite_preferences: false,
   pages: false,
   code_scanning_default_setup: false,
+  code_quality_setup: false,
   collaborators: true,
   teams: false,
   milestones: true,

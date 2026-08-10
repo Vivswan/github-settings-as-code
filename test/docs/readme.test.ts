@@ -564,9 +564,7 @@ describe("pre-filled PAT form URL", () => {
     // including the three that differ from our resource names.
     agent_secrets: "agent_secrets",
     agent_variables: "agent_variables",
-    // No section consumes this grant yet; the slug lands, verified against
-    // the live form, with the section that first needs it.
-    checks: null,
+    checks: "checks",
   } satisfies Record<PatResource, string | null>;
 
   test("every PAT resource's form parameter appears in the URL", () => {

@@ -1,0 +1,24 @@
+name: code-quality-apply-converges
+description: >-
+  Apply over a repository whose code quality setup diverges (no languages
+  change, so the PATCH answers 200 synchronously). A check rerun converges
+  over the mutated state.
+settings:
+  code_quality_setup:
+    state: configured
+    runner_type: standard
+    ai_findings_option: disabled
+live_state:
+  code_quality:
+    state: not-configured
+    languages: []
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    code_quality_setup: applied
+  mutations:
+    - "PATCH /repos/{repo}/code-quality/setup"
+  stdout_contains:
+    - "applied code quality setup"
+  converges: true
