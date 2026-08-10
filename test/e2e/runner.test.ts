@@ -100,7 +100,7 @@ describe("parseGithubOutput", () => {
 describe("parseSummaryOutcomes", () => {
   test("extracts key -> status from the section table rows", () => {
     const summary = [
-      "## repo-settings-as-code (apply)",
+      "## github-settings-as-code (apply)",
       "",
       "| Section | Status | Detail |",
       "|---|---|---|",

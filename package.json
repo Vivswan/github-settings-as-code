@@ -1,5 +1,5 @@
 {
-  "name": "repo-settings-as-code",
+  "name": "github-settings-as-code",
   "private": true,
   "license": "SEE LICENSE IN LICENSE.md",
   "description": "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more.",
@@ -15,7 +15,7 @@
     "fuzz": "bun test/e2e/fuzz.ts",
     "build": "bun run build:bundle && bun run build:schema",
     "build:bundle": "bun build src/main.ts --target=node --outfile lib/index.js",
-    "build:schema": "ts-json-schema-generator --path src/schema.ts --type SettingsFile --tsconfig tsconfig.json --additional-properties --id https://raw.githubusercontent.com/Vivswan/repo-settings-as-code/main/lib/settings.schema.json --out lib/settings.schema.json && bun .github/scripts/finalize-schema.ts",
+    "build:schema": "ts-json-schema-generator --path src/schema.ts --type SettingsFile --tsconfig tsconfig.json --additional-properties --id https://raw.githubusercontent.com/Vivswan/github-settings-as-code/main/lib/settings.schema.json --out lib/settings.schema.json && bun .github/scripts/finalize-schema.ts",
     "build:check": "bun run build && git diff --exit-code lib/ && ! git ls-files --others --exclude-standard lib/ | grep .",
     "prepare": "husky"
   },

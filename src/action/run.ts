@@ -1,5 +1,5 @@
 /**
- * repo-settings-as-code: apply a declarative .github/settings.yml to the repo.
+ * github-settings-as-code: apply a declarative .github/settings.yml to the repo.
  *
  * Policy model:
  * - mode: apply (default) mutates; check reports drift and exits 1 on any.

@@ -21,7 +21,7 @@ jobs:
     steps:
       - id: check
         continue-on-error: true
-        uses: Vivswan/repo-settings-as-code@v1 # x-release-please-major
+        uses: Vivswan/github-settings-as-code@v1 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_READ_TOKEN }}
           mode: check

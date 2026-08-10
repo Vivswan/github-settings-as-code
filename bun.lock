@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "repo-settings-as-code",
+      "name": "github-settings-as-code",
       "dependencies": {
         "@actions/artifact": "^6.2.1",
         "@actions/core": "^3.0.1",

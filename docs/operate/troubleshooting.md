@@ -155,7 +155,7 @@ for the trace when you need to see the requests that succeeded.
 ## Behavior does not match src/ (stale bundle)
 
 When you run the action from a fork or a branch
-(`uses: your-fork/repo-settings-as-code@your-branch`), what executes is
+(`uses: your-fork/github-settings-as-code@your-branch`), what executes is
 `lib/index.js`, the committed bundle, not the TypeScript under `src/`. If
 you changed `src/` without rebuilding, the run behaves like the old code and
 no error tells you so. Run `bun run build` to regenerate the bundle and the

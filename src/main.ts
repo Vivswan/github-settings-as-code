@@ -15,7 +15,7 @@ if (invokedDirectly) {
     (error) => {
       annotate(
         "error",
-        `repo-settings-as-code stopped unexpectedly: ${String(error)}. Re-run the workflow; if it recurs, report a bug with this log attached`,
+        `github-settings-as-code stopped unexpectedly: ${String(error)}. Re-run the workflow; if it recurs, report a bug with this log attached`,
       );
       process.exit(1);
     },

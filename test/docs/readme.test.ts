@@ -186,7 +186,7 @@ describe("README version pins", () => {
     if (version === "0.0.0") {
       return;
     }
-    const pins = [...readme.matchAll(/uses: Vivswan\/repo-settings-as-code@(\S+)/g)].map(
+    const pins = [...readme.matchAll(/uses: Vivswan\/github-settings-as-code@(\S+)/g)].map(
       (m) => m[1],
     );
     expect(pins.length).toBeGreaterThan(0);

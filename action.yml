@@ -1,4 +1,4 @@
-name: Repo Settings as Code
+name: GitHub Settings as Code
 description: "Apply declarative repository settings from settings.yml: repo fields, topics, labels, rulesets, branch protection, and more."
 author: Vivswan
 branding:

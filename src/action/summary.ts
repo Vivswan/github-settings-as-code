@@ -56,7 +56,7 @@ function writeSummaryFile(build: () => string[]): void {
 }
 
 export function writeSummary(outcomes: SectionOutcome[], mode: string): void {
-  writeSummaryFile(() => [`## repo-settings-as-code (${mode})`, "", ...outcomeRows(outcomes)]);
+  writeSummaryFile(() => [`## github-settings-as-code (${mode})`, "", ...outcomeRows(outcomes)]);
 }
 
 /**
@@ -73,7 +73,7 @@ export function writeRedactedSummary(
   result: RepoResult,
 ): void {
   writeSummaryFile(() => [
-    `## repo-settings-as-code (${mode})`,
+    `## github-settings-as-code (${mode})`,
     "",
     `:${STATUS_ICON[result]}: ${result} - ${REDACTED_NOTE}`,
     "",
@@ -84,7 +84,7 @@ export function writeRedactedSummary(
 export function writeMultiSummary(views: PublicTargetView[], mode: string): void {
   writeSummaryFile(() => {
     const lines = [
-      `## repo-settings-as-code (${mode}, ${views.length} repositories)`,
+      `## github-settings-as-code (${mode}, ${views.length} repositories)`,
       "",
       "| Repository | Source | Result |",
       "|---|---|---|",

@@ -29,12 +29,21 @@ interface ActionInput {
   default?: unknown;
 }
 interface ActionYml {
+  name: string;
   inputs: Record<string, ActionInput>;
   outputs: Record<string, { description?: string }>;
   runs: { using?: string; main?: string };
 }
 
 const actionYml = parseYaml(readFileSync(join(ROOT, "action.yml"), "utf8")) as ActionYml;
+
+describe("action.yml <-> README", () => {
+  test("the marketplace display name matches the README H1", () => {
+    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+    const h1 = readme.match(/^# (.+)$/m)?.[1];
+    expect(actionYml.name).toBe(h1 as string);
+  });
+});
 
 /** Names in `a` missing from `b`, for an actionable failure message. */
 function missingFrom(a: readonly string[], b: readonly string[]): string[] {

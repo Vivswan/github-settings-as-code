@@ -35,7 +35,7 @@ input moves it). A comment at the top wires editor autocomplete and hover
 documentation to the published JSON Schema. A small first file:
 
 ```yaml settings
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/repo-settings-as-code/main/lib/settings.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/main/lib/settings.schema.json
 
 repository:
   description: Payments service
@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/repo-settings-as-code@v1 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v1 # x-release-please-major
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
           mode: check

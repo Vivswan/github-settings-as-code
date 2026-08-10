@@ -480,7 +480,7 @@ describe("docs/ guide pages", () => {
     let references = 0;
     for (const page of guidePages()) {
       const markdown = readFileSync(join(DOCS, page), "utf8");
-      for (const m of markdown.matchAll(/uses: Vivswan\/repo-settings-as-code@(\S+)/g)) {
+      for (const m of markdown.matchAll(/uses: Vivswan\/github-settings-as-code@(\S+)/g)) {
         references++;
         expect(
           m[1],

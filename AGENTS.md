@@ -6,7 +6,7 @@ symlinks to this file, so edit only here.
 
 ## Project
 
-Settings as Code: GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more. A loud, stateless Probot Settings replacement.
+GitHub Settings as Code: GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more. A loud, stateless Probot Settings replacement.
 
 ## Toolchain
 

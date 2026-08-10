@@ -1,6 +1,6 @@
 # Guides
 
-The documentation for Repo Settings as Code, in four groups. Start here if
+The documentation for GitHub Settings as Code, in four groups. Start here if
 the [README](../README.md) told you what the action does and you want to
 know how to put it to work: the start pages are enough to get a repository
 under management, and the rest are there when their topic comes up.

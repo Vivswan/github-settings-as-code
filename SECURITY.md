@@ -9,7 +9,7 @@ Only the latest release is supported.
 **Do not open a public issue for security problems.**
 
 Report vulnerabilities privately via
-[GitHub Security Advisories](https://github.com/vivswan/repo-settings-as-code/security/advisories/new)
+[GitHub Security Advisories](https://github.com/vivswan/github-settings-as-code/security/advisories/new)
 ("Report a vulnerability"). If that page is unavailable (GitHub offers no
 advisories on private personal repositories), contact
 [@Vivswan](https://github.com/vivswan)

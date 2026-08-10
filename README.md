@@ -1,4 +1,4 @@
-# Repo Settings as Code
+# GitHub Settings as Code
 
 Apply declarative repository settings from `.github/settings.yml`: a loud,
 stateless replacement for the [Probot Settings app](https://github.com/repository-settings/app)
@@ -9,7 +9,7 @@ silently.
 ## Usage
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token):
-   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&checks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
+   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=github-settings-as-code&description=Token+for+Vivswan%2Fgithub-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&checks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
    starts you off with every repository permission the
    [Sections](#sections) table can need. Pick the resource owner and
    repositories, and add Members: read by hand when the owner is an
@@ -24,7 +24,7 @@ silently.
    editor autocomplete and hover docs (agents can fetch the same URL):
 
    ```yaml
-   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/repo-settings-as-code/main/lib/settings.schema.json
+   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/main/lib/settings.schema.json
    ```
 
 4. Add the workflow. On a repository with existing labels, autolinks, or
@@ -51,7 +51,7 @@ silently.
        runs-on: ubuntu-latest
        steps:
          - uses: actions/checkout@v7
-         - uses: Vivswan/repo-settings-as-code@v1.0.1
+         - uses: Vivswan/github-settings-as-code@v1.0.1
            with:
              token: ${{ secrets.ADMIN_TOKEN }}
    ```
@@ -167,7 +167,7 @@ repo-scoped gap and the user-scoped surface that is out of scope by design.
 ## Example settings.yml
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/repo-settings-as-code/main/lib/settings.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/main/lib/settings.schema.json
 
 repository:
   description: My project

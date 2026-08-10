@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/repo-settings-as-code@v1 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v1 # x-release-please-major
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
           mode: check
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/repo-settings-as-code@v1 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v1 # x-release-please-major
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
           mode: check

@@ -1,4 +1,4 @@
-# Contributing to repo-settings-as-code
+# Contributing to github-settings-as-code
 
 Thanks for contributing! This document covers the conventions every change
 in this repository goes through.
