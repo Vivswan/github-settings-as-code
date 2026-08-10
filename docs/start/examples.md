@@ -202,6 +202,10 @@ milestones:
 interaction_limits:
   limit: collaborators_only
   expiry: one_week
+  pull_request_creation_cap:
+    enabled: true
+    max_open_pull_requests: 5
+  pull_request_creation_bypass: [octocat, hubot]
 
 custom_properties:
   - property_name: team
@@ -264,7 +268,9 @@ pages: null
 ```
 
 `interaction_limits: null` clears an active repository-level interaction
-limit. An absent key leaves whatever limit is live untouched.
+limit - the base limit only; the pull request creation cap and its bypass
+list are separate resources a `null` never touches. An absent key leaves
+whatever limit is live untouched.
 
 ```yaml settings
 interaction_limits: null

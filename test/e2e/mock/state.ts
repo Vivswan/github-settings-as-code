@@ -123,6 +123,25 @@ export interface LiveState {
   /** GET /interaction-limits body ({limit, origin, expires_at}); default none. */
   interaction_limits?: Json;
   /**
+   * GET /interaction-limits/pulls/creation-cap body ({enabled,
+   * max_open_pull_requests}); the default mirrors an unconfigured repo
+   * (disabled). The spec requires both fields in every response.
+   */
+  pull_creation_cap?: Json;
+  /**
+   * When true, the pull request creation cap endpoints answer 405 (the cap
+   * is not available on this repository), matching GitHub's documented
+   * Method Not Allowed on both the GET and the PATCH.
+   */
+  pull_creation_cap_unavailable?: boolean;
+  /**
+   * The pull request creation cap bypass list (GET shape: simple-user
+   * objects), replaces the (empty) baseline. A seed may be sparse (just a
+   * login); buildState completes each user via bypassUser, the same
+   * completion the PUT handler applies.
+   */
+  pull_bypass_list?: Json[];
+  /**
    * Actions repository variables (GET shape: name, value, created_at,
    * updated_at), replaces the baseline. GitHub stores names uppercased, so
    * seeded names should be uppercase to mirror the live service.
@@ -237,6 +256,11 @@ export interface MockState {
   /** The active interaction limit, or null when none is set. */
   interaction_limits: Json | null;
   interaction_limits_org_override: boolean;
+  /** The pull request creation cap ({enabled, max_open_pull_requests}). */
+  pull_creation_cap: Json;
+  pull_creation_cap_unavailable: boolean;
+  /** The creation-cap bypass list, simple-user objects in GET shape. */
+  pull_bypass_list: Json[];
   actions_variables: Json[];
   /** Repository webhooks; config.secret is stored real, GETs echo "********". */
   hooks: Json[];
@@ -327,6 +351,30 @@ export function completeHook(seed: Json, id: number): Json {
     last_response: { code: null, status: "unused", message: null },
     id: hookId,
     ...seed,
+  };
+}
+
+/**
+ * Complete a (possibly sparse) bypass-list user to the simple-user GET shape,
+ * so scenario seeds stay terse (just a login) and the PUT handler stores the
+ * same shape it will later serve. The seed's own fields win; the id comes
+ * from the caller unless the seed carries one. Deterministic (no clocks, no
+ * randomness) so repeat applies leave the state byte-stable.
+ */
+export function bypassUser(seed: Json, id: number): Json {
+  const login = String(seed.login ?? "");
+  const userId = Number(seed.id ?? id);
+  return {
+    id: userId,
+    node_id: `MDQ6VXNlcj${userId}`,
+    avatar_url: `https://avatars.githubusercontent.com/u/${userId}?v=4`,
+    gravatar_id: "",
+    url: `https://api.github.com/users/${login}`,
+    html_url: `https://github.com/${login}`,
+    type: "User",
+    site_admin: false,
+    ...seed,
+    login,
   };
 }
 
@@ -474,6 +522,13 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     milestones: ls.milestones ? clone(ls.milestones) : [],
     interaction_limits: ls.interaction_limits ? clone(ls.interaction_limits) : null,
     interaction_limits_org_override: ls.interaction_limits_org_override ?? false,
+    // An unconfigured repo's cap is disabled; the spec requires
+    // max_open_pull_requests in every response, so the default carries one.
+    pull_creation_cap: ls.pull_creation_cap
+      ? clone(ls.pull_creation_cap)
+      : { enabled: false, max_open_pull_requests: 1 },
+    pull_creation_cap_unavailable: ls.pull_creation_cap_unavailable ?? false,
+    pull_bypass_list: (ls.pull_bypass_list ?? []).map((user) => bypassUser(clone(user), takeId())),
     actions_variables: ls.actions_variables ? clone(ls.actions_variables) : [],
     hooks: (ls.hooks ?? []).map((hook) => completeHook(clone(hook), takeId())),
     deploy_keys: ls.deploy_keys ? clone(ls.deploy_keys) : [],

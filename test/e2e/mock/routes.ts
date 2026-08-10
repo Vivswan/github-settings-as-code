@@ -40,6 +40,7 @@ import {
   unsealSecretValue,
 } from "./secrets.js";
 import {
+  bypassUser,
   CUSTOM_PROPERTY_DEFINITIONS,
   collaboratorFromPut,
   completeHook,
@@ -1271,6 +1272,47 @@ const HANDLERS: Record<string, Handler> = {
     state.interaction_limits = null;
     return noContent();
   },
+  "interaction_limits.capGet": ({ state }) =>
+    state.pull_creation_cap_unavailable ? CAP_UNAVAILABLE_405 : ok(state.pull_creation_cap),
+  "interaction_limits.capPatch": ({ state, body }) => {
+    if (state.pull_creation_cap_unavailable) {
+      return CAP_UNAVAILABLE_405;
+    }
+    // The PATCH requires enabled and takes max_open_pull_requests optionally;
+    // merging over the stored cap keeps the response's required max field.
+    state.pull_creation_cap = { ...state.pull_creation_cap, ...asObject(body) };
+    return ok(state.pull_creation_cap);
+  },
+  // The endpoint documents no pagination parameters, so the whole list is
+  // served in one body, like GitHub.
+  "interaction_limits.bypassList": ({ state }) => ok(state.pull_bypass_list),
+  "interaction_limits.bypassAdd": ({ state, body }) => {
+    // Adds the named logins to the list (case-insensitively deduped); never
+    // a wholesale replace - the DELETE removes. The documented 100-user
+    // total is enforced, so an add-before-remove regression 422s here.
+    const additions = bypassLogins(body).filter(
+      (login) => !state.pull_bypass_list.some((user) => sameLogin(user, login)),
+    );
+    if (state.pull_bypass_list.length + additions.length > 100) {
+      return {
+        status: 422,
+        body: {
+          message: "Validation Failed: the bypass list can only hold a maximum of 100 users",
+        },
+      };
+    }
+    for (const login of additions) {
+      state.pull_bypass_list.push(bypassUser({ login }, state.nextId++));
+    }
+    return noContent();
+  },
+  "interaction_limits.bypassRemove": ({ state, body }) => {
+    const logins = bypassLogins(body);
+    state.pull_bypass_list = state.pull_bypass_list.filter(
+      (user) => !logins.some((login) => sameLogin(user, login)),
+    );
+    return noContent();
+  },
 
   // actions_variables --------------------------------------------------------
   "actions_variables.list": ({ state, query }) => {
@@ -1726,6 +1768,23 @@ const INTERACTION_ORG_CONFLICT = {
   status: 409,
   body: { message: "Conflict: an organization or user interaction limit is in effect" },
 } as const;
+
+/** The 405 both creation-cap endpoints answer where the cap is unavailable. */
+const CAP_UNAVAILABLE_405 = {
+  status: 405,
+  body: { message: "Method Not Allowed: the pull request creation cap is not available" },
+} as const;
+
+/** The logins a bypass-list PUT/DELETE body names ({users: [logins]}). */
+function bypassLogins(body: unknown): string[] {
+  const users = asObject(body).users;
+  return Array.isArray(users) ? users.map(String) : [];
+}
+
+/** Case-insensitive login match, as GitHub treats logins. */
+function sameLogin(user: Json, login: string): boolean {
+  return String(user.login).toLowerCase() === login.toLowerCase();
+}
 
 /** The 409 both immutable-releases writes answer under owner enforcement. */
 const IMMUTABLE_OWNER_CONFLICT = {

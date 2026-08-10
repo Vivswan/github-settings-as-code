@@ -556,6 +556,40 @@ function genInteractionLimits(rng: Rng): Json | null {
   if (rng.bool()) {
     limits.expiry = rng.pick(["one_day", "three_days", "one_week", "one_month", "six_months"]);
   }
+  // The pulls keys are NEW draws appended after the original body, each on
+  // its own forked stream, so pre-existing seeds keep producing the same
+  // document above (the seed-stability convention; see genActions).
+  const capRng = rng.fork("pulls-cap");
+  if (capRng.bool(0.3)) {
+    const cap: Json = { enabled: capRng.bool() };
+    if (capRng.bool()) {
+      cap.max_open_pull_requests = capRng.pick([1, 5, 100, 1000]);
+    }
+    limits.pull_request_creation_cap = cap;
+  }
+  const bypassRng = rng.fork("pulls-bypass");
+  if (bypassRng.bool(0.3)) {
+    // Unique under the case-insensitive login key; a draw sometimes
+    // uppercases a declared login so the corpus exercises the
+    // case-insensitive match against the live list.
+    const logins = Array.from({ length: bypassRng.int(3) }, (_, i) => {
+      const login = `${bypassRng.pick(["octocat", "hubot", "dev"])}-${i}`;
+      return bypassRng.bool(0.3) ? login.toUpperCase() : login;
+    });
+    limits.pull_request_creation_bypass = logins;
+  }
+  // A pulls-only document (no base group at all) is valid and takes the
+  // apply path that skips the base PUT entirely; dropping the base keys is
+  // its own forked draw so documents whose pulls forks decline are
+  // untouched. Both base keys go together: expiry without limit is invalid.
+  if (
+    (limits.pull_request_creation_cap !== undefined ||
+      limits.pull_request_creation_bypass !== undefined) &&
+    rng.fork("pulls-only").bool(0.25)
+  ) {
+    delete limits.limit;
+    delete limits.expiry;
+  }
   return limits;
 }
 
@@ -1497,12 +1531,14 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
  * A fault aimed here is guaranteed to fire, which the fuzz iteration's
  * faultsFired assertion turns into a non-vacuity proof. Sections whose first
  * read is conditional or check-mode-only are deliberately absent: repository,
- * environments, code_scanning_default_setup, and interaction_limits read
+ * environments, and code_scanning_default_setup read
  * only under check (apply
  * writes unconditionally; environments' variables list additionally fires
- * only when an entry declares the nested key), and branches/actions gate
- * their reads on the
- * declared keys - a fault aimed at a read that never happens would fail the
+ * only when an entry declares the nested key), and branches/actions/
+ * interaction_limits gate their reads on the
+ * declared keys (interaction_limits' base read is also check-mode-only; its
+ * cap and bypass reads fire only when those keys are declared) - a fault
+ * aimed at a read that never happens would fail the
  * non-vacuity assertion instead of testing anything.
  */
 export const SECTION_PRIMARY_READ = {
@@ -1614,7 +1650,11 @@ export const UNFAULTABLE_APPLY_SETTINGS: {
     languages: ["javascript-typescript"],
     threat_model: "remote",
   },
-  // The limits GET runs only in check mode; apply re-arms via PUT.
+  // The base-limit GET runs only in check mode; apply re-arms via PUT. The
+  // pull_request_creation_cap and pull_request_creation_bypass keys are
+  // deliberately omitted: each triggers its own GET in apply mode too
+  // (compare-before-write within the key), the environments precedent of
+  // read-triggering keys left out of the battery.
   interaction_limits: { limit: "collaborators_only", expiry: "one_week" },
 };
 

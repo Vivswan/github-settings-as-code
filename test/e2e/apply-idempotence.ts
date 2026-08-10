@@ -51,7 +51,11 @@
  * - code_scanning_default_setup (false): the PATCH runs unconditionally.
  * - teams (false): team access is granted (PUT) unconditionally.
  * - interaction_limits (false): the PUT re-arms the self-expiring limit
- *   unconditionally on every apply - the re-arm IS the desired behavior.
+ *   unconditionally on every apply - the re-arm IS the desired behavior. The
+ *   pull_request_creation_cap PATCH and the bypass-list PUT/DELETE do
+ *   compare before writing (a second apply issues none of them), but the
+ *   unconditional base PUT keeps the whole section false, the environments
+ *   precedent.
  * - webhooks (false): a DECLARED config.secret rides the config PATCH on
  *   every apply run (GitHub echoes a live secret as "********", so there is
  *   nothing to compare against and re-sending is how rotations propagate);

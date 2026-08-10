@@ -1,0 +1,22 @@
+# The cap is persistent desired state (no self-expiry, unlike the base
+# limit): apply GETs it first and PATCHes only on divergence. The
+# convergence rerun GETs the stored cap back, subsetDiffs clean, and issues
+# no second PATCH.
+name: interaction-limits-cap-apply-converges
+settings:
+  interaction_limits:
+    pull_request_creation_cap:
+      enabled: true
+      max_open_pull_requests: 5
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    interaction_limits: applied
+  mutations:
+    - "PATCH /repos/{repo}/interaction-limits/pulls/creation-cap"
+  never:
+    - "PUT /repos/{repo}/interaction-limits"
+  converges: true

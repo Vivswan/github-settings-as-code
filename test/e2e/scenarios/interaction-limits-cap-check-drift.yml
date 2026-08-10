@@ -1,0 +1,23 @@
+# Check mode against the disabled live default: the declared cap diverges,
+# so check reports exact drift (the cap reads back verbatim, unlike the
+# write-only base expiry) and writes nothing.
+name: interaction-limits-cap-check-drift
+settings:
+  interaction_limits:
+    pull_request_creation_cap:
+      enabled: true
+      max_open_pull_requests: 10
+inputs:
+  mode: check
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    interaction_limits: drift
+  never:
+    - "PATCH /repos/{repo}/interaction-limits/pulls/creation-cap"
+    - "PUT /repos/{repo}/interaction-limits"
+  summary_contains:
+    - "pull_request_creation_cap.enabled"

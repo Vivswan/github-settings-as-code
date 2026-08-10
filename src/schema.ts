@@ -63,7 +63,11 @@ export interface SettingsFile {
    * Temporary interaction limits; null clears an active repo-level limit,
    * and an absent key leaves whatever is live untouched. Limits self-expire
    * (GitHub's expiry tops out at six_months), so apply re-arms the declared
-   * limit on every run and check mode reports drift once it lapses.
+   * limit on every run and check mode reports drift once it lapses. The
+   * pull_request_creation_cap and pull_request_creation_bypass keys manage
+   * the persistent pull request creation cap and its bypass list instead;
+   * `interaction_limits: null` clears the base limit only and never touches
+   * them.
    */
   interaction_limits?: InteractionLimitsConfig | null;
   /**
@@ -561,17 +565,52 @@ export interface ActionsVariableConfig {
   value: string;
 }
 
-/** PUT /repos/{r}/interaction-limits, sent verbatim. GitHub reads back limit, origin, and the computed expires_at only. */
+/**
+ * The `interaction_limits:` section. The base object is sent verbatim to
+ * PUT /repos/{r}/interaction-limits minus the two routed keys below, which
+ * go to their own .../interaction-limits/pulls sub-endpoints instead. GitHub
+ * reads the base limit back as limit, origin, and the computed expires_at
+ * only. Declare at least one of `limit`, `pull_request_creation_cap`, or
+ * `pull_request_creation_bypass`.
+ */
 export interface InteractionLimitsConfig {
-  /** Who may interact: "existing_users", "contributors_only", or "collaborators_only". */
-  limit: string;
+  /**
+   * Who may interact: "existing_users", "contributors_only", or
+   * "collaborators_only". Optional when only the pull-request keys below are
+   * declared; an omitted limit leaves the live base limit untouched.
+   */
+  limit?: string;
   /**
    * How long the limit lasts ("one_day" through "six_months"); GitHub
    * defaults to one_day. Write-only: GitHub reports back the computed
    * expires_at, never the duration, so check mode cannot verify this field
-   * and apply re-arms it on every run.
+   * and apply re-arms it on every run. Requires a sibling `limit`.
    */
   expiry?: string;
+  /**
+   * The pull request creation cap, routed to
+   * GET/PATCH /repos/{r}/interaction-limits/pulls/creation-cap. Unlike the
+   * base limit it is persistent desired state with no self-expiry and reads
+   * back verbatim, so check mode diffs it exactly and apply PATCHes only on
+   * divergence. max_open_pull_requests is 1-1000. On repositories where the
+   * cap is not available, the endpoints answer 405: apply surfaces that as a
+   * note, check mode as drift.
+   */
+  pull_request_creation_cap?: {
+    /** Whether the cap is enforced. */
+    enabled: boolean;
+    /** The maximum number of open pull requests one user may have (1-1000). */
+    max_open_pull_requests?: number;
+  };
+  /**
+   * User logins exempt from the pull request creation cap, routed to
+   * GET/PUT/DELETE /repos/{r}/interaction-limits/pulls/bypass-list and
+   * reconciled: apply removes the undeclared logins and then adds the
+   * missing ones (removals first - the list holds at most 100 users);
+   * logins compare case-insensitively. An empty list removes everyone.
+   * At most 100 logins.
+   */
+  pull_request_creation_bypass?: string[];
 }
 
 /**

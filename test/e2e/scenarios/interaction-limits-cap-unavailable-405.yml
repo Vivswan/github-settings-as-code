@@ -1,0 +1,25 @@
+# A repository where the pull request creation cap is unavailable answers
+# 405 on the cap endpoints. Apply tolerates it as a note (the 409
+# org-override pattern) and still arms the base limit, so the run succeeds;
+# no PATCH is ever attempted.
+name: interaction-limits-cap-unavailable-405
+settings:
+  interaction_limits:
+    limit: collaborators_only
+    pull_request_creation_cap:
+      enabled: true
+live_state:
+  pull_creation_cap_unavailable: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    interaction_limits: applied
+  mutations:
+    - "PUT /repos/{repo}/interaction-limits"
+  never:
+    - "PATCH /repos/{repo}/interaction-limits/pulls/creation-cap"
+  stdout_contains:
+    - "the pull request creation cap is not available on this repository"
