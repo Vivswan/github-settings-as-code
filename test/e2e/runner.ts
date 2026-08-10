@@ -43,8 +43,15 @@ export const E2E_TOKEN = "e2e-token";
  * fails compilation here instead of leaving a stale string reading nothing.
  */
 const SKIPPED_SECTIONS_OUTPUT = "skipped-sections" satisfies (typeof OUTPUT_NAMES)[number];
-/** Hard cap so a hung child never wedges the suite. */
-const KILL_AFTER_MS = 30_000;
+/**
+ * Hard cap so a hung child never wedges the suite. Sized for the observed
+ * worst case, not the typical one: chatty multi-repo children legitimately
+ * exceed 30 seconds when several suites run in parallel on one machine, and
+ * a wrongly killed child fails its scenario with a misleading exit code.
+ * killNote() marks every harness kill in the failure text, so the cap stays
+ * a safety net rather than a diagnosis.
+ */
+const KILL_AFTER_MS = 120_000;
 
 /** Monotonic per-process counter so repeated same-name failures never collide. */
 let artifactCounter = 0;
@@ -114,6 +121,17 @@ interface Invocation {
   summary: string;
   stdout: string;
   stderr: string;
+  /** True when the harness's KILL_AFTER_MS timer terminated the child. */
+  killedByHarness: boolean;
+}
+
+/**
+ * The suffix every exit-code failure line carries when the harness itself
+ * killed the child, so a timeout is never misread as the action exiting
+ * with the kill signal on its own.
+ */
+function killNote(run: Invocation): string {
+  return run.killedByHarness ? ` (the harness killed the child after ${KILL_AFTER_MS}ms)` : "";
 }
 
 /** Capture an internal re-run's surfaces for the report (see RerunCapture). */
@@ -355,7 +373,9 @@ async function invoke(scenario: Scenario, dir: string, apiUrl: string): Promise<
     stdout: "pipe",
     stderr: "pipe",
   });
+  let killedByHarness = false;
   const killer = setTimeout(() => {
+    killedByHarness = true;
     proc.kill();
   }, KILL_AFTER_MS);
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -371,6 +391,7 @@ async function invoke(scenario: Scenario, dir: string, apiUrl: string): Promise<
     summary: readFileSync(summaryFile, "utf8"),
     stdout,
     stderr,
+    killedByHarness,
   };
 }
 
@@ -887,7 +908,9 @@ async function assertApplyIdempotent(
   const second = await invoke(rerun, dir, handle.url);
   reruns.push(captureRerun("apply-idempotence second apply", second));
   if (second.exitCode !== 0) {
-    failures.push(`apply-idempotence: second apply exited ${second.exitCode}, expected 0`);
+    failures.push(
+      `apply-idempotence: second apply exited ${second.exitCode}, expected 0${killNote(second)}`,
+    );
   }
   const secondViolations = handle.violations.slice(violationsBefore);
   if (secondViolations.length > 0) {
@@ -915,7 +938,7 @@ async function assertApplyIdempotent(
   reruns.push(captureRerun("apply-idempotence check", check));
   if (check.exitCode !== 0) {
     failures.push(
-      `apply-idempotence: the check run after the second apply exited ${check.exitCode}, expected 0`,
+      `apply-idempotence: the check run after the second apply exited ${check.exitCode}, expected 0${killNote(check)}`,
     );
   }
   const checkWrites = handle.requests.slice(checkRequestsBefore).filter((r) => r.method !== "GET");
@@ -988,7 +1011,7 @@ export async function runScenario(
     // set (the fuzz oracle predicts a set of legal exits).
     const exitFailure = exitCodeFailure(first.exitCode, exp.exit_code);
     if (exitFailure !== undefined) {
-      failures.push(exitFailure);
+      failures.push(`${exitFailure}${killNote(first)}`);
     }
     // 2b. Zero-request invariant: a failure that must fire before any API
     // contact (e.g. a settings_raw parse failure, read from the local
@@ -1156,7 +1179,9 @@ export async function runScenario(
       reruns.push(captureRerun("converges check", converge));
       const newWrites = handle.requests.slice(writesBefore).filter((r) => r.method !== "GET");
       if (converge.exitCode !== 0) {
-        failures.push(`convergence: rerun exited ${converge.exitCode}, expected 0`);
+        failures.push(
+          `convergence: rerun exited ${converge.exitCode}, expected 0${killNote(converge)}`,
+        );
       }
       if (newWrites.length > 0) {
         failures.push(
