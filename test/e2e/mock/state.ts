@@ -428,7 +428,10 @@ export function completeInvitation(seed: Json, id: number, repo: Json): Json {
         };
   return {
     node_id: `MDEwOlJlcG9JbnZpdGF0aW9u${invitationId}`,
-    repository: repo,
+    // A CLONE, not the live reference: stored invitations must not mirror
+    // later repo mutations, or the snapshot layer (snapshotFamilies in
+    // runner.ts) would misattribute a repo-family change to invitations.
+    repository: clone(repo),
     inviter: { login: ownerLogin, id: 0, type: "User", site_admin: false },
     permissions: "write",
     expired: false,

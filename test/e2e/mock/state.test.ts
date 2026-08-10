@@ -244,7 +244,10 @@ describe("invitationFromPut round-trips the PUT permission into the invitation v
     const invitation = invitationFromPut("alice", { permission: "pull" }, 3, repo);
     expect((invitation.inviter as { login: string }).login).toBe("e2e-owner");
     expect(invitation.url).toBe("https://api.github.com/repos/e2e-owner/e2e-repo/invitations/3");
-    expect(invitation.repository).toBe(repo);
+    // A clone of the repo, not the live reference: stored invitations must
+    // not mirror later repo mutations (the snapshot layer keys on families).
+    expect(invitation.repository).toEqual(repo);
+    expect(invitation.repository).not.toBe(repo);
   });
 });
 
