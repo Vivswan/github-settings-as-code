@@ -24,8 +24,14 @@ on:
         required: false
         default: "300"
 
+# Scheduled nights share one group so they serialize; each manual dispatch
+# gets its own group (keyed by run id) so several seeds can run at once -
+# concurrent with each other AND with a scheduled night - without GitHub
+# cancelling the queued ones (one pending run per group). The fuzz-issue
+# steps are check-then-act, so a mixed pass/fail batch can close the
+# tracking issue under a green message; the failure comment survives.
 concurrency:
-  group: nightly-fuzz
+  group: ${{ github.event_name == 'workflow_dispatch' && format('nightly-fuzz-{0}', github.run_id) || 'nightly-fuzz' }}
   cancel-in-progress: false
 
 # issues: write lets the fuzz-issue action file/close the tracking issue;
