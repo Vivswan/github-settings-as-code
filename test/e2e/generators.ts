@@ -21,6 +21,7 @@ import {
 } from "../../src/schema.js";
 import { endpointMethod, undeclaredPolicy } from "../../src/sections/contract.js";
 import { allEndpoints, SECTIONS } from "../../src/sections/registry.js";
+import { DEFAULT_ROLE, roleForPermission } from "../../src/sections/roles.js";
 import { ADMIN_SLUG } from "./constants.js";
 import type { LiveState } from "./mock/state.js";
 import { CUSTOM_PROPERTY_DEFINITIONS, PROTECTION_RULE_APPS } from "./mock/state.js";
@@ -509,6 +510,42 @@ function genCollaborators(rng: Rng): EntriesForm {
     out.push({ username, permission: rng.pick(["pull", "push", "maintain", "admin"]) });
   }
   return maybeWrapUndeclared(rng, out);
+}
+
+/** The undeclared pending-invitation invitee; no generated username collides with it. */
+const UNDECLARED_INVITEE = "zz-undeclared-invitee";
+
+/**
+ * Pending-invitation live state for the declared collaborators: some
+ * declared users get a pending invitation (matching the declared permission,
+ * mismatched, or expired), and sometimes an undeclared invitee rides along.
+ * Every relation converges under a fully-granted apply - matched invitations
+ * are left alone, mismatches PATCHed, expired ones re-sent, the undeclared
+ * one cancelled (or kept as a note) - so the fixpoint and convergence gates
+ * hold without the oracle modeling a collaborators witness kind.
+ */
+function genInvitationsState(rng: Rng, declared: Json[]): Json[] {
+  const out: Json[] = [];
+  for (const entry of declared) {
+    if (!rng.bool(0.5)) {
+      continue;
+    }
+    const wantRole = roleForPermission(String(entry.permission ?? DEFAULT_ROLE));
+    const kind = rng.pick(["matching", "mismatched", "expired"] as const);
+    const invitation: Json = { invitee: { login: entry.username }, permissions: wantRole };
+    if (kind === "mismatched") {
+      invitation.permissions = rng.pick(
+        ["read", "write", "maintain", "triage", "admin"].filter((role) => role !== wantRole),
+      );
+    } else if (kind === "expired") {
+      invitation.expired = true;
+    }
+    out.push(invitation);
+  }
+  if (rng.bool(0.3)) {
+    out.push({ invitee: { login: UNDECLARED_INVITEE }, permissions: "write" });
+  }
+  return out;
 }
 
 function genTeams(rng: Rng): Json[] {
@@ -1820,6 +1857,19 @@ export function genScenario(
     const witness = genLiveWitness(witnessRng, key, settings[key], kind);
     liveKinds[key] = witness.kind;
     Object.assign(witnessState, witness.state);
+  }
+
+  // Pending-invitation live state for collaborators: NEW draws, so they live
+  // on a forked stream (main-stream stability, like the input-sections fork).
+  // No liveKinds entry - the oracle keeps the loose collaborators prediction;
+  // the seeding's value is the convergence/idempotence gates walking the
+  // PATCH, cancel, and expired-re-invite paths over fuzz-shaped declarations.
+  const invitationsRng = rng.fork("invitations");
+  if (chosen.includes("collaborators") && invitationsRng.bool(0.5)) {
+    const invitations = genInvitationsState(invitationsRng, entriesOf(settings.collaborators));
+    if (invitations.length > 0) {
+      witnessState.invitations = invitations;
+    }
   }
 
   const combinedLive: LiveState = { ...presence, ...witnessState };

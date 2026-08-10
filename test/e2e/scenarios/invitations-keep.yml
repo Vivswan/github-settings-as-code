@@ -1,0 +1,38 @@
+name: invitations-keep
+description: >-
+  Under the wrapped `undeclared: keep` form an undeclared pending invitation
+  is kept as a note, never cancelled; a declared user's matching pending
+  invitation converges without any write at all; an email invitation (null
+  invitee) is noted and left untouched.
+settings:
+  collaborators:
+    undeclared: keep
+    entries:
+      - username: e2e-pending
+        permission: push
+live_state:
+  invitations:
+    - id: 601
+      invitee:
+        login: e2e-pending
+      permissions: write
+    - id: 602
+      invitee:
+        login: e2e-uninvited
+      permissions: read
+    - id: 603
+      invitee: null
+      permissions: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    collaborators: applied
+  never:
+    - "PUT /repos/{repo}/collaborators/"
+    - "PATCH /repos/{repo}/invitations/"
+    - "DELETE /repos/{repo}/invitations/"
+  stdout_contains:
+    - "invitation for \"e2e-uninvited\" is pending but not declared"
+    - "invitation 603 was sent by email"
+  converges: true

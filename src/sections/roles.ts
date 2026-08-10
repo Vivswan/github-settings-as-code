@@ -18,3 +18,20 @@ export function roleForPermission(permission: string): string {
   const roles: Record<string, string> = { push: "write", pull: "read" };
   return roles[permission] ?? permission;
 }
+
+/**
+ * The only values a repository invitation can carry in `permissions`: the
+ * GET reports this enum and the PATCH accepts nothing else, so a declared
+ * custom org role can never be verified against (or set on) a pending
+ * invitation - the PUT applies it once the invitation is accepted. Consumed
+ * by the collaborators handler and the e2e mock (whose stored invitations
+ * must stay inside the enum); a lockstep test pins it to the trimmed
+ * OpenAPI spec.
+ */
+export const INVITATION_ROLES: ReadonlySet<string> = new Set([
+  "read",
+  "write",
+  "maintain",
+  "triage",
+  "admin",
+]);

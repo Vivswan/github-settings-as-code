@@ -15,7 +15,9 @@
  * - workflows (true): enable/disable fires only when the live state differs
  *   from the declared one.
  * - collaborators (true): the PUT is skipped when the live role_name already
- *   equals the declared role.
+ *   equals the declared role, a pending invitation matching the declared
+ *   permission (or carrying an unverifiable custom role) is left alone, and
+ *   the invitation PATCH/cancel fire only on divergence.
  * - milestones (true): the PATCH is skipped when the declared fields
  *   subsetDiff clean against the live milestone.
  * - actions_variables (true): the PATCH is skipped when the live value (and

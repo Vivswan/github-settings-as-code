@@ -45,6 +45,8 @@ import {
   collaboratorFromPut,
   completeHook,
   environmentFromPut,
+  invitationFromPut,
+  invitationPermissionFromPut,
   type MockState,
   type MultiMockState,
   PROTECTION_RULE_APPS,
@@ -1138,40 +1140,30 @@ const HANDLERS: Record<string, Handler> = {
   "collaborators.list": ({ state, query }) => ok(slicePage(state.collaborators, query)),
   "collaborators.update": ({ state, pathname, body }) => {
     const username = lastSegment(pathname);
-    const stored = collaboratorFromPut(username, asObject(body));
     const existing = state.collaborators.find(
       (c) => String(c.login).toLowerCase() === username.toLowerCase(),
     );
     if (existing) {
-      Object.assign(existing, stored);
+      Object.assign(existing, collaboratorFromPut(username, asObject(body)));
       return noContent(); // 204: already a collaborator, access updated
     }
-    state.collaborators.push(stored);
-    // 201 returns a repository-invitation object; its `permissions` is a STRING
-    // (read/write/admin/...), not the collaborator role object. The section does
-    // not read this body, but the OpenAPI validator checks its shape. Derive all
-    // identity fields from state.repo (re-slugged per target in multi mode) so
-    // the invitee/inviter/urls stay internally consistent with the target repo.
-    const permission = String(asObject(body).permission ?? "push");
-    const invitationPermission =
-      permission === "pull" ? "read" : permission === "push" ? "write" : permission;
-    const id = state.nextId++;
-    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
-    const ownerLogin = String((state.repo.owner as Json | undefined)?.login ?? slug.split("/")[0]);
-    return {
-      status: 201,
-      body: {
-        id,
-        node_id: `MDEwOlJlcG9JbnZpdGF0aW9u${id}`,
-        repository: state.repo,
-        invitee: { login: username, id: 0, type: "User", site_admin: false },
-        inviter: { login: ownerLogin, id: 0, type: "User", site_admin: false },
-        permissions: invitationPermission,
-        created_at: "2026-07-01T00:00:00Z",
-        url: `https://api.github.com/repos/${slug}/invitations/${id}`,
-        html_url: `https://github.com/${slug}/invitations`,
-      },
-    };
+    // Matching real GitHub, a PUT for a non-collaborator does NOT grant
+    // access: it creates (or refreshes) a pending invitation and answers 201
+    // with the repository-invitation body, whose `permissions` is a STRING
+    // (read/write/admin/...), not the collaborator role object. The user
+    // joins state.collaborators only in a scenario that seeds them there.
+    const pending = state.invitations.find(
+      (i) =>
+        String((i.invitee as Json | undefined)?.login).toLowerCase() === username.toLowerCase(),
+    );
+    if (pending) {
+      pending.permissions = invitationPermissionFromPut(asObject(body));
+      pending.expired = false; // a re-PUT refreshes the invitation
+      return { status: 201, body: pending };
+    }
+    const stored = invitationFromPut(username, asObject(body), state.nextId++, state.repo);
+    state.invitations.push(stored);
+    return { status: 201, body: stored };
   },
   "collaborators.remove": ({ state, pathname }) => {
     const username = lastSegment(pathname);
@@ -1180,6 +1172,29 @@ const HANDLERS: Record<string, Handler> = {
     );
     if (index >= 0) {
       state.collaborators.splice(index, 1);
+    }
+    return noContent();
+  },
+  "collaborators.listInvitations": ({ state, query }) => ok(slicePage(state.invitations, query)),
+  "collaborators.updateInvitation": ({ state, pathname, body }) => {
+    const id = lastSegment(pathname);
+    const invitation = state.invitations.find((i) => String(i.id) === id);
+    if (!invitation) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    // The PATCH speaks the invitation's own read vocabulary (read/write/...),
+    // so the body's `permissions` is stored verbatim.
+    const permissions = asObject(body).permissions;
+    if (permissions !== undefined) {
+      invitation.permissions = permissions;
+    }
+    return ok(invitation);
+  },
+  "collaborators.cancelInvitation": ({ state, pathname }) => {
+    const id = lastSegment(pathname);
+    const index = state.invitations.findIndex((i) => String(i.id) === id);
+    if (index >= 0) {
+      state.invitations.splice(index, 1);
     }
     return noContent();
   },

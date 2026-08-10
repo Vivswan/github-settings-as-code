@@ -12,7 +12,7 @@
  * proves the round trip.
  */
 
-import { roleForPermission } from "../../../src/sections/roles.js";
+import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/roles.js";
 import { ADMIN_SLUG } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
@@ -116,6 +116,14 @@ export interface LiveState {
   code_scanning?: Json;
   /** Direct collaborators (GET shape with role_name), replaces the baseline. */
   collaborators?: Json[];
+  /**
+   * Pending repository invitations (repository-invitation GET shape),
+   * replaces the (empty) baseline. A seed may be sparse: buildState
+   * completes each invitation to the spec's required shape (id, repository,
+   * inviter, urls); typically only {invitee: {login}, permissions, expired}
+   * is seeded.
+   */
+  invitations?: Json[];
   /** Team access keyed by team slug; null means "no access". */
   teams?: Record<string, { role_name: string } | null>;
   /** Milestones (GET shape), replaces the baseline. */
@@ -251,6 +259,8 @@ export interface MockState {
   pages: Json | null;
   code_scanning: Json;
   collaborators: Json[];
+  /** Pending repository invitations in the repository-invitation GET shape. */
+  invitations: Json[];
   teams: Record<string, { role_name: string } | null>;
   milestones: Json[];
   /** The active interaction limit, or null when none is set. */
@@ -379,6 +389,46 @@ export function bypassUser(seed: Json, id: number): Json {
 }
 
 /**
+ * Complete a (possibly sparse) repository-invitation body to the spec's
+ * required GET shape, so scenario seeds stay terse: typically only
+ * {invitee: {login}, permissions, expired}. The seed's own fields win, `id`
+ * comes from the caller unless the seed carries one, and the server-owned
+ * scaffold (repository, inviter, urls, timestamp) derives from `repo` so the
+ * body stays internally consistent with the target (re-slugged in multi
+ * mode). The timestamp is FIXED for the idempotence proof.
+ */
+export function completeInvitation(seed: Json, id: number, repo: Json): Json {
+  const invitationId = Number(seed.id ?? id);
+  const slug = String(repo.full_name ?? ADMIN_SLUG);
+  const ownerLogin = String((repo.owner as Json | undefined)?.login ?? slug.split("/")[0]);
+  // An explicit `invitee: null` seeds an EMAIL invitation (the spec's invitee
+  // is nullable); only an absent invitee gets the default user scaffold.
+  const invitee =
+    seed.invitee === null
+      ? null
+      : {
+          login: "invitee",
+          id: 0,
+          type: "User",
+          site_admin: false,
+          ...((seed.invitee as Json | undefined) ?? {}),
+        };
+  return {
+    node_id: `MDEwOlJlcG9JbnZpdGF0aW9u${invitationId}`,
+    repository: repo,
+    inviter: { login: ownerLogin, id: 0, type: "User", site_admin: false },
+    permissions: "write",
+    expired: false,
+    created_at: "2026-07-01T00:00:00Z",
+    url: `https://api.github.com/repos/${slug}/invitations/${invitationId}`,
+    html_url: `https://github.com/${slug}/invitations`,
+    ...seed,
+    invitee,
+    id: invitationId,
+  };
+}
+
+/**
  * The GitHub Apps the mock offers as custom deployment protection rule
  * providers, served by the available-Apps endpoint. The ONE source of
  * available slugs: the mock's create handler resolves integration_id against
@@ -432,8 +482,15 @@ export const CUSTOM_PROPERTY_DEFINITIONS: ReadonlyArray<{
  * List families default to empty; the repo defaults to the fixture (deep-merged
  * with any overlay); the single-object families default to their fixtures.
  * `ownerKind: "user"` marks the org absent so the teams section no-ops.
+ * `slug`, when given (multi-repo targets), re-slugs the repo BEFORE any
+ * family completion runs, so bodies derived from the repo (the invitation
+ * scaffold's urls and inviter) name the target, not the fixture.
  */
-export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKind): MockState {
+export function buildState(
+  liveState: LiveState | undefined,
+  ownerKind: OwnerKind,
+  slug?: string,
+): MockState {
   const ls = liveState ?? {};
   let nextId = 90_000_000;
   const takeId = (): number => nextId++;
@@ -458,6 +515,9 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
   const repo = ls.repo
     ? deepMerge(clone(repoFixture as Json), clone(ls.repo))
     : clone(repoFixture as Json);
+  if (slug !== undefined) {
+    reslugRepo(repo, slug);
+  }
 
   return {
     ownerKind,
@@ -518,6 +578,9 @@ export function buildState(liveState: LiveState | undefined, ownerKind: OwnerKin
     pages: ls.pages !== undefined ? clone(ls.pages) : null,
     code_scanning: ls.code_scanning ? clone(ls.code_scanning) : {},
     collaborators: ls.collaborators ? clone(ls.collaborators) : [],
+    invitations: (ls.invitations ?? []).map((invitation) =>
+      completeInvitation(clone(invitation), takeId(), repo),
+    ),
     teams: ls.teams ? clone(ls.teams) : {},
     milestones: ls.milestones ? clone(ls.milestones) : [],
     interaction_limits: ls.interaction_limits ? clone(ls.interaction_limits) : null,
@@ -617,9 +680,7 @@ export function buildStateForSlug(
   spec: MultiRepoSpec,
   ownerKind: OwnerKind,
 ): MockState {
-  const state = buildState(spec.liveState, ownerKind);
-  reslugRepo(state.repo, slug);
-  return state;
+  return buildState(spec.liveState, ownerKind, slug);
 }
 
 /**
@@ -820,10 +881,11 @@ export function environmentFromPut(payload: Json): Json {
 }
 
 /**
- * Turn a collaborator PUT body into the GET-shape collaborator object the list
- * endpoint returns: the declared `permission` (pull/push/...) becomes
- * `role_name` via the shared `roleForPermission`, so a check run compares like
- * with like.
+ * Turn a collaborator PUT body for an EXISTING collaborator into the
+ * GET-shape collaborator object the list endpoint returns: the declared
+ * `permission` (pull/push/...) becomes `role_name` via the shared
+ * `roleForPermission`, so a check run compares like with like. A PUT for a
+ * non-collaborator creates a pending invitation instead (invitationFromPut).
  */
 export function collaboratorFromPut(username: string, payload: Json): Json {
   const permission = String(payload.permission ?? "push");
@@ -834,6 +896,32 @@ export function collaboratorFromPut(username: string, payload: Json): Json {
     site_admin: false,
     role_name: roleForPermission(permission),
   };
+}
+
+/**
+ * The spec-enum `permissions` string a collaborator PUT payload maps to on
+ * the invitation it creates: the declared permission (pull/push/...) through
+ * the shared `roleForPermission`, clamped into INVITATION_ROLES - GitHub
+ * never reports a custom role name on an invitation, only its base grant,
+ * modeled here as "write".
+ */
+export function invitationPermissionFromPut(payload: Json): string {
+  const role = roleForPermission(String(payload.permission ?? "push"));
+  return INVITATION_ROLES.has(role) ? role : "write";
+}
+
+/**
+ * Turn a collaborator PUT body for a NON-collaborator into the stored
+ * repository-invitation object, with `permissions` mapped via
+ * invitationPermissionFromPut so a freshly-invited user reads back exactly
+ * what the section compares pending invitations with.
+ */
+export function invitationFromPut(username: string, payload: Json, id: number, repo: Json): Json {
+  return completeInvitation(
+    { invitee: { login: username }, permissions: invitationPermissionFromPut(payload) },
+    id,
+    repo,
+  );
 }
 
 /**

@@ -25,7 +25,9 @@ picture. Undeclared collaborators are deleted under this file's plain-array
 declaration (the section's default policy) while undeclared teams are
 left untouched (see the [Sections table](../../README.md#sections)), so a
 team you stop declaring keeps its access until removed by hand. And
-pending invitations are outside the section's reach: it invites new
-collaborators but does not list or cancel invitations already pending, so
-an old invitation can still turn into direct access later;
-`gh api repos/acme/payments/invitations` is the companion audit.
+pending invitations are reconciled alongside the collaborators: an
+undeclared pending invitation is cancelled under the same policy (kept as
+a note under `undeclared: keep`), a declared user's pending invitation
+counts as converged at the declared permission, and only an invitation
+sent by email - which no username can declare - is left untouched, each
+surfaced as a note.

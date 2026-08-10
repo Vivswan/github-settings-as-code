@@ -53,7 +53,7 @@ export interface SettingsFile {
   pages?: PagesConfig | null;
   /** Code scanning default setup (CodeQL). */
   code_scanning_default_setup?: CodeScanningDefaultSetupConfig;
-  /** Direct collaborators; undeclared ones are REMOVED by default (owner never touched; the wrapped form can set `undeclared: keep`). */
+  /** Direct collaborators, with pending invitations reconciled alongside; undeclared ones are REMOVED (pending invitations cancelled) by default (owner never touched; the wrapped form can set `undeclared: keep`). */
   collaborators?: CollaboratorConfig[] | UndeclaredPolicyList<CollaboratorConfig>;
   /** Org team access to the repo; skipped on personal accounts. */
   teams?: TeamConfig[];

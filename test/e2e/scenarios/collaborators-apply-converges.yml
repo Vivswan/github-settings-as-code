@@ -1,8 +1,9 @@
 name: collaborators-apply-converges
 description: >-
-  One declared collaborator is missing (apply invites) and one is live at the
-  wrong role (apply updates). Both go through PUT; a check rerun over the
-  mutated state converges.
+  One declared collaborator is missing (apply invites, creating a pending
+  invitation) and one is live at the wrong role (apply updates). Both go
+  through PUT; the check rerun converges with the invited user matched as a
+  pending invitation, not a collaborator.
 settings:
   collaborators:
     - username: e2e-new

@@ -841,3 +841,28 @@ describe("mock rule-type catalog lockstep", () => {
     }
   });
 });
+
+describe("invitation role vocabulary lockstep", () => {
+  test("INVITATION_ROLES matches the spec's repository-invitation permissions enum exactly", async () => {
+    // The collaborators handler gates PATCH-vs-note on this set and the mock
+    // clamps stored invitation permissions into it, so a spec refresh that
+    // widens (or narrows) the enum must land here too. Checked on BOTH sides
+    // of the vocabulary: the GET's response enum (what a pending invitation
+    // can report) and the PATCH's request enum (what an update may send).
+    const { INVITATION_ROLES } = await import("../../../src/sections/roles.js");
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const spec = JSON.parse(
+      readFileSync(join(import.meta.dir, "github-openapi.trimmed.json"), "utf8"),
+    );
+    const getEnum = spec.paths["/repos/{owner}/{repo}/invitations"].get.responses["200"].content[
+      "application/json"
+    ].schema.items.properties.permissions.enum as string[];
+    const patchEnum = spec.paths["/repos/{owner}/{repo}/invitations/{invitation_id}"].patch
+      .requestBody.content["application/json"].schema.properties.permissions.enum as string[];
+    for (const specEnum of [getEnum, patchEnum]) {
+      expect(specEnum.length).toBeGreaterThan(0);
+      expect([...INVITATION_ROLES].sort()).toEqual([...specEnum].sort());
+    }
+  });
+});

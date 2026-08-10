@@ -18,7 +18,9 @@ import {
   buildState,
   buildStateForSlug,
   collaboratorFromPut,
+  completeInvitation,
   environmentFromPut,
+  invitationFromPut,
   protectionFromPut,
   teamRepoFromPut,
 } from "./state.js";
@@ -212,5 +214,83 @@ describe("collaborator and team transformers map permission to role_name", () =>
 
   test("teamRepoFromPut maps pull to read", () => {
     expect(teamRepoFromPut({ permission: "pull" })).toEqual({ role_name: "read" });
+  });
+});
+
+describe("invitationFromPut round-trips the PUT permission into the invitation vocabulary", () => {
+  const repo = { full_name: "e2e-owner/e2e-repo", owner: { login: "e2e-owner" } };
+
+  test("the declared permission becomes the permissions string via roleForPermission", () => {
+    const invitation = invitationFromPut("alice", { permission: "push" }, 42, repo);
+    expect((invitation.invitee as { login: string }).login).toBe("alice");
+    expect(invitation.permissions).toBe(roleForPermission("push"));
+    expect(invitation.permissions).toBe("write");
+    // The section's converged-pending comparison reads exactly these two
+    // fields plus `expired`, which a fresh invitation must not carry as true.
+    expect(invitation.expired).toBe(false);
+    expect(invitation.id).toBe(42);
+  });
+
+  test("defaults to push when permission is absent; a custom role clamps to its base grant", () => {
+    expect(invitationFromPut("bob", {}, 1, repo).permissions).toBe("write");
+    // GitHub never reports a custom role name on an invitation (the
+    // permissions field is a spec enum), so the mock stores the base grant.
+    expect(invitationFromPut("carol", { permission: "security-team" }, 2, repo).permissions).toBe(
+      "write",
+    );
+  });
+
+  test("the scaffold derives identity fields from the target repo", () => {
+    const invitation = invitationFromPut("alice", { permission: "pull" }, 3, repo);
+    expect((invitation.inviter as { login: string }).login).toBe("e2e-owner");
+    expect(invitation.url).toBe("https://api.github.com/repos/e2e-owner/e2e-repo/invitations/3");
+    expect(invitation.repository).toBe(repo);
+  });
+});
+
+describe("completeInvitation", () => {
+  const repo = { full_name: "e2e-owner/e2e-repo", owner: { login: "e2e-owner" } };
+
+  test("a sparse seed keeps its own fields and gains the required scaffold", () => {
+    const completed = completeInvitation(
+      { invitee: { login: "dave" }, permissions: "read", expired: true },
+      77,
+      repo,
+    );
+    expect(completed.id).toBe(77);
+    expect(completed.permissions).toBe("read");
+    expect(completed.expired).toBe(true);
+    expect(completed.invitee).toEqual({
+      login: "dave",
+      id: 0,
+      type: "User",
+      site_admin: false,
+    });
+    expect(completed.created_at).toBe("2026-07-01T00:00:00Z");
+  });
+
+  test("a seeded id wins over the caller's", () => {
+    expect(completeInvitation({ id: 5, invitee: { login: "x" } }, 99, repo).id).toBe(5);
+  });
+
+  test("an explicit null invitee stays null (an email invitation)", () => {
+    expect(completeInvitation({ invitee: null, permissions: "read" }, 6, repo).invitee).toBeNull();
+  });
+
+  test("a multi-repo target's seeded invitation derives from the re-slugged repo", () => {
+    // Re-slugging must happen BEFORE family completion (the buildState slug
+    // param), or the invitation scaffold bakes the fixture slug into its urls.
+    const state = buildStateForSlug(
+      "acme/payments",
+      {
+        settingsYaml: null,
+        liveState: { invitations: [{ id: 9, invitee: { login: "dave" }, permissions: "read" }] },
+      },
+      "org",
+    );
+    const invitation = state.invitations[0] as Record<string, unknown>;
+    expect(invitation.url).toBe("https://api.github.com/repos/acme/payments/invitations/9");
+    expect((invitation.inviter as { login: string }).login).toBe("acme");
+    expect((invitation.repository as { full_name: string }).full_name).toBe("acme/payments");
   });
 });

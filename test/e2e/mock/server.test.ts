@@ -1088,6 +1088,7 @@ describe("handler statuses obey the realism rule", () => {
           autolinks: [{ id: 5, key_prefix: "T-", url_template: "https://x/<num>" }],
           workflows: [{ id: 9, name: "CI", path: ".github/workflows/ci.yml", state: "active" }],
           collaborators: [{ login: "carol", role_name: "write" }],
+          invitations: [{ id: 314, invitee: { login: "erin" }, permissions: "read" }],
           milestones: [{ number: 1, title: "v1", state: "open" }],
           environments: {
             prod: { name: "prod", protection_rules: [] },
@@ -1400,7 +1401,8 @@ describe("handler statuses obey the realism rule", () => {
         `/repos/${OWNER}/${REPO}/code-scanning/default-setup`,
         { state: "configured" },
       ],
-      // collaborators: list, update (upsert new = 201), remove (both)
+      // collaborators: list, update (invite = 201, refresh = 201, existing =
+      // 204), the invitation trio (success + error branches), remove (both)
       ["collaborators.list", "GET", `/repos/${OWNER}/${REPO}/collaborators`],
       [
         "collaborators.update",
@@ -1408,6 +1410,33 @@ describe("handler statuses obey the realism rule", () => {
         `/repos/${OWNER}/${REPO}/collaborators/dave`,
         { permission: "push" },
       ],
+      [
+        "collaborators.update",
+        "PUT",
+        `/repos/${OWNER}/${REPO}/collaborators/dave`,
+        { permission: "pull" },
+      ], // pending invitee refreshed, 201 again
+      [
+        "collaborators.update",
+        "PUT",
+        `/repos/${OWNER}/${REPO}/collaborators/carol`,
+        { permission: "admin" },
+      ], // existing collaborator, 204
+      ["collaborators.listInvitations", "GET", `/repos/${OWNER}/${REPO}/invitations`],
+      [
+        "collaborators.updateInvitation",
+        "PATCH",
+        `/repos/${OWNER}/${REPO}/invitations/314`,
+        { permissions: "write" },
+      ],
+      [
+        "collaborators.updateInvitation",
+        "PATCH",
+        `/repos/${OWNER}/${REPO}/invitations/999999`,
+        { permissions: "write" },
+      ], // 404 error branch
+      ["collaborators.cancelInvitation", "DELETE", `/repos/${OWNER}/${REPO}/invitations/999999`], // no-op 204
+      ["collaborators.cancelInvitation", "DELETE", `/repos/${OWNER}/${REPO}/invitations/314`],
       ["collaborators.remove", "DELETE", `/repos/${OWNER}/${REPO}/collaborators/ghost`], // no-op 204
       ["collaborators.remove", "DELETE", `/repos/${OWNER}/${REPO}/collaborators/carol`],
       // teams: org, probe (both), grant

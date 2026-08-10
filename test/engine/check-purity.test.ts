@@ -129,6 +129,11 @@ const ROUTES = {
   "GET /repos/o/r/collaborators?affiliation=direct&per_page=100&page=1": {
     data: [{ login: "alice", role_name: "write" }],
   },
+  // An undeclared pending invitation: the invitation sweep's cancel branch
+  // must stay a drift line in check mode, never a DELETE.
+  "GET /repos/o/r/invitations?per_page=100&page=1": {
+    data: [{ id: 7, invitee: { login: "carol" }, permissions: "read", expired: false }],
+  },
   "GET /orgs/o": { data: { login: "o" } },
   "GET /repos/o/r/milestones?state=all&per_page=100&page=1": {
     data: [{ number: 1, title: "old", description: null, state: "open" }],
