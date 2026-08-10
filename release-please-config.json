@@ -19,7 +19,8 @@
         "docs/playbooks/fleet-baseline-rings.md",
         "docs/playbooks/incident-freeze.md",
         "docs/playbooks/preview-blast-radius.md",
-        "docs/playbooks/trust-tiers.md"
+        "docs/playbooks/trust-tiers.md",
+        "docs/reference/secrets-and-vaults.md"
       ]
     }
   }
