@@ -528,7 +528,8 @@ describe("section endpoints", () => {
     // An override equal to the section permission would be redundant; this
     // guards against redundant or stray overrides creeping in. Exactly these
     // endpoints in the whole registry legitimately override: the branches
-    // probe (Contents), the teams org read (Members), the OIDC subject
+    // probe (Contents) and its public App-by-slug bypass-actor lookup, the
+    // teams org read (Members), the OIDC subject
     // claim pair (Actions instead of Administration), the environments
     // deployment branch-policy patterns and custom deployment protection
     // rules (Actions for the list reads, Administration for the
@@ -541,6 +542,7 @@ describe("section endpoints", () => {
     expect(overridden.sort()).toEqual([
       "actions.getOidcSub",
       "actions.putOidcSub",
+      "branches.appLookup",
       "branches.branchProbe",
       "custom_properties.list",
       "custom_properties.org",

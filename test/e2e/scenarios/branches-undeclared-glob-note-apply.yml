@@ -1,0 +1,35 @@
+# The apply-mode twin of branches-undeclared-glob-note-check: the note
+# surfaces on apply too, and the undeclared wildcard rule survives the run
+# untouched (this action never deletes undeclared rules).
+name: branches-undeclared-glob-note-apply
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        force_push_bypassers: []
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+  branch_protection_rules:
+    - pattern: "legacy/*"
+      isAdminEnforced: true
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  stdout_contains:
+    - 'undeclared classic protection rule "legacy/*" exists on the repo - declare it to manage it (this action never deletes undeclared rules)'
+  mutations:
+    - "PUT /repos/{repo}/branches/main/protection"
+    - "GRAPHQL UpdateBranchProtectionRule"
+  never:
+    - "GRAPHQL DeleteBranchProtectionRule"
+  converges: true

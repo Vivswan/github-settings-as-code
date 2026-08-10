@@ -11,20 +11,30 @@
 
 import { describe, expect, test } from "bun:test";
 import { subsetDiff } from "../../../src/engine/diff.js";
-import { flattenProtection } from "../../../src/sections/branches.js";
+import {
+  bypassActorStrings,
+  classicViewOfRule,
+  flattenProtection,
+} from "../../../src/sections/branches.js";
 import { flattenEnvironment } from "../../../src/sections/environments.js";
 import { roleForPermission } from "../../../src/sections/roles.js";
 import {
+  applyRuleInput,
+  applyRuleInputToLiteral,
   buildState,
   buildStateForSlug,
   collaboratorFromPut,
   completeInvitation,
+  completeRule,
   decodeNodeId,
   environmentFromPut,
   invitationFromPut,
+  mintAppNodeId,
   mintNodeId,
   normalizePinnedSeed,
   protectionFromPut,
+  ruleFromProtection,
+  ruleWireNode,
   teamRepoFromPut,
 } from "./state.js";
 
@@ -168,6 +178,142 @@ describe("protectionFromPut round trip", () => {
     // shape must not gain it from a PUT body.
     expect(protectionFromPut({ enforce_admins: true, required_signatures: true })).toEqual({
       enforce_admins: { enabled: true },
+    });
+  });
+});
+
+describe("branch protection rule projections", () => {
+  test("the section's classicViewOfRule over ruleFromProtection shows no drift", () => {
+    // A LITERAL rule with every translated key plus the GraphQL-only extras:
+    // projecting the stored REST GET shape into a rule node and reading it
+    // back through the engine's classic view must reproduce the declaration
+    // under the same declared-keys-only subsetDiff the section uses.
+    const payload = {
+      enforce_admins: true,
+      required_linear_history: true,
+      allow_force_pushes: false,
+      allow_deletions: false,
+      block_creations: true,
+      required_conversation_resolution: true,
+      lock_branch: false,
+      allow_fork_syncing: true,
+      required_status_checks: { strict: true, contexts: ["all-green"] },
+      required_pull_request_reviews: {
+        required_approving_review_count: 2,
+        require_code_owner_reviews: true,
+        dismiss_stale_reviews: false,
+        require_last_push_approval: true,
+      },
+    };
+    const extras = {
+      bypassForcePushActors: ["octocat", "e2e-owner/platform", "app/deploy-gate"],
+      requiresDeployments: true,
+      requiredDeploymentEnvironments: ["prod"],
+    };
+    const node = ruleFromProtection("main", protectionFromPut(payload), extras, "o/r");
+    const view = classicViewOfRule(node as Record<string, unknown>);
+    expect(subsetDiff(payload, view, "protection")).toEqual([]);
+    expect(view.force_push_bypassers).toEqual(["app/deploy-gate", "e2e-owner/platform", "octocat"]);
+    expect(view.required_deployments).toEqual({ environments: ["prod"] });
+    const decoded = decodeNodeId(String((node as Record<string, unknown>).id));
+    expect(decoded).toEqual({ family: "rule", slug: "o/r", key: "main" });
+  });
+
+  test("required_signatures projects from the GET sub-resource shape", () => {
+    // The sub-endpoint stores {enabled} on the GET shape; the rule node's
+    // requiresCommitSignatures twin must read it back.
+    const node = ruleFromProtection(
+      "main",
+      { enforce_admins: { enabled: true }, required_signatures: { enabled: true } },
+      undefined,
+      "o/r",
+    );
+    expect(classicViewOfRule(node as Record<string, unknown>).required_signatures).toBe(true);
+  });
+
+  test("a stored wildcard rule round-trips through ruleWireNode and the classic view", () => {
+    const stored = completeRule({
+      pattern: "release/*",
+      isAdminEnforced: true,
+      requiresStatusChecks: true,
+      requiresStrictStatusChecks: true,
+      requiredStatusCheckContexts: ["ci"],
+      bypassForcePushActors: ["octocat"],
+    });
+    const view = classicViewOfRule(ruleWireNode(stored) as Record<string, unknown>);
+    expect(view.enforce_admins).toBe(true);
+    expect(view.required_status_checks).toEqual({ strict: true, contexts: ["ci"] });
+    expect(view.force_push_bypassers).toEqual(["octocat"]);
+    expect(view.required_deployments).toBeNull();
+  });
+
+  test("applyRuleInput decodes actor ids and mimics the environment silent drop", () => {
+    const state = buildState({ environments: { prod: { name: "prod" } } }, "org");
+    const stored = completeRule({ pattern: "release/*" });
+    const applied = applyRuleInput(
+      stored,
+      {
+        branchProtectionRuleId: mintNodeId("rule", "e2e-owner/e2e-repo", "release/*"),
+        isAdminEnforced: true,
+        bypassForcePushActorIds: [
+          mintNodeId("user", "e2e-owner/e2e-repo", "octocat"),
+          mintNodeId("team", "e2e-owner/e2e-repo", "e2e-owner/platform"),
+          mintAppNodeId("deploy-gate"),
+        ],
+        requiresDeployments: true,
+        requiredDeploymentEnvironments: ["prod", "ghost"],
+      },
+      state,
+    );
+    expect(applied).toEqual({ ok: true });
+    expect(stored.isAdminEnforced).toBe(true);
+    expect(stored.bypassForcePushActors).toEqual([
+      "octocat",
+      "e2e-owner/platform",
+      "app/deploy-gate",
+    ]);
+    // GitHub keeps only names of EXISTING environments and still succeeds;
+    // "ghost" must vanish so the section's read-back check can catch it.
+    expect(stored.requiredDeploymentEnvironments).toEqual(["prod"]);
+    expect(bypassActorStrings(ruleWireNode(stored) as Record<string, unknown>)).toEqual([
+      "octocat",
+      "e2e-owner/platform",
+      "app/deploy-gate",
+    ]);
+  });
+
+  test("applyRuleInput rejects an actor id the codec did not mint", () => {
+    const state = buildState(undefined, "org");
+    const stored = completeRule({ pattern: "release/*" });
+    const applied = applyRuleInput(stored, { bypassForcePushActorIds: ["MDQ6VXNlcjE="] }, state);
+    expect(applied).toEqual({ bad: "MDQ6VXNlcjE=" });
+  });
+
+  test("applyRuleInputToLiteral splits twins onto the GET shape and extras", () => {
+    const state = buildState(
+      {
+        branch_protection: { main: { enforce_admins: { enabled: false } } },
+        environments: { prod: { name: "prod" } },
+      },
+      "org",
+    );
+    const applied = applyRuleInputToLiteral(state, "main", {
+      branchProtectionRuleId: mintNodeId("rule", "e2e-owner/e2e-repo", "main"),
+      isAdminEnforced: true,
+      bypassForcePushActorIds: [mintNodeId("user", "e2e-owner/e2e-repo", "octocat")],
+      requiresDeployments: true,
+      requiredDeploymentEnvironments: ["prod", "ghost"],
+    });
+    expect(applied).toEqual({ ok: true });
+    // The translated twin lands back on the REST GET shape (one underlying
+    // rule), while the GraphQL-only fields live in the extras family.
+    expect((state.branch_protection.main as Record<string, unknown>).enforce_admins).toEqual({
+      enabled: true,
+    });
+    expect(state.branch_protection_graphql.main).toEqual({
+      bypassForcePushActors: ["octocat"],
+      requiresDeployments: true,
+      requiredDeploymentEnvironments: ["prod"],
     });
   });
 });

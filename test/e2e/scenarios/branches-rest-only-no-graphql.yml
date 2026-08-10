@@ -1,0 +1,26 @@
+# The zero-behavior-change guarantee for existing users: a branches
+# declaration with only literal names and no GraphQL-routed key must issue
+# NO GraphQL request at all - the rules query is gated on needing it.
+name: branches-rest-only-no-graphql
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+    - name: gone
+      protection: null
+live_state:
+  branches: ["main"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  mutations:
+    - "PUT /repos/{repo}/branches/main/protection"
+  never:
+    - "GRAPHQL"
+  converges: true

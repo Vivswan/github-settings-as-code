@@ -49,20 +49,29 @@ import {
   unsealSecretValue,
 } from "./secrets.js";
 import {
+  allRuleNodes,
+  applyRuleInput,
+  applyRuleInputToLiteral,
+  BYPASS_ACTOR_TEAMS,
+  BYPASS_ACTOR_USERS,
   bypassUser,
   CUSTOM_PROPERTY_DEFINITIONS,
   collaboratorFromPut,
   completeHook,
+  completeRule,
   decodeNodeId,
   environmentFromPut,
   invitationFromPut,
   invitationPermissionFromPut,
   type MockState,
   type MultiMockState,
+  mintAppNodeId,
   mintNodeId,
   PROTECTION_RULE_APPS,
   protectionFromPut,
   restRepoSurface,
+  ruleFromProtection,
+  ruleWireNode,
   teamRepoFromPut,
 } from "./state.js";
 
@@ -600,6 +609,9 @@ const HANDLERS: Record<string, Handler> = {
   "branches.removeProtection": ({ state, pathname }) => {
     const branch = segmentFromEnd(pathname, 1);
     state.branch_protection[branch] = null;
+    // GitHub deletes the whole underlying RULE: a later re-protect starts
+    // clean, so the GraphQL-only extras must not survive the delete.
+    delete state.branch_protection_graphql[branch];
     return noContent();
   },
   "branches.sigPost": ({ state, pathname }) => {
@@ -633,6 +645,21 @@ const HANDLERS: Record<string, Handler> = {
       return { status: 404, body: { message: "Branch not found" } };
     }
     return ok({ name: branch });
+  },
+  "branches.appLookup": ({ pathname }) => {
+    const slug = lastSegment(pathname);
+    // Slug matching is case-insensitive like GitHub's; the body echoes the
+    // canonical roster slug.
+    const app = PROTECTION_RULE_APPS.find(
+      (entry) => String(entry.slug).toLowerCase() === slug.toLowerCase(),
+    );
+    if (!app) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    // The served node_id is MINTED (never the fixture's realistic-looking
+    // one): the section feeds it into bypassForcePushActorIds, and mutation
+    // handlers reject any id the codec cannot decode.
+    return ok(integrationBody(app));
   },
 
   // environments -----------------------------------------------------------
@@ -2442,6 +2469,209 @@ const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
     state._pinned_position_counter = list.length;
     return { data: { reorderEnvironment: { environment: { name: target.name } } } };
   },
+  // branches ---------------------------------------------------------------
+  "branches.rulesQuery": ({ state }) => ({
+    data: {
+      repository: {
+        branchProtectionRules: {
+          nodes: allRuleNodes(state),
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    },
+  }),
+  "branches.repoLookup": ({ state }) => ({
+    data: { repository: { id: state.repo.node_id } },
+  }),
+  "branches.actorUser": ({ state, variables }) => {
+    const login = String((variables as Json).login ?? "");
+    // GitHub logins are case-insensitive; the lookup resolves any spelling
+    // and the minted id carries the CANONICAL roster login, so read-backs
+    // echo the canonical form exactly like production.
+    const canonical = BYPASS_ACTOR_USERS.find(
+      (known) => known.toLowerCase() === login.toLowerCase(),
+    );
+    if (canonical === undefined) {
+      return {
+        errors: [
+          {
+            type: "NOT_FOUND",
+            message: `Could not resolve to a User with the login of '${login}'.`,
+          },
+        ],
+      };
+    }
+    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+    return {
+      data: {
+        repository: { id: state.repo.node_id },
+        user: { id: mintNodeId("user", slug, canonical) },
+      },
+    };
+  },
+  "branches.actorTeam": ({ state, variables }) => {
+    const org = String((variables as Json).org ?? "");
+    const team = String((variables as Json).team ?? "");
+    const combinedFold = `${org}/${team}`.toLowerCase();
+    if (
+      !BYPASS_ACTOR_TEAMS.some((entry) => entry.toLowerCase().startsWith(`${org.toLowerCase()}/`))
+    ) {
+      return {
+        errors: [
+          {
+            type: "NOT_FOUND",
+            message: `Could not resolve to an Organization with the login of '${org}'.`,
+          },
+        ],
+      };
+    }
+    const repository = { id: state.repo.node_id };
+    const canonical = BYPASS_ACTOR_TEAMS.find((entry) => entry.toLowerCase() === combinedFold);
+    if (canonical === undefined) {
+      // A known org with an unknown team is a NULLABLE-FIELD miss, not an
+      // errors[] entry, matching GitHub's Organization.team shape.
+      return { data: { repository, organization: { team: null } } };
+    }
+    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+    return {
+      data: {
+        repository,
+        organization: { team: { id: mintNodeId("team", slug, canonical) } },
+      },
+    };
+  },
+  "branches.createRule": ({ state, variables }) => {
+    const input = asObject((variables as Json).input);
+    const pattern = String(input.pattern ?? "");
+    if (allRuleNodes(state).some((node) => String(node.pattern) === pattern)) {
+      return {
+        errors: [
+          {
+            type: "UNPROCESSABLE",
+            message: `A branch protection rule with the pattern '${pattern}' already exists.`,
+          },
+        ],
+      };
+    }
+    const stored = completeRule({ pattern });
+    const applied = applyRuleInput(stored, input, state);
+    if ("bad" in applied) {
+      return {
+        errors: [
+          {
+            type: "UNPROCESSABLE",
+            message: `Could not resolve to a node with the global id of '${applied.bad}'.`,
+          },
+        ],
+      };
+    }
+    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+    stored.id = mintNodeId("rule", slug, String(stored.pattern));
+    state.branch_protection_rules.push(stored);
+    return {
+      data: { createBranchProtectionRule: { branchProtectionRule: ruleWireNode(stored) } },
+    };
+  },
+  "branches.updateRule": ({ state, variables }) => {
+    const input = asObject((variables as Json).input);
+    const id = String(input.branchProtectionRuleId ?? "");
+    const decoded = decodeNodeId(id);
+    const notFound: GraphqlHandlerResult = {
+      errors: [
+        {
+          type: "NOT_FOUND",
+          message: `Could not resolve to a node with the global id of '${id}'.`,
+        },
+      ],
+    };
+    if (!decoded || decoded.family !== "rule") {
+      return notFound;
+    }
+    const pattern = decoded.key;
+    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+    const wildcard = state.branch_protection_rules.find((rule) => rule.pattern === pattern);
+    if (wildcard) {
+      const applied = applyRuleInput(wildcard, input, state);
+      if ("bad" in applied) {
+        return {
+          errors: [
+            {
+              type: "UNPROCESSABLE",
+              message: `Could not resolve to a node with the global id of '${applied.bad}'.`,
+            },
+          ],
+        };
+      }
+      // The id embeds the pattern, so a pattern change re-mints it, exactly
+      // like stampNodeIds would.
+      wildcard.id = mintNodeId("rule", slug, String(wildcard.pattern));
+      return {
+        data: { updateBranchProtectionRule: { branchProtectionRule: ruleWireNode(wildcard) } },
+      };
+    }
+    const protection = state.branch_protection[pattern];
+    if (!protection) {
+      return notFound;
+    }
+    const applied = applyRuleInputToLiteral(state, pattern, input);
+    if ("bad" in applied) {
+      return {
+        errors: [
+          {
+            type: "UNPROCESSABLE",
+            message: `Could not resolve to a node with the global id of '${applied.bad}'.`,
+          },
+        ],
+      };
+    }
+    return {
+      data: {
+        updateBranchProtectionRule: {
+          branchProtectionRule: ruleFromProtection(
+            pattern,
+            protection,
+            state.branch_protection_graphql[pattern],
+            slug,
+          ),
+        },
+      },
+    };
+  },
+  "branches.deleteRule": ({ state, variables }) => {
+    const input = asObject((variables as Json).input);
+    const id = String(input.branchProtectionRuleId ?? "");
+    const decoded = decodeNodeId(id);
+    if (!decoded || decoded.family !== "rule") {
+      return {
+        errors: [
+          {
+            type: "NOT_FOUND",
+            message: `Could not resolve to a node with the global id of '${id}'.`,
+          },
+        ],
+      };
+    }
+    const pattern = decoded.key;
+    const index = state.branch_protection_rules.findIndex((rule) => rule.pattern === pattern);
+    if (index >= 0) {
+      state.branch_protection_rules.splice(index, 1);
+    } else if (state.branch_protection[pattern]) {
+      // Deleting a literal rule through GraphQL removes the protection the
+      // REST view serves, GitHub's one underlying rule.
+      state.branch_protection[pattern] = null;
+      delete state.branch_protection_graphql[pattern];
+    } else {
+      return {
+        errors: [
+          {
+            type: "NOT_FOUND",
+            message: `Could not resolve to a node with the global id of '${id}'.`,
+          },
+        ],
+      };
+    }
+    return { data: { deleteBranchProtectionRule: { clientMutationId: null } } };
+  },
 };
 
 /**
@@ -3431,14 +3661,24 @@ function slugFromPath(pathname: string): string | null {
 }
 
 /**
+ * Node-id families that are GLOBAL on GitHub (not repo-scoped): they carry
+ * the GLOBAL_NODE_SLUG sentinel instead of a repository, so the mutation
+ * target resolution must not read a slug off them. Apps are the one case:
+ * a force-push allowance can name a GitHub App, whose id comes from the
+ * repo-independent GET /apps/{app_slug} lookup.
+ */
+const GLOBAL_NODE_FAMILIES: ReadonlySet<string> = new Set(["app"]);
+
+/**
  * Every string anywhere inside a mutation's variables that decodes as a mock
  * node id, collected recursively - GraphQL mutations nest their target ids
- * under input objects, so a top-level scan would miss them.
+ * under input objects, so a top-level scan would miss them. Ids of global
+ * families are skipped: they name no repository.
  */
 function decodedNodeIds(value: unknown, out: Array<{ slug: string }>): void {
   if (typeof value === "string") {
     const decoded = decodeNodeId(value);
-    if (decoded) {
+    if (decoded && !GLOBAL_NODE_FAMILIES.has(decoded.family)) {
       out.push(decoded);
     }
     return;
@@ -3454,6 +3694,48 @@ function decodedNodeIds(value: unknown, out: Array<{ slug: string }>): void {
       decodedNodeIds(item, out);
     }
   }
+}
+
+/**
+ * The full integration (GitHub App) body the app-by-slug lookup serves,
+ * completed to the spec's required shape around a PROTECTION_RULE_APPS
+ * roster entry. Deterministic (fixed timestamps) for the idempotence proof.
+ */
+function integrationBody(app: Json): Json {
+  const slug = String(app.slug);
+  return {
+    id: app.id,
+    slug,
+    node_id: mintAppNodeId(slug),
+    owner: {
+      login: "e2e-apps",
+      id: 9100,
+      node_id: "MDQ6VXNlcjkxMDA=",
+      avatar_url: "https://avatars.githubusercontent.com/u/9100?v=4",
+      gravatar_id: "",
+      url: "https://api.github.com/users/e2e-apps",
+      html_url: "https://github.com/e2e-apps",
+      followers_url: "https://api.github.com/users/e2e-apps/followers",
+      following_url: "https://api.github.com/users/e2e-apps/following{/other_user}",
+      gists_url: "https://api.github.com/users/e2e-apps/gists{/gist_id}",
+      starred_url: "https://api.github.com/users/e2e-apps/starred{/owner}{/repo}",
+      subscriptions_url: "https://api.github.com/users/e2e-apps/subscriptions",
+      organizations_url: "https://api.github.com/users/e2e-apps/orgs",
+      repos_url: "https://api.github.com/users/e2e-apps/repos",
+      events_url: "https://api.github.com/users/e2e-apps/events{/privacy}",
+      received_events_url: "https://api.github.com/users/e2e-apps/received_events",
+      type: "Organization",
+      site_admin: false,
+    },
+    name: slug,
+    description: null,
+    external_url: String(app.integration_url ?? `https://api.github.com/apps/${slug}`),
+    html_url: `https://github.com/apps/${slug}`,
+    created_at: "2026-07-01T00:00:00Z",
+    updated_at: "2026-07-01T00:00:00Z",
+    permissions: { administration: "read" },
+    events: [],
+  };
 }
 
 /**

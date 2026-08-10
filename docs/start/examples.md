@@ -273,6 +273,35 @@ branches:
       restrictions: null
 ```
 
+Two protection surfaces the REST API cannot express ride GraphQL under the
+hood, declared as ordinary keys: `force_push_bypassers` lists who may force
+push (a bare login is a user, `org/team-slug` a team, `app/slug` a GitHub
+App), and `required_deployments` requires deployments to the named
+environments before merging (`null` turns the requirement off; declare the
+environments in the same file - the `environments` section applies first).
+An entry whose name is a wildcard pattern (`release/*`) is a classic RULE
+rather than a branch: it reconciles entirely through GraphQL and its
+protection accepts only the keys with exact GraphQL equivalents, so prefer
+rulesets for new pattern-based configuration.
+
+```yaml settings
+environments:
+  - name: production
+branches:
+  - name: main
+    protection:
+      enforce_admins: true
+      force_push_bypassers: [octocat, my-org/release-team, app/deploy-bot]
+      required_deployments:
+        environments: [production]
+  - name: release/*
+    protection:
+      required_linear_history: true
+      required_status_checks:
+        strict: true
+        contexts: [all-green]
+```
+
 ## What null means
 
 For most sections, leaving a key out means "do not touch it". Three

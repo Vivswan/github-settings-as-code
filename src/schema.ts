@@ -256,23 +256,54 @@ export interface RulesetConfig {
   bypass_actors?: Array<Record<string, unknown>>;
 }
 
-/** The protection PUT payload, passed through verbatim except its one routed key. */
+/** The protection PUT payload, passed through verbatim except its routed keys. */
 export interface BranchProtectionConfig {
   /**
-   * Require signed commits on the branch. The one protection key the PUT
-   * silently drops, so it is applied through the
+   * Require signed commits on the branch. A routed key the PUT silently
+   * drops, so it is applied through the
    * POST/DELETE .../protection/required_signatures sub-endpoint after the
    * PUT. GitHub does not document whether the protection PUT preserves an
    * existing signature requirement, so declare the toggle on any branch
    * that carries one - a declared value is pinned either way.
    */
   required_signatures?: boolean;
+  /**
+   * Who may force-push to the branch when "allow force pushes" is in its
+   * "specify who" mode. Each actor is one string: a bare login is a user
+   * ("octocat"), "org/team-slug" is a team, and "app/slug" is a GitHub App.
+   * A REST-invisible surface, so this routed key is stripped from the
+   * protection PUT and applied through the updateBranchProtectionRule
+   * GraphQL mutation after it; check mode reads the live list back through
+   * GraphQL. An empty list clears every allowance; an absent key leaves the
+   * live list untouched.
+   */
+  force_push_bypassers?: string[];
+  /**
+   * Require deployments to succeed before merging (the checkbox and its
+   * environment list). REST-invisible like force_push_bypassers, so the
+   * routed key rides the same GraphQL mutation. Declaring `null` turns the
+   * requirement OFF; an absent key leaves the live state untouched. GitHub
+   * SILENTLY drops environment names that do not exist on the repository,
+   * so apply verifies the mutation's read-back and fails loudly naming any
+   * dropped name; the environments section runs before branches, so
+   * environments declared in the same settings file exist by the time this
+   * key applies.
+   */
+  required_deployments?: { environments: string[] } | null;
   [key: string]: unknown;
 }
 
-/** Classic protection for one branch. */
+/** Classic protection for one branch name or wildcard pattern. */
 export interface BranchConfig {
-  /** The branch name. */
+  /**
+   * The branch name, or a wildcard pattern (any name containing `*`, `?`,
+   * or `[`, e.g. "release/*"). A literal name applies through the REST
+   * protection endpoints; a wildcard rule is REST-invisible, so it applies
+   * entirely through the GraphQL branch-protection-rule mutations and its
+   * protection accepts only the keys this action can round-trip through
+   * that surface (the validator names them; prefer rulesets for new
+   * pattern-based configuration).
+   */
   name: string;
   /** PUT .../protection payload; null removes protection (Probot parity). */
   protection: BranchProtectionConfig | null;
@@ -856,8 +887,11 @@ export const SECTION_KEYS = [
   "repository",
   "labels",
   "rulesets",
-  "branches",
+  // environments before branches on purpose: branches' required_deployments
+  // names deployment environments, and GitHub silently drops names that do
+  // not exist, so environments declared in the same file must land first.
   "environments",
+  "branches",
   "autolinks",
   "actions",
   "actions_secrets",

@@ -19,12 +19,18 @@ import {
   type SettingsFile,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
+import { isWildcardPattern } from "../../src/sections/branches.js";
 import { endpointMethod, undeclaredPolicy } from "../../src/sections/contract.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { DEFAULT_ROLE, roleForPermission } from "../../src/sections/roles.js";
 import { ADMIN_SLUG } from "./constants.js";
 import type { LiveState } from "./mock/state.js";
-import { CUSTOM_PROPERTY_DEFINITIONS, PROTECTION_RULE_APPS } from "./mock/state.js";
+import {
+  BYPASS_ACTOR_TEAMS,
+  BYPASS_ACTOR_USERS,
+  CUSTOM_PROPERTY_DEFINITIONS,
+  PROTECTION_RULE_APPS,
+} from "./mock/state.js";
 import type { Rng } from "./prng.js";
 import {
   type DenialStyle,
@@ -227,6 +233,11 @@ function genBranches(rng: Rng): Json[] {
   // The required_signatures draws are NEW, so they live on a forked stream:
   // the main stream stays stable and recorded seeds keep reproducing.
   const sigRng = rng.fork("required-signatures");
+  // The wildcard/bypassers/deployments draws are NEWER still - the GraphQL
+  // rule surface - forked for the same stability reason, and gated onto a
+  // MINORITY of entries so most iterations stay pure-REST (the
+  // zero-GraphQL-for-existing-users guarantee keeps getting exercised).
+  const bprRng = rng.fork("bpr");
   return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const name = `${rng.pick(["main", "release", "dev"])}-${i}`;
     if (rng.bool(0.3)) {
@@ -257,9 +268,72 @@ function genBranches(rng: Rng): Json[] {
     if (sigRng.bool(0.3)) {
       protection.required_signatures = sigRng.bool();
     }
+    if (bprRng.bool(0.25)) {
+      // A WILDCARD entry replaces the literal one: only translated keys, so
+      // the whole entry reconciles through the GraphQL rule mutations.
+      const wildcard: Json = {};
+      if (bprRng.bool(0.6)) {
+        wildcard.enforce_admins = bprRng.bool();
+      }
+      if (bprRng.bool(0.4)) {
+        wildcard.required_status_checks = bprRng.bool(0.3)
+          ? null
+          : { strict: bprRng.bool(), contexts: [] };
+      }
+      if (bprRng.bool(0.4)) {
+        wildcard.required_pull_request_reviews = {
+          required_approving_review_count: bprRng.int(3) + 1,
+        };
+      }
+      if (Object.keys(wildcard).length === 0) {
+        wildcard.required_linear_history = true;
+      }
+      addRoutedGraphqlKeys(bprRng, wildcard);
+      return {
+        name: `${rng.pick(["main", "release", "dev"])}-${i}/*`,
+        protection: bprRng.bool(0.15) ? null : wildcard,
+      };
+    }
+    addRoutedGraphqlKeys(bprRng, protection);
     return { name, protection };
   });
 }
+
+/**
+ * The minority draws for the two GraphQL-routed protection keys, shared by
+ * literal and wildcard entries. Actors come from the mock's known rosters so
+ * a generated allowance always resolves; deployment environment names come
+ * from the fixed pool presenceLiveState seeds as live environments, so the
+ * mutation's silent drop never fires on a generated document.
+ */
+function addRoutedGraphqlKeys(bprRng: Rng, protection: Json): void {
+  if (bprRng.bool(0.25)) {
+    const pool = [
+      ...BYPASS_ACTOR_USERS,
+      ...BYPASS_ACTOR_TEAMS,
+      ...PROTECTION_RULE_APPS.map((app) => `app/${String(app.slug)}`),
+    ];
+    const count = bprRng.int(3);
+    const picked = new Set<string>();
+    for (let i = 0; i < count; i++) {
+      picked.add(bprRng.pick(pool));
+    }
+    protection.force_push_bypassers = [...picked];
+  }
+  if (bprRng.bool(0.2)) {
+    protection.required_deployments = bprRng.bool(0.3)
+      ? null
+      : { environments: [bprRng.pick(FUZZ_DEPLOYMENT_ENVIRONMENTS)] };
+  }
+}
+
+/**
+ * The deployment environments a generated required_deployments key may name.
+ * presenceLiveState seeds every one of them as a live environment, so the
+ * verified silent-drop behavior (the mock keeps only EXISTING names) never
+ * turns a fully-granted apply into a read-back failure.
+ */
+export const FUZZ_DEPLOYMENT_ENVIRONMENTS = ["fuzz-deploy-a", "fuzz-deploy-b"] as const;
 
 function genEnvironments(rng: Rng): Json[] {
   // The variables draws are NEW, so they live on a forked stream: the main
@@ -1621,7 +1695,19 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
   const live: LiveState = {};
   const branches = settings.branches as Json[] | undefined;
   if (Array.isArray(branches)) {
-    live.branches = branches.map((b) => String(b.name));
+    // Only literal names: a wildcard pattern is a rule, never a git branch.
+    const literal = branches.map((b) => String(b.name)).filter((name) => !isWildcardPattern(name));
+    if (literal.length > 0) {
+      live.branches = literal;
+    }
+    // Every environment a generated required_deployments can name exists
+    // live, so the mutation's silent drop (mimicked by the mock) never
+    // fails a fully-granted apply's read-back.
+    if (branches.some((b) => (b.protection as Json | null)?.required_deployments !== undefined)) {
+      live.environments = Object.fromEntries(
+        FUZZ_DEPLOYMENT_ENVIRONMENTS.map((name) => [name, { name }]),
+      );
+    }
   }
   const workflows = settings.workflows as Json[] | undefined;
   if (Array.isArray(workflows)) {
@@ -1632,7 +1718,7 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
       state: w.state === "disabled" ? "disabled_manually" : "active",
     }));
   }
-  return live.branches || live.workflows ? live : undefined;
+  return live.branches || live.environments || live.workflows ? live : undefined;
 }
 
 // --- Fault-target catalog (fault-mode fuzz) ---------------------------------

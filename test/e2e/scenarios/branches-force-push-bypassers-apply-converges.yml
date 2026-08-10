@@ -1,0 +1,34 @@
+# force_push_bypassers never rides the protection PUT (no REST field exists);
+# the declared actors resolve to node ids - the user and team through GraphQL,
+# the App through the public GET /apps/{app_slug} lookup - and ONE
+# updateBranchProtectionRule mutation applies the allowance list after the
+# PUT. The converges rerun reads the live list back through the rules query
+# and sees the same actors.
+name: branches-force-push-bypassers-apply-converges
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        force_push_bypassers:
+          - octocat
+          - e2e-owner/platform
+          - app/deploy-gate
+live_state:
+  branches: ["main"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  requests_contain:
+    - "GRAPHQL BranchProtectionActorUser"
+    - "GRAPHQL BranchProtectionActorTeam"
+    - "GET /apps/deploy-gate"
+  mutations:
+    - "PUT /repos/{repo}/branches/main/protection"
+    - "GRAPHQL UpdateBranchProtectionRule"
+  converges: true

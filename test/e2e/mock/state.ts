@@ -12,6 +12,12 @@
  * proves the round trip.
  */
 
+import {
+  GRAPHQL_BOOLEAN_TWINS,
+  GRAPHQL_REVIEW_TWINS,
+  GRAPHQL_STATUS_CHECK_TWINS,
+  parseBypassActor,
+} from "../../../src/sections/branches.js";
 import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/roles.js";
 import { ADMIN_SLUG } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
@@ -50,6 +56,22 @@ export interface LiveState {
   rulesets?: Json[];
   /** Branch protection keyed by branch name; null means "unprotected". */
   branch_protection?: Record<string, Json | null>;
+  /**
+   * The GraphQL-only classic-protection fields of LITERAL rules, keyed by
+   * branch name (the REST GET shape cannot carry them): bypassForcePushActors
+   * (actor strings in the declared vocabulary), requiresDeployments, and
+   * requiredDeploymentEnvironments. Served merged into the rule node the
+   * rules query projects from branch_protection.
+   */
+  branch_protection_graphql?: Record<string, Json>;
+  /**
+   * WILDCARD-pattern classic protection rules, invisible to every REST
+   * protection endpoint (like GitHub), served only by the GraphQL rules
+   * query. Stored in the internal rule shape: GraphQL field names plus
+   * bypassForcePushActors as actor strings; buildState completes each seed
+   * to the full field set (completeRule) and stampNodeIds mints the ids.
+   */
+  branch_protection_rules?: Json[];
   /** Branch names that exist on the repo (drives the advisory branch probe). */
   branches?: string[];
   /** Deployment environments keyed by name (GET shape). */
@@ -235,6 +257,10 @@ export interface MockState {
   labels: Json[];
   rulesets: Json[];
   branch_protection: Record<string, Json | null>;
+  /** GraphQL-only fields of literal rules, keyed by branch name. */
+  branch_protection_graphql: Record<string, Json>;
+  /** Wildcard classic rules in the internal rule shape (see LiveState). */
+  branch_protection_rules: Json[];
   branches: string[];
   environments: Record<string, Json>;
   environment_variables: Record<string, Json[]>;
@@ -408,17 +434,34 @@ export function decodeNodeId(nodeId: string): { family: string; slug: string; ke
 }
 
 /**
+ * The repo-slug half of a GLOBAL resource's node id: GitHub Apps are not
+ * repo-scoped, so their minted ids carry this sentinel and the pipeline's
+ * mutation-target resolution skips the "app" family (see GLOBAL_NODE_FAMILIES
+ * in routes.ts).
+ */
+export const GLOBAL_NODE_SLUG = "-";
+
+/** Mint the global node id of a GitHub App, keyed by its slug. */
+export function mintAppNodeId(appSlug: string): string {
+  return mintNodeId("app", GLOBAL_NODE_SLUG, appSlug);
+}
+
+/**
  * Stamp the node ids of everything a state serves that GraphQL can address:
- * the repo object and each environment body. Called after a state is built
- * AND after it is re-slugged (the slug is part of the id), so the ids a
- * section reads always name the repository they belong to. Write handlers
- * mint ids for resources they create with the same codec.
+ * the repo object, each environment body, and each wildcard protection rule.
+ * Called after a state is built AND after it is re-slugged (the slug is part
+ * of the id), so the ids a section reads always name the repository they
+ * belong to. Write handlers mint ids for resources they create with the same
+ * codec.
  */
 export function stampNodeIds(state: MockState): void {
   const slug = String(state.repo.full_name ?? ADMIN_SLUG);
   state.repo.node_id = mintNodeId("repo", slug, "");
   for (const [name, environment] of Object.entries(state.environments)) {
     environment.node_id = mintNodeId("environment", slug, name);
+  }
+  for (const rule of state.branch_protection_rules) {
+    rule.id = mintNodeId("rule", slug, String(rule.pattern));
   }
 }
 
@@ -683,6 +726,12 @@ export function buildState(
     labels,
     rulesets: ls.rulesets ? clone(ls.rulesets) : [],
     branch_protection: ls.branch_protection ? clone(ls.branch_protection) : {},
+    branch_protection_graphql: ls.branch_protection_graphql
+      ? clone(ls.branch_protection_graphql)
+      : {},
+    branch_protection_rules: (ls.branch_protection_rules ?? []).map((rule) =>
+      completeRule(clone(rule)),
+    ),
     branches: ls.branches ? clone(ls.branches) : [],
     environments: ls.environments ? clone(ls.environments) : {},
     environment_variables: ls.environment_variables ? clone(ls.environment_variables) : {},
@@ -1033,6 +1082,334 @@ export function protectionFromPut(payload: Json): Json {
     }
   }
   return out;
+}
+
+// --- Branch protection rules (the GraphQL surface) --------------------------
+//
+// The rules query serves the UNION of literal rules (branch_protection
+// projected into GraphQL rule nodes) and wildcard rules (the
+// branch_protection_rules family). The projection imports the branches
+// section's own translation tables, and the state test proves the section's
+// classicViewOfRule inverts it, the protectionFromPut round-trip precedent.
+
+/**
+ * The users a force_push_bypassers entry can name in scenarios and fuzz
+ * draws; the actor-user lookup answers NOT_FOUND for anything else.
+ */
+export const BYPASS_ACTOR_USERS: readonly string[] = ["octocat", "release-bot"];
+
+/**
+ * The org teams ("org/team-slug") the actor-team lookup resolves; an unknown
+ * org answers NOT_FOUND, a known org with an unknown team answers team: null
+ * (GitHub's nullable-field shape).
+ */
+export const BYPASS_ACTOR_TEAMS: readonly string[] = [
+  "e2e-owner/platform",
+  "e2e-owner/release-guild",
+];
+
+/**
+ * Complete a (possibly sparse) internal rule seed to the full field set the
+ * wire node needs (the GraphQL type's booleans are non-null), with GitHub's
+ * fresh-rule defaults. The seed's own fields win; the id is stamped later
+ * (stampNodeIds) or minted by the create handler.
+ */
+export function completeRule(seed: Json): Json {
+  return {
+    pattern: "*",
+    isAdminEnforced: false,
+    requiresLinearHistory: false,
+    allowsForcePushes: false,
+    allowsDeletions: false,
+    blocksCreations: false,
+    requiresConversationResolution: false,
+    lockBranch: false,
+    lockAllowsFetchAndMerge: false,
+    requiresCommitSignatures: false,
+    requiresStatusChecks: false,
+    requiresStrictStatusChecks: false,
+    requiredStatusCheckContexts: [],
+    requiresApprovingReviews: false,
+    requiredApprovingReviewCount: null,
+    requiresCodeOwnerReviews: false,
+    dismissesStaleReviews: false,
+    requireLastPushApproval: false,
+    requiresDeployments: false,
+    requiredDeploymentEnvironments: [],
+    bypassForcePushActors: [],
+    ...seed,
+  };
+}
+
+/** Expand internal actor strings into the query's allowance-node selection. */
+function bypassAllowanceNodes(actors: unknown): Json {
+  const list = Array.isArray(actors) ? actors.map(String) : [];
+  return {
+    nodes: list.map((raw) => {
+      const actor = parseBypassActor(raw);
+      if (actor === null) {
+        return { actor: null };
+      }
+      if (actor.kind === "user") {
+        return { actor: { __typename: "User", login: actor.login } };
+      }
+      if (actor.kind === "team") {
+        return { actor: { __typename: "Team", combinedSlug: raw } };
+      }
+      return { actor: { __typename: "App", slug: actor.slug } };
+    }),
+    // The section reads one 100-node page and fails loudly on a truncation
+    // signal; the mock's lists never exceed that, so this is always false.
+    pageInfo: { hasNextPage: false },
+  };
+}
+
+/** Project one stored internal rule into the wire node the query serves. */
+export function ruleWireNode(stored: Json): Json {
+  const { bypassForcePushActors, ...fields } = stored;
+  return { ...fields, bypassForcePushAllowances: bypassAllowanceNodes(bypassForcePushActors) };
+}
+
+/** Unwrap a GET-shape `{enabled}` boolean (or a bare boolean seed). */
+function enabledOf(value: unknown): boolean {
+  return isPlainObject(value) ? value.enabled === true : value === true;
+}
+
+/**
+ * Project one LITERAL rule into the wire node: the stored REST GET shape
+ * translated through the section's own twin tables, plus the GraphQL-only
+ * extras family. The inverse of the section's classicViewOfRule, proven by
+ * the state test.
+ */
+export function ruleFromProtection(
+  pattern: string,
+  protection: Json,
+  extras: Json | undefined,
+  slug: string,
+): Json {
+  const stored = completeRule({ pattern });
+  stored.id = mintNodeId("rule", slug, pattern);
+  for (const [classic, twin] of Object.entries(GRAPHQL_BOOLEAN_TWINS)) {
+    if (classic in protection) {
+      stored[twin] = enabledOf(protection[classic]);
+    }
+  }
+  const checks = protection.required_status_checks;
+  if (isPlainObject(checks)) {
+    stored.requiresStatusChecks = true;
+    if ("strict" in checks) {
+      stored.requiresStrictStatusChecks = checks.strict === true;
+    }
+    if (Array.isArray(checks.contexts)) {
+      stored.requiredStatusCheckContexts = [...checks.contexts];
+    }
+  }
+  const reviews = protection.required_pull_request_reviews;
+  if (isPlainObject(reviews)) {
+    stored.requiresApprovingReviews = true;
+    for (const [classic, twin] of Object.entries(GRAPHQL_REVIEW_TWINS)) {
+      if (classic in reviews) {
+        stored[twin] = reviews[classic];
+      }
+    }
+  }
+  if (extras) {
+    Object.assign(stored, extras);
+  }
+  return ruleWireNode(stored);
+}
+
+/**
+ * Every rule node the rules query serves, deterministically ordered: the
+ * literal projections plus the wildcard family. REST GETs never see the
+ * wildcard family, mirroring GitHub (a glob rule is REST-invisible).
+ */
+export function allRuleNodes(state: MockState): Json[] {
+  const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+  const nodes: Json[] = [];
+  for (const [branch, protection] of Object.entries(state.branch_protection)) {
+    if (protection) {
+      nodes.push(
+        ruleFromProtection(branch, protection, state.branch_protection_graphql[branch], slug),
+      );
+    }
+  }
+  for (const rule of state.branch_protection_rules) {
+    nodes.push(ruleWireNode(rule));
+  }
+  nodes.sort((a, b) => String(a.pattern).localeCompare(String(b.pattern)));
+  return nodes;
+}
+
+/**
+ * GitHub's verified silent-drop behavior, mimicked: the mutation keeps only
+ * requiredDeploymentEnvironments names that exist as deployment environments
+ * and succeeds regardless, so the section's read-back check is what has to
+ * catch a dropped name. Environment names are case-insensitive on GitHub
+ * and stored canonically, so a kept name echoes the STORED spelling.
+ */
+export function dropMissingEnvironments(names: unknown, state: MockState): string[] {
+  const canonical = new Map(
+    Object.keys(state.environments).map((name) => [name.toLowerCase(), name]),
+  );
+  const out: string[] = [];
+  for (const name of Array.isArray(names) ? names.map(String) : []) {
+    const stored = canonical.get(name.toLowerCase());
+    if (stored !== undefined) {
+      out.push(stored);
+    }
+  }
+  return out;
+}
+
+/** Decode minted actor node ids back to the declared string vocabulary. */
+export function actorStringsFromIds(ids: unknown): { actors: string[] } | { bad: string } {
+  const out: string[] = [];
+  for (const id of Array.isArray(ids) ? ids : []) {
+    const decoded = decodeNodeId(String(id));
+    if (decoded === null) {
+      return { bad: String(id) };
+    }
+    if (decoded.family === "user" || decoded.family === "team") {
+      out.push(decoded.key);
+    } else if (decoded.family === "app") {
+      out.push(`app/${decoded.key}`);
+    } else {
+      return { bad: String(id) };
+    }
+  }
+  return { actors: out };
+}
+
+/**
+ * Apply a rule mutation's input fields onto a stored internal rule: the
+ * target/bookkeeping ids are skipped, actor ids decode back to strings,
+ * the deployment environment list passes through the silent drop, and every
+ * other field is a GraphQL-named twin stored verbatim.
+ */
+export function applyRuleInput(
+  stored: Json,
+  input: Json,
+  state: MockState,
+): { ok: true } | { bad: string } {
+  for (const [key, value] of Object.entries(input)) {
+    switch (key) {
+      case "branchProtectionRuleId":
+      case "repositoryId":
+      case "clientMutationId":
+        break;
+      case "pattern":
+        stored.pattern = String(value);
+        break;
+      case "bypassForcePushActorIds": {
+        const decoded = actorStringsFromIds(value);
+        if ("bad" in decoded) {
+          return decoded;
+        }
+        stored.bypassForcePushActors = decoded.actors;
+        break;
+      }
+      case "requiredDeploymentEnvironments":
+        stored.requiredDeploymentEnvironments = dropMissingEnvironments(value, state);
+        break;
+      default:
+        stored[key] = value;
+    }
+  }
+  return { ok: true };
+}
+
+/** The classic GET-shape key of each GraphQL boolean twin, for the inverse map. */
+const CLASSIC_BY_TWIN: Record<string, string> = Object.fromEntries(
+  Object.entries(GRAPHQL_BOOLEAN_TWINS).map(([classic, twin]) => [twin, classic]),
+);
+
+const REVIEW_CLASSIC_BY_TWIN: Record<string, string> = Object.fromEntries(
+  Object.entries(GRAPHQL_REVIEW_TWINS).map(([classic, twin]) => [twin, classic]),
+);
+
+const STATUS_CLASSIC_BY_TWIN: Record<string, string> = Object.fromEntries(
+  Object.entries(GRAPHQL_STATUS_CHECK_TWINS).map(([classic, twin]) => [twin, classic]),
+);
+
+/**
+ * Apply a rule mutation's input onto a LITERAL rule: the GraphQL-only
+ * fields land in the extras family, and every translated twin lands back on
+ * the stored REST GET shape (the classic key, {enabled}-wrapped for the
+ * booleans) so both views keep agreeing - GitHub's one underlying rule.
+ */
+export function applyRuleInputToLiteral(
+  state: MockState,
+  branch: string,
+  input: Json,
+): { ok: true } | { bad: string } {
+  const protection = state.branch_protection[branch] as Json;
+  if (state.branch_protection_graphql[branch] === undefined) {
+    state.branch_protection_graphql[branch] = {};
+  }
+  const extras = state.branch_protection_graphql[branch] as Json;
+  for (const [key, value] of Object.entries(input)) {
+    switch (key) {
+      case "branchProtectionRuleId":
+      case "clientMutationId":
+        break;
+      case "bypassForcePushActorIds": {
+        const decoded = actorStringsFromIds(value);
+        if ("bad" in decoded) {
+          return decoded;
+        }
+        extras.bypassForcePushActors = decoded.actors;
+        break;
+      }
+      case "requiresDeployments":
+        extras.requiresDeployments = value === true;
+        break;
+      case "requiredDeploymentEnvironments":
+        extras.requiredDeploymentEnvironments = dropMissingEnvironments(value, state);
+        break;
+      case "requiresStatusChecks":
+        if (value !== true) {
+          delete protection.required_status_checks;
+        } else if (!isPlainObject(protection.required_status_checks)) {
+          protection.required_status_checks = { strict: false, contexts: [] };
+        }
+        break;
+      case "requiresApprovingReviews":
+        if (value !== true) {
+          delete protection.required_pull_request_reviews;
+        } else if (!isPlainObject(protection.required_pull_request_reviews)) {
+          protection.required_pull_request_reviews = {};
+        }
+        break;
+      default: {
+        const classicBoolean = CLASSIC_BY_TWIN[key];
+        if (classicBoolean !== undefined) {
+          protection[classicBoolean] = { enabled: value === true };
+          break;
+        }
+        const classicReview = REVIEW_CLASSIC_BY_TWIN[key];
+        if (classicReview !== undefined) {
+          if (!isPlainObject(protection.required_pull_request_reviews)) {
+            protection.required_pull_request_reviews = {};
+          }
+          (protection.required_pull_request_reviews as Json)[classicReview] = value;
+          break;
+        }
+        const classicStatus = STATUS_CLASSIC_BY_TWIN[key];
+        if (classicStatus !== undefined) {
+          if (!isPlainObject(protection.required_status_checks)) {
+            protection.required_status_checks = { strict: false, contexts: [] };
+          }
+          (protection.required_status_checks as Json)[classicStatus] = value;
+          break;
+        }
+        // A field with no classic destination (a future twin): keep it on
+        // the extras so a read-back still echoes what was stored.
+        extras[key] = value;
+      }
+    }
+  }
+  return { ok: true };
 }
 
 /**

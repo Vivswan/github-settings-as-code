@@ -1,0 +1,47 @@
+# The full wildcard-rule lifecycle in one apply: release/* has no live rule
+# (createBranchProtectionRule, after the one repository-id lookup), hotfix/*
+# exists with a stale review count (updateBranchProtectionRule), and old/*
+# declares protection: null against a live rule (deleteBranchProtectionRule).
+# Every wildcard write goes through GraphQL; no REST protection endpoint can
+# see these rules. The check rerun converges.
+name: branches-wildcard-lifecycle
+settings:
+  branches:
+    - name: "release/*"
+      protection:
+        enforce_admins: true
+        required_status_checks:
+          strict: true
+          contexts: ["ci"]
+    - name: "hotfix/*"
+      protection:
+        required_pull_request_reviews:
+          required_approving_review_count: 2
+        allow_deletions: false
+    - name: "old/*"
+      protection: null
+live_state:
+  branch_protection_rules:
+    - pattern: "hotfix/*"
+      requiresApprovingReviews: true
+      requiredApprovingReviewCount: 1
+    - pattern: "old/*"
+      isAdminEnforced: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  requests_contain:
+    - "GRAPHQL BranchProtectionRules"
+    - "GRAPHQL BranchProtectionRepository"
+  mutations:
+    - "GRAPHQL CreateBranchProtectionRule"
+    - "GRAPHQL UpdateBranchProtectionRule"
+    - "GRAPHQL DeleteBranchProtectionRule"
+  never:
+    - "PUT /repos/{repo}/branches"
+    - "DELETE /repos/{repo}/branches"
+  converges: true

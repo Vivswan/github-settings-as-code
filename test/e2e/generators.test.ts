@@ -62,34 +62,61 @@ describe("generator couplings and pools", () => {
     }
   });
 
-  test("branches protection payloads only use the core keys plus required_signatures", () => {
+  test("branches protection payloads only use known keys, wildcards only translated ones", () => {
     const allowed = new Set([
       "required_status_checks",
       "enforce_admins",
       "required_pull_request_reviews",
       "restrictions",
       "required_signatures",
+      "required_linear_history",
+      "force_push_bypassers",
+      "required_deployments",
     ]);
+    // Wildcard entries reconcile through GraphQL, whose translation table has
+    // no `restrictions` (the shape rejects it there); the generator must
+    // never draw it onto one.
+    const wildcardForbidden = new Set(["restrictions", "required_signatures"]);
     let signatureDraws = 0;
+    let wildcardDraws = 0;
+    let bypasserDraws = 0;
+    let deploymentDraws = 0;
     for (let i = 0; i < 200; i++) {
       const branches = genSettings(new Rng(i), "branches") as Array<{
+        name: string;
         protection: Record<string, unknown> | null;
       }>;
       for (const branch of branches) {
+        const wildcard = /[*?[]/.test(branch.name);
+        if (wildcard) {
+          wildcardDraws++;
+        }
         if (branch.protection) {
           for (const key of Object.keys(branch.protection)) {
             expect(allowed.has(key)).toBe(true);
+            if (wildcard) {
+              expect(wildcardForbidden.has(key)).toBe(false);
+            }
           }
           if ("required_signatures" in branch.protection) {
             expect(typeof branch.protection.required_signatures).toBe("boolean");
             signatureDraws++;
           }
+          if ("force_push_bypassers" in branch.protection) {
+            bypasserDraws++;
+          }
+          if ("required_deployments" in branch.protection) {
+            deploymentDraws++;
+          }
         }
       }
     }
-    // The ~0.3 draw must actually fire across seeds, or the sub-endpoint
-    // paths would go unfuzzed without anything failing.
+    // Each minority draw must actually fire across seeds, or its path would
+    // go unfuzzed without anything failing.
     expect(signatureDraws).toBeGreaterThan(0);
+    expect(wildcardDraws).toBeGreaterThan(0);
+    expect(bypasserDraws).toBeGreaterThan(0);
+    expect(deploymentDraws).toBeGreaterThan(0);
   });
 
   test("milestones due_on, when present, is a fixed ISO date (deterministic)", () => {
@@ -545,15 +572,32 @@ describe("genScenario", () => {
   test("declared branches and workflows are present in live_state so they converge", () => {
     // branches (protection PUT) and workflows (enable/disable) can configure but
     // not create their resource; a declared name absent from live_state would
-    // permanently drift with a skip note. Every declared branch name / workflow
-    // path must appear in the seeded live_state.
+    // permanently drift with a skip note. Every declared LITERAL branch name /
+    // workflow path must appear in the seeded live_state; a wildcard entry is
+    // a RULE (creatable through GraphQL), so it must never be seeded as a git
+    // branch. Declared required-deployment environments must exist live, or
+    // the mock's silent-drop mimicry would fail a fully-granted apply.
     for (let i = 0; i < 200; i++) {
       const { scenario } = genScenario(new Rng(i));
-      const branches = scenario.settings?.branches as Array<{ name: string }> | undefined;
+      const branches = scenario.settings?.branches as
+        | Array<{ name: string; protection: Record<string, unknown> | null }>
+        | undefined;
       if (branches) {
         const live = new Set((scenario.live_state?.branches as string[] | undefined) ?? []);
+        const liveEnvironments = scenario.live_state?.environments ?? {};
         for (const b of branches) {
-          expect(live.has(b.name)).toBe(true);
+          if (/[*?[]/.test(b.name)) {
+            expect(live.has(b.name)).toBe(false);
+          } else {
+            expect(live.has(b.name)).toBe(true);
+          }
+          const deployments = b.protection?.required_deployments as
+            | { environments: string[] }
+            | null
+            | undefined;
+          for (const env of deployments?.environments ?? []) {
+            expect(Object.keys(liveEnvironments)).toContain(env);
+          }
         }
       }
       const workflows = scenario.settings?.workflows as Array<{ path: string }> | undefined;

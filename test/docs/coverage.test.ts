@@ -129,10 +129,18 @@ describe("COVERAGE gaps anti-test", () => {
     // Structural, not a tuned constant: EVERY gap row must spell at least one
     // METHOD /path endpoint in its Endpoints cell, so a single row losing its
     // endpoint syntax (or the whole table changing format) fails here by
-    // name. Implementing a gap deletes its whole row, so this bar never
-    // needs retuning.
+    // name. Implementing a gap deletes its whole row; an EMPTY table is the
+    // legitimate all-gaps-implemented state, which the section prose must
+    // declare in so many words - the guard that the table did not silently
+    // change format out from under the sweep above.
     const gapRows = tableRows(gapLines);
-    expect(gapRows.length).toBeGreaterThan(0);
+    if (gapRows.length === 0) {
+      expect(
+        gapLines.join(" ").includes("The table is EMPTY right now"),
+        "the gaps table has no rows but its prose does not declare the empty state; either a row lost its table format or the empty-state sentence was dropped",
+      ).toBe(true);
+      return;
+    }
     expect(found).toBeGreaterThan(0);
     for (const row of gapRows) {
       const endpointCell = row[1] ?? "";

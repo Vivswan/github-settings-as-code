@@ -1,0 +1,43 @@
+# required_deployments rides the same rule mutation as force_push_bypassers:
+# main turns the requirement ON for an environment that exists (the read-back
+# keeps it, so no drop error), and dev declares null, which turns a live
+# requirement OFF. Both converge on the check rerun.
+name: branches-required-deployments-apply-converges
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        required_deployments:
+          environments: ["prod"]
+    - name: dev
+      protection:
+        enforce_admins: true
+        required_deployments: null
+live_state:
+  branches: ["main", "dev"]
+  environments:
+    prod:
+      name: prod
+  branch_protection:
+    dev:
+      enforce_admins:
+        enabled: true
+  branch_protection_graphql:
+    dev:
+      requiresDeployments: true
+      requiredDeploymentEnvironments: ["staging"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  mutations:
+    - "PUT /repos/{repo}/branches/main/protection"
+    - "GRAPHQL UpdateBranchProtectionRule"
+    - "PUT /repos/{repo}/branches/dev/protection"
+    - "GRAPHQL UpdateBranchProtectionRule"
+  converges: true
