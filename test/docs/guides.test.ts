@@ -478,14 +478,18 @@ describe("docs/ guide pages", () => {
     }
     const major = `v${version.split(".")[0]}`;
     let references = 0;
+    const stale: string[] = [];
     for (const page of guidePages()) {
       const markdown = readFileSync(join(DOCS, page), "utf8");
-      for (const m of markdown.matchAll(/uses: Vivswan\/github-settings-as-code@(\S+)/g)) {
+      for (const [index, line] of markdown.split("\n").entries()) {
+        const m = line.match(/uses: Vivswan\/github-settings-as-code@(\S+)/);
+        if (!m) {
+          continue;
+        }
         references++;
-        expect(
-          m[1],
-          `docs/${page} pins @${m[1]}; guides must use the moving major tag @${major}`,
-        ).toBe(major);
+        if (m[1] !== major) {
+          stale.push(`docs/${page}:${index + 1} pins @${m[1]}: ${line.trim()}`);
+        }
       }
       // release-please's generic updater rewrites the FIRST digit run on an
       // annotated line (MAJOR_VERSION_REGEX with String.replace). Every
@@ -514,6 +518,14 @@ describe("docs/ guide pages", () => {
     // The guides carry workflow snippets, so zero matches means the pattern
     // rotted, not that the docs went snippet-free.
     expect(references).toBeGreaterThan(0);
+    expect(
+      stale,
+      `${stale.length} guide snippet(s) do not reference the moving major tag @${major}:\n` +
+        `  ${stale.join("\n  ")}\n` +
+        `Fix each line by appending " # x-release-please-major" and listing the file under\n` +
+        `extra-files in release-please-config.json, so release PRs rewrite the tag; then\n` +
+        `set the tag to the current major.`,
+    ).toEqual([]);
   });
 });
 
