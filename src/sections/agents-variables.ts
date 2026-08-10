@@ -1,0 +1,171 @@
+/**
+ * `agents_variables:` section - Copilot agents repository variables,
+ * upserted by case-insensitive name and DELETED loudly when undeclared (the
+ * wrapped `undeclared: keep` form softens that to notes). Values are plain
+ * text by design: variables are readable configuration, which is what makes
+ * check-mode diffing possible; secrets are write-only material and
+ * deliberately not this section. GitHub stores variable names uppercased
+ * regardless of how they are entered, so matching and duplicate rejection
+ * compare uppercased names.
+ */
+
+import { z } from "zod";
+import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
+import type { AgentsVariableConfig, UndeclaredPolicyList } from "../schema.js";
+import {
+  call,
+  defaultUndeclaredPolicy,
+  type EndpointDecl,
+  emptyResult,
+  listAllEnveloped,
+  rejectDuplicates,
+  type SectionModule,
+  type SectionPermission,
+  type SectionResult,
+  undeclaredPolicy,
+  undeclaredPolicyShape,
+} from "./contract.js";
+
+/** Case-insensitive key for variable names (GitHub stores them uppercased). */
+export function variableKey(name: string): string {
+  return name.toUpperCase();
+}
+
+interface LiveVariable {
+  name: string;
+  value: string;
+}
+
+const permission: SectionPermission = { repo: ["agent_variables"] };
+
+const ENDPOINTS = {
+  list: {
+    route: "GET /repos/{owner}/{repo}/agents/variables",
+    statuses: { 200: "the Copilot agents variables list" },
+    // This list endpoint caps per_page at 30 (not the standard 100); asking
+    // for more would be silently clamped and truncate the walk to one page.
+    pageSize: 30,
+  },
+  create: {
+    route: "POST /repos/{owner}/{repo}/agents/variables",
+    statuses: { 201: "variable created" },
+  },
+  update: {
+    route: "PATCH /repos/{owner}/{repo}/agents/variables/{name}",
+    statuses: { 204: "variable updated" },
+  },
+  remove: {
+    route: "DELETE /repos/{owner}/{repo}/agents/variables/{name}",
+    statuses: { 204: "variable deleted" },
+  },
+} as const satisfies Record<string, EndpointDecl>;
+
+export const agentsVariablesSection: SectionModule<"agents_variables"> = {
+  key: "agents_variables",
+  undeclaredDefault: "delete",
+  permission,
+  endpoints: ENDPOINTS,
+  shape: undeclaredPolicyShape(z.array(z.looseObject({ name: z.string(), value: z.string() }))),
+  async run(ctx, desiredRaw): Promise<SectionResult> {
+    const result = emptyResult();
+    const { policy, entries: desired } = undeclaredPolicy(
+      desiredRaw as AgentsVariableConfig[] | UndeclaredPolicyList<AgentsVariableConfig>,
+      defaultUndeclaredPolicy(this),
+    );
+    // Variable names are case-insensitive on GitHub, so two entries differing
+    // only in case name the same variable and would fight on every run.
+    rejectDuplicates(
+      this,
+      desired,
+      (variable) => variableKey(variable.name),
+      (variable) => variable.name,
+    );
+    const live = (await listAllEnveloped(ctx, this, ENDPOINTS.list, "variables")) as LiveVariable[];
+    const liveByKey = new Map<string, LiveVariable>();
+    for (const variable of live) {
+      liveByKey.set(variableKey(variable.name), variable);
+    }
+
+    const declaredKeys = new Set<string>();
+    for (const variable of desired) {
+      declaredKeys.add(variableKey(variable.name));
+      const existing = liveByKey.get(variableKey(variable.name));
+      const { name: _name, value: _value, ...extraKeys } = variable;
+      if (!existing) {
+        if (ctx.check) {
+          result.drift.push(
+            `agents_variables[${variable.name}]: missing - declared in the settings file but not on the repo; apply will create it`,
+          );
+        } else {
+          await call(ctx, this, ENDPOINTS.create, {
+            payload: {
+              name: variable.name,
+              value: variable.value,
+              ...extraKeys, // future variable fields pass through verbatim
+            },
+          });
+          result.changes.push(`created Copilot agents variable "${variable.name}"`);
+        }
+        continue;
+      }
+
+      // The live name never drifts against the declaration: GitHub stores it
+      // uppercased whatever casing the file uses, so only the value (and any
+      // declared passthrough fields) can diverge.
+      const valueDrift = existing.value !== variable.value;
+      const extraDrift = subsetDiff(extraKeys, existing, `agents_variables[${variable.name}]`);
+      if (!valueDrift && extraDrift.length === 0) {
+        continue;
+      }
+      if (ctx.check) {
+        if (valueDrift) {
+          result.drift.push(
+            `agents_variables[${variable.name}].value: declared ${JSON.stringify(variable.value)} != live ${JSON.stringify(existing.value)}; apply will set the declared value`,
+          );
+        }
+        result.drift.push(...extraDrift);
+      } else {
+        const phantom = phantomKeys(extraKeys, existing);
+        if (phantom.length > 0) {
+          result.notes.push(
+            phantomNote(
+              `agents_variables[${variable.name}]`,
+              phantom,
+              "variable",
+              "this update will re-run",
+            ),
+          );
+        }
+        await call(ctx, this, ENDPOINTS.update, {
+          params: { name: existing.name },
+          payload: {
+            value: variable.value,
+            ...extraKeys, // future variable fields pass through verbatim
+          },
+        });
+        result.changes.push(`updated Copilot agents variable "${variable.name}"`);
+      }
+    }
+
+    // Undeclared variables are deleted by default, loudly on purpose; the
+    // wrapped `undeclared: keep` form downgrades each to a note.
+    for (const variable of liveByKey.values()) {
+      if (declaredKeys.has(variableKey(variable.name))) {
+        continue;
+      }
+      if (policy === "keep") {
+        result.notes.push(
+          `Copilot agents variable "${variable.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+        );
+      } else if (ctx.check) {
+        result.drift.push(
+          `agents_variables[${variable.name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
+        );
+      } else {
+        await call(ctx, this, ENDPOINTS.remove, { params: { name: variable.name } });
+        result.changes.push(`DELETED undeclared Copilot agents variable "${variable.name}"`);
+      }
+    }
+    return result;
+  },
+};

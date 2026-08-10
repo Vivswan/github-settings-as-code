@@ -102,6 +102,8 @@ export interface LiveState {
   dependabot_secrets?: Json[];
   /** Codespaces secrets list items, same GET shape as actions_secrets. */
   codespaces_secrets?: Json[];
+  /** Copilot agents secrets list items, same GET shape as actions_secrets. */
+  agents_secrets?: Json[];
   /**
    * Per-environment Actions secrets (GET shape: {name, created_at,
    * updated_at}), keyed by environment name. Values are never part of the
@@ -155,6 +157,12 @@ export interface LiveState {
    * seeded names should be uppercase to mirror the live service.
    */
   actions_variables?: Json[];
+  /**
+   * Copilot agents repository variables (GET shape: name, value, created_at,
+   * updated_at), replaces the baseline. GitHub stores names uppercased, so
+   * seeded names should be uppercase to mirror the live service.
+   */
+  agents_variables?: Json[];
   /**
    * When true, an organization- or user-level interaction limit is in
    * effect: repo-level PUT/DELETE answer 409, matching GitHub.
@@ -234,6 +242,8 @@ export interface MockState {
   dependabot_secrets: Json[];
   /** Codespaces secrets, same GET shape as actions_secrets. */
   codespaces_secrets: Json[];
+  /** Copilot agents secrets, same GET shape as actions_secrets. */
+  agents_secrets: Json[];
   /** Per-environment Actions secrets (GET shape), keyed by environment name. */
   environment_secrets: Record<string, Json[]>;
   /**
@@ -254,6 +264,7 @@ export interface MockState {
   actions_secret_digests: Record<string, string>;
   dependabot_secret_digests: Record<string, string>;
   codespaces_secret_digests: Record<string, string>;
+  agents_secret_digests: Record<string, string>;
   environment_secret_digests: Record<string, Record<string, string>>;
   workflows: Json[];
   pages: Json | null;
@@ -272,6 +283,8 @@ export interface MockState {
   /** The creation-cap bypass list, simple-user objects in GET shape. */
   pull_bypass_list: Json[];
   actions_variables: Json[];
+  /** Copilot agents repository variables, same GET shape as actions_variables. */
+  agents_variables: Json[];
   /** Repository webhooks; config.secret is stored real, GETs echo "********". */
   hooks: Json[];
   /** Deploy keys in GET shape; stored key material carries no comment. */
@@ -568,11 +581,13 @@ export function buildState(
     actions_secrets: ls.actions_secrets ? clone(ls.actions_secrets) : [],
     dependabot_secrets: ls.dependabot_secrets ? clone(ls.dependabot_secrets) : [],
     codespaces_secrets: ls.codespaces_secrets ? clone(ls.codespaces_secrets) : [],
+    agents_secrets: ls.agents_secrets ? clone(ls.agents_secrets) : [],
     environment_secrets: ls.environment_secrets ? clone(ls.environment_secrets) : {},
     _secret_write_counter: 0,
     actions_secret_digests: {},
     dependabot_secret_digests: {},
     codespaces_secret_digests: {},
+    agents_secret_digests: {},
     environment_secret_digests: {},
     workflows: ls.workflows ? clone(ls.workflows) : [],
     pages: ls.pages !== undefined ? clone(ls.pages) : null,
@@ -593,6 +608,7 @@ export function buildState(
     pull_creation_cap_unavailable: ls.pull_creation_cap_unavailable ?? false,
     pull_bypass_list: (ls.pull_bypass_list ?? []).map((user) => bypassUser(clone(user), takeId())),
     actions_variables: ls.actions_variables ? clone(ls.actions_variables) : [],
+    agents_variables: ls.agents_variables ? clone(ls.agents_variables) : [],
     hooks: (ls.hooks ?? []).map((hook) => completeHook(clone(hook), takeId())),
     deploy_keys: ls.deploy_keys ? clone(ls.deploy_keys) : [],
     issues: ls.issues ? clone(ls.issues) : [],

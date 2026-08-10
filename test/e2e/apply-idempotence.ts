@@ -22,6 +22,8 @@
  *   subsetDiff clean against the live milestone.
  * - actions_variables (true): the PATCH is skipped when the live value (and
  *   any declared passthrough fields) already match the declaration.
+ * - agents_variables (true): as actions_variables, over the Copilot agents
+ *   variable store.
  * - deploy_keys (true): the delete-and-recreate fires only when the declared
  *   entry diverges from the live key (material compared as algorithm + blob,
  *   comments ignored; a declared read_only compared verbatim).
@@ -43,12 +45,12 @@
  *   half of the proof covers the variables family, and the nested `secrets`
  *   PUTs are always-rewrite by contract (see ALWAYS_REWRITE_STATE_FAMILIES).
  * - actions (false): every declared endpoint group is PUT unconditionally.
- * - actions_secrets, dependabot_secrets, codespaces_secrets (false): every
- *   declared secret is re-sealed and re-PUT on every apply BY DESIGN -
- *   GitHub cannot return a value to compare against, and the unconditional
- *   rewrite is what makes a rotated source value propagate. State stability
- *   holds because the mock stores a deterministic digest of the unsealed
- *   value, not the (per-seal random) ciphertext.
+ * - actions_secrets, dependabot_secrets, codespaces_secrets, agents_secrets
+ *   (false): every declared secret is re-sealed and re-PUT on every apply BY
+ *   DESIGN - GitHub cannot return a value to compare against, and the
+ *   unconditional rewrite is what makes a rotated source value propagate.
+ *   State stability holds because the mock stores a deterministic digest of
+ *   the unsealed value, not the (per-seal random) ciphertext.
  * - pages (false): an existing site is PUT unconditionally.
  * - code_scanning_default_setup (false): the PATCH runs unconditionally.
  * - teams (false): team access is granted (PUT) unconditionally.
@@ -93,6 +95,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   actions_secrets: false,
   dependabot_secrets: false,
   codespaces_secrets: false,
+  agents_secrets: false,
   workflows: true,
   pages: false,
   code_scanning_default_setup: false,
@@ -101,6 +104,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   milestones: true,
   interaction_limits: false,
   actions_variables: true,
+  agents_variables: true,
   webhooks: false,
   custom_properties: true,
   deploy_keys: true,
@@ -130,6 +134,7 @@ export const ALWAYS_REWRITE_ENDPOINT_FAMILIES: Readonly<Record<string, string>> 
   "actions_secrets.put": "actions_secrets",
   "dependabot_secrets.put": "dependabot_secrets",
   "codespaces_secrets.put": "codespaces_secrets",
+  "agents_secrets.put": "agents_secrets",
   "environments.putSecret": "environment_secrets",
 };
 

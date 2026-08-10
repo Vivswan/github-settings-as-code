@@ -75,9 +75,11 @@ describe("changed-sections file map", () => {
       "actions-secrets.ts": ["actions_secrets"],
       "dependabot-secrets.ts": ["dependabot_secrets"],
       "codespaces-secrets.ts": ["codespaces_secrets"],
+      "agents-secrets.ts": ["agents_secrets"],
       "code-scanning.ts": ["code_scanning_default_setup"],
       "interaction-limits.ts": ["interaction_limits"],
       "actions-variables.ts": ["actions_variables"],
+      "agents-variables.ts": ["agents_variables"],
       "custom-properties.ts": ["custom_properties"],
       "deploy-keys.ts": ["deploy_keys"],
       "secret-scanning-patterns.ts": ["secret_scanning_custom_patterns"],
@@ -86,6 +88,7 @@ describe("changed-sections file map", () => {
         "actions_secrets",
         "dependabot_secrets",
         "codespaces_secrets",
+        "agents_secrets",
         "environments",
       ],
     };
@@ -158,9 +161,9 @@ describe("changed-sections selection", () => {
     );
   });
 
-  test("secrets-engine.ts fans out to all four consuming sections", () => {
+  test("secrets-engine.ts fans out to all five consuming sections", () => {
     expect(renderSelection(sectionsForFiles(["src/sections/secrets-engine.ts"]))).toBe(
-      "environments,actions_secrets,dependabot_secrets,codespaces_secrets",
+      "environments,actions_secrets,dependabot_secrets,codespaces_secrets,agents_secrets",
     );
   });
 

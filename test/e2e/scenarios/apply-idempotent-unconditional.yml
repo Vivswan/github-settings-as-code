@@ -4,7 +4,7 @@
 # because a wrong `false` merely weakens the zero-write proof and nothing else
 # would contradict it. apply-idempotent-mixed carries the compare-before-write
 # sections plus rulesets and environments; the secrets *-apply-converges
-# scenarios carry the three secret sections and webhooks. This scenario covers
+# scenarios carry the four secret sections and webhooks. This scenario covers
 # the rest: each section here writes unconditionally, so the second apply must
 # write to every one of them again while leaving the mock state byte-identical,
 # and the final check run reads back clean.

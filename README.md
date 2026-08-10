@@ -9,7 +9,7 @@ silently.
 ## Usage
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token):
-   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
+   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=repo-settings-as-code&description=Token+for+Vivswan%2Frepo-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
    starts you off with every repository permission the
    [Sections](#sections) table can need. Pick the resource owner and
    repositories, and add Members: read by hand when the owner is an
@@ -124,6 +124,7 @@ The guides live in [docs/](docs/README.md), in four groups:
 | `actions_secrets` | actions secrets list + public-key + sealed PUT + delete | Secrets: write | kept (settable) | `{name, value: $NAME}` sealed writes, re-sent every apply; existence-only checks, values unrecoverable |
 | `dependabot_secrets` | dependabot secrets list + public-key + sealed PUT + delete | Dependabot secrets: write | kept (settable) | as `actions_secrets`, over the Dependabot secret store |
 | `codespaces_secrets` | codespaces secrets list + public-key + sealed PUT + delete | Codespaces secrets: write | kept (settable) | as `actions_secrets`, over the Codespaces secret store |
+| `agents_secrets` | agents secrets list + public-key + sealed PUT + delete | Agent secrets: write | kept (settable) | as `actions_secrets`, over the Copilot agents secret store |
 | `workflows` | Actions workflows list, enable/disable | Actions: write | untouched | `{path, state: active or disabled}`; bare file names match `.github/workflows/` |
 | `pages` | POST/PUT/DELETE pages | Pages: write | untouched | `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`, `public` (GHEC site visibility); `pages: null` disables the site |
 | `code_scanning_default_setup` | code scanning default setup | Administration or Code scanning alerts: write | untouched | `state`, `query_suite`, `languages`; needs Advanced Security on private repositories |
@@ -132,6 +133,7 @@ The guides live in [docs/](docs/README.md), in four groups:
 | `milestones` | milestones | Issues: write | kept (settable) | upsert by title; deleting a milestone detaches it from every issue carrying it, which is why keep is the default |
 | `interaction_limits` | interaction-limits + pulls creation-cap/bypass-list | Administration: write | untouched | re-arms the self-expiring limit every apply run; `null` clears it (base limit only); a 409 (org/user-level limit overrides) becomes a note; the PR creation cap is persistent (PATCHed only on divergence, 405 where unavailable) and its bypass logins reconcile add/remove |
 | `actions_variables` | Actions variables CRUD | Variables: write | deleted (settable) | plain-text variables upserted by name (case-insensitive); values read back in full, so check mode diffs them exactly |
+| `agents_variables` | Copilot agents variables CRUD | Agent variables: write | deleted (settable) | as `actions_variables`, over the Copilot agents variable store |
 | `webhooks` | hooks CRUD + hook config sub-endpoint | Webhooks: write | kept (settable) | one hook per `config.url`, the natural key; `config.secret` takes a `$NAME` reference and is re-sent every run |
 | `custom_properties` | GET/PATCH properties/values; probes GET /orgs/{owner} | Custom properties: write | kept (settable) | values of org-defined properties (definitions are org-scoped); org repos only, skipped with a notice on personal accounts; `value: null` unsets |
 | `deploy_keys` | deploy keys list/create/delete | Administration: write | kept (settable) | matched by title; the declared material is a PUBLIC key; immutable upstream, so changed entries are replaced |
@@ -268,7 +270,8 @@ object-shaped sections keep their original Probot shapes).
 Uninstall the app, add the workflow above, and optionally move branch
 protection to `rulesets`. Differences: applies run visibly in Actions
 (loud failures instead of silent skips), rulesets are supported, and
-nothing except labels/autolinks/collaborators/Actions variables - plus,
+nothing except labels/autolinks/collaborators/Actions variables/Copilot
+agents variables - plus,
 WITHIN a declared per-environment key, that environment's variables and
 deployment branch-policy patterns - is ever deleted implicitly.
 

@@ -1,7 +1,8 @@
 /**
  * The shared secrets engine: existence-based reconciliation plus client-side
- * sealing for GitHub's four repo-scoped secret families - repository Actions,
- * Dependabot, and Codespaces secrets, plus per-environment Actions secrets.
+ * sealing for GitHub's five repo-scoped secret families - repository Actions,
+ * Dependabot, Codespaces, and Copilot agents secrets, plus per-environment
+ * Actions secrets.
  * Each family exposes the same four operations - an enveloped list, a public
  * key, a sealed PUT, a DELETE - differing only in route, so a consuming
  * section keeps its own EndpointDecls (which also drive the mock routes and

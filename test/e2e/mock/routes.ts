@@ -996,9 +996,9 @@ const HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // actions_secrets / dependabot_secrets / codespaces_secrets ----------------
+  // actions_secrets / dependabot_secrets / codespaces_secrets / agents_secrets
   //
-  // The three repository-level secret families share one handler shape (see
+  // The four repository-level secret families share one handler shape (see
   // the sealedSecretPut/secretsList/secretRemove helpers): the list serves
   // names and timestamps only (values are never part of the GET shape), and
   // the PUT is the crypto proof - it UNSEALS the uploaded ciphertext with the
@@ -1048,6 +1048,20 @@ const HANDLERS: Record<string, Handler> = {
     ),
   "codespaces_secrets.remove": ({ state, pathname }) =>
     secretRemove(state.codespaces_secrets, state.codespaces_secret_digests, lastSegment(pathname)),
+
+  "agents_secrets.list": ({ state, query }) => secretsList(state.agents_secrets, query),
+  "agents_secrets.publicKey": () =>
+    ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
+  "agents_secrets.put": ({ state, pathname, body }) =>
+    sealedSecretPut(
+      state,
+      state.agents_secrets,
+      state.agents_secret_digests,
+      lastSegment(pathname),
+      body,
+    ),
+  "agents_secrets.remove": ({ state, pathname }) =>
+    secretRemove(state.agents_secrets, state.agents_secret_digests, lastSegment(pathname)),
 
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {
@@ -1390,6 +1404,65 @@ const HANDLERS: Record<string, Handler> = {
       return { status: 404, body: { message: "Not Found" } };
     }
     state.actions_variables.splice(index, 1);
+    return noContent();
+  },
+
+  // agents_variables ---------------------------------------------------------
+  //
+  // The Copilot agents variable store mirrors the actions_variables handlers
+  // exactly: same GET shape, same uppercase-stored names, same 30-item page
+  // cap read from the endpoint declaration.
+  "agents_variables.list": ({ state, query }) => {
+    const page = slicePage(
+      state.agents_variables,
+      query,
+      allEndpoints()["agents_variables.list"]?.pageSize,
+    );
+    return ok({ total_count: state.agents_variables.length, variables: page });
+  },
+  "agents_variables.create": ({ state, body }) => {
+    const payload = asObject(body);
+    const variable: Json = {
+      ...payload,
+      name: variableName(payload),
+      value: payload.value ?? "",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    state.agents_variables.push(variable);
+    // The documented 201 body is an empty object.
+    return { status: 201, body: {} };
+  },
+  "agents_variables.update": ({ state, pathname, body }) => {
+    const name = lastSegment(pathname).toUpperCase();
+    const variable = state.agents_variables.find((v) => String(v.name).toUpperCase() === name);
+    if (!variable) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    const payload = asObject(body);
+    if (typeof payload.name === "string") {
+      variable.name = payload.name.toUpperCase();
+    }
+    if (payload.value !== undefined) {
+      variable.value = payload.value;
+    }
+    // Passthrough fields update verbatim, mirroring the create path, so a
+    // second apply's subsetDiff over them reads back what was written.
+    for (const [key, value] of Object.entries(payload)) {
+      if (VARIABLE_CANONICAL_KEYS.has(key)) {
+        continue;
+      }
+      variable[key] = value;
+    }
+    return noContent();
+  },
+  "agents_variables.remove": ({ state, pathname }) => {
+    const name = lastSegment(pathname).toUpperCase();
+    const index = state.agents_variables.findIndex((v) => String(v.name).toUpperCase() === name);
+    if (index < 0) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    state.agents_variables.splice(index, 1);
     return noContent();
   },
 

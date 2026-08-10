@@ -423,7 +423,7 @@ function genWorkflows(rng: Rng): Json[] {
  * E2E_SECRET_ENV, the ONE fixed name -> plaintext pool shared with webhook
  * secrets; scenarioSecretEnv() builds the scenario `env` from the same map,
  * so a generated reference can never name a variable the child env lacks.
- * Shared by the three repository-level secret families - their settings
+ * Shared by the four repository-level secret families - their settings
  * shapes are identical.
  */
 function genSecretEntries(rng: Rng): EntriesForm {
@@ -779,11 +779,12 @@ const SECRET_LIST_SECTIONS = [
   "actions_secrets",
   "dependabot_secrets",
   "codespaces_secrets",
+  "agents_secrets",
 ] as const satisfies readonly SectionKey[];
 
 /**
  * The child-env half of any `$NAME` secret references a generated settings
- * document declares - webhook config.secret, the three repository secret
+ * document declares - webhook config.secret, the four repository secret
  * sections, and every environment entry's nested secrets - drawn from
  * E2E_SECRET_ENV (the same pool the generators pick from). Undefined when
  * the document declares none, so secret-free scenarios stay byte-identical.
@@ -833,7 +834,7 @@ export function scenarioSecretEnv(settings: Json): Record<string, string> | unde
  * target's settings.yml is fetched from the TARGET repository, where a
  * `$NAME` reference is refused by design (target provenance must not read
  * the operator's environment) - so the multi generator never declares one
- * there: webhook entries lose their config.secret, the three repository
+ * there: webhook entries lose their config.secret, the four repository
  * secret sections (whose values are ALWAYS references) are removed outright,
  * and every environment entry loses its nested secrets list. Mutates the
  * document in place through entriesOf's by-reference entries.
@@ -968,6 +969,7 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   actions_secrets: genSecretEntries,
   dependabot_secrets: genSecretEntries,
   codespaces_secrets: genSecretEntries,
+  agents_secrets: genSecretEntries,
   workflows: genWorkflows,
   pages: genPages,
   code_scanning_default_setup: genCodeScanning,
@@ -976,6 +978,7 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   milestones: genMilestones,
   interaction_limits: genInteractionLimits,
   actions_variables: genActionsVariables,
+  agents_variables: genActionsVariables,
   webhooks: genWebhooks,
   custom_properties: genCustomProperties,
   deploy_keys: genDeployKeys,
@@ -1260,11 +1263,13 @@ const ARRAY_SECTIONS = [
   "actions_secrets",
   "dependabot_secrets",
   "codespaces_secrets",
+  "agents_secrets",
   "workflows",
   "collaborators",
   "teams",
   "milestones",
   "actions_variables",
+  "agents_variables",
   "webhooks",
   "custom_properties",
   "deploy_keys",
@@ -1301,11 +1306,13 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   actions_secrets: "name",
   dependabot_secrets: "name",
   codespaces_secrets: "name",
+  agents_secrets: "name",
   workflows: "path",
   collaborators: "username",
   teams: "name",
   milestones: "title",
   actions_variables: "name",
+  agents_variables: "name",
   // webhooks' natural key is the nested config.url, but the required
   // entry-level field the shape enforces is `config` itself.
   webhooks: "config",
@@ -1591,6 +1598,8 @@ export const SECTION_PRIMARY_READ = {
   actions_secrets: "actions_secrets.list",
   dependabot_secrets: "dependabot_secrets.list",
   codespaces_secrets: "codespaces_secrets.list",
+  agents_secrets: "agents_secrets.list",
+  agents_variables: "agents_variables.list",
   webhooks: "webhooks.list",
   // The values GET runs right after the org probe, in both modes, whenever
   // the section is declared on an org owner (the fault batteries pin

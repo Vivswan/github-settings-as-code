@@ -44,6 +44,7 @@ const FIXTURES: Record<SectionKey, unknown> = {
   actions_secrets: [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }],
   dependabot_secrets: [{ name: "REGISTRY_TOKEN", value: "$REGISTRY_TOKEN" }],
   codespaces_secrets: [{ name: "DEVCONTAINER_PAT", value: "$DEVCONTAINER_PAT" }],
+  agents_secrets: [{ name: "AGENT_TOKEN", value: "$AGENT_TOKEN" }],
   workflows: [{ path: "ci.yml", state: "active" }],
   pages: { build_type: "workflow" },
   code_scanning_default_setup: { state: "configured" },
@@ -52,6 +53,7 @@ const FIXTURES: Record<SectionKey, unknown> = {
   milestones: [{ title: "v1" }],
   interaction_limits: { limit: "contributors_only" },
   actions_variables: [{ name: "DEPLOY_REGION", value: "us-east-1" }],
+  agents_variables: [{ name: "AGENT_MODEL", value: "default" }],
   webhooks: [
     {
       config: { url: "https://ci.example.com/hook", content_type: "json", secret: "$HOOK_SECRET" },
@@ -119,6 +121,9 @@ const ROUTES = {
   "GET /repos/o/r/codespaces/secrets?per_page=100&page=1": {
     data: { total_count: 0, secrets: [] },
   },
+  "GET /repos/o/r/agents/secrets?per_page=100&page=1": {
+    data: { total_count: 0, secrets: [] },
+  },
   "GET /repos/o/r/actions/workflows?per_page=100&page=1": {
     data: {
       total_count: 1,
@@ -148,6 +153,21 @@ const ROUTES = {
       variables: [
         {
           name: "STALE_VAR",
+          value: "old",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    },
+  },
+  // The agents variable store mirrors the Actions one: a stale live variable
+  // (delete-default -> drift) and the declared one missing (create drift).
+  "GET /repos/o/r/agents/variables?per_page=30&page=1": {
+    data: {
+      total_count: 1,
+      variables: [
+        {
+          name: "STALE_AGENT_VAR",
           value: "old",
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:00Z",

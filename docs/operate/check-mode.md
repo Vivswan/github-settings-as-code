@@ -135,8 +135,9 @@ rather than drift, and each note says what apply does about it:
   run.
 - `webhooks[].config.secret`: GitHub echoes a live secret as `********`, so
   apply re-sends the declared secret on every run (rotations propagate).
-- Secret values in all four secret families (`actions_secrets`,
-  `dependabot_secrets`, `codespaces_secrets`, and per-environment
+- Secret values in all five secret families (`actions_secrets`,
+  `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, and
+  per-environment
   `secrets`): the API returns names only, so check mode verifies existence
   and apply re-seals and rewrites every declared value on each run. One
   note per family (or per environment), not per entry.

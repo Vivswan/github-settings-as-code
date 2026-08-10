@@ -12,6 +12,8 @@ import { SECTION_KEYS, type SectionKey } from "../schema.js";
 import { actionsSection } from "./actions.js";
 import { actionsSecretsSection } from "./actions-secrets.js";
 import { actionsVariablesSection } from "./actions-variables.js";
+import { agentsSecretsSection } from "./agents-secrets.js";
+import { agentsVariablesSection } from "./agents-variables.js";
 import { autolinksSection } from "./autolinks.js";
 import { branchesSection } from "./branches.js";
 import { codeScanningDefaultSetupSection } from "./code-scanning.js";
@@ -44,6 +46,7 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   actions_secrets: actionsSecretsSection,
   dependabot_secrets: dependabotSecretsSection,
   codespaces_secrets: codespacesSecretsSection,
+  agents_secrets: agentsSecretsSection,
   workflows: workflowsSection,
   pages: pagesSection,
   code_scanning_default_setup: codeScanningDefaultSetupSection,
@@ -52,6 +55,7 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   milestones: milestonesSection,
   interaction_limits: interactionLimitsSection,
   actions_variables: actionsVariablesSection,
+  agents_variables: agentsVariablesSection,
   webhooks: webhooksSection,
   custom_properties: customPropertiesSection,
   deploy_keys: deployKeysSection,

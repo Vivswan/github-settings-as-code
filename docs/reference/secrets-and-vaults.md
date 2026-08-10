@@ -166,14 +166,16 @@ verbatim, so an extra key rides along and GitHub decides; a secret's PUT
 body is built from the sealed value alone, so an extra key has no
 destination and would "apply" successfully forever while doing nothing.
 
-## Dependabot and Codespaces secrets
+## Dependabot, Codespaces, and Copilot agents secrets
 
-Two sibling sections manage the other repository-level secret stores with
+Three sibling sections manage the other repository-level secret stores with
 the exact same shape and semantics: `dependabot_secrets` (private-registry
-credentials Dependabot uses when it resolves dependencies) and
-`codespaces_secrets` (secrets exposed to development environments). Each
+credentials Dependabot uses when it resolves dependencies),
+`codespaces_secrets` (secrets exposed to development environments), and
+`agents_secrets` (the Copilot agents secret store). Each
 seals against its own public key and needs its own PAT permission -
-"Dependabot secrets" and "Codespaces secrets" respectively; note GitHub
+"Dependabot secrets", "Codespaces secrets", and "Agent secrets"
+respectively; note GitHub
 gates even the Codespaces secret reads at write access.
 
 ```yaml settings
@@ -183,6 +185,9 @@ dependabot_secrets:
 codespaces_secrets:
   - name: DOTFILES_PAT
     value: $DOTFILES_PAT
+agents_secrets:
+  - name: AGENT_TOKEN
+    value: $AGENT_TOKEN
 ```
 
 Everything said about `actions_secrets` applies: existence-only checks, one
@@ -221,7 +226,8 @@ the same "Environments" PAT permission as the rest of the section.
 
 In multi-repo mode a defaults file merges under every target the run
 processes. A defaults file that declares a secret section
-(`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, or
+(`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`,
+`agents_secrets`, or
 environment secrets) therefore writes those secrets into EVERY discovered
 target - which is sometimes exactly the point (a fleet-wide deploy key),
 and sometimes a surprise (a token fanned out to repositories that should

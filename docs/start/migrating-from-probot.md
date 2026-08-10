@@ -70,7 +70,8 @@ deliberate action.
 
 Deletions still exist where the app had them: undeclared labels are deleted
 by default (Probot parity), and so are undeclared autolinks, collaborators,
-and Actions variables - plus, within a declared per-environment key, that
+Actions variables, and Copilot agents variables - plus, within a declared
+per-environment key, that
 environment's variables and deployment branch-policy patterns. Nothing else
 is ever deleted implicitly; the README's
 [Sections table](../../README.md#sections) states each section's default in

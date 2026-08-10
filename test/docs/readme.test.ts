@@ -17,7 +17,7 @@ import { REPO_RESULTS, validateSettingsDoc } from "../../src/engine/orchestrate.
 import type { Io } from "../../src/io.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
-import type { PatResource } from "../../src/sections/contract.js";
+import { endpointPermission, type PatResource } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
 import { CLAIM_FAMILY, CLAIM_STEMS, defaultClaimProblems, stemNegation } from "./claims.js";
@@ -555,10 +555,17 @@ describe("pre-filled PAT form URL", () => {
     codespaces_secrets: "codespaces_secrets",
     custom_properties: "repository_custom_properties",
     secret_scanning_alerts: "secret_scanning_alerts",
-    // No section consumes these grants yet; each slug lands, verified
-    // against the live form, with the section that first needs it.
-    agent_secrets: null,
-    agent_variables: null,
+    // The Copilot agents stores. Verified 2026-08-10 against GitHub's
+    // machine-readable fine-grained-PAT permission data (github/docs,
+    // src/github-apps/data/fpt-2022-11-28/fine-grained-pat-permissions.json),
+    // which keys the repository permissions for the /agents/secrets and
+    // /agents/variables endpoints as "agent_secrets"/"agent_variables" - the
+    // same vocabulary file that carries every form-verified slug above,
+    // including the three that differ from our resource names.
+    agent_secrets: "agent_secrets",
+    agent_variables: "agent_variables",
+    // No section consumes this grant yet; the slug lands, verified against
+    // the live form, with the section that first needs it.
     checks: null,
   } satisfies Record<PatResource, string | null>;
 
@@ -574,6 +581,49 @@ describe("pre-filled PAT form URL", () => {
           `the pre-filled PAT form URL lacks "${slug}=" (the ${resource} resource)`,
         ).toBe(true);
       }
+    }
+  });
+
+  /**
+   * Resources a section consumes whose form parameter is knowingly absent.
+   * The one source the tripwire below exempts from, asserted null in
+   * RESOURCE_SLUGS so the two cannot disagree; the WHY lives on the map
+   * entry itself.
+   */
+  const CONSUMED_WITHOUT_FORM_PARAMETER: ReadonlySet<PatResource> = new Set([
+    "code_scanning_alerts",
+  ]);
+
+  test("every resource a section permission consumes has a non-null slug", () => {
+    // A null exemption is only for resources NO section needs yet: once an
+    // endpoint's effective permission names the resource, real tokens need
+    // the grant and the form URL must pre-select it. endpointPermission
+    // resolves overrides exactly the way the engine does, so an override
+    // cannot slip past the sweep.
+    const consumed = new Set<PatResource>();
+    for (const section of SECTIONS) {
+      for (const endpoint of Object.values(section.endpoints)) {
+        const permission = endpointPermission(section, endpoint);
+        if (permission === "none") {
+          continue;
+        }
+        for (const resource of permission.repo) {
+          consumed.add(resource);
+        }
+      }
+    }
+    for (const resource of consumed) {
+      if (CONSUMED_WITHOUT_FORM_PARAMETER.has(resource)) {
+        expect(
+          RESOURCE_SLUGS[resource],
+          `"${resource}" is exempted by CONSUMED_WITHOUT_FORM_PARAMETER, so its RESOURCE_SLUGS entry must stay null`,
+        ).toBeNull();
+        continue;
+      }
+      expect(
+        RESOURCE_SLUGS[resource],
+        `the "${resource}" resource is consumed by a section but RESOURCE_SLUGS exempts it; verify its form parameter and name it`,
+      ).not.toBeNull();
     }
   });
 });

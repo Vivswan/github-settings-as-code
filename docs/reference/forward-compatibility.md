@@ -26,10 +26,11 @@ Two deliberate boundaries:
 
 ## The closed sections
 
-Eight sections are closed rather than passthrough: `collaborators`,
+Nine sections are closed rather than passthrough: `collaborators`,
 `teams`, `workflows`, `custom_properties`,
 `secret_scanning_custom_patterns`, and the secret sections
-`actions_secrets`, `dependabot_secrets`, and `codespaces_secrets` reject
+`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, and
+`agents_secrets` reject
 entry keys they do not recognize. Their API calls carry at most the
 declared fields per entry (a `permission`, a property `value`, a sealed
 secret value, or a pattern's own fields; the workflow enable/disable calls

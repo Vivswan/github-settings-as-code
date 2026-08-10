@@ -124,6 +124,7 @@ describe("secret provenance through the defaults merge", () => {
       actions_secrets: (ref) => [{ name: "S", value: ref }],
       dependabot_secrets: (ref) => [{ name: "S", value: ref }],
       codespaces_secrets: (ref) => [{ name: "S", value: ref }],
+      agents_secrets: (ref) => [{ name: "S", value: ref }],
       webhooks: (ref) => [{ config: { url: "https://x.test/h", secret: ref } }],
       environments: (ref) => [{ name: "prod", secrets: [{ name: "S", value: ref }] }],
     };

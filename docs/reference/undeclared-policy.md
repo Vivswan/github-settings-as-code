@@ -1,9 +1,10 @@
 # The undeclared policy
 
-Thirteen sections list the live resources sitting next to the declared
+Fifteen sections list the live resources sitting next to the declared
 ones: `labels`, `autolinks`, `collaborators`, `actions_variables`,
-`rulesets`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`,
-`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, and
+`agents_variables`, `rulesets`, `milestones`, `webhooks`,
+`custom_properties`, `deploy_keys`, `actions_secrets`,
+`dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, and
 `secret_scanning_custom_patterns`. Each has
 a default answer for a live resource the settings file does not declare,
 and each accepts a wrapped form that overrides it per file. This page is
@@ -57,6 +58,7 @@ written.
 | `autolinks` | delete | `keep`: declare some references, tolerate the rest |
 | `collaborators` | delete (owner always exempt) | `keep`: manage listed people without removing others |
 | `actions_variables` | delete | `keep`: declare the managed variables, tolerate the rest |
+| `agents_variables` | delete | `keep`: declare the managed variables, tolerate the rest |
 | `rulesets` | keep | `delete`: make the file the complete ruleset inventory |
 | `milestones` | keep | `delete`: prune stale milestones, with the caveat below |
 | `webhooks` | keep (integrations create their own hooks) | `delete`: make the file the complete hook inventory |
@@ -64,6 +66,7 @@ written.
 | `actions_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `dependabot_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `codespaces_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
+| `agents_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `custom_properties` | keep (an unset can revert to an org default the file does not model) | `delete`: make the file the complete property-value inventory, unsetting the rest |
 | `secret_scanning_custom_patterns` | keep | `delete`: prune stale patterns - the pattern's alerts are resolved (never deleted), keeping the audit trail |
 
@@ -146,7 +149,7 @@ section, so omitting targets keep them. A check run shows the resulting
 deletions as drift before an apply performs them.
 
 One boundary to know about: HAVING a policy and INHERITING one are
-different things. The thirteen top-level section lists take the policy
+different things. The fifteen top-level section lists take the policy
 through the multi-repo defaults merge as described above. The nested
 `environments[].variables`, `environments[].secrets`,
 `environments[].deployment_branch_policies`, and

@@ -31,6 +31,7 @@ export const DENIAL_SEMANTICS: Record<SectionKey, DenialSemantics> = {
   actions_secrets: "denied",
   dependabot_secrets: "denied",
   codespaces_secrets: "denied",
+  agents_secrets: "denied",
   workflows: "denied",
   pages: "absent",
   code_scanning_default_setup: "denied",
@@ -39,6 +40,7 @@ export const DENIAL_SEMANTICS: Record<SectionKey, DenialSemantics> = {
   milestones: "denied",
   interaction_limits: "denied",
   actions_variables: "denied",
+  agents_variables: "denied",
   webhooks: "denied",
   // The primary read (GET .../properties/values) is Metadata-gated only, so a
   // fine-grained denial never touches it: like the "absent" sections, the

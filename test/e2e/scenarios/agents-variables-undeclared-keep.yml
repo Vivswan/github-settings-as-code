@@ -1,0 +1,36 @@
+name: agents-variables-undeclared-keep
+description: >-
+  The wrapped agents_variables form with "undeclared: keep" softens the
+  section's delete default: a live variable the settings file does not
+  declare is KEPT and surfaced as a note instead of being deleted. The
+  declared variable still updates, apply stays green, and a check rerun
+  converges (the kept variable is a note, not drift).
+settings:
+  agents_variables:
+    undeclared: keep
+    entries:
+      - name: AGENT_MODEL
+        value: extended
+live_state:
+  agents_variables:
+    - name: AGENT_MODEL
+      value: default
+      created_at: "2026-01-01T00:00:00Z"
+      updated_at: "2026-01-01T00:00:00Z"
+    - name: RETIRED_FLAG
+      value: "off"
+      created_at: "2026-01-01T00:00:00Z"
+      updated_at: "2026-01-01T00:00:00Z"
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    agents_variables: applied
+  mutations:
+    - "PATCH /repos/{repo}/agents/variables/AGENT_MODEL"
+  never:
+    - "DELETE /repos/{repo}/agents/variables"
+  stdout_contains:
+    - "kept under \"undeclared: keep\""
+    - RETIRED_FLAG
+  converges: true

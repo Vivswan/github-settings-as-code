@@ -296,6 +296,7 @@ describe("always-rewrite lockstep (endpoint flag <-> mock state families)", () =
       "actions_secrets.put": "actions_secrets",
       "dependabot_secrets.put": "dependabot_secrets",
       "codespaces_secrets.put": "codespaces_secrets",
+      "agents_secrets.put": "agents_secrets",
       "environments.putSecret": "environment_secrets",
     });
   });

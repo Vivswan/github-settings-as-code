@@ -47,6 +47,15 @@ export interface SettingsFile {
    * `undeclared: delete`; a deleted secret's value is unrecoverable).
    */
   codespaces_secrets?: CodespacesSecretConfig[] | UndeclaredPolicyList<CodespacesSecretConfig>;
+  /**
+   * Repository Copilot agents secrets (the secret store Copilot coding
+   * agents read), written by name with values sealed client-side; each
+   * value is a whole-value `$NAME` reference to the action step's
+   * environment, never a literal. Undeclared secrets are kept by default
+   * (the wrapped form can set `undeclared: delete`; a deleted secret's
+   * value is unrecoverable).
+   */
+  agents_secrets?: AgentsSecretConfig[] | UndeclaredPolicyList<AgentsSecretConfig>;
   /** Per-workflow enable/disable state; undeclared workflows are untouched. */
   workflows?: WorkflowConfig[];
   /** GitHub Pages configuration; null disables Pages on the repository. */
@@ -79,6 +88,16 @@ export interface SettingsFile {
    * and deliberately not this section.
    */
   actions_variables?: ActionsVariableConfig[] | UndeclaredPolicyList<ActionsVariableConfig>;
+  /**
+   * Copilot agents repository variables (the plain-text configuration
+   * Copilot coding agents read), upserted by name; undeclared ones are
+   * DELETED by default (the wrapped form can set `undeclared: keep`).
+   * Names are case-insensitive (GitHub stores them uppercased). Values are
+   * plain text BY DESIGN - variables are readable configuration, which is
+   * what makes check-mode diffing possible; secrets are write-only material
+   * and deliberately not this section.
+   */
+  agents_variables?: AgentsVariableConfig[] | UndeclaredPolicyList<AgentsVariableConfig>;
   /**
    * Repository webhooks, managed one per config.url; undeclared hooks are
    * kept by default and surfaced as notes, since integrations create their
@@ -493,6 +512,25 @@ export interface CodespacesSecretConfig {
   value: string;
 }
 
+/**
+ * One repository Copilot agents secret, matched by case-insensitive name
+ * (GitHub stores secret names uppercase). Keys other than name and value are
+ * rejected: the API body is built from the sealed value alone, so an extra
+ * key would silently do nothing.
+ */
+export interface AgentsSecretConfig {
+  /** The secret name, the natural key; compared case-insensitively and written uppercase. */
+  name: string;
+  /**
+   * A whole-value `$NAME` reference to an environment variable holding the
+   * secret - never a literal (settings files are committed plaintext).
+   * Resolved from the action step's env at run time and sealed with a
+   * libsodium sealed box before upload; GitHub cannot return the value, so
+   * check mode verifies existence only and apply re-seals it on every run.
+   */
+  value: string;
+}
+
 /** One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo). */
 export interface WorkflowConfig {
   /** Full ".github/workflows/ci.yml" or the bare "ci.yml" file name. */
@@ -562,6 +600,14 @@ export interface ActionsVariableConfig {
   /** The variable name, the natural key; case-insensitive (stored uppercased by GitHub). */
   name: string;
   /** The plain-text value workflows read through the vars context. */
+  value: string;
+}
+
+/** One Copilot agents repository variable, matched by case-insensitive name. */
+export interface AgentsVariableConfig {
+  /** The variable name, the natural key; case-insensitive (stored uppercased by GitHub). */
+  name: string;
+  /** The plain-text value Copilot coding agents read. */
   value: string;
 }
 
@@ -724,6 +770,7 @@ export const SECTION_KEYS = [
   "actions_secrets",
   "dependabot_secrets",
   "codespaces_secrets",
+  "agents_secrets",
   "workflows",
   "pages",
   "code_scanning_default_setup",
@@ -732,6 +779,7 @@ export const SECTION_KEYS = [
   "milestones",
   "interaction_limits",
   "actions_variables",
+  "agents_variables",
   "webhooks",
   "custom_properties",
   "deploy_keys",
@@ -763,9 +811,11 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "actions_secrets",
   "dependabot_secrets",
   "codespaces_secrets",
+  "agents_secrets",
   "collaborators",
   "milestones",
   "actions_variables",
+  "agents_variables",
   "webhooks",
   "custom_properties",
   "deploy_keys",

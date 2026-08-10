@@ -1,0 +1,38 @@
+name: agents-variables-check-drift
+description: >
+  Check mode surfaces all three kinds of Copilot agents variable drift at
+  once: a value change, a declared variable missing from the repo, and a
+  live variable the settings file does not declare (which apply would
+  delete, the section's default policy). The run reports drift, exits 1,
+  and writes nothing.
+settings:
+  agents_variables:
+    - name: AGENT_MODEL
+      value: extended
+    - name: FIREWALL_MODE
+      value: strict
+live_state:
+  agents_variables:
+    - name: AGENT_MODEL
+      value: default
+      created_at: "2026-01-01T00:00:00Z"
+      updated_at: "2026-01-01T00:00:00Z"
+    - name: RETIRED_FLAG
+      value: "off"
+      created_at: "2026-01-01T00:00:00Z"
+      updated_at: "2026-01-01T00:00:00Z"
+inputs:
+  mode: check
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    agents_variables: drift
+  never:
+    - POST /repos/{repo}/agents/variables
+    - PATCH /repos/{repo}/agents/variables
+    - DELETE /repos/{repo}/agents/variables
+  summary_contains:
+    - "agents_variables[AGENT_MODEL].value"
+    - "apply will create it"
+    - "undeclared"

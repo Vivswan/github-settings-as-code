@@ -162,6 +162,14 @@ codespaces_secrets:
   - name: DEVCONTAINER_PAT
     value: $DEVCONTAINER_PAT
 
+agents_secrets:
+  - name: AGENT_TOKEN
+    value: $AGENT_TOKEN
+
+agents_variables:
+  - name: AGENT_MODEL
+    value: default
+
 webhooks:
   - config:
       url: https://ci.example.com/hook
