@@ -25,11 +25,19 @@ import {
   endpointMethod,
   endpointPath,
   endpointPermission,
+  type GraphqlTolerableError,
   matchesTemplate,
   type SectionPermission,
+  toleratedGraphqlErrors,
   toleratedStatuses,
 } from "../../../src/sections/contract.js";
-import { allEndpoints, SECTIONS, type TaggedEndpoint } from "../../../src/sections/registry.js";
+import {
+  allEndpoints,
+  allGraphqlOps,
+  SECTIONS,
+  type TaggedEndpoint,
+  type TaggedGraphqlOp,
+} from "../../../src/sections/registry.js";
 import { ADMIN_SLUG, TOKEN_USER_LOGIN } from "../constants.js";
 import { DENIAL_SEMANTICS } from "../denial-semantics.js";
 import type { DenialStyle, MaskGrade, MaskKey, Scenario } from "../schema.js";
@@ -44,11 +52,13 @@ import {
   CUSTOM_PROPERTY_DEFINITIONS,
   collaboratorFromPut,
   completeHook,
+  decodeNodeId,
   environmentFromPut,
   invitationFromPut,
   invitationPermissionFromPut,
   type MockState,
   type MultiMockState,
+  mintNodeId,
   PROTECTION_RULE_APPS,
   protectionFromPut,
   teamRepoFromPut,
@@ -99,6 +109,16 @@ export interface LoggedRequest {
    * pipeline.
    */
   requestOffSpec?: boolean;
+  /**
+   * The GraphQL operation behind this request, when it hit /graphql and
+   * resolved to a declared operation: the dispatched operationName plus its
+   * declared kind. What lets every log consumer stay exact where the HTTP
+   * method cannot: the runner's write classification (a GraphQL READ is a
+   * POST on the wire), the "GRAPHQL <opName>" expectation spelling, and the
+   * coverage tripwire's per-operation attribution all read it. Unset for a
+   * /graphql request that never resolved (a violation).
+   */
+  graphql?: { operationName: string; kind: "read" | "write" };
 }
 
 /** The reply a handler (or the pipeline) produces: a status and a JSON body. */
@@ -636,8 +656,14 @@ const HANDLERS: Record<string, Handler> = {
   "environments.update": ({ state, pathname, body }) => {
     const name = lastSegment(pathname);
     // GitHub's PUT environment returns 200 on BOTH create and update (never
-    // 201), matching the section's declared status and the OpenAPI spec.
-    state.environments[name] = { name, ...environmentFromPut(asObject(body)) };
+    // 201), matching the section's declared status and the OpenAPI spec. The
+    // node id is minted last so a smuggled node_id in the PUT body can never
+    // displace the canonical self-describing one.
+    state.environments[name] = {
+      name,
+      ...environmentFromPut(asObject(body)),
+      node_id: mintNodeId("environment", String(state.repo.full_name ?? ADMIN_SLUG), name),
+    };
     return ok(state.environments[name]);
   },
   // Every variables handler 404s for an environment that does not exist: the
@@ -2185,6 +2211,108 @@ export function assertHandlerCompleteness(
   }
 }
 
+// --- GraphQL operations -----------------------------------------------------
+//
+// The GraphQL sibling of the REST handler table. Dispatch is by operationName
+// (the globally-unique wire key allGraphqlOps() asserts), never by parsing the
+// query text. A handler answers ONLY the two shapes GitHub's GraphQL endpoint
+// can produce for a declared operation: a 200 with a data object, or a 200
+// with data:null plus errors[] whose every type the operation DECLARES as a
+// tolerated outcome - the status-subset guard's analog, enforced by the
+// pipeline after every handler, and deliberately STRICTER than REST's
+// undeclared->=400 realism allowance: an undeclared error type would drive
+// tolerance semantics the declaration never promised.
+
+/** One GraphQL errors[] entry a handler (or the denial gate) may emit. */
+export interface GraphqlErrorReply {
+  readonly type: GraphqlTolerableError;
+  readonly message: string;
+}
+
+/**
+ * A GraphQL handler's reply: data XOR errors, the structural exclusion making
+ * a two-marker literal fail to compile (the IssueReportOutcome idiom).
+ */
+export type GraphqlHandlerResult =
+  | { data: Json; errors?: never }
+  | { errors: readonly GraphqlErrorReply[]; data?: never };
+
+/** Everything a GraphQL handler needs: the target state, its op, the variables. */
+export interface GraphqlHandlerContext {
+  state: MockState;
+  op: TaggedGraphqlOp;
+  variables: Json;
+}
+
+type GraphqlHandler = (ctx: GraphqlHandlerContext) => GraphqlHandlerResult;
+
+/**
+ * One entry per "section.role" key in allGraphqlOps(), exactly like HANDLERS.
+ * Empty until the first GraphQL-backed section lands; the completeness
+ * assertion below keeps it in lockstep with the declarations from day one.
+ */
+const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {};
+
+/**
+ * assertHandlerCompleteness for the GraphQL table: every allGraphqlOps() key
+ * MUST have a handler and every handler key MUST name a declared operation,
+ * both directions, asserted at server construction. Exported with injectable
+ * dictionaries so a unit test can drive both failure directions.
+ */
+export function assertGraphqlHandlerCompleteness(
+  ops: Readonly<Record<string, TaggedGraphqlOp>> = allGraphqlOps(),
+  handlers: Record<string, GraphqlHandler> = GRAPHQL_HANDLERS,
+): void {
+  const opKeys = new Set(Object.keys(ops));
+  const handlerKeys = new Set(Object.keys(handlers));
+  const missing = [...opKeys].filter((key) => !handlerKeys.has(key));
+  const extra = [...handlerKeys].filter((key) => !opKeys.has(key));
+  if (missing.length > 0 || extra.length > 0) {
+    const lines: string[] = [];
+    if (missing.length > 0) {
+      lines.push(
+        `GraphQL operations with no mock handler in routes.ts: [${missing.sort().join(", ")}]`,
+      );
+    }
+    if (extra.length > 0) {
+      lines.push(`GraphQL handlers naming no declared operation: [${extra.sort().join(", ")}]`);
+    }
+    throw new Error(
+      `E2E MOCK: GraphQL handler table out of sync with allGraphqlOps()\n  ${lines.join("\n  ")}`,
+    );
+  }
+}
+
+/**
+ * The errors[] a denied GraphQL request answers with, by denial style and
+ * read/write kind - the GraphQL flavor of denialResponse, delivered inside an
+ * HTTP 200 like the real endpoint. fine_grained mirrors real fine-grained
+ * tokens (a denied read conceals the resource as NOT_FOUND, a denied write is
+ * FORBIDDEN); the numeric styles answer uniformly with their status's type.
+ * No message ever contains "rate limit" (the client's classifier reads
+ * RATE_LIMITED as throttling, which a denial must never be mistaken for).
+ */
+export function graphqlDenialErrors(
+  style: DenialStyle,
+  kind: "read" | "write",
+): GraphqlErrorReply[] {
+  const forbidden: GraphqlErrorReply = {
+    type: "FORBIDDEN",
+    message: "Resource not accessible by personal access token",
+  };
+  const notFound: GraphqlErrorReply = {
+    type: "NOT_FOUND",
+    message: "Could not resolve to a Repository with the given name",
+  };
+  if (style === 403) {
+    return [forbidden];
+  }
+  if (style === 404) {
+    return [notFound];
+  }
+  return kind === "read" ? [notFound] : [forbidden];
+}
+
 /**
  * The CORE-ROUTE fault/corruption keys: stable names for the non-section paths
  * the pipeline serves inline, so a scenario (or the fuzzer) can fault the
@@ -2213,14 +2341,19 @@ export type CoreFaultKey = keyof typeof CORE_FAULT_KEYS;
  * duplicate fault would silently take first-match; validating at server
  * construction (the same loud-at-startup pattern as assertHandlerCompleteness)
  * turns both into an immediate throw. A key may name a section endpoint
- * ("section.role") or a registered core route (CORE_FAULT_KEYS). Exported for
- * direct testing.
+ * ("section.role", REST or GraphQL - the two share the key space, which
+ * allGraphqlOps() keeps collision-free) or a registered core route
+ * (CORE_FAULT_KEYS). Exported for direct testing.
  */
 export function assertFaultKeys(
   faults: FaultOption[] | undefined,
   corrupt: CorruptOption | undefined,
 ): void {
-  const known = new Set([...Object.keys(allEndpoints()), ...Object.keys(CORE_FAULT_KEYS)]);
+  const known = new Set([
+    ...Object.keys(allEndpoints()),
+    ...Object.keys(allGraphqlOps()),
+    ...Object.keys(CORE_FAULT_KEYS),
+  ]);
   const seen = new Set<string>();
   for (const fault of faults ?? []) {
     if (!known.has(fault.key)) {
@@ -2489,13 +2622,56 @@ function matchEndpoint(
 }
 
 /**
- * The section a request belongs to, or null when it matches no section
- * endpoint (core routes, unknown paths). The runner's apply-idempotence check
- * uses it to attribute a second-apply write to its section, so the
- * compare-before-write subset can be held to write silence.
+ * The declared GraphQL operation dispatched for a request body's
+ * operationName, or null when the body carries none or the name is unknown.
+ * Shared by the pipeline's dispatch and sectionForRequest's attribution.
  */
-export function sectionForRequest(method: string, pathname: string): SectionKey | null {
+function graphqlOpForBody(
+  body: unknown,
+  ops: Readonly<Record<string, TaggedGraphqlOp>>,
+): { key: string; op: TaggedGraphqlOp } | null {
+  const name = (body as { operationName?: unknown } | undefined)?.operationName;
+  if (typeof name !== "string") {
+    return null;
+  }
+  for (const [key, op] of Object.entries(ops)) {
+    if (op.name === name) {
+      return { key, op };
+    }
+  }
+  return null;
+}
+
+/**
+ * The section a request belongs to, or null when it matches no section
+ * endpoint (core routes, unknown paths). A /graphql request attributes by its
+ * body's operationName, so `body` must be supplied to resolve those. The
+ * runner's apply-idempotence check uses it to attribute a second-apply write
+ * to its section, so the compare-before-write subset can be held to write
+ * silence.
+ */
+export function sectionForRequest(
+  method: string,
+  pathname: string,
+  body?: unknown,
+): SectionKey | null {
+  if (pathname === "/graphql") {
+    return graphqlOpForBody(body, allGraphqlOps())?.op.section ?? null;
+  }
   return matchEndpoint(method, pathname)?.endpoint.section ?? null;
+}
+
+/**
+ * True when a logged request mutated (or would mutate) live state. The HTTP
+ * method decides for REST; for GraphQL - where every call is a POST - the
+ * dispatched operation's DECLARED kind decides, so a GraphQL read never
+ * counts as a write in the runner's idempotence and check-mode assertions.
+ */
+export function isWriteRequest(request: Pick<LoggedRequest, "method" | "graphql">): boolean {
+  if (request.graphql) {
+    return request.graphql.kind === "write";
+  }
+  return request.method !== "GET";
 }
 
 /**
@@ -3064,6 +3240,247 @@ function slugFromPath(pathname: string): string | null {
 }
 
 /**
+ * Every string anywhere inside a mutation's variables that decodes as a mock
+ * node id, collected recursively - GraphQL mutations nest their target ids
+ * under input objects, so a top-level scan would miss them.
+ */
+function decodedNodeIds(value: unknown, out: Array<{ slug: string }>): void {
+  if (typeof value === "string") {
+    const decoded = decodeNodeId(value);
+    if (decoded) {
+      out.push(decoded);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      decodedNodeIds(item, out);
+    }
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value)) {
+      decodedNodeIds(item, out);
+    }
+  }
+}
+
+/**
+ * Serve one POST /graphql request: the GraphQL leg of the pipeline, mirroring
+ * the REST order exactly - wire shape, dispatch, check-mode barrier, target
+ * resolution, fault barrier, permission gate, denial barrier, handler,
+ * response guard, chaos hook.
+ *
+ * Target resolution is where GraphQL differs from REST (the path carries no
+ * slug): a READ resolves its slug from the $owner/$repo variables the
+ * declaration contract requires, and a MUTATION resolves it from the
+ * self-describing node ids the mock minted (see state.ts) - an undecodable or
+ * absent id is a violation, never a guess, which keeps per-slug permission
+ * masks and state routing exact. Single-repo mode dispatches into the one
+ * MockState like every REST endpoint.
+ *
+ * `ops`/`handlers` are injectable for direct testing (the
+ * assertHandlerCompleteness idiom); production takes the declared tables.
+ */
+export function handleGraphqlRequest(
+  request: { method: string; body: unknown },
+  options: PipelineOptions,
+  baseLog: LoggedRequest,
+  ops: Readonly<Record<string, TaggedGraphqlOp>> = allGraphqlOps(),
+  handlers: Record<string, GraphqlHandler> = GRAPHQL_HANDLERS,
+): PipelineResult {
+  const { scenario, working } = options;
+  const violation = (message: string): PipelineResult => ({
+    response: violationResponse(message),
+    log: { ...baseLog, status: 400 },
+    violation: message,
+  });
+
+  // 1. Wire shape: GraphQL is POST-only, and the client always sends the
+  // query, the operationName (the dispatch key), and a variables object.
+  if (request.method !== "POST") {
+    return violation(`GraphQL requests must be POST, got ${request.method}`);
+  }
+  const body = asObject(request.body);
+  if (
+    typeof body.query !== "string" ||
+    typeof body.operationName !== "string" ||
+    typeof body.variables !== "object" ||
+    body.variables === null ||
+    Array.isArray(body.variables)
+  ) {
+    return violation(
+      "GraphQL request body must carry query (string), operationName (string), and variables (object)",
+    );
+  }
+  const variables = body.variables as Json;
+
+  // 2. Dispatch by operationName; an unknown name is a loud violation (the
+  // no-route analog).
+  const dispatched = graphqlOpForBody(body, ops);
+  if (!dispatched) {
+    return violation(
+      `no GraphQL operation named "${String(body.operationName)}" is declared by any section`,
+    );
+  }
+  const { key, op } = dispatched;
+  const graphqlLog: LoggedRequest = {
+    ...baseLog,
+    graphql: { operationName: op.name, kind: op.kind },
+  };
+
+  // 3. Check-mode barrier, independent of the engine's own kind-derived
+  // guard: no GraphQL write may leave the client in check mode. Before the
+  // fault barrier for the same reason as REST - a synthetic fault must not
+  // mask the one bug this barrier exists to catch.
+  if (options.checkMode && op.kind !== "read") {
+    const message = `GraphQL write in check mode (${op.name})`;
+    return {
+      response: violationResponse(message),
+      log: { ...graphqlLog, status: 400 },
+      violation: message,
+    };
+  }
+
+  // 4. Target/state resolution, before the fault barrier so a fault can
+  // never mask an unknown-target violation. A MUTATION resolves its target
+  // from the self-describing node ids in EVERY mode - single-repo included,
+  // where the decoded slug must name the one state - so a section that
+  // sends a garbage or foreign id can never look green against the
+  // single-repo harness and only fail once a multi scenario runs it.
+  let mutationSlug: string | null = null;
+  if (op.kind === "write") {
+    const decoded: Array<{ slug: string }> = [];
+    decodedNodeIds(variables, decoded);
+    const slugs = new Set(decoded.map((id) => id.slug));
+    if (slugs.size === 0) {
+      return violation(
+        `GraphQL mutation ${op.name} carries no decodable mock node id; mutations must address their target through node ids the mock minted`,
+      );
+    }
+    if (slugs.size > 1) {
+      return violation(
+        `GraphQL mutation ${op.name} carries node ids of several repositories [${[...slugs].sort().join(", ")}]; one mutation must address one target`,
+      );
+    }
+    mutationSlug = [...slugs][0] as string;
+  }
+  let state: MockState;
+  let mask: PermissionMask = scenario.token_permissions ?? {};
+  let targetSlug = "";
+  if (working.mode === "single") {
+    state = working.state;
+    const singleSlug = String(state.repo.full_name ?? ADMIN_SLUG);
+    if (mutationSlug !== null && mutationSlug !== singleSlug) {
+      return violation(
+        `GraphQL mutation ${op.name} carries node ids of "${mutationSlug}", but this single-repo run serves only "${singleSlug}"`,
+      );
+    }
+  } else {
+    let slug: string;
+    if (op.kind === "read") {
+      const { owner, repo } = variables as { owner?: unknown; repo?: unknown };
+      if (typeof owner !== "string" || typeof repo !== "string") {
+        return violation(
+          `GraphQL read ${op.name} carries no $owner/$repo variables to resolve its target slug`,
+        );
+      }
+      slug = `${owner}/${repo}`;
+    } else {
+      slug = mutationSlug as string;
+    }
+    const repoState = working.multi.repos.get(slug);
+    if (!repoState) {
+      return violation(`GraphQL ${op.name} names no known target slug ("${slug}")`);
+    }
+    state = repoState;
+    mask = effectiveMask(scenario.token_permissions ?? {}, working.multi.permissions.get(slug));
+    targetSlug = slug;
+  }
+
+  // 5. Fault barrier: GraphQL operations are addressable by their
+  // "section.role" key exactly like REST endpoints (assertFaultKeys unions
+  // the two universes).
+  const taken = takeFault(key, options);
+  if (taken) {
+    return applyFault(taken.kind, { ...graphqlLog }, taken.fired);
+  }
+
+  // 6. Permission gate, grading the operation's DECLARED kind against the
+  // same mask machinery as REST. A denial is the real wire shape: HTTP 200,
+  // data:null, errors[] typed per the denial style.
+  const section = SECTION_BY_KEY.get(op.section);
+  if (!section) {
+    return violation(`BUG: no section module registered for key "${op.section}"`);
+  }
+  const requirement: Requirement = {
+    permission: endpointPermission(section, op),
+    kind: op.kind,
+  };
+  const grading = gradeRequirement(mask, requirement);
+  if (!grading.allowed) {
+    const errors = graphqlDenialErrors(scenario.denial_style, op.kind);
+    const response: MockResponse = { status: 200, body: { data: null, errors } };
+    const log: LoggedRequest = { ...graphqlLog, status: 200, deniedBy: grading.deniedBy };
+    // 6b. Denial barrier, SHARED with REST through the same per-target
+    // per-section sets: a GraphQL-read-denied section that then writes (REST
+    // or GraphQL) is a violation, and vice versa. A denied read whose error
+    // type the operation TOLERATES reads as "resource absent" and must not
+    // arm, mirroring toleratedStatuses; advisory reads are exempt for the
+    // same reason as REST.
+    const barrierKey = `${targetSlug}:${op.section}`;
+    let barrierViolation: string | undefined;
+    if (op.kind === "read") {
+      const deniedType = (errors[0] as GraphqlErrorReply).type;
+      const tolerated = toleratedGraphqlErrors(op).includes(deniedType);
+      if (op.advisory !== true && !tolerated) {
+        options.deniedReadSections.add(barrierKey);
+      }
+    }
+    if (op.kind === "write" && options.deniedReadSections.has(barrierKey)) {
+      const semantics = DENIAL_SEMANTICS[op.section];
+      barrierViolation = `write to GRAPHQL ${op.name} reached the server after a fatal denied read in the same target+section; the engine's section loop should have aborted at that read (section "${op.section}" has "${semantics}" denial semantics, style ${String(scenario.denial_style)})`;
+    }
+    return { response, log, violation: barrierViolation };
+  }
+
+  // 7. Handler runs.
+  const handler = handlers[key];
+  if (!handler) {
+    // assertGraphqlHandlerCompleteness runs at construction, so this is
+    // unreachable; keep it loud rather than a silent undefined call.
+    return violation(`no GraphQL handler registered for dispatched operation "${key}"`);
+  }
+  const result = handler({ state, op, variables });
+
+  // 8. Response guard, the status-subset analog: a handler may answer ONLY
+  // data, or errors whose every type the operation declares as a tolerated
+  // outcome. Anything else is a mock design bug.
+  if (result.errors !== undefined) {
+    const declared = toleratedGraphqlErrors(op);
+    const undeclared = result.errors.filter((entry) => !declared.includes(entry.type));
+    if (undeclared.length > 0) {
+      return violation(
+        `GraphQL handler "${key}" answered error type(s) [${undeclared.map((e) => e.type).join(", ")}] the operation does not declare as outcomes [${declared.join(", ")}]`,
+      );
+    }
+  }
+  const response: MockResponse = {
+    status: 200,
+    body:
+      result.errors !== undefined ? { data: null, errors: result.errors } : { data: result.data },
+  };
+
+  // 9. Chaos hook, addressable by the same "section.role" key as the faults.
+  const corrupted = takeCorruption(key, options, response, graphqlLog);
+  if (corrupted) {
+    return corrupted;
+  }
+
+  return { response, log: { ...graphqlLog, status: 200 } };
+}
+
+/**
  * Run the full request pipeline for one already-parsed request. This is pure:
  * it reads and mutates `state`, appends nothing to logs itself (the caller
  * owns the arrays), and returns the response plus the log entry and any
@@ -3266,6 +3683,12 @@ export function runPipeline(
       },
       ...(issueReport.violation ? { violation: issueReport.violation } : {}),
     };
+  }
+
+  // 3b3. GraphQL operations: one path, dispatched by operationName, served
+  // BEFORE REST endpoint matching (no path template can claim /graphql).
+  if (pathname === "/graphql") {
+    return handleGraphqlRequest({ method: request.method, body: request.body }, options, baseLog);
   }
 
   // 3c. Section endpoints.

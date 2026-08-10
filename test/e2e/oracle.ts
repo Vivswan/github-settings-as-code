@@ -26,19 +26,27 @@ const PERMISSION_BY_KEY: Record<SectionKey, SectionPermission> = Object.fromEntr
 ) as Record<SectionKey, SectionPermission>;
 
 /**
- * Sections whose every GET is write-gated (the EndpointDecl accessGrade
+ * Sections whose every read is write-gated (the EndpointDecl accessGrade
  * override; Codespaces secrets today): a read-only grant cannot even list,
  * so grade "read" collapses to "none". Derived from the same declarations
- * the mock's permission gate reads (endpointKind), so mock and oracle cannot
- * disagree. A section with MIXED read grades would make the section-level
- * collapse wrong; the registry unit test forbids that shape.
+ * the mock's permission gate reads - REST GETs through endpointKind, GraphQL
+ * operations through their explicit kind (a declared "read" op always gates
+ * at read; GraphQL has no accessGrade analog, the kind IS the gate) - so
+ * mock and oracle cannot disagree. A section with MIXED read grades would
+ * make the section-level collapse wrong; the registry unit test forbids
+ * that shape.
  */
 const READS_REQUIRE_WRITE: ReadonlySet<SectionKey> = new Set(
   SECTIONS.filter((section) => {
-    const gets = Object.values(section.endpoints).filter(
-      (endpoint) => endpointMethod(endpoint.route) === "GET",
-    );
-    return gets.length > 0 && gets.every((endpoint) => endpointKind(endpoint) === "write");
+    const readGates: Array<"read" | "write"> = [
+      ...Object.values(section.endpoints)
+        .filter((endpoint) => endpointMethod(endpoint.route) === "GET")
+        .map((endpoint) => endpointKind(endpoint)),
+      ...Object.values(section.graphql ?? {})
+        .filter((op) => op.kind === "read")
+        .map(() => "read" as const),
+    ];
+    return readGates.length > 0 && readGates.every((gate) => gate === "write");
   }).map((section) => section.key),
 );
 

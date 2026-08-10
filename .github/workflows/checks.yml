@@ -32,6 +32,19 @@ jobs:
       - name: Fetch the trimmed OpenAPI spec (cache miss)
         if: steps.openapi-cache.outputs.cache-hit != 'true'
         run: bun .github/scripts/trim-openapi.ts
+      # bun test also validates every declared GraphQL query against GitHub's
+      # published schema, another fetched, gitignored artifact. The key hashes
+      # only the fetch script: it carries the pinned UPSTREAM_REF, the sole
+      # input that changes the output.
+      - name: Cache the GraphQL schema
+        id: graphql-schema-cache
+        uses: actions/cache@v6
+        with:
+          path: test/e2e/graphql/schema.docs.graphql
+          key: graphql-schema-${{ hashFiles('.github/scripts/fetch-graphql-schema.ts') }}
+      - name: Fetch the GraphQL schema (cache miss)
+        if: steps.graphql-schema-cache.outputs.cache-hit != 'true'
+        run: bun .github/scripts/fetch-graphql-schema.ts
       - name: Lint (biome)
         run: bun run lint
       - name: Typecheck

@@ -22,7 +22,12 @@ import { MARKER_LABEL } from "../../src/report/issue-report.js";
 import type { SectionKey } from "../../src/schema.js";
 import { ALWAYS_REWRITE_STATE_FAMILIES, COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
 import { ADMIN_SLUG as REPO_SLUG } from "./constants.js";
-import { endpointForRequest, type LoggedRequest, sectionForRequest } from "./mock/routes.js";
+import {
+  endpointForRequest,
+  isWriteRequest,
+  type LoggedRequest,
+  sectionForRequest,
+} from "./mock/routes.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./mock/server.js";
 import type { MockState } from "./mock/state.js";
 import { sharedValidator } from "./openapi/validate.js";
@@ -606,9 +611,15 @@ export function assertIssueReport(
  * Render a logged request to the string the expectations match against. The
  * mock logs pathname and query separately, so both match rules compose here:
  * mutations/never match a "METHOD /pathname" PREFIX (query omitted), and
- * requests_contain matches a substring of "METHOD /pathname?query".
+ * requests_contain matches a substring of "METHOD /pathname?query". A
+ * GraphQL request renders as "GRAPHQL <opName>" - every GraphQL call shares
+ * POST /graphql, so the operation name is the only spelling that lets a
+ * scenario pin one operation.
  */
 function renderRequest(request: LoggedRequest, includeQuery: boolean): string {
+  if (request.graphql) {
+    return `GRAPHQL ${request.graphql.operationName}`;
+  }
   const base = `${request.method} ${request.pathname}`;
   return includeQuery && request.query ? `${base}?${request.query}` : base;
 }
@@ -730,7 +741,7 @@ export function changedFamilies(before: Map<string, string>, after: Map<string, 
 export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
   const failures: string[] = [];
   for (const write of writes) {
-    const section = sectionForRequest(write.method, write.pathname);
+    const section = sectionForRequest(write.method, write.pathname, write.body);
     if (section === null) {
       failures.push(
         `apply-idempotence: second apply wrote outside any section endpoint: ${write.method} ${write.pathname}`,
@@ -776,7 +787,7 @@ export function recordUnconditionalWrites(
 ): void {
   const bump = (writes: LoggedRequest[], side: "first" | "second"): void => {
     for (const write of writes) {
-      const section = sectionForRequest(write.method, write.pathname);
+      const section = sectionForRequest(write.method, write.pathname, write.body);
       if (section === null || COMPARE_BEFORE_WRITE[section]) {
         continue;
       }
@@ -916,9 +927,9 @@ async function assertApplyIdempotent(
   if (secondViolations.length > 0) {
     failures.push(`apply-idempotence: mock violations:\n  ${secondViolations.join("\n  ")}`);
   }
-  const writes = handle.requests.slice(requestsBefore).filter((r) => r.method !== "GET");
+  const writes = handle.requests.slice(requestsBefore).filter(isWriteRequest);
   failures.push(...secondApplyWriteFailures(writes));
-  const firstWrites = handle.requests.slice(0, requestsBefore).filter((r) => r.method !== "GET");
+  const firstWrites = handle.requests.slice(0, requestsBefore).filter(isWriteRequest);
   failures.push(...missingSecondApplyRewrites(firstWrites, writes));
   recordUnconditionalWrites(corpusWriteWitness, firstWrites, writes);
   const changed = changedFamilies(before, snapshotFamilies(handle));
@@ -941,7 +952,7 @@ async function assertApplyIdempotent(
       `apply-idempotence: the check run after the second apply exited ${check.exitCode}, expected 0${killNote(check)}`,
     );
   }
-  const checkWrites = handle.requests.slice(checkRequestsBefore).filter((r) => r.method !== "GET");
+  const checkWrites = handle.requests.slice(checkRequestsBefore).filter(isWriteRequest);
   if (checkWrites.length > 0) {
     failures.push(
       `apply-idempotence: the check run wrote ${checkWrites.length} time(s): ${checkWrites.map((r) => renderRequest(r, false)).join(", ")}`,
@@ -1079,9 +1090,7 @@ export async function runScenario(
       }
     }
     const pathLog = handle.requests.map((r) => renderRequest(r, false));
-    const writes = handle.requests
-      .filter((r) => r.method !== "GET")
-      .map((r) => renderRequest(r, false));
+    const writes = handle.requests.filter(isWriteRequest).map((r) => renderRequest(r, false));
     // 5. Mutations as an ordered subsequence of the non-GET log.
     if (exp.mutations) {
       const want = exp.mutations.map(expandRepo);
@@ -1177,7 +1186,7 @@ export async function runScenario(
         handle.url,
       );
       reruns.push(captureRerun("converges check", converge));
-      const newWrites = handle.requests.slice(writesBefore).filter((r) => r.method !== "GET");
+      const newWrites = handle.requests.slice(writesBefore).filter(isWriteRequest);
       if (converge.exitCode !== 0) {
         failures.push(
           `convergence: rerun exited ${converge.exitCode}, expected 0${killNote(converge)}`,

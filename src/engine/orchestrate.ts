@@ -128,29 +128,57 @@ export function validateSettingsDoc(
 }
 
 /**
- * Probe every active section read-only and collect the permission denials
- * as "key: detail" lines. Empty means every section is accessible.
+ * Thrown by readOnlyClient when a section handler attempts a mutation in a
+ * read-only phase. A dedicated class because the preflight barrier must NOT
+ * swallow it like an ordinary probe error: an ordinary error resurfaces on
+ * the apply pass with full context, but a check-mode write is legitimate-
+ * looking under apply, so swallowing it here would hide the bug forever.
  */
-async function preflightProbe(
+export class ReadOnlyViolation extends Error {}
+
+/**
+ * A GithubClient that refuses every mutation: non-GET REST requests and
+ * GraphQL writes both throw ReadOnlyViolation, reads pass through to `api`
+ * untouched. The belt over the check-is-read-only convention, worn in BOTH
+ * read-only phases: the preflight barrier's probes, and the whole of check
+ * mode (runForRepo wraps the context client), so a handler that (wrongly)
+ * mutated under check cannot touch the repo. Exported so the refusal is
+ * directly testable.
+ */
+export function readOnlyClient(api: GithubClient): GithubClient {
+  return {
+    tryRequest(method, path, payload, options) {
+      if (method !== "GET") {
+        throw new ReadOnlyViolation(
+          `${method} ${path} was attempted in check mode, but section handlers must be read-only in check mode; this is a bug in the section handler`,
+        );
+      }
+      return api.tryRequest(method, path, payload, options);
+    },
+    tryGraphql(op, variables, slug) {
+      if (op.kind !== "read") {
+        throw new ReadOnlyViolation(
+          `GRAPHQL ${op.name} (a ${op.kind} operation) was attempted in check mode, but section handlers must be read-only in check mode; this is a bug in the section handler`,
+        );
+      }
+      return api.tryGraphql(op, variables, slug);
+    },
+  };
+}
+
+/**
+ * Probe every active section read-only and collect the permission denials
+ * as "key: detail" lines. Empty means every section is accessible. Exported
+ * with the injectable `active` list so the ReadOnlyViolation rethrow is
+ * directly testable against a synthetic section.
+ */
+export async function preflightProbe(
   api: GithubClient,
   ctx: SectionContext,
   active: typeof SECTIONS,
   settings: SettingsFile,
 ): Promise<string[]> {
-  // Belt over the check-is-read-only convention: the probe client refuses
-  // every non-GET, so a handler that (wrongly) mutated under check cannot
-  // touch the repo during preflight. The thrown error is ignored below
-  // like any other non-permission error; the apply pass surfaces the bug.
-  const probeApi: GithubClient = {
-    tryRequest(method, path, payload, options) {
-      if (method !== "GET") {
-        throw new Error(
-          `preflight probe attempted ${method} ${path}, but section handlers must be read-only in check mode; this is a bug in the section handler`,
-        );
-      }
-      return api.tryRequest(method, path, payload, options);
-    },
-  };
+  const probeApi = readOnlyClient(api);
   const denied: string[] = [];
   for (const section of active) {
     try {
@@ -161,9 +189,17 @@ async function preflightProbe(
     } catch (error) {
       if (error instanceof PermissionDenied) {
         denied.push(`${section.key}: ${error.detail}`);
+        continue;
       }
-      // Non-permission preflight errors are ignored here; the apply pass
-      // will surface them with full context.
+      if (error instanceof ReadOnlyViolation) {
+        // A write attempt during the read-only probe is a section-handler
+        // bug the APPLY pass can never resurface (the same write is
+        // legitimate there), so it must fail the run loudly instead of
+        // being ignored like an ordinary probe error.
+        throw new Error(`preflight: ${section.key}: ${error.message}`);
+      }
+      // Other non-permission preflight errors are ignored here; the apply
+      // pass will surface them with full context.
     }
   }
   return denied;
@@ -176,11 +212,14 @@ export async function runForRepo(
   io: Io,
 ): Promise<RepoRunResult> {
   const [owner] = opts.repo.split("/");
+  const check = opts.mode === "check";
   const ctx: SectionContext = {
-    api,
+    // Check mode is a read-only phase end to end, so the context client
+    // itself refuses mutations - the same belt the preflight probe wears.
+    api: check ? readOnlyClient(api) : api,
     repo: opts.repo,
     owner: owner ?? "",
-    check: opts.mode === "check",
+    check,
   };
   const settings = opts.settings;
 

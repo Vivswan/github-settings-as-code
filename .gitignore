@@ -7,6 +7,9 @@ test/e2e/.artifacts/
 # with `bun .github/scripts/trim-openapi.ts` (reproducible at the pinned sha);
 # CI restores it from actions/cache or re-fetches on a miss.
 test/e2e/openapi/github-openapi.trimmed.json
+# GitHub's public GraphQL schema, the same fetched-artifact arrangement:
+# generate it with `bun .github/scripts/fetch-graphql-schema.ts`.
+test/e2e/graphql/schema.docs.graphql
 # Agent session state and git worktrees; stray biome.json copies inside
 # worktrees otherwise abort `biome ci .` as nested roots.
 .claude/

@@ -21,7 +21,7 @@ import { codeQualitySetupSection } from "./code-quality.js";
 import { codeScanningDefaultSetupSection } from "./code-scanning.js";
 import { codespacesSecretsSection } from "./codespaces-secrets.js";
 import { collaboratorsSection } from "./collaborators.js";
-import type { EndpointDecl, SectionModule } from "./contract.js";
+import type { EndpointDecl, GraphqlOpDecl, SectionModule } from "./contract.js";
 import { customPropertiesSection } from "./custom-properties.js";
 import { dependabotSecretsSection } from "./dependabot-secrets.js";
 import { deployKeysSection } from "./deploy-keys.js";
@@ -107,6 +107,68 @@ export function allEndpoints(): Readonly<Record<string, TaggedEndpoint>> {
         Object.freeze(endpoint.permission.repo);
       }
       out[`${section.key}.${role}`] = Object.freeze({ ...endpoint, section: section.key, role });
+    }
+  }
+  return Object.freeze(out);
+}
+
+/** One GraphQL operation in the flattened cross-section view, tagged with its owner. */
+export type TaggedGraphqlOp = GraphqlOpDecl & {
+  readonly section: SectionKey;
+  readonly role: string;
+};
+
+/**
+ * Every section's GraphQL operations flattened into one dictionary keyed
+ * `${sectionKey}.${role}`, the allEndpoints() sibling the e2e mock's dispatch
+ * table, the coverage tripwire, and the fault-key universe iterate. Frozen
+ * for the same reason: the declarations must never mutate at runtime.
+ *
+ * Two shapes are asserted here, at construction, because the rest of the
+ * system depends on them:
+ *   - operation NAMES are globally unique: the name is the wire dispatch key
+ *     (the operationName on every request), so a duplicate would make the
+ *     mock's dispatch and the coverage attribution ambiguous;
+ *   - a role never collides with a REST endpoint role in the same section:
+ *     fault/corruption directives address both dictionaries through one
+ *     "section.role" key space.
+ * A declared `connection` is also held to its cursor contract here (the
+ * query must take $cursor), so a paginated operation that cannot page fails
+ * at declaration time, not on its first multi-page repository.
+ * `sections` is injectable so the asserts are directly testable; production
+ * callers take the registry default.
+ */
+export function allGraphqlOps(
+  sections: ReadonlyArray<Pick<SectionModule, "key" | "endpoints" | "graphql">> = SECTIONS,
+): Readonly<Record<string, TaggedGraphqlOp>> {
+  const out: Record<string, TaggedGraphqlOp> = {};
+  const byName = new Map<string, string>();
+  for (const section of sections) {
+    for (const [role, op] of Object.entries(section.graphql ?? {})) {
+      const key = `${section.key}.${role}`;
+      if (section.endpoints[role] !== undefined) {
+        throw new Error(
+          `BUG: section "${section.key}" declares both a REST endpoint and a GraphQL operation under the role "${role}"; fault and corruption directives share the "section.role" key space, so roles must be distinct`,
+        );
+      }
+      const holder = byName.get(op.name);
+      if (holder !== undefined) {
+        throw new Error(
+          `BUG: GraphQL operation name "${op.name}" is declared by both ${holder} and ${key}; operation names are the wire dispatch key and must be globally unique`,
+        );
+      }
+      if (op.connection !== undefined && !op.query.includes("$cursor")) {
+        throw new Error(
+          `BUG: GraphQL operation ${key} declares a connection but its query takes no $cursor variable, so listGraphqlConnection could never advance past the first page`,
+        );
+      }
+      byName.set(op.name, key);
+      Object.freeze(op.outcomes);
+      if (op.permission && typeof op.permission === "object") {
+        Object.freeze(op.permission);
+        Object.freeze(op.permission.repo);
+      }
+      out[key] = Object.freeze({ ...op, section: section.key, role });
     }
   }
   return Object.freeze(out);

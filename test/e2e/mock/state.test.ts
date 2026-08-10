@@ -19,8 +19,10 @@ import {
   buildStateForSlug,
   collaboratorFromPut,
   completeInvitation,
+  decodeNodeId,
   environmentFromPut,
   invitationFromPut,
+  mintNodeId,
   protectionFromPut,
   teamRepoFromPut,
 } from "./state.js";
@@ -295,5 +297,53 @@ describe("completeInvitation", () => {
     expect(invitation.url).toBe("https://api.github.com/repos/acme/payments/invitations/9");
     expect((invitation.inviter as { login: string }).login).toBe("acme");
     expect((invitation.repository as { full_name: string }).full_name).toBe("acme/payments");
+  });
+});
+
+describe("mock node ids", () => {
+  test("mint/decode round-trips family, slug, and key", () => {
+    const id = mintNodeId("environment", "acme/api.service-1", "prod");
+    expect(decodeNodeId(id)).toEqual({
+      family: "environment",
+      slug: "acme/api.service-1",
+      key: "prod",
+    });
+  });
+
+  test("a key containing colons survives the round trip", () => {
+    const id = mintNodeId("rule", "o/r", "branch:main:pattern");
+    expect(decodeNodeId(id)?.key).toBe("branch:main:pattern");
+  });
+
+  test("foreign ids do not decode", () => {
+    // A GitHub-realistic legacy id, an arbitrary string, and an empty string:
+    // none of them are the mock's, so a mutation carrying one is a violation
+    // the pipeline can only raise if the codec refuses to guess.
+    expect(decodeNodeId("MDU6TGFiZWw5MDAwMDAwMQ==")).toBeNull();
+    expect(decodeNodeId("not-base64-at-all")).toBeNull();
+    expect(decodeNodeId("")).toBeNull();
+  });
+
+  test("buildState stamps the repo node id with the fixture slug", () => {
+    const state = buildState(undefined, "org");
+    expect(decodeNodeId(String(state.repo.node_id))).toEqual({
+      family: "repo",
+      slug: "e2e-owner/e2e-repo",
+      key: "",
+    });
+  });
+
+  test("buildStateForSlug re-mints ids for the target slug, environments included", () => {
+    const state = buildStateForSlug(
+      "acme/private",
+      { settingsYaml: null, liveState: { environments: { prod: { name: "prod" } } } },
+      "org",
+    );
+    expect(decodeNodeId(String(state.repo.node_id))?.slug).toBe("acme/private");
+    expect(decodeNodeId(String(state.environments.prod?.node_id))).toEqual({
+      family: "environment",
+      slug: "acme/private",
+      key: "prod",
+    });
   });
 });

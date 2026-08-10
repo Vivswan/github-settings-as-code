@@ -322,6 +322,62 @@ function isPlainObject(value: unknown): value is Json {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// --- Mock node ids ----------------------------------------------------------
+//
+// Every node_id the mock serves is minted here, self-describing: GraphQL
+// mutations address their target through node ids alone (no owner/repo in the
+// variables), so the pipeline must recover the target slug FROM the id to keep
+// per-slug permission masks and state routing exact. A base64 wrapper over a
+// "MOCKNODE:<family>:<slug>:<key>" spine gives ids that look like GitHub's
+// (opaque base64) while staying decodable by the mock alone; an id the codec
+// cannot decode inside a mutation is a loud violation, never a guess.
+
+const NODE_ID_PREFIX = "MOCKNODE";
+
+/**
+ * Mint the node id for one resource: `family` names the resource kind
+ * ("repo", "environment", ...), `slug` the owning repository, and `key` the
+ * resource's natural key within the family (empty for the repo itself, whose
+ * slug says everything).
+ */
+export function mintNodeId(family: string, slug: string, key: string): string {
+  return Buffer.from(`${NODE_ID_PREFIX}:${family}:${slug}:${key}`, "utf8").toString("base64");
+}
+
+/**
+ * Decode a minted node id back to its parts, or null for anything this mock
+ * did not mint (a fixture's GitHub-realistic id, an arbitrary string). The
+ * slug never contains ":" (the owner/name charset), so the first two
+ * separators are unambiguous; the key keeps any ":" it carries.
+ */
+export function decodeNodeId(nodeId: string): { family: string; slug: string; key: string } | null {
+  const decoded = Buffer.from(nodeId, "base64").toString("utf8");
+  const parts = decoded.split(":");
+  if (parts[0] !== NODE_ID_PREFIX || parts.length < 4 || !parts[1] || !parts[2]) {
+    return null;
+  }
+  return {
+    family: parts[1] as string,
+    slug: parts[2] as string,
+    key: parts.slice(3).join(":"),
+  };
+}
+
+/**
+ * Stamp the node ids of everything a state serves that GraphQL can address:
+ * the repo object and each environment body. Called after a state is built
+ * AND after it is re-slugged (the slug is part of the id), so the ids a
+ * section reads always name the repository they belong to. Write handlers
+ * mint ids for resources they create with the same codec.
+ */
+export function stampNodeIds(state: MockState): void {
+  const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+  state.repo.node_id = mintNodeId("repo", slug, "");
+  for (const [name, environment] of Object.entries(state.environments)) {
+    environment.node_id = mintNodeId("environment", slug, name);
+  }
+}
+
 /**
  * Deep-merge `overlay` onto `base`, recursing into plain objects and replacing
  * arrays and scalars wholesale. Neither input is mutated. Used for the repo
@@ -546,7 +602,7 @@ export function buildState(
     reslugRepo(repo, slug);
   }
 
-  return {
+  const state: MockState = {
     ownerKind,
     org: ownerKind === "user" ? null : clone(orgFixture as Json),
     repo,
@@ -647,6 +703,8 @@ export function buildState(
     _secret_scanning_version_counter: 0,
     nextId,
   };
+  stampNodeIds(state);
+  return state;
 }
 
 // --- Multi-repo layer -----------------------------------------------------
@@ -726,17 +784,21 @@ export function buildStateForSlug(
   spec: MultiRepoSpec,
   ownerKind: OwnerKind,
 ): MockState {
+  // buildState reslugs and then stamps the node ids (they carry the slug),
+  // so nothing further is minted here.
   return buildState(spec.liveState, ownerKind, slug);
 }
 
 /**
  * A discovery-pool repo body: the fixture repo re-slugged, with the four
  * filterable attributes overlaid so the action's discovery filters can act on
- * them. Only the fields discovery reads need be realistic.
+ * them. Only the fields discovery reads need be realistic; the node id is
+ * still minted so any id that leaves the mock decodes.
  */
 function discoveryRepoBody(spec: DiscoveryRepoSpec): Json {
   const body = clone(repoFixture as Json);
   reslugRepo(body, spec.slug);
+  body.node_id = mintNodeId("repo", spec.slug, "");
   if (spec.archived !== undefined) {
     body.archived = spec.archived;
   }

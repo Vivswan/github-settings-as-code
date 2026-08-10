@@ -13,6 +13,7 @@ import { stringify as stringifyYaml } from "yaml";
 import type { MultiRepo, Scenario } from "../schema.js";
 import {
   assertFaultKeys,
+  assertGraphqlHandlerCompleteness,
   assertHandlerCompleteness,
   type CorruptOption,
   type FaultOption,
@@ -119,9 +120,10 @@ export async function startMockServer(
   scenario: Scenario,
   options: ServerOptions = {},
 ): Promise<MockHandle> {
-  // Fail loudly at construction if the handler table has drifted from the
-  // section endpoint dictionary, before any request is served.
+  // Fail loudly at construction if either handler table has drifted from its
+  // declaration dictionary, before any request is served.
   assertHandlerCompleteness();
+  assertGraphqlHandlerCompleteness();
   // Reject fault/corrupt directives naming unknown endpoints or duplicate faults.
   assertFaultKeys(options.faults, options.corrupt);
   // libsodium init, awaited ONCE here: the secret-family PUT handlers unseal

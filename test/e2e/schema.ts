@@ -124,12 +124,18 @@ export const ExpectSchema = z
     /** Per-section outcome parsed from the step-summary table. */
     outcomes: z.record(z.string(), z.string()).optional(),
     /**
-     * Ordered "METHOD /path" prefixes the non-GET request log must contain as
+     * Ordered "METHOD /path" prefixes the write request log must contain as
      * a subsequence. `{repo}` is a placeholder the loader expands to the
-     * scenario's owner/name before matching.
+     * scenario's owner/name before matching. A GraphQL operation is spelled
+     * "GRAPHQL <opName>" (every GraphQL call shares POST /graphql, so the
+     * operation name is the log's rendering), and a GraphQL READ never
+     * appears in the write log despite its POST method.
      */
     mutations: z.array(z.string()).optional(),
-    /** "METHOD /path" prefixes that must NEVER appear in the request log. */
+    /**
+     * "METHOD /path" (or "GRAPHQL <opName>") prefixes that must NEVER appear
+     * in the request log.
+     */
     never: z.array(z.string()).optional(),
     /** Substrings the step summary must contain. */
     summary_contains: z.array(z.string()).optional(),

@@ -1,12 +1,24 @@
-import type { ApiError, GithubClient } from "../src/github/api.js";
+import type { ApiError, GithubClient, GraphqlOp } from "../src/github/api.js";
 
 export type Route = { data?: unknown; error?: ApiError };
 
 export type MockApiOptions = { unroutedMutations?: "throw" | "succeed" };
 
-/** Duck-typed GithubClient over a route table; records every mutation. */
+/**
+ * Duck-typed GithubClient over a route table; records every mutation.
+ * GraphQL operations route through the same table under the key
+ * `GRAPHQL <opName>` (`data` must be the response's data object), and are
+ * recorded with their declared kind so mutations() can tell a GraphQL read
+ * from a write - every GraphQL call shares the POST method, so the method
+ * alone cannot.
+ */
 export class MockApi implements GithubClient {
-  calls: Array<{ method: string; path: string; payload?: unknown }> = [];
+  calls: Array<{
+    method: string;
+    path: string;
+    payload?: unknown;
+    graphqlKind?: "read" | "write";
+  }> = [];
   private routes: Record<string, Route>;
   private unroutedMutations: "throw" | "succeed";
 
@@ -66,7 +78,32 @@ export class MockApi implements GithubClient {
     return { data: route.data ?? null };
   }
 
+  async tryGraphql(
+    op: GraphqlOp,
+    variables: Readonly<Record<string, unknown>>,
+    _slug: string,
+  ): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
+    this.calls.push({ method: "GRAPHQL", path: op.name, payload: variables, graphqlKind: op.kind });
+    const route = this.routes[`GRAPHQL ${op.name}`];
+    if (!route) {
+      if (op.kind === "read") {
+        // Mirror the unrouted-GET default: absence reads as GitHub's 404.
+        return { error: { status: 404, message: "Not Found", body: "" } };
+      }
+      if (this.unroutedMutations === "throw") {
+        throw new Error(
+          `MockApi: unrouted GraphQL mutation ${op.name}; add a "GRAPHQL ${op.name}" route or allowMutations(...)`,
+        );
+      }
+      return { data: {} };
+    }
+    if (route.error) {
+      return { error: route.error };
+    }
+    return { data: (route.data ?? {}) as Record<string, unknown> };
+  }
+
   mutations() {
-    return this.calls.filter((c) => c.method !== "GET");
+    return this.calls.filter((c) => c.method !== "GET" && c.graphqlKind !== "read");
   }
 }

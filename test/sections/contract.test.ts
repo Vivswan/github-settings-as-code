@@ -46,7 +46,7 @@ describe("throwFor context enrichment", () => {
         "POST",
         "/repos/o/r/rulesets",
         { ...rejection, documentationUrl: "https://docs.github.com/rest/repos/rules" },
-        { endpoint: endpoint({ hints: { 422: "Usually this means a typo" } }) },
+        { op: endpoint({ hints: { 422: "Usually this means a typo" } }) },
       ),
     ).toThrow(
       /message above\. Usually this means a typo\. The fields and values this endpoint accepts are documented at https:\/\/docs\.github\.com\/rest\/repos\/rules$/,
@@ -60,7 +60,7 @@ describe("throwFor context enrichment", () => {
         "POST",
         "/repos/o/r/rulesets",
         { status: 409, message: "Conflict", body: "" },
-        { endpoint: endpoint({ hints: { 422: "never rendered on a 409" } }) },
+        { op: endpoint({ hints: { 422: "never rendered on a 409" } }) },
       );
     } catch (error) {
       expect(String(error)).toContain("409");
@@ -78,7 +78,7 @@ describe("throwFor context enrichment", () => {
         { status: 403, message: "Resource not accessible", body: "" },
         {
           operation: 'creating ruleset "quality"',
-          endpoint: endpoint({ hints: { 422: "never rendered here" } }),
+          op: endpoint({ hints: { 422: "never rendered here" } }),
         },
       );
     } catch (error) {
@@ -100,7 +100,7 @@ describe("throwFor context enrichment", () => {
         "/repos/o/r/lfs",
         { status: 403, message: "Git LFS is globally disabled", body: "" },
         {
-          endpoint: endpoint({
+          op: endpoint({
             denialHint: "a 403 here can also mean LFS is disabled account-wide",
           }),
         },
@@ -121,7 +121,7 @@ describe("throwFor context enrichment", () => {
         "PUT",
         "/repos/o/r/lfs",
         { status: 422, message: "nope", body: "" },
-        { endpoint: endpoint({ denialHint: "not for 422s" }) },
+        { op: endpoint({ denialHint: "not for 422s" }) },
       ),
     ).toThrow(/^(?!.*not for 422s).*fix the "rulesets" values/);
   });
@@ -135,7 +135,7 @@ describe("throwFor context enrichment", () => {
         "GET",
         "/repos/o/r/rulesets",
         { status: 500, message: "Server Error", body: "" },
-        { endpoint: endpoint({ hints: { 422: "never rendered here" } }) },
+        { op: endpoint({ hints: { 422: "never rendered here" } }) },
       ),
     ).toThrow(/server error/);
     try {
@@ -144,7 +144,7 @@ describe("throwFor context enrichment", () => {
         "GET",
         "/repos/o/r/rulesets",
         { status: 500, message: "Server Error", body: "" },
-        { endpoint: endpoint({ hints: { 422: "never rendered here" } }) },
+        { op: endpoint({ hints: { 422: "never rendered here" } }) },
       );
     } catch (error) {
       expect(String(error)).not.toContain("never rendered here");
@@ -159,7 +159,7 @@ describe("throwFor context enrichment", () => {
         "POST",
         "/repos/o/r/actions/oidc/customization/sub",
         { status: 403, message: "Resource not accessible", body: "" },
-        { endpoint: endpoint({ permission: { repo: ["actions"] } }) },
+        { op: endpoint({ permission: { repo: ["actions"] } }) },
       );
     } catch (error) {
       thrown = error;
@@ -186,7 +186,7 @@ describe("throwFor context enrichment", () => {
         "GET",
         "/repos/o/r/actions/oidc/customization/sub",
         { status: 403, message: "Resource not accessible", body: "" },
-        { endpoint: actionsSection.endpoints.getOidcSub as EndpointDecl },
+        { op: actionsSection.endpoints.getOidcSub as EndpointDecl },
       );
     } catch (error) {
       thrown = error;
@@ -206,7 +206,7 @@ describe("throwFor context enrichment", () => {
         "GET",
         "/repos/o/r/environments/prod/deployment-branch-policies",
         { status: 404, message: "Not Found", body: "" },
-        { endpoint: environmentsSection.endpoints.listPolicies as EndpointDecl },
+        { op: environmentsSection.endpoints.listPolicies as EndpointDecl },
       );
     } catch (error) {
       thrown = error;
@@ -228,7 +228,7 @@ describe("throwFor context enrichment", () => {
         "GET",
         "/repos/o/r/rulesets",
         { status: 403, message: "Forbidden", body: "" },
-        { endpoint: endpoint({ permission: "none" }) },
+        { op: endpoint({ permission: "none" }) },
       );
     } catch (error) {
       thrown = error;
@@ -245,18 +245,17 @@ describe("throwFor context enrichment", () => {
     // would silently drop every caveat while caveat-free fixtures stay
     // green.
     let thrown: unknown;
+    const noOverride: EndpointDecl = {
+      route: "GET /repos/{owner}/{repo}/actions/permissions",
+      statuses: { 200: "x" },
+    };
     try {
       throwFor(
         actionsSection,
         "GET",
         "/repos/o/r/actions/permissions",
         { status: 403, message: "Resource not accessible", body: "" },
-        {
-          endpoint: {
-            route: "GET /repos/{owner}/{repo}/actions/permissions",
-            statuses: { 200: "x" },
-          },
-        },
+        { op: noOverride },
       );
     } catch (error) {
       thrown = error;

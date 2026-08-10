@@ -883,3 +883,99 @@ describe("invitation role vocabulary lockstep", () => {
     }
   });
 });
+
+describe("the hand-written /graphql branch", () => {
+  // An empty spec plus an injected known-name set: the branch never consults
+  // OpenAPI paths, and the injection makes the known-name check testable
+  // while no section declares operations yet.
+  const validator = new OpenApiValidator({ paths: {} } as never, new Set(["RepoToggles"]));
+
+  const goodBody = {
+    query: "query RepoToggles($owner: String!, $repo: String!) { repository { id } }",
+    operationName: "RepoToggles",
+    variables: { owner: "o", repo: "r" },
+  };
+
+  const exchange = (overrides: Partial<LoggedRequest>): LoggedRequest =>
+    req({
+      method: "POST",
+      pathname: "/graphql",
+      body: goodBody,
+      status: 200,
+      responseBody: { data: { repository: { id: "R_1" } } },
+      ...overrides,
+    });
+
+  test("a well-formed exchange passes", () => {
+    expect(validator.validateRequest(exchange({}))).toEqual([]);
+  });
+
+  test("a data:null + typed errors response passes", () => {
+    expect(
+      validator.validateRequest(
+        exchange({
+          responseBody: { data: null, errors: [{ type: "NOT_FOUND", message: "gone" }] },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a non-POST method is an unknown-route finding", () => {
+    const found = validator.validateRequest(exchange({ method: "GET" }));
+    expect(found.map((f) => f.kind)).toContain("unknown-route");
+  });
+
+  test("missing query/operationName/variables are request-body findings", () => {
+    const found = validator.validateRequest(exchange({ body: { operationName: 7 } }));
+    const details = found.map((f) => `${f.kind}: ${f.detail}`).join("\n");
+    expect(details).toContain("request-body: the request body must carry a string `query`");
+    expect(details).toContain("request-body: the request body must carry a string `operationName`");
+    expect(details).toContain("request-body: the request body must carry a `variables` object");
+  });
+
+  test("an undeclared operationName is a request-body finding", () => {
+    const found = validator.validateRequest(
+      exchange({ body: { ...goodBody, operationName: "Rogue" } }),
+    );
+    expect(found.map((f) => f.detail).join("\n")).toContain(
+      'operationName "Rogue" names no declared GraphQL operation',
+    );
+  });
+
+  test("a non-200 status is a response-body finding", () => {
+    const found = validator.validateRequest(exchange({ status: 502, responseBody: null }));
+    expect(found.map((f) => f.detail).join("\n")).toContain("GraphQL responses are HTTP 200");
+  });
+
+  test("a data value that is neither object nor null is a finding", () => {
+    const found = validator.validateRequest(exchange({ responseBody: { data: 42 } }));
+    expect(found.map((f) => f.detail).join("\n")).toContain(
+      "the response `data` must be an object or null",
+    );
+  });
+
+  test("an unknown errors[].type and a missing message are findings", () => {
+    const found = validator.validateRequest(
+      exchange({
+        responseBody: { data: null, errors: [{ type: "SERVICE_UNAVAILABLE" }] },
+      }),
+    );
+    const details = found.map((f) => f.detail).join("\n");
+    expect(details).toContain(
+      'errors[].type "SERVICE_UNAVAILABLE" is not a known GraphqlErrorType',
+    );
+    expect(details).toContain("every errors[] entry must carry a string message");
+  });
+
+  test("an empty errors array is a finding (present means non-empty)", () => {
+    const found = validator.validateRequest(exchange({ responseBody: { data: null, errors: [] } }));
+    expect(found.map((f) => f.detail).join("\n")).toContain("must be a non-empty array");
+  });
+
+  test("denied and off-spec exchanges are excluded like every other route", () => {
+    expect(
+      validator.validateRequest(exchange({ deniedBy: "administration", responseBody: undefined })),
+    ).toEqual([]);
+    expect(validator.validateRequest(exchange({ offSpec: true }))).toEqual([]);
+  });
+});

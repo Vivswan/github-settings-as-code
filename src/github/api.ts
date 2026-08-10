@@ -27,6 +27,17 @@ export interface ApiError {
    * rate limit arriving as 403 must not be misread as a permission failure.
    */
   rateLimited?: true;
+  /**
+   * The GraphQL error `type` values behind this error, verbatim, deduped and
+   * sorted - present only when the error was mapped from a GraphQL errors[]
+   * response in which EVERY entry carried a string type. The HTTP status is
+   * a lossy fold (FORBIDDEN and a mixed [FORBIDDEN, UNPROCESSABLE] both land
+   * on 403/422 classes), so tolerance decisions read this instead: an
+   * untyped or partially-typed response omits the field and is never
+   * tolerable. The values are structural enums, never echoes, so the field
+   * survives even a withheld (secret-carrying or redacted) response.
+   */
+  graphqlTypes?: readonly string[];
 }
 
 /**
@@ -47,10 +58,30 @@ export const RERUN_ADVICE =
 export const DEFAULT_API_VERSION = "2022-11-28";
 
 /**
+ * A GraphQL operation as the transport sees it: the wire dispatch name, the
+ * read/write kind (declared explicitly, NEVER derived from the POST method
+ * every GraphQL call shares), and the query document. The transport-level
+ * slice of the sections' richer GraphqlOpDecl - this module must not import
+ * from sections/, so the declaration type extends this shape structurally.
+ */
+export interface GraphqlOp {
+  readonly name: string;
+  readonly kind: "read" | "write";
+  readonly query: string;
+}
+
+/**
  * The one capability everything downstream depends on: a verbatim request
  * that surfaces errors as values. The engine, the sections, discovery,
  * pagination, and the test mock all program against this interface, not
  * the concrete client.
+ *
+ * `tryGraphql` is the GraphQL sibling of tryRequest: one POST /graphql whose
+ * failures - including the errors[] GitHub delivers inside an HTTP 200 - come
+ * back as the same ApiError value the REST classifiers already read. `slug`
+ * names the owner/repo the operation addresses: GraphQL carries the target in
+ * the request BODY, invisible to the URL-based trace redaction, so the client
+ * needs it to keep a redacted repository's traces closed.
  */
 export interface GithubClient {
   tryRequest(
@@ -59,6 +90,11 @@ export interface GithubClient {
     payload?: unknown,
     options?: { accept?: string; raw?: boolean },
   ): Promise<{ data: unknown } | { error: ApiError }>;
+  tryGraphql(
+    op: GraphqlOp,
+    variables: Readonly<Record<string, unknown>>,
+    slug: string,
+  ): Promise<{ data: Record<string, unknown> } | { error: ApiError }>;
 }
 
 /**
@@ -180,6 +216,18 @@ export const SECRET_FIELD_PLACEHOLDER = "***";
  */
 export const SECRET_RESPONSE_WITHHELD =
   "response body withheld: the request carried a secret field and an error body may echo its value";
+
+/**
+ * The wholesale replacement for a GraphQL error response addressing a
+ * REDACTED repository. GraphQL error messages quote the slug and live state
+ * verbatim ("Could not resolve to a Repository with the name 'o/private'"),
+ * where a REST denial says only "Not Found" - and the output mask is
+ * exact-literal, so a re-cased or name-only mention would slip it. Only the
+ * status and the structural classification fields (rateLimited,
+ * graphqlTypes) survive.
+ */
+export const REDACTED_RESPONSE_WITHHELD =
+  "response body withheld: the repository is redacted and a GraphQL error message may carry its name or live state";
 
 /**
  * Octokit's own body rule: only plain objects and arrays are stringified.
@@ -469,6 +517,118 @@ function testRetryBaseMs(): number | undefined {
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/**
+ * Map a caught octokit HTTP error to the ApiError value contract. Shared by
+ * tryRequest and tryGraphql, whose HTTP-level failures (a 401, a 5xx that
+ * survived the retries) are identical - only the GraphQL-specific errors[]
+ * mapping lives elsewhere.
+ *
+ * When the failing request carried a secret field, the response is replaced
+ * wholesale - a 4xx body can ECHO the rejected value inside its free-text
+ * message/errors, where no field name finds it, and JSON escaping defeats
+ * exact-literal masking - so nothing of the body survives (not even
+ * documentation_url); only the HTTP status and the content-free rate-limit
+ * classification flag do. Rate limiting normally classifies by message
+ * content, which the replacement destroys - so the flag is computed FIRST,
+ * from the signals the throttling plugin itself recognizes: the primary-limit
+ * header (x-ratelimit-remaining 0), the plugin's secondary-limit message
+ * predicate (\bsecondary rate\b - GitHub documents secondary limits where no
+ * rate-limit header is present), the structured errors[].type ===
+ * "RATE_LIMITED", and the retry-after header. Accepting retry-after ALONE is
+ * deliberately broader than the plugin (which reads it only after the phrase
+ * matches): no documented 403 carries retry-after without being a rate limit,
+ * and a header cannot be spoofed by an echoed value. The residual spoof is an
+ * operator's own secret containing the exact phrase "secondary rate" echoed
+ * into a 403 - theoretical (permission 403s do not echo payloads) and
+ * strictly less harmful than telling a rate-limited user to fix their token.
+ */
+function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiError {
+  const body = error.response?.data;
+  if (carriesSecret) {
+    const headers = error.response?.headers ?? {};
+    const classificationText =
+      typeof body === "object" && body !== null && "message" in body
+        ? String((body as { message: unknown }).message)
+        : typeof body === "string" && body
+          ? body
+          : error.message;
+    const errorsRateLimited =
+      typeof body === "object" &&
+      body !== null &&
+      Array.isArray((body as { errors?: unknown }).errors) &&
+      ((body as { errors: unknown[] }).errors ?? []).some(
+        (entry) =>
+          typeof entry === "object" &&
+          entry !== null &&
+          (entry as { type?: unknown }).type === "RATE_LIMITED",
+      );
+    const rateLimited =
+      error.status === 429 ||
+      (error.status === 403 &&
+        (String(headers["x-ratelimit-remaining"]) === "0" ||
+          headers["retry-after"] !== undefined ||
+          errorsRateLimited ||
+          /\bsecondary rate\b/i.test(classificationText)));
+    return {
+      status: error.status,
+      message: SECRET_RESPONSE_WITHHELD,
+      body: SECRET_RESPONSE_WITHHELD,
+      ...(rateLimited ? { rateLimited: true } : {}),
+    };
+  }
+  let message: string;
+  let documentationUrl: string | undefined;
+  if (typeof body === "object" && body !== null && "message" in body) {
+    message = String((body as { message: unknown }).message);
+    const errors = (body as { errors?: unknown }).errors;
+    if (errors) {
+      message += ` (${JSON.stringify(errors)})`;
+    }
+    const docUrl = (body as { documentation_url?: unknown }).documentation_url;
+    if (typeof docUrl === "string" && docUrl) {
+      documentationUrl = docUrl;
+    }
+  } else if (typeof body === "string" && body) {
+    message = body;
+  } else {
+    message = error.message;
+  }
+  return {
+    status: error.status,
+    message,
+    body: typeof body === "string" ? body : JSON.stringify(body ?? ""),
+    ...(documentationUrl === undefined ? {} : { documentationUrl }),
+  };
+}
+
+/**
+ * The hard error for a request that got no HTTP response at all: a
+ * network-level failure after the plugins exhausted their retries. `label`
+ * names the failing call ("PUT /repos/o/r/topics", "GRAPHQL RepoToggles").
+ * `withholdReason`, when given, REPLACES the transport error's own message -
+ * some transport failures quote request details in free text, where neither
+ * a field name nor the output mask finds a secret or a redacted slug.
+ */
+function transportFailure(
+  label: string,
+  error: unknown,
+  withholdReason: string | undefined,
+  baseUrl: string,
+): Error {
+  const reason = withholdReason ?? (error instanceof Error ? error.message : String(error));
+  return new Error(
+    `${label} failed: ${reason}. Check network connectivity from the runner to ${baseUrl}, then re-run the workflow`,
+  );
+}
+
+/** The withheld transport-failure reason for a secret-carrying request. */
+const SECRET_TRANSPORT_WITHHELD =
+  "the transport failed before an HTTP response arrived (details withheld: the request carried a secret field)";
+
+/** The withheld transport-failure reason for a redacted repository's request. */
+const REDACTED_TRANSPORT_WITHHELD =
+  "the transport failed before an HTTP response arrived (details withheld: the repository is redacted)";
+
 export class GithubApi implements GithubClient {
   private readonly octokit: InstanceType<typeof ActionOctokit>;
   constructor(
@@ -601,106 +761,240 @@ export class GithubApi implements GithubClient {
       return { data: data === undefined || data === "" ? null : data };
     } catch (error) {
       if (isHttpError(error)) {
-        if (secretScan.carriesSecret) {
-          // Fail closed: the request carried a secret field, and the error
-          // body may echo the rejected value inside free text. The response is
-          // replaced wholesale - before the trace line is written and before
-          // the ApiError exists. Nothing from the response BODY survives
-          // (not even documentation_url); only the status and the
-          // classification flag below remain.
-          // Rate limiting normally classifies by message content, which the
-          // replacement destroys - so the flag is computed FIRST, from the
-          // signals the throttling plugin itself recognizes: the
-          // primary-limit header (x-ratelimit-remaining 0), the plugin's
-          // secondary-limit message predicate (\bsecondary rate\b - GitHub
-          // documents secondary limits where no rate-limit header is
-          // present), the structured errors[].type === "RATE_LIMITED", and
-          // the retry-after header. Accepting retry-after ALONE is
-          // deliberately broader than the plugin (which reads it only after
-          // the phrase matches): no documented 403 carries retry-after
-          // without being a rate limit, and a header cannot be spoofed by
-          // an echoed value. The residual spoof is an operator's own
-          // secret containing the exact phrase "secondary rate" echoed into
-          // a 403 - theoretical (permission 403s do not echo payloads) and
-          // strictly less harmful than telling a rate-limited user to fix
-          // their token.
-          const headers = error.response?.headers ?? {};
-          const body = error.response?.data;
-          const classificationText =
-            typeof body === "object" && body !== null && "message" in body
-              ? String((body as { message: unknown }).message)
-              : typeof body === "string" && body
-                ? body
-                : error.message;
-          const errorsRateLimited =
-            typeof body === "object" &&
-            body !== null &&
-            Array.isArray((body as { errors?: unknown }).errors) &&
-            ((body as { errors: unknown[] }).errors ?? []).some(
-              (entry) =>
-                typeof entry === "object" &&
-                entry !== null &&
-                (entry as { type?: unknown }).type === "RATE_LIMITED",
-            );
-          const rateLimited =
-            error.status === 429 ||
-            (error.status === 403 &&
-              (String(headers["x-ratelimit-remaining"]) === "0" ||
-                headers["retry-after"] !== undefined ||
-                errorsRateLimited ||
-                /\bsecondary rate\b/i.test(classificationText)));
-          trace(error.status);
-          return {
-            error: {
-              status: error.status,
-              message: SECRET_RESPONSE_WITHHELD,
-              body: SECRET_RESPONSE_WITHHELD,
-              ...(rateLimited ? { rateLimited: true } : {}),
-            },
-          };
-        }
         trace(error.status);
-        const body = error.response?.data;
-        let message: string;
-        let documentationUrl: string | undefined;
-        if (typeof body === "object" && body !== null && "message" in body) {
-          message = String((body as { message: unknown }).message);
-          const errors = (body as { errors?: unknown }).errors;
-          if (errors) {
-            message += ` (${JSON.stringify(errors)})`;
-          }
-          const docUrl = (body as { documentation_url?: unknown }).documentation_url;
-          if (typeof docUrl === "string" && docUrl) {
-            documentationUrl = docUrl;
-          }
-        } else if (typeof body === "string" && body) {
-          message = body;
-        } else {
-          message = error.message;
-        }
-        return {
-          error: {
-            status: error.status,
-            message,
-            body: typeof body === "string" ? body : JSON.stringify(body ?? ""),
-            ...(documentationUrl === undefined ? {} : { documentationUrl }),
-          },
-        };
+        // Fail closed for a secret-carrying request: apiErrorFromHttp replaces
+        // the response wholesale (an error body may echo the rejected value),
+        // keeping only the status and the content-free rate-limit flag.
+        return { error: apiErrorFromHttp(error, secretScan.carriesSecret) };
       }
-      // No HTTP response at all: network-level failure after the plugins
-      // exhausted their retries. A secret-carrying request withholds even
-      // the transport error's message - some transport failures quote
-      // request details in free text, where no field name finds a secret.
-      const reason = secretScan.carriesSecret
-        ? "the transport failed before an HTTP response arrived (details withheld: the request carried a secret field)"
-        : error instanceof Error
-          ? error.message
-          : String(error);
-      throw new Error(
-        `${method} ${path} failed: ${reason}. Check network connectivity from the runner to ${this.baseUrl}, then re-run the workflow`,
+      throw transportFailure(
+        `${method} ${path}`,
+        error,
+        secretScan.carriesSecret ? SECRET_TRANSPORT_WITHHELD : undefined,
+        this.baseUrl,
       );
     }
   }
+
+  /**
+   * One GraphQL operation over POST /graphql, through the same octokit
+   * instance as tryRequest - so retry, throttling, auth, and the pinned API
+   * version all apply, with zero extra runtime dependencies.
+   *
+   * The load-bearing difference from REST: GraphQL failures arrive as an HTTP
+   * 200 whose body carries a non-empty errors[]. ANY such response maps to
+   * { error } - even beside partial data - so a section can never act on a
+   * half-answered query (fail closed). HTTP-level failures ride the shared
+   * catch unchanged. Non-error `extensions.warnings` (e.g. the legacy
+   * node-ID deprecation notices) surface through the debug trace, never as
+   * errors.
+   *
+   * Tracing: the operation addresses its repository in the BODY, which the
+   * URL-based redactTracePath can never see - that is what the `slug`
+   * parameter is for. When the slug is registered redacted the ENTIRE line
+   * collapses to `<redacted>` (the variables carry the private repository's
+   * live state); otherwise the rendered line still passes through
+   * redactMessage, so a registered slug appearing anywhere in it fails
+   * closed like every octokit log line.
+   */
+  async tryGraphql(
+    op: GraphqlOp,
+    variables: Readonly<Record<string, unknown>>,
+    slug: string,
+  ): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
+    const started = Date.now();
+    // The same one-serialization contract as tryRequest: the secret scan
+    // normalizes the variables and the request sends that SAME tree, so a
+    // future secret-bearing variable is masked in the trace and withheld
+    // from error bodies exactly like a REST payload field.
+    const scan = redactSecretPayloadSafe(variables);
+    if (!scan.ok) {
+      throw new Error(
+        `GRAPHQL ${op.name} was not sent: its variables could not be safely inspected for secret fields - they are not plain JSON data (a cyclic value, or a YAML explicit tag such as !!timestamp or !!binary, which parse to Date and binary objects). Use a plain string in the settings file instead`,
+      );
+    }
+    const redacted = redactedSlugs.has(slug.toLowerCase());
+    const trace = (status: number, suffix = ""): void => {
+      debugLog(
+        redacted
+          ? "<redacted>"
+          : redactMessage(
+              `GRAPHQL ${op.name} -> ${status} (${Date.now() - started}ms) variables: ${JSON.stringify(scan.traced)}${suffix}`,
+            ),
+      );
+    };
+    // A redacted repository's GraphQL error content is withheld wholesale at
+    // this transport, like a secret-carrying request's: GraphQL error
+    // messages quote the slug and live state verbatim where REST denials say
+    // "Not Found", and the exact-literal output mask cannot catch a re-cased
+    // or name-only mention. The mappers below already classify with
+    // withholding on (so the content-free rateLimited flag is computed from
+    // structural signals, never the destroyed message); this wrapper then
+    // REBUILDS the error from a whitelist - status plus the structural
+    // classification fields - swapping in the redaction prose, so no field a
+    // mapper may add later can leak by default.
+    const withholdContent = scan.carriesSecret || redacted;
+    const withheld = (error: ApiError): ApiError =>
+      redacted
+        ? {
+            status: error.status,
+            message: REDACTED_RESPONSE_WITHHELD,
+            body: REDACTED_RESPONSE_WITHHELD,
+            ...(error.rateLimited ? { rateLimited: true as const } : {}),
+            ...(error.graphqlTypes ? { graphqlTypes: error.graphqlTypes } : {}),
+          }
+        : error;
+    let response: { status: number; data: unknown };
+    try {
+      response = (await this.octokit.request({
+        method: "POST",
+        url: "/graphql",
+        headers: {
+          accept: "application/vnd.github+json",
+          "x-github-api-version": this.apiVersion,
+        },
+        // operationName makes the request self-describing on the wire (the
+        // mock dispatches on it), and the scanned tree is what is sent.
+        data: { query: op.query, operationName: op.name, variables: scan.payload },
+      } as unknown as Parameters<InstanceType<typeof ActionOctokit>["request"]>[0])) as {
+        status: number;
+        data: unknown;
+      };
+    } catch (error) {
+      if (isHttpError(error)) {
+        trace(error.status);
+        return { error: withheld(apiErrorFromHttp(error, withholdContent)) };
+      }
+      // The throttling plugin inspects GraphQL bodies itself: it retries a
+      // RATE_LIMITED errors[] response like any rate limit and, once the
+      // retries are spent, rethrows a plain Error carrying the response (no
+      // HTTP status on the error - the wire status was 200). Classify that
+      // delivered body through the same errors[] mapper as an unretried one.
+      const rethrownErrors = (error as { response?: { data?: { errors?: unknown } } } | null)
+        ?.response?.data?.errors;
+      if (Array.isArray(rethrownErrors) && rethrownErrors.length > 0) {
+        trace(200);
+        return { error: withheld(apiErrorFromGraphqlErrors(rethrownErrors, withholdContent)) };
+      }
+      throw transportFailure(
+        `GRAPHQL ${op.name}`,
+        error,
+        scan.carriesSecret
+          ? SECRET_TRANSPORT_WITHHELD
+          : redacted
+            ? REDACTED_TRANSPORT_WITHHELD
+            : undefined,
+        this.baseUrl,
+      );
+    }
+    const body = (response.data ?? {}) as {
+      data?: unknown;
+      errors?: unknown;
+      extensions?: { warnings?: unknown };
+    };
+    const warnings = body.extensions?.warnings;
+    trace(
+      response.status,
+      Array.isArray(warnings) && warnings.length > 0
+        ? // Warning entries are free text that can echo input values exactly
+          // like error messages, so a secret-carrying request keeps only the
+          // count.
+          scan.carriesSecret
+          ? ` warnings: ${warnings.length} (details withheld: the request carried a secret field)`
+          : ` warnings: ${JSON.stringify(warnings)}`
+        : "",
+    );
+    if (body.errors !== undefined && (!Array.isArray(body.errors) || body.errors.length === 0)) {
+      // The GraphQL contract makes errors, when present, a NON-EMPTY list. A
+      // malformed errors value must not read as "no errors" - that would turn
+      // a partial response into a success (fail closed, body never quoted).
+      throw new Error(
+        `GRAPHQL ${op.name} returned a malformed errors value (not a non-empty list); the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run the workflow, and retry later if it persists`,
+      );
+    }
+    const errors = Array.isArray(body.errors) ? body.errors : [];
+    if (errors.length > 0) {
+      return { error: withheld(apiErrorFromGraphqlErrors(errors, withholdContent)) };
+    }
+    const data = body.data;
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+      // A 200 with neither errors nor a data map is outside the GraphQL
+      // response contract; nothing downstream can classify it, so fail hard
+      // (the body is not quoted - it could carry private live state).
+      throw new Error(
+        `GRAPHQL ${op.name} returned a response carrying neither errors nor a data object; the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run the workflow, and retry later if it persists`,
+      );
+    }
+    return { data: data as Record<string, unknown> };
+  }
+}
+
+/**
+ * Map a GraphQL errors[] array (delivered inside an HTTP 200) to the ApiError
+ * value the REST classifiers already understand, keyed on GitHub's structured
+ * error `type`:
+ *   - RATE_LIMITED           -> 403 with the content-free rateLimited flag,
+ *     so isRateLimitError classifies it even when the message is withheld;
+ *   - FORBIDDEN / INSUFFICIENT_SCOPES -> 403 (isPermissionError);
+ *   - NOT_FOUND              -> 404 (fine-grained tokens conceal denied
+ *     resources this way, exactly like their REST 404s);
+ *   - anything else          -> 422, a payload GitHub rejected.
+ * With mixed types the classification-critical ones win in that order: a rate
+ * limit must never read as a permission failure, and a permission failure
+ * must never read as a bad payload. The message joins every error's message
+ * and the body serializes the whole array - unless the request carried a
+ * secret field, in which case both are withheld (an error message can echo
+ * the rejected value; the `type` fields read here are structural enums, not
+ * echoes).
+ */
+function apiErrorFromGraphqlErrors(errors: unknown[], carriesSecret: boolean): ApiError {
+  const types = new Set<string>();
+  const messages: string[] = [];
+  let everyEntryTyped = true;
+  for (const entry of errors) {
+    if (typeof entry !== "object" || entry === null) {
+      everyEntryTyped = false;
+      continue;
+    }
+    const type = (entry as { type?: unknown }).type;
+    if (typeof type === "string") {
+      types.add(type);
+    } else {
+      everyEntryTyped = false;
+    }
+    const message = (entry as { message?: unknown }).message;
+    if (typeof message === "string" && message) {
+      messages.push(message);
+    }
+  }
+  const rateLimited = types.has("RATE_LIMITED");
+  const status =
+    rateLimited || types.has("FORBIDDEN") || types.has("INSUFFICIENT_SCOPES")
+      ? 403
+      : types.has("NOT_FOUND")
+        ? 404
+        : 422;
+  // graphqlTypes only when EVERY entry carried a string type: the field is
+  // what tolerance decisions read, and an untyped entry must make the whole
+  // response untolerable rather than hide behind its typed siblings.
+  const graphqlTypes =
+    everyEntryTyped && types.size > 0 ? { graphqlTypes: Object.freeze([...types].sort()) } : {};
+  if (carriesSecret) {
+    return {
+      status,
+      message: SECRET_RESPONSE_WITHHELD,
+      body: SECRET_RESPONSE_WITHHELD,
+      ...(rateLimited ? { rateLimited: true } : {}),
+      ...graphqlTypes,
+    };
+  }
+  return {
+    status,
+    message: messages.join("; ") || "GraphQL request failed",
+    body: JSON.stringify(errors),
+    ...(rateLimited ? { rateLimited: true } : {}),
+    ...graphqlTypes,
+  };
 }
 
 /**
@@ -708,7 +1002,8 @@ export class GithubApi implements GithubClient {
  * rate-limit exhaustion and secondary (abuse) limits arrive as 403, not
  * 429, once the throttling plugin gives up retrying. A withheld response
  * (secret-carrying request) has no message to read, so its content-free
- * `rateLimited` flag stands in.
+ * `rateLimited` flag stands in - as does a GraphQL RATE_LIMITED error,
+ * whose HTTP status is a 200 the mapper rewrites to 403.
  */
 export function isRateLimitError(error: ApiError): boolean {
   return (

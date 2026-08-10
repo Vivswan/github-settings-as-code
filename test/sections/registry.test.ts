@@ -10,6 +10,7 @@ import {
   endpointPath,
   endpointPermission,
   expand,
+  type GraphqlOpDecl,
   grantFor,
   matchesTemplate,
   probeAbsent,
@@ -19,7 +20,12 @@ import {
   sectionGrant,
   toleratedStatuses,
 } from "../../src/sections/contract.js";
-import { allEndpoints, SECTIONS, sectionModule } from "../../src/sections/registry.js";
+import {
+  allEndpoints,
+  allGraphqlOps,
+  SECTIONS,
+  sectionModule,
+} from "../../src/sections/registry.js";
 
 describe("registry <-> README", () => {
   const readme = readFileSync("README.md", "utf8");
@@ -447,23 +453,31 @@ describe("section endpoints", () => {
   test("only the known endpoints carry an accessGrade override, never mixed within a section", () => {
     // The override models GitHub gating a READ at write (Codespaces secrets
     // is the only known case). The fuzz oracle collapses grade "read" to
-    // "none" at SECTION level for sections whose every GET is write-gated,
-    // so a section mixing overridden and plain GETs would make that collapse
-    // wrong - forbid the shape here until the oracle models per-endpoint
-    // grades.
+    // "none" at SECTION level for sections whose every read is write-gated,
+    // so a section mixing write-gated and plain reads would make that
+    // collapse wrong - forbid the shape here until the oracle models
+    // per-endpoint grades. The read universe spans BOTH dictionaries: REST
+    // GETs (gated by accessGrade) and GraphQL reads (always read-gated -
+    // their kind IS the gate), so an all-write-gated REST section gaining a
+    // GraphQL read fails here instead of silently desyncing the oracle.
     const overridden = Object.entries(allEndpoints())
       .filter(([, endpoint]) => endpoint.accessGrade !== undefined)
       .map(([key]) => key)
       .sort();
     expect(overridden).toEqual(["codespaces_secrets.list", "codespaces_secrets.publicKey"]);
     for (const section of SECTIONS) {
-      const gets = Object.values(section.endpoints).filter(
-        (endpoint) => endpointMethod(endpoint.route) === "GET",
-      );
-      const gated = gets.filter((endpoint) => endpoint.accessGrade !== undefined);
+      const readGates = [
+        ...Object.values(section.endpoints)
+          .filter((endpoint) => endpointMethod(endpoint.route) === "GET")
+          .map((endpoint) => endpointKind(endpoint)),
+        ...Object.values(section.graphql ?? {})
+          .filter((op) => op.kind === "read")
+          .map(() => "read" as const),
+      ];
+      const gated = readGates.filter((gate) => gate === "write");
       expect(
-        gated.length === 0 || gated.length === gets.length,
-        `${section.key} mixes write-gated and plain GETs`,
+        gated.length === 0 || gated.length === readGates.length,
+        `${section.key} mixes write-gated and plain reads`,
       ).toBe(true);
     }
   });
@@ -542,26 +556,25 @@ describe("section endpoints", () => {
       endpoints: {},
       undeclaredDefault: "untouched",
     };
-    // No override -> the section's permission.
-    expect(
-      endpointPermission(section, { route: "GET /repos/{owner}/{repo}", statuses: { 200: "x" } }),
-    ).toEqual({ repo: ["administration"] });
+    // No override -> the section's permission. The declarations are typed
+    // consts because endpointPermission now takes the FailingOp facet, and a
+    // fresh literal's route/statuses would trip the excess-property check.
+    const plain: EndpointDecl = { route: "GET /repos/{owner}/{repo}", statuses: { 200: "x" } };
+    expect(endpointPermission(section, plain)).toEqual({ repo: ["administration"] });
     // A repo override wins.
-    expect(
-      endpointPermission(section, {
-        route: "GET /repos/{owner}/{repo}/branches/{branch}",
-        statuses: { 200: "x" },
-        permission: { repo: ["contents"] },
-      }),
-    ).toEqual({ repo: ["contents"] });
+    const overridden: EndpointDecl = {
+      route: "GET /repos/{owner}/{repo}/branches/{branch}",
+      statuses: { 200: "x" },
+      permission: { repo: ["contents"] },
+    };
+    expect(endpointPermission(section, overridden)).toEqual({ repo: ["contents"] });
     // "none" (public) wins.
-    expect(
-      endpointPermission(section, {
-        route: "GET /orgs/{org}",
-        statuses: { 200: "x" },
-        permission: "none",
-      }),
-    ).toBe("none");
+    const publicEndpoint: EndpointDecl = {
+      route: "GET /orgs/{org}",
+      statuses: { 200: "x" },
+      permission: "none",
+    };
+    expect(endpointPermission(section, publicEndpoint)).toBe("none");
   });
 });
 
@@ -604,6 +617,83 @@ describe("allEndpoints", () => {
     // The section's own declaration is unchanged.
     const labels = SECTIONS.find((s) => s.key === "labels");
     expect(labels?.endpoints.update?.route).toBe("PATCH /repos/{owner}/{repo}/labels/{name}");
+  });
+});
+
+describe("allGraphqlOps", () => {
+  /** The injectable section slice allGraphqlOps takes. */
+  type SectionSlice = NonNullable<Parameters<typeof allGraphqlOps>[0]>[number];
+
+  /** A minimal section slice carrying just what the flattener reads. */
+  function graphqlSection(
+    key: string,
+    graphql: SectionSlice["graphql"],
+    endpoints: SectionSlice["endpoints"] = {},
+  ): SectionSlice {
+    return { key: key as (typeof SECTION_KEYS)[number], endpoints, graphql };
+  }
+
+  const op = (name: string): GraphqlOpDecl & { kind: "read" } => ({
+    name,
+    kind: "read",
+    query: `query ${name} { viewer { login } }`,
+    outcomes: { ok: "x" },
+  });
+
+  test("flattens, tags, and freezes like allEndpoints", () => {
+    const ops = allGraphqlOps([graphqlSection("repository", { toggles: op("RepoToggles") })]);
+    const tagged = ops["repository.toggles"];
+    expect(tagged).toBeDefined();
+    expect(tagged?.section).toBe("repository");
+    expect(tagged?.role).toBe("toggles");
+    expect(Object.isFrozen(ops)).toBe(true);
+    expect(Object.isFrozen(tagged)).toBe(true);
+    expect(Object.isFrozen(tagged?.outcomes)).toBe(true);
+  });
+
+  test("a duplicate operation name across sections fails at construction", () => {
+    expect(() =>
+      allGraphqlOps([
+        graphqlSection("repository", { toggles: op("RepoToggles") }),
+        graphqlSection("branches", { rules: op("RepoToggles") }),
+      ]),
+    ).toThrow(
+      /operation name "RepoToggles" is declared by both repository\.toggles and branches\.rules/,
+    );
+  });
+
+  test("a role colliding with a REST endpoint role in the same section fails", () => {
+    expect(() =>
+      allGraphqlOps([
+        graphqlSection(
+          "repository",
+          { get: op("RepoToggles") },
+          { get: { route: "GET /repos/{owner}/{repo}", statuses: { 200: "x" } } },
+        ),
+      ]),
+    ).toThrow(/declares both a REST endpoint and a GraphQL operation under the role "get"/);
+  });
+
+  test("a declared connection whose query takes no $cursor fails at construction", () => {
+    const paginated: GraphqlOpDecl & { kind: "read" } = {
+      ...op("RepoRules"),
+      connection: { path: ["repository", "rules"] },
+    };
+    expect(() => allGraphqlOps([graphqlSection("repository", { rules: paginated })])).toThrow(
+      /declares a connection but its query takes no \$cursor/,
+    );
+    const cursored: GraphqlOpDecl & { kind: "read" } = {
+      ...paginated,
+      query: "query RepoRules($cursor: String) { viewer { login } }",
+    };
+    expect(() => allGraphqlOps([graphqlSection("repository", { rules: cursored })])).not.toThrow();
+  });
+
+  test("the registry's own declarations pass both asserts", () => {
+    // No section declares GraphQL operations yet; the call itself proves the
+    // asserts hold over the live registry, and the first consuming section
+    // inherits the check.
+    expect(() => allGraphqlOps()).not.toThrow();
   });
 });
 
@@ -686,7 +776,7 @@ describe("matchesTemplate", () => {
   test("every declared route path matches its own expanded concrete path", () => {
     // Construction parity: each route template matches the path it expands to.
     const ctx: SectionContext = {
-      api: { tryRequest: async () => ({ data: null }) },
+      api: { tryRequest: async () => ({ data: null }), tryGraphql: async () => ({ data: {} }) },
       repo: "octo/repo",
       owner: "octo",
       check: false,
@@ -704,7 +794,7 @@ describe("matchesTemplate", () => {
 
 describe("expand", () => {
   const ctx = (): SectionContext => ({
-    api: { tryRequest: async () => ({ data: null }) },
+    api: { tryRequest: async () => ({ data: null }), tryGraphql: async () => ({ data: {} }) },
     repo: "octo/repo",
     owner: "octo",
     check: false,
@@ -765,6 +855,7 @@ describe("probeAbsent tolerance derivation", () => {
   const ctxWith = (status: number): SectionContext => ({
     api: {
       tryRequest: async () => ({ error: { status, message: "nope", body: "" } }),
+      tryGraphql: async () => ({ error: { status, message: "nope", body: "" } }),
     },
     repo: "octo/repo",
     owner: "octo",

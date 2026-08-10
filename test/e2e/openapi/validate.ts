@@ -19,7 +19,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
-import { endpointMethod, endpointPath, matchesTemplate } from "../../../src/sections/contract.js";
+import {
+  endpointMethod,
+  endpointPath,
+  GRAPHQL_ERROR_TYPES,
+  matchesTemplate,
+} from "../../../src/sections/contract.js";
+import { allGraphqlOps } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/routes.js";
 import { UNDOCUMENTED_ROUTES } from "./paths.js";
 
@@ -178,12 +184,19 @@ interface OpenApiSpec {
 export class OpenApiValidator {
   private readonly ajv: Ajv;
   private readonly templates: string[];
+  /** The declared GraphQL operation names the /graphql branch accepts. */
+  private readonly graphqlOpNames: ReadonlySet<string>;
   /** Compiled response-body validators (required relaxed), keyed by schema. */
   private readonly cache = new Map<unknown, ValidateFunction>();
   /** Compiled request-body validators (required kept), keyed by schema. */
   private readonly requiredCache = new Map<unknown, ValidateFunction>();
 
-  constructor(private readonly spec: OpenApiSpec) {
+  constructor(
+    private readonly spec: OpenApiSpec,
+    // Injectable so the /graphql branch's known-name check is testable while
+    // no section declares operations yet; production takes the registry.
+    graphqlOpNames?: ReadonlySet<string>,
+  ) {
     // strict:false because a trimmed OpenAPI doc still carries vocabulary ajv
     // treats as unknown; validateFormats:false because GitHub's `format`
     // values (e.g. "uri", "date-time") are advisory here and we validate
@@ -192,6 +205,8 @@ export class OpenApiValidator {
     this.ajv = new Ajv({ strict: false, validateFormats: false, allErrors: true });
     addFormats(this.ajv);
     this.templates = Object.keys(spec.paths);
+    this.graphqlOpNames =
+      graphqlOpNames ?? new Set(Object.values(allGraphqlOps()).map((op) => op.name));
   }
 
   /**
@@ -290,6 +305,11 @@ export class OpenApiValidator {
     }
     if (request.status === 400 && isMockViolationBody(request.responseBody)) {
       return []; // the mock's own contract-violation reply
+    }
+    if (request.pathname === "/graphql") {
+      // GraphQL is outside the OpenAPI descriptor entirely, so this branch is
+      // hand-written against the GraphQL wire contract - never a silent skip.
+      return this.validateGraphql(request);
     }
     const label = `${request.method} ${request.pathname}`;
     const template = this.matchTemplate(request.pathname);
@@ -420,6 +440,123 @@ export class OpenApiValidator {
   /** Validate an entire request log, flattening every request's violations. */
   validateLog(requests: readonly LoggedRequest[]): OpenApiViolation[] {
     return requests.flatMap((request) => this.validateRequest(request));
+  }
+
+  /**
+   * The /graphql exchange contract: the request must be a POST whose body
+   * carries {query: string, operationName: <a declared operation's name>,
+   * variables: object}, and the response must be an HTTP 200 whose body
+   * carries {data: object|null} plus an optional errors[] of
+   * {type: <a known GraphqlErrorType>, message: string} entries. Anything
+   * else is a finding, attributed like the OpenAPI checks: the request side
+   * as "request-body", the response side as "response-body", and a wrong
+   * method as "unknown-route".
+   */
+  private validateGraphql(request: LoggedRequest): OpenApiViolation[] {
+    const label = `${request.method} /graphql`;
+    if (request.method !== "POST") {
+      return [
+        {
+          request: label,
+          kind: "unknown-route",
+          detail: "GraphQL requests must be POST",
+        },
+      ];
+    }
+    const violations: OpenApiViolation[] = [];
+    const body = request.body as
+      | { query?: unknown; operationName?: unknown; variables?: unknown }
+      | undefined;
+    if (typeof body?.query !== "string") {
+      violations.push({
+        request: label,
+        kind: "request-body",
+        detail: "the request body must carry a string `query`",
+      });
+    }
+    if (typeof body?.operationName !== "string") {
+      violations.push({
+        request: label,
+        kind: "request-body",
+        detail: "the request body must carry a string `operationName`",
+      });
+    } else if (!this.graphqlOpNames.has(body.operationName)) {
+      violations.push({
+        request: label,
+        kind: "request-body",
+        detail: `operationName "${body.operationName}" names no declared GraphQL operation`,
+      });
+    }
+    if (
+      typeof body?.variables !== "object" ||
+      body.variables === null ||
+      Array.isArray(body.variables)
+    ) {
+      violations.push({
+        request: label,
+        kind: "request-body",
+        detail: "the request body must carry a `variables` object",
+      });
+    }
+    if (request.status !== 200) {
+      violations.push({
+        request: label,
+        kind: "response-body",
+        detail: `GraphQL responses are HTTP 200 (errors ride the body), but the mock answered ${request.status}`,
+      });
+    }
+    const response = request.responseBody as
+      | { data?: unknown; errors?: unknown }
+      | null
+      | undefined;
+    if (typeof response !== "object" || response === null) {
+      violations.push({
+        request: label,
+        kind: "response-body",
+        detail: "the response body must be an object",
+      });
+      return violations;
+    }
+    const data = response.data;
+    if (data !== null && (typeof data !== "object" || Array.isArray(data))) {
+      violations.push({
+        request: label,
+        kind: "response-body",
+        detail: "the response `data` must be an object or null",
+      });
+    }
+    if (response.errors !== undefined) {
+      if (!Array.isArray(response.errors) || response.errors.length === 0) {
+        violations.push({
+          request: label,
+          kind: "response-body",
+          detail: "the response `errors`, when present, must be a non-empty array",
+        });
+        return violations;
+      }
+      for (const entry of response.errors) {
+        const type = (entry as { type?: unknown } | null)?.type;
+        const message = (entry as { message?: unknown } | null)?.message;
+        if (
+          typeof type !== "string" ||
+          !(GRAPHQL_ERROR_TYPES as readonly string[]).includes(type)
+        ) {
+          violations.push({
+            request: label,
+            kind: "response-body",
+            detail: `errors[].type "${String(type)}" is not a known GraphqlErrorType [${GRAPHQL_ERROR_TYPES.join(", ")}]`,
+          });
+        }
+        if (typeof message !== "string") {
+          violations.push({
+            request: label,
+            kind: "response-body",
+            detail: "every errors[] entry must carry a string message",
+          });
+        }
+      }
+    }
+    return violations;
   }
 }
 

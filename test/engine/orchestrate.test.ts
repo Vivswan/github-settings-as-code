@@ -1,14 +1,18 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  preflightProbe,
+  readOnlyClient,
   runForRepo,
   skippedSectionKeys,
   validateSettingsDoc,
   worstOf,
 } from "../../src/engine/orchestrate.js";
+import type { GithubClient } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
 import { prefixedIo } from "../../src/io.js";
 import type { SettingsFile } from "../../src/schema.js";
+import type { SECTIONS } from "../../src/sections/registry.js";
 import { MockApi } from "../mock-api.js";
 
 function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: string[] } {
@@ -223,5 +227,98 @@ describe("worstOf", () => {
     expect(worstOf([{ result: "clean" }, { result: "drift" }], true)).toBe("drift");
     expect(worstOf([], true)).toBe("clean");
     expect(worstOf([], false)).toBe("applied");
+  });
+});
+
+describe("readOnlyClient", () => {
+  const READ_OP = {
+    name: "RepoToggles",
+    kind: "read",
+    query: "query RepoToggles { viewer { login } }",
+  } as const;
+  const WRITE_OP = {
+    name: "UpdateToggles",
+    kind: "write",
+    query: "mutation UpdateToggles { x }",
+  } as const;
+
+  test("GETs and GraphQL reads pass through to the wrapped client", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r": { data: { ok: true } },
+      "GRAPHQL RepoToggles": { data: { viewer: { login: "bot" } } },
+    });
+    const probe = readOnlyClient(api);
+    expect(await probe.tryRequest("GET", "/repos/o/r")).toEqual({ data: { ok: true } });
+    expect(await probe.tryGraphql(READ_OP, {}, "o/r")).toEqual({
+      data: { viewer: { login: "bot" } },
+    });
+    expect(api.calls).toHaveLength(2);
+  });
+
+  test("a non-GET REST request throws before reaching the wire", () => {
+    const api = new MockApi({}, { unroutedMutations: "succeed" });
+    const probe = readOnlyClient(api);
+    expect(() => probe.tryRequest("PATCH", "/repos/o/r", {})).toThrow(
+      /PATCH \/repos\/o\/r was attempted in check mode.*read-only in check mode/,
+    );
+    expect(api.calls).toHaveLength(0);
+  });
+
+  test("a GraphQL write throws before reaching the wire", () => {
+    const api = new MockApi({}, { unroutedMutations: "succeed" });
+    const probe = readOnlyClient(api);
+    expect(() => probe.tryGraphql(WRITE_OP, {}, "o/r")).toThrow(
+      /GRAPHQL UpdateToggles \(a write operation\) was attempted in check mode.*read-only/,
+    );
+    expect(api.calls).toHaveLength(0);
+  });
+
+  test("preflight rethrows a probe write attempt instead of swallowing it", async () => {
+    // A section handler that writes during the read-only probe is a bug the
+    // APPLY pass can never resurface (the same write is legitimate there),
+    // so preflightProbe must fail the run loudly - unlike ordinary probe
+    // errors, which it ignores. Driven through a synthetic section via the
+    // injectable `active` list.
+    const api = new MockApi({}, { unroutedMutations: "succeed" });
+    const buggySection = {
+      key: "repository",
+      permission: { repo: ["administration"] },
+      endpoints: {},
+      undeclaredDefault: "untouched",
+      shape: { safeParse: () => ({ success: true }) },
+      async run(ctx: { api: GithubClient }) {
+        await ctx.api.tryRequest("PATCH", "/repos/o/r", { has_wiki: false });
+        return { changes: [], drift: [], notes: [] };
+      },
+    } as unknown as (typeof SECTIONS)[number];
+    const ctx = { api, repo: "o/r", owner: "o", check: false };
+    await expect(
+      preflightProbe(api, ctx, [buggySection], { repository: {} } as SettingsFile),
+    ).rejects.toThrow(/preflight: repository: PATCH \/repos\/o\/r was attempted in check mode/);
+    // An ordinary probe error is still swallowed (the apply pass surfaces it).
+    const throwingSection = {
+      ...buggySection,
+      async run() {
+        throw new Error("some transient probe failure");
+      },
+    } as unknown as (typeof SECTIONS)[number];
+    await expect(
+      preflightProbe(api, ctx, [throwingSection], { repository: {} } as SettingsFile),
+    ).resolves.toEqual([]);
+  });
+
+  test("runForRepo's check-mode context refuses writes end to end", async () => {
+    // The real registry never writes in check mode (check-purity.test.ts),
+    // so the wrap is observable only through a read still passing: the run
+    // completes clean/drift with zero mutations on the wire.
+    const api = new MockApi({ "GET /repos/o/r": { data: { description: "live" } } });
+    const { io } = captureIo();
+    const result = await runForRepo(
+      api,
+      opts({ mode: "check", settings: { repository: { description: "live" } } as SettingsFile }),
+      io,
+    );
+    expect(result.result).toBe("clean");
+    expect(api.mutations()).toEqual([]);
   });
 });

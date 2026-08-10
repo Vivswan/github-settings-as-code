@@ -289,6 +289,144 @@ export function endpointKind(endpoint: EndpointDecl): "read" | "write" {
 }
 
 /**
+ * The GraphQL error classes GitHub delivers in an errors[] entry's `type`
+ * field, as far as this system models them. The runtime array feeds the e2e
+ * validator's known-type check; the type derives from it.
+ */
+export const GRAPHQL_ERROR_TYPES = [
+  "FORBIDDEN",
+  "INSUFFICIENT_SCOPES",
+  "NOT_FOUND",
+  "RATE_LIMITED",
+  "UNPROCESSABLE",
+] as const;
+
+export type GraphqlErrorType = (typeof GRAPHQL_ERROR_TYPES)[number];
+
+/**
+ * The subset of GraphQL error types a section may DECLARE as tolerated
+ * outcomes. RATE_LIMITED is deliberately absent (throttling is a transport
+ * concern every operation handles identically, never a per-operation
+ * outcome), as is INSUFFICIENT_SCOPES (a wrong token, which no section
+ * outcome can tolerate; the transport folds it into the 403 class).
+ */
+export const GRAPHQL_TOLERABLE_ERRORS = ["FORBIDDEN", "NOT_FOUND", "UNPROCESSABLE"] as const;
+
+export type GraphqlTolerableError = (typeof GRAPHQL_TOLERABLE_ERRORS)[number];
+
+/**
+ * The connection a paginated read walks: `path` leads from the data root to
+ * the connection field (e.g. ["repository", "branchProtectionRules"]), which
+ * must select `nodes { ... }` and `pageInfo { hasNextPage endCursor }`, and
+ * the query must declare a `$cursor` variable feeding the connection's
+ * `after` argument (allGraphqlOps asserts both at construction).
+ */
+export interface GraphqlConnectionDecl {
+  readonly path: readonly [string, ...string[]];
+}
+
+/**
+ * The facets shared by both kinds of GraphQL operation; see GraphqlOpDecl.
+ * `V` is the operation's variables shape, carried by the type-only
+ * `_variables` marker (never set at runtime; covariant, so a concretely
+ * typed declaration still erases to the metadata consumers' default) so the
+ * request helpers type-check call-site variables against the declaration.
+ */
+interface GraphqlOpCommon<V extends Record<string, unknown>> {
+  readonly name: string;
+  readonly outcomes: Readonly<{ ok: string } & Partial<Record<GraphqlTolerableError, string>>>;
+  /**
+   * Overrides the section's permission for this one operation, exactly like
+   * EndpointDecl.permission: "none" means public, omitted means the section's
+   * own permission applies.
+   */
+  readonly permission?: SectionPermission | "none";
+  /**
+   * True for an advisory READ whose non-404 failures are tolerated, mirroring
+   * EndpointDecl.advisory (the e2e mock derives its denial-barrier exemption
+   * from it).
+   */
+  readonly advisory?: boolean;
+  /**
+   * Appended to the PermissionDenied message for an operation whose
+   * FORBIDDEN/NOT_FOUND can mean something other than a missing token grant.
+   * One sentence, no trailing period.
+   */
+  readonly denialHint?: string;
+  /**
+   * Never present: GraphQL rejections carry no HTTP status for a hint to key
+   * on, and the `never` makes declaring one a compile error instead of a
+   * silently ignored field (see FailingOp).
+   */
+  readonly hints?: never;
+  /** Type-only marker for `V`; never set at runtime. */
+  readonly _variables?: V;
+}
+
+/**
+ * One GraphQL operation a section may issue, the sibling of EndpointDecl.
+ * Extends the transport-level GraphqlOp structurally, so a declaration passes
+ * straight to GithubClient.tryGraphql.
+ *
+ * `name` is the wire dispatch key - the operationName sent with every call,
+ * globally unique across sections (allGraphqlOps asserts it), which is what
+ * lets the mock, the coverage tripwire, and the scenario expectations address
+ * the operation without parsing the query. `kind` is declared explicitly and
+ * NEVER derived from the POST method every GraphQL call shares: it drives the
+ * preflight read-only guard, the mock's permission gate, and the fuzz oracle -
+ * and the union pins each kind to its operation type (`query ...` /
+ * `mutation ...`), so a mutation declared "read" does not compile. The query
+ * is a single named operation whose name equals `name`; a repo-addressed READ
+ * must take $owner/$repo variables (the mock routes multi-repo reads by
+ * them), and a mutation addresses its target through self-describing node
+ * ids. `outcomes` mirrors EndpointDecl.statuses: "ok" documents the success
+ * meaning, and each declared error type is a TOLERATED outcome
+ * (tryCallGraphql returns it as { error } instead of throwing). Only a read
+ * may declare a `connection` (pagination is a read concern).
+ *
+ * Declare each operation as an ANNOTATED const
+ * (`const OP: GraphqlOpDecl<{owner: string; repo: string}> = {...}`) and pass
+ * that const to the request helpers: the annotation is what carries `V` (via
+ * the type-only `_variables` marker), so a call site with missing or
+ * misnamed variables fails to compile. A declaration reached through a
+ * widened dictionary (`section.graphql.role`) erases `V` to the permissive
+ * default - the same erasure a widened EndpointDecl record applies to its
+ * statuses - so helpers must be fed the consts, not dictionary lookups.
+ */
+export type GraphqlOpDecl<V extends Record<string, unknown> = Record<string, unknown>> =
+  | (GraphqlOpCommon<V> & {
+      readonly kind: "read";
+      readonly query: `query ${string}`;
+      readonly connection?: GraphqlConnectionDecl;
+    })
+  | (GraphqlOpCommon<V> & {
+      readonly kind: "write";
+      readonly query: `mutation ${string}`;
+      readonly connection?: never;
+    });
+
+/**
+ * The variables shape a declaration carries (via the `_variables` marker),
+ * recovered from the concrete declaration type so the request helpers infer
+ * it from the `op` argument alone - inferring from the variables argument
+ * would let a typo'd call site WIDEN the shape instead of failing.
+ */
+export type GraphqlVariablesOf<O extends GraphqlOpDecl> = O extends {
+  readonly _variables?: infer V;
+}
+  ? Extract<V, Record<string, unknown>>
+  : Record<string, unknown>;
+
+/**
+ * The declared error types of a GraphQL operation - its tolerated outcomes,
+ * exactly as toleratedStatuses reads an EndpointDecl's >= 400 statuses. The
+ * declaration is the single source; tryCallGraphql defaults to this set.
+ */
+export function toleratedGraphqlErrors(op: GraphqlOpDecl): GraphqlTolerableError[] {
+  return GRAPHQL_TOLERABLE_ERRORS.filter((type) => op.outcomes[type] !== undefined);
+}
+
+/**
  * The path-parameter names a route declares, minus `owner` and `repo` (which
  * expand() fills from the SectionContext). A call site must supply exactly
  * these; the helpers use it to make `params` compiler-required and typo-proof.
@@ -298,17 +436,27 @@ export type PathParams<R extends string> = R extends `${string}{${infer T}}${inf
   : never;
 
 /**
- * The permission this endpoint actually requires: its own override when one
- * is declared, otherwise the section's permission. "none" means public. The
- * single place downstream consumers (e.g. the e2e mock's permission gate)
- * resolve the effective permission, so section vs per-endpoint precedence
- * lives in one spot.
+ * The declaration behind a failing request, as error classification reads
+ * it: a REST endpoint or a GraphQL operation. An honest union rather than a
+ * structural facet - `{}` must not satisfy it - and the GraphqlOpDecl arm's
+ * `hints?: never` makes a hint on a GraphQL operation (which has no HTTP
+ * status for it to key on) a compile error. throwFor and endpointPermission
+ * take this, so both kinds classify through one code path.
+ */
+export type FailingOp = EndpointDecl | GraphqlOpDecl;
+
+/**
+ * The permission this endpoint or GraphQL operation actually requires: its
+ * own override when one is declared, otherwise the section's permission.
+ * "none" means public. The single place downstream consumers (e.g. the e2e
+ * mock's permission gate) resolve the effective permission, so section vs
+ * per-operation precedence lives in one spot.
  */
 export function endpointPermission(
   section: SectionMeta,
-  endpoint: EndpointDecl,
+  op: FailingOp,
 ): SectionPermission | "none" {
-  return endpoint.permission ?? section.permission;
+  return op.permission ?? section.permission;
 }
 
 /**
@@ -429,6 +577,13 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
    * derivation iterate Object.values(...).
    */
   readonly endpoints: Readonly<Record<string, EndpointDecl>>;
+  /**
+   * Every GraphQL operation this section may issue, keyed by role exactly
+   * like `endpoints`. Handlers pass these declarations to the GraphQL
+   * request helpers; the mock's dispatch table, the coverage tripwire, and
+   * the fuzz oracle iterate allGraphqlOps(). Omitted by REST-only sections.
+   */
+  readonly graphql?: Readonly<Record<string, GraphqlOpDecl>>;
   /**
    * The DEFAULT policy for live resources this section does NOT declare, the
    * single source the README Sections table and COVERAGE derive their
@@ -652,7 +807,7 @@ export async function call<E extends EndpointDecl>(
   if ("error" in result) {
     throwFor(section, method, path, result.error, {
       operation: opts?.describe,
-      endpoint,
+      op: endpoint,
     });
   }
   return result.data;
@@ -687,7 +842,7 @@ export async function tryCall<E extends EndpointDecl>(
   if ("error" in result && !tolerate.includes(result.error.status)) {
     throwFor(section, method, path, result.error, {
       operation: opts?.describe,
-      endpoint,
+      op: endpoint,
     });
   }
   return result;
@@ -724,7 +879,7 @@ export async function probeAbsent<E extends EndpointDecl>(
     }
     throwFor(section, "GET", path, result.error, {
       operation: options?.describe,
-      endpoint,
+      op: endpoint,
     });
   }
   return { data: result.data };
@@ -745,7 +900,7 @@ async function listPages(
 ): Promise<unknown[]> {
   const result = await paginate(ctx.api, path, extract, undefined, endpoint.pageSize);
   if ("error" in result) {
-    throwFor(section, "GET", path, result.error, { endpoint });
+    throwFor(section, "GET", path, result.error, { op: endpoint });
   }
   if ("malformed" in result) {
     throw new Error(
@@ -801,6 +956,150 @@ export async function listAllEnveloped<E extends EndpointDecl>(
 }
 
 /**
+ * Issue a GraphQL operation; convert permission failures into
+ * PermissionDenied, everything else into a hard error carrying the API's
+ * message - the GraphQL sibling of call(). The failing request renders as
+ * `GRAPHQL <opName>` where a REST error shows its method and path. The
+ * variables are typed by the declaration's own `V`, so a call site cannot
+ * omit or misname what the query expects.
+ */
+export async function callGraphql<O extends GraphqlOpDecl>(
+  ctx: SectionContext,
+  section: SectionMeta,
+  op: O,
+  variables: Readonly<GraphqlVariablesOf<O>>,
+  opts?: { describe?: string },
+): Promise<Record<string, unknown>> {
+  const result = await ctx.api.tryGraphql(op, variables, ctx.repo);
+  if ("error" in result) {
+    throwFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op });
+  }
+  return result.data;
+}
+
+/**
+ * Whether an ApiError is tolerable under a set of declared error types: it
+ * must carry the transport's graphqlTypes (an untyped or HTTP-level failure
+ * is never tolerable) and EVERY observed type must be declared - the HTTP
+ * status is a lossy fold (a mixed [FORBIDDEN, UNPROCESSABLE] response and a
+ * pure FORBIDDEN both land on 403), so only the full type set can say what
+ * actually happened. RATE_LIMITED and INSUFFICIENT_SCOPES can never appear
+ * in `tolerate` (the type excludes them), so both always classify through
+ * throwFor.
+ */
+function graphqlErrorTolerated(
+  error: ApiError,
+  tolerate: readonly GraphqlTolerableError[],
+): boolean {
+  const observed = error.graphqlTypes;
+  return (
+    observed !== undefined &&
+    observed.length > 0 &&
+    observed.every((type) => (tolerate as readonly string[]).includes(type))
+  );
+}
+
+/**
+ * Like callGraphql, but tolerated error types come back as { error } for the
+ * caller to interpret; every other error classifies through throwFor. The
+ * tolerated set defaults to the operation's declared error outcomes; pass an
+ * explicit `tolerate` only to tolerate FEWER than declared. Tolerance reads
+ * the error's OBSERVED GraphQL types (see graphqlErrorTolerated), never the
+ * folded HTTP status.
+ */
+export async function tryCallGraphql<O extends GraphqlOpDecl>(
+  ctx: SectionContext,
+  section: SectionMeta,
+  op: O,
+  variables: Readonly<GraphqlVariablesOf<O>>,
+  opts?: {
+    tolerate?: readonly (keyof O["outcomes"] & GraphqlTolerableError)[];
+    describe?: string;
+  },
+): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
+  const declared = toleratedGraphqlErrors(op);
+  const tolerate: readonly GraphqlTolerableError[] = opts?.tolerate ?? declared;
+  // The keyof-outcomes typing cannot pin the DECLARED subset (keyof a Partial
+  // record names every possible key), so the subset rule is enforced here: an
+  // explicit tolerate may only narrow, never smuggle in an undeclared type.
+  const undeclared = tolerate.filter((type) => !declared.includes(type));
+  if (undeclared.length > 0) {
+    throw new Error(
+      `BUG: tryCallGraphql for ${op.name} was told to tolerate [${undeclared.join(", ")}], which the operation's outcomes do not declare; declare the outcome or drop it from tolerate`,
+    );
+  }
+  const result = await ctx.api.tryGraphql(op, variables, ctx.repo);
+  if ("error" in result) {
+    if (!graphqlErrorTolerated(result.error, tolerate)) {
+      throwFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op });
+    }
+  }
+  return result;
+}
+
+/**
+ * Collect every node of a GraphQL connection, the sibling of listAll: the
+ * cursor loop lives here so paging behavior cannot drift between sections.
+ * The operation must declare its `connection` (the type requires it), whose
+ * `path` walks from the data root to the connection field selecting
+ * `nodes { ... }` and `pageInfo { hasNextPage endCursor }`; the loop owns the
+ * `$cursor` variable, passing null first and the previous page's endCursor
+ * after, so the caller's variables must not carry one.
+ */
+export async function listGraphqlConnection<
+  O extends GraphqlOpDecl & { connection: GraphqlConnectionDecl },
+>(
+  ctx: SectionContext,
+  section: SectionMeta,
+  op: O,
+  variables: Readonly<GraphqlVariablesOf<O>>,
+): Promise<unknown[]> {
+  if (!op.query.includes("$cursor")) {
+    throw new Error(
+      `BUG: GRAPHQL ${op.name} is paginated through listGraphqlConnection but its query declares no $cursor variable`,
+    );
+  }
+  if ("cursor" in variables) {
+    throw new Error(
+      `BUG: GRAPHQL ${op.name} was given a "cursor" variable, but the connection loop owns the cursor; drop it from the call site`,
+    );
+  }
+  const path = op.connection.path;
+  const items: unknown[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const result = await ctx.api.tryGraphql(op, { ...variables, cursor }, ctx.repo);
+    if ("error" in result) {
+      throwFor(section, "GRAPHQL", op.name, result.error, { op });
+    }
+    const connection = path.reduce<unknown>(
+      (node, key) => (node as Record<string, unknown> | null)?.[key],
+      result.data,
+    ) as { nodes?: unknown; pageInfo?: { hasNextPage?: unknown; endCursor?: unknown } } | null;
+    const nodes = connection?.nodes;
+    const pageInfo = connection?.pageInfo;
+    if (!Array.isArray(nodes) || typeof pageInfo?.hasNextPage !== "boolean") {
+      throw new Error(
+        `${section.key}: GRAPHQL ${op.name} returned a response without a "${path.join(".")}" connection carrying nodes and pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation's query must select both under that path`,
+      );
+    }
+    items.push(...nodes);
+    if (!pageInfo.hasNextPage) {
+      return items;
+    }
+    const endCursor = pageInfo.endCursor;
+    if (typeof endCursor !== "string" || endCursor === cursor) {
+      // hasNextPage without a fresh endCursor can only loop forever; treat it
+      // as the same broken-connection shape as a missing pageInfo.
+      throw new Error(
+        `${section.key}: GRAPHQL ${op.name} reported hasNextPage without a new endCursor at "${path.join(".")}", so the pagination cannot advance. The operation's query must select pageInfo{hasNextPage, endCursor}`,
+      );
+    }
+    cursor = endCursor;
+  }
+}
+
+/**
  * Reject two declared entries that resolve to the same natural key; they
  * would fight each other on every run instead of converging.
  */
@@ -843,14 +1142,15 @@ function samePermission(a: SectionPermission | "none", b: SectionPermission | "n
 
 /**
  * The access level denial advice should ask for on an override permission:
- * "write" when ANY of the section's endpoints carrying that same effective
- * permission is write-graded, else "read". Grading by the SECTION's need
- * rather than the failing endpoint keeps the fix to one round trip: the
- * apply-mode preflight probes with reads, so a read-level advice on a
- * permission the section also writes with (the OIDC GET/PUT pair) would
- * have the user grant read, pass preflight, and then fail again on the
- * write. A permission the section only reads with (the branch-policy list;
- * its write siblings live on a different permission) still advises read.
+ * "write" when ANY of the section's endpoints or GraphQL operations carrying
+ * that same effective permission is write-graded, else "read". Grading by
+ * the SECTION's need rather than the failing operation keeps the fix to one
+ * round trip: the apply-mode preflight probes with reads, so a read-level
+ * advice on a permission the section also writes with (the OIDC GET/PUT
+ * pair) would have the user grant read, pass preflight, and then fail again
+ * on the write. A permission the section only reads with (the branch-policy
+ * list; its write siblings live on a different permission) still advises
+ * read.
  */
 export function overrideAdviceLevel(
   section: SectionMeta,
@@ -861,6 +1161,11 @@ export function overrideAdviceLevel(
       samePermission(endpointPermission(section, endpoint), effective) &&
       endpointKind(endpoint) === "write"
     ) {
+      return "write";
+    }
+  }
+  for (const op of Object.values(section.graphql ?? {})) {
+    if (samePermission(endpointPermission(section, op), effective) && op.kind === "write") {
       return "write";
     }
   }
@@ -875,13 +1180,15 @@ export function throwFor(
   context?: {
     operation?: string;
     /**
-     * The endpoint declaration behind the failing request. Supplies the
-     * status hints and denial hint, and resolves the EFFECTIVE permission:
-     * an endpoint with a permission override renders its own grant advice
-     * instead of the section's, and a public endpoint ("none") cannot be a
-     * missing-grant failure at all, so its 403/404 takes the generic branch.
+     * The declaration behind the failing request - a REST EndpointDecl or a
+     * GraphqlOpDecl (a GraphQL failure renders `GRAPHQL <opName>` in the
+     * method/path slot). Supplies the status hints and denial hint, and
+     * resolves the EFFECTIVE permission: an operation with a permission
+     * override renders its own grant advice instead of the section's, and a
+     * public operation ("none") cannot be a missing-grant failure at all, so
+     * its 403/404 takes the generic branch.
      */
-    endpoint?: EndpointDecl;
+    op?: FailingOp;
   },
 ): never {
   // "creating ruleset "x" failed - POST /repos/...": the operation label says
@@ -896,18 +1203,16 @@ export function throwFor(
       `${section.key}: ${cause}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
     );
   }
-  const effective = context?.endpoint ? endpointPermission(section, context.endpoint) : undefined;
+  const effective = context?.op ? endpointPermission(section, context.op) : undefined;
   if (isPermissionError(error) && effective !== "none") {
     const alsoMissing =
       error.status === 404 ? " (a 404 here can also mean the resource does not exist)" : "";
-    // An endpoint whose 403/404 is AMBIGUOUS (it can mean something other
+    // An operation whose 403/404 is AMBIGUOUS (it can mean something other
     // than a missing grant) says so here, right where the user reads the
     // grant advice.
-    const denialHint = context?.endpoint?.denialHint
-      ? `. Note: ${context.endpoint.denialHint}`
-      : "";
+    const denialHint = context?.op?.denialHint ? `. Note: ${context.op.denialHint}` : "";
     // The section's grant prose carries its caveats, so it stays the default;
-    // an endpoint override names a DIFFERENT permission, so only then is the
+    // an operation override names a DIFFERENT permission, so only then is the
     // advice re-derived from the override - at the level the SECTION needs
     // on that permission (see overrideAdviceLevel), so a denied read never
     // asks for a write grant the section cannot use, and never advises a
@@ -932,7 +1237,7 @@ export function throwFor(
       `${section.key}: ${cause}. The token was rejected as invalid or expired; update the token input (or the secret it reads) with a valid, unexpired PAT`,
     );
   }
-  const advice = context?.endpoint?.hints?.[error.status as HintableStatus];
+  const advice = context?.op?.hints?.[error.status as HintableStatus];
   const hint = advice ? `. ${advice}` : "";
   const docs = error.documentationUrl
     ? `. The fields and values this endpoint accepts are documented at ${error.documentationUrl}`
