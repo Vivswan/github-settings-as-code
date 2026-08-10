@@ -469,6 +469,9 @@ describe("genScenario", () => {
     "codespaces_secrets",
     "custom_properties",
     "secret_scanning_alerts",
+    "agent_secrets",
+    "agent_variables",
+    "checks",
     "org_members",
   ]);
 

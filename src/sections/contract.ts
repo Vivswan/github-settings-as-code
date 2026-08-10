@@ -66,7 +66,10 @@ export type PatResource =
   | "dependabot_secrets"
   | "codespaces_secrets"
   | "custom_properties"
-  | "secret_scanning_alerts";
+  | "secret_scanning_alerts"
+  | "agent_secrets"
+  | "agent_variables"
+  | "checks";
 
 /**
  * The machine-readable permission a section requires. `repo` lists the
@@ -96,6 +99,9 @@ const RESOURCE_LABEL: Record<PatResource, string> = {
   codespaces_secrets: "Codespaces secrets",
   custom_properties: "Custom properties",
   secret_scanning_alerts: "Secret scanning alerts",
+  agent_secrets: "Agent secrets",
+  agent_variables: "Agent variables",
+  checks: "Checks",
 };
 
 /** Human-facing label for each PAT organization resource. */
@@ -151,7 +157,22 @@ type SupplementalRoute =
   | "GET /repos/{owner}/{repo}/secret-scanning/custom-patterns"
   | "POST /repos/{owner}/{repo}/secret-scanning/custom-patterns"
   | "PATCH /repos/{owner}/{repo}/secret-scanning/custom-patterns/{pattern_id}"
-  | "DELETE /repos/{owner}/{repo}/secret-scanning/custom-patterns";
+  | "DELETE /repos/{owner}/{repo}/secret-scanning/custom-patterns"
+  | "GET /repos/{owner}/{repo}/agents/secrets"
+  | "GET /repos/{owner}/{repo}/agents/secrets/public-key"
+  | "PUT /repos/{owner}/{repo}/agents/secrets/{secret_name}"
+  | "DELETE /repos/{owner}/{repo}/agents/secrets/{secret_name}"
+  | "GET /repos/{owner}/{repo}/agents/variables"
+  | "POST /repos/{owner}/{repo}/agents/variables"
+  | "PATCH /repos/{owner}/{repo}/agents/variables/{name}"
+  | "DELETE /repos/{owner}/{repo}/agents/variables/{name}"
+  | "GET /repos/{owner}/{repo}/code-quality/setup"
+  | "PATCH /repos/{owner}/{repo}/code-quality/setup"
+  | "GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap"
+  | "PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap"
+  | "GET /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list"
+  | "PUT /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list"
+  | "DELETE /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list";
 
 /**
  * The audit above, enforced by the compiler: a supplemental route that HAS

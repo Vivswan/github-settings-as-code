@@ -555,6 +555,11 @@ describe("pre-filled PAT form URL", () => {
     codespaces_secrets: "codespaces_secrets",
     custom_properties: "repository_custom_properties",
     secret_scanning_alerts: "secret_scanning_alerts",
+    // No section consumes these grants yet; each slug lands, verified
+    // against the live form, with the section that first needs it.
+    agent_secrets: null,
+    agent_variables: null,
+    checks: null,
   } satisfies Record<PatResource, string | null>;
 
   test("every PAT resource's form parameter appears in the URL", () => {
