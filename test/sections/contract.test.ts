@@ -2,16 +2,76 @@ import { describe, expect, test } from "bun:test";
 import { actionsSection } from "../../src/sections/actions.js";
 import {
   type EndpointDecl,
+  type GraphqlOpDecl,
   grantFor,
   PermissionDenied,
   type SectionMeta,
   sectionGrant,
+  sectionOperations,
   throwFor,
 } from "../../src/sections/contract.js";
 import { environmentsSection } from "../../src/sections/environments.js";
+import { repositorySection } from "../../src/sections/repository.js";
 import { rulesetsSection } from "../../src/sections/rulesets.js";
 
 const section: SectionMeta = rulesetsSection;
+
+describe("sectionOperations", () => {
+  const readOp: GraphqlOpDecl = {
+    name: "SyntheticRead",
+    kind: "read",
+    query: "query SyntheticRead($owner: String!, $repo: String!) { repository { id } }",
+    outcomes: { ok: "x" },
+  };
+
+  test("flattens BOTH dictionaries, so a GraphQL-read-only section is not read-free", () => {
+    // The shape the oracle's NO_READ_SECTIONS derivation must never misread:
+    // zero REST endpoints, one GraphQL read. A derivation walking
+    // section.endpoints alone would call this section read-free.
+    const graphqlOnly: SectionMeta = {
+      key: "repository",
+      permission: { repo: ["administration"] },
+      endpoints: {},
+      graphql: { read: readOp },
+      undeclaredDefault: "untouched",
+    };
+    expect(sectionOperations(graphqlOnly)).toEqual([
+      { wire: "read", grade: "read", permission: { repo: ["administration"] } },
+    ]);
+  });
+
+  test("every REST endpoint and GraphQL operation of a real section appears exactly once", () => {
+    // repositorySection carries BOTH dictionaries, so the GraphQL half of
+    // the length assertion binds (a section without `graphql` would prove
+    // only the REST half).
+    expect(Object.keys(repositorySection.graphql ?? {}).length).toBeGreaterThan(0);
+    const operations = sectionOperations(repositorySection);
+    expect(operations).toHaveLength(
+      Object.keys(repositorySection.endpoints).length +
+        Object.keys(repositorySection.graphql ?? {}).length,
+    );
+  });
+
+  test("resolves per-operation permission overrides and accessGrade write-gating", () => {
+    const overridden: SectionMeta = {
+      key: "repository",
+      permission: { repo: ["administration"] },
+      endpoints: {
+        gatedList: {
+          route: "GET /repos/{owner}/{repo}/codespaces/secrets",
+          statuses: { 200: "x" },
+          accessGrade: "write",
+        },
+      },
+      graphql: { read: { ...readOp, permission: "none" } },
+      undeclaredDefault: "untouched",
+    };
+    expect(sectionOperations(overridden)).toEqual([
+      { wire: "read", grade: "write", permission: { repo: ["administration"] } },
+      { wire: "read", grade: "read", permission: "none" },
+    ]);
+  });
+});
 
 /** A synthetic declaration carrying just the context fields under test. */
 function endpoint(extra: Partial<EndpointDecl>): EndpointDecl {

@@ -275,6 +275,11 @@ export function endpointMethod(route: Route): string {
   return route.slice(0, route.indexOf(" "));
 }
 
+/** The name half of an "owner/name" slug (expand()'s `{repo}` fill). */
+export function repoNameOf(repo: string): string {
+  return repo.slice(repo.indexOf("/") + 1);
+}
+
 /** The path-template half of a route ("PATCH /repos/{owner}/..." -> "/repos/{owner}/..."). */
 export function endpointPath(route: Route): string {
   return route.slice(route.indexOf(" ") + 1);
@@ -521,7 +526,7 @@ export function expand(
   query?: Readonly<Record<string, string>>,
 ): string {
   const route = endpoint.route;
-  const repoName = ctx.repo.slice(ctx.repo.indexOf("/") + 1);
+  const repoName = repoNameOf(ctx.repo);
   const supplied = new Set(Object.keys(params ?? {}));
   const path = endpointPath(route).replace(/{([a-z_]+)}/g, (_match, token: string) => {
     if (token === "owner") {
@@ -617,6 +622,71 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
 export function sectionGrant(section: Pick<SectionMeta, "permission" | "grantCaveat">): string {
   return grantFor(section.permission, section.grantCaveat);
 }
+
+/**
+ * One entry in the flattened REST + GraphQL view of sectionOperations():
+ * `wire` says whether the request READS or WRITES on the wire (a GET or a
+ * query vs a mutating method or a mutation), `grade` the access level GitHub
+ * gates it at (endpointKind, so an accessGrade override write-gates a wire
+ * read; a GraphQL operation's kind is both), and `permission` the effective
+ * permission (endpointPermission).
+ */
+export interface SectionOperation {
+  readonly wire: "read" | "write";
+  readonly grade: "read" | "write";
+  readonly permission: SectionPermission | "none";
+}
+
+/**
+ * Every operation a section may issue - its REST endpoints and GraphQL
+ * operations flattened into one list. Consumers deriving cross-cutting facts
+ * from "everything this section can call" (overrideAdviceLevel below, the
+ * fuzz oracle's no-read and write-gated section sets, the registry
+ * mixed-grade guard, the README PAT-form and permissions-doc sweeps) walk
+ * THIS view instead of section.endpoints alone, so a derivation can never
+ * quietly ignore the GraphQL dictionary. The _OperationDictionariesFlattened
+ * pin below keeps the flattening total: a new operation dictionary on
+ * SectionMeta fails to compile until it is folded in here.
+ */
+export function sectionOperations(section: SectionMeta): SectionOperation[] {
+  return [
+    ...Object.values(section.endpoints).map((endpoint) => ({
+      wire: endpointMethod(endpoint.route) === "GET" ? ("read" as const) : ("write" as const),
+      grade: endpointKind(endpoint),
+      permission: endpointPermission(section, endpoint),
+    })),
+    ...Object.values(section.graphql ?? {}).map((op) => ({
+      wire: op.kind,
+      grade: op.kind,
+      permission: endpointPermission(section, op),
+    })),
+  ];
+}
+
+/** The SectionMeta properties sectionOperations flattens. */
+type FlattenedOperationDictionaries = "endpoints" | "graphql";
+
+/** Every SectionMeta property holding a dictionary of operation declarations. */
+type OperationDictionaryKeys = {
+  [K in keyof SectionMeta]-?: NonNullable<SectionMeta[K]> extends Readonly<
+    Record<string, FailingOp>
+  >
+    ? K
+    : never;
+}[keyof SectionMeta];
+
+/**
+ * The compile-time pin behind sectionOperations' completeness claim: a new
+ * operation dictionary added to SectionMeta lands in OperationDictionaryKeys
+ * structurally and fails here until sectionOperations (and the list above)
+ * flatten it - the _UnlistedSection idiom from schema.ts. The structural
+ * match sees `Readonly<Record<string, ...>>` properties (the form both
+ * dictionaries use today); a dictionary declared as a named interface would
+ * evade it, so keep the record form on any future operation dictionary.
+ */
+type _OperationDictionariesFlattened = MustBeNever<
+  Exclude<OperationDictionaryKeys, FlattenedOperationDictionaries>
+>;
 
 /**
  * One settings section, self-contained: identity and grant advice
@@ -1156,20 +1226,11 @@ export function overrideAdviceLevel(
   section: SectionMeta,
   effective: SectionPermission,
 ): "read" | "write" {
-  for (const endpoint of Object.values(section.endpoints)) {
-    if (
-      samePermission(endpointPermission(section, endpoint), effective) &&
-      endpointKind(endpoint) === "write"
-    ) {
-      return "write";
-    }
-  }
-  for (const op of Object.values(section.graphql ?? {})) {
-    if (samePermission(endpointPermission(section, op), effective) && op.kind === "write") {
-      return "write";
-    }
-  }
-  return "read";
+  return sectionOperations(section).some(
+    (operation) => samePermission(operation.permission, effective) && operation.grade === "write",
+  )
+    ? "write"
+    : "read";
 }
 
 export function throwFor(

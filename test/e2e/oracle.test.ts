@@ -4,6 +4,7 @@ import type { MultiRepoTarget, MultiScenarioMeta, ScenarioMeta } from "./generat
 import {
   foldRepoResults,
   foldSectionOutcomes,
+  NO_READ_SECTIONS,
   predictDiscovery,
   predictMulti,
   predictOutcomes,
@@ -11,6 +12,17 @@ import {
   sectionGrade,
 } from "./oracle.js";
 import type { MaskGrade, MaskKey } from "./schema.js";
+
+describe("NO_READ_SECTIONS derivation", () => {
+  test("counts GraphQL reads: only the write-only section remains, exactly as before", () => {
+    // The derivation walks sectionOperations (REST + GraphQL); this exact-set
+    // pin proves the widened walk left today's membership unchanged - and
+    // that a section carrying only a GraphQL read (repository's features
+    // query would be that shape without its REST GETs) is not misread as
+    // read-free. A new member here is a conscious change, not drift.
+    expect([...NO_READ_SECTIONS].sort()).toEqual(["check_suite_preferences"]);
+  });
+});
 
 /** Build a ScenarioMeta with sensible defaults for one focused assertion. */
 function meta(overrides: Partial<ScenarioMeta>): ScenarioMeta {

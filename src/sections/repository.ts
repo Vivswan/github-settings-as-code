@@ -1,16 +1,22 @@
 /**
  * `repository:` section - PATCH passthrough for repo fields, plus the
- * settings that live on their own endpoints in the REST API even though
- * the Probot schema nests them here: topics and the feature toggles.
+ * settings that live on their own endpoints even though the settings file
+ * nests them here: topics, the feature toggles, and the two GraphQL-only
+ * keys (the Sponsor button and the issue creation policy).
  */
 
 import { subsetDiff } from "../engine/diff.js";
 import {
   anyRecord,
   call,
+  callGraphql,
   type EndpointDecl,
   emptyResult,
+  type GraphqlOpDecl,
   probeAbsent,
+  repoNameOf,
+  type SectionContext,
+  type SectionMeta,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
@@ -203,6 +209,173 @@ const WRITE_ONLY_TOGGLES = [
 ] satisfies readonly FeatureToggle[];
 
 /**
+ * The GraphQL-routed keys: two repository settings whose ONLY surface is
+ * GraphQL. The issue creation policy is live-verified both ways (the REST
+ * repo PATCH answers 200 and silently ignores an issue_creation_policy
+ * field, and no REST GET returns one); the sponsor button has no REST field
+ * at all. One read serves every declared key AND supplies the node id the
+ * mutation addresses, so neither mode needs an extra REST round trip.
+ *
+ * Each key is a RoutedKey descriptor, and everything else derives from the
+ * table: SPECIAL_KEYS (the PATCH strip), the shape sweep, the check-mode
+ * compare, and the apply-mode mutate-and-verify loop all iterate
+ * GRAPHQL_ROUTED_KEYS - so a new key cannot compile into a silently
+ * stripped-but-never-applied no-op.
+ */
+interface RoutedKey {
+  /** The settings-file key. */
+  readonly key: string;
+  /** The change-line label ("sponsor button: enabled"). */
+  readonly label: string;
+  /** The Repository read field, also the UpdateRepositoryInput field. */
+  readonly field: "hasSponsorshipsEnabled" | "issueCreationPolicy";
+  /** Why a declared value is invalid, or null when it passes; feeds the shape sweep. */
+  invalid(declared: unknown): string | null;
+  /** Map a valid declared value to its GraphQL variable value. */
+  encode(declared: unknown): boolean | string;
+  /**
+   * Map a readback field value to the settings-file vocabulary, or
+   * undefined when the value is outside the vocabulary this section reads
+   * (the caller fails loudly; folding to a default could report a clean
+   * check against state the section does not understand).
+   */
+  decode(live: unknown): unknown;
+  /** Render a settings-vocabulary value for drift prose (raw, like the toggles' drift lines). */
+  show(value: unknown): string;
+  /** Render a settings-vocabulary value for a change line ("enabled", "collaborators_only"). */
+  changeText(value: unknown): string;
+  /**
+   * Appended to the unreadable-value error for a vocabulary this section
+   * knows can surprise (the policy's SDL-nullable read). One sentence, no
+   * trailing period.
+   */
+  readonly unreadableHint?: string;
+}
+
+/** The settings-file vocabulary for issue_creation_policy -> GitHub's enum. */
+const ISSUE_CREATION_POLICIES = {
+  all: "ALL",
+  collaborators_only: "COLLABORATORS_ONLY",
+} as const;
+
+type IssueCreationPolicy = keyof typeof ISSUE_CREATION_POLICIES;
+
+const GRAPHQL_ROUTED_KEYS = [
+  {
+    key: "enable_sponsorships",
+    label: "sponsor button",
+    field: "hasSponsorshipsEnabled",
+    invalid: (declared) =>
+      typeof declared === "boolean"
+        ? null
+        : `${describeToggleValue(declared)} is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
+    encode: (declared) => declared as boolean,
+    decode: (live) => (typeof live === "boolean" ? live : undefined),
+    show: (value) => String(value),
+    changeText: (value) => (value ? "enabled" : "disabled"),
+  },
+  {
+    key: "issue_creation_policy",
+    label: "issue creation policy",
+    field: "issueCreationPolicy",
+    invalid: (declared) =>
+      typeof declared === "string" && Object.hasOwn(ISSUE_CREATION_POLICIES, declared)
+        ? null
+        : `${describeToggleValue(declared)} is not a recognized policy. Use "all" (everyone) or "collaborators_only"`,
+    encode: (declared) => ISSUE_CREATION_POLICIES[declared as IssueCreationPolicy],
+    decode: (live) =>
+      live === "ALL" ? "all" : live === "COLLABORATORS_ONLY" ? "collaborators_only" : undefined,
+    show: (value) => String(value),
+    changeText: (value) => String(value),
+    // The SDL marks Repository.issueCreationPolicy nullable, though a live
+    // probe never observed null (the policy is retained even with issues
+    // disabled), so a null read stays a loud failure with honest prose.
+    unreadableHint:
+      "a null policy means GitHub reported no issue creation policy for this repository; otherwise the field vocabulary may have changed",
+  },
+] as const satisfies readonly RoutedKey[];
+
+const FEATURES_QUERY: GraphqlOpDecl<{ owner: string; repo: string }> = {
+  name: "RepositoryFeatures",
+  kind: "read",
+  query:
+    "query RepositoryFeatures($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id hasSponsorshipsEnabled issueCreationPolicy } }",
+  outcomes: {
+    ok: "the sponsor-button and issue-creation-policy state, plus the node id the mutation addresses",
+  },
+};
+
+// The GraphQL absent-variable rule makes one mutation serve any declared
+// subset: an input field fed by an unprovided variable is treated as not
+// provided, so the input carries exactly the keys apply needs to move.
+const UPDATE_FEATURES: GraphqlOpDecl<{
+  repositoryId: string;
+  hasSponsorshipsEnabled?: boolean;
+  issueCreationPolicy?: (typeof ISSUE_CREATION_POLICIES)[IssueCreationPolicy];
+}> = {
+  name: "UpdateRepositoryFeatures",
+  kind: "write",
+  query:
+    "mutation UpdateRepositoryFeatures($repositoryId: ID!, $hasSponsorshipsEnabled: Boolean, $issueCreationPolicy: IssueCreationPolicy) { updateRepository(input: {repositoryId: $repositoryId, hasSponsorshipsEnabled: $hasSponsorshipsEnabled, issueCreationPolicy: $issueCreationPolicy}) { repository { hasSponsorshipsEnabled issueCreationPolicy } } }",
+  outcomes: { ok: "the carried values set; the echoed state verifies each one took" },
+};
+
+const GRAPHQL_OPS = {
+  featuresQuery: FEATURES_QUERY,
+  updateFeatures: UPDATE_FEATURES,
+} as const satisfies Record<string, GraphqlOpDecl>;
+
+/**
+ * Decode the routed fields of a repository object for the DECLARED keys
+ * only, into the settings-file vocabulary. Scoping the strictness to
+ * `routed` is deliberate: an unreadable value (the SDL-nullable policy, a
+ * future enum member) must fail loudly for a key the file declares, and
+ * must not fail a run that never declared it.
+ */
+function decodeRoutedFields(
+  fields: Record<string, unknown>,
+  routed: readonly RoutedKey[],
+  opName: string,
+): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const entry of routed) {
+    const decoded = entry.decode(fields[entry.field]);
+    if (decoded === undefined) {
+      const hint = entry.unreadableHint ? `; ${entry.unreadableHint}` : "";
+      throw new Error(
+        `repository: GRAPHQL ${opName} returned ${entry.field} ${JSON.stringify(fields[entry.field])}, which this section cannot read as a repository.${entry.key} value${hint}. Drop the key, or update the action if GitHub's vocabulary moved`,
+      );
+    }
+    values[entry.key] = decoded;
+  }
+  return values;
+}
+
+/** The routed-state read: the mutation's node id plus each declared key's live value. */
+interface LiveRoutedState {
+  id: string;
+  values: Record<string, unknown>;
+}
+
+async function fetchRoutedState(
+  ctx: SectionContext,
+  section: SectionMeta,
+  routed: readonly RoutedKey[],
+): Promise<LiveRoutedState> {
+  const data = await callGraphql(ctx, section, FEATURES_QUERY, {
+    owner: ctx.owner,
+    repo: repoNameOf(ctx.repo),
+  });
+  const repository = (data as { repository?: Record<string, unknown> }).repository;
+  if (!repository || typeof repository.id !== "string") {
+    throw new Error(
+      `repository: GRAPHQL ${FEATURES_QUERY.name} returned no repository object with an id, so the ${GRAPHQL_ROUTED_KEYS.map((entry) => entry.key).join("/")} state cannot be read. Check the token's repository access`,
+    );
+  }
+  return { id: repository.id, values: decodeRoutedFields(repository, routed, FEATURES_QUERY.name) };
+}
+
+/**
  * Every feature toggle, exported for the test that pins the apply loop's
  * safety contract: the loop reports a change for any tolerated non-409
  * outcome, so a toggle write may only tolerate statuses the loop knows how
@@ -213,11 +386,16 @@ export const FEATURE_TOGGLES = [...READABLE_TOGGLES, ...WRITE_ONLY_TOGGLES];
 
 /**
  * The keys the repository section handles specially instead of sending them
- * through the base PATCH: `topics` (its own PUT) and the feature toggles
- * (each a PUT/DELETE sub-endpoint). Exported as the single source the
- * README's repository special-keys documentation is pinned against.
+ * through the base PATCH: `topics` (its own PUT), the feature toggles
+ * (each a PUT/DELETE sub-endpoint), and the GraphQL-routed keys
+ * (GRAPHQL_ROUTED_KEYS). Exported as the single source the README's
+ * repository special-keys documentation is pinned against.
  */
-export const SPECIAL_KEYS = new Set(["topics", ...FEATURE_TOGGLES.map((toggle) => toggle.key)]);
+export const SPECIAL_KEYS = new Set([
+  "topics",
+  ...FEATURE_TOGGLES.map((toggle) => toggle.key),
+  ...GRAPHQL_ROUTED_KEYS.map((routed) => routed.key),
+]);
 
 /**
  * Cycle-safe description of a rejected toggle value for the shape error:
@@ -247,8 +425,9 @@ function describeToggleValue(value: unknown): string {
  * writes - a run()-time throw would fire only after earlier sections already
  * wrote (the environments flag-pairing precedent). The base stays anyRecord,
  * so the accepted surface is unchanged: unknown keys still ride the PATCH
- * verbatim, and non-mapping documents are rejected as before. Derived from
- * FEATURE_TOGGLES so a new toggle is covered automatically.
+ * verbatim, and non-mapping documents are rejected as before. The sweep
+ * derives from FEATURE_TOGGLES and each GRAPHQL_ROUTED_KEYS descriptor's
+ * own `invalid`, so a new toggle or routed key is covered automatically.
  */
 const shape = anyRecord.superRefine((declared, refineCtx) => {
   for (const toggle of FEATURE_TOGGLES) {
@@ -260,6 +439,15 @@ const shape = anyRecord.superRefine((declared, refineCtx) => {
       });
     }
   }
+  for (const routed of GRAPHQL_ROUTED_KEYS) {
+    if (!(routed.key in declared)) {
+      continue;
+    }
+    const message = routed.invalid(declared[routed.key]);
+    if (message !== null) {
+      refineCtx.addIssue({ code: "custom", path: [routed.key], message });
+    }
+  }
 });
 
 export const repositorySection: SectionModule<"repository"> = {
@@ -267,6 +455,7 @@ export const repositorySection: SectionModule<"repository"> = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
+  graphql: GRAPHQL_OPS,
   shape,
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
@@ -313,6 +502,17 @@ export const repositorySection: SectionModule<"repository"> = {
           `repository.${toggle.key}: GitHub exposes no endpoint to read this state back, so check mode cannot verify it; apply re-asserts the declared value (${JSON.stringify(desired[toggle.key])}) on every run`,
         );
       }
+      const declaredRouted = GRAPHQL_ROUTED_KEYS.filter((routed) => routed.key in desired);
+      if (declaredRouted.length > 0) {
+        const live = await fetchRoutedState(ctx, this, declaredRouted);
+        for (const routed of declaredRouted) {
+          if (desired[routed.key] !== live.values[routed.key]) {
+            result.drift.push(
+              `repository.${routed.key}: declared ${routed.show(desired[routed.key])} != live ${routed.show(live.values[routed.key])}; apply will set the declared value`,
+            );
+          }
+        }
+      }
       return result;
     }
 
@@ -346,6 +546,48 @@ export const repositorySection: SectionModule<"repository"> = {
         continue;
       }
       result.changes.push(`${toggle.label}: ${desired[toggle.key] ? "enabled" : "disabled"}`);
+    }
+    const declaredRouted = GRAPHQL_ROUTED_KEYS.filter((routed) => routed.key in desired);
+    if (declaredRouted.length > 0) {
+      // Compare before writing, unlike the endpoint-backed toggles: the
+      // routed-state read is already needed for the mutation's node id, so
+      // the comparison is free and a converged repo issues no GraphQL write.
+      const live = await fetchRoutedState(ctx, this, declaredRouted);
+      const diverged = declaredRouted.filter(
+        (routed) => desired[routed.key] !== live.values[routed.key],
+      );
+      if (diverged.length > 0) {
+        const variables: Record<string, unknown> = { repositoryId: live.id };
+        for (const routed of diverged) {
+          variables[routed.field] = routed.encode(desired[routed.key]);
+        }
+        const data = await callGraphql(
+          ctx,
+          this,
+          UPDATE_FEATURES,
+          variables as { repositoryId: string },
+        );
+        // The mutation selects the post-state on purpose: silently
+        // accepting-and-ignoring a field is the exact REST failure mode that
+        // forced these keys onto GraphQL, so each carried value is verified
+        // against the echo, and the change lines report OBSERVED state.
+        const echoedRepo = (data as { updateRepository?: { repository?: Record<string, unknown> } })
+          .updateRepository?.repository;
+        if (!echoedRepo) {
+          throw new Error(
+            `repository: GRAPHQL ${UPDATE_FEATURES.name} returned no repository echo, so the write cannot be verified. GitHub may have changed the mutation payload; update the action`,
+          );
+        }
+        const echoed = decodeRoutedFields(echoedRepo, diverged, UPDATE_FEATURES.name);
+        for (const routed of diverged) {
+          if (echoed[routed.key] !== desired[routed.key]) {
+            throw new Error(
+              `repository: GRAPHQL ${UPDATE_FEATURES.name} was accepted, but GitHub reports repository.${routed.key} ${routed.show(echoed[routed.key])} where ${routed.show(desired[routed.key])} was set, so the write did not take. GitHub may restrict this setting on the repository`,
+            );
+          }
+          result.changes.push(`${routed.label}: ${routed.changeText(echoed[routed.key])}`);
+        }
+      }
     }
     return result;
   },

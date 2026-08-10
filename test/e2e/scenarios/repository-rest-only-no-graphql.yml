@@ -1,0 +1,25 @@
+# A repository declaration without the two GraphQL-routed keys never
+# touches /graphql at all - not even the RepositoryFeatures read: the
+# passthrough PATCH and the endpoint-backed toggle do the whole job, and
+# the never list pins zero GraphQL requests of any kind (every resolved
+# operation renders "GRAPHQL <opName>", so the bare "GRAPHQL " prefix
+# forbids them all; an unresolved request renders "POST /graphql").
+name: repository-rest-only-no-graphql
+settings:
+  repository:
+    has_issues: true
+    enable_vulnerability_alerts: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    repository: applied
+  mutations:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/vulnerability-alerts"
+  never:
+    - "GRAPHQL "
+    - "POST /graphql"
+  converges: true

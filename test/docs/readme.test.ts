@@ -17,7 +17,7 @@ import { REPO_RESULTS, validateSettingsDoc } from "../../src/engine/orchestrate.
 import type { Io } from "../../src/io.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
-import { endpointPermission, type PatResource } from "../../src/sections/contract.js";
+import { type PatResource, sectionOperations } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
 import { CLAIM_FAMILY, CLAIM_STEMS, defaultClaimProblems, stemNegation } from "./claims.js";
@@ -594,18 +594,19 @@ describe("pre-filled PAT form URL", () => {
 
   test("every resource a section permission consumes has a non-null slug", () => {
     // A null exemption is only for resources NO section needs yet: once an
-    // endpoint's effective permission names the resource, real tokens need
-    // the grant and the form URL must pre-select it. endpointPermission
-    // resolves overrides exactly the way the engine does, so an override
-    // cannot slip past the sweep.
+    // operation's effective permission names the resource, real tokens need
+    // the grant and the form URL must pre-select it. sectionOperations is
+    // the flattened REST + GraphQL view with overrides resolved exactly the
+    // way the engine resolves them (endpointPermission), so neither a
+    // per-endpoint override nor a GraphQL operation's permission can slip
+    // past the sweep.
     const consumed = new Set<PatResource>();
     for (const section of SECTIONS) {
-      for (const endpoint of Object.values(section.endpoints)) {
-        const permission = endpointPermission(section, endpoint);
-        if (permission === "none") {
+      for (const operation of sectionOperations(section)) {
+        if (operation.permission === "none") {
           continue;
         }
-        for (const resource of permission.repo) {
+        for (const resource of operation.permission.repo) {
           consumed.add(resource);
         }
       }

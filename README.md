@@ -114,7 +114,7 @@ The guides live in [docs/](docs/README.md), in four groups:
 
 | Section | Endpoints | PAT permission | Undeclared default | Notes |
 |---|---|---|---|---|
-| `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs, immutable-releases | Administration: write | untouched | Probot repository payload plus `enable_*` feature toggles; `topics` as string or list; declared fields only, undeclared siblings untouched |
+| `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs, immutable-releases, GraphQL RepositoryFeatures + UpdateRepositoryFeatures | Administration: write | untouched | Probot repository payload plus `enable_*` feature toggles; `topics` as string or list; `enable_sponsorships` and `issue_creation_policy` (`all`/`collaborators_only`) route through GraphQL - REST has no surface for them; declared fields only, undeclared siblings untouched |
 | `labels` | labels CRUD | Issues: write | deleted (settable) | upsert by name (rename via `new_name`); the delete-by-default is Probot parity |
 | `rulesets` | repo rulesets CRUD | Administration: write | kept (settable) | branch, tag, and push targets; short ref names auto-prefixed (`staging` -> `refs/heads/staging`); deletion stays an explicit opt-in |
 | `branches` | classic branch protection + required-signatures sub-endpoint | Administration: write | untouched | `protection: null` removes protection; the protection PUT drops `required_signatures`, so declare it on any branch already carrying it; add Contents: read so check mode can tell a missing branch from an unprotected one |

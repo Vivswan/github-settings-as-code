@@ -309,3 +309,260 @@ describe("repository", () => {
     ]);
   });
 });
+
+describe("repository GraphQL-routed keys", () => {
+  const features = (overrides?: Record<string, unknown>) => ({
+    "GRAPHQL RepositoryFeatures": {
+      data: {
+        repository: {
+          id: "R_node",
+          hasSponsorshipsEnabled: false,
+          issueCreationPolicy: "ALL",
+          ...overrides,
+        },
+      },
+    },
+  });
+  const echo = (fields: Record<string, unknown>) => ({
+    "GRAPHQL UpdateRepositoryFeatures": {
+      data: { updateRepository: { repository: fields } },
+    },
+  });
+
+  test("apply mutates only on divergence, carrying the declared fields and the node id", async () => {
+    const api = new MockApi({
+      ...features(),
+      ...echo({ hasSponsorshipsEnabled: true, issueCreationPolicy: "COLLABORATORS_ONLY" }),
+    });
+    const result = await repositorySection.run(ctx(api), {
+      enable_sponsorships: true,
+      issue_creation_policy: "collaborators_only",
+    });
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "GRAPHQL UpdateRepositoryFeatures",
+    ]);
+    expect(api.mutations()[0]?.payload).toEqual({
+      repositoryId: "R_node",
+      hasSponsorshipsEnabled: true,
+      issueCreationPolicy: "COLLABORATORS_ONLY",
+    });
+    // The complete call sequence: ONE features read, then the mutation.
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "GRAPHQL RepositoryFeatures",
+      "GRAPHQL UpdateRepositoryFeatures",
+    ]);
+    expect(result.changes).toEqual([
+      "sponsor button: enabled",
+      "issue creation policy: collaborators_only",
+    ]);
+  });
+
+  test("partial divergence: the mutation and the change lines carry only the diverged key", async () => {
+    // enable_sponsorships already matches live; only the policy moves. A
+    // change line for the untouched sponsor button would be a false claim
+    // (the section's own 409 rule: a note, never a false change line).
+    const api = new MockApi({
+      ...features({ hasSponsorshipsEnabled: true }),
+      ...echo({ hasSponsorshipsEnabled: true, issueCreationPolicy: "COLLABORATORS_ONLY" }),
+    });
+    const result = await repositorySection.run(ctx(api), {
+      enable_sponsorships: true,
+      issue_creation_policy: "collaborators_only",
+    });
+    expect(api.mutations()[0]?.payload).toEqual({
+      repositoryId: "R_node",
+      issueCreationPolicy: "COLLABORATORS_ONLY",
+    });
+    expect(result.changes).toEqual(["issue creation policy: collaborators_only"]);
+  });
+
+  test("a converged repo issues the read but no mutation", async () => {
+    const api = new MockApi(
+      features({ hasSponsorshipsEnabled: true, issueCreationPolicy: "COLLABORATORS_ONLY" }),
+    );
+    const result = await repositorySection.run(ctx(api), {
+      enable_sponsorships: true,
+      issue_creation_policy: "collaborators_only",
+    });
+    expect(api.mutations()).toEqual([]);
+    expect(result.changes).toEqual([]);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GRAPHQL RepositoryFeatures"]);
+  });
+
+  test("the mutation carries only the declared key", async () => {
+    const api = new MockApi({
+      ...features(),
+      ...echo({ issueCreationPolicy: "COLLABORATORS_ONLY" }),
+    });
+    await repositorySection.run(ctx(api), { issue_creation_policy: "collaborators_only" });
+    expect(api.mutations()[0]?.payload).toEqual({
+      repositoryId: "R_node",
+      issueCreationPolicy: "COLLABORATORS_ONLY",
+    });
+  });
+
+  test("an echo reporting the old value fails loudly: the write did not take", async () => {
+    // "Accepted but silently ignored" is the REST failure mode that forced
+    // these keys onto GraphQL; the mutation's echoed post-state is the guard.
+    const api = new MockApi({
+      ...features(),
+      ...echo({ hasSponsorshipsEnabled: false }),
+    });
+    await expect(repositorySection.run(ctx(api), { enable_sponsorships: true })).rejects.toThrow(
+      "the write did not take",
+    );
+  });
+
+  test("a mutation response without the repository echo fails loudly", async () => {
+    const api = new MockApi({
+      ...features(),
+      "GRAPHQL UpdateRepositoryFeatures": { data: { updateRepository: {} } },
+    });
+    await expect(repositorySection.run(ctx(api), { enable_sponsorships: true })).rejects.toThrow(
+      "returned no repository echo",
+    );
+  });
+
+  test("neither key declared means zero GraphQL calls", async () => {
+    const api = new MockApi({}).allowMutations("PATCH /repos/o/r");
+    await repositorySection.run(ctx(api), { has_issues: true });
+    expect(api.calls.map((c) => c.method)).toEqual(["PATCH"]);
+  });
+
+  test("both keys are stripped from the base PATCH", async () => {
+    const api = new MockApi({
+      ...features(),
+      ...echo({ hasSponsorshipsEnabled: true, issueCreationPolicy: "ALL" }),
+    }).allowMutations("PATCH /repos/o/r");
+    await repositorySection.run(ctx(api), {
+      description: "d",
+      enable_sponsorships: true,
+      issue_creation_policy: "all",
+    });
+    const patch = api.calls.find((c) => c.method === "PATCH")?.payload as Record<string, unknown>;
+    expect(Object.keys(patch)).toEqual(["description"]);
+  });
+
+  test("check mode reports per-key drift and stays clean when live matches", async () => {
+    const drifted = new MockApi({
+      "GET /repos/o/r": { data: {} },
+      ...features({ hasSponsorshipsEnabled: true }),
+    });
+    const result = await repositorySection.run(ctx(drifted, true), {
+      enable_sponsorships: false,
+      issue_creation_policy: "collaborators_only",
+    });
+    expect(result.drift).toEqual([
+      "repository.enable_sponsorships: declared false != live true; apply will set the declared value",
+      "repository.issue_creation_policy: declared collaborators_only != live all; apply will set the declared value",
+    ]);
+    expect(drifted.mutations()).toEqual([]);
+    const clean = new MockApi({
+      "GET /repos/o/r": { data: {} },
+      ...features({ hasSponsorshipsEnabled: true, issueCreationPolicy: "COLLABORATORS_ONLY" }),
+    });
+    const noDrift = await repositorySection.run(ctx(clean, true), {
+      enable_sponsorships: true,
+      issue_creation_policy: "collaborators_only",
+    });
+    expect(noDrift.drift).toEqual([]);
+  });
+
+  test("a features response without a repository id fails loudly", async () => {
+    const api = new MockApi({ "GRAPHQL RepositoryFeatures": { data: { repository: null } } });
+    await expect(repositorySection.run(ctx(api), { enable_sponsorships: true })).rejects.toThrow(
+      "returned no repository object with an id",
+    );
+  });
+
+  test("an unreadable value on a DECLARED key fails loudly instead of folding to a default", async () => {
+    // A null issueCreationPolicy (the SDL marks the field nullable) or a
+    // non-boolean sponsorship flag must never read as "all"/false - that
+    // could report a clean check against state the section does not
+    // understand.
+    const nullPolicy = new MockApi({
+      "GET /repos/o/r": { data: {} },
+      ...features({ issueCreationPolicy: null }),
+    });
+    await expect(
+      repositorySection.run(ctx(nullPolicy, true), { issue_creation_policy: "all" }),
+    ).rejects.toThrow("GitHub reported no issue creation policy");
+    const unknownEnum = new MockApi({
+      "GET /repos/o/r": { data: {} },
+      ...features({ issueCreationPolicy: "MAINTAINERS_ONLY" }),
+    });
+    await expect(
+      repositorySection.run(ctx(unknownEnum, true), { issue_creation_policy: "all" }),
+    ).rejects.toThrow("MAINTAINERS_ONLY");
+    const stringFlag = new MockApi({
+      "GET /repos/o/r": { data: {} },
+      ...features({ hasSponsorshipsEnabled: "yes" }),
+    });
+    await expect(
+      repositorySection.run(ctx(stringFlag, true), { enable_sponsorships: true }),
+    ).rejects.toThrow("cannot read as a repository.enable_sponsorships value");
+  });
+
+  test("an unreadable value on an UNDECLARED key never fails the run", async () => {
+    // The strictness is scoped to declared keys: a null policy (SDL-nullable)
+    // must not fail a run that only declared the sponsor button.
+    const api = new MockApi({
+      "GET /repos/o/r": { data: {} },
+      ...features({ hasSponsorshipsEnabled: true, issueCreationPolicy: null }),
+    });
+    const result = await repositorySection.run(ctx(api, true), { enable_sponsorships: true });
+    expect(result.drift).toEqual([]);
+    const applied = new MockApi(
+      features({ hasSponsorshipsEnabled: true, issueCreationPolicy: null }),
+    );
+    const converged = await repositorySection.run(ctx(applied), { enable_sponsorships: true });
+    expect(applied.mutations()).toEqual([]);
+    expect(converged.changes).toEqual([]);
+  });
+
+  test("a GraphQL FORBIDDEN on the read surfaces as PermissionDenied", async () => {
+    const api = new MockApi({
+      "GRAPHQL RepositoryFeatures": {
+        error: {
+          status: 403,
+          message: "Resource not accessible",
+          body: "",
+          graphqlTypes: ["FORBIDDEN"],
+        },
+      },
+    });
+    await expect(
+      repositorySection.run(ctx(api), { enable_sponsorships: true }),
+    ).rejects.toBeInstanceOf(PermissionDenied);
+  });
+
+  test("a non-boolean enable_sponsorships is rejected upfront with the YAML hint", () => {
+    const error = validateSectionShapes({ repository: { enable_sponsorships: "yes" } }, "f.yml");
+    expect(error).toContain("repository.enable_sponsorships");
+    expect(error).toContain("not a boolean");
+  });
+
+  test("an unrecognized issue_creation_policy is rejected upfront naming the vocabulary", () => {
+    const error = validateSectionShapes(
+      { repository: { issue_creation_policy: "everyone" } },
+      "f.yml",
+    );
+    expect(error).toContain("repository.issue_creation_policy");
+    expect(error).toContain('"collaborators_only"');
+    expect(
+      validateSectionShapes({ repository: { issue_creation_policy: "all" } }, "f.yml"),
+    ).toBeNull();
+  });
+
+  test("prototype-chain property names never pass the policy vocabulary", () => {
+    // `"constructor" in ISSUE_CREATION_POLICIES` is true via the prototype
+    // chain; the vocabulary check must be an own-property check or these
+    // would validate and then map to garbage at the GraphQL boundary.
+    for (const name of ["constructor", "toString", "__proto__"]) {
+      expect(
+        validateSectionShapes({ repository: { issue_creation_policy: name } }, "f.yml"),
+        `"${name}" must be rejected`,
+      ).toContain("repository.issue_creation_policy");
+    }
+  });
+});

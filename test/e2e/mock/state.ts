@@ -379,6 +379,30 @@ export function stampNodeIds(state: MockState): void {
 }
 
 /**
+ * The repo fields only GraphQL serves, mirroring the real API: the issue
+ * creation policy is live-verified REST-blind in both directions (the repo
+ * PATCH answers 200 and silently ignores such a field, no GET returns one),
+ * and the sponsor button has no REST field at all. They live on state.repo
+ * like every repo field (live_state.repo seeds them, the snapshot layer
+ * sees them), but every REST-served or REST-accepted repo body goes through
+ * restRepoSurface, which strips them - so only the GraphQL handlers can
+ * read or write them.
+ */
+export const GRAPHQL_ONLY_REPO_FIELDS = [
+  "has_sponsorships_enabled",
+  "issue_creation_policy",
+] as const;
+
+/** The REST-visible projection of a repo body (see GRAPHQL_ONLY_REPO_FIELDS). */
+export function restRepoSurface(repo: Json): Json {
+  const view = { ...repo };
+  for (const field of GRAPHQL_ONLY_REPO_FIELDS) {
+    delete view[field];
+  }
+  return view;
+}
+
+/**
  * Deep-merge `overlay` onto `base`, recursing into plain objects and replacing
  * arrays and scalars wholesale. Neither input is mutated. Used for the repo
  * object, where a scenario overrides individual fields but keeps the rest of
@@ -493,7 +517,7 @@ export function completeInvitation(seed: Json, id: number, repo: Json): Json {
           site_admin: false,
           ...((seed.invitee as Json | undefined) ?? {}),
         };
-  return {
+  const completed: Json = {
     node_id: `MDEwOlJlcG9JbnZpdGF0aW9u${invitationId}`,
     // A CLONE, not the live reference: stored invitations must not mirror
     // later repo mutations, or the snapshot layer (snapshotFamilies in
@@ -509,6 +533,10 @@ export function completeInvitation(seed: Json, id: number, repo: Json): Json {
     invitee,
     id: invitationId,
   };
+  // AFTER the seed spread, so a seeded repository object is projected too:
+  // the invitation body is a REST surface like any other.
+  completed.repository = restRepoSurface(completed.repository as Json);
+  return completed;
 }
 
 /**
@@ -796,7 +824,7 @@ export function buildStateForSlug(
  * still minted so any id that leaves the mock decodes.
  */
 function discoveryRepoBody(spec: DiscoveryRepoSpec): Json {
-  const body = clone(repoFixture as Json);
+  const body = restRepoSurface(clone(repoFixture as Json));
   reslugRepo(body, spec.slug);
   body.node_id = mintNodeId("repo", spec.slug, "");
   if (spec.archived !== undefined) {

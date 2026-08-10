@@ -876,9 +876,21 @@
           "description": "Private vulnerability reporting, via PUT/DELETE /repos/{r}/private-vulnerability-reporting. Repositories where the feature does not apply (observed: private repos) read as off.",
           "type": "boolean"
         },
+        "enable_sponsorships": {
+          "description": "Display a Sponsor button on the repository, via the GraphQL updateRepository mutation (hasSponsorshipsEnabled) - GraphQL is the setting's only read and write surface (the REST repo PATCH and GET carry no such field). A stored repository toggle independent of any FUNDING.yml content.",
+          "type": "boolean"
+        },
         "enable_vulnerability_alerts": {
           "description": "Dependabot alerts, via PUT/DELETE /repos/{r}/vulnerability-alerts. On read, 404 means off.",
           "type": "boolean"
+        },
+        "issue_creation_policy": {
+          "description": "Who may create issues: \"all\" (everyone) or \"collaborators_only\", mapped to GitHub's ALL/COLLABORATORS_ONLY GraphQL enum at the API boundary. GraphQL-only upstream (Repository.issueCreationPolicy and the updateRepository mutation): the REST repo PATCH accepts an issue_creation_policy field and silently ignores it, and no REST GET returns it.",
+          "enum": [
+            "all",
+            "collaborators_only"
+          ],
+          "type": "string"
         },
         "topics": {
           "anyOf": [

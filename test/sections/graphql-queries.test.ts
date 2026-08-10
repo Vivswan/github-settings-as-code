@@ -70,7 +70,11 @@ describe("declared GraphQL queries", () => {
   });
 
   test.skipIf(!schemaAvailable)("every query validates against GitHub's published schema", () => {
-    const schema = buildSchema(readFileSync(SCHEMA_PATH, "utf8"));
+    // assumeValid skips graphql-js's SCHEMA-level validation, which rejects
+    // GitHub's published SDL as-is (it deprecates implementation fields, e.g.
+    // Project.id, whose interface fields are not deprecated); each QUERY is
+    // still fully validated against the schema's types below.
+    const schema = buildSchema(readFileSync(SCHEMA_PATH, "utf8"), { assumeValid: true });
     for (const [key, op] of Object.entries(allGraphqlOps())) {
       const errors = validate(schema, parse(op.query));
       expect(

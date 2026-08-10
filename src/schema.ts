@@ -178,6 +178,23 @@ export interface RepositoryConfig {
    * note instead of a change.
    */
   enable_immutable_releases?: boolean;
+  /**
+   * Display a Sponsor button on the repository, via the GraphQL
+   * updateRepository mutation (hasSponsorshipsEnabled) - GraphQL is the
+   * setting's only read and write surface (the REST repo PATCH and GET
+   * carry no such field). A stored repository toggle independent of any
+   * FUNDING.yml content.
+   */
+  enable_sponsorships?: boolean;
+  /**
+   * Who may create issues: "all" (everyone) or "collaborators_only",
+   * mapped to GitHub's ALL/COLLABORATORS_ONLY GraphQL enum at the API
+   * boundary. GraphQL-only upstream (Repository.issueCreationPolicy and
+   * the updateRepository mutation): the REST repo PATCH accepts an
+   * issue_creation_policy field and silently ignores it, and no REST GET
+   * returns it.
+   */
+  issue_creation_policy?: "all" | "collaborators_only";
   /** Everything else passes through to PATCH /repos/{r} verbatim. */
   [key: string]: unknown;
 }

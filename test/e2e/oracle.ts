@@ -8,11 +8,7 @@
  */
 
 import type { SectionKey } from "../../src/schema.js";
-import {
-  endpointKind,
-  endpointMethod,
-  type SectionPermission,
-} from "../../src/sections/contract.js";
+import { type SectionPermission, sectionOperations } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { DENIAL_SEMANTICS } from "./denial-semantics.js";
 import { displayKeyOf, type MultiScenarioMeta, type ScenarioMeta } from "./generators.js";
@@ -29,23 +25,18 @@ const PERMISSION_BY_KEY: Record<SectionKey, SectionPermission> = Object.fromEntr
  * Sections whose every read is write-gated (the EndpointDecl accessGrade
  * override; Codespaces secrets today): a read-only grant cannot even list,
  * so grade "read" collapses to "none". Derived from the same declarations
- * the mock's permission gate reads - REST GETs through endpointKind, GraphQL
- * operations through their explicit kind (a declared "read" op always gates
- * at read; GraphQL has no accessGrade analog, the kind IS the gate) - so
- * mock and oracle cannot disagree. A section with MIXED read grades would
+ * the mock's permission gate reads, through sectionOperations - the
+ * flattened REST + GraphQL view, where a REST GET carries its accessGrade
+ * as `grade` and a GraphQL read is always read-gated (its kind IS the gate) -
+ * so mock and oracle cannot disagree. A section with MIXED read grades would
  * make the section-level collapse wrong; the registry unit test forbids
  * that shape.
  */
 const READS_REQUIRE_WRITE: ReadonlySet<SectionKey> = new Set(
   SECTIONS.filter((section) => {
-    const readGates: Array<"read" | "write"> = [
-      ...Object.values(section.endpoints)
-        .filter((endpoint) => endpointMethod(endpoint.route) === "GET")
-        .map((endpoint) => endpointKind(endpoint)),
-      ...Object.values(section.graphql ?? {})
-        .filter((op) => op.kind === "read")
-        .map(() => "read" as const),
-    ];
+    const readGates = sectionOperations(section)
+      .filter((op) => op.wire === "read")
+      .map((op) => op.grade);
     return readGates.length > 0 && readGates.every((gate) => gate === "write");
   }).map((section) => section.key),
 );
@@ -53,20 +44,22 @@ const READS_REQUIRE_WRITE: ReadonlySet<SectionKey> = new Set(
 const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 
 /**
- * Sections that declare NO read endpoint at all (check_suite_preferences
- * today): check mode issues zero requests for them - the cannot-verify note
- * is not an outcome - so they are ALWAYS clean in check mode no matter what
- * the mask says, and apply-mode preflight has nothing to probe, so the
- * barrier can never arm on them (the denial surfaces mid-apply on the first
- * write instead). Derived from the same ENDPOINTS declarations the mock
- * routes read, so a section gaining a read drops out automatically. Exported
- * for the fuzz unfaultable battery, whose empty-read-derivation guard stays
- * armed for every section outside this set.
+ * Sections that declare NO read at all - REST or GraphQL
+ * (check_suite_preferences today): check mode issues zero requests for them -
+ * the cannot-verify note is not an outcome - so they are ALWAYS clean in
+ * check mode no matter what the mask says, and apply-mode preflight has
+ * nothing to probe, so the barrier can never arm on them (the denial
+ * surfaces mid-apply on the first write instead). Derived through
+ * sectionOperations, the same flattened view the mock routes and the
+ * write-gate collapse read, so a section gaining a read of EITHER kind
+ * drops out automatically. Exported for the fuzz unfaultable battery, whose
+ * empty-read-derivation guard stays armed for every section outside this
+ * set.
  */
 export const NO_READ_SECTIONS: ReadonlySet<SectionKey> = new Set(
-  SECTIONS.filter((section) =>
-    Object.values(section.endpoints).every((endpoint) => endpointMethod(endpoint.route) !== "GET"),
-  ).map((section) => section.key),
+  SECTIONS.filter((section) => sectionOperations(section).every((op) => op.wire === "write")).map(
+    (section) => section.key,
+  ),
 );
 
 /** Map a section's repo resources to the mask keys they use (org is separate). */

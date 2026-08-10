@@ -1,0 +1,24 @@
+# The sponsor button and the issue creation policy live only on GraphQL
+# (live-verified: the REST PATCH silently ignores them and no REST GET
+# returns them): apply reads both plus the repo node id in ONE
+# RepositoryFeatures query, mutates only on divergence, and the convergence
+# rerun reads the stored values back and issues no second mutation. With no
+# passthrough key declared, the base repo PATCH must never fire - the two
+# keys are stripped from it, not forwarded.
+name: repository-toggles-apply-converges
+settings:
+  repository:
+    enable_sponsorships: true
+    issue_creation_policy: collaborators_only
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    repository: applied
+  mutations:
+    - "GRAPHQL UpdateRepositoryFeatures"
+  never:
+    - "PATCH /repos/{repo}"
+  converges: true

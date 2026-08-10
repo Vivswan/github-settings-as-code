@@ -61,6 +61,7 @@ import {
   mintNodeId,
   PROTECTION_RULE_APPS,
   protectionFromPut,
+  restRepoSurface,
   teamRepoFromPut,
 } from "./state.js";
 
@@ -375,10 +376,13 @@ const orgProbeHandler: Handler = ({ state }) => {
 
 const HANDLERS: Record<string, Handler> = {
   // repository -------------------------------------------------------------
-  "repository.get": ({ state }) => ok(state.repo),
+  // Every repo body a REST handler serves - and the PATCH body it accepts -
+  // goes through restRepoSurface, which strips the GraphQL-only fields
+  // (state.ts), so the REST paths stay as blind to them as real GitHub's.
+  "repository.get": ({ state }) => ok(restRepoSurface(state.repo)),
   "repository.update": ({ state, body }) => {
-    Object.assign(state.repo, asObject(body));
-    return ok(state.repo);
+    Object.assign(state.repo, restRepoSurface(asObject(body)));
+    return ok(restRepoSurface(state.repo));
   },
   "repository.topics": ({ state, body }) => {
     const names = asObject(body).names;
@@ -1211,7 +1215,10 @@ const HANDLERS: Record<string, Handler> = {
     // are visible only through this PATCH's echo ({preferences, repository}
     // per the spec's check-suite-preference schema).
     Object.assign(state.check_suite_preferences, asObject(body));
-    return ok({ preferences: state.check_suite_preferences, repository: state.repo });
+    return ok({
+      preferences: state.check_suite_preferences,
+      repository: restRepoSurface(state.repo),
+    });
   },
 
   // collaborators ----------------------------------------------------------
@@ -1289,7 +1296,7 @@ const HANDLERS: Record<string, Handler> = {
     }
     // The repository media type makes this return the repo object with the
     // team's role_name folded in.
-    return ok({ ...state.repo, role_name: access.role_name });
+    return ok({ ...restRepoSurface(state.repo), role_name: access.role_name });
   },
   "teams.grant": ({ state, pathname, body }) => {
     const slug = segmentFromEnd(pathname, 3);
@@ -2247,11 +2254,75 @@ export interface GraphqlHandlerContext {
 type GraphqlHandler = (ctx: GraphqlHandlerContext) => GraphqlHandlerResult;
 
 /**
- * One entry per "section.role" key in allGraphqlOps(), exactly like HANDLERS.
- * Empty until the first GraphQL-backed section lands; the completeness
- * assertion below keeps it in lockstep with the declarations from day one.
+ * The GraphQL-only feature fields as the Repository object serves them. The
+ * state fields carry the GraphQL enum vocabulary (UPPERCASE), and a seeded
+ * value outside it throws instead of folding to a default: the state key
+ * looks like the settings key, so a scenario seeding the lowercase
+ * "collaborators_only" would otherwise silently test against ALL. Absent
+ * fields take the fixture defaults (button off, policy ALL).
  */
-const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {};
+function repoFeatureFields(state: MockState): Json {
+  const sponsorships = state.repo.has_sponsorships_enabled;
+  if (sponsorships !== undefined && typeof sponsorships !== "boolean") {
+    throw new Error(
+      `E2E MOCK: state.repo.has_sponsorships_enabled is ${JSON.stringify(sponsorships)}; seed a boolean`,
+    );
+  }
+  const policy = state.repo.issue_creation_policy;
+  if (policy !== undefined && policy !== "ALL" && policy !== "COLLABORATORS_ONLY") {
+    throw new Error(
+      `E2E MOCK: state.repo.issue_creation_policy is ${JSON.stringify(policy)}; seed "ALL" or "COLLABORATORS_ONLY" (the GraphQL enum vocabulary)`,
+    );
+  }
+  return {
+    hasSponsorshipsEnabled: sponsorships === true,
+    issueCreationPolicy: policy ?? "ALL",
+  };
+}
+
+/**
+ * One entry per "section.role" key in allGraphqlOps(), exactly like HANDLERS.
+ * The completeness assertion below keeps it in lockstep with the declarations.
+ */
+const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
+  // repository ---------------------------------------------------------------
+  // The two GraphQL-only repo settings, stored on state.repo but invisible to
+  // every REST handler (restRepoSurface): the read serves both plus the repo's
+  // minted node id, the mutation resolves its target back through the codec.
+  "repository.featuresQuery": ({ state }) => {
+    const nodeId = state.repo.node_id;
+    if (typeof nodeId !== "string" || nodeId === "") {
+      throw new Error(
+        "E2E MOCK: state.repo.node_id is missing; stampNodeIds must mint it before GraphQL serves the repo",
+      );
+    }
+    return { data: { repository: { id: nodeId, ...repoFeatureFields(state) } } };
+  },
+  "repository.updateFeatures": ({ state, variables }) => {
+    const { repositoryId, hasSponsorshipsEnabled, issueCreationPolicy } = variables as {
+      repositoryId?: unknown;
+      hasSponsorshipsEnabled?: unknown;
+      issueCreationPolicy?: unknown;
+    };
+    // The pipeline already resolved the id to this state's slug; the family
+    // is this handler's own concern - a decodable non-repo id (say an
+    // environment's) would silently update the wrong resource, so it is a
+    // loud mock failure instead.
+    const decoded = decodeNodeId(String(repositoryId ?? ""));
+    if (decoded?.family !== "repo") {
+      throw new Error(
+        `E2E MOCK: UpdateRepositoryFeatures got repositoryId of family "${String(decoded?.family)}", expected a repo node id`,
+      );
+    }
+    if (typeof hasSponsorshipsEnabled === "boolean") {
+      state.repo.has_sponsorships_enabled = hasSponsorshipsEnabled;
+    }
+    if (issueCreationPolicy === "ALL" || issueCreationPolicy === "COLLABORATORS_ONLY") {
+      state.repo.issue_creation_policy = issueCreationPolicy;
+    }
+    return { data: { updateRepository: { repository: repoFeatureFields(state) } } };
+  },
+};
 
 /**
  * assertHandlerCompleteness for the GraphQL table: every allGraphqlOps() key

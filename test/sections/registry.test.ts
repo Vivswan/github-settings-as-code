@@ -6,7 +6,6 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   endpointKind,
-  endpointMethod,
   endpointPath,
   endpointPermission,
   expand,
@@ -18,6 +17,7 @@ import {
   type SectionMeta,
   type SectionPermission,
   sectionGrant,
+  sectionOperations,
   toleratedStatuses,
 } from "../../src/sections/contract.js";
 import {
@@ -109,6 +109,15 @@ describe("registry <-> README", () => {
       expect(
         variants.some((variant) => new RegExp(`\\b${escapeRe(variant)}\\b`).test(cell)),
         `the README Endpoints cell for "${endpoint.section}" never mentions "${needle}" from endpoint ${endpoint.route}`,
+      ).toBe(true);
+    }
+    // GraphQL operations have no path to derive a resource segment from, so
+    // the cell must name each one by its wire operationName instead.
+    for (const op of Object.values(allGraphqlOps())) {
+      const cell = normalize(rows.find((row) => row.key === op.section)?.endpoints ?? "");
+      expect(
+        cell.includes(normalize(op.name)),
+        `the README Endpoints cell for "${op.section}" never mentions the GraphQL operation "${op.name}"`,
       ).toBe(true);
     }
   });
@@ -456,24 +465,21 @@ describe("section endpoints", () => {
     // "none" at SECTION level for sections whose every read is write-gated,
     // so a section mixing write-gated and plain reads would make that
     // collapse wrong - forbid the shape here until the oracle models
-    // per-endpoint grades. The read universe spans BOTH dictionaries: REST
-    // GETs (gated by accessGrade) and GraphQL reads (always read-gated -
-    // their kind IS the gate), so an all-write-gated REST section gaining a
-    // GraphQL read fails here instead of silently desyncing the oracle.
+    // per-endpoint grades. The read universe is sectionOperations, the
+    // flattened REST + GraphQL view the oracle itself derives from: REST
+    // GETs carry their accessGrade as `grade` and GraphQL reads are always
+    // read-gated (their kind IS the gate), so an all-write-gated REST
+    // section gaining a GraphQL read fails here instead of silently
+    // desyncing the oracle.
     const overridden = Object.entries(allEndpoints())
       .filter(([, endpoint]) => endpoint.accessGrade !== undefined)
       .map(([key]) => key)
       .sort();
     expect(overridden).toEqual(["codespaces_secrets.list", "codespaces_secrets.publicKey"]);
     for (const section of SECTIONS) {
-      const readGates = [
-        ...Object.values(section.endpoints)
-          .filter((endpoint) => endpointMethod(endpoint.route) === "GET")
-          .map((endpoint) => endpointKind(endpoint)),
-        ...Object.values(section.graphql ?? {})
-          .filter((op) => op.kind === "read")
-          .map(() => "read" as const),
-      ];
+      const readGates = sectionOperations(section)
+        .filter((operation) => operation.wire === "read")
+        .map((operation) => operation.grade);
       const gated = readGates.filter((gate) => gate === "write");
       expect(
         gated.length === 0 || gated.length === readGates.length,

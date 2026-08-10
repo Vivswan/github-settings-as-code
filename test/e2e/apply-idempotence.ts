@@ -33,7 +33,11 @@
  *   converged repo produces none of the three.
  * - repository (false): the base PATCH, the topics PUT, and each feature
  *   toggle's PUT/DELETE run unconditionally (enable_git_lfs necessarily so:
- *   no read endpoint exists to compare against).
+ *   no read endpoint exists to compare against). The GraphQL-routed pair
+ *   (enable_sponsorships, issue_creation_policy) DOES compare before
+ *   writing - the features read already supplies the mutation's node id, and
+ *   a converged repo skips the mutation - but the unconditional PATCH keeps
+ *   the whole section false (the environments precedent).
  * - rulesets (false): an existing ruleset is PUT unconditionally (the GET +
  *   diff runs only in check mode).
  * - branches (false): declared protection is PUT unconditionally (only the

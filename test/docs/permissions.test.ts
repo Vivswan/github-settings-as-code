@@ -10,10 +10,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  endpointMethod,
   grantFor,
   overrideAdviceLevel,
   type SectionPermission,
+  sectionOperations,
 } from "../../src/sections/contract.js";
 import { allEndpoints, SECTIONS, sectionModule } from "../../src/sections/registry.js";
 import { sectionLines, tableRows } from "./markdown.js";
@@ -100,12 +100,13 @@ describe("write-gated section reads", () => {
   test("both pages name every section whose reads GitHub gates at write, and only those", () => {
     // The accessGrade override on the codespaces GETs is the code-side model
     // (pinned in test/sections/registry.test.ts); the docs sentences must
-    // name exactly the sections whose every GET carries it.
+    // name exactly the sections whose every read - REST or GraphQL, via
+    // sectionOperations - GitHub gates at write.
     const gated = SECTIONS.filter((section) => {
-      const gets = Object.values(section.endpoints).filter(
-        (endpoint) => endpointMethod(endpoint.route) === "GET",
-      );
-      return gets.length > 0 && gets.every((endpoint) => endpoint.accessGrade === "write");
+      const readGrades = sectionOperations(section)
+        .filter((operation) => operation.wire === "read")
+        .map((operation) => operation.grade);
+      return readGrades.length > 0 && readGrades.every((grade) => grade === "write");
     });
     expect(gated.length).toBeGreaterThan(0);
     for (const [label, page] of [
