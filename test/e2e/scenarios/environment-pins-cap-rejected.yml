@@ -8,17 +8,17 @@ settings:
   repository:
     description: should never be written
   environments:
-    - { name: env-01, pinned: true }
-    - { name: env-02, pinned: true }
-    - { name: env-03, pinned: true }
-    - { name: env-04, pinned: true }
-    - { name: env-05, pinned: true }
-    - { name: env-06, pinned: true }
-    - { name: env-07, pinned: true }
-    - { name: env-08, pinned: true }
-    - { name: env-09, pinned: true }
-    - { name: env-10, pinned: true }
-    - { name: env-11, pinned: true }
+    - {name: env-01, pinned: true}
+    - {name: env-02, pinned: true}
+    - {name: env-03, pinned: true}
+    - {name: env-04, pinned: true}
+    - {name: env-05, pinned: true}
+    - {name: env-06, pinned: true}
+    - {name: env-07, pinned: true}
+    - {name: env-08, pinned: true}
+    - {name: env-09, pinned: true}
+    - {name: env-10, pinned: true}
+    - {name: env-11, pinned: true}
 expect:
   exit_code: 1
   result: failed
