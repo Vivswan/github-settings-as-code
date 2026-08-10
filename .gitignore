@@ -14,6 +14,8 @@ test/e2e/graphql/schema.docs.graphql
 # worktrees otherwise abort `biome ci .` as nested roots.
 .claude/
 .worktrees/
+# Review tooling scratch directory.
+.rubber-duck-tmp/
 
 # END REPOSITORY LOCAL
 

@@ -275,7 +275,9 @@ protection to `rulesets`. Differences: applies run visibly in Actions
 nothing except labels/autolinks/collaborators/Actions variables/Copilot
 agents variables - plus,
 WITHIN a declared per-environment key, that environment's variables and
-deployment branch-policy patterns - is ever deleted implicitly.
+deployment branch-policy patterns, and WITHIN a declared
+`pull_request_creation_bypass` key, that list's undeclared logins - is
+ever deleted implicitly.
 
 The step-by-step move, including an org-scale shadow run alongside the
 app, is the [migration guide](docs/start/migrating-from-probot.md).

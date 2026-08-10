@@ -107,7 +107,7 @@ Settings as Code: GitHub Action applying declarative repository settings: rulese
   `test/e2e/openapi/paths.ts`) picks the new path up automatically, so beyond
   the handler a new endpoint needs a corpus scenario that reaches it (the
   coverage tripwire fails on a cold route) and a regenerated trimmed spec (`bun
-  .github/scripts/trim-openapi.ts`, committed).
+  .github/scripts/trim-openapi.ts`; the artifact stays gitignored).
 - Two declarations on each section are single sources the rest of the system
   reads: `permission` (a `SectionPermission`) drives the PAT grant prose
   (`grantFor`), the mock's permission gate, and the fuzz oracle; the `ENDPOINTS`

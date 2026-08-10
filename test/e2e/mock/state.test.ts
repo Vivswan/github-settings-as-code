@@ -23,6 +23,7 @@ import {
   applyRuleInputToLiteral,
   buildState,
   buildStateForSlug,
+  bypassUser,
   collaboratorFromPut,
   completeInvitation,
   completeRule,
@@ -444,6 +445,46 @@ describe("completeInvitation", () => {
     expect(invitation.url).toBe("https://api.github.com/repos/acme/payments/invitations/9");
     expect((invitation.inviter as { login: string }).login).toBe("acme");
     expect((invitation.repository as { full_name: string }).full_name).toBe("acme/payments");
+  });
+});
+
+describe("bypassUser", () => {
+  test("a sparse seed keeps its own fields and gains the simple-user scaffold", () => {
+    const completed = bypassUser({ login: "dave" }, 42) as Record<string, unknown>;
+    expect(completed.id).toBe(42);
+    expect(completed.login).toBe("dave");
+    expect(completed.type).toBe("User");
+    expect(completed.site_admin).toBe(false);
+    expect(completed.node_id).toBe("MDQ6VXNlcj42");
+    expect(completed.url).toBe("https://api.github.com/users/dave");
+    expect(completed.html_url).toBe("https://github.com/dave");
+    expect(completed.avatar_url).toBe("https://avatars.githubusercontent.com/u/42?v=4");
+  });
+
+  test("a seeded id wins over the caller's and drives the derived fields", () => {
+    const completed = bypassUser({ login: "x", id: 5 }, 99) as Record<string, unknown>;
+    expect(completed.id).toBe(5);
+    expect(completed.node_id).toBe("MDQ6VXNlcj5");
+    expect(completed.avatar_url).toBe("https://avatars.githubusercontent.com/u/5?v=4");
+  });
+
+  test("a seed's own scaffold fields win over the defaults", () => {
+    const completed = bypassUser(
+      { login: "bot", type: "Bot", site_admin: true, url: "https://example.test/bot" },
+      7,
+    ) as Record<string, unknown>;
+    expect(completed.type).toBe("Bot");
+    expect(completed.site_admin).toBe(true);
+    expect(completed.url).toBe("https://example.test/bot");
+  });
+
+  test("buildState completes pull_bypass_list seeds to the served shape", () => {
+    const state = buildState({ pull_bypass_list: [{ login: "dave" }] }, "org");
+    const user = state.pull_bypass_list[0] as Record<string, unknown>;
+    expect(user.login).toBe("dave");
+    expect(typeof user.id).toBe("number");
+    expect(user.type).toBe("User");
+    expect(user.url).toBe("https://api.github.com/users/dave");
   });
 });
 

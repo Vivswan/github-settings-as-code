@@ -16,7 +16,12 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildSchema, type OperationDefinitionNode, parse, validate } from "graphql";
+import { buildSchema, type OperationDefinitionNode, parse, validate, visit } from "graphql";
+import {
+  GRAPHQL_BOOLEAN_TWINS,
+  GRAPHQL_REVIEW_TWINS,
+  GRAPHQL_STATUS_CHECK_TWINS,
+} from "../../src/sections/branches.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";
 
 const SCHEMA_PATH = join(import.meta.dir, "..", "e2e", "graphql", "schema.docs.graphql");
@@ -81,6 +86,55 @@ describe("declared GraphQL queries", () => {
         errors.map((error) => `${key}: ${error.message}`),
         `${key}: the query must validate against the schema`,
       ).toEqual([]);
+    }
+  });
+
+  test("the branches rules query selects every translation-table twin", () => {
+    // The twin tables translate classic protection keys into GraphQL rule
+    // fields the engine diffs against the rules query's read-back, so a twin
+    // added to a table but not to RULES_QUERY's selection set would drift
+    // forever (the live field would read as undefined, never converging).
+    const op = allGraphqlOps()["branches.rulesQuery"];
+    if (op === undefined) {
+      throw new Error("the branches section no longer declares rulesQuery; update this test");
+    }
+    // Collect only the fields selected DIRECTLY on the rule nodes (the
+    // branchProtectionRules connection's nodes selection): that is where the
+    // engine reads node[twin], so a twin selected elsewhere in the document
+    // must not satisfy the assertion. Aliases are rejected for the same
+    // reason - an aliased twin reads back under the alias, not the twin name.
+    const selected = new Set<string>();
+    visit(parse(op.query), {
+      Field(node) {
+        if (node.name.value !== "branchProtectionRules") {
+          return;
+        }
+        for (const selection of node.selectionSet?.selections ?? []) {
+          if (selection.kind !== "Field" || selection.name.value !== "nodes") {
+            continue;
+          }
+          for (const field of selection.selectionSet?.selections ?? []) {
+            if (field.kind === "Field") {
+              expect(
+                field.alias,
+                `RULES_QUERY must not alias "${field.name.value}": the engine reads rule fields by their twin name`,
+              ).toBeUndefined();
+              selected.add(field.name.value);
+            }
+          }
+        }
+      },
+    });
+    const twins = [
+      ...Object.values(GRAPHQL_BOOLEAN_TWINS),
+      ...Object.values(GRAPHQL_REVIEW_TWINS),
+      ...Object.values(GRAPHQL_STATUS_CHECK_TWINS),
+    ];
+    for (const twin of twins) {
+      expect(
+        selected.has(twin),
+        `RULES_QUERY must select "${twin}" on the rule nodes: a twin in a translation table but not in the query's selection set can never converge`,
+      ).toBe(true);
     }
   });
 });

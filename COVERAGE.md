@@ -52,11 +52,10 @@ comparison with the Probot Settings app lives in the README, under
 
 ## Repo-scoped gaps (not built yet)
 
-Ordered roughly by value. PRs welcome; most need a new section handler,
-and several rows extend an existing section instead (each row says
-which). The table is EMPTY right now: every previously known gap has
-been implemented (see the Supported table). A new row belongs here the
-moment GitHub ships a repo-scoped setting this action cannot yet apply.
+The table is EMPTY right now: every previously known gap has been
+implemented (see the Supported table). A new row belongs here the
+moment GitHub ships a repo-scoped setting this action cannot yet
+apply; PRs welcome.
 
 | Area | Endpoints | Why it matters |
 |---|---|---|

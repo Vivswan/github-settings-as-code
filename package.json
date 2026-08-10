@@ -5,8 +5,9 @@
   "description": "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more.",
   "type": "module",
   "scripts": {
-    "check": "bun run lint && bun run typecheck && bun run test && bun run build:check",
+    "check": "bun run lint && bun run lint:yaml && bun run typecheck && bun run test && bun run build:check",
     "lint": "bun x biome ci .",
+    "lint:yaml": "if command -v yamllint >/dev/null 2>&1; then git ls-files -z '*.yml' '*.yaml' | xargs -0 yamllint -s; else echo 'lint:yaml: yamllint not installed, skipping (CI enforces it; install with pip install yamllint or brew install yamllint)'; fi",
     "lint:fix": "bun x biome check --write .",
     "typecheck": "bun x tsc -p .",
     "test": "bun test",

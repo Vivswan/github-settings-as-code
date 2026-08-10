@@ -14,7 +14,7 @@ import {
   emptyResult,
   type GraphqlOpDecl,
   probeAbsent,
-  repoNameOf,
+  repoVariables,
   type SectionContext,
   type SectionMeta,
   type SectionModule,
@@ -362,10 +362,7 @@ async function fetchRoutedState(
   section: SectionMeta,
   routed: readonly RoutedKey[],
 ): Promise<LiveRoutedState> {
-  const data = await callGraphql(ctx, section, FEATURES_QUERY, {
-    owner: ctx.owner,
-    repo: repoNameOf(ctx.repo),
-  });
+  const data = await callGraphql(ctx, section, FEATURES_QUERY, repoVariables(ctx));
   const repository = (data as { repository?: Record<string, unknown> }).repository;
   if (!repository || typeof repository.id !== "string") {
     throw new Error(

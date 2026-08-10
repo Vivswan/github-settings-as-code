@@ -565,7 +565,7 @@ export function repoVariables(ctx: Pick<SectionContext, "owner" | "repo">): {
   owner: string;
   repo: string;
 } {
-  return { owner: ctx.owner, repo: ctx.repo.slice(ctx.repo.indexOf("/") + 1) };
+  return { owner: ctx.owner, repo: repoNameOf(ctx.repo) };
 }
 
 /**

@@ -744,9 +744,11 @@ function genInteractionLimits(rng: Rng): Json | null {
   }
   const bypassRng = rng.fork("pulls-bypass");
   if (bypassRng.bool(0.3)) {
-    // Unique under the case-insensitive login key; a draw sometimes
-    // uppercases a declared login so the corpus exercises the
-    // case-insensitive match against the live list.
+    // Unique under the case-insensitive login key. The uppercase draw buys
+    // shape variety only: fuzz live lists originate from declared PUTs, so a
+    // live/declared case mismatch never arises here; the case-insensitive
+    // match is pinned by the curated bypass add-remove scenario and the
+    // section's unit tests.
     const logins = Array.from({ length: bypassRng.int(3) }, (_, i) => {
       const login = `${bypassRng.pick(["octocat", "hubot", "dev"])}-${i}`;
       return bypassRng.bool(0.3) ? login.toUpperCase() : login;

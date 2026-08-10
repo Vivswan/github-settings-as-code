@@ -61,7 +61,8 @@ export function isWildcardPattern(name: string): boolean {
 // A wildcard entry keeps the classic snake_case protection vocabulary; these
 // tables are its EXPLICIT translation to the BranchProtectionRule mutation
 // inputs, verified field for field against GitHub's published schema by
-// test/sections/graphql-queries.test.ts (the query below selects every twin).
+// test/sections/graphql-queries.test.ts, whose twin-superset test asserts
+// the rules query below selects every twin.
 // The e2e mock imports them to project stored REST state into GraphQL rule
 // nodes, so the two views cannot drift.
 

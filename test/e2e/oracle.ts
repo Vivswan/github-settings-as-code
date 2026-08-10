@@ -44,7 +44,6 @@ const READS_REQUIRE_WRITE: ReadonlySet<SectionKey> = new Set(
 const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 
 /**
-/**
  * Sections that declare NO read at all - REST or GraphQL
  * (check_suite_preferences today): check mode issues zero requests for them -
  * the cannot-verify note is not an outcome - so they are ALWAYS clean in

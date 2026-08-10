@@ -1475,6 +1475,46 @@ describe("handler statuses obey the realism rule", () => {
       ["milestones.create", "POST", `/repos/${OWNER}/${REPO}/milestones`, { title: "v2" }],
       ["milestones.update", "PATCH", `/repos/${OWNER}/${REPO}/milestones/1`, { state: "closed" }],
       ["milestones.update", "PATCH", `/repos/${OWNER}/${REPO}/milestones/999`, { state: "x" }], // 404
+      // interaction limits: the base-limit trio (get empty, put, remove), the
+      // creation cap (get, patch), and the bypass list (list, add, remove);
+      // the 409 org-override and 405 cap-unavailable branches are flag-gated
+      // and exercised by their own server below.
+      ["interaction_limits.get", "GET", `/repos/${OWNER}/${REPO}/interaction-limits`],
+      [
+        "interaction_limits.put",
+        "PUT",
+        `/repos/${OWNER}/${REPO}/interaction-limits`,
+        { limit: "collaborators_only" },
+      ],
+      ["interaction_limits.remove", "DELETE", `/repos/${OWNER}/${REPO}/interaction-limits`],
+      [
+        "interaction_limits.capGet",
+        "GET",
+        `/repos/${OWNER}/${REPO}/interaction-limits/pulls/creation-cap`,
+      ],
+      [
+        "interaction_limits.capPatch",
+        "PATCH",
+        `/repos/${OWNER}/${REPO}/interaction-limits/pulls/creation-cap`,
+        { enabled: true, max_open_pull_requests: 5 },
+      ],
+      [
+        "interaction_limits.bypassList",
+        "GET",
+        `/repos/${OWNER}/${REPO}/interaction-limits/pulls/bypass-list`,
+      ],
+      [
+        "interaction_limits.bypassAdd",
+        "PUT",
+        `/repos/${OWNER}/${REPO}/interaction-limits/pulls/bypass-list`,
+        { users: ["dave"] },
+      ],
+      [
+        "interaction_limits.bypassRemove",
+        "DELETE",
+        `/repos/${OWNER}/${REPO}/interaction-limits/pulls/bypass-list`,
+        { users: ["dave"] },
+      ],
     ];
     for (const [key, method, path, body] of cases) {
       const res = await call(h, method, path, body === undefined ? {} : { body });
@@ -1539,6 +1579,53 @@ describe("handler statuses obey the realism rule", () => {
     });
     expect(res.status).toBe(422);
     expect(statusAllowed("pages.create", res.status)).toBe(true);
+  });
+
+  test("org-overridden interaction limits and an unavailable cap answer their declared statuses", async () => {
+    // The flag-gated branches: the base-limit writes answer the declared 409
+    // under an org override, and both creation-cap endpoints answer the
+    // declared 405 where the cap is unavailable.
+    const h = await start(
+      scenario({
+        live_state: {
+          interaction_limits_org_override: true,
+          pull_creation_cap_unavailable: true,
+        },
+      }),
+    );
+    const flagged: Array<[string, string, string, number, unknown?]> = [
+      [
+        "interaction_limits.put",
+        "PUT",
+        `/repos/${OWNER}/${REPO}/interaction-limits`,
+        409,
+        { limit: "existing_users" },
+      ],
+      ["interaction_limits.remove", "DELETE", `/repos/${OWNER}/${REPO}/interaction-limits`, 409],
+      [
+        "interaction_limits.capGet",
+        "GET",
+        `/repos/${OWNER}/${REPO}/interaction-limits/pulls/creation-cap`,
+        405,
+      ],
+      [
+        "interaction_limits.capPatch",
+        "PATCH",
+        `/repos/${OWNER}/${REPO}/interaction-limits/pulls/creation-cap`,
+        405,
+        { enabled: true },
+      ],
+    ];
+    for (const [key, method, path, status, body] of flagged) {
+      const res = await call(h, method, path, body === undefined ? {} : { body });
+      expect(res.status).toBe(status);
+      // Stronger than statusAllowed (any >= 400 passes there): these statuses
+      // must stay DECLARED on the section's endpoints.
+      expect(
+        declaredStatuses(key).has(res.status),
+        `handler ${key} must answer a status its endpoint declares`,
+      ).toBe(true);
+    }
   });
 });
 
