@@ -598,6 +598,10 @@
           "description": "The environment name, the natural key.",
           "type": "string"
         },
+        "pinned": {
+          "description": "Pin this environment on the repository home page's deployments sidebar (GraphQL-only; the REST environment PUT carries no pin field). Pin ORDER is the declaration order of the entries with `pinned: true` - together they must LEAD the repository's pinned list in that order, compared by rank (GitHub's live position numbers may carry holes after an unpin and are never read literally). `pinned: false` unpins; an entry without the key leaves its pin state untouched. Live pins on environments the settings file does not declare are never unpinned; when they sit among the declared ranks, apply moves them after the declared pins (surfaced as a note). GitHub allows at most 10 pinned environments, so more than 10 `pinned: true` entries are rejected upfront.",
+          "type": "boolean"
+        },
         "prevent_self_review": {
           "description": "Whether the deployer may approve their own deployment.",
           "type": "boolean"

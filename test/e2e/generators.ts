@@ -20,7 +20,7 @@ import {
   UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
 import { endpointMethod, undeclaredPolicy } from "../../src/sections/contract.js";
-import { allEndpoints, SECTIONS } from "../../src/sections/registry.js";
+import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { DEFAULT_ROLE, roleForPermission } from "../../src/sections/roles.js";
 import { ADMIN_SLUG } from "./constants.js";
 import type { LiveState } from "./mock/state.js";
@@ -272,6 +272,8 @@ function genEnvironments(rng: Rng): Json[] {
   const policiesRng = rng.fork("branch-policies");
   // Protection-rule draws, newer again, fork the same way.
   const rulesRng = rng.fork("protection-rules");
+  // Pin draws are the newest, again on their own forked stream.
+  const pinnedRng = rng.fork("pinned");
   return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const env: Json = { name: `${rng.pick(["staging", "prod", "qa"])}-${i}` };
     if (rng.bool()) {
@@ -333,6 +335,15 @@ function genEnvironments(rng: Rng): Json[] {
       const count = rulesRng.int(slugs.length) + 1;
       const entries: Json[] = slugs.slice(0, count).map((slug) => ({ app: slug }));
       env.deployment_protection_rules = rulesRng.bool(0.25) ? { entries } : entries;
+    }
+    if (pinnedRng.bool(0.25)) {
+      // A small subset declares a pin state, gating the GraphQL pins read
+      // onto those iterations. The entry count stays tiny (<= 3), so the
+      // declared pinned: true count can never approach GitHub's 10 cap;
+      // pinned: false over the empty pins baseline is a no-op unpin, which
+      // exercises the read without a mutation. The interleaving and cap
+      // paths are pinned by curated scenarios.
+      env.pinned = pinnedRng.bool(0.7);
     }
     return env;
   });
@@ -1635,7 +1646,8 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
  * environments, code_scanning_default_setup, and code_quality_setup read
  * only under check (apply
  * writes unconditionally; environments' variables list additionally fires
- * only when an entry declares the nested key), branches/actions/
+ * only when an entry declares the nested key, and its GraphQL pins read
+ * only when an entry declares pinned), branches/actions/
  * interaction_limits gate their reads on the
  * declared keys (interaction_limits' base read is also check-mode-only; its
  * cap and bypass reads fire only when those keys are declared), and
@@ -1727,7 +1739,8 @@ export const UNFAULTABLE_APPLY_SETTINGS: {
   branches: [{ name: "main", protection: { enforce_admins: true, required_signatures: true } }],
   // The environment probe and every nested list read run only in check mode
   // or when an entry declares a nested key (variables/secrets/policies/
-  // protection rules), so those stay deliberately undeclared.
+  // protection rules), and the GraphQL pins read only when an entry declares
+  // pinned - so those all stay deliberately undeclared.
   environments: [{ name: "prod", wait_timer: 30 }],
   // Every endpoint group PUTs unconditionally in apply mode and its GET runs
   // only under check, so every group with a GET is declared.
@@ -1778,16 +1791,23 @@ export const UNFAULTABLE_APPLY_SETTINGS: {
 };
 
 /**
- * Every GET endpoint of a section as "section.role" fault keys, derived from
- * the registry's ENDPOINTS declarations - the same single source the mock
- * routes and USED_PATHS derive from - so the battery cannot arm a stale
- * hand-copied key while the section reads somewhere else.
+ * Every read of a section as "section.role" fault keys - the REST GET
+ * endpoints AND the GraphQL read operations - derived from the registry's
+ * declarations, the same single source the mock routes and USED_PATHS derive
+ * from, so the battery cannot arm a stale hand-copied key while the section
+ * reads somewhere else. environments' key-gated pins read is what the
+ * GraphQL leg exists for: the battery proves it stays cold in a pin-free
+ * apply.
  */
 export function unfaultableReadKeys(section: UnfaultableSection): string[] {
-  return Object.entries(allEndpoints())
-    .filter(([key, ep]) => key.startsWith(`${section}.`) && endpointMethod(ep.route) === "GET")
-    .map(([key]) => key)
-    .sort();
+  return [
+    ...Object.entries(allEndpoints())
+      .filter(([key, ep]) => key.startsWith(`${section}.`) && endpointMethod(ep.route) === "GET")
+      .map(([key]) => key),
+    ...Object.entries(allGraphqlOps())
+      .filter(([key, op]) => key.startsWith(`${section}.`) && op.kind === "read")
+      .map(([key]) => key),
+  ].sort();
 }
 
 let validator: ValidateFunction | undefined;

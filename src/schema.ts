@@ -278,8 +278,36 @@ export interface BranchConfig {
   protection: BranchProtectionConfig | null;
 }
 
+/**
+ * The per-environment keys ROUTED to their own API operations instead of the
+ * environment PUT body - each is a scalar the PUT does not accept, applied
+ * through a dedicated call after the PUT. This interface is where routed-ness
+ * is DECLARED: environments.ts pins its ROUTED_SCALAR_KEYS strip list to
+ * these keys in both directions (the NESTED_KEYS lockstep pattern), so a key
+ * added here without strip handling - or stripped without being declared
+ * here - fails to compile. A routed scalar belongs here, never directly on
+ * EnvironmentConfig, or it would ride the passthrough PUT verbatim and
+ * configure nothing.
+ */
+export interface EnvironmentRoutedScalars {
+  /**
+   * Pin this environment on the repository home page's deployments sidebar
+   * (GraphQL-only; the REST environment PUT carries no pin field). Pin ORDER
+   * is the declaration order of the entries with `pinned: true` - together
+   * they must LEAD the repository's pinned list in that order, compared by
+   * rank (GitHub's live position numbers may carry holes after an unpin and
+   * are never read literally). `pinned: false` unpins; an entry without the
+   * key leaves its pin state untouched. Live pins on environments the
+   * settings file does not declare are never unpinned; when they sit among
+   * the declared ranks, apply moves them after the declared pins (surfaced
+   * as a note). GitHub allows at most 10 pinned environments, so more than
+   * 10 `pinned: true` entries are rejected upfront.
+   */
+  pinned?: boolean;
+}
+
 /** One deployment environment, matched by name. */
-export interface EnvironmentConfig {
+export interface EnvironmentConfig extends EnvironmentRoutedScalars {
   /** The environment name, the natural key. */
   name: string;
   /** Minutes to wait before deployments proceed. */

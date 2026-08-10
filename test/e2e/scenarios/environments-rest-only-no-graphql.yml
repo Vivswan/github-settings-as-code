@@ -1,0 +1,33 @@
+# The pins read is KEY-GATED: an environments section without any `pinned`
+# key stays entirely on REST, even with live pins present - the section
+# never enumerates or touches pins nobody declared, so zero /graphql
+# requests leave the client (the "never GRAPHQL" prefix matches every
+# GraphQL operation the log could render). The live legacy pin survives the
+# apply untouched, proven by the converging check rerun.
+name: environments-rest-only-no-graphql
+settings:
+  environments:
+    - name: production
+      wait_timer: 30
+      variables:
+        - name: DEPLOY_REGION
+          value: eu-west-1
+live_state:
+  environments:
+    legacy:
+      name: legacy
+      protection_rules: []
+  pinned_environments: [legacy]
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+    - "POST /repos/{repo}/environments/production/variables"
+  never:
+    - "GRAPHQL"
+  converges: true

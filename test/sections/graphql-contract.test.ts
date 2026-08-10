@@ -336,12 +336,61 @@ describe("listGraphqlConnection", () => {
 
   test("walks the cursor until hasNextPage is false, passing null first", async () => {
     const api = pagedApi([page(["a", "b"], "CUR1", true), page(["c"], null, false)]);
-    const items = await listGraphqlConnection(ctx(api), section, pagedOp, {
+    const listed = await listGraphqlConnection(ctx(api), section, pagedOp, {
       owner: "o",
       repo: "r",
     });
-    expect(items).toEqual([{ id: "a" }, { id: "b" }, { id: "c" }]);
+    expect(listed).toEqual({ items: [{ id: "a" }, { id: "b" }, { id: "c" }] });
     expect(api.calls.map((c) => (c.payload as { cursor: unknown }).cursor)).toEqual([null, "CUR1"]);
+  });
+
+  test("a declared error outcome comes back as { error } instead of throwing", async () => {
+    // The probeAbsent posture over a connection: an operation declaring
+    // NOT_FOUND (the environments pins read) has a fine-grained denial come
+    // back as a value its caller reads as "resource absent".
+    const tolerantPaged = {
+      ...pagedOp,
+      outcomes: { ok: "the rules", NOT_FOUND: "denied reads as absent" },
+    };
+    const api = new MockApi({
+      "GRAPHQL RepoRules": {
+        error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
+      },
+    });
+    const listed = await listGraphqlConnection(ctx(api), section, tolerantPaged, {
+      owner: "o",
+      repo: "r",
+    });
+    expect("error" in listed && listed.error.status).toBe(404);
+  });
+
+  test("a tolerated type arriving MID-walk still classifies as an error", async () => {
+    // Absence describes the whole resource: a NOT_FOUND after a successful
+    // first page means the connection vanished under the loop, and reading
+    // it as "absent" would silently discard the collected pages.
+    const tolerantPaged = {
+      ...pagedOp,
+      outcomes: { ok: "the rules", NOT_FOUND: "denied reads as absent" },
+    };
+    let call = 0;
+    const api = new MockApi({});
+    api.tryGraphql = async (op, variables) => {
+      api.calls.push({
+        method: "GRAPHQL",
+        path: op.name,
+        payload: variables,
+        graphqlKind: op.kind,
+      });
+      if (call++ === 0) {
+        return { data: page(["a"], "CUR1", true) as Record<string, unknown> };
+      }
+      return {
+        error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
+      };
+    };
+    await expect(
+      listGraphqlConnection(ctx(api), section, tolerantPaged, { owner: "o", repo: "r" }),
+    ).rejects.toThrow(PermissionDenied);
   });
 
   test("a query without $cursor is a BUG throw", async () => {

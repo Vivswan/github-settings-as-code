@@ -70,6 +70,15 @@ export interface LiveState {
    * PROTECTION_RULE_APPS so the available-Apps listing agrees with them.
    */
   environment_protection_rules?: Record<string, Json[]>;
+  /**
+   * The repository's pinned environments, served by the EnvironmentPins
+   * GraphQL connection and mutated by the pin/reorder mutations. A plain
+   * string is sugar for the next contiguous position; the object form seeds
+   * an explicit (possibly HOLE-Y) position, mirroring live GitHub, where
+   * unpinning does not renumber. Seeded names should name environments that
+   * exist in `environments` (a pin's target is always a real environment).
+   */
+  pinned_environments?: Array<string | { name: string; position: number }>;
   /** Autolinks, replaces the baseline. */
   autolinks?: Json[];
   /** GET /actions/permissions body. */
@@ -233,6 +242,20 @@ export interface MockState {
   environment_branch_policies: Record<string, Json[]>;
   /** Per-environment enabled custom deployment protection rules, keyed by environment name. */
   environment_protection_rules: Record<string, Json[]>;
+  /**
+   * The pinned environments with their live position numbers, kept in rank
+   * order. Positions mirror verified GitHub behavior: a new pin appends at
+   * _pinned_position_counter + 1 (monotonic), an unpin leaves a HOLE (no
+   * renumbering), and only the reorder mutation renormalizes to contiguous
+   * 1..N.
+   */
+  pinned_environments: Array<{ name: string; position: number }>;
+  /**
+   * The monotonic position source for new pins (starts at the seeded
+   * maximum). Underscore prefix: mock bookkeeping, excluded from the
+   * idempotence snapshot (see snapshotFamilies in runner.ts).
+   */
+  _pinned_position_counter: number;
   autolinks: Json[];
   actions_permissions: Json;
   selected_actions: Json;
@@ -315,6 +338,27 @@ export interface MockState {
   _secret_scanning_version_counter: number;
   /** Next id handed to a created resource (label, ruleset, autolink, ...). */
   nextId: number;
+}
+
+/**
+ * Normalize a pinned-environments seed into rank-ordered {name, position}
+ * entries: a plain string takes the next contiguous position after the
+ * largest seen so far, an object keeps its explicit (possibly hole-y)
+ * position. Exported for the state test.
+ */
+export function normalizePinnedSeed(
+  seed: ReadonlyArray<string | { name: string; position: number }>,
+): Array<{ name: string; position: number }> {
+  let max = 0;
+  const pins = seed.map((entry) => {
+    if (typeof entry === "string") {
+      max += 1;
+      return { name: entry, position: max };
+    }
+    max = Math.max(max, entry.position);
+    return { name: entry.name, position: entry.position };
+  });
+  return pins.sort((a, b) => a.position - b.position);
 }
 
 /** True for a plain (non-array, non-null) object we can deep-merge into. */
@@ -630,6 +674,8 @@ export function buildState(
     reslugRepo(repo, slug);
   }
 
+  const pinnedSeed = normalizePinnedSeed(ls.pinned_environments ?? []);
+
   const state: MockState = {
     ownerKind,
     org: ownerKind === "user" ? null : clone(orgFixture as Json),
@@ -646,6 +692,8 @@ export function buildState(
     environment_protection_rules: ls.environment_protection_rules
       ? clone(ls.environment_protection_rules)
       : {},
+    pinned_environments: pinnedSeed,
+    _pinned_position_counter: Math.max(0, ...pinnedSeed.map((pin) => pin.position)),
     autolinks: ls.autolinks ? clone(ls.autolinks) : [],
     actions_permissions: ls.actions_permissions ? clone(ls.actions_permissions) : {},
     selected_actions: ls.selected_actions ? clone(ls.selected_actions) : {},

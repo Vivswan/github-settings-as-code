@@ -1,0 +1,29 @@
+# Ten live pins with no pinned declaration (which the section never unpins)
+# already fill GitHub's cap, so pinning the one declared environment would
+# overflow it. The overflow gate fires AFTER the pins read and BEFORE any pin
+# mutation - the environment PUT has landed (the section's ordinary flow),
+# but no GraphQL write is ever issued, so the pinned list is never
+# half-applied. The error names the cap and the way to make room.
+name: environment-pins-cap-live-blocked
+settings:
+  environments:
+    - name: prod
+      pinned: true
+live_state:
+  pinned_environments: [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10]
+token_permissions:
+  environments: write
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    environments: failed
+  mutations:
+    - "PUT /repos/{repo}/environments/prod"
+  requests_contain:
+    - "GRAPHQL EnvironmentPins"
+  never:
+    - "GRAPHQL PinEnvironment"
+    - "GRAPHQL ReorderEnvironment"
+  stdout_contains:
+    - "would leave 11 environments pinned, but GitHub allows at most 10"

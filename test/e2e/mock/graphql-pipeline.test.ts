@@ -1,18 +1,22 @@
 /**
- * The mock's GraphQL pipeline, tested at two levels:
+ * The mock's GraphQL pipeline, tested at three levels:
  *   - through the wire (startMockServer + fetch) for the parts that need no
  *     declared operation: the POST-only rule, the body-shape rule, and the
- *     unknown-operationName violation (no section declares GraphQL ops yet,
- *     so every name is unknown at the wire);
+ *     unknown-operationName violation (the fixture names below are declared
+ *     by no section, so they stay unknown at the wire);
  *   - through handleGraphqlRequest with FIXTURE operation/handler tables (the
  *     same injectable-dictionary idiom as assertHandlerCompleteness) for
  *     dispatch, the check-mode barrier, the permission gate and denial
  *     barrier, slug resolution from variables and node ids, the
- *     declared-outcomes response guard, and the fault/corruption hooks.
+ *     declared-outcomes response guard, and the fault/corruption hooks;
+ *   - through the PRODUCTION tables for the pinned-environments position
+ *     semantics the mock must model exactly (verified live behavior: tail
+ *     appends via a monotonic counter, holes on unpin, renormalization only
+ *     on reorder).
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import type { TaggedGraphqlOp } from "../../../src/sections/registry.js";
+import { allGraphqlOps, type TaggedGraphqlOp } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG, ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
 import { parseScenario, type Scenario } from "../schema.js";
 import {
@@ -438,7 +442,77 @@ describe("assertGraphqlHandlerCompleteness", () => {
     );
   });
 
-  test("the live tables (both empty of GraphQL today) are in lockstep", () => {
+  test("the live tables are in lockstep", () => {
     expect(() => assertGraphqlHandlerCompleteness()).not.toThrow();
+  });
+});
+
+describe("pinned-environments position semantics (production tables)", () => {
+  // The DEFAULT ops/handlers serve these dispatches, so what is pinned here
+  // is the real mock's model of the verified live behavior: a new pin
+  // appends at a monotonic counter, an unpin leaves a hole, and only the
+  // reorder mutation renormalizes the numbering.
+  const pinOp = allGraphqlOps()["environments.pin"] as TaggedGraphqlOp;
+  const reorderOp = allGraphqlOps()["environments.reorder"] as TaggedGraphqlOp;
+
+  function pinnedSetup(pinned: string[]) {
+    const s = scenario({
+      live_state: {
+        environments: Object.fromEntries(
+          ["a", "b", "c", "d"].map((name) => [name, { name, protection_rules: [] }]),
+        ),
+        pinned_environments: pinned,
+      },
+    });
+    const state = buildState(s.live_state, s.owner_kind);
+    const opts = options(s, { working: { mode: "single", state } });
+    const positions = () => state.pinned_environments.map((pin) => [pin.name, pin.position]);
+    return { opts, positions };
+  }
+
+  function send(op: TaggedGraphqlOp, variables: Json, opts: PipelineOptions) {
+    const body = gqlBody(op, variables);
+    return handleGraphqlRequest({ method: "POST", body }, opts, baseLog(body));
+  }
+
+  function envId(name: string): string {
+    return mintNodeId("environment", ADMIN_SLUG, name);
+  }
+
+  test("unpin leaves a hole; a re-pin appends via the counter, never refilling it", () => {
+    const { opts, positions } = pinnedSetup(["a", "b", "c"]);
+    const unpin = send(pinOp, { environmentId: envId("b"), pinned: false }, opts);
+    expect(unpin.violation).toBeUndefined();
+    expect(positions()).toEqual([
+      ["a", 1],
+      ["c", 3],
+    ]);
+    const repin = send(pinOp, { environmentId: envId("b"), pinned: true }, opts);
+    expect(repin.violation).toBeUndefined();
+    expect(positions()).toEqual([
+      ["a", 1],
+      ["c", 3],
+      ["b", 4],
+    ]);
+  });
+
+  test("reorder renormalizes the WHOLE list; the next pin appends after it", () => {
+    const { opts, positions } = pinnedSetup(["a", "b", "c"]);
+    send(pinOp, { environmentId: envId("b"), pinned: false }, opts);
+    send(pinOp, { environmentId: envId("b"), pinned: true }, opts); // holes: a=1, c=3, b=4
+    const reorder = send(reorderOp, { environmentId: envId("b"), position: 1 }, opts);
+    expect(reorder.violation).toBeUndefined();
+    expect(positions()).toEqual([
+      ["b", 1],
+      ["a", 2],
+      ["c", 3],
+    ]);
+    send(pinOp, { environmentId: envId("d"), pinned: true }, opts);
+    expect(positions()).toEqual([
+      ["b", 1],
+      ["a", 2],
+      ["c", 3],
+      ["d", 4],
+    ]);
   });
 });

@@ -23,6 +23,7 @@ import {
   environmentFromPut,
   invitationFromPut,
   mintNodeId,
+  normalizePinnedSeed,
   protectionFromPut,
   teamRepoFromPut,
 } from "./state.js";
@@ -345,5 +346,45 @@ describe("mock node ids", () => {
       slug: "acme/private",
       key: "prod",
     });
+  });
+});
+
+describe("normalizePinnedSeed", () => {
+  test("strings take contiguous positions; explicit entries keep their holes", () => {
+    expect(normalizePinnedSeed(["a", "b"])).toEqual([
+      { name: "a", position: 1 },
+      { name: "b", position: 2 },
+    ]);
+    // Explicit hole-y positions survive verbatim and come back rank-sorted,
+    // so a scenario can seed the layouts live GitHub produces after unpins.
+    expect(
+      normalizePinnedSeed([
+        { name: "b", position: 5 },
+        { name: "a", position: 2 },
+      ]),
+    ).toEqual([
+      { name: "a", position: 2 },
+      { name: "b", position: 5 },
+    ]);
+    // A string after an explicit entry continues past the largest position.
+    expect(normalizePinnedSeed([{ name: "a", position: 3 }, "b"])).toEqual([
+      { name: "a", position: 3 },
+      { name: "b", position: 4 },
+    ]);
+  });
+
+  test("buildState seeds the monotonic counter at the largest seeded position", () => {
+    const state = buildState(
+      {
+        pinned_environments: [
+          { name: "a", position: 2 },
+          { name: "b", position: 5 },
+        ],
+      },
+      "org",
+    );
+    expect(state._pinned_position_counter).toBe(5);
+    // An empty seed leaves the counter at zero, so the first pin takes 1.
+    expect(buildState(undefined, "org")._pinned_position_counter).toBe(0);
   });
 });

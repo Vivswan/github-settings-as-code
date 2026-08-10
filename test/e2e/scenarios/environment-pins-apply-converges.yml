@@ -1,0 +1,50 @@
+# Apply reconciles the declared pin states AFTER every environment PUT, with
+# the node ids captured from the PUT bodies: sandbox declares pinned: false
+# and is live-pinned, so it is unpinned FIRST (unpin-before-pin keeps the
+# count under GitHub's cap even through a swap); api declares pinned: true
+# and is not pinned, so it is pinned (landing at the tail); the declared pin
+# order is the file order (api first, web second), so api is then moved to
+# position 1 with a single leftward reorder while web (already correct after
+# the shifts) needs none. A check rerun reads the pins connection back and
+# sees positions 1..2 exactly as declared, so it converges. Warms the
+# EnvironmentPins, PinEnvironment, and ReorderEnvironment routes for the
+# coverage tripwire.
+name: environment-pins-apply-converges
+settings:
+  environments:
+    - name: api
+      pinned: true
+    - name: web
+      pinned: true
+    - name: sandbox
+      pinned: false
+live_state:
+  environments:
+    web:
+      name: web
+      protection_rules: []
+    sandbox:
+      name: sandbox
+      protection_rules: []
+  pinned_environments: [sandbox, web]
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  mutations:
+    - "PUT /repos/{repo}/environments/api"
+    - "PUT /repos/{repo}/environments/web"
+    - "PUT /repos/{repo}/environments/sandbox"
+    - "GRAPHQL PinEnvironment"
+    - "GRAPHQL PinEnvironment"
+    - "GRAPHQL ReorderEnvironment"
+  requests_contain:
+    - "GRAPHQL EnvironmentPins"
+  stdout_contains:
+    - 'unpinned environment "sandbox"'
+    - 'pinned environment "api"'
+    - 'moved pinned environment "api" to position 1'
+  converges: true

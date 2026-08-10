@@ -31,6 +31,7 @@ import {
   toleratedGraphqlErrors,
   toleratedStatuses,
 } from "../../../src/sections/contract.js";
+import { MAX_PINNED_ENVIRONMENTS } from "../../../src/sections/environments.js";
 import {
   allEndpoints,
   allGraphqlOps,
@@ -2281,8 +2282,38 @@ function repoFeatureFields(state: MockState): Json {
 }
 
 /**
+ * Resolve a pin mutation's target environment from its $environmentId. The
+ * pipeline already proved the id decodes and names this repository; what is
+ * checked here is the FAMILY and the environment's existence. The section
+ * only mutates pins of environments it just PUT, so a non-environment id or
+ * a missing environment is a section bug - answered with NOT_FOUND, which
+ * neither mutation declares as an outcome, so the response guard turns it
+ * into a loud violation instead of a silently tolerated error.
+ */
+function pinTargetName(
+  state: MockState,
+  variables: Json,
+): { name: string } | { errors: GraphqlErrorReply[] } {
+  const decoded = decodeNodeId(String(variables.environmentId ?? ""));
+  if (decoded?.family !== "environment" || !state.environments[decoded.key]) {
+    return {
+      errors: [
+        {
+          type: "NOT_FOUND",
+          message: "Could not resolve to an Environment node with the given id",
+        },
+      ],
+    };
+  }
+  return { name: decoded.key };
+}
+
+/**
  * One entry per "section.role" key in allGraphqlOps(), exactly like HANDLERS.
  * The completeness assertion below keeps it in lockstep with the declarations.
+ * The pin family models VERIFIED live GitHub position semantics: a new pin
+ * appends at a monotonic counter, unpinning leaves a hole (no renumbering),
+ * and only the reorder mutation renormalizes the list to contiguous 1..N.
  */
 const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
   // repository ---------------------------------------------------------------
@@ -2321,6 +2352,95 @@ const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
       state.repo.issue_creation_policy = issueCreationPolicy;
     }
     return { data: { updateRepository: { repository: repoFeatureFields(state) } } };
+  },
+  // environments (pinned) ----------------------------------------------------
+  "environments.pins": ({ state }) => ({
+    data: {
+      repository: {
+        pinnedEnvironments: {
+          nodes: state.pinned_environments.map((pin) => ({
+            position: pin.position,
+            environment: { name: pin.name },
+          })),
+          // Whole list in one page: GitHub caps pins at
+          // MAX_PINNED_ENVIRONMENTS, far under the query's page size.
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    },
+  }),
+  "environments.pin": ({ state, variables }) => {
+    const target = pinTargetName(state, variables);
+    if ("errors" in target) {
+      return target;
+    }
+    const list = state.pinned_environments;
+    const index = list.findIndex((pin) => pin.name === target.name);
+    if (variables.pinned === true) {
+      if (index < 0) {
+        if (list.length >= MAX_PINNED_ENVIRONMENTS) {
+          // The DECLARED outcome type, mirroring GitHub's cap rejection, so
+          // the section's full-list error path is reachable on contract.
+          return {
+            errors: [
+              {
+                type: "UNPROCESSABLE",
+                message: `Repositories may only have ${MAX_PINNED_ENVIRONMENTS} pinned environments`,
+              },
+            ],
+          };
+        }
+        // Append at the tail via the monotonic counter (verified live
+        // behavior); an earlier unpin's hole is never refilled.
+        state._pinned_position_counter += 1;
+        list.push({ name: target.name, position: state._pinned_position_counter });
+      }
+      return { data: { pinEnvironment: { environment: { name: target.name, isPinned: true } } } };
+    }
+    if (index >= 0) {
+      // Remove WITHOUT renumbering: the positions of the remaining pins keep
+      // their values, leaving a hole (verified live behavior).
+      list.splice(index, 1);
+    }
+    return { data: { pinEnvironment: { environment: { name: target.name, isPinned: false } } } };
+  },
+  "environments.reorder": ({ state, variables }) => {
+    const target = pinTargetName(state, variables);
+    if ("errors" in target) {
+      return target;
+    }
+    const list = state.pinned_environments;
+    const index = list.findIndex((pin) => pin.name === target.name);
+    const position = variables.position;
+    if (
+      index < 0 ||
+      typeof position !== "number" ||
+      !Number.isInteger(position) ||
+      position < 1 ||
+      position > list.length
+    ) {
+      // The section only reorders names it just proved pinned, to ranks
+      // inside the list, so reaching this is a section bug - UNPROCESSABLE
+      // is not declared on this operation, and the response guard flags it.
+      return {
+        errors: [
+          {
+            type: "UNPROCESSABLE",
+            message: "The environment is not pinned or the position is out of range",
+          },
+        ],
+      };
+    }
+    // Move to the 1-based RANK, then renormalize the WHOLE list to
+    // contiguous 1..N - the reorder mutation is the one operation that
+    // renumbers (verified live behavior), so the counter rejoins it.
+    const [moved] = list.splice(index, 1);
+    list.splice(position - 1, 0, moved as { name: string; position: number });
+    list.forEach((pin, rank) => {
+      pin.position = rank + 1;
+    });
+    state._pinned_position_counter = list.length;
+    return { data: { reorderEnvironment: { environment: { name: target.name } } } };
   },
 };
 

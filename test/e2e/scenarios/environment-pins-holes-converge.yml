@@ -1,0 +1,58 @@
+# The verified live position semantics, end to end: unpinning beta leaves a
+# HOLE (alpha keeps position 1, gamma keeps 3 - unpinning never renumbers),
+# and the two fresh pins delta and epsilon append at the TAIL via the
+# monotonic counter (positions 4 and 5, in declaration order). The declared
+# order (alpha, gamma, delta, epsilon) already matches the resulting rank
+# order, so NO reorder is issued and nothing ever renormalizes - the final
+# state keeps its hole at position 2. The check rerun converges over that
+# hole-y numbering because pins compare by RANK, never by literal position
+# numbers (renormalization itself is exercised by
+# environment-pins-apply-converges, whose reorder renumbers the list).
+name: environment-pins-holes-converge
+settings:
+  environments:
+    - name: alpha
+      pinned: true
+    - name: beta
+      pinned: false
+    - name: gamma
+      pinned: true
+    - name: delta
+      pinned: true
+    - name: epsilon
+      pinned: true
+live_state:
+  environments:
+    alpha:
+      name: alpha
+      protection_rules: []
+    beta:
+      name: beta
+      protection_rules: []
+    gamma:
+      name: gamma
+      protection_rules: []
+  pinned_environments: [alpha, beta, gamma]
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  mutations:
+    - "PUT /repos/{repo}/environments/alpha"
+    - "PUT /repos/{repo}/environments/beta"
+    - "PUT /repos/{repo}/environments/gamma"
+    - "PUT /repos/{repo}/environments/delta"
+    - "PUT /repos/{repo}/environments/epsilon"
+    - "GRAPHQL PinEnvironment"
+    - "GRAPHQL PinEnvironment"
+    - "GRAPHQL PinEnvironment"
+  never:
+    - "GRAPHQL ReorderEnvironment"
+  stdout_contains:
+    - 'unpinned environment "beta"'
+    - 'pinned environment "delta"'
+    - 'pinned environment "epsilon"'
+  converges: true

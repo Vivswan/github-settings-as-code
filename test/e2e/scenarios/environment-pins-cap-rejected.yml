@@ -1,0 +1,33 @@
+# Eleven entries declare pinned: true, one over GitHub's hard cap of 10
+# pinned environments. The cap invariant lives in the section's shape (like
+# the branch-policy flag pairing), so upfront document validation rejects the
+# run BEFORE any section writes - the repository section pins that ordering,
+# and no environment PUT or GraphQL call is ever issued.
+name: environment-pins-cap-rejected
+settings:
+  repository:
+    description: should never be written
+  environments:
+    - { name: env-01, pinned: true }
+    - { name: env-02, pinned: true }
+    - { name: env-03, pinned: true }
+    - { name: env-04, pinned: true }
+    - { name: env-05, pinned: true }
+    - { name: env-06, pinned: true }
+    - { name: env-07, pinned: true }
+    - { name: env-08, pinned: true }
+    - { name: env-09, pinned: true }
+    - { name: env-10, pinned: true }
+    - { name: env-11, pinned: true }
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    # The offending path and this action's own cap message; zod's phrasing in
+    # between stays unasserted.
+    - "environments"
+    - "GitHub allows at most 10 pinned environments per repository"
+  never:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/environments"
+    - "GRAPHQL"

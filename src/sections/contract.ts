@@ -557,6 +557,18 @@ export function expand(
 }
 
 /**
+ * The $owner/$repo variables every repo-addressed GraphQL READ takes, derived
+ * from the context in the one place expand() derives the REST path halves -
+ * so the name-half slice cannot be copy-pasted into each GraphQL section.
+ */
+export function repoVariables(ctx: Pick<SectionContext, "owner" | "repo">): {
+  owner: string;
+  repo: string;
+} {
+  return { owner: ctx.owner, repo: ctx.repo.slice(ctx.repo.indexOf("/") + 1) };
+}
+
+/**
  * The identity every helper needs to classify an error: the section's key
  * and its fine-grained-PAT grant advice. Handlers pass `this`, so the
  * advice always travels with the section that owns it.
@@ -1114,7 +1126,15 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
  * `path` walks from the data root to the connection field selecting
  * `nodes { ... }` and `pageInfo { hasNextPage endCursor }`; the loop owns the
  * `$cursor` variable, passing null first and the previous page's endCursor
- * after, so the caller's variables must not carry one.
+ * after, so the caller's variables must not carry one. The operation's
+ * DECLARED error outcomes are tolerated exactly as tryCallGraphql tolerates
+ * them, coming back as { error } for the caller to interpret (the
+ * environments pins read declares NOT_FOUND, so a fine-grained denial reads
+ * as an absent resource - the probeAbsent posture) - but only on the FIRST
+ * page: absence describes the whole resource, and a tolerated type arriving
+ * mid-walk means the connection vanished under the loop, a broken walk that
+ * classifies through throwFor like any other error. An operation declaring
+ * no error outcomes always resolves { items }.
  */
 export async function listGraphqlConnection<
   O extends GraphqlOpDecl & { connection: GraphqlConnectionDecl },
@@ -1123,7 +1143,7 @@ export async function listGraphqlConnection<
   section: SectionMeta,
   op: O,
   variables: Readonly<GraphqlVariablesOf<O>>,
-): Promise<unknown[]> {
+): Promise<{ items: unknown[] } | { error: ApiError }> {
   if (!op.query.includes("$cursor")) {
     throw new Error(
       `BUG: GRAPHQL ${op.name} is paginated through listGraphqlConnection but its query declares no $cursor variable`,
@@ -1140,6 +1160,9 @@ export async function listGraphqlConnection<
   for (;;) {
     const result = await ctx.api.tryGraphql(op, { ...variables, cursor }, ctx.repo);
     if ("error" in result) {
+      if (cursor === null && graphqlErrorTolerated(result.error, toleratedGraphqlErrors(op))) {
+        return result;
+      }
       throwFor(section, "GRAPHQL", op.name, result.error, { op });
     }
     const connection = path.reduce<unknown>(
@@ -1155,7 +1178,7 @@ export async function listGraphqlConnection<
     }
     items.push(...nodes);
     if (!pageInfo.hasNextPage) {
-      return items;
+      return { items };
     }
     const endCursor = pageInfo.endCursor;
     if (typeof endCursor !== "string" || endCursor === cursor) {

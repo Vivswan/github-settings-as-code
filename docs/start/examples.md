@@ -106,6 +106,7 @@ rulesets:
 
 environments:
   - name: production
+    pinned: true
     wait_timer: 30
     prevent_self_review: true
     reviewers:
