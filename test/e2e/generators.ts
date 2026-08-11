@@ -1366,7 +1366,9 @@ export function genLiveWitness(
   kind: LiveWitnessKind,
 ): LiveWitness {
   if (!WITNESS_KINDS[key].includes(kind)) {
-    throw new Error(`genLiveWitness: ${key} does not support the "${kind}" witness`);
+    throw new Error(
+      `genLiveWitness: ${key} does not support the "${kind}" witness (supported: ${WITNESS_KINDS[key].join(", ")}); add the kind to WITNESS_KINDS[${key}] and implement it in the section's witness builder`,
+    );
   }
   // The witness sections are generated in the plain array form only, but the
   // unwrap keeps this correct if that exclusion ever moves.
@@ -1911,6 +1913,19 @@ function settingsValidator(): ValidateFunction {
   return validator;
 }
 
+/** The doc value at an ajv instancePath ("/labels/0/color"), for error rendering. */
+function valueAtPointer(doc: unknown, instancePath: string): unknown {
+  let value = doc;
+  for (const segment of instancePath.split("/").slice(1)) {
+    if (typeof value !== "object" || value === null) {
+      return undefined;
+    }
+    const key = segment.replace(/~1/g, "/").replace(/~0/g, "~");
+    value = (value as Record<string, unknown>)[key];
+  }
+  return value;
+}
+
 /**
  * Validate a whole settings document against the PUBLISHED JSON schema
  * (lib/settings.schema.json). Throws with the ajv errors when it does not
@@ -1920,8 +1935,15 @@ function settingsValidator(): ValidateFunction {
 export function validateAgainstPublishedSchema(doc: unknown): void {
   const validate = settingsValidator();
   if (!validate(doc)) {
+    // Each line carries the offending VALUE and the ajv params (e.g. the
+    // allowedValues of a failed enum): the doc is ephemeral, so without them
+    // a drift means replaying the seed and dumping the doc by hand.
     const errors = (validate.errors ?? [])
-      .map((e) => `  ${e.instancePath || "(root)"} ${e.message}`)
+      .map((e) => {
+        const params =
+          Object.keys(e.params ?? {}).length > 0 ? `, ${JSON.stringify(e.params)}` : "";
+        return `  ${e.instancePath || "(root)"} ${e.message} (got ${JSON.stringify(valueAtPointer(doc, e.instancePath))}${params})`;
+      })
       .join("\n");
     throw new Error(`generated settings failed schema validation:\n${errors}`);
   }

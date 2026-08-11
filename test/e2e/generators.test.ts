@@ -30,19 +30,38 @@ const silentIo: Io = { annotate() {}, log() {}, mask() {} };
 
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {
+    const offenders: string[] = [];
     for (const key of SECTION_KEYS) {
       const shape = sectionShape(key);
       for (let i = 0; i < 200; i++) {
         const value = genSettings(new Rng(i * 7 + key.length), key);
         const doc = { [key]: value };
         // 1. Published JSON schema (ajv).
-        expect(() => validateAgainstPublishedSchema(doc)).not.toThrow();
+        try {
+          validateAgainstPublishedSchema(doc);
+        } catch (error) {
+          offenders.push(
+            `${key} seed ${i}: published schema rejected the doc: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
         // 2. The action's own doc validator (unknown-key check + more).
-        expect(validateSettingsDoc(doc, "fuzz", new Set<string>(), silentIo)).toBeNull();
+        const verdict = validateSettingsDoc(doc, "fuzz", new Set<string>(), silentIo);
+        if (verdict !== null) {
+          offenders.push(`${key} seed ${i}: validateSettingsDoc rejected the doc: ${verdict}`);
+        }
         // 3. The section's zod shape parses the raw value.
-        expect(shape.safeParse(value).success).toBe(true);
+        const parsed = shape.safeParse(value);
+        if (!parsed.success) {
+          offenders.push(
+            `${key} seed ${i}: zod shape rejected the generated value ${JSON.stringify(value)}: ${JSON.stringify(parsed.error.issues)}`,
+          );
+        }
       }
     }
+    expect(
+      offenders,
+      `generated section doc(s) drifting from schema, validator, or shape:\n  ${offenders.join("\n  ")}`,
+    ).toEqual([]);
   });
 
   test("validateAgainstPublishedSchema rejects a section with the wrong type", () => {
@@ -93,9 +112,15 @@ describe("generator couplings and pools", () => {
         }
         if (branch.protection) {
           for (const key of Object.keys(branch.protection)) {
-            expect(allowed.has(key)).toBe(true);
+            expect(
+              allowed.has(key),
+              `seed ${i} branch "${branch.name}": generator drew unknown protection key "${key}"; add it to the allowed set or fix genSettings(branches)`,
+            ).toBe(true);
             if (wildcard) {
-              expect(wildcardForbidden.has(key)).toBe(false);
+              expect(
+                wildcardForbidden.has(key),
+                `seed ${i} wildcard branch "${branch.name}": protection key "${key}" has no GraphQL translation, so a wildcard rule cannot carry it`,
+              ).toBe(false);
             }
           }
           if ("required_signatures" in branch.protection) {
@@ -125,7 +150,10 @@ describe("generator couplings and pools", () => {
       const milestones = genSettings(new Rng(i), "milestones") as Array<{ due_on?: string }>;
       for (const m of milestones) {
         if (m.due_on !== undefined) {
-          expect(pool.has(m.due_on)).toBe(true);
+          expect(
+            pool.has(m.due_on),
+            `seed ${i}: milestone due_on "${m.due_on}" is not from the fixed ISO date pool`,
+          ).toBe(true);
         }
       }
     }
@@ -512,10 +540,16 @@ describe("genScenario", () => {
       expect(() => validateAgainstPublishedSchema(scenario.settings)).not.toThrow();
       const declared = new Set(Object.keys(scenario.settings ?? {}) as SectionKey[]);
       for (const section of meta.requiredSections) {
-        expect(declared.has(section)).toBe(true);
+        expect(
+          declared.has(section),
+          `seed ${i}: required section "${section}" is not declared in the generated settings`,
+        ).toBe(true);
       }
       for (const key of Object.keys(meta.mask)) {
-        expect(KNOWN_MASK_KEYS.has(key)).toBe(true);
+        expect(
+          KNOWN_MASK_KEYS.has(key),
+          `seed ${i}: generated mask carries unknown key "${key}"`,
+        ).toBe(true);
       }
       expect([...meta.sections].sort()).toEqual([...declared].sort());
       expect(meta.sections.length).toBeGreaterThan(0);
@@ -587,16 +621,25 @@ describe("genScenario", () => {
         const liveEnvironments = scenario.live_state?.environments ?? {};
         for (const b of branches) {
           if (/[*?[]/.test(b.name)) {
-            expect(live.has(b.name)).toBe(false);
+            expect(
+              live.has(b.name),
+              `seed ${i}: wildcard branch "${b.name}" is a rule and must never be seeded as a git branch in live_state.branches`,
+            ).toBe(false);
           } else {
-            expect(live.has(b.name)).toBe(true);
+            expect(
+              live.has(b.name),
+              `seed ${i}: declared branch "${b.name}" is not seeded in live_state.branches, so the scenario would permanently drift`,
+            ).toBe(true);
           }
           const deployments = b.protection?.required_deployments as
             | { environments: string[] }
             | null
             | undefined;
           for (const env of deployments?.environments ?? []) {
-            expect(Object.keys(liveEnvironments)).toContain(env);
+            expect(
+              Object.keys(liveEnvironments),
+              `seed ${i}: branch "${b.name}" requires deployment environment "${env}" that live_state.environments never seeds`,
+            ).toContain(env);
           }
         }
       }
@@ -608,7 +651,10 @@ describe("genScenario", () => {
           ),
         );
         for (const w of workflows) {
-          expect(livePaths.has(w.path)).toBe(true);
+          expect(
+            livePaths.has(w.path),
+            `seed ${i}: declared workflow "${w.path}" is not seeded in live_state.workflows, so the scenario would permanently drift`,
+          ).toBe(true);
         }
       }
     }
@@ -647,8 +693,14 @@ describe("genMultiScenario", () => {
           settings?: unknown;
           settings_raw?: string;
         };
-        expect(typeof spec.settings_raw).toBe("string");
-        expect(spec.settings).toBeUndefined();
+        expect(
+          typeof spec.settings_raw,
+          `seed ${i}: raw-invalid target ${repo.slug} serves no settings_raw string`,
+        ).toBe("string");
+        expect(
+          spec.settings,
+          `seed ${i}: raw-invalid target ${repo.slug} also carries a settings object`,
+        ).toBeUndefined();
         // The raw pool entry matches its kind: unparseable bodies throw in
         // the yaml parser, non-mapping ones parse to a non-mapping.
         if (repo.target.raw === "unparseable") {
@@ -713,7 +765,10 @@ describe("genMultiScenario", () => {
           redact &&
           repo.slug !== meta.selfSlug &&
           (repo.visibility !== "public" || repo.probeDenied);
-        expect(repo.redaction.kind === "redacted").toBe(expected);
+        expect(
+          repo.redaction.kind === "redacted",
+          `seed ${i}: target ${repo.slug} (visibility ${repo.visibility}, probeDenied ${repo.probeDenied}, policy ${meta.privateRepos}) stamped redaction "${repo.redaction.kind}" but the mechanical rule says ${expected ? "redacted" : "shown"}`,
+        ).toBe(expected);
       }
       // The action input echoes the policy the meta records.
       expect(scenario.inputs?.private_repos).toBe(meta.privateRepos);

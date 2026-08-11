@@ -45,5 +45,6 @@ expect:
     - "DELETE /repos/{repo}/keys/10"
     - "POST /repos/{repo}/keys"
     - "DELETE /repos/{repo}/keys/20"
-  converges: true
+  # apply_idempotent's final check-mode run IS the convergence proof, so
+  # converges is not set alongside (the schema rejects the pair).
   apply_idempotent: true

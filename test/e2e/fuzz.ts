@@ -18,7 +18,7 @@
  */
 
 import { MAX_RETRIES } from "../../src/github/api.js";
-import type { SectionKey } from "../../src/schema.js";
+import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import {
   canariesOf,
   displayKeyOf,
@@ -108,7 +108,24 @@ function parseFlags(argv: string[]): Flags {
     } else if (arg === "--seed") {
       flags.seed = Number(argv[++i]);
     } else if (arg === "--sections") {
-      flags.sections = (argv[++i] ?? "").split(",").map((s) => s.trim()) as SectionKey[];
+      // Parse, don't cast: a typo'd section would otherwise crash deep inside
+      // the generator pool several green iterations later.
+      const parsed = (argv[++i] ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== "");
+      const isSection = (s: string): s is SectionKey =>
+        (SECTION_KEYS as readonly string[]).includes(s);
+      const unknown = parsed.filter((s) => !isSection(s));
+      if (unknown.length > 0) {
+        throw new Error(
+          `--sections names unknown section(s) [${unknown.join(", ")}]; known sections: ${SECTION_KEYS.join(", ")}`,
+        );
+      }
+      if (parsed.length === 0) {
+        throw new Error("--sections got an empty list; name at least one section or drop the flag");
+      }
+      flags.sections = parsed.filter(isSection);
     }
   }
   return flags;
@@ -336,16 +353,28 @@ function assertFaultFired(
 }
 
 /**
+ * One injected fault as the run cores carry it: the endpoint key it was aimed
+ * at and the histogram class label recorded when it provably fired. The two
+ * describe the same fault, so they travel as one value - a key without a
+ * label (a starved histogram) or a label without a key (dead configuration)
+ * cannot be constructed. injectContentsFault returns this exact shape.
+ */
+interface InjectedFault {
+  key: string;
+  classLabel: string;
+}
+
+/**
  * Run one generated single-repo scenario against its oracle prediction: the
  * shared core of the standard random iteration and the directed witness and
  * fault batteries. A fully-granted apply also asserts convergence (the
- * runner's converges machinery); `opts.faultKey` adds the fault-fired
+ * runner's converges machinery); `opts.fault` adds the fault-fired
  * non-vacuity check.
  */
 async function runPredicted(
   scenario: Scenario,
   meta: ScenarioMeta,
-  opts: { faultKey?: string; faultClass?: string } = {},
+  opts: { fault?: InjectedFault } = {},
 ): Promise<IterationResult> {
   const prediction = predictOutcomes(meta);
   // The oracle predicts a SET of allowed exit codes; the expectation carries
@@ -357,16 +386,12 @@ async function runPredicted(
   // keep the lighter converges proof: the idempotence gate requires no
   // injected faults.
   const fixpoint = prediction.fullyGranted && meta.mode === "apply";
-  const idempotent = fixpoint && opts.faultKey === undefined;
+  const proof: IterationResult["proof"] =
+    fixpoint && opts.fault === undefined ? "apply_idempotent" : fixpoint ? "converges" : undefined;
   scenario.expect = {
     exit_code: [...prediction.allowedExitCodes],
-    ...(idempotent ? { apply_idempotent: true } : fixpoint ? { converges: true } : {}),
+    fixpoint: proof,
   };
-  const proof: IterationResult["proof"] = idempotent
-    ? "apply_idempotent"
-    : fixpoint
-      ? "converges"
-      : undefined;
 
   const report = await runScenario(scenario);
   const problems: string[] = [];
@@ -375,9 +400,9 @@ async function runPredicted(
   // (for converges) the barrier/re-run checks into failures.
   problems.push(...report.failures);
   let faultClass: string | undefined;
-  if (opts.faultKey !== undefined) {
-    const fired = assertFaultFired(report.faultsFired, opts.faultKey, problems);
-    faultClass = fired ? opts.faultClass : undefined;
+  if (opts.fault !== undefined) {
+    const fired = assertFaultFired(report.faultsFired, opts.fault.key, problems);
+    faultClass = fired ? opts.fault.classLabel : undefined;
   }
   // Each predicted section must APPEAR in the summary (a predicted section
   // missing entirely is a silent regression the old `if (got)` guard hid), and
@@ -651,7 +676,7 @@ async function singleShotChaosIteration(
     owner_kind: "org",
     // The corrupt response is retried away, so the apply must both succeed AND
     // converge: a check-mode re-run against the mutated mock writes nothing.
-    expect: { exit_code: 0, converges: true },
+    expect: { exit_code: 0, fixpoint: "converges" },
   };
   const report = await runScenario(scenario, {
     serverOptions: { corrupt: { key: "labels.list", mode } },
@@ -745,14 +770,13 @@ async function multiRepoFuzzIteration(seed: number): Promise<IterationResult> {
 
 /**
  * Options steering a multi-repo run's assertions when a fault rides along:
- * `faultKey` adds the fault-fired non-vacuity check; `reportFaultDegrades`
- * replaces the report-body positive assertion with the degrade contract (the
- * safe warning fires, no issue is ever written, target results unchanged).
+ * `fault` adds the fault-fired non-vacuity check (its class label is recorded
+ * only when the fault provably fired); `reportFaultDegrades` replaces the
+ * report-body positive assertion with the degrade contract (the safe warning
+ * fires, no issue is ever written, target results unchanged).
  */
 interface MultiRunOptions {
-  faultKey?: string;
-  /** Histogram label recorded only when the fault provably fired. */
-  faultClass?: string;
+  fault?: InjectedFault;
   reportFaultDegrades?: boolean;
 }
 
@@ -817,13 +841,14 @@ async function runMultiPredicted(
   // proof tripwire fails loudly instead of passing vacuously.
   const idempotent =
     multiIdempotenceEligible(meta) &&
-    opts.faultKey === undefined &&
+    opts.fault === undefined &&
     meta.coreFault === undefined &&
     prediction.allowedExitCodes.size === 1 &&
     prediction.allowedExitCodes.has(0);
+  const proof = idempotent ? ("apply_idempotent" as const) : undefined;
   scenario.expect = {
     exit_code: [...prediction.allowedExitCodes],
-    ...(idempotent ? { apply_idempotent: true } : {}),
+    fixpoint: proof,
   };
 
   const report = await runScenario(scenario);
@@ -832,9 +857,9 @@ async function runMultiPredicted(
   // (the redaction counterfactual re-run) - they need replay blocks too.
   const extraArtifactDirs: string[] = [];
   let faultClass: string | undefined;
-  if (opts.faultKey !== undefined) {
-    const fired = assertFaultFired(report.faultsFired, opts.faultKey, problems);
-    faultClass = fired ? opts.faultClass : undefined;
+  if (opts.fault !== undefined) {
+    const fired = assertFaultFired(report.faultsFired, opts.fault.key, problems);
+    faultClass = fired ? opts.fault.classLabel : undefined;
   }
   // Non-vacuity guard: a redact run must always exercise a non-empty forbidden
   // set (the generator forces one private target), so the leak check below is
@@ -1116,7 +1141,7 @@ async function runMultiPredicted(
     extraArtifactDirs,
     sections: [],
     faultClass,
-    proof: idempotent ? "apply_idempotent" : undefined,
+    proof,
   });
 }
 
@@ -1155,7 +1180,7 @@ async function discoveryFuzzIteration(seed: number): Promise<IterationResult> {
 async function runDiscoveryPredicted(
   scenario: Scenario,
   meta: ReturnType<typeof genDiscoveryScenario>["meta"],
-  opts: { faultKey?: string; faultClass?: string } = {},
+  opts: { fault?: InjectedFault } = {},
 ): Promise<IterationResult> {
   const kept = predictDiscovery(meta.pool, meta.filters);
   // Zero surviving repos is a fatal configuration error for the action (there
@@ -1164,18 +1189,21 @@ async function runDiscoveryPredicted(
   // A non-empty kept set is an APPLY over fully-granted labels (the discovery
   // scenario pins issues: write / contents: read), so the check re-run must
   // converge - unless a fault rides along and may legitimately perturb it.
-  const converges = discoveryConvergeEligible(meta) && opts.faultKey === undefined;
+  const proof =
+    discoveryConvergeEligible(meta) && opts.fault === undefined
+      ? ("converges" as const)
+      : undefined;
   scenario.expect = {
     exit_code: kept.length === 0 ? 1 : 0,
-    ...(converges ? { converges: true } : {}),
+    fixpoint: proof,
   };
 
   const report = await runScenario(scenario);
   const problems: string[] = [...report.failures];
   let faultClass: string | undefined;
-  if (opts.faultKey !== undefined) {
-    const fired = assertFaultFired(report.faultsFired, opts.faultKey, problems);
-    faultClass = fired ? opts.faultClass : undefined;
+  if (opts.fault !== undefined) {
+    const fired = assertFaultFired(report.faultsFired, opts.fault.key, problems);
+    faultClass = fired ? opts.fault.classLabel : undefined;
   }
   const results = parseReposResult(report.outputs["repos-result"]);
   const got = new Set(Object.keys(results));
@@ -1244,7 +1272,7 @@ async function runDiscoveryPredicted(
       artifactDir: report.artifactDir,
       sections: [],
       faultClass,
-      proof: converges ? "converges" : undefined,
+      proof,
     },
     `filters ${JSON.stringify(meta.filters)}: `,
   );
@@ -1372,7 +1400,7 @@ async function faultedSectionRun(seed: number, plan: SectionFaultPlan): Promise<
   const label = faultClassLabel(plan.key, plan.kind, faultKills(plan.kind, plan.exhausting));
   return faultKills(plan.kind, plan.exhausting)
     ? exhaustedSectionRun(scenario, plan.section, plan.key, label)
-    : runPredicted(scenario, meta, { faultKey: plan.key, faultClass: label });
+    : runPredicted(scenario, meta, { fault: { key: plan.key, classLabel: label } });
 }
 
 /**
@@ -1394,13 +1422,13 @@ async function unfaultableSectionRun(
   const readKeys = unfaultableReadKeys(section);
   const problems: string[] = [];
   if (readKeys.length === 0 && !NO_READ_SECTIONS.has(section)) {
-    // Zero GETs would make this run vacuous. A section in NO_READ_SECTIONS
-    // (derived from the same ENDPOINTS declarations) is exempt by
-    // construction - there is genuinely nothing to arm, and the outcome pin
-    // below still proves the full-width apply stays healthy - but for every
-    // OTHER section an empty derivation is a keying bug in
-    // unfaultableReadKeys, not an exemption.
-    problems.push(`no GET endpoints derived for "${section}" - the battery run is vacuous`);
+    // A NO_READ_SECTIONS member (derived from the same ENDPOINTS
+    // declarations) is exempt by construction - there is genuinely nothing to
+    // arm, and the outcome pin below still proves the full-width apply stays
+    // healthy.
+    problems.push(
+      `no GET endpoints derived for "${section}" - the unfaultable battery run is vacuous; fix the endpoint keying in unfaultableReadKeys (generators.ts), or if the section genuinely declares no GET it should already appear in NO_READ_SECTIONS (oracle.ts)`,
+    );
     return iterationResult(problems, { sections: [section] }, `[unfaultable ${section}] `);
   }
   const scenario: Scenario = {
@@ -1516,14 +1544,16 @@ function injectContentsFault(
   meta: MultiScenarioMeta,
   kind: FaultKind,
   exhausting: boolean,
-): { faultKey: string; faultClass: string } {
+): { fault: InjectedFault } {
   const fatal = faultKills(kind, exhausting);
   const times = kind === "rate_limit_403" ? 1 : exhausting ? RETRY_BUDGET : 1;
   scenario.faults = [{ endpoint: "core.contentsGet", kind, times }];
   meta.coreFault = { key: "core.contentsGet", fatal };
   return {
-    faultKey: "core.contentsGet",
-    faultClass: faultClassLabel("core.contentsGet", kind, fatal),
+    fault: {
+      key: "core.contentsGet",
+      classLabel: faultClassLabel("core.contentsGet", kind, fatal),
+    },
   };
 }
 
@@ -1546,8 +1576,7 @@ async function discoveryFaultIteration(seed: number): Promise<IterationResult> {
   const faultClass = faultClassLabel("core.discoveryList", kind, fatal);
   if (!fatal) {
     return runDiscoveryPredicted(scenario, meta, {
-      faultKey: "core.discoveryList",
-      faultClass,
+      fault: { key: "core.discoveryList", classLabel: faultClass },
     });
   }
   return fatalDiscoveryRun(scenario, meta, faultClass);
@@ -1698,8 +1727,10 @@ function injectedReportFaultRun(drawn: {
 }): Promise<IterationResult> {
   drawn.scenario.faults = [{ endpoint: "core.issuesList", kind: "server_error", times: 99 }];
   return runMultiPredicted(drawn.scenario, drawn.meta, {
-    faultKey: "core.issuesList",
-    faultClass: faultClassLabel("core.issuesList", "server_error", true),
+    fault: {
+      key: "core.issuesList",
+      classLabel: faultClassLabel("core.issuesList", "server_error", true),
+    },
     reportFaultDegrades: true,
   });
 }
@@ -2209,6 +2240,8 @@ async function main(): Promise<number> {
 try {
   process.exit(await main());
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
+  // The stack's first line IS the message, so deliberate errors stay readable
+  // while a generator/oracle crash mid-soak gains its origin.
+  console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
   process.exit(1);
 }

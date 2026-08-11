@@ -34,7 +34,7 @@ const UNDECLARED_DEFAULT_DISPLAY: Record<string, string> = {
 };
 
 describe("README Sections table", () => {
-  const rows = tableRows(sectionLines(readme, "Sections"));
+  const rows = tableRows(sectionLines(readme, "Sections", "README.md"));
 
   test("one row per section, in SECTION_KEYS order", () => {
     const names = rows.map((cells) => (cells[0] ?? "").replace(/`/g, ""));
@@ -279,7 +279,11 @@ describe("schema $schema hints and $id", () => {
 
 describe("README migration paragraph", () => {
   test("lists exactly the Probot-parity sections", () => {
-    const paragraph = sectionLines(readme, "Migrating from the Probot Settings app").join(" ");
+    const paragraph = sectionLines(
+      readme,
+      "Migrating from the Probot Settings app",
+      "README.md",
+    ).join(" ");
     // Isolate the parity clause precisely so later mentions (e.g. "move to
     // `rulesets`") cannot leak in and a filename dot cannot truncate it: the
     // clause runs from "works as-is for" up to its "(for the list sections
@@ -504,7 +508,10 @@ describe("forward-compatibility closed-sections claim", () => {
       "utf8",
     ).replace(/\n/g, " ");
     const sentence = paragraph.match(/[^.]*closed rather than passthrough[^.]*\./)?.[0];
-    expect(sentence).toBeDefined();
+    expect(
+      sentence,
+      'docs/reference/forward-compatibility.md has no sentence containing "closed rather than passthrough"; restore the phrase or update this extraction',
+    ).toBeDefined();
     // The sentence opens with the count in words; pin it to the derived list
     // so the next closed section cannot leave the number stale.
     const word = COUNT_WORDS[closed.length];
@@ -668,7 +675,9 @@ describe("knobbed-section count prose", () => {
   });
 
   test("the guide's Defaults table has exactly one row per knobbed section, stating its default", () => {
-    const rows = tableRows(sectionLines(policyDoc, "Defaults per section"));
+    const rows = tableRows(
+      sectionLines(policyDoc, "Defaults per section", "docs/reference/undeclared-policy.md"),
+    );
     const byKey = new Map(
       rows.map((cells) => [(cells[0] ?? "").replace(/`/g, ""), cells[1] ?? ""]),
     );

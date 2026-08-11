@@ -404,9 +404,7 @@ describe("GraphQL response guard and chaos", () => {
       OPS,
       rogue,
     );
-    expect(result.violation).toContain(
-      "answered error type(s) [UNPROCESSABLE] the operation does not declare",
-    );
+    expect(result.violation).toContain('answered undeclared error type(s) [UNPROCESSABLE: "nope"]');
   });
 
   test("faults address GraphQL ops by their section.role key", () => {

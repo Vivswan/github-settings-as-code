@@ -18,7 +18,7 @@ const ROOT = join(import.meta.dir, "..", "..");
 const coverage = readFileSync(join(ROOT, "COVERAGE.md"), "utf8");
 
 describe("COVERAGE Supported table", () => {
-  const rows = tableRows(sectionLines(coverage, "Supported"));
+  const rows = tableRows(sectionLines(coverage, "Supported", "COVERAGE.md"));
   // Every row's notes, concatenated per section key (a section may span rows).
   const rowsByKey = new Map<string, string>();
   for (const cells of rows) {
@@ -104,7 +104,7 @@ describe("COVERAGE gaps anti-test", () => {
       path: endpointPath(e.route),
       route: e.route,
     }));
-    const gapLines = sectionLines(coverage, "Repo-scoped gaps (not built yet)");
+    const gapLines = sectionLines(coverage, "Repo-scoped gaps (not built yet)", "COVERAGE.md");
     // The gaps table spells combined verbs like "GET/POST /repos/..."; expand
     // each method against the following path.
     const methodPath =

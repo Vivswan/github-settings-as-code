@@ -126,7 +126,7 @@ function githubSlug(heading: string): string {
  * stricter column-zero policy, so it is safe over every markdown file the
  * anchor test scans.
  */
-function linesOutsideFences(markdown: string): string[] {
+function linesOutsideFences(markdown: string, source: string): string[] {
   const lines: string[] = [];
   let opener: string | null = null;
   for (const line of markdown.split("\n")) {
@@ -148,15 +148,15 @@ function linesOutsideFences(markdown: string): string[] {
     // An unclosed fence would silently swallow every heading and link after
     // it; the guides' own fence policy catches this for docs/ pages, but the
     // root files in the scan set have no such check, so fail here instead.
-    throw new Error(`unclosed ${opener} fence swallows the rest of the document`);
+    throw new Error(`unclosed ${opener} fence in ${source} swallows the rest of the document`);
   }
   return lines;
 }
 
 /** Every fragment a file's headings answer to, duplicate suffixes included. */
-function headingSlugs(markdown: string): Set<string> {
+function headingSlugs(markdown: string, source: string): Set<string> {
   const slugs = new Set<string>();
-  for (const line of linesOutsideFences(markdown)) {
+  for (const line of linesOutsideFences(markdown, source)) {
     // ATX headings may carry a closing hash run ("## Setup ##"), which is
     // not part of the heading text GitHub slugs.
     const heading = line.match(/^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
@@ -204,7 +204,7 @@ describe("docs/ guide pages", () => {
     // in-page links skipped) and require the target to exist.
     const broken: string[] = [];
     for (const file of linkScanFiles()) {
-      const markdown = linesOutsideFences(readFileSync(file.path, "utf8")).join("\n");
+      const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
       for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
         const target = match[1] ?? "";
         if (/^[a-z]+:\/\//.test(target) || target.startsWith("#") || target.startsWith("mailto:")) {
@@ -234,14 +234,14 @@ describe("docs/ guide pages", () => {
     const slugsOf = (path: string): Set<string> => {
       let slugs = slugCache.get(path);
       if (!slugs) {
-        slugs = headingSlugs(readFileSync(path, "utf8"));
+        slugs = headingSlugs(readFileSync(path, "utf8"), path);
         slugCache.set(path, slugs);
       }
       return slugs;
     };
     const broken: string[] = [];
     for (const file of files) {
-      const markdown = linesOutsideFences(readFileSync(file.path, "utf8")).join("\n");
+      const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
       for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
         const target = match[1] ?? "";
         if (/^[a-z]+:\/\//.test(target) || target.startsWith("mailto:")) {
@@ -275,7 +275,7 @@ describe("docs/ guide pages", () => {
     // trusts. Keep headings plain text and the slugger stays honest.
     const offenders: string[] = [];
     for (const file of linkScanFiles()) {
-      for (const line of linesOutsideFences(readFileSync(file.path, "utf8"))) {
+      for (const line of linesOutsideFences(readFileSync(file.path, "utf8"), file.label)) {
         const heading = line.match(/^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
         if (heading && /[[\]<>&]/.test(heading[1] ?? "")) {
           offenders.push(`${file.label}: ${line.trim()}`);
@@ -576,23 +576,25 @@ describe("github heading slugger", () => {
   }
 
   test("duplicate headings get -1/-2 suffixes", () => {
-    expect(headingSlugs("# Setup\n\n## Setup\n\n### Setup\n")).toEqual(
+    expect(headingSlugs("# Setup\n\n## Setup\n\n### Setup\n", "(inline)")).toEqual(
       new Set(["setup", "setup-1", "setup-2"]),
     );
   });
 
   test("a duplicate probes past an explicit -1 heading, as GitHub does", () => {
-    expect(headingSlugs("# Setup\n\n## Setup-1\n\n### Setup\n")).toEqual(
+    expect(headingSlugs("# Setup\n\n## Setup-1\n\n### Setup\n", "(inline)")).toEqual(
       new Set(["setup", "setup-1", "setup-2"]),
     );
   });
 
   test("a closing hash run is not part of the heading text", () => {
-    expect(headingSlugs("## Setup ##\n")).toEqual(new Set(["setup"]));
+    expect(headingSlugs("## Setup ##\n", "(inline)")).toEqual(new Set(["setup"]));
   });
 
   test("tilde fences hide heading-looking lines like backtick fences do", () => {
-    expect(headingSlugs("~~~text\n# not a heading\n~~~\n\n# Real\n")).toEqual(new Set(["real"]));
+    expect(headingSlugs("~~~text\n# not a heading\n~~~\n\n# Real\n", "(inline)")).toEqual(
+      new Set(["real"]),
+    );
   });
 
   test("heading-looking lines inside fenced blocks are not headings", () => {
@@ -604,11 +606,11 @@ describe("github heading slugger", () => {
       "## Real heading",
       "",
     ].join("\n");
-    expect(headingSlugs(markdown)).toEqual(new Set(["real-heading"]));
+    expect(headingSlugs(markdown, "(inline)")).toEqual(new Set(["real-heading"]));
   });
 
   test("indented fences hide their contents too", () => {
     const markdown = ["   ```yaml", "   # a comment", "   ```", "# Title"].join("\n");
-    expect(headingSlugs(markdown)).toEqual(new Set(["title"]));
+    expect(headingSlugs(markdown, "(inline)")).toEqual(new Set(["title"]));
   });
 });

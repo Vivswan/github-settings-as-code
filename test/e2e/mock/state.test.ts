@@ -371,7 +371,13 @@ describe("invitationFromPut round-trips the PUT permission into the invitation v
   const repo = { full_name: "e2e-owner/e2e-repo", owner: { login: "e2e-owner" } };
 
   test("the declared permission becomes the permissions string via roleForPermission", () => {
-    const invitation = invitationFromPut("alice", { permission: "push" }, 42, repo);
+    const invitation = invitationFromPut(
+      "alice",
+      { permission: "push" },
+      42,
+      repo,
+      "e2e-owner/e2e-repo",
+    );
     expect((invitation.invitee as { login: string }).login).toBe("alice");
     expect(invitation.permissions).toBe(roleForPermission("push"));
     expect(invitation.permissions).toBe("write");
@@ -382,16 +388,23 @@ describe("invitationFromPut round-trips the PUT permission into the invitation v
   });
 
   test("defaults to push when permission is absent; a custom role clamps to its base grant", () => {
-    expect(invitationFromPut("bob", {}, 1, repo).permissions).toBe("write");
+    expect(invitationFromPut("bob", {}, 1, repo, "e2e-owner/e2e-repo").permissions).toBe("write");
     // GitHub never reports a custom role name on an invitation (the
     // permissions field is a spec enum), so the mock stores the base grant.
-    expect(invitationFromPut("carol", { permission: "security-team" }, 2, repo).permissions).toBe(
-      "write",
-    );
+    expect(
+      invitationFromPut("carol", { permission: "security-team" }, 2, repo, "e2e-owner/e2e-repo")
+        .permissions,
+    ).toBe("write");
   });
 
   test("the scaffold derives identity fields from the target repo", () => {
-    const invitation = invitationFromPut("alice", { permission: "pull" }, 3, repo);
+    const invitation = invitationFromPut(
+      "alice",
+      { permission: "pull" },
+      3,
+      repo,
+      "e2e-owner/e2e-repo",
+    );
     expect((invitation.inviter as { login: string }).login).toBe("e2e-owner");
     expect(invitation.url).toBe("https://api.github.com/repos/e2e-owner/e2e-repo/invitations/3");
     // A clone of the repo, not the live reference: stored invitations must
@@ -409,6 +422,7 @@ describe("completeInvitation", () => {
       { invitee: { login: "dave" }, permissions: "read", expired: true },
       77,
       repo,
+      "e2e-owner/e2e-repo",
     );
     expect(completed.id).toBe(77);
     expect(completed.permissions).toBe("read");
@@ -423,11 +437,16 @@ describe("completeInvitation", () => {
   });
 
   test("a seeded id wins over the caller's", () => {
-    expect(completeInvitation({ id: 5, invitee: { login: "x" } }, 99, repo).id).toBe(5);
+    expect(
+      completeInvitation({ id: 5, invitee: { login: "x" } }, 99, repo, "e2e-owner/e2e-repo").id,
+    ).toBe(5);
   });
 
   test("an explicit null invitee stays null (an email invitation)", () => {
-    expect(completeInvitation({ invitee: null, permissions: "read" }, 6, repo).invitee).toBeNull();
+    expect(
+      completeInvitation({ invitee: null, permissions: "read" }, 6, repo, "e2e-owner/e2e-repo")
+        .invitee,
+    ).toBeNull();
   });
 
   test("a multi-repo target's seeded invitation derives from the re-slugged repo", () => {

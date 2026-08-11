@@ -85,12 +85,25 @@ function selectScenarios(all: Scenario[], flags: Flags): Scenario[] {
 
 async function main(): Promise<number> {
   const flags = parseFlags(process.argv.slice(2));
-  const scenarios = selectScenarios(loadScenarios(SCENARIO_DIR), flags);
+  const all = loadScenarios(SCENARIO_DIR);
+  const scenarios = selectScenarios(all, flags);
 
   if (scenarios.length === 0) {
+    if (flags.sections || flags.scenario) {
+      // A filter that matches nothing is a broken filter (a typo'd name or a
+      // section no scenario touches), not a green run.
+      const filters = [
+        flags.scenario === undefined ? [] : [`--scenario "${flags.scenario}"`],
+        flags.sections === undefined ? [] : [`--sections "${flags.sections.join(",")}"`],
+      ].flat();
+      console.error(
+        `none of the ${all.length} scenario(s) under ${SCENARIO_DIR} match ${filters.join(" / ")}; check the value against the scenario files' name: fields (or their settings keys for --sections)`,
+      );
+      return 1;
+    }
     // Before the corpus phase the scenarios dir is empty; land green so the
     // script itself is not a failure.
-    console.log("no scenarios found");
+    console.log(`no scenario .yml files found under ${SCENARIO_DIR}`);
     return 0;
   }
 
@@ -147,6 +160,8 @@ async function main(): Promise<number> {
 try {
   process.exit(await main());
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
+  // The stack's first line IS the message, so deliberate errors stay readable
+  // while an unexpected harness error gains its origin.
+  console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
   process.exit(1);
 }

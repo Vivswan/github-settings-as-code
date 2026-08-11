@@ -80,8 +80,16 @@ describe("action.yml <-> inputs.ts", () => {
 describe("action.yml outputs", () => {
   test("output names match OUTPUT_NAMES in both directions", () => {
     const declared = Object.keys(actionYml.outputs);
-    expect(missingFrom(declared, OUTPUT_NAMES)).toEqual([]);
-    expect(missingFrom(OUTPUT_NAMES, declared)).toEqual([]);
+    const extraInYml = missingFrom(declared, OUTPUT_NAMES);
+    const missingInYml = missingFrom(OUTPUT_NAMES, declared);
+    expect(
+      extraInYml,
+      `action.yml declares output(s) the code never sets (add to OUTPUT_NAMES or remove from action.yml): ${extraInYml.join(", ")}`,
+    ).toEqual([]);
+    expect(
+      missingInYml,
+      `OUTPUT_NAMES lists output(s) missing from action.yml (add to action.yml or remove from OUTPUT_NAMES): ${missingInYml.join(", ")}`,
+    ).toEqual([]);
   });
 
   test("the result description mentions every RepoResult value", () => {

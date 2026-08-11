@@ -293,7 +293,9 @@ function expectedReposResult(scenario: Scenario): Record<string, string> | null 
  * YAML. Mirrors settingsYamlFor in mock/server.ts for multi-repo targets.
  */
 function settingsFileBody(scenario: Scenario): string {
-  return scenario.settings_raw ?? stringifyYaml(scenario.settings ?? {});
+  return scenario.settings_raw !== undefined
+    ? scenario.settings_raw
+    : stringifyYaml(scenario.settings);
 }
 
 /** Build the child environment from scratch: nothing leaks from process.env. */
@@ -654,14 +656,13 @@ export function forbiddenPresent(patterns: string[], log: string[]): string[] {
  * pipeline never mutates, so they are not part of the stability snapshot.
  */
 function mutableStates(handle: MockHandle): Array<[string, MockState]> {
-  if (handle.state) {
-    return [["state", handle.state]];
+  const working = handle.working;
+  switch (working.mode) {
+    case "single":
+      return [["state", working.state]];
+    case "multi":
+      return [...working.multi.repos, ["(org)", working.multi.orgState]];
   }
-  const out: Array<[string, MockState]> = [...(handle.multi?.repos ?? new Map())];
-  if (handle.multi) {
-    out.push(["(org)", handle.multi.orgState]);
-  }
-  return out;
 }
 
 /** An always-rewrite family entry with its server-managed updated_at dropped. */
@@ -872,9 +873,9 @@ export function missingSecondApplyRewrites(
 }
 
 /**
- * The apply-idempotence proof (expect.apply_idempotent): re-run the scenario
- * in apply mode against the SAME mutated mock and require apply to be a
- * fixpoint. Three properties, each its own regression class:
+ * The apply-idempotence proof (expect.fixpoint: "apply_idempotent"): re-run
+ * the scenario in apply mode against the SAME mutated mock and require apply
+ * to be a fixpoint. Three properties, each its own regression class:
  *   - the second apply exits 0: a fresh apply over converged state must not
  *     trip over its own output;
  *   - no compare-before-write section writes (COMPARE_BEFORE_WRITE): those
@@ -883,7 +884,8 @@ export function missingSecondApplyRewrites(
  *   - the mock state is unchanged family by family: unconditional-PUT sections
  *     may write again, but a second apply must rewrite the SAME state.
  * A final check-mode run then converges (exit 0, zero writes) - the same proof
- * `converges` makes, so scenarios set one or the other, not both.
+ * `fixpoint: "converges"` makes, which is why the two proofs are one enum
+ * field rather than two booleans.
  *
  * The issue report channels are rejected, not neutralized: their delivery embeds
  * a fresh ISO timestamp (the report issue legitimately moves every run), and
@@ -1163,10 +1165,10 @@ export async function runScenario(
       failures.push(...assertIssueReport(exp.issue_report, handle.requests));
     }
     // 7d. Apply-idempotence: a second apply against the same mutated mock must
-    // be a fixpoint (see assertApplyIdempotent). Runs BEFORE the converges
-    // block because its own final step arms the one-way check-mode barrier,
-    // after which no further apply could run.
-    if (exp.apply_idempotent) {
+    // be a fixpoint (see assertApplyIdempotent). Its own final step arms the
+    // one-way check-mode barrier and proves convergence, which is why
+    // `fixpoint` is a single enum: only one of these blocks can ever run.
+    if (exp.fixpoint === "apply_idempotent") {
       const idempotence = await assertApplyIdempotent(scenario, dir, handle);
       failures.push(...idempotence.failures);
       reruns.push(...idempotence.reruns);
@@ -1176,7 +1178,7 @@ export async function runScenario(
     // apply-mode scenario, so without this a stray write would not be a
     // violation), then require exit 0 and zero new writes, and re-check the
     // mock's violations for anything the re-run tripped.
-    if (exp.converges) {
+    if (exp.fixpoint === "converges") {
       const violationsBefore = handle.violations.length;
       const writesBefore = handle.requests.length;
       handle.enterCheckMode();

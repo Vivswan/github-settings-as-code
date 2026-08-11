@@ -35,11 +35,11 @@ export function fencedBlocks(markdown: string, info: string): string[] {
 }
 
 /** The lines of a markdown section between `## <heading>` and the next `## `. */
-export function sectionLines(markdown: string, heading: string): string[] {
+export function sectionLines(markdown: string, heading: string, source: string): string[] {
   const lines = markdown.split("\n");
   const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
   if (start === -1) {
-    throw new Error(`no "## ${heading}" section found`);
+    throw new Error(`no "## ${heading}" section found in ${source}`);
   }
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((line) => line.startsWith("## "));

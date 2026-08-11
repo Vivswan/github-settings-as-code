@@ -19,17 +19,11 @@ import {
   type FaultOption,
   type LoggedRequest,
   newPipelineRunState,
-  type PipelineOptions,
   runPipeline,
+  type WorkingState,
 } from "./routes.js";
 import { mockSodiumReady } from "./secrets.js";
-import {
-  buildMultiState,
-  buildState,
-  type MockState,
-  type MultiMockState,
-  type MultiRepoSpec,
-} from "./state.js";
+import { buildMultiState, buildState, type MultiMockState, type MultiRepoSpec } from "./state.js";
 
 /** Extra knobs beyond the scenario: the GHES prefix and the chaos directive. */
 export interface ServerOptions {
@@ -45,12 +39,11 @@ export interface ServerOptions {
 export interface MockHandle {
   url: string;
   /**
-   * Single-repo working state; undefined in multi-repo mode (see `multi`).
-   * Tests seed or assert against it directly.
+   * The working state, discriminated exactly as the pipeline carries it:
+   * single-repo (`working.state`) XOR multi-repo (`working.multi`). Tests
+   * seed or assert against the narrowed side directly.
    */
-  state?: MockState;
-  /** Multi-repo working state (per-slug repos + discovery pool), when set. */
-  multi?: MultiMockState;
+  working: WorkingState;
   requests: LoggedRequest[];
   violations: string[];
   /**
@@ -135,10 +128,9 @@ export async function startMockServer(
   // MockState. The discriminated `working` carries exactly one, and the
   // pipeline dispatches on its mode.
   const multi = multiStateFor(scenario);
-  const working: PipelineOptions["working"] = multi
+  const working: WorkingState = multi
     ? { mode: "multi", multi }
     : { mode: "single", state: buildState(scenario.live_state, scenario.owner_kind) };
-  const state = working.mode === "single" ? working.state : undefined;
   const requests: LoggedRequest[] = [];
   const violations: string[] = [];
   // All mutable per-run pipeline state (chaos/fault counts + barrier bookkeeping)
@@ -238,8 +230,7 @@ export async function startMockServer(
   const base = `http://localhost:${server.port}`;
   return {
     url: options.basePrefix ? `${base}${options.basePrefix}` : base,
-    state,
-    multi,
+    working,
     requests,
     violations,
     faultCounts: runState.faultCounts,

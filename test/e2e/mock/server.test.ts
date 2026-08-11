@@ -24,7 +24,7 @@ import {
   statusAllowed,
 } from "./routes.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./server.js";
-import type { MockState } from "./state.js";
+import type { MockState, MultiMockState } from "./state.js";
 
 const AUTH = { authorization: "Bearer test-token", "x-github-api-version": "2022-11-28" };
 
@@ -81,10 +81,18 @@ async function jsonArray(res: Response): Promise<Record<string, unknown>[]> {
 
 /** The single-repo MockState (defined for every non-multi scenario here). */
 function singleState(h: MockHandle): MockState {
-  if (!h.state) {
+  if (h.working.mode !== "single") {
     throw new Error("expected a single-repo MockState on the handle");
   }
-  return h.state;
+  return h.working.state;
+}
+
+/** The multi-repo working state (defined for every multi scenario here). */
+function multiState(h: MockHandle): MultiMockState {
+  if (h.working.mode !== "multi") {
+    throw new Error("expected a multi-repo MultiMockState on the handle");
+  }
+  return h.working.multi;
 }
 
 const labelsPath = `/repos/${OWNER}/${REPO}/labels`;
@@ -245,18 +253,25 @@ describe("permission mask semantics", () => {
     // or name at least one repo resource. Driven from allEndpoints() so a new
     // section is covered automatically.
     const sectionByKey = new Map(SECTIONS.map((s) => [s.key, s]));
-    for (const endpoint of Object.values(allEndpoints())) {
+    const offenders: string[] = [];
+    for (const [key, endpoint] of Object.entries(allEndpoints())) {
       const section = sectionByKey.get(endpoint.section);
-      expect(section).toBeDefined();
       if (!section) {
+        offenders.push(`${key}: section "${endpoint.section}" is not registered in SECTIONS`);
         continue;
       }
       const permission = endpointPermission(section, endpoint);
       if (permission === "none") {
         continue;
       }
-      expect(permission.repo.length).toBeGreaterThan(0);
+      if (permission.repo.length === 0) {
+        offenders.push(`${key}: resolved permission names no repo resource`);
+      }
     }
+    expect(
+      offenders,
+      `endpoint(s) whose permission resolves to no gate:\n  ${offenders.join("\n  ")}`,
+    ).toEqual([]);
   });
 });
 
@@ -603,7 +618,7 @@ describe("check-mode barrier", () => {
     const res = await call(h, "POST", labelsPath, { body: { name: "x" } });
     expect(res.status).toBe(400);
     expect((await json(res)).message).toContain("write in check mode");
-    expect(h.violations.some((v) => v === "write in check mode")).toBe(true);
+    expect(h.violations.some((v) => v.startsWith("write in check mode"))).toBe(true);
   });
 
   test("a faulted write in check mode is STILL a check-mode violation (barrier runs before faults)", async () => {
@@ -614,7 +629,7 @@ describe("check-mode barrier", () => {
     });
     const res = await call(h, "POST", labelsPath, { body: { name: "x" } });
     expect(res.status).toBe(400); // the check-mode violation, not the 403 fault
-    expect(h.violations.some((v) => v === "write in check mode")).toBe(true);
+    expect(h.violations.some((v) => v.startsWith("write in check mode"))).toBe(true);
   });
 
   test("a GET in check mode is allowed", async () => {
@@ -636,7 +651,7 @@ describe("check-mode barrier", () => {
     h.enterCheckMode();
     const after = await call(h, "POST", labelsPath, { body: { name: "second" } });
     expect(after.status).toBe(400);
-    expect(h.violations.some((v) => v === "write in check mode")).toBe(true);
+    expect(h.violations.some((v) => v.startsWith("write in check mode"))).toBe(true);
     // A GET still works after entering check mode.
     expect((await call(h, "GET", labelsPath)).status).toBe(200);
   });
@@ -1027,12 +1042,12 @@ describe("core-route faults and server_error", () => {
       body: { title: "x", body: "y" },
     });
     expect(faulted.status).toBe(500);
-    expect(h.multi?.repos.get(target)?.issues).toHaveLength(0);
+    expect(multiState(h).repos.get(target)?.issues).toHaveLength(0);
     const retried = await call(h, "POST", `/repos/${target}/issues`, {
       body: { title: "x", body: "y" },
     });
     expect(retried.status).toBe(201);
-    expect(h.multi?.repos.get(target)?.issues).toHaveLength(1);
+    expect(multiState(h).repos.get(target)?.issues).toHaveLength(1);
     expect(h.violations).toHaveLength(0);
   });
 
@@ -1546,7 +1561,10 @@ describe("handler statuses obey the realism rule", () => {
     ];
     for (const [key, path] of branches) {
       const res = await call(h, "GET", path);
-      expect(statusAllowed(key, res.status)).toBe(true);
+      expect(
+        statusAllowed(key, res.status),
+        `handler ${key} returned status ${res.status}, which is neither declared [${[...declaredStatuses(key)].join(", ")}] nor a >= 400 error status`,
+      ).toBe(true);
     }
   });
 
@@ -1566,7 +1584,10 @@ describe("handler statuses obey the realism rule", () => {
       expect(res.status).toBe(409);
       const key =
         method === "PUT" ? "repository.immutableReleasesPut" : "repository.immutableReleasesRemove";
-      expect(statusAllowed(key, res.status)).toBe(true);
+      expect(
+        statusAllowed(key, res.status),
+        `handler ${key} returned status ${res.status}, which is neither declared [${[...declaredStatuses(key)].join(", ")}] nor a >= 400 error status`,
+      ).toBe(true);
     }
   });
 
@@ -1656,8 +1677,7 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    expect(h.multi).toBeDefined();
-    expect(h.state).toBeUndefined();
+    expect(h.working.mode).toBe("multi");
     const configured = await contentsGet(h, "e2e-owner/svc-a");
     expect(configured.status).toBe(200);
     expect(await configured.text()).toContain("labels");
@@ -2020,7 +2040,7 @@ describe("private-report bypass is scoped to redact-and-deliver targets", () => 
       body: { name: "settings-as-code-report" },
     });
     expect(res.status).toBe(400);
-    expect(h.violations.some((v) => v === "write in check mode")).toBe(true);
+    expect(h.violations.some((v) => v.startsWith("write in check mode"))).toBe(true);
   });
 
   test("issue traffic to a PUBLIC (non-delivery) target is a loud no-route violation", async () => {

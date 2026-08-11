@@ -41,7 +41,7 @@ import {
 } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG, TOKEN_USER_LOGIN } from "../constants.js";
 import { DENIAL_SEMANTICS } from "../denial-semantics.js";
-import type { DenialStyle, MaskGrade, MaskKey, Scenario } from "../schema.js";
+import type { DenialStyle, MaskGrade, MaskKey, PermissionMask, Scenario } from "../schema.js";
 import {
   MOCK_SECRETS_KEY_ID,
   MOCK_SECRETS_PUBLIC_KEY,
@@ -67,6 +67,7 @@ import {
   type MultiMockState,
   mintAppNodeId,
   mintNodeId,
+  type NodeFamily,
   PROTECTION_RULE_APPS,
   protectionFromPut,
   restRepoSurface,
@@ -152,14 +153,24 @@ export interface MockResponse {
 
 /**
  * Everything a handler needs to serve one request: the mutable state, the
- * matched endpoint, the concrete path (so id/name params can be parsed out),
- * the parsed query, and the request body. The chaos-corruption directive is
- * applied by the pipeline AFTER the handler returns, so it is not passed here.
+ * matched endpoint, the concrete path, the named path params the route
+ * template extracted, the parsed query, and the request body. The
+ * chaos-corruption directive is applied by the pipeline AFTER the handler
+ * returns, so it is not passed here.
  */
 export interface HandlerContext {
   state: MockState;
   endpoint: TaggedEndpoint;
-  pathname: string;
+  /**
+   * The URL-decoded value of one `{token}` in the matched route template
+   * ({owner} and {repo} included). Extraction and routing share one template
+   * walk, so a handler reads a param by the name its own ENDPOINTS
+   * declaration spells and can never disagree with it about position; asking
+   * for a token the route does not declare throws a mock BUG naming the
+   * handler, the route, and the declared tokens. The raw path is deliberately
+   * NOT exposed, so a handler cannot fall back to positional parsing.
+   */
+  param(name: string): string;
   query: Record<string, string>;
   body: unknown;
 }
@@ -194,12 +205,13 @@ function endpointRequirement(endpoint: TaggedEndpoint): Requirement {
 const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 
 /**
- * A token permission mask: resource -> grade. Unlisted resources default to
- * write. In single-repo mode this is the scenario's token_permissions; in
- * multi-repo mode it is the target slug's per-repo mask (so a denial can be
- * scoped to one repository).
+ * A token permission mask: resource -> grade (see PermissionMask in
+ * ../schema.ts, re-exported here for the pipeline's consumers). Unlisted
+ * resources default to write. In single-repo mode this is the scenario's
+ * token_permissions; in multi-repo mode it is the target slug's per-repo mask
+ * (so a denial can be scoped to one repository).
  */
-export type PermissionMask = Partial<Record<MaskKey, MaskGrade>>;
+export type { PermissionMask } from "../schema.js";
 
 /** The grade the token holds for a mask resource; unlisted resources are write. */
 function maskGrade(mask: PermissionMask, resource: MaskKey): MaskGrade {
@@ -254,12 +266,12 @@ function gradeResource(mask: PermissionMask, resource: MaskKey, level: "read" | 
  */
 function effectiveMask(
   global: PermissionMask,
-  perSlug: Record<string, string> | undefined,
+  perSlug: PermissionMask | undefined,
 ): PermissionMask {
   if (!perSlug) {
     return global;
   }
-  return { ...global, ...(perSlug as PermissionMask) };
+  return { ...global, ...perSlug };
 }
 
 // --- Denial responses -----------------------------------------------------
@@ -314,22 +326,6 @@ function clampInt(raw: string | undefined, fallback: number): number {
 }
 
 // --- Handler helpers ------------------------------------------------------
-
-/** The last path segment, URL-decoded (parses {name}/{id}/{username} params). */
-function lastSegment(pathname: string): string {
-  const segments = pathname.split("/").filter((segment) => segment.length > 0);
-  return decodeURIComponent(segments[segments.length - 1] ?? "");
-}
-
-/**
- * The path segment at a given index from the end, URL-decoded. index 0 is the
- * last segment; higher indices walk toward the front. Used where the id/name
- * is not the final segment (e.g. .../workflows/{id}/enable).
- */
-function segmentFromEnd(pathname: string, index: number): string {
-  const segments = pathname.split("/").filter((segment) => segment.length > 0);
-  return decodeURIComponent(segments[segments.length - 1 - index] ?? "");
-}
 
 function asObject(body: unknown): Json {
   return body && typeof body === "object" && !Array.isArray(body) ? (body as Json) : {};
@@ -498,8 +494,8 @@ const HANDLERS: Record<string, Handler> = {
     state.labels.push(label);
     return { status: 201, body: label };
   },
-  "labels.update": ({ state, pathname, body }) => {
-    const name = lastSegment(pathname);
+  "labels.update": ({ state, param, body }) => {
+    const name = param("name");
     const label = findLabel(state, name);
     if (!label) {
       return { status: 404, body: { message: "Not Found" } };
@@ -525,8 +521,8 @@ const HANDLERS: Record<string, Handler> = {
     }
     return ok(label);
   },
-  "labels.remove": ({ state, pathname }) => {
-    const name = lastSegment(pathname);
+  "labels.remove": ({ state, param }) => {
+    const name = param("name");
     const index = state.labels.findIndex((l) => labelName(l) === name.toLowerCase());
     if (index < 0) {
       return { status: 404, body: { message: "Not Found" } };
@@ -546,16 +542,16 @@ const HANDLERS: Record<string, Handler> = {
     state.rulesets.push(ruleset);
     return { status: 201, body: ruleset };
   },
-  "rulesets.get": ({ state, pathname }) => {
-    const id = lastSegment(pathname);
+  "rulesets.get": ({ state, param }) => {
+    const id = param("ruleset_id");
     const ruleset = state.rulesets.find((r) => String(r.id) === id);
     if (!ruleset) {
       return { status: 404, body: { message: "Not Found" } };
     }
     return ok(ruleset);
   },
-  "rulesets.update": ({ state, pathname, body }) => {
-    const id = lastSegment(pathname);
+  "rulesets.update": ({ state, param, body }) => {
+    const id = param("ruleset_id");
     const index = state.rulesets.findIndex((r) => String(r.id) === id);
     if (index < 0) {
       // Existence first, like GitHub: an unknown ruleset 404s even when the
@@ -570,8 +566,8 @@ const HANDLERS: Record<string, Handler> = {
     state.rulesets[index] = updated;
     return ok(updated);
   },
-  "rulesets.remove": ({ state, pathname }) => {
-    const id = lastSegment(pathname);
+  "rulesets.remove": ({ state, param }) => {
+    const id = param("ruleset_id");
     const index = state.rulesets.findIndex((r) => String(r.id) === id);
     if (index < 0) {
       return { status: 404, body: { message: "Not Found" } };
@@ -581,16 +577,16 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   // branches ---------------------------------------------------------------
-  "branches.getProtection": ({ state, pathname }) => {
-    const branch = segmentFromEnd(pathname, 1); // .../branches/{branch}/protection
+  "branches.getProtection": ({ state, param }) => {
+    const branch = param("branch");
     const protection = state.branch_protection[branch];
     if (!protection) {
       return { status: 404, body: { message: "Branch not protected" } };
     }
     return ok(protection);
   },
-  "branches.putProtection": ({ state, pathname, body }) => {
-    const branch = segmentFromEnd(pathname, 1);
+  "branches.putProtection": ({ state, param, body }) => {
+    const branch = param("branch");
     const stored = protectionFromPut(asObject(body));
     // The signed-commit requirement is its own sub-resource and absent from
     // the PUT's request schema (protectionFromPut drops any
@@ -606,16 +602,16 @@ const HANDLERS: Record<string, Handler> = {
     state.branch_protection[branch] = stored;
     return ok(stored);
   },
-  "branches.removeProtection": ({ state, pathname }) => {
-    const branch = segmentFromEnd(pathname, 1);
+  "branches.removeProtection": ({ state, param }) => {
+    const branch = param("branch");
     state.branch_protection[branch] = null;
     // GitHub deletes the whole underlying RULE: a later re-protect starts
     // clean, so the GraphQL-only extras must not survive the delete.
     delete state.branch_protection_graphql[branch];
     return noContent();
   },
-  "branches.sigPost": ({ state, pathname }) => {
-    const branch = segmentFromEnd(pathname, 2); // .../branches/{branch}/protection/required_signatures
+  "branches.sigPost": ({ state, param }) => {
+    const branch = param("branch");
     const protection = state.branch_protection[branch];
     if (!protection) {
       return { status: 404, body: { message: "Branch not protected" } };
@@ -628,8 +624,8 @@ const HANDLERS: Record<string, Handler> = {
       enabled: true,
     });
   },
-  "branches.sigDelete": ({ state, pathname }) => {
-    const branch = segmentFromEnd(pathname, 2);
+  "branches.sigDelete": ({ state, param }) => {
+    const branch = param("branch");
     const protection = state.branch_protection[branch];
     if (!protection) {
       return { status: 404, body: { message: "Branch not protected" } };
@@ -639,15 +635,15 @@ const HANDLERS: Record<string, Handler> = {
     delete protection.required_signatures;
     return noContent();
   },
-  "branches.branchProbe": ({ state, pathname }) => {
-    const branch = lastSegment(pathname);
+  "branches.branchProbe": ({ state, param }) => {
+    const branch = param("branch");
     if (!state.branches.includes(branch)) {
       return { status: 404, body: { message: "Branch not found" } };
     }
     return ok({ name: branch });
   },
-  "branches.appLookup": ({ pathname }) => {
-    const slug = lastSegment(pathname);
+  "branches.appLookup": ({ param }) => {
+    const slug = param("app_slug");
     // Slug matching is case-insensitive like GitHub's; the body echoes the
     // canonical roster slug.
     const app = PROTECTION_RULE_APPS.find(
@@ -663,8 +659,8 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   // environments -----------------------------------------------------------
-  "environments.probe": ({ state, pathname }) => {
-    const name = lastSegment(pathname);
+  "environments.probe": ({ state, param }) => {
+    const name = param("environment_name");
     const environment = state.environments[name];
     if (!environment) {
       return { status: 404, body: { message: "Not Found" } };
@@ -685,8 +681,8 @@ const HANDLERS: Record<string, Handler> = {
     const rules = Array.isArray(environment.protection_rules) ? environment.protection_rules : [];
     return ok({ ...environment, protection_rules: [...rules, ...custom] });
   },
-  "environments.update": ({ state, pathname, body }) => {
-    const name = lastSegment(pathname);
+  "environments.update": ({ state, param, body }) => {
+    const name = param("environment_name");
     // GitHub's PUT environment returns 200 on BOTH create and update (never
     // 201), matching the section's declared status and the OpenAPI spec. The
     // node id is minted last so a smuggled node_id in the PUT body can never
@@ -694,15 +690,15 @@ const HANDLERS: Record<string, Handler> = {
     state.environments[name] = {
       name,
       ...environmentFromPut(asObject(body)),
-      node_id: mintNodeId("environment", String(state.repo.full_name ?? ADMIN_SLUG), name),
+      node_id: mintNodeId("environment", state.slug, name),
     };
     return ok(state.environments[name]);
   },
   // Every variables handler 404s for an environment that does not exist: the
   // variables live under the environment, and the section only calls them
   // after its probe (check) or PUT (apply) proved the environment is there.
-  "environments.listVariables": ({ state, pathname, query }) => {
-    const env = segmentFromEnd(pathname, 1); // .../environments/{name}/variables
+  "environments.listVariables": ({ state, param, query }) => {
+    const env = param("environment_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -718,8 +714,8 @@ const HANDLERS: Record<string, Handler> = {
       ),
     });
   },
-  "environments.createVariable": ({ state, pathname, body }) => {
-    const env = segmentFromEnd(pathname, 1);
+  "environments.createVariable": ({ state, param, body }) => {
+    const env = param("environment_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -744,9 +740,9 @@ const HANDLERS: Record<string, Handler> = {
     });
     return { status: 201, body: {} };
   },
-  "environments.updateVariable": ({ state, pathname, body }) => {
-    const env = segmentFromEnd(pathname, 2); // .../environments/{env}/variables/{name}
-    const name = lastSegment(pathname);
+  "environments.updateVariable": ({ state, param, body }) => {
+    const env = param("environment_name");
+    const name = param("name");
     const variable = (state.environment_variables[env] ?? []).find(
       (v) => environmentVariableName(v) === name.toUpperCase(),
     );
@@ -762,9 +758,9 @@ const HANDLERS: Record<string, Handler> = {
     }
     return noContent();
   },
-  "environments.removeVariable": ({ state, pathname }) => {
-    const env = segmentFromEnd(pathname, 2);
-    const name = lastSegment(pathname);
+  "environments.removeVariable": ({ state, param }) => {
+    const env = param("environment_name");
+    const name = param("name");
     const list = state.environment_variables[env] ?? [];
     const index = list.findIndex((v) => environmentVariableName(v) === name.toUpperCase());
     if (!state.environments[env] || index < 0) {
@@ -778,23 +774,23 @@ const HANDLERS: Record<string, Handler> = {
   // environment, and the section only calls them after its probe (check) or
   // PUT (apply) proved the environment is there. The seal/unseal and
   // timestamp semantics are the shared secret-family helpers'.
-  "environments.listSecrets": ({ state, pathname, query }) => {
-    const env = segmentFromEnd(pathname, 1); // .../environments/{name}/secrets
+  "environments.listSecrets": ({ state, param, query }) => {
+    const env = param("environment_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
     return secretsList(state.environment_secrets[env] ?? [], query);
   },
-  "environments.secretsPublicKey": ({ state, pathname }) => {
-    const env = segmentFromEnd(pathname, 2); // .../environments/{name}/secrets/public-key
+  "environments.secretsPublicKey": ({ state, param }) => {
+    const env = param("environment_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
     return ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY });
   },
-  "environments.putSecret": ({ state, pathname, body }) => {
-    const env = segmentFromEnd(pathname, 2); // .../environments/{env}/secrets/{name}
-    const name = lastSegment(pathname);
+  "environments.putSecret": ({ state, param, body }) => {
+    const env = param("environment_name");
+    const name = param("secret_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -810,9 +806,9 @@ const HANDLERS: Record<string, Handler> = {
     }
     return sealedSecretPut(state, list, digests, name, body);
   },
-  "environments.removeSecret": ({ state, pathname }) => {
-    const env = segmentFromEnd(pathname, 2);
-    const name = lastSegment(pathname);
+  "environments.removeSecret": ({ state, param }) => {
+    const env = param("environment_name");
+    const name = param("secret_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -826,8 +822,8 @@ const HANDLERS: Record<string, Handler> = {
   // its stored deployment_branch_policy does not enable
   // custom_branch_policies, matching GitHub's documented "Not Found or
   // custom_branch_policies is false" behavior on this endpoint family.
-  "environments.listPolicies": ({ state, pathname, query }) => {
-    const env = segmentFromEnd(pathname, 1); // .../environments/{name}/deployment-branch-policies
+  "environments.listPolicies": ({ state, param, query }) => {
+    const env = param("environment_name");
     if (!branchPoliciesEnabled(state, env)) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -837,8 +833,8 @@ const HANDLERS: Record<string, Handler> = {
       branch_policies: slicePage(policies, query),
     });
   },
-  "environments.createPolicy": ({ state, pathname, body }) => {
-    const env = segmentFromEnd(pathname, 1);
+  "environments.createPolicy": ({ state, param, body }) => {
+    const env = param("environment_name");
     if (!branchPoliciesEnabled(state, env)) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -875,9 +871,9 @@ const HANDLERS: Record<string, Handler> = {
     list.push(policy);
     return ok(policy);
   },
-  "environments.removePolicy": ({ state, pathname }) => {
-    const env = segmentFromEnd(pathname, 2); // .../deployment-branch-policies/{branch_policy_id}
-    const id = lastSegment(pathname);
+  "environments.removePolicy": ({ state, param }) => {
+    const env = param("environment_name");
+    const id = param("branch_policy_id");
     const list = state.environment_branch_policies[env] ?? [];
     const index = list.findIndex((policy) => String(policy.id) === id);
     if (!branchPoliciesEnabled(state, env) || index < 0) {
@@ -888,8 +884,8 @@ const HANDLERS: Record<string, Handler> = {
   },
   // The protection-rule handlers 404 for an environment that does not exist,
   // like the variables family; there is no flag precondition here.
-  "environments.listProtectionRules": ({ state, pathname }) => {
-    const env = segmentFromEnd(pathname, 1); // .../environments/{name}/deployment_protection_rules
+  "environments.listProtectionRules": ({ state, param }) => {
+    const env = param("environment_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -898,8 +894,8 @@ const HANDLERS: Record<string, Handler> = {
     // parameters, so there is nothing to slice.
     return ok({ total_count: rules.length, custom_deployment_protection_rules: rules });
   },
-  "environments.listProtectionRuleApps": ({ state, pathname, query }) => {
-    const env = segmentFromEnd(pathname, 2); // .../deployment_protection_rules/apps
+  "environments.listProtectionRuleApps": ({ state, param, query }) => {
+    const env = param("environment_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -911,8 +907,8 @@ const HANDLERS: Record<string, Handler> = {
       ),
     });
   },
-  "environments.createProtectionRule": ({ state, pathname, body }) => {
-    const env = segmentFromEnd(pathname, 1);
+  "environments.createProtectionRule": ({ state, param, body }) => {
+    const env = param("environment_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -937,9 +933,9 @@ const HANDLERS: Record<string, Handler> = {
     list.push(rule);
     return { status: 201, body: rule };
   },
-  "environments.removeProtectionRule": ({ state, pathname }) => {
-    const env = segmentFromEnd(pathname, 2); // .../deployment_protection_rules/{protection_rule_id}
-    const id = lastSegment(pathname);
+  "environments.removeProtectionRule": ({ state, param }) => {
+    const env = param("environment_name");
+    const id = param("protection_rule_id");
     const list = state.environment_protection_rules[env] ?? [];
     const index = list.findIndex((rule) => String(rule.id) === id);
     if (!state.environments[env] || index < 0) {
@@ -961,8 +957,8 @@ const HANDLERS: Record<string, Handler> = {
     state.autolinks.push(autolink);
     return { status: 201, body: autolink };
   },
-  "autolinks.remove": ({ state, pathname }) => {
-    const id = lastSegment(pathname);
+  "autolinks.remove": ({ state, param }) => {
+    const id = param("autolink_id");
     const index = state.autolinks.findIndex((a) => String(a.id) === id);
     if (index < 0) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1068,66 +1064,66 @@ const HANDLERS: Record<string, Handler> = {
   "actions_secrets.list": ({ state, query }) => secretsList(state.actions_secrets, query),
   "actions_secrets.publicKey": () =>
     ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "actions_secrets.put": ({ state, pathname, body }) =>
+  "actions_secrets.put": ({ state, param, body }) =>
     sealedSecretPut(
       state,
       state.actions_secrets,
       state.actions_secret_digests,
-      lastSegment(pathname),
+      param("secret_name"),
       body,
     ),
-  "actions_secrets.remove": ({ state, pathname }) =>
-    secretRemove(state.actions_secrets, state.actions_secret_digests, lastSegment(pathname)),
+  "actions_secrets.remove": ({ state, param }) =>
+    secretRemove(state.actions_secrets, state.actions_secret_digests, param("secret_name")),
 
   "dependabot_secrets.list": ({ state, query }) => secretsList(state.dependabot_secrets, query),
   "dependabot_secrets.publicKey": () =>
     ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "dependabot_secrets.put": ({ state, pathname, body }) =>
+  "dependabot_secrets.put": ({ state, param, body }) =>
     sealedSecretPut(
       state,
       state.dependabot_secrets,
       state.dependabot_secret_digests,
-      lastSegment(pathname),
+      param("secret_name"),
       body,
     ),
-  "dependabot_secrets.remove": ({ state, pathname }) =>
-    secretRemove(state.dependabot_secrets, state.dependabot_secret_digests, lastSegment(pathname)),
+  "dependabot_secrets.remove": ({ state, param }) =>
+    secretRemove(state.dependabot_secrets, state.dependabot_secret_digests, param("secret_name")),
 
   "codespaces_secrets.list": ({ state, query }) => secretsList(state.codespaces_secrets, query),
   "codespaces_secrets.publicKey": () =>
     ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "codespaces_secrets.put": ({ state, pathname, body }) =>
+  "codespaces_secrets.put": ({ state, param, body }) =>
     sealedSecretPut(
       state,
       state.codespaces_secrets,
       state.codespaces_secret_digests,
-      lastSegment(pathname),
+      param("secret_name"),
       body,
     ),
-  "codespaces_secrets.remove": ({ state, pathname }) =>
-    secretRemove(state.codespaces_secrets, state.codespaces_secret_digests, lastSegment(pathname)),
+  "codespaces_secrets.remove": ({ state, param }) =>
+    secretRemove(state.codespaces_secrets, state.codespaces_secret_digests, param("secret_name")),
 
   "agents_secrets.list": ({ state, query }) => secretsList(state.agents_secrets, query),
   "agents_secrets.publicKey": () =>
     ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "agents_secrets.put": ({ state, pathname, body }) =>
+  "agents_secrets.put": ({ state, param, body }) =>
     sealedSecretPut(
       state,
       state.agents_secrets,
       state.agents_secret_digests,
-      lastSegment(pathname),
+      param("secret_name"),
       body,
     ),
-  "agents_secrets.remove": ({ state, pathname }) =>
-    secretRemove(state.agents_secrets, state.agents_secret_digests, lastSegment(pathname)),
+  "agents_secrets.remove": ({ state, param }) =>
+    secretRemove(state.agents_secrets, state.agents_secret_digests, param("secret_name")),
 
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {
     const page = slicePage(state.workflows, query);
     return ok({ total_count: state.workflows.length, workflows: page });
   },
-  "workflows.enable": ({ state, pathname }) => {
-    const id = segmentFromEnd(pathname, 1); // .../workflows/{id}/enable
+  "workflows.enable": ({ state, param }) => {
+    const id = param("workflow_id");
     const workflow = state.workflows.find((w) => String(w.id) === id);
     if (!workflow) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1135,8 +1131,8 @@ const HANDLERS: Record<string, Handler> = {
     workflow.state = "active";
     return noContent();
   },
-  "workflows.disable": ({ state, pathname }) => {
-    const id = segmentFromEnd(pathname, 1);
+  "workflows.disable": ({ state, param }) => {
+    const id = param("workflow_id");
     const workflow = state.workflows.find((w) => String(w.id) === id);
     if (!workflow) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1251,8 +1247,8 @@ const HANDLERS: Record<string, Handler> = {
 
   // collaborators ----------------------------------------------------------
   "collaborators.list": ({ state, query }) => ok(slicePage(state.collaborators, query)),
-  "collaborators.update": ({ state, pathname, body }) => {
-    const username = lastSegment(pathname);
+  "collaborators.update": ({ state, param, body }) => {
+    const username = param("username");
     const existing = state.collaborators.find(
       (c) => String(c.login).toLowerCase() === username.toLowerCase(),
     );
@@ -1274,12 +1270,18 @@ const HANDLERS: Record<string, Handler> = {
       pending.expired = false; // a re-PUT refreshes the invitation
       return { status: 201, body: pending };
     }
-    const stored = invitationFromPut(username, asObject(body), state.nextId++, state.repo);
+    const stored = invitationFromPut(
+      username,
+      asObject(body),
+      state.nextId++,
+      state.repo,
+      state.slug,
+    );
     state.invitations.push(stored);
     return { status: 201, body: stored };
   },
-  "collaborators.remove": ({ state, pathname }) => {
-    const username = lastSegment(pathname);
+  "collaborators.remove": ({ state, param }) => {
+    const username = param("username");
     const index = state.collaborators.findIndex(
       (c) => String(c.login).toLowerCase() === username.toLowerCase(),
     );
@@ -1289,8 +1291,8 @@ const HANDLERS: Record<string, Handler> = {
     return noContent();
   },
   "collaborators.listInvitations": ({ state, query }) => ok(slicePage(state.invitations, query)),
-  "collaborators.updateInvitation": ({ state, pathname, body }) => {
-    const id = lastSegment(pathname);
+  "collaborators.updateInvitation": ({ state, param, body }) => {
+    const id = param("invitation_id");
     const invitation = state.invitations.find((i) => String(i.id) === id);
     if (!invitation) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1303,8 +1305,8 @@ const HANDLERS: Record<string, Handler> = {
     }
     return ok(invitation);
   },
-  "collaborators.cancelInvitation": ({ state, pathname }) => {
-    const id = lastSegment(pathname);
+  "collaborators.cancelInvitation": ({ state, param }) => {
+    const id = param("invitation_id");
     const index = state.invitations.findIndex((i) => String(i.id) === id);
     if (index >= 0) {
       state.invitations.splice(index, 1);
@@ -1314,8 +1316,8 @@ const HANDLERS: Record<string, Handler> = {
 
   // teams ------------------------------------------------------------------
   "teams.org": orgProbeHandler,
-  "teams.probe": ({ state, pathname }) => {
-    const slug = segmentFromEnd(pathname, 3); // .../teams/{slug}/repos/{owner}/{repo}
+  "teams.probe": ({ state, param }) => {
+    const slug = param("team_slug");
     const access = state.teams[slug];
     if (!access) {
       // The spec documents this 404 ("team does not have permission for the
@@ -1326,8 +1328,8 @@ const HANDLERS: Record<string, Handler> = {
     // team's role_name folded in.
     return ok({ ...restRepoSurface(state.repo), role_name: access.role_name });
   },
-  "teams.grant": ({ state, pathname, body }) => {
-    const slug = segmentFromEnd(pathname, 3);
+  "teams.grant": ({ state, param, body }) => {
+    const slug = param("team_slug");
     state.teams[slug] = teamRepoFromPut(asObject(body));
     return noContent();
   },
@@ -1347,8 +1349,8 @@ const HANDLERS: Record<string, Handler> = {
     state.milestones.push(milestone);
     return { status: 201, body: milestone };
   },
-  "milestones.update": ({ state, pathname, body }) => {
-    const number = lastSegment(pathname);
+  "milestones.update": ({ state, param, body }) => {
+    const number = param("milestone_number");
     const milestone = state.milestones.find((m) => String(m.number) === number);
     if (!milestone) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1356,8 +1358,8 @@ const HANDLERS: Record<string, Handler> = {
     Object.assign(milestone, asObject(body));
     return ok(milestone);
   },
-  "milestones.remove": ({ state, pathname }) => {
-    const number = lastSegment(pathname);
+  "milestones.remove": ({ state, param }) => {
+    const number = param("milestone_number");
     const index = state.milestones.findIndex((m) => String(m.number) === number);
     if (index < 0) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1473,8 +1475,8 @@ const HANDLERS: Record<string, Handler> = {
     // The documented 201 body is an empty object.
     return { status: 201, body: {} };
   },
-  "actions_variables.update": ({ state, pathname, body }) => {
-    const name = lastSegment(pathname).toUpperCase();
+  "actions_variables.update": ({ state, param, body }) => {
+    const name = param("name").toUpperCase();
     const variable = state.actions_variables.find((v) => String(v.name).toUpperCase() === name);
     if (!variable) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1496,8 +1498,8 @@ const HANDLERS: Record<string, Handler> = {
     }
     return noContent();
   },
-  "actions_variables.remove": ({ state, pathname }) => {
-    const name = lastSegment(pathname).toUpperCase();
+  "actions_variables.remove": ({ state, param }) => {
+    const name = param("name").toUpperCase();
     const index = state.actions_variables.findIndex((v) => String(v.name).toUpperCase() === name);
     if (index < 0) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1532,8 +1534,8 @@ const HANDLERS: Record<string, Handler> = {
     // The documented 201 body is an empty object.
     return { status: 201, body: {} };
   },
-  "agents_variables.update": ({ state, pathname, body }) => {
-    const name = lastSegment(pathname).toUpperCase();
+  "agents_variables.update": ({ state, param, body }) => {
+    const name = param("name").toUpperCase();
     const variable = state.agents_variables.find((v) => String(v.name).toUpperCase() === name);
     if (!variable) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1555,8 +1557,8 @@ const HANDLERS: Record<string, Handler> = {
     }
     return noContent();
   },
-  "agents_variables.remove": ({ state, pathname }) => {
-    const name = lastSegment(pathname).toUpperCase();
+  "agents_variables.remove": ({ state, param }) => {
+    const name = param("name").toUpperCase();
     const index = state.agents_variables.findIndex((v) => String(v.name).toUpperCase() === name);
     if (index < 0) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1580,8 +1582,8 @@ const HANDLERS: Record<string, Handler> = {
     state.hooks.push(hook);
     return { status: 201, body: maskHookSecret(hook) };
   },
-  "webhooks.update": ({ state, pathname, body }) => {
-    const id = lastSegment(pathname);
+  "webhooks.update": ({ state, param, body }) => {
+    const id = param("hook_id");
     const hook = state.hooks.find((h) => String(h.id) === id);
     if (!hook) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1608,8 +1610,8 @@ const HANDLERS: Record<string, Handler> = {
     }
     return ok(maskHookSecret(hook));
   },
-  "webhooks.updateConfig": ({ state, pathname, body }) => {
-    const id = segmentFromEnd(pathname, 1); // .../hooks/{hook_id}/config
+  "webhooks.updateConfig": ({ state, param, body }) => {
+    const id = param("hook_id");
     const hook = state.hooks.find((h) => String(h.id) === id);
     if (!hook) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1619,8 +1621,8 @@ const HANDLERS: Record<string, Handler> = {
     hook.config = storedHookConfig({ ...asObject(hook.config), ...asObject(body) });
     return ok(maskedConfig(asObject(hook.config)));
   },
-  "webhooks.remove": ({ state, pathname }) => {
-    const id = lastSegment(pathname);
+  "webhooks.remove": ({ state, param }) => {
+    const id = param("hook_id");
     const index = state.hooks.findIndex((h) => String(h.id) === id);
     if (index < 0) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1720,8 +1722,8 @@ const HANDLERS: Record<string, Handler> = {
     state.deploy_keys.push(key);
     return { status: 201, body: key };
   },
-  "deploy_keys.remove": ({ state, pathname }) => {
-    const id = lastSegment(pathname);
+  "deploy_keys.remove": ({ state, param }) => {
+    const id = param("key_id");
     const index = state.deploy_keys.findIndex((k) => String(k.id) === id);
     if (index < 0) {
       return { status: 404, body: { message: "Not Found" } };
@@ -1784,8 +1786,8 @@ const HANDLERS: Record<string, Handler> = {
     state.secret_scanning_patterns.push(...created);
     return { status: 201, body: { created_patterns: created } };
   },
-  "secret_scanning_custom_patterns.update": ({ state, pathname, body }) => {
-    const id = lastSegment(pathname);
+  "secret_scanning_custom_patterns.update": ({ state, param, body }) => {
+    const id = param("pattern_id");
     const pattern = state.secret_scanning_patterns.find((p) => String(p.id) === id);
     if (!pattern) {
       // Existence first, like GitHub: an unknown id 404s before the version
@@ -2336,6 +2338,15 @@ function pinTargetName(
 }
 
 /**
+ * The repo's canonical minted node id, re-minted from the state's fixed slug
+ * (exactly what stampNodeIds stored at build): the ONE spelling of the repo
+ * identity every GraphQL handler serves.
+ */
+function repoNodeId(state: MockState): string {
+  return mintNodeId("repo", state.slug, "");
+}
+
+/**
  * One entry per "section.role" key in allGraphqlOps(), exactly like HANDLERS.
  * The completeness assertion below keeps it in lockstep with the declarations.
  * The pin family models VERIFIED live GitHub position semantics: a new pin
@@ -2346,16 +2357,11 @@ const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
   // repository ---------------------------------------------------------------
   // The two GraphQL-only repo settings, stored on state.repo but invisible to
   // every REST handler (restRepoSurface): the read serves both plus the repo's
-  // minted node id, the mutation resolves its target back through the codec.
-  "repository.featuresQuery": ({ state }) => {
-    const nodeId = state.repo.node_id;
-    if (typeof nodeId !== "string" || nodeId === "") {
-      throw new Error(
-        "E2E MOCK: state.repo.node_id is missing; stampNodeIds must mint it before GraphQL serves the repo",
-      );
-    }
-    return { data: { repository: { id: nodeId, ...repoFeatureFields(state) } } };
-  },
+  // canonical minted node id, the mutation resolves its target back through
+  // the codec.
+  "repository.featuresQuery": ({ state }) => ({
+    data: { repository: { id: repoNodeId(state), ...repoFeatureFields(state) } },
+  }),
   "repository.updateFeatures": ({ state, variables }) => {
     const { repositoryId, hasSponsorshipsEnabled, issueCreationPolicy } = variables as {
       repositoryId?: unknown;
@@ -2481,7 +2487,7 @@ const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
     },
   }),
   "branches.repoLookup": ({ state }) => ({
-    data: { repository: { id: state.repo.node_id } },
+    data: { repository: { id: repoNodeId(state) } },
   }),
   "branches.actorUser": ({ state, variables }) => {
     const login = String((variables as Json).login ?? "");
@@ -2501,10 +2507,10 @@ const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
         ],
       };
     }
-    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+    const slug = state.slug;
     return {
       data: {
-        repository: { id: state.repo.node_id },
+        repository: { id: repoNodeId(state) },
         user: { id: mintNodeId("user", slug, canonical) },
       },
     };
@@ -2525,14 +2531,14 @@ const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
         ],
       };
     }
-    const repository = { id: state.repo.node_id };
+    const repository = { id: repoNodeId(state) };
     const canonical = BYPASS_ACTOR_TEAMS.find((entry) => entry.toLowerCase() === combinedFold);
     if (canonical === undefined) {
       // A known org with an unknown team is a NULLABLE-FIELD miss, not an
       // errors[] entry, matching GitHub's Organization.team shape.
       return { data: { repository, organization: { team: null } } };
     }
-    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+    const slug = state.slug;
     return {
       data: {
         repository,
@@ -2565,7 +2571,7 @@ const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
         ],
       };
     }
-    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+    const slug = state.slug;
     stored.id = mintNodeId("rule", slug, String(stored.pattern));
     state.branch_protection_rules.push(stored);
     return {
@@ -2588,7 +2594,7 @@ const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = {
       return notFound;
     }
     const pattern = decoded.key;
-    const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+    const slug = state.slug;
     const wildcard = state.branch_protection_rules.find((rule) => rule.pattern === pattern);
     if (wildcard) {
       const applied = applyRuleInput(wildcard, input, state);
@@ -2962,19 +2968,24 @@ export function newPipelineRunState(): PipelineRunState {
   };
 }
 
+/**
+ * The working state, discriminated on the run shape so exactly one store
+ * exists by construction. "single" carries the one MockState every request
+ * dispatches into. "multi" carries the per-slug repos + discovery pool: the
+ * pipeline resolves the target slug from the request path, dispatches into
+ * that slug's MockState, and grades against that slug's permission mask; the
+ * `/user/repos` and `/repos/{slug}/contents/{path}` endpoints are served from
+ * here. Shared by PipelineOptions and the MockHandle, so no surface can decay
+ * the XOR back into two independent optionals.
+ */
+export type WorkingState =
+  | { mode: "single"; state: MockState }
+  | { mode: "multi"; multi: MultiMockState };
+
 /** Options the server passes into the pipeline for each request. */
 export interface PipelineOptions extends PipelineRunState {
   scenario: Scenario;
-  /**
-   * The working state, discriminated on the run shape so exactly one store
-   * exists by construction. "single" carries the one MockState every request
-   * dispatches into. "multi" carries the per-slug repos + discovery pool: the
-   * pipeline resolves the target slug from the request path, dispatches into
-   * that slug's MockState, and grades against that slug's permission mask; the
-   * `/user/repos` and `/repos/{slug}/contents/{path}` endpoints are served from
-   * here.
-   */
-  working: { mode: "single"; state: MockState } | { mode: "multi"; multi: MultiMockState };
+  working: WorkingState;
   basePrefix?: string;
   corrupt?: CorruptOption;
   /** Transport-level faults to inject on matching requests (see fault barrier). */
@@ -3025,21 +3036,86 @@ function violationResponse(message: string): MockResponse {
 
 /**
  * Find the endpoint whose method and path template match this request. Returns
- * the "section.role" key and the tagged endpoint, or null when nothing matches.
+ * the "section.role" key, the tagged endpoint, and the named params the
+ * template extracted, or null when nothing matches.
  */
 function matchEndpoint(
   method: string,
   pathname: string,
-): { key: string; endpoint: TaggedEndpoint } | null {
+): { key: string; endpoint: TaggedEndpoint; params: Record<string, string> } | null {
   for (const [key, endpoint] of Object.entries(allEndpoints())) {
     if (endpointMethod(endpoint.route) !== method) {
       continue;
     }
-    if (matchesTemplate(endpointPath(endpoint.route), pathname)) {
-      return { key, endpoint };
+    const params = matchTemplateParams(endpointPath(endpoint.route), pathname);
+    if (params !== null) {
+      return { key, endpoint, params };
     }
   }
   return null;
+}
+
+/**
+ * The named `{token}` params a route template extracts from a concrete path,
+ * URL-decoded, or null when the path does not match. The SAME walk
+ * matchesTemplate (src/sections/contract.ts) proves, kept here so the match
+ * proof is not thrown away: the params handlers read come from the exact
+ * declaration that routed the request.
+ */
+function matchTemplateParams(
+  template: string,
+  concretePath: string,
+): Record<string, string> | null {
+  const templateSegs = pathSegmentsOf(template);
+  const pathSegs = pathSegmentsOf(concretePath);
+  if (templateSegs.length !== pathSegs.length) {
+    return null;
+  }
+  const params: Record<string, string> = {};
+  for (let i = 0; i < templateSegs.length; i++) {
+    const token = templateSegs[i] as string;
+    const segment = pathSegs[i] as string;
+    if (token.startsWith("{") && token.endsWith("}")) {
+      // A malformed percent escape (e.g. %ZZ) cannot decode to a param value;
+      // treat the path as matching no route, so it fails as a loud no-route
+      // violation instead of an unhandled URIError.
+      try {
+        params[token.slice(1, -1)] = decodeURIComponent(segment);
+      } catch {
+        return null;
+      }
+    } else if (token !== segment) {
+      return null;
+    }
+  }
+  return params;
+}
+
+/** A path's non-empty segments, query string dropped (matchesTemplate's split). */
+function pathSegmentsOf(path: string): string[] {
+  const withoutQuery = path.split("?")[0] ?? "";
+  return withoutQuery.split("/").filter((segment) => segment.length > 0);
+}
+
+/**
+ * The HandlerContext.param accessor over one matched route's extracted
+ * params: a handler asking for a `{token}` its own route never declares is a
+ * mock design bug, thrown loudly with every fact needed to fix it.
+ */
+function paramAccessor(
+  key: string,
+  endpoint: TaggedEndpoint,
+  params: Record<string, string>,
+): (name: string) => string {
+  return (name) => {
+    const value = params[name];
+    if (value === undefined) {
+      throw new Error(
+        `E2E MOCK BUG: handler "${key}" asked for path param "{${name}}" that its route "${endpoint.route}" does not declare (declared: ${Object.keys(params).join(", ") || "(none)"})`,
+      );
+    }
+    return value;
+  };
 }
 
 /**
@@ -3667,7 +3743,7 @@ function slugFromPath(pathname: string): string | null {
  * a force-push allowance can name a GitHub App, whose id comes from the
  * repo-independent GET /apps/{app_slug} lookup.
  */
-const GLOBAL_NODE_FAMILIES: ReadonlySet<string> = new Set(["app"]);
+const GLOBAL_NODE_FAMILIES: ReadonlySet<NodeFamily> = new Set(["app"]);
 
 /**
  * Every string anywhere inside a mutation's variables that decodes as a mock
@@ -3694,6 +3770,34 @@ function decodedNodeIds(value: unknown, out: Array<{ slug: string }>): void {
       decodedNodeIds(item, out);
     }
   }
+}
+
+/**
+ * Resolve a mutation's target slug from the self-describing node ids in its
+ * variables: the ONE derivation of the write=>slug correlation, returning a
+ * violation instead of a slug for zero or several addressed repositories
+ * (the Grading-style discriminated result keeps the slug exactly where the
+ * type says it is, so a write can never dispatch without a resolved target).
+ */
+function resolveMutationTarget(
+  opName: string,
+  variables: Json,
+): { slug: string } | { violation: string } {
+  const decoded: Array<{ slug: string }> = [];
+  decodedNodeIds(variables, decoded);
+  const slugs = [...new Set(decoded.map((id) => id.slug))];
+  const first = slugs[0];
+  if (first === undefined) {
+    return {
+      violation: `GraphQL mutation ${opName} carries no decodable mock node id; mutations must address their target through node ids the mock minted`,
+    };
+  }
+  if (slugs.length > 1) {
+    return {
+      violation: `GraphQL mutation ${opName} carries node ids of several repositories [${slugs.sort().join(", ")}]; one mutation must address one target`,
+    };
+  }
+  return { slug: first };
 }
 
 /**
@@ -3821,37 +3925,27 @@ export function handleGraphqlRequest(
   // where the decoded slug must name the one state - so a section that
   // sends a garbage or foreign id can never look green against the
   // single-repo harness and only fail once a multi scenario runs it.
-  let mutationSlug: string | null = null;
-  if (op.kind === "write") {
-    const decoded: Array<{ slug: string }> = [];
-    decodedNodeIds(variables, decoded);
-    const slugs = new Set(decoded.map((id) => id.slug));
-    if (slugs.size === 0) {
-      return violation(
-        `GraphQL mutation ${op.name} carries no decodable mock node id; mutations must address their target through node ids the mock minted`,
-      );
-    }
-    if (slugs.size > 1) {
-      return violation(
-        `GraphQL mutation ${op.name} carries node ids of several repositories [${[...slugs].sort().join(", ")}]; one mutation must address one target`,
-      );
-    }
-    mutationSlug = [...slugs][0] as string;
+  // `target` is null exactly for reads; a write either resolved its slug or
+  // already returned the violation.
+  const target = op.kind === "write" ? resolveMutationTarget(op.name, variables) : null;
+  if (target !== null && "violation" in target) {
+    return violation(target.violation);
   }
   let state: MockState;
   let mask: PermissionMask = scenario.token_permissions ?? {};
   let targetSlug = "";
   if (working.mode === "single") {
     state = working.state;
-    const singleSlug = String(state.repo.full_name ?? ADMIN_SLUG);
-    if (mutationSlug !== null && mutationSlug !== singleSlug) {
+    if (target !== null && target.slug !== state.slug) {
       return violation(
-        `GraphQL mutation ${op.name} carries node ids of "${mutationSlug}", but this single-repo run serves only "${singleSlug}"`,
+        `GraphQL mutation ${op.name} carries node ids of "${target.slug}", but this single-repo run serves only "${state.slug}"`,
       );
     }
   } else {
     let slug: string;
-    if (op.kind === "read") {
+    if (target !== null) {
+      slug = target.slug;
+    } else {
       const { owner, repo } = variables as { owner?: unknown; repo?: unknown };
       if (typeof owner !== "string" || typeof repo !== "string") {
         return violation(
@@ -3859,8 +3953,6 @@ export function handleGraphqlRequest(
         );
       }
       slug = `${owner}/${repo}`;
-    } else {
-      slug = mutationSlug as string;
     }
     const repoState = working.multi.repos.get(slug);
     if (!repoState) {
@@ -3934,7 +4026,7 @@ export function handleGraphqlRequest(
     const undeclared = result.errors.filter((entry) => !declared.includes(entry.type));
     if (undeclared.length > 0) {
       return violation(
-        `GraphQL handler "${key}" answered error type(s) [${undeclared.map((e) => e.type).join(", ")}] the operation does not declare as outcomes [${declared.join(", ")}]`,
+        `GraphQL handler "${key}" answered undeclared error type(s) [${undeclared.map((e) => `${e.type}: "${e.message}"`).join(", ")}]; the operation declares only [${declared.join(", ")}] as tolerated outcomes`,
       );
     }
   }
@@ -3995,7 +4087,7 @@ export function runPipeline(
 
   // 1. Wire-contract assertions on EVERY request.
   if (!request.headers.get("authorization")) {
-    const message = "request is missing the Authorization header";
+    const message = `request ${request.method} ${strippedForLog} is missing the Authorization header`;
     return {
       response: violationResponse(message),
       log: { ...baseLog, status: 400 },
@@ -4003,7 +4095,7 @@ export function runPipeline(
     };
   }
   if (!request.headers.get("x-github-api-version")) {
-    const message = "request is missing the x-github-api-version header";
+    const message = `request ${request.method} ${strippedForLog} is missing the x-github-api-version header`;
     return {
       response: violationResponse(message),
       log: { ...baseLog, status: 400 },
@@ -4183,7 +4275,7 @@ export function runPipeline(
   // mask it. The flag is the scenario's mode ORed with the server's one-way
   // override, so a convergence re-run against the same server arms it too.
   if (options.checkMode && request.method !== "GET") {
-    const message = "write in check mode";
+    const message = `write in check mode: ${request.method} ${pathname} (endpoint "${key}")`;
     return {
       response: violationResponse(message),
       log: { ...baseLog, status: 400 },
@@ -4373,7 +4465,7 @@ export function runPipeline(
   const response = handler({
     state,
     endpoint,
-    pathname,
+    param: paramAccessor(key, endpoint, matched.params),
     query: request.query,
     body: request.body,
   });

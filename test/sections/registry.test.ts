@@ -42,27 +42,51 @@ describe("registry <-> README", () => {
   }));
 
   test("the README Sections table lists every section, in order, naming each granted permission", () => {
-    expect(start).toBeGreaterThan(-1);
+    expect(start, 'README.md has no "## Sections" heading; restore it exactly').toBeGreaterThan(-1);
     // One row per section, in SECTION_KEYS order - a new section without a
-    // README row (or a stale row) fails here. The raw line count catches
-    // malformed rows the key regex would otherwise skip silently.
+    // README row (or a stale row) fails here. Malformed rows the key regex
+    // would otherwise skip silently are named outright, with the raw line
+    // count kept as a backstop.
     const tableLines = section.split("\n").filter((line) => line.startsWith("|"));
-    expect(tableLines).toHaveLength(SECTION_KEYS.length + 2); // header + separator
+    const rowRe = /^\| `[a-z_]+` \| [^|]+ \| [^|]+ \|/;
+    const unmatched = tableLines.slice(2).filter((line) => !rowRe.test(line));
+    expect(
+      unmatched,
+      `README Sections table has malformed row line(s) the key regex cannot parse: ${unmatched.join(" | ")}`,
+    ).toEqual([]);
+    expect(
+      tableLines,
+      `README Sections table has ${tableLines.length} "|" line(s), expected ${SECTION_KEYS.length + 2} (one per section plus header and separator)`,
+    ).toHaveLength(SECTION_KEYS.length + 2);
     expect(rows.map((row) => row.key)).toEqual([...SECTION_KEYS]);
 
     // Every permission the grant advice names (the quoted words in
     // sectionGrant's derived prose) must appear in that section's README row,
     // so the table cannot drift from the advice users see in errors.
+    const offenders: string[] = [];
     for (const module of SECTIONS) {
       const row = rows.find((r) => r.key === module.key);
       const granted = [...sectionGrant(module).matchAll(/"([^"]+)"/g)].map(
         (match) => match[1] ?? "",
       );
-      expect(granted.length).toBeGreaterThan(0);
+      if (granted.length === 0) {
+        offenders.push(
+          `${module.key}: no quoted permission extracted from its grant prose "${sectionGrant(module)}"`,
+        );
+        continue;
+      }
       for (const name of granted) {
-        expect(row?.permission).toContain(name);
+        if (!row?.permission.includes(name)) {
+          offenders.push(
+            `${module.key}: README PAT cell (${row?.permission ?? "row missing"}) never names granted permission "${name}"`,
+          );
+        }
       }
     }
+    expect(
+      offenders,
+      `README Sections rows drifting from the grant advice:\n  ${offenders.join("\n  ")}`,
+    ).toEqual([]);
   });
 
   test("each row's Endpoints cell names every distinct leading resource segment its section calls", () => {
@@ -278,15 +302,22 @@ describe("section permissions", () => {
         module.shape.safeParse({ undeclared: "keep", entries: [] }).success,
         `${key}: wrapper with a policy must parse`,
       ).toBe(true);
-      expect(["keep", "delete"]).toContain(defaultUndeclaredPolicy(sectionModule(key)));
+      const policy = defaultUndeclaredPolicy(sectionModule(key));
+      expect(
+        ["keep", "delete"],
+        `${key}: defaultUndeclaredPolicy returned "${policy}", expected "keep" or "delete"`,
+      ).toContain(policy);
     }
   });
 
   test("every registered section declares a permission with at least one repo resource", () => {
-    for (const module of SECTIONS) {
-      expect(module.permission).toBeDefined();
-      expect(module.permission.repo.length).toBeGreaterThan(0);
-    }
+    const offenders = SECTIONS.filter(
+      (module) => module.permission === undefined || module.permission.repo.length === 0,
+    ).map((module) => module.key);
+    expect(
+      offenders,
+      `section(s) declaring a permission with no repo resource (add at least one PatResource to permission.repo): ${offenders.join(", ")}`,
+    ).toEqual([]);
   });
 
   test("each section's grant caveat matches the pinned per-section caveats", () => {
@@ -402,40 +433,60 @@ describe("grantFor", () => {
 
 describe("section endpoints", () => {
   test("every registered section declares at least one endpoint", () => {
-    for (const module of SECTIONS) {
-      expect(Object.values(module.endpoints).length).toBeGreaterThan(0);
-    }
+    const offenders = SECTIONS.filter((module) => Object.values(module.endpoints).length === 0).map(
+      (module) => module.key,
+    );
+    expect(
+      offenders,
+      `section(s) declaring no endpoints (add their routes to ENDPOINTS): ${offenders.join(", ")}`,
+    ).toEqual([]);
   });
 
   test("every declared endpoint is well-formed", () => {
     const methods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+    const problems: string[] = [];
     for (const module of SECTIONS) {
-      for (const endpoint of Object.values(module.endpoints)) {
+      for (const [role, endpoint] of Object.entries(module.endpoints)) {
+        const tag = `${module.key}.${role} ("${endpoint.route}")`;
         const [method, path] = endpoint.route.split(" ");
-        expect(methods.has(method ?? "")).toBe(true);
+        if (!methods.has(method ?? "")) {
+          problems.push(`${tag}: method "${method}" is not one of GET/POST/PUT/PATCH/DELETE`);
+        }
         // Absolute path with no query string; only balanced {param} tokens.
-        expect(path?.startsWith("/")).toBe(true);
-        expect(path).not.toContain("?");
+        if (!path?.startsWith("/")) {
+          problems.push(`${tag}: path "${path}" does not start with "/"`);
+        }
+        if (path?.includes("?")) {
+          problems.push(
+            `${tag}: path "${path}" carries a query string; pass queries at the call site`,
+          );
+        }
         for (const segment of (path ?? "").split("/").filter(Boolean)) {
           const hasBrace = segment.includes("{") || segment.includes("}");
-          if (hasBrace) {
+          if (hasBrace && !/^{[a-z_]+}$/.test(segment)) {
             // A templated segment is exactly one {param} token, nothing else.
-            expect(segment).toMatch(/^{[a-z_]+}$/);
+            problems.push(
+              `${tag}: templated segment "${segment}" is not exactly one {param} token`,
+            );
           }
         }
-        const statusKeys = Object.keys(endpoint.statuses).map(Number);
-        expect(statusKeys.length).toBeGreaterThan(0);
-        for (const status of statusKeys) {
-          expect(status).toBeGreaterThanOrEqual(100);
-          expect(status).toBeLessThan(600);
+        const statusEntries = Object.entries(endpoint.statuses);
+        if (statusEntries.length === 0) {
+          problems.push(`${tag}: declares no statuses`);
         }
-        // Every status carries a non-empty prose meaning.
-        for (const meaning of Object.values(endpoint.statuses)) {
-          expect(typeof meaning).toBe("string");
-          expect(meaning.length).toBeGreaterThan(0);
+        for (const [statusKey, meaning] of statusEntries) {
+          const status = Number(statusKey);
+          if (!Number.isInteger(status) || status < 100 || status >= 600) {
+            problems.push(`${tag}: status "${statusKey}" is not an integer in 100-599`);
+          }
+          // Every status carries a non-empty prose meaning.
+          if (typeof meaning !== "string" || meaning.length === 0) {
+            problems.push(`${tag}: status ${statusKey} carries no prose meaning`);
+          }
         }
       }
     }
+    expect(problems, `malformed endpoint declaration(s):\n  ${problems.join("\n  ")}`).toEqual([]);
   });
 
   test("endpointKind derives read for GET and write for everything else", () => {
@@ -514,15 +565,26 @@ describe("section endpoints", () => {
   test("every section's tolerated statuses are a subset of its declared statuses", () => {
     // Trivially true by construction, but this pins the invariant the
     // helpers rely on: tolerances are derived from statuses, never wider.
+    const offenders: string[] = [];
     for (const module of SECTIONS) {
-      for (const endpoint of Object.values(module.endpoints)) {
+      for (const [role, endpoint] of Object.entries(module.endpoints)) {
         const declared = new Set(Object.keys(endpoint.statuses).map(Number));
         for (const status of toleratedStatuses(endpoint)) {
-          expect(declared.has(status)).toBe(true);
-          expect(status).toBeGreaterThanOrEqual(400);
+          if (!declared.has(status)) {
+            offenders.push(
+              `${module.key}.${role}: tolerates ${status}, which its statuses never declare`,
+            );
+          }
+          if (status < 400) {
+            offenders.push(`${module.key}.${role}: tolerates non-error status ${status}`);
+          }
         }
       }
     }
+    expect(
+      offenders,
+      `endpoint(s) whose tolerated statuses escape their declaration:\n  ${offenders.join("\n  ")}`,
+    ).toEqual([]);
   });
 
   test("only the known endpoints carry a permission override", () => {
@@ -792,14 +854,23 @@ describe("matchesTemplate", () => {
       repo: { owner: "octo", name: "repo", slug: "octo/repo" },
       check: true,
     };
+    const mismatches: string[] = [];
     for (const endpoint of Object.values(allEndpoints())) {
       const tokens = [...endpointPath(endpoint.route).matchAll(/{([a-z_]+)}/g)]
         .map((m) => m[1])
         .filter((t) => t !== "owner" && t !== "repo");
       const params = Object.fromEntries(tokens.map((t) => [t as string, "x"]));
       const concrete = expand(endpoint, ctx, params);
-      expect(matchesTemplate(endpointPath(endpoint.route), concrete)).toBe(true);
+      if (!matchesTemplate(endpointPath(endpoint.route), concrete)) {
+        mismatches.push(
+          `${endpoint.section}.${endpoint.role}: expanded path "${concrete}" does not match its own template "${endpointPath(endpoint.route)}"`,
+        );
+      }
     }
+    expect(
+      mismatches,
+      `endpoint route(s) whose expansion diverges from their own template:\n  ${mismatches.join("\n  ")}`,
+    ).toEqual([]);
   });
 });
 

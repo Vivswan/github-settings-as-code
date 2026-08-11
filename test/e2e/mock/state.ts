@@ -22,7 +22,7 @@ import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/roles
 import { ADMIN_SLUG } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
-import type { OwnerKind } from "../schema.js";
+import type { OwnerKind, PermissionMask } from "../schema.js";
 
 /** A plain JSON object body, the currency of every fixture and overlay. */
 type Json = Record<string, unknown>;
@@ -250,6 +250,13 @@ export interface LiveState {
  * owner kind (which flips the org endpoint to 404 for a personal account).
  */
 export interface MockState {
+  /**
+   * The "owner/name" slug this state serves, fixed at construction (buildState
+   * re-slugs the repo body first, so the two always agree at birth). Node ids
+   * and per-slug routing key off THIS field, never the mutable repo body: a
+   * PATCH that writes `full_name` must not move the identity minted ids carry.
+   */
+  readonly slug: string;
   ownerKind: OwnerKind;
   /** The org body, or null when the owner is a personal account. */
   org: Json | null;
@@ -405,30 +412,49 @@ function isPlainObject(value: unknown): value is Json {
 const NODE_ID_PREFIX = "MOCKNODE";
 
 /**
+ * The closed vocabulary of node-id families: every mint site and every decode
+ * consumer speaks these six literals, so a typo at either end is a compile
+ * error instead of a runtime NOT_FOUND hunt.
+ */
+const NODE_FAMILIES = ["repo", "environment", "rule", "user", "team", "app"] as const;
+export type NodeFamily = (typeof NODE_FAMILIES)[number];
+
+/**
  * Mint the node id for one resource: `family` names the resource kind
  * ("repo", "environment", ...), `slug` the owning repository, and `key` the
  * resource's natural key within the family (empty for the repo itself, whose
  * slug says everything).
  */
-export function mintNodeId(family: string, slug: string, key: string): string {
+export function mintNodeId(family: NodeFamily, slug: string, key: string): string {
   return Buffer.from(`${NODE_ID_PREFIX}:${family}:${slug}:${key}`, "utf8").toString("base64");
 }
 
 /**
  * Decode a minted node id back to its parts, or null for anything this mock
- * did not mint (a fixture's GitHub-realistic id, an arbitrary string). The
- * slug never contains ":" (the owner/name charset), so the first two
- * separators are unambiguous; the key keeps any ":" it carries.
+ * did not mint (a fixture's GitHub-realistic id, an arbitrary string, a spine
+ * whose family is outside the closed vocabulary). The slug never contains ":"
+ * (the owner/name charset), so the first two separators are unambiguous; the
+ * key keeps any ":" it carries.
  */
-export function decodeNodeId(nodeId: string): { family: string; slug: string; key: string } | null {
+export function decodeNodeId(
+  nodeId: string,
+): { family: NodeFamily; slug: string; key: string } | null {
   const decoded = Buffer.from(nodeId, "base64").toString("utf8");
   const parts = decoded.split(":");
-  if (parts[0] !== NODE_ID_PREFIX || parts.length < 4 || !parts[1] || !parts[2]) {
+  const family = parts[1];
+  const slug = parts[2];
+  if (
+    parts[0] !== NODE_ID_PREFIX ||
+    parts.length < 4 ||
+    family === undefined ||
+    !(NODE_FAMILIES as readonly string[]).includes(family) ||
+    !slug
+  ) {
     return null;
   }
   return {
-    family: parts[1] as string,
-    slug: parts[2] as string,
+    family: family as NodeFamily,
+    slug,
     key: parts.slice(3).join(":"),
   };
 }
@@ -449,19 +475,18 @@ export function mintAppNodeId(appSlug: string): string {
 /**
  * Stamp the node ids of everything a state serves that GraphQL can address:
  * the repo object, each environment body, and each wildcard protection rule.
- * Called after a state is built AND after it is re-slugged (the slug is part
- * of the id), so the ids a section reads always name the repository they
- * belong to. Write handlers mint ids for resources they create with the same
- * codec.
+ * Runs at the end of buildState, after the repo body is re-slugged and
+ * `state.slug` is fixed (the slug is part of every id), so the ids a section
+ * reads always name the repository they belong to. Write handlers mint ids
+ * for resources they create with the same codec.
  */
 export function stampNodeIds(state: MockState): void {
-  const slug = String(state.repo.full_name ?? ADMIN_SLUG);
-  state.repo.node_id = mintNodeId("repo", slug, "");
+  state.repo.node_id = mintNodeId("repo", state.slug, "");
   for (const [name, environment] of Object.entries(state.environments)) {
-    environment.node_id = mintNodeId("environment", slug, name);
+    environment.node_id = mintNodeId("environment", state.slug, name);
   }
   for (const rule of state.branch_protection_rules) {
-    rule.id = mintNodeId("rule", slug, String(rule.pattern));
+    rule.id = mintNodeId("rule", state.slug, String(rule.pattern));
   }
 }
 
@@ -584,13 +609,13 @@ export function bypassUser(seed: Json, id: number): Json {
  * required GET shape, so scenario seeds stay terse: typically only
  * {invitee: {login}, permissions, expired}. The seed's own fields win, `id`
  * comes from the caller unless the seed carries one, and the server-owned
- * scaffold (repository, inviter, urls, timestamp) derives from `repo` so the
- * body stays internally consistent with the target (re-slugged in multi
- * mode). The timestamp is FIXED for the idempotence proof.
+ * scaffold (repository, inviter, urls, timestamp) derives from `repo` and the
+ * state's fixed `slug`, so the body stays internally consistent with the
+ * target (re-slugged in multi mode). The timestamp is FIXED for the
+ * idempotence proof.
  */
-export function completeInvitation(seed: Json, id: number, repo: Json): Json {
+export function completeInvitation(seed: Json, id: number, repo: Json, slug: string): Json {
   const invitationId = Number(seed.id ?? id);
-  const slug = String(repo.full_name ?? ADMIN_SLUG);
   const ownerLogin = String((repo.owner as Json | undefined)?.login ?? slug.split("/")[0]);
   // An explicit `invitee: null` seeds an EMAIL invitation (the spec's invitee
   // is nullable); only an absent invitee gets the default user scaffold.
@@ -716,10 +741,23 @@ export function buildState(
   if (slug !== undefined) {
     reslugRepo(repo, slug);
   }
+  // The state's identity, fixed here for good: the slug param (multi-repo
+  // targets) or the repo body's name at construction. Later repo mutations
+  // (a PATCH writing full_name) cannot move it. A seed that blanks full_name
+  // has no identity to fix, so it fails loudly at build instead of minting
+  // ids under a garbage slug.
+  const fullName = repo.full_name;
+  if (slug === undefined && (typeof fullName !== "string" || fullName === "")) {
+    throw new Error(
+      `buildState: live_state.repo.full_name must be a non-empty string when no slug is given, got ${JSON.stringify(fullName)}`,
+    );
+  }
+  const stateSlug = slug ?? String(fullName);
 
   const pinnedSeed = normalizePinnedSeed(ls.pinned_environments ?? []);
 
   const state: MockState = {
+    slug: stateSlug,
     ownerKind,
     org: ownerKind === "user" ? null : clone(orgFixture as Json),
     repo,
@@ -805,7 +843,7 @@ export function buildState(
       : { auto_trigger_checks: [] },
     collaborators: ls.collaborators ? clone(ls.collaborators) : [],
     invitations: (ls.invitations ?? []).map((invitation) =>
-      completeInvitation(clone(invitation), takeId(), repo),
+      completeInvitation(clone(invitation), takeId(), repo, stateSlug),
     ),
     teams: ls.teams ? clone(ls.teams) : {},
     milestones: ls.milestones ? clone(ls.milestones) : [],
@@ -851,7 +889,7 @@ export interface MultiRepoSpec {
   /** Starting live state for this slug's section endpoints. */
   liveState?: LiveState;
   /** Per-slug token permission mask (denials scoped to one target). */
-  permissions?: Record<string, string>;
+  permissions?: PermissionMask;
 }
 
 /**
@@ -875,7 +913,7 @@ export interface MultiMockState {
   /** The raw settings.yml each slug serves (null = no file), keyed by slug. */
   settings: Map<string, string | null>;
   /** Per-slug permission mask, keyed by slug (empty = default write). */
-  permissions: Map<string, Record<string, string>>;
+  permissions: Map<string, PermissionMask>;
   /** The repo objects `/user/repos` enumerates (discovery pool). */
   discoveryPool: Json[];
   /**
@@ -1225,7 +1263,7 @@ export function ruleFromProtection(
  * wildcard family, mirroring GitHub (a glob rule is REST-invisible).
  */
 export function allRuleNodes(state: MockState): Json[] {
-  const slug = String(state.repo.full_name ?? ADMIN_SLUG);
+  const slug = state.slug;
   const nodes: Json[] = [];
   for (const [branch, protection] of Object.entries(state.branch_protection)) {
     if (protection) {
@@ -1477,11 +1515,18 @@ export function invitationPermissionFromPut(payload: Json): string {
  * invitationPermissionFromPut so a freshly-invited user reads back exactly
  * what the section compares pending invitations with.
  */
-export function invitationFromPut(username: string, payload: Json, id: number, repo: Json): Json {
+export function invitationFromPut(
+  username: string,
+  payload: Json,
+  id: number,
+  repo: Json,
+  slug: string,
+): Json {
   return completeInvitation(
     { invitee: { login: username }, permissions: invitationPermissionFromPut(payload) },
     id,
     repo,
+    slug,
   );
 }
 

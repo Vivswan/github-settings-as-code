@@ -213,6 +213,7 @@ export const ExpectSchema = z
     /**
      * When true, the runner reruns the scenario in check mode against the SAME
      * mutated mock and expects exit 0 with zero writes (the convergence proof).
+     * Folded into `fixpoint: "converges"` by the transform below.
      */
     converges: z.boolean().optional(),
     /**
@@ -222,13 +223,21 @@ export const ExpectSchema = z
      * apply-idempotence.ts) issues a write; the mock's working state is
      * unchanged family by family (unconditional-PUT sections may write again,
      * but must rewrite the same state); and a final check-mode run converges
-     * (exit 0, zero writes), so `converges` need not be set alongside.
+     * (exit 0, zero writes), so `converges` cannot be set alongside.
      * Requires an apply-mode scenario WITHOUT the issue report channel: that
      * channel embeds a fresh timestamp in the report issue (state moves every
      * run) and injects the marker label into the labels declaration, so no
-     * run under it is a fixpoint.
+     * run under it is a fixpoint. Folded into `fixpoint: "apply_idempotent"`
+     * by the transform below.
      */
     apply_idempotent: z.boolean().optional(),
+    /**
+     * The canonical spelling of the armed fixpoint re-run proof, which the
+     * transform below emits - accepted on input so a dumped artifact
+     * scenario.yml (stringified AFTER the transform) reparses. Set this or
+     * one legacy boolean, never both.
+     */
+    fixpoint: z.enum(["converges", "apply_idempotent"]).optional(),
     /**
      * Multi-repo: the expected per-target rollup, parsed from the action's
      * `repos-result` JSON output, keyed by "owner/name" slug -> result string
@@ -236,7 +245,31 @@ export const ExpectSchema = z
      */
     repos_result: z.record(z.string(), z.string()).optional(),
   })
-  .strict();
+  .strict()
+  // apply_idempotent's final check-mode run IS the convergence proof, so a
+  // scenario arming both would rerun a proof it already gets.
+  .refine((expected) => !(expected.converges && expected.apply_idempotent), {
+    message: "apply_idempotent subsumes converges; set only one",
+  })
+  .refine(
+    (expected) =>
+      expected.fixpoint === undefined ||
+      (expected.converges === undefined && expected.apply_idempotent === undefined),
+    { message: "set fixpoint or a legacy converges/apply_idempotent boolean, not both" },
+  )
+  // The two YAML booleans collapse into one armed fixpoint proof, so
+  // consumers branch on a single enum instead of two booleans whose
+  // exclusivity would otherwise live in a comment.
+  .transform(({ converges, apply_idempotent, fixpoint, ...rest }) => ({
+    ...rest,
+    fixpoint:
+      fixpoint ??
+      (apply_idempotent
+        ? ("apply_idempotent" as const)
+        : converges
+          ? ("converges" as const)
+          : undefined),
+  }));
 
 /**
  * The mock's starting state. The LiveState shape is owned by
@@ -436,15 +469,41 @@ export const ScenarioSchema = z
 export type Tier = z.infer<typeof TierSchema>;
 export type MaskKey = z.infer<typeof MaskKeySchema>;
 export type MaskGrade = z.infer<typeof MaskGradeSchema>;
+/** A token permission mask: MaskKey -> granted MaskGrade, closed vocabulary. */
+export type PermissionMask = z.infer<typeof TokenPermissionsSchema>;
 export type DenialStyle = z.infer<typeof DenialStyleSchema>;
 export type OwnerKind = z.infer<typeof OwnerKindSchema>;
 export type Inputs = z.infer<typeof InputsSchema>;
-export type Expect = z.infer<typeof ExpectSchema>;
-export type MultiRepo = z.infer<typeof MultiRepoSchema>;
+/**
+ * ExpectSchema's output with `fixpoint` optional: the transform always emits
+ * the key, but a hand-built expectation (the fuzz cores) may simply omit it.
+ */
+export type Expect = Omit<z.infer<typeof ExpectSchema>, "fixpoint"> & {
+  fixpoint?: "converges" | "apply_idempotent";
+};
+/**
+ * Exactly one of `settings`/`settings_raw` defines the settings.yml a target
+ * serves (a MultiRepo target may also have NO file: `settings: null` or both
+ * absent). The zod refines prove the exclusivity at the parse boundary; the
+ * `?: never` halves carry it into the type, so a generator that sets both
+ * fails to compile instead of silently favoring `settings_raw`.
+ */
+type SettingsSource =
+  | { settings: Record<string, unknown>; settings_raw?: never }
+  | { settings_raw: string; settings?: never };
+type MultiSettingsSource =
+  | { settings?: Record<string, unknown> | null; settings_raw?: never }
+  | { settings_raw: string; settings?: never };
+export type MultiRepo = Omit<z.infer<typeof MultiRepoSchema>, "settings" | "settings_raw"> &
+  MultiSettingsSource;
 export type DiscoveryRepo = z.infer<typeof DiscoveryRepoSchema>;
 export type Discovery = z.infer<typeof DiscoverySchema>;
 export type Fault = z.infer<typeof FaultSchema>;
-export type Scenario = z.infer<typeof ScenarioSchema>;
+export type Scenario = Omit<
+  z.infer<typeof ScenarioSchema>,
+  "settings" | "settings_raw" | "repos" | "expect"
+> &
+  SettingsSource & { repos?: Record<string, MultiRepo>; expect: Expect };
 
 /**
  * Where a scenario re-types MARKER_LABEL_CONFIG as fixture data because .yml
@@ -507,13 +566,14 @@ export function parseScenario(raw: unknown, sourcePath: string): Scenario {
       .join("\n");
     throw new Error(`invalid scenario ${sourcePath}:\n${detail}`);
   }
-  const markerMismatches = markerLabelFixtureMismatches(result.data);
+  const markerMismatches = markerLabelFixtureMismatches(result.data as Scenario);
   if (markerMismatches.length > 0) {
     throw new Error(
       `invalid scenario ${sourcePath}: marker-label fixture data drifted from MARKER_LABEL_CONFIG (src/report/issue-report.ts):\n  ${markerMismatches.join("\n  ")}`,
     );
   }
-  return result.data;
+  // The refines above prove the settings XOR the Scenario type declares.
+  return result.data as Scenario;
 }
 
 /** Recursively collect every .yml file under a directory (empty if absent). */
@@ -544,5 +604,15 @@ function collectYmlFiles(dir: string): string[] {
 export function loadScenarios(dir: string): Scenario[] {
   return collectYmlFiles(dir)
     .sort()
-    .map((path) => parseScenario(parseYaml(readFileSync(path, "utf8")), path));
+    .map((path) => {
+      let raw: unknown;
+      try {
+        raw = parseYaml(readFileSync(path, "utf8"));
+      } catch (error) {
+        throw new Error(
+          `cannot parse scenario ${path} as YAML: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return parseScenario(raw, path);
+    });
 }

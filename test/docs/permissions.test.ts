@@ -160,7 +160,7 @@ describe("branches Contents advice", () => {
     const level = overrideAdviceLevel(sectionModule("branches"), override as SectionPermission);
     const advice = `${label}: ${level}`;
     const readme = readFileSync(join(ROOT, "README.md"), "utf8");
-    const row = tableRows(sectionLines(readme, "Sections")).find(
+    const row = tableRows(sectionLines(readme, "Sections", "README.md")).find(
       (cells) => (cells[0] ?? "").replace(/`/g, "") === "branches",
     );
     expect(
