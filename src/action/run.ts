@@ -25,9 +25,10 @@ import {
 } from "../engine/orchestrate.js";
 import { GithubApi, type GithubClient, registerRedactedSlug } from "../github/api.js";
 import { createVisibilityResolver } from "../github/repo-visibility.js";
+import type { Io } from "../io.js";
 import { deliverArtifactReport } from "../report/artifact-report.js";
 import { parseConfig } from "./inputs.js";
-import { actionsIo, annotate, setOutput } from "./io.js";
+import { actionsIo, setOutput } from "./io.js";
 import {
   applyMarkerInjection,
   composeTargetReport,
@@ -70,14 +71,18 @@ async function resolveSingleRepoRedaction(
   return { redacted: true, deliverable: isPrivateVisibility(visibility) };
 }
 
-/** Execute the action; returns the process exit code. */
-export async function run(overrides?: { api?: GithubClient }): Promise<number> {
+/**
+ * Execute the action; returns the process exit code. `overrides` exists for
+ * tests: a stub client instead of the real API, and a capturing Io instead of
+ * the @actions/core sink (production always uses the defaults).
+ */
+export async function run(overrides?: { api?: GithubClient; io?: Io }): Promise<number> {
+  const io = overrides?.io ?? actionsIo;
   const fail = (message: string): number => {
-    annotate("error", message);
+    io.annotate("error", message);
     setOutput("result", "failed");
     return 1;
   };
-  const io = actionsIo;
 
   const parsed = parseConfig();
   if ("error" in parsed) {
@@ -112,7 +117,7 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
     );
     const overall = worstOf(views, cfg.mode === "check");
     setOutput("result", overall);
-    console.log(`result: ${overall}`);
+    io.log(`result: ${overall}`);
     // The exit code follows the same worst-of ranking the output reports.
     return overall === "failed" || (cfg.mode === "check" && overall === "drift") ? 1 : 0;
   }
@@ -188,7 +193,7 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
       );
       const delivery = await deliverArtifactReport(body, cfg.reportPublicKey);
       if ("warning" in delivery) {
-        annotate("warning", delivery.warning);
+        io.annotate("warning", delivery.warning);
       }
     } else if (isIssueChannel(cfg.privateReport)) {
       await deliverReport(
@@ -207,7 +212,7 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
   } else if (redacted && cfg.privateReport !== "none" && !deliverable) {
     // Redacted but not proven private: the report is withheld, said once,
     // safely (the cause and fix are slug-free; the placeholder stays).
-    annotate(
+    io.annotate(
       "notice",
       "private repository: visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the target repository), so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified",
     );
@@ -230,12 +235,12 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
 
   if (result.result === "failed") {
     if (redacted) {
-      annotate("error", `failed. ${REDACTED_NOTE}`);
+      io.annotate("error", `failed. ${REDACTED_NOTE}`);
     }
     setOutput("result", "failed");
     return 1;
   }
   setOutput("result", result.result);
-  console.log(`result: ${result.result}`);
+  io.log(`result: ${result.result}`);
   return result.result === "drift" ? 1 : 0;
 }

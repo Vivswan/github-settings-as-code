@@ -197,11 +197,21 @@ export async function startMockServer(
       // connection_drop: Bun.serve cannot abort before the status line, so the
       // drop happens mid-response via an erroring body stream; undici surfaces
       // that as a network read failure (a real drop can occur at any phase).
+      // Bun's default reporter always prints this stream error (the error()
+      // hook does not fire for it), so the intent line and the self-describing
+      // message - which never reaches the client - label the trace instead.
       if (result.wire?.kind === "drop") {
+        console.log(
+          `[mock] injecting connection drop (intentional fault, expected in passing runs) for ${request.method} ${url.pathname}`,
+        );
         return new Response(
           new ReadableStream({
             start(controller) {
-              controller.error(new Error("connection dropped"));
+              controller.error(
+                new Error(
+                  "mock connection_drop fault: intentional mid-body drop, expected in passing runs",
+                ),
+              );
             },
           }),
           { status: 500 },
