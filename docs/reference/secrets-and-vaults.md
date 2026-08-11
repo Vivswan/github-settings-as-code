@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/github-settings-as-code@v1 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
         env:
@@ -91,7 +91,7 @@ jobs:
           role: settings-as-code
           secrets: |
             secret/data/ci webhook_secret | WEBHOOK_SECRET
-      - uses: Vivswan/github-settings-as-code@v1 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
 ```
