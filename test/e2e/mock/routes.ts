@@ -1,7 +1,7 @@
 /**
  * The mock GitHub server's route table, request pipeline, and per-endpoint
  * handlers. Everything here is pure logic over a MockState and a Scenario; the
- * transport shell (Bun.serve, per-scenario lifecycle) lives in server.ts.
+ * transport shell (node:http, per-scenario lifecycle) lives in server.ts.
  *
  * The route TABLE is not hand-written: it is derived from allEndpoints(), the
  * frozen dictionary the sections themselves declare. What IS hand-written is
@@ -3008,11 +3008,11 @@ export interface PipelineResult {
   /**
    * How the response leaves the wire when it is NOT the normal JSON delivery
    * of `response.body` (the absent case). "raw" sends `text` verbatim (chaos
-   * invalid_json, an unparseable body). "drop" makes the server drop the
-   * connection MID-RESPONSE (an erroring body stream; Bun.serve cannot abort
-   * before the status line) - the connection_drop fault, modeling a network
-   * failure the client surfaces after its retries are spent. The log entry
-   * still records the attempt (status 0).
+   * invalid_json, an unparseable body). "drop" makes the server destroy the
+   * connection's socket before ANY response bytes leave - the connection_drop
+   * fault, a true network failure the client's retries can absorb (times 1)
+   * or exhaust into a hard connectivity error (times >= 1 + MAX_RETRIES). The
+   * log entry still records the attempt (status 0).
    */
   wire?: { kind: "raw"; text: string } | { kind: "drop" };
   /**
@@ -4528,8 +4528,9 @@ const SERVER_ERROR_ROTATION = [500, 502, 503] as const;
  *   - server_error: a 5xx with a JSON message body, rotating 500/502/503 on the
  *     fault's fire count (`fired`). The client's retry plugin retries 5xx, so a
  *     single firing is retried away and `times` >= 3 exhausts the retries.
- *   - connection_drop: signal the server to drop the connection mid-response
- *     (an erroring body stream), which undici surfaces as a network failure.
+ *   - connection_drop: signal the server to destroy the socket before any
+ *     response bytes leave, a true network failure the client's fetch rejects
+ *     on and its retry plugin retries.
  * The log records the attempt; the fault status (403/429/5xx) or 0 (drop) is
  * set. All are deliberately off the OpenAPI contract (offSpecBody).
  */

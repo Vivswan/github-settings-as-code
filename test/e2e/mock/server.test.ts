@@ -2200,20 +2200,18 @@ describe("fault injection", () => {
     expect(retried.status).toBe(200);
   });
 
-  test("connection_drop does not serve the real response and logs the attempt (status 0)", async () => {
+  test("connection_drop rejects the fetch outright and logs the attempt (status 0)", async () => {
     const h = await start(scenario({ live_state: { labels: [{ id: 1, name: "real" }] } }), {
       faults: [{ key: "labels.list", kind: "connection_drop" }],
     });
-    // The mid-response abort is the drop: the client never receives the real
-    // labels list. Bun's in-process fetch cannot observe the connection-level
-    // failure the way undici does over a socket (the true client-visible reject
-    // is proven end-to-end by labels-network-drop), so the reliable in-process
-    // signals are: the attempt is logged with status 0, and the body is NOT the
-    // served list.
-    const res = await call(h, "GET", labelsPath);
-    expect(res.status).not.toBe(200);
+    // The server destroys the socket before any response bytes leave, so even
+    // the in-process client sees a genuine network failure: the fetch itself
+    // rejects (no status line ever arrives). The attempt is still logged with
+    // status 0.
+    await expect(call(h, "GET", labelsPath)).rejects.toThrow();
     expect(h.requests.some((r) => r.status === 0)).toBe(true);
-    // The fault fires once, so the next request serves the real list.
+    // The fault fires once, so the next request serves the real list - and the
+    // drop killed one connection, never the server.
     const normal = await jsonArray(await call(h, "GET", labelsPath));
     expect(normal.map((l) => l.name)).toEqual(["real"]);
   });
