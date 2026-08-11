@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/github-settings-as-code@v1 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_TOKEN }}
           repos-dir: .github/repos
