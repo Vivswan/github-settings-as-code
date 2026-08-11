@@ -165,10 +165,6 @@ export function grantFor(
  * Endpoints map has gained.
  */
 type SupplementalRoute =
-  | "GET /repos/{owner}/{repo}/actions/cache/retention-limit"
-  | "PUT /repos/{owner}/{repo}/actions/cache/retention-limit"
-  | "GET /repos/{owner}/{repo}/actions/cache/storage-limit"
-  | "PUT /repos/{owner}/{repo}/actions/cache/storage-limit"
   | "PUT /repos/{owner}/{repo}/lfs"
   | "DELETE /repos/{owner}/{repo}/lfs"
   | "GET /repos/{owner}/{repo}/secret-scanning/custom-patterns"
