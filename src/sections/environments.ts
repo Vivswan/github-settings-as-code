@@ -38,11 +38,12 @@ import type {
 import {
   call,
   callGraphql,
+  type DeclaredSecretValue,
   type EndpointDecl,
   type EntryOf,
   emptyResult,
-  type GraphqlConnectionDecl,
   type GraphqlOpDecl,
+  graphqlOp,
   listAllEnveloped,
   listGraphqlConnection,
   probeAbsent,
@@ -58,7 +59,6 @@ import {
 } from "./contract.js";
 import {
   listSecretValues,
-  prepareSecretValues,
   reconcileSecrets,
   type SecretsScope,
   type SecretsScopeOps,
@@ -224,9 +224,7 @@ export const MAX_PINNED_ENVIRONMENTS = 10;
  * REST probe (DENIAL_SEMANTICS keeps environments "absent"); the denial then
  * surfaces on the first write, exactly like the environment PUT.
  */
-const PINS_QUERY: GraphqlOpDecl<{ owner: string; repo: string }> & {
-  connection: GraphqlConnectionDecl;
-} = {
+const PINS_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   name: "EnvironmentPins",
   kind: "read",
   query:
@@ -237,7 +235,7 @@ const PINS_QUERY: GraphqlOpDecl<{ owner: string; repo: string }> & {
     NOT_FOUND:
       "the repository is not visible to the token; read as no pins (the denial surfaces on the first pin write)",
   },
-};
+});
 
 /**
  * Pin or unpin one environment, addressed by the node id the REST PUT/GET
@@ -250,7 +248,7 @@ const PINS_QUERY: GraphqlOpDecl<{ owner: string; repo: string }> & {
  * which the handler turns into an actionable error naming the cap and the
  * way to make room.
  */
-const PIN_ENVIRONMENT: GraphqlOpDecl<{ environmentId: string; pinned: boolean }> = {
+const PIN_ENVIRONMENT = graphqlOp<{ environmentId: string; pinned: boolean }>()({
   name: "PinEnvironment",
   kind: "write",
   query:
@@ -259,7 +257,7 @@ const PIN_ENVIRONMENT: GraphqlOpDecl<{ environmentId: string; pinned: boolean }>
     ok: "the environment was pinned or unpinned",
     UNPROCESSABLE: `the repository already holds ${MAX_PINNED_ENVIRONMENTS} pinned environments (GitHub's cap), so this pin was rejected`,
   },
-};
+});
 
 /**
  * Move one pinned environment to a 1-based RANK; verified against live
@@ -268,13 +266,13 @@ const PIN_ENVIRONMENT: GraphqlOpDecl<{ environmentId: string; pinned: boolean }>
  * only ever moves a pin LEFT (toward rank 1), where remove-and-insert
  * semantics are unambiguous.
  */
-const REORDER_ENVIRONMENT: GraphqlOpDecl<{ environmentId: string; position: number }> = {
+const REORDER_ENVIRONMENT = graphqlOp<{ environmentId: string; position: number }>()({
   name: "ReorderEnvironment",
   kind: "write",
   query:
     "mutation ReorderEnvironment($environmentId: ID!, $position: Int!) { reorderEnvironment(input: { environmentId: $environmentId, position: $position }) { environment { name } } }",
   outcomes: { ok: "the pinned environment moved to its declared position" },
-};
+});
 
 const GRAPHQL_OPS = {
   pins: PINS_QUERY,
@@ -624,20 +622,29 @@ export const environmentsSection: SectionModule<"environments"> = {
     }),
   /**
    * The declared value of every entry's secrets list, across all declared
-   * environments, for the engine's up-front reference resolution. DEFENSIVE
+   * environments, for the engine's up-front reference resolution - each
+   * label carries the ENVIRONMENT alongside the secret name, since several
+   * environments can declare same-named secrets. DEFENSIVE
    * like the shared extractor: a malformed container contributes nothing
    * instead of throwing, so the actionable error always comes from shape
    * validation.
    */
-  secretValues(declared: unknown): string[] {
+  secretValues(declared: unknown): DeclaredSecretValue[] {
     if (!Array.isArray(declared)) {
       return [];
     }
-    return declared.flatMap((entry) =>
-      typeof entry === "object" && entry !== null
-        ? listSecretValues((entry as EnvironmentConfig).secrets)
-        : [],
-    );
+    return declared.flatMap((entry) => {
+      if (typeof entry !== "object" || entry === null) {
+        return [];
+      }
+      const env = entry as EnvironmentConfig;
+      const where =
+        typeof env.name === "string" ? `environment "${env.name}"` : "an unnamed environment";
+      return listSecretValues(env.secrets).map(({ label, value }) => ({
+        label: `${label} of ${where}`,
+        value,
+      }));
+    });
   },
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
@@ -736,22 +743,28 @@ function variableKey(name: string): string {
 
 /**
  * Reject two declared variables whose names collapse to the same
- * case-insensitive key: they would fight each other on every run.
+ * case-insensitive key: they would fight each other on every run. All
+ * colliding pairs are reported at once (the rejectDuplicates posture).
  */
 function rejectDuplicateVariables(
   envName: string,
   entries: readonly EnvironmentVariableConfig[],
 ): void {
   const seen = new Map<string, string>();
+  const collisions: string[] = [];
   for (const variable of entries) {
     const key = variableKey(variable.name);
     const first = seen.get(key);
     if (first !== undefined) {
-      throw new Error(
-        `environments: the "${envName}" entry declares variables "${first}" and "${variable.name}", which GitHub treats as the same variable (names are case-insensitive). Keep exactly one entry per variable`,
-      );
+      collisions.push(`"${first}" and "${variable.name}"`);
+      continue;
     }
     seen.set(key, variable.name);
+  }
+  if (collisions.length > 0) {
+    throw new Error(
+      `environments: the "${envName}" entry declares variables that GitHub treats as the same variable (names are case-insensitive): ${collisions.join("; ")}. Keep exactly one entry per variable`,
+    );
   }
 }
 
@@ -852,22 +865,27 @@ async function reconcileVariables(
 /**
  * Reject two declared secrets whose names collapse to the same
  * case-insensitive key (GitHub stores secret names uppercase): they would
- * fight each other on every run.
+ * fight each other on every run. All colliding pairs are reported at once.
  */
 function rejectDuplicateSecrets(
   envName: string,
   entries: readonly EnvironmentSecretConfig[],
 ): void {
   const seen = new Map<string, string>();
+  const collisions: string[] = [];
   for (const secret of entries) {
     const key = secretKey(secret.name);
     const first = seen.get(key);
     if (first !== undefined) {
-      throw new Error(
-        `environments: the "${envName}" entry declares secrets "${first}" and "${secret.name}", which GitHub treats as the same secret (names are case-insensitive). Keep exactly one entry per secret`,
-      );
+      collisions.push(`"${first}" and "${secret.name}"`);
+      continue;
     }
     seen.set(key, secret.name);
+  }
+  if (collisions.length > 0) {
+    throw new Error(
+      `environments: the "${envName}" entry declares secrets that GitHub treats as the same secret (names are case-insensitive): ${collisions.join("; ")}. Keep exactly one entry per secret`,
+    );
   }
 }
 
@@ -914,10 +932,9 @@ function environmentSecretsScope(envName: string): SecretsScope {
 /**
  * Reconcile one environment's declared `secrets` list through the shared
  * secrets engine, under the policy the caller unwrapped against the table
- * default. prepareSecretValues runs PER ENVIRONMENT - per scope - because
- * its lookup is keyed by secret name alone: one global call would silently
- * collide same-named secrets across environments and seal the wrong
- * plaintext.
+ * default. Each call is inherently scoped to ITS environment's entries, so
+ * same-named secrets across environments can never collide: the engine
+ * resolves each entry's own reference through ctx.resolveSecret.
  */
 async function reconcileEnvironmentSecrets(
   ctx: SectionContext,
@@ -927,11 +944,9 @@ async function reconcileEnvironmentSecrets(
   entries: readonly EnvironmentSecretConfig[],
   result: SectionResult,
 ): Promise<void> {
-  const resolvedValueOf = prepareSecretValues(ctx, section, entries);
   const scoped = await reconcileSecrets(ctx, section, environmentSecretsScope(envName), {
     entries,
     policy,
-    resolvedValueOf,
   });
   result.changes.push(...scoped.changes);
   result.drift.push(...scoped.drift);
@@ -991,13 +1006,17 @@ function validateBranchPolicies(
   entries: readonly DeploymentBranchPolicyConfig[],
 ): void {
   const seen = new Set<string>();
+  const duplicates = new Set<string>();
   for (const pattern of entries) {
     if (seen.has(pattern.name)) {
-      throw new Error(
-        `environments: the "${env.name}" entry declares the deployment branch policy "${pattern.name}" twice. Keep exactly one entry per pattern`,
-      );
+      duplicates.add(pattern.name);
     }
     seen.add(pattern.name);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(
+      `environments: the "${env.name}" entry declares deployment branch polic${duplicates.size === 1 ? "y" : "ies"} ${[...duplicates].map((name) => `"${name}"`).join(", ")} more than once. Keep exactly one entry per pattern`,
+    );
   }
 }
 
@@ -1264,13 +1283,17 @@ function validateProtectionRules(
   entries: readonly DeploymentProtectionRuleConfig[],
 ): void {
   const seen = new Set<string>();
+  const duplicates = new Set<string>();
   for (const rule of entries) {
     if (seen.has(rule.app)) {
-      throw new Error(
-        `environments: the "${env.name}" entry declares the deployment protection rule App "${rule.app}" twice. Keep exactly one entry per App`,
-      );
+      duplicates.add(rule.app);
     }
     seen.add(rule.app);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(
+      `environments: the "${env.name}" entry declares the deployment protection rule App${duplicates.size === 1 ? "" : "s"} ${[...duplicates].map((app) => `"${app}"`).join(", ")} more than once. Keep exactly one entry per App`,
+    );
   }
 }
 
@@ -1392,7 +1415,7 @@ function livePin(node: unknown): LivePin {
   const name = pin?.environment?.name;
   if (typeof position !== "number" || typeof name !== "string") {
     throw new Error(
-      'environments: the pinned-environments listing returned a pin without a numeric position and an environment name, so the declared pins cannot be reconciled. Check the "api-version" input against the GitHub GraphQL reference for pinnedEnvironments',
+      `environments: the pinned-environments listing returned a pin node this section cannot read (${JSON.stringify(node) ?? String(node)}): it needs a numeric "position" and an "environment.name" string, so the declared pins cannot be reconciled. Check the "api-version" input against the GitHub GraphQL reference for pinnedEnvironments`,
     );
   }
   return { position, name };
@@ -1510,32 +1533,32 @@ function planPins(
  * Resolve the node id of every environment the plan will mutate, BEFORE the
  * first mutation (the resolve-before-write posture of the protection-rules
  * reconciler): a body that omitted its node_id fails the section here, with
- * zero pins half-applied, instead of on the Nth mutation.
+ * zero pins half-applied, instead of on the Nth mutation. The ids are
+ * attached to the plan items themselves, so each mutation below carries its
+ * own proof and no name-keyed lookup exists to miss.
  */
 function resolvePinIds(
   nodeIds: ReadonlyMap<string, string>,
-  names: readonly string[],
-): ReadonlyMap<string, string> {
-  const resolved = new Map<string, string>();
-  for (const name of names) {
+  plan: { unpins: string[]; pins: string[]; reorders: Array<{ name: string; rank: number }> },
+): {
+  unpins: Array<{ name: string; id: string }>;
+  pins: Array<{ name: string; id: string }>;
+  reorders: Array<{ name: string; rank: number; id: string }>;
+} {
+  const idOf = (name: string): string => {
     const nodeId = nodeIds.get(pinKey(name));
     if (nodeId === undefined) {
       throw new Error(
         `environments: the environment body for "${name}" carried no node_id, so its pin cannot be reconciled. Check the "api-version" input against the GitHub REST docs for the environments endpoint`,
       );
     }
-    resolved.set(pinKey(name), nodeId);
-  }
-  return resolved;
-}
-
-/** A resolved id from resolvePinIds; absence is a BUG (the plan named it). */
-function resolvedPinId(ids: ReadonlyMap<string, string>, name: string): string {
-  const nodeId = ids.get(pinKey(name));
-  if (nodeId === undefined) {
-    throw new Error(`BUG: no resolved node id for "${name}"; resolvePinIds must cover the plan`);
-  }
-  return nodeId;
+    return nodeId;
+  };
+  return {
+    unpins: plan.unpins.map((name) => ({ name, id: idOf(name) })),
+    pins: plan.pins.map((name) => ({ name, id: idOf(name) })),
+    reorders: plan.reorders.map(({ name, rank }) => ({ name, rank, id: idOf(name) })),
+  };
 }
 
 /**
@@ -1601,28 +1624,24 @@ async function reconcilePins(
   if (plan.unpins.length === 0 && plan.pins.length === 0 && plan.reorders.length === 0) {
     return;
   }
-  const ids = resolvePinIds(nodeIds, [
-    ...plan.unpins,
-    ...plan.pins,
-    ...plan.reorders.map((reorder) => reorder.name),
-  ]);
+  const resolved = resolvePinIds(nodeIds, plan);
 
-  for (const name of plan.unpins) {
+  for (const { name, id } of resolved.unpins) {
     await callGraphql(
       ctx,
       section,
       PIN_ENVIRONMENT,
-      { environmentId: resolvedPinId(ids, name), pinned: false },
+      { environmentId: id, pinned: false },
       { describe: `unpinning environment "${name}"` },
     );
     result.changes.push(`unpinned environment "${name}"`);
   }
-  for (const name of plan.pins) {
+  for (const { name, id } of resolved.pins) {
     const pinned = await tryCallGraphql(
       ctx,
       section,
       PIN_ENVIRONMENT,
-      { environmentId: resolvedPinId(ids, name), pinned: true },
+      { environmentId: id, pinned: true },
       { describe: `pinning environment "${name}"` },
     );
     if ("error" in pinned) {
@@ -1635,12 +1654,12 @@ async function reconcilePins(
     }
     result.changes.push(`pinned environment "${name}"`);
   }
-  for (const { name, rank } of plan.reorders) {
+  for (const { name, rank, id } of resolved.reorders) {
     await callGraphql(
       ctx,
       section,
       REORDER_ENVIRONMENT,
-      { environmentId: resolvedPinId(ids, name), position: rank },
+      { environmentId: id, position: rank },
       { describe: `moving pinned environment "${name}" to position ${rank}` },
     );
     result.changes.push(`moved pinned environment "${name}" to position ${rank}`);

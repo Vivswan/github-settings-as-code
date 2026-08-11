@@ -11,6 +11,7 @@ import {
   type SettingsSource,
   validateSecretRef,
 } from "../action/secret-refs.js";
+import type { RepoRef } from "../discovery/targets.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import { type MustBeNever, SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
@@ -19,19 +20,32 @@ import { SECTIONS } from "../sections/registry.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
 import { validateSectionShapes } from "./validate.js";
 
-export interface SectionOutcome {
-  key: string;
-  status: "applied" | "clean" | "drift" | "skipped" | "excluded" | "failed";
-  detail: string[];
-  /**
-   * The HTTP status behind a denial, when one raised it. The redacted view
-   * surfaces this safe code (`HTTP 403`) in place of the hidden detail.
-   */
-  httpStatus?: number;
-}
+/**
+ * One section's end state, discriminated on `status` so an HTTP code can
+ * only exist where it means something: `httpStatus` is the safe code of the
+ * PermissionDenied behind a failed/skipped section (the redacted view
+ * surfaces it as `HTTP 403` in place of the hidden detail), and the
+ * `?: never` pin on the healthy arm makes a code on an applied/clean row
+ * unrepresentable instead of merely filtered out.
+ */
+export type SectionOutcome =
+  | {
+      key: string;
+      status: "applied" | "clean" | "drift" | "excluded";
+      detail: string[];
+      httpStatus?: never;
+    }
+  | {
+      key: string;
+      status: "failed" | "skipped";
+      detail: string[];
+      /** Optional: a generic (non-denial) failure legitimately carries none. */
+      httpStatus?: number;
+    };
 
 export interface RepoRunOptions {
-  repo: string; // owner/name
+  /** The target repository, parsed at the caller's validated boundary. */
+  repo: RepoRef;
   settings: SettingsFile;
   mode: "apply" | "check";
   onMissingPermission: "fail" | "warn";
@@ -168,24 +182,29 @@ export function readOnlyClient(api: GithubClient): GithubClient {
 
 /**
  * Probe every active section read-only and collect the permission denials
- * as "key: detail" lines. Empty means every section is accessible. Exported
- * with the injectable `active` list so the ReadOnlyViolation rethrow is
- * directly testable against a synthetic section.
+ * as "key: detail" lines. Empty means every section is accessible. The
+ * probe context is built HERE, on the check arm of SectionContext: the
+ * preflight runs before the apply context (and its resolver) can exist, and
+ * the arm's `resolveSecret?: never` makes handing the probe a resolver
+ * uncompilable. Exported with the injectable `active` list so the
+ * ReadOnlyViolation rethrow is directly testable against a synthetic
+ * section.
  */
 export async function preflightProbe(
   api: GithubClient,
-  ctx: SectionContext,
+  repo: RepoRef,
   active: typeof SECTIONS,
   settings: SettingsFile,
 ): Promise<string[]> {
-  const probeApi = readOnlyClient(api);
+  const probeCtx: SectionContext = {
+    api: readOnlyClient(api),
+    repo,
+    check: true,
+  };
   const denied: string[] = [];
   for (const section of active) {
     try {
-      await section.run(
-        { ...ctx, api: probeApi, check: true },
-        settings[section.key as keyof SettingsFile],
-      );
+      await section.run(probeCtx, settings[section.key]);
     } catch (error) {
       if (error instanceof PermissionDenied) {
         denied.push(`${section.key}: ${error.detail}`);
@@ -211,20 +230,12 @@ export async function runForRepo(
   opts: RepoRunOptions,
   io: Io,
 ): Promise<RepoRunResult> {
-  const [owner] = opts.repo.split("/");
   const check = opts.mode === "check";
-  const ctx: SectionContext = {
-    // Check mode is a read-only phase end to end, so the context client
-    // itself refuses mutations - the same belt the preflight probe wears.
-    api: check ? readOnlyClient(api) : api,
-    repo: opts.repo,
-    owner: owner ?? "",
-    check,
-  };
+  const repo = opts.repo;
   const settings = opts.settings;
 
   const active = SECTIONS.filter((section) => {
-    if (settings[section.key as keyof SettingsFile] === undefined) {
+    if (settings[section.key] === undefined) {
       return false;
     }
     return opts.onlySections.size === 0 || opts.onlySections.has(section.key);
@@ -249,7 +260,7 @@ export async function runForRepo(
       outcomes.push({ key, status: "failed", detail: errors });
     }
     return {
-      repo: opts.repo,
+      repo: opts.repo.slug,
       result: "failed",
       outcomes,
       preflightDenied: [],
@@ -261,8 +272,8 @@ export async function runForRepo(
     map.set(key, list);
   };
   const syntaxErrors = new Map<string, string[]>();
-  for (const { section, value, source } of secretValues) {
-    const checked = validateSecretRef(value, source);
+  for (const { section, value, source, label } of secretValues) {
+    const checked = validateSecretRef(value, source, label);
     if (!checked.ok) {
       pushError(syntaxErrors, section, checked.error);
     }
@@ -277,14 +288,14 @@ export async function runForRepo(
   // write anything when any of them is inaccessible. (A token with read
   // but not write access can still fail mid-apply; the engine is
   // idempotent, so re-running after fixing the token converges.)
-  if (!ctx.check && opts.onMissingPermission === "fail") {
-    const denied = await preflightProbe(api, ctx, active, settings);
+  if (!check && opts.onMissingPermission === "fail") {
+    const denied = await preflightProbe(api, repo, active, settings);
     if (denied.length > 0) {
       for (const line of denied) {
         io.annotate("error", `preflight: ${line}`);
       }
       return {
-        repo: opts.repo,
+        repo: opts.repo.slug,
         result: "failed",
         outcomes: [],
         preflightDenied: denied,
@@ -297,47 +308,62 @@ export async function runForRepo(
   // secrets) and before the first mutation of ANY section, so an unset or
   // empty variable fails the repository cleanly with zero writes. Every
   // resolved plaintext is registered with output masking BEFORE the resolver
-  // exists, so no handler can use a value the masker has not seen.
-  let resolveSecret: SectionContext["resolveSecret"];
-  if (!ctx.check && secretValues.length > 0) {
-    const env = opts.secretEnv ?? process.env;
-    const bySection = new Map<string, SectionSecretValue[]>();
-    for (const value of secretValues) {
-      const list = bySection.get(value.section) ?? [];
-      list.push(value);
-      bySection.set(value.section, list);
-    }
-    const resolutionErrors = new Map<string, string[]>();
+  // exists, so no handler can use a value the masker has not seen. The two
+  // context arms are constructed here, one per mode: the check arm cannot
+  // carry a resolver (its type forbids one), and the apply arm ALWAYS does -
+  // over an empty map when nothing was declared, where any lookup hits the
+  // BUG throw below (collectSecretValues read the same settings the handlers
+  // get, so an empty collection proves no legitimate call exists).
+  let runCtx: SectionContext;
+  if (check) {
+    // Check mode is a read-only phase end to end, so the context client
+    // itself refuses mutations - the same belt the preflight probe wears.
+    runCtx = { api: readOnlyClient(api), repo, check: true };
+  } else {
     const resolved: Record<string, string> = {};
-    const mask = new Set<string>();
-    for (const [key, values] of bySection) {
-      const resolution = resolveSecretRefs(values, env);
-      if (!resolution.ok) {
-        resolutionErrors.set(key, resolution.errors);
-        continue;
+    if (secretValues.length > 0) {
+      const env = opts.secretEnv ?? process.env;
+      const bySection = new Map<string, SectionSecretValue[]>();
+      for (const value of secretValues) {
+        const list = bySection.get(value.section) ?? [];
+        list.push(value);
+        bySection.set(value.section, list);
       }
-      Object.assign(resolved, resolution.values);
-      for (const plaintext of resolution.mask) {
-        mask.add(plaintext);
+      const resolutionErrors = new Map<string, string[]>();
+      const mask = new Set<string>();
+      for (const [key, values] of bySection) {
+        const resolution = resolveSecretRefs(values, env);
+        if (!resolution.ok) {
+          resolutionErrors.set(key, resolution.errors);
+          continue;
+        }
+        Object.assign(resolved, resolution.values);
+        for (const plaintext of resolution.mask) {
+          mask.add(plaintext);
+        }
+      }
+      if (resolutionErrors.size > 0) {
+        return secretFailure(resolutionErrors);
+      }
+      for (const plaintext of mask) {
+        io.mask(plaintext);
       }
     }
-    if (resolutionErrors.size > 0) {
-      return secretFailure(resolutionErrors);
-    }
-    for (const plaintext of mask) {
-      io.mask(plaintext);
-    }
-    resolveSecret = (reference: string): string => {
-      const plaintext = reference.startsWith("$") ? resolved[reference.slice(1)] : undefined;
-      if (plaintext === undefined) {
-        throw new Error(
-          `BUG: secret reference ${reference} was not resolved up front; the engine resolves every declared secret value before any section runs`,
-        );
-      }
-      return plaintext;
+    runCtx = {
+      api,
+      repo,
+      check: false,
+      resolveSecret: (reference: string): string => {
+        const plaintext = reference.startsWith("$") ? resolved[reference.slice(1)] : undefined;
+        if (plaintext === undefined) {
+          throw new Error(
+            `BUG: secret reference ${reference} was not resolved up front; the engine resolves every declared secret value before any section runs`,
+          );
+        }
+        return plaintext;
+      },
     };
   }
-  const runCtx: SectionContext = resolveSecret === undefined ? ctx : { ...ctx, resolveSecret };
 
   const outcomes: SectionOutcome[] = [];
   let failed = false;
@@ -345,7 +371,7 @@ export async function runForRepo(
   let drifted = false;
 
   for (const section of SECTIONS) {
-    const desired = settings[section.key as keyof SettingsFile];
+    const desired = settings[section.key];
     if (desired === undefined) {
       continue; // declared-keys-only: absent section = untouched
     }
@@ -397,7 +423,7 @@ export async function runForRepo(
     for (const note of result.notes) {
       io.annotate("notice", `${section.key}: ${note}`);
     }
-    if (ctx.check) {
+    if (check) {
       if (result.drift.length > 0) {
         drifted = true;
         for (const line of result.drift) {
@@ -429,7 +455,7 @@ export async function runForRepo(
 
   const result: RepoResult = failed
     ? "failed"
-    : ctx.check
+    : check
       ? drifted
         ? "drift"
         : partial
@@ -440,7 +466,7 @@ export async function runForRepo(
         : "applied";
 
   return {
-    repo: opts.repo,
+    repo: opts.repo.slug,
     result,
     outcomes,
     preflightDenied: [],

@@ -58,7 +58,13 @@ async function main(): Promise<number> {
   // Integrity at generation, the assertRefFree analog: a truncated download
   // or a moved upstream file must fail HERE, not as an opaque parse error in
   // the disk-only consumer.
-  buildSchema(text);
+  try {
+    buildSchema(text);
+  } catch (error) {
+    throw new Error(
+      `the fetched GraphQL schema from ${SCHEMA_URL} failed to parse: ${error instanceof Error ? error.message : String(error)}. The download may be truncated (re-run), or the upstream file changed shape (check UPSTREAM_REF)`,
+    );
+  }
   // Atomic write: serialize to a temp file, then rename over the target, so
   // an aborted run leaves the previously written schema intact. The directory
   // holds no tracked file, so a fresh checkout must create it first.

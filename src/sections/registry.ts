@@ -132,9 +132,9 @@ export type TaggedGraphqlOp = GraphqlOpDecl & {
  *   - a role never collides with a REST endpoint role in the same section:
  *     fault/corruption directives address both dictionaries through one
  *     "section.role" key space.
- * A declared `connection` is also held to its cursor contract here (the
- * query must take $cursor), so a paginated operation that cannot page fails
- * at declaration time, not on its first multi-page repository.
+ * A declared `connection`'s cursor contract needs no assert here: the
+ * GraphqlPaginatedReadDecl query type makes a paginated operation that
+ * cannot page uncompilable at its declaration.
  * `sections` is injectable so the asserts are directly testable; production
  * callers take the registry default.
  */
@@ -155,11 +155,6 @@ export function allGraphqlOps(
       if (holder !== undefined) {
         throw new Error(
           `BUG: GraphQL operation name "${op.name}" is declared by both ${holder} and ${key}; operation names are the wire dispatch key and must be globally unique`,
-        );
-      }
-      if (op.connection !== undefined && !op.query.includes("$cursor")) {
-        throw new Error(
-          `BUG: GraphQL operation ${key} declares a connection but its query takes no $cursor variable, so listGraphqlConnection could never advance past the first page`,
         );
       }
       byName.set(op.name, key);

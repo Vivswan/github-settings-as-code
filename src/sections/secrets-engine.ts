@@ -20,10 +20,10 @@
  *   included - ever appears in a drift, note, or change line.
  * - Apply re-seals and re-writes every declared secret on every run, so a
  *   rotated source value propagates without any diff. The sealed-write path
- *   takes ALREADY-RESOLVED plaintext through a lookup parameter; the engine
- *   resolved and masked every `$NAME` reference before any section ran (see
- *   engine/secrets.ts), and prepareSecretValues below adapts
- *   ctx.resolveSecret into that per-entry lookup.
+ *   resolves each entry's `$NAME` reference through ctx.resolveSecret, which
+ *   the apply arm of SectionContext carries by construction; the engine
+ *   resolved and masked every reference before any section ran (see
+ *   engine/secrets.ts).
  * - Sealing is a libsodium sealed box against the scope's public key; the
  *   PUT body is {encrypted_value, key_id}. `encrypted_value` is a named
  *   secret field, so the request-side redaction in github/api.ts masks it in
@@ -35,6 +35,7 @@
 import sodium from "libsodium-wrappers";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../schema.js";
 import {
+  type DeclaredSecretValue,
   emptyResult,
   rejectDuplicates,
   type SectionContext,
@@ -116,11 +117,13 @@ export function secretKey(name: string): string {
 /**
  * The declared `value` of every entry in one {name, value} secret list -
  * plain-array or wrapped form - for the engine's up-front reference
- * resolution (SectionModule.secretValues). DEFENSIVE by contract: a
+ * resolution (SectionModule.secretValues), each labelled with its entry's
+ * secret NAME so a validation error can point at the offending entry.
+ * DEFENSIVE by contract: a
  * malformed container returns [] instead of throwing, so the actionable
  * error always comes from shape validation, never a TypeError from here.
  */
-export function listSecretValues(declared: unknown): string[] {
+export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
   const container = declared as SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
   const isWrapper =
     typeof container === "object" &&
@@ -132,9 +135,16 @@ export function listSecretValues(declared: unknown): string[] {
   }
   // The default policy is irrelevant here: only the entries are read.
   const { entries } = undeclaredPolicy(container, "keep");
-  return entries
-    .map((entry) => (typeof entry === "object" && entry !== null ? entry.value : undefined))
-    .filter((value): value is string => typeof value === "string");
+  return entries.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null || typeof entry.value !== "string") {
+      return [];
+    }
+    const label =
+      typeof entry.name === "string"
+        ? `the secret entry "${entry.name}"`
+        : "an unnamed secret entry";
+    return [{ label, value: entry.value }];
+  });
 }
 
 /**
@@ -176,43 +186,6 @@ export async function sealSecretValue(plaintext: string, publicKeyB64: string): 
 }
 
 /**
- * Adapt the engine's up-front resolution into the per-entry-name lookup the
- * sealed-write path takes. The ENGINE (engine/secrets.ts) already validated
- * every reference for syntax and provenance in both modes and, in apply
- * mode, resolved and masked every plaintext before any section ran - so
- * this is a pure adapter: check mode and an empty declaration return
- * undefined (nothing to seal - and a document declaring no references gets
- * no resolver from the engine, so an empty inventory must not demand one).
- * A missing resolver when entries ARE declared is an engine sequencing bug
- * and throws loudly.
- */
-export function prepareSecretValues(
-  ctx: SectionContext,
-  section: SectionMeta,
-  entries: readonly SecretEntry[],
-): ((entryName: string) => string) | undefined {
-  if (ctx.check || entries.length === 0) {
-    return undefined;
-  }
-  const resolve = ctx.resolveSecret;
-  if (resolve === undefined) {
-    throw new Error(
-      `BUG: applying ${section.key} reached a sealed write with no secret resolver on the context; the engine must resolve secret references before any section runs`,
-    );
-  }
-  const plaintextByEntry = new Map(
-    entries.map((entry) => [secretKey(entry.name), resolve(entry.value)]),
-  );
-  return (entryName) => {
-    const plaintext = plaintextByEntry.get(secretKey(entryName));
-    if (plaintext === undefined) {
-      throw new Error(`BUG: no resolved value for secret "${secretKey(entryName)}"`);
-    }
-    return plaintext;
-  };
-}
-
-/**
  * The {key_id, key} pair a scope's public-key endpoint must answer with,
  * checked down to the key material: base64 that decodes to exactly an
  * X25519 public key. A malformed key fails here with the endpoint named,
@@ -227,19 +200,32 @@ function parsePublicKey(
 ): { keyId: string; key: string } {
   const advice = `Check the "api-version" input against the GitHub REST docs for this endpoint`;
   const body = (data ?? {}) as { key_id?: unknown; key?: unknown };
+  const keyId = body.key_id;
+  const publicKey = body.key;
   if (
-    typeof body.key_id !== "string" ||
-    body.key_id === "" ||
-    typeof body.key !== "string" ||
-    body.key === ""
+    typeof keyId !== "string" ||
+    keyId === "" ||
+    typeof publicKey !== "string" ||
+    publicKey === ""
   ) {
+    // Name the exact defect (which field, absent vs wrong type vs empty),
+    // like the base64 and byte-length rejections below.
+    const fieldDefect = (label: string, value: unknown): string | null =>
+      value === undefined
+        ? `${label} is missing`
+        : typeof value !== "string"
+          ? `${label} is not a string`
+          : value === ""
+            ? `${label} is empty`
+            : null;
+    const defect = fieldDefect("key_id", keyId) ?? fieldDefect("key", publicKey);
     throw new Error(
-      `${section.key}: the ${scope.label} public-key endpoint returned no usable {key_id, key} pair, so no value can be sealed. ${advice}`,
+      `${section.key}: the ${scope.label} public-key endpoint returned no usable {key_id, key} pair (${defect}), so no value can be sealed. ${advice}`,
     );
   }
   let keyBytes: Uint8Array;
   try {
-    keyBytes = sodium.from_base64(body.key, sodium.base64_variants.ORIGINAL);
+    keyBytes = sodium.from_base64(publicKey, sodium.base64_variants.ORIGINAL);
   } catch {
     throw new Error(
       `${section.key}: the ${scope.label} public key is not valid base64, so no value can be sealed. ${advice}`,
@@ -250,7 +236,7 @@ function parsePublicKey(
       `${section.key}: the ${scope.label} public key decodes to ${keyBytes.length} bytes where an X25519 public key has ${sodium.crypto_box_PUBLICKEYBYTES}, so no value can be sealed. ${advice}`,
     );
   }
-  return { keyId: body.key_id, key: body.key };
+  return { keyId, key: publicKey };
 }
 
 /**
@@ -261,9 +247,14 @@ function parsePublicKey(
  *   the delete policy) deletion drift. Nothing here reads a value.
  * - apply: seal and PUT every declared secret (201 create / 204 update both
  *   land as normal outcomes; created-vs-updated is decided by the listing),
- *   then handle undeclared ones per the policy. `resolvedValueOf` supplies
- *   the already-resolved plaintext per declared entry name and is required
- *   exactly when entries are declared.
+ *   then handle undeclared ones per the policy. Every entry's plaintext is
+ *   resolved through ctx.resolveSecret (which the apply arm of
+ *   SectionContext carries by construction) UP FRONT, before this scope's
+ *   first request, so a resolution failure writes nothing. The ENGINE
+ *   validated every reference for syntax and provenance in both modes and,
+ *   in apply mode, resolved and masked every plaintext before any section
+ *   ran. Resolution is inherently keyed to THIS call's entries, so one
+ *   scope can never seal another scope's same-named secret.
  */
 export async function reconcileSecrets(
   ctx: SectionContext,
@@ -272,13 +263,21 @@ export async function reconcileSecrets(
   opts: {
     entries: readonly SecretEntry[];
     policy: UndeclaredPolicy;
-    resolvedValueOf?: (entryName: string) => string;
   },
 ): Promise<SectionResult> {
   const result = emptyResult();
   const { entries, policy } = opts;
   const home = scope.home ?? "the repo";
   const suffix = scope.changeSuffix ?? "";
+
+  // Apply resolves EVERY declared value up front, before any request of this
+  // scope: a resolution failure - an engine sequencing BUG - must leave the
+  // scope with zero writes. Each plaintext travels WITH its entry, so no
+  // name-keyed lookup exists to miss.
+  const resolvedEntries =
+    !ctx.check && entries.length > 0
+      ? entries.map((entry) => ({ entry, plaintext: ctx.resolveSecret(entry.value) }))
+      : [];
 
   const live = (await scope.ops.list(ctx, section)) as Array<{ name?: unknown }>;
   // Uppercase key -> the name as the API listed it (already uppercase on real
@@ -305,13 +304,7 @@ export async function reconcileSecrets(
         `${scope.noun} values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run`,
       );
     }
-  } else if (entries.length > 0) {
-    const resolvedValueOf = opts.resolvedValueOf;
-    if (resolvedValueOf === undefined) {
-      throw new Error(
-        `BUG: applying ${section.key} requires resolved secret values, but none were supplied`,
-      );
-    }
+  } else if (resolvedEntries.length > 0) {
     // One WASM init up front: parsePublicKey and every seal below use
     // libsodium synchronously.
     await readySodium();
@@ -321,9 +314,9 @@ export async function reconcileSecrets(
       `reading the ${scope.label} sealing key`,
     );
     const { keyId, key } = parsePublicKey(section, scope, keyData);
-    for (const entry of entries) {
+    for (const { entry, plaintext } of resolvedEntries) {
       const name = secretKey(entry.name);
-      const encryptedValue = await sealSecretValue(resolvedValueOf(entry.name), key);
+      const encryptedValue = await sealSecretValue(plaintext, key);
       await scope.ops.put(
         ctx,
         section,

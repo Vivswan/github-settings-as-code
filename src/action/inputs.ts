@@ -14,7 +14,7 @@ import {
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
-import { SLUG_RE } from "../discovery/targets.js";
+import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import { DEFAULT_API_VERSION } from "../github/api.js";
 import { parseRecipient } from "../report/artifact-report.js";
 import { type MustBeNever, SECTION_KEYS } from "../schema.js";
@@ -193,7 +193,7 @@ export interface CommonConfig {
 /** Everything run() needs, already validated; `kind` picks the mode. */
 export type RunConfig = CommonConfig &
   (
-    | { kind: "single"; repo: string; settingsFile: string }
+    | { kind: "single"; repo: RepoRef; settingsFile: string }
     | {
         kind: "multi";
         reposDir: string;
@@ -246,12 +246,24 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
       .filter(Boolean),
   );
   const knownSections = new Set<string>(SECTION_KEYS);
-  for (const name of [...requiredSections, ...onlySections]) {
-    if (!knownSections.has(name)) {
-      return {
-        error: `unknown section "${name}" in the "sections" or "required-sections" input; it matches none of: ${SECTION_KEYS.join(", ")}. Fix the name in the workflow's input list`,
-      };
+  // Each set is validated against ITS OWN input name (the file's header
+  // contract), and every unknown name in a set is reported at once.
+  const unknownIn = (names: Set<string>, inputName: string): string | null => {
+    const unknown = [...names].filter((name) => !knownSections.has(name));
+    if (unknown.length === 0) {
+      return null;
     }
+    const quoted = unknown.map((name) => `"${name}"`).join(", ");
+    return unknown.length === 1
+      ? `unknown section ${quoted} in the "${inputName}" input; it matches none of: ${SECTION_KEYS.join(", ")}. Fix the name in the workflow's input list`
+      : `unknown sections ${quoted} in the "${inputName}" input; each matches none of: ${SECTION_KEYS.join(", ")}. Fix the names in the workflow's input list`;
+  };
+  const unknownSections = [
+    unknownIn(requiredSections, "required-sections"),
+    unknownIn(onlySections, "sections"),
+  ].filter((problem): problem is string => problem !== null);
+  if (unknownSections.length > 0) {
+    return { error: unknownSections.join("; ") };
   }
   const apiVersion = input("api-version") || DEFAULT_API_VERSION;
   const privateRepos = readEnum(
@@ -405,10 +417,11 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
         'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never be merged. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode',
     };
   }
-  const repo = input("repository") || githubRepository;
-  if (!SLUG_RE.test(repo)) {
+  const rawRepo = input("repository") || githubRepository;
+  const repo = parseRepoSlug(rawRepo);
+  if (repo === null) {
     return {
-      error: `cannot target a repository: "${repo}" is not an owner/name slug. Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"`,
+      error: `cannot target a repository: "${rawRepo}" is not an owner/name slug. Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"`,
     };
   }
   return { config: { ...common, kind: "single", repo, settingsFile } };

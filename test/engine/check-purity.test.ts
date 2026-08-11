@@ -230,7 +230,7 @@ describe("check-mode purity", () => {
     const result = await runForRepo(
       api,
       {
-        repo: "o/r",
+        repo: { owner: "o", name: "r", slug: "o/r" },
         settings: FIXTURES as SettingsFile,
         mode: "check",
         onMissingPermission: "fail",

@@ -20,6 +20,7 @@ import { parseReposInput } from "../discovery/repos-input.js";
 import {
   type CentralTarget,
   dedupeTargets,
+  parseRepoSlug,
   type RemoteTarget,
   type Target,
 } from "../discovery/targets.js";
@@ -121,12 +122,10 @@ export type RedactedOutcome = {
  */
 export function redactOutcomes(outcomes: RepoRunResult["outcomes"]): RedactedOutcome[] {
   return outcomes.map((o) => {
-    // Only failed/skipped sections carry an actionable HTTP code; showing it on
-    // applied/clean rows would be noise.
+    // The SectionOutcome union proves a code exists only on failed/skipped
+    // rows, so presence alone decides.
     const withCode =
-      o.httpStatus !== undefined && (o.status === "failed" || o.status === "skipped")
-        ? `${REDACTED_DETAIL}, HTTP ${o.httpStatus}`
-        : REDACTED_DETAIL;
+      o.httpStatus !== undefined ? `${REDACTED_DETAIL}, HTTP ${o.httpStatus}` : REDACTED_DETAIL;
     return { key: o.key, status: o.status, detail: [withCode] };
   });
 }
@@ -307,10 +306,20 @@ async function processTarget(ctx: {
     return fail(invalid);
   }
 
+  // Central files and the repos input validated their slugs at parse time;
+  // discovery's full_name is API data, so the shared constructor is the
+  // boundary that proves every engine-bound target is an owner/name pair.
+  const repoRef = parseRepoSlug(target.slug);
+  if (repoRef === null) {
+    return fail(
+      `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be targeted`,
+    );
+  }
+
   const run = await runForRepo(
     api,
     {
-      repo: target.slug,
+      repo: repoRef,
       settings,
       mode: cfg.mode,
       onMissingPermission: cfg.onMissingPermission,
@@ -650,8 +659,9 @@ export async function runMulti(
       }
     } else if (reportOn && !deliverable) {
       // Redacted but not proven private: the report is withheld, said once,
-      // safely (placeholder only).
-      const withheld = "visibility could not be verified; the private report was not delivered";
+      // safely (placeholder only; the cause and fix are slug-free).
+      const withheld =
+        "visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the repository), so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified";
       io.annotate("notice", `${display}: ${withheld}`);
       note = note ? `${note}; ${withheld}` : withheld;
     }

@@ -1,15 +1,17 @@
 /**
  * Unit tests for the shared secrets engine: the seal/unseal round-trip
- * against the mock's fixed keypair, the prepareSecretValues adapter over
- * ctx.resolveSecret (check and empty inventories need no resolver; apply
- * with entries demands one loudly), and duplicate-name rejection.
+ * against the mock's fixed keypair, reconcileSecrets' use of the apply
+ * context's resolver (each entry's own value, and never on an empty
+ * inventory), and duplicate-name rejection.
  */
 
 import { describe, expect, test } from "bun:test";
 import type { SectionContext, SectionMeta } from "../../src/sections/contract.js";
 import {
-  prepareSecretValues,
+  reconcileSecrets,
   rejectDuplicateSecretNames,
+  type SealedSecretPayload,
+  type SecretsScope,
   sealSecretValue,
   secretKey,
 } from "../../src/sections/secrets-engine.js";
@@ -28,23 +30,42 @@ const section: SectionMeta = {
   undeclaredDefault: "keep",
 };
 
-function resolveCtx(opts: { check: boolean; resolved?: Record<string, string> }): SectionContext {
+function applyCtx(resolved?: Record<string, string>): SectionContext {
   return {
     api: new MockApi({}),
-    repo: "o/r",
-    owner: "o",
-    check: opts.check,
-    ...(opts.resolved === undefined
-      ? {}
-      : {
-          resolveSecret: (reference: string): string => {
-            const plaintext = opts.resolved?.[reference];
-            if (plaintext === undefined) {
-              throw new Error(`test resolver has no value for ${reference}`);
-            }
-            return plaintext;
-          },
-        }),
+    repo: { owner: "o", name: "r", slug: "o/r" },
+    check: false,
+    resolveSecret: (reference: string): string => {
+      const plaintext = resolved?.[reference];
+      if (plaintext === undefined) {
+        throw new Error(`test resolver has no value for ${reference}`);
+      }
+      return plaintext;
+    },
+  };
+}
+
+/**
+ * A fabricated scope whose operations never touch an API: the list answers
+ * `live`, the public key is the mock keypair's, and every sealed PUT is
+ * recorded for the assertions.
+ */
+function fabricatedScope(
+  live: string[],
+  puts: Array<{ name: string; payload: SealedSecretPayload }>,
+): SecretsScope {
+  return {
+    label: "actions_secrets",
+    noun: "Actions secret",
+    ops: {
+      list: async () => live.map((name) => ({ name })),
+      publicKey: async () => ({ key_id: "key-1", key: MOCK_SECRETS_PUBLIC_KEY }),
+      put: async (_ctx, _section, name, payload) => {
+        puts.push({ name, payload });
+        return null;
+      },
+      remove: async () => null,
+    },
   };
 }
 
@@ -81,54 +102,70 @@ describe("secretKey and duplicates", () => {
         { name: "Deploy_Token", value: "$A" },
         { name: "DEPLOY_TOKEN", value: "$B" },
       ]),
-    ).toThrow(/Deploy_Token.*DEPLOY_TOKEN.*same actions_secrets entry/s);
+    ).toThrow(/same actions_secrets entry.*"Deploy_Token" and "DEPLOY_TOKEN"/s);
   });
 });
 
-describe("prepareSecretValues", () => {
+describe("reconcileSecrets and the apply-arm resolver", () => {
   // Reference VALIDATION (literals, provenance, unset/empty) lives in the
   // engine (src/engine/secrets.ts + secret-refs.ts) and runs before any
-  // section; these tests cover only the adapter over ctx.resolveSecret.
-  test("check mode returns undefined and needs no resolver", () => {
-    const lookup = prepareSecretValues(resolveCtx({ check: true }), section, [
-      { name: "A", value: "$SOME_REF" },
-    ]);
-    expect(lookup).toBeUndefined();
+  // section; these tests cover only the resolver usage. The context ARMS
+  // themselves are compiler-enforced: a check context cannot carry a
+  // resolver, and an apply context cannot lack one.
+  test("a check-mode context carrying a resolver does not compile", () => {
+    // @ts-expect-error the check arm pins resolveSecret to never
+    const checkCtx: SectionContext = {
+      api: new MockApi({}),
+      repo: { owner: "o", name: "r", slug: "o/r" },
+      check: true,
+      resolveSecret: (reference: string): string => reference,
+    };
+    expect(checkCtx.check).toBe(true);
   });
 
-  test("an empty declaration in apply mode needs no resolver either", () => {
-    // A document with no references gets NO resolver from the engine, and
+  test("an empty declaration in apply mode never touches the resolver", async () => {
+    // A document with no references gets the engine's stub resolver, and
     // `actions_secrets: []` (or an entries-less `undeclared: delete` purge)
-    // must still apply - nothing to seal means nothing to look up.
-    const lookup = prepareSecretValues(resolveCtx({ check: false }), section, []);
-    expect(lookup).toBeUndefined();
+    // must still apply - nothing to seal means nothing to resolve.
+    const puts: Array<{ name: string; payload: SealedSecretPayload }> = [];
+    const result = await reconcileSecrets(applyCtx(), section, fabricatedScope([], puts), {
+      entries: [],
+      policy: "keep",
+    });
+    expect(result.changes).toEqual([]);
+    expect(puts).toEqual([]);
   });
 
-  test("apply maps entry names to resolved plaintexts, case-insensitively", () => {
-    const lookup = prepareSecretValues(
-      resolveCtx({ check: false, resolved: { $ONE: "plain-1", $TWO: "plain-2" } }),
+  test("apply seals each entry's OWN resolved value, uppercasing the name", async () => {
+    await mockSodiumReady();
+    const puts: Array<{ name: string; payload: SealedSecretPayload }> = [];
+    await reconcileSecrets(
+      applyCtx({ $ONE: "plain-1", $TWO: "plain-2" }),
       section,
-      [
-        { name: "first", value: "$ONE" },
-        { name: "SECOND", value: "$TWO" },
-      ],
+      fabricatedScope([], puts),
+      {
+        entries: [
+          { name: "first", value: "$ONE" },
+          { name: "SECOND", value: "$TWO" },
+        ],
+        policy: "keep",
+      },
     );
-    expect(lookup?.("FIRST")).toBe("plain-1");
-    expect(lookup?.("second")).toBe("plain-2");
+    expect(puts.map((put) => put.name)).toEqual(["FIRST", "SECOND"]);
+    expect(puts.map((put) => unsealSecretValue(put.payload.encrypted_value))).toEqual([
+      "plain-1",
+      "plain-2",
+    ]);
   });
 
-  test("apply without the engine's resolver is a loud BUG, not a silent default", () => {
-    expect(() =>
-      prepareSecretValues(resolveCtx({ check: false }), section, [{ name: "A", value: "$REF" }]),
-    ).toThrow(/BUG: applying actions_secrets reached a sealed write with no secret resolver/);
-  });
-
-  test("looking up an entry the section never declared is a loud BUG", () => {
-    const lookup = prepareSecretValues(
-      resolveCtx({ check: false, resolved: { $ONE: "plain-1" } }),
-      section,
-      [{ name: "A", value: "$ONE" }],
-    );
-    expect(() => lookup?.("UNDECLARED")).toThrow(/BUG: no resolved value/);
+  test("a value the engine never resolved fails the entry loudly", async () => {
+    const puts: Array<{ name: string; payload: SealedSecretPayload }> = [];
+    await expect(
+      reconcileSecrets(applyCtx({}), section, fabricatedScope([], puts), {
+        entries: [{ name: "A", value: "$NEVER_RESOLVED" }],
+        policy: "keep",
+      }),
+    ).rejects.toThrow(/no value for \$NEVER_RESOLVED/);
+    expect(puts).toEqual([]);
   });
 });

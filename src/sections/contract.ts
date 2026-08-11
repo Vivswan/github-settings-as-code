@@ -2,6 +2,7 @@
 
 import type { Endpoints } from "@octokit/types";
 import { z } from "zod";
+import type { RepoRef } from "../discovery/targets.js";
 import type { ApiError, GithubClient } from "../github/api.js";
 import { isPermissionError, isRateLimitError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
@@ -25,22 +26,38 @@ export class PermissionDenied extends Error {
   }
 }
 
-export interface SectionContext {
+/** The facets of a section context shared by both mode arms. */
+interface SectionContextBase {
   api: GithubClient;
-  repo: string; // owner/name
-  owner: string;
-  check: boolean;
-  /**
-   * Resolve a whole-value `$NAME` secret reference to its plaintext. Present
-   * only in apply mode: the engine resolves EVERY declared secret value up
-   * front (after the preflight barrier, before the first mutation of any
-   * section) and registers each plaintext with output masking before any
-   * handler runs, so a handler only ever looks up an already-resolved name.
-   * Absent in check mode and during preflight, where references are
-   * validated for syntax only and the environment is never read.
-   */
-  resolveSecret?: (reference: string) => string;
+  /** The target repository, parsed once at the boundary (see RepoRef). */
+  repo: RepoRef;
 }
+
+/**
+ * The context a section handler runs under, discriminated on `check` so the
+ * mode carries its own capabilities:
+ * - `check: true` (check mode and the apply-mode preflight) is the
+ *   read-only phase: references are validated for syntax only, the
+ *   environment is never read, and `resolveSecret?: never` makes a resolver
+ *   in this phase unrepresentable.
+ * - `check: false` (apply) ALWAYS carries `resolveSecret`, which maps a
+ *   whole-value `$NAME` secret reference to its plaintext: the engine
+ *   resolves EVERY declared secret value up front (after the preflight
+ *   barrier, before the first mutation of any section) and registers each
+ *   plaintext with output masking before any handler runs, so a handler
+ *   only ever looks up an already-resolved name. When the document declares
+ *   no secret values the resolver still exists, closed over an empty map,
+ *   and any lookup fails with the engine's BUG error - a call it can never
+ *   legitimately receive.
+ * Handlers narrow on `ctx.check`, so the apply branch gets the resolver
+ * structurally instead of re-checking for it at runtime.
+ */
+export type SectionContext =
+  | (SectionContextBase & { check: true; resolveSecret?: never })
+  | (SectionContextBase & { check: false; resolveSecret: (reference: string) => string });
+
+/** The apply-mode arm of SectionContext, for helpers only apply may call. */
+export type ApplySectionContext = Extract<SectionContext, { check: false }>;
 
 export interface SectionResult {
   /** Mutations performed (apply mode) or that WOULD be performed. */
@@ -275,11 +292,6 @@ export function endpointMethod(route: Route): string {
   return route.slice(0, route.indexOf(" "));
 }
 
-/** The name half of an "owner/name" slug (expand()'s `{repo}` fill). */
-export function repoNameOf(repo: string): string {
-  return repo.slice(repo.indexOf("/") + 1);
-}
-
 /** The path-template half of a route ("PATCH /repos/{owner}/..." -> "/repos/{owner}/..."). */
 export function endpointPath(route: Route): string {
   return route.slice(route.indexOf(" ") + 1);
@@ -324,7 +336,8 @@ export type GraphqlTolerableError = (typeof GRAPHQL_TOLERABLE_ERRORS)[number];
  * the connection field (e.g. ["repository", "branchProtectionRules"]), which
  * must select `nodes { ... }` and `pageInfo { hasNextPage endCursor }`, and
  * the query must declare a `$cursor` variable feeding the connection's
- * `after` argument (allGraphqlOps asserts both at construction).
+ * `after` argument (GraphqlPaginatedReadDecl's query type enforces the
+ * variable at the declaration).
  */
 export interface GraphqlConnectionDecl {
   readonly path: readonly [string, ...string[]];
@@ -387,28 +400,62 @@ interface GraphqlOpCommon<V extends Record<string, unknown>> {
  * ids. `outcomes` mirrors EndpointDecl.statuses: "ok" documents the success
  * meaning, and each declared error type is a TOLERATED outcome
  * (tryCallGraphql returns it as { error } instead of throwing). Only a read
- * may declare a `connection` (pagination is a read concern).
+ * may declare a `connection` (pagination is a read concern), and the
+ * paginated arm's query type requires the $cursor variable the loop feeds -
+ * a connection op that cannot page does not compile.
  *
- * Declare each operation as an ANNOTATED const
- * (`const OP: GraphqlOpDecl<{owner: string; repo: string}> = {...}`) and pass
- * that const to the request helpers: the annotation is what carries `V` (via
- * the type-only `_variables` marker), so a call site with missing or
- * misnamed variables fails to compile. A declaration reached through a
- * widened dictionary (`section.graphql.role`) erases `V` to the permissive
- * default - the same erasure a widened EndpointDecl record applies to its
- * statuses - so helpers must be fed the consts, not dictionary lookups.
+ * Declare each operation with the graphqlOp constructor
+ * (`const OP = graphqlOp<{owner: string; repo: string}>()({...})`): the
+ * curried call carries `V` (via the type-only `_variables` marker) while the
+ * `const` type parameter preserves the LITERAL declaration - the query's
+ * template shape and the exact `outcomes` keys - so a call site with missing
+ * or misnamed variables, or a tolerate naming an undeclared outcome, fails
+ * to compile. A declaration reached through a widened dictionary
+ * (`section.graphql.role`) erases `V` to the permissive default - the same
+ * erasure a widened EndpointDecl record applies to its statuses - so helpers
+ * must be fed the consts, not dictionary lookups.
  */
 export type GraphqlOpDecl<V extends Record<string, unknown> = Record<string, unknown>> =
   | (GraphqlOpCommon<V> & {
       readonly kind: "read";
       readonly query: `query ${string}`;
-      readonly connection?: GraphqlConnectionDecl;
+      readonly connection?: undefined;
     })
+  | GraphqlPaginatedReadDecl<V>
   | (GraphqlOpCommon<V> & {
       readonly kind: "write";
       readonly query: `mutation ${string}`;
       readonly connection?: never;
     });
+
+/**
+ * The paginated arm of GraphqlOpDecl: a read declaring a `connection` MUST
+ * take the $cursor variable listGraphqlConnection's loop owns (the template
+ * type makes a cursorless paginated query uncompilable), and its callers
+ * must never supply their own `cursor` (the `?: never` pin on V). Connection
+ * ops annotate with THIS type, so the compiler checks the pairing at the
+ * declaration.
+ */
+export type GraphqlPaginatedReadDecl<V extends Record<string, unknown> = Record<string, unknown>> =
+  GraphqlOpCommon<V & { cursor?: never }> & {
+    readonly kind: "read";
+    readonly query: `query ${string}$cursor${string}`;
+    readonly connection: GraphqlConnectionDecl;
+  };
+
+/**
+ * The curried declaration constructor for GraphQL operations: `V` is spelled
+ * explicitly while `const O` infers the LITERAL declaration type, so the
+ * exact `outcomes` keys and the query's template shape survive into the
+ * declared const instead of widening to the Partial record an annotated
+ * const erases to. That literal type is what lets tryCallGraphql's
+ * `tolerate` reject undeclared outcome types at compile time (the REST
+ * `as const satisfies` symmetry) and what checks a connection op's $cursor
+ * at its declaration.
+ */
+export function graphqlOp<V extends Record<string, unknown>>() {
+  return <const O extends GraphqlOpDecl<V>>(op: O): O & { readonly _variables?: V } => op;
+}
 
 /**
  * The variables shape a declaration carries (via the `_variables` marker),
@@ -511,29 +558,28 @@ export function matchesTemplate(template: string, concretePath: string): boolean
 }
 
 /**
- * Build the concrete request path from an endpoint's route: `{owner}` fills
- * from ctx.owner and `{repo}` from the name half of ctx.repo (both one
- * segment); every other `{token}` fills from params. All are URL-encoded in
+ * Build the concrete request path from an endpoint's route: `{owner}` and
+ * `{repo}` fill from the context's parsed RepoRef (both one segment); every
+ * other `{token}` fills from params. All are URL-encoded in
  * this single place. A missing param or an unused (extra) param is a handler
  * bug, so throw loudly. `query`, when given, is appended as an encoded query
- * string. Only the owner/repo halves of the context are read, so non-section
- * callers (the private-report module) can pass a bare pair.
+ * string. Only the RepoRef half of the context is read, so non-section
+ * callers (the private-report module) can pass a bare `{ repo }` pair.
  */
 export function expand(
   endpoint: EndpointDecl,
-  ctx: Pick<SectionContext, "owner" | "repo">,
+  ctx: Pick<SectionContext, "repo">,
   params?: Readonly<Record<string, string>>,
   query?: Readonly<Record<string, string>>,
 ): string {
   const route = endpoint.route;
-  const repoName = repoNameOf(ctx.repo);
   const supplied = new Set(Object.keys(params ?? {}));
   const path = endpointPath(route).replace(/{([a-z_]+)}/g, (_match, token: string) => {
     if (token === "owner") {
-      return encodeURIComponent(ctx.owner);
+      return encodeURIComponent(ctx.repo.owner);
     }
     if (token === "repo") {
-      return encodeURIComponent(repoName);
+      return encodeURIComponent(ctx.repo.name);
     }
     const value = params?.[token];
     if (value === undefined) {
@@ -557,15 +603,15 @@ export function expand(
 }
 
 /**
- * The $owner/$repo variables every repo-addressed GraphQL READ takes, derived
- * from the context in the one place expand() derives the REST path halves -
- * so the name-half slice cannot be copy-pasted into each GraphQL section.
+ * The $owner/$repo variables every repo-addressed GraphQL READ takes, read
+ * off the context's parsed RepoRef in the one place expand() reads the REST
+ * path halves - so no GraphQL section ever re-derives them.
  */
-export function repoVariables(ctx: Pick<SectionContext, "owner" | "repo">): {
+export function repoVariables(ctx: Pick<SectionContext, "repo">): {
   owner: string;
   repo: string;
 } {
-  return { owner: ctx.owner, repo: repoNameOf(ctx.repo) };
+  return { owner: ctx.repo.owner, repo: ctx.repo.name };
 }
 
 /**
@@ -747,15 +793,28 @@ export interface SectionModule<K extends SectionKey = SectionKey> extends Sectio
   /**
    * The declared values of this section's DESIGNATED SECRET FIELDS (e.g.
    * every webhooks entry's config.secret), extracted from the raw declared
-   * value. Declared only by sections that carry secret fields. The engine
+   * value, each labelled with its owning entry (see DeclaredSecretValue).
+   * Declared only by sections that carry secret fields. The engine
    * collects these before any section runs: it validates each value as a
    * whole-value `$NAME` reference (syntax only in check mode and preflight)
    * and, in apply mode, resolves them all up front - masking every
    * plaintext - so ctx.resolveSecret never misses. Values are returned raw;
    * nothing here reads the environment.
    */
-  secretValues?(declared: unknown): string[];
+  secretValues?(declared: unknown): DeclaredSecretValue[];
   run(ctx: SectionContext, desired: unknown): Promise<SectionResult>;
+}
+
+/**
+ * One designated secret-field value as a section declares it: the raw value
+ * (a `$NAME` reference when well-formed) plus a label naming the OWNING
+ * ENTRY - a secret name, an environment-plus-secret pair, a webhook url -
+ * so a validation error can point at the offending entry among many. The
+ * label is configuration the settings file already spells, never a value.
+ */
+export interface DeclaredSecretValue {
+  readonly label: string;
+  readonly value: string;
 }
 
 /** The loose "any YAML mapping" shape for passthrough-heavy sections. */
@@ -833,8 +892,7 @@ export function undeclaredPolicyShape(list: z.ZodType): z.ZodType {
       if (shape === null) {
         ctx.addIssue({
           code: "custom",
-          message:
-            'Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "undeclared" policy)',
+          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "undeclared" policy), but this section parsed as ${value === null ? "null" : typeof value}`,
         });
         return;
       }
@@ -1052,7 +1110,7 @@ export async function callGraphql<O extends GraphqlOpDecl>(
   variables: Readonly<GraphqlVariablesOf<O>>,
   opts?: { describe?: string },
 ): Promise<Record<string, unknown>> {
-  const result = await ctx.api.tryGraphql(op, variables, ctx.repo);
+  const result = await ctx.api.tryGraphql(op, variables, ctx.repo.slug);
   if ("error" in result) {
     throwFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op });
   }
@@ -1095,22 +1153,16 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
   op: O,
   variables: Readonly<GraphqlVariablesOf<O>>,
   opts?: {
+    // The graphqlOp constructor preserves the literal `outcomes` keys, so
+    // this keyof pins the DECLARED subset at compile time: a tolerate
+    // naming an undeclared type does not compile (the REST
+    // `as const satisfies` symmetry).
     tolerate?: readonly (keyof O["outcomes"] & GraphqlTolerableError)[];
     describe?: string;
   },
 ): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
-  const declared = toleratedGraphqlErrors(op);
-  const tolerate: readonly GraphqlTolerableError[] = opts?.tolerate ?? declared;
-  // The keyof-outcomes typing cannot pin the DECLARED subset (keyof a Partial
-  // record names every possible key), so the subset rule is enforced here: an
-  // explicit tolerate may only narrow, never smuggle in an undeclared type.
-  const undeclared = tolerate.filter((type) => !declared.includes(type));
-  if (undeclared.length > 0) {
-    throw new Error(
-      `BUG: tryCallGraphql for ${op.name} was told to tolerate [${undeclared.join(", ")}], which the operation's outcomes do not declare; declare the outcome or drop it from tolerate`,
-    );
-  }
-  const result = await ctx.api.tryGraphql(op, variables, ctx.repo);
+  const tolerate: readonly GraphqlTolerableError[] = opts?.tolerate ?? toleratedGraphqlErrors(op);
+  const result = await ctx.api.tryGraphql(op, variables, ctx.repo.slug);
   if ("error" in result) {
     if (!graphqlErrorTolerated(result.error, tolerate)) {
       throwFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op });
@@ -1136,29 +1188,20 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
  * classifies through throwFor like any other error. An operation declaring
  * no error outcomes always resolves { items }.
  */
-export async function listGraphqlConnection<
-  O extends GraphqlOpDecl & { connection: GraphqlConnectionDecl },
->(
+export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
   ctx: SectionContext,
   section: SectionMeta,
   op: O,
-  variables: Readonly<GraphqlVariablesOf<O>>,
+  // The `cursor?: never` pin makes a call site that supplies its own cursor
+  // uncompilable - the loop below owns the variable; the paginated arm's
+  // query type already proved $cursor exists at the declaration.
+  variables: Readonly<GraphqlVariablesOf<O>> & { cursor?: never },
 ): Promise<{ items: unknown[] } | { error: ApiError }> {
-  if (!op.query.includes("$cursor")) {
-    throw new Error(
-      `BUG: GRAPHQL ${op.name} is paginated through listGraphqlConnection but its query declares no $cursor variable`,
-    );
-  }
-  if ("cursor" in variables) {
-    throw new Error(
-      `BUG: GRAPHQL ${op.name} was given a "cursor" variable, but the connection loop owns the cursor; drop it from the call site`,
-    );
-  }
   const path = op.connection.path;
   const items: unknown[] = [];
   let cursor: string | null = null;
   for (;;) {
-    const result = await ctx.api.tryGraphql(op, { ...variables, cursor }, ctx.repo);
+    const result = await ctx.api.tryGraphql(op, { ...variables, cursor }, ctx.repo.slug);
     if ("error" in result) {
       if (cursor === null && graphqlErrorTolerated(result.error, toleratedGraphqlErrors(op))) {
         return result;
@@ -1194,7 +1237,9 @@ export async function listGraphqlConnection<
 
 /**
  * Reject two declared entries that resolve to the same natural key; they
- * would fight each other on every run instead of converging.
+ * would fight each other on every run instead of converging. The sweep
+ * collects EVERY colliding pair and fails once with the full list, so N
+ * duplicates cost one run to discover, not N.
  */
 export function rejectDuplicates<T>(
   section: SectionMeta,
@@ -1203,15 +1248,20 @@ export function rejectDuplicates<T>(
   describe: (item: T) => string,
 ): void {
   const seen = new Map<string, string>();
+  const collisions: string[] = [];
   for (const item of items) {
     const key = keyOf(item);
     const first = seen.get(key);
     if (first !== undefined) {
-      throw new Error(
-        `${section.key}: the settings file declares both "${first}" and "${describe(item)}", which name the same ${section.key} entry. Keep exactly one entry per resource`,
-      );
+      collisions.push(`"${first}" and "${describe(item)}"`);
+      continue;
     }
     seen.set(key, describe(item));
+  }
+  if (collisions.length > 0) {
+    throw new Error(
+      `${section.key}: the settings file declares entries that name the same ${section.key} entry: ${collisions.join("; ")}. Keep exactly one entry per resource`,
+    );
   }
 }
 

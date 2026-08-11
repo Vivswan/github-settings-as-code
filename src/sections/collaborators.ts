@@ -44,6 +44,19 @@ interface LiveInvitation {
   expired?: boolean;
 }
 
+/** An invitation PROVEN username-addressed: the type carries the login. */
+type NamedInvitation = LiveInvitation & { invitee: { login: string } };
+
+/**
+ * The partition predicate: a NON-EMPTY string login on purpose, so an
+ * empty-string login stays in the email pool exactly as the runtime filter
+ * always treated it, and an off-contract non-string login can never reach
+ * the named pool's string operations.
+ */
+function isNamedInvitation(invitation: LiveInvitation): invitation is NamedInvitation {
+  return typeof invitation.invitee?.login === "string" && invitation.invitee.login !== "";
+}
+
 const permission: SectionPermission = { repo: ["administration"] };
 
 const KNOWN_KEYS = ["username", "permission"] as const;
@@ -108,19 +121,19 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
     })) as LiveCollaborator[];
     const liveByLogin = new Map(live.map((c) => [c.login.toLowerCase(), c]));
     // Both live pools are resolved BEFORE the declared walk, so a declared
-    // user is never mistaken for undeclared in the other pool. Email
-    // invitations (null invitee) split off: no username can declare them.
+    // user is never mistaken for undeclared in the other pool. The type
+    // predicate PARTITIONS the invitations once: the username-addressed pool
+    // carries its logins structurally, and email invitations (null invitee,
+    // which no username can declare) split into their own pool.
     const allInvitations = (await listAll(
       ctx,
       this,
       ENDPOINTS.listInvitations,
     )) as LiveInvitation[];
-    const invitations = allInvitations.filter((invitation) => invitation.invitee?.login);
+    const invitations = allInvitations.filter(isNamedInvitation);
+    const emailInvitations = allInvitations.filter((invitation) => !isNamedInvitation(invitation));
     const inviteByLogin = new Map(
-      invitations.map((invitation) => [
-        String(invitation.invitee?.login).toLowerCase(),
-        invitation,
-      ]),
+      invitations.map((invitation) => [invitation.invitee.login.toLowerCase(), invitation]),
     );
     const declared = new Set<string>();
 
@@ -216,7 +229,7 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
 
     for (const collaborator of live) {
       const login = collaborator.login.toLowerCase();
-      if (login === ctx.owner.toLowerCase() || declared.has(login)) {
+      if (login === ctx.repo.owner.toLowerCase() || declared.has(login)) {
         continue; // never remove the owner (under either policy)
       }
       if (policy === "keep") {
@@ -236,7 +249,7 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
     }
 
     for (const invitation of invitations) {
-      const invitee = String(invitation.invitee?.login);
+      const invitee = invitation.invitee.login;
       if (declared.has(invitee.toLowerCase())) {
         continue;
       }
@@ -256,10 +269,7 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
       }
     }
 
-    for (const invitation of allInvitations) {
-      if (invitation.invitee?.login) {
-        continue;
-      }
+    for (const invitation of emailInvitations) {
       result.notes.push(
         `invitation ${invitation.id} was sent by email, so no username can declare it; left untouched - cancel it from the repository's Access settings if it is unwanted`,
       );

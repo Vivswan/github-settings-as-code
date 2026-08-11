@@ -27,8 +27,8 @@ import {
   type EndpointDecl,
   emptyResult,
   expand,
-  type GraphqlConnectionDecl,
   type GraphqlOpDecl,
+  graphqlOp,
   listGraphqlConnection,
   probeAbsent,
   rejectDuplicates,
@@ -205,9 +205,7 @@ const ENDPOINTS = {
  * denial reads as "no rules visible", preserving the section's
  * denial-surfaces-at-the-first-write semantics.
  */
-const RULES_QUERY: GraphqlOpDecl<{ owner: string; repo: string }> & {
-  connection: GraphqlConnectionDecl;
-} = {
+const RULES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   name: "BranchProtectionRules",
   kind: "read",
   connection: { path: ["repository", "branchProtectionRules"] },
@@ -256,17 +254,17 @@ const RULES_QUERY: GraphqlOpDecl<{ owner: string; repo: string }> & {
     }
   }
 }`,
-};
+});
 
 /** The repository's GraphQL node id, needed only to CREATE a wildcard rule. */
-const REPO_LOOKUP: GraphqlOpDecl<{ owner: string; repo: string }> = {
+const REPO_LOOKUP = graphqlOp<{ owner: string; repo: string }>()({
   name: "BranchProtectionRepository",
   kind: "read",
   outcomes: { ok: "the repository's GraphQL node id" },
   query: `query BranchProtectionRepository($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) { id }
 }`,
-};
+});
 
 /**
  * A user actor's NEW-format node id. REST /users/{username} can still carry
@@ -274,7 +272,7 @@ const REPO_LOOKUP: GraphqlOpDecl<{ owner: string; repo: string }> = {
  * warning), so users resolve through GraphQL. The repository selection also
  * routes the read (every repo-addressed read takes $owner/$repo).
  */
-const ACTOR_USER: GraphqlOpDecl<{ owner: string; repo: string; login: string }> = {
+const ACTOR_USER = graphqlOp<{ owner: string; repo: string; login: string }>()({
   name: "BranchProtectionActorUser",
   kind: "read",
   outcomes: {
@@ -287,10 +285,10 @@ const ACTOR_USER: GraphqlOpDecl<{ owner: string; repo: string; login: string }> 
   repository(owner: $owner, name: $repo) { id }
   user(login: $login) { id }
 }`,
-};
+});
 
 /** A team actor's node id, addressed as organization login plus team slug. */
-const ACTOR_TEAM: GraphqlOpDecl<{ owner: string; repo: string; org: string; team: string }> = {
+const ACTOR_TEAM = graphqlOp<{ owner: string; repo: string; org: string; team: string }>()({
   name: "BranchProtectionActorTeam",
   kind: "read",
   outcomes: {
@@ -303,7 +301,7 @@ const ACTOR_TEAM: GraphqlOpDecl<{ owner: string; repo: string; org: string; team
   repository(owner: $owner, name: $repo) { id }
   organization(login: $org) { team(slug: $team) { id } }
 }`,
-};
+});
 
 /**
  * The three rule mutations. Each payload re-reads the persisted rule, so
@@ -311,7 +309,7 @@ const ACTOR_TEAM: GraphqlOpDecl<{ owner: string; repo: string; org: string; team
  * the silent-drop check needs (GitHub drops names of environments that do
  * not exist without failing the mutation).
  */
-const CREATE_RULE: GraphqlOpDecl<{ input: Record<string, unknown> }> = {
+const CREATE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
   name: "CreateBranchProtectionRule",
   kind: "write",
   outcomes: {
@@ -323,9 +321,9 @@ const CREATE_RULE: GraphqlOpDecl<{ input: Record<string, unknown> }> = {
     branchProtectionRule { id pattern requiresDeployments requiredDeploymentEnvironments }
   }
 }`,
-};
+});
 
-const UPDATE_RULE: GraphqlOpDecl<{ input: Record<string, unknown> }> = {
+const UPDATE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
   name: "UpdateBranchProtectionRule",
   kind: "write",
   outcomes: {
@@ -338,16 +336,16 @@ const UPDATE_RULE: GraphqlOpDecl<{ input: Record<string, unknown> }> = {
     branchProtectionRule { id pattern requiresDeployments requiredDeploymentEnvironments }
   }
 }`,
-};
+});
 
-const DELETE_RULE: GraphqlOpDecl<{ input: Record<string, unknown> }> = {
+const DELETE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
   name: "DeleteBranchProtectionRule",
   kind: "write",
   outcomes: { ok: "rule deleted", NOT_FOUND: "no rule with this node id" },
   query: `mutation DeleteBranchProtectionRule($input: DeleteBranchProtectionRuleInput!) {
   deleteBranchProtectionRule(input: $input) { clientMutationId }
 }`,
-};
+});
 
 const GRAPHQL = {
   rulesQuery: RULES_QUERY,
@@ -367,13 +365,6 @@ function hasRoutedGraphqlKeys(protection: BranchProtectionConfig | null): boolea
   );
 }
 
-/** True when any entry makes this run touch the GraphQL rule surface. */
-function needsRulesQuery(desired: readonly BranchConfig[]): boolean {
-  return desired.some(
-    (branch) => isWildcardPattern(branch.name) || hasRoutedGraphqlKeys(branch.protection),
-  );
-}
-
 /** One live rule node as the rules query returns it. */
 type RuleNode = Record<string, unknown>;
 
@@ -383,6 +374,18 @@ interface GraphqlRun {
   repoId: string | null;
   actorIds: Map<string, string>;
 }
+
+/**
+ * One declared entry paired with its GraphQL proof at classification time: a
+ * wildcard entry always carries the run state (its whole reconciliation is
+ * the GraphQL surface), a literal entry carries it exactly when it declares
+ * a routed key. The tag is built in the ONE place that decides whether the
+ * run state exists, so an entry that needs GraphQL without the state being
+ * constructed is unrepresentable - no cast, no predicate re-spelling.
+ */
+type ClassifiedEntry =
+  | { kind: "wildcard"; branch: BranchConfig; run: GraphqlRun }
+  | { kind: "literal"; branch: BranchConfig; routed: { run: GraphqlRun } | null };
 
 async function fetchRules(
   ctx: SectionContext,
@@ -733,7 +736,7 @@ async function resolveActorId(
   }
   if (typeof id !== "string" || id.length === 0) {
     throw new Error(
-      `branches: force_push_bypassers actor "${raw}" resolved to a response without a node id, so the allowance cannot be applied`,
+      `branches: force_push_bypassers actor "${raw}": the ${actor.kind === "app" ? "App lookup" : "GraphQL lookup"} succeeded but returned no node id, so the allowance cannot be applied; re-run the workflow, and report this if it persists`,
     );
   }
   run.actorIds.set(cacheKey, id);
@@ -955,34 +958,58 @@ export const branchesSection: SectionModule<"branches"> = {
     );
     // The one rules read, fired only when an entry needs the GraphQL
     // surface: a pure-REST declaration issues no GraphQL request at all.
-    let graphql: GraphqlRun | null = null;
-    if (needsRulesQuery(desired)) {
-      graphql = { byPattern: await fetchRules(ctx, this), repoId: null, actorIds: new Map() };
+    // The SAME predicate that gates the fetch classifies the entries, so
+    // every entry that needs the run state gets it attached right here.
+    const needsGraphql = (branch: BranchConfig): boolean =>
+      isWildcardPattern(branch.name) || hasRoutedGraphqlKeys(branch.protection);
+    let entries: ClassifiedEntry[];
+    if (desired.some(needsGraphql)) {
+      const run: GraphqlRun = {
+        byPattern: await fetchRules(ctx, this),
+        repoId: null,
+        actorIds: new Map(),
+      };
       const declaredPatterns = new Set(desired.map((branch) => branch.name));
-      for (const pattern of [...graphql.byPattern.keys()].sort()) {
+      for (const pattern of [...run.byPattern.keys()].sort()) {
         if (isWildcardPattern(pattern) && !declaredPatterns.has(pattern)) {
           result.notes.push(
             `undeclared classic protection rule "${pattern}" exists on the repo - declare it to manage it (this action never deletes undeclared rules)`,
           );
         }
       }
+      entries = desired.map((branch) =>
+        isWildcardPattern(branch.name)
+          ? { kind: "wildcard", branch, run }
+          : {
+              kind: "literal",
+              branch,
+              routed: hasRoutedGraphqlKeys(branch.protection) ? { run } : null,
+            },
+      );
+    } else {
+      // No entry satisfies the predicate, so every entry is a plain literal.
+      entries = desired.map((branch) => ({ kind: "literal", branch, routed: null }));
     }
-    for (const branch of desired) {
-      if (isWildcardPattern(branch.name)) {
-        await runWildcardEntry(ctx, this, graphql as GraphqlRun, branch, result);
+    for (const entry of entries) {
+      if (entry.kind === "wildcard") {
+        await runWildcardEntry(ctx, this, entry.run, entry.branch, result);
         continue;
       }
-      await runLiteralEntry(ctx, this, graphql, branch, result);
+      await runLiteralEntry(ctx, this, entry.routed, entry.branch, result);
     }
     return result;
   },
 };
 
-/** Reconcile one literal-branch entry (the REST path plus routed keys). */
+/**
+ * Reconcile one literal-branch entry (the REST path plus routed keys).
+ * `routed` is the classification-time proof: non-null exactly when the entry
+ * declares a GraphQL-routed key, carrying the per-run GraphQL state.
+ */
 async function runLiteralEntry(
   ctx: SectionContext,
   section: SectionModule<"branches">,
-  graphql: GraphqlRun | null,
+  routed: { run: GraphqlRun } | null,
   branch: BranchConfig,
   result: SectionResult,
 ): Promise<void> {
@@ -1068,7 +1095,7 @@ async function runLiteralEntry(
         ...routedKeyDrift(
           `branches[${branch.name}].protection`,
           branch.protection,
-          graphql?.byPattern.get(branch.name),
+          routed?.run.byPattern.get(branch.name),
         ),
       );
       // Apply null-fills the four required keys, REMOVING live settings
@@ -1086,9 +1113,11 @@ async function runLiteralEntry(
   // Actor resolution comes BEFORE the destructive PUT: a misspelled actor
   // must fail the entry while the live protection is still untouched, not
   // after the PUT already replaced it. Resolution is read-only.
+  // (forcePushBypassers implies routed; the conjunct carries that fact to
+  // the type checker.)
   const resolvedBypassIds =
-    forcePushBypassers !== undefined
-      ? await resolveActorIds(ctx, section, graphql as GraphqlRun, forcePushBypassers)
+    routed !== null && forcePushBypassers !== undefined
+      ? await resolveActorIds(ctx, section, routed.run, forcePushBypassers)
       : undefined;
   await call(ctx, section, ENDPOINTS.putProtection, {
     params: { branch: branch.name },
@@ -1109,12 +1138,11 @@ async function runLiteralEntry(
       describe: `removing the signed-commit requirement from branch "${branch.name}"`,
     });
   }
-  if (resolvedBypassIds !== undefined || requiredDeployments !== undefined) {
-    // needsRulesQuery saw the routed key, so the run state exists; the rule
-    // node itself may be fresh (the PUT above just created it), which the
-    // one-refetch lookup covers.
-    const run = graphql as GraphqlRun;
-    const node = await ruleNodeFor(ctx, section, run, branch.name);
+  if (routed !== null) {
+    // The entry declared a routed key, so the classification attached the
+    // run state; the rule node itself may be fresh (the PUT above just
+    // created it), which the one-refetch lookup covers.
+    const node = await ruleNodeFor(ctx, section, routed.run, branch.name);
     const input: Record<string, unknown> = { branchProtectionRuleId: node.id };
     if (resolvedBypassIds !== undefined) {
       input.bypassForcePushActorIds = resolvedBypassIds;

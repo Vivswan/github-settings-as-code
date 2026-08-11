@@ -83,13 +83,13 @@ describe("webhooks secretValues", () => {
         { config: { url: "https://a.test", secret: "$A" } },
         { config: { url: "https://b.test" } },
       ]),
-    ).toEqual(["$A"]);
+    ).toEqual([{ label: 'the webhook "https://a.test" config.secret', value: "$A" }]);
     expect(
       webhooksSection.secretValues?.({
         undeclared: "keep",
         entries: [{ config: { url: "https://a.test", secret: "$B" } }],
       }),
-    ).toEqual(["$B"]);
+    ).toEqual([{ label: 'the webhook "https://a.test" config.secret', value: "$B" }]);
   });
 
   test("malformed containers return [] and leave the error to validation", () => {

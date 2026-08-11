@@ -20,6 +20,7 @@
  * delivery is infrastructure that writes even in check mode.
  */
 
+import type { RepoRef } from "../discovery/targets.js";
 import type { ApiError, GithubClient } from "../github/api.js";
 import { isPermissionError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
@@ -89,9 +90,15 @@ export type IssueReportMode = "always" | "on-failure";
  */
 export type IssueDelivery = { url: string } | { skipped: true } | { warning: string };
 
-/** The owner/repo halves expand() needs, from an owner/name slug. */
-function repoRef(slug: string): { owner: string; repo: string } {
-  return { owner: slug.slice(0, slug.indexOf("/")), repo: slug };
+/**
+ * The `{ repo }` context expand() needs, from an owner/name slug. Built with
+ * the shared parse-once shape so the name half is derived exactly once here
+ * (never re-sliced downstream); the slug is validated at the run flows'
+ * boundaries before it can reach this module.
+ */
+function repoRef(slug: string): { repo: RepoRef } {
+  const separator = slug.indexOf("/");
+  return { repo: { owner: slug.slice(0, separator), name: slug.slice(separator + 1), slug } };
 }
 
 /**
@@ -106,10 +113,15 @@ function deliveryWarning(error: ApiError): { warning: string } {
   return { warning: `could not deliver the private report (HTTP ${error.status}). ${advice}` };
 }
 
-function malformedWarning(): { warning: string } {
+/**
+ * The malformed-response twin of deliveryWarning, equally public-safe: `what`
+ * names the failing request as a route template or a structural fact (never
+ * the slug, the expanded path, or response content), so the operator can
+ * tell WHICH of the channel's requests answered off-contract.
+ */
+function malformedWarning(what: string): { warning: string } {
   return {
-    warning:
-      'could not deliver the private report: the issues API returned an unexpected shape. Check the "api-version" input, or set private-report: none',
+    warning: `could not deliver the private report: ${what}. Check the "api-version" input, or set private-report: none`,
   };
 }
 
@@ -156,7 +168,7 @@ function reportIssueIn(items: unknown[]): { number: number; url: string; labels:
  */
 async function fallbackScan(
   api: GithubClient,
-  ref: { owner: string; repo: string },
+  ref: { repo: RepoRef },
 ): Promise<{ found: ReturnType<typeof reportIssueIn> } | { warning: string }> {
   const user = await api.tryRequest("GET", expand(ISSUE_REPORT_ENDPOINTS.user, ref));
   if ("error" in user) {
@@ -164,7 +176,7 @@ async function fallbackScan(
   }
   const login = (user.data as { login?: unknown } | null)?.login;
   if (typeof login !== "string" || login === "") {
-    return malformedWarning();
+    return malformedWarning("GET /user returned a response without the token user's login");
   }
   const path = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, {
     state: "all",
@@ -177,7 +189,7 @@ async function fallbackScan(
     return deliveryWarning(page.error);
   }
   if ("malformed" in page) {
-    return malformedWarning();
+    return malformedWarning("the issue list (creator scan) returned a non-list page");
   }
   return { found: reportIssueIn(page.items) };
 }
@@ -193,7 +205,7 @@ async function fallbackScan(
  */
 async function closeIfOpen(
   api: GithubClient,
-  ref: { owner: string; repo: string },
+  ref: { repo: RepoRef },
   body: string,
 ): Promise<IssueDelivery> {
   const listPath = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, {
@@ -206,7 +218,7 @@ async function closeIfOpen(
     return deliveryWarning(listed.error);
   }
   if (!Array.isArray(listed.data)) {
-    return malformedWarning();
+    return malformedWarning("the open-issue lookup returned a non-list response");
   }
   const found = reportIssueIn(listed.data);
   if (!found) {
@@ -254,7 +266,7 @@ async function deliver(
     return deliveryWarning(listed.error);
   }
   if (!Array.isArray(listed.data)) {
-    return malformedWarning();
+    return malformedWarning("the report-issue lookup returned a non-list response");
   }
   let found = reportIssueIn(listed.data);
   // The PATCH normally leaves labels alone (a human may have added their own).
@@ -298,7 +310,9 @@ async function deliver(
   if (state === "closed") {
     // Creation cannot set the state, so a healthy first run closes right after.
     if (typeof issue?.number !== "number") {
-      return malformedWarning();
+      return malformedWarning(
+        "the report issue was created but carried no issue number, so it could not be closed for this healthy run",
+      );
     }
     const closed = await api.tryRequest(
       "PATCH",

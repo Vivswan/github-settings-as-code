@@ -66,7 +66,7 @@ describe("deploy_keys validation before any write", () => {
         { title: "deploy-bot", key: `${BOT_KEY} deploy@bot` },
         { title: "mirror-pull", key: `${BOT_KEY} mirror@other-comment` },
       ]),
-    ).rejects.toThrow(/declares both "deploy-bot" and "mirror-pull"/);
+    ).rejects.toThrow(/same deploy_keys entry.*"deploy-bot" and "mirror-pull"/s);
     expect(api.calls).toHaveLength(0);
   });
 

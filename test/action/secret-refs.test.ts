@@ -6,17 +6,20 @@ import {
   validateSecretRef,
 } from "../../src/action/secret-refs.js";
 
+/** The entry label validateSecretRef weaves into its error prose. */
+const LABEL = 'the secret entry "TEST_ENTRY"';
+
 describe("validateSecretRef (syntax phase, never reads the environment)", () => {
   test("a whole-value $NAME reference from an operator source is accepted", () => {
     // No environment is in scope at all: the function takes none, so accepting
     // here proves syntax validation cannot depend on a variable being set.
-    const result = validateSecretRef("$WEBHOOK_SECRET", "operator");
+    const result = validateSecretRef("$WEBHOOK_SECRET", "operator", LABEL);
     expect(result.ok).toBe(true);
     expect(result.ok && result.ref.name).toBe("WEBHOOK_SECRET");
   });
 
   test("a value that embeds $NAME without being one is rejected, naming the fragment", () => {
-    const result = validateSecretRef("prefix-$TOKEN", "operator");
+    const result = validateSecretRef("prefix-$TOKEN", "operator", LABEL);
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error("expected rejection");
@@ -28,7 +31,7 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
   });
 
   test("a literal value is rejected and never echoed", () => {
-    const result = validateSecretRef("hunter2-plaintext", "operator");
+    const result = validateSecretRef("hunter2-plaintext", "operator", LABEL);
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error("expected rejection");
@@ -41,7 +44,7 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
 
   test("every reserved prefix is refused, naming the prefix", () => {
     for (const prefix of RESERVED_REF_PREFIXES) {
-      const result = validateSecretRef(`$${prefix}SOMETHING`, "operator");
+      const result = validateSecretRef(`$${prefix}SOMETHING`, "operator", LABEL);
       expect(result.ok).toBe(false);
       if (result.ok) {
         throw new Error("expected rejection");
@@ -53,11 +56,11 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
 
   test("a name merely starting like a reserved word is not reserved", () => {
     // INPUTX does not match INPUT_ (the underscore is part of the prefix).
-    expect(validateSecretRef("$INPUTX", "operator").ok).toBe(true);
+    expect(validateSecretRef("$INPUTX", "operator", LABEL).ok).toBe(true);
   });
 
   test("a reference in a target-fetched settings source is a hard error", () => {
-    const result = validateSecretRef("$DEPLOY_KEY", "target");
+    const result = validateSecretRef("$DEPLOY_KEY", "target", LABEL);
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error("expected rejection");
@@ -69,7 +72,7 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
   test("the target boundary precedes the reserved check", () => {
     // A target-sourced reserved name must be refused for the routing reason,
     // so the error explains the boundary rather than the lesser rule.
-    const result = validateSecretRef("$GITHUB_TOKEN", "target");
+    const result = validateSecretRef("$GITHUB_TOKEN", "target", LABEL);
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error("expected rejection");
@@ -93,16 +96,20 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
   };
   for (const [name, value] of Object.entries(NOT_WHOLE_VALUE)) {
     test(`${name} is not a whole-value reference`, () => {
-      expect(validateSecretRef(value, "operator").ok).toBe(false);
+      expect(validateSecretRef(value, "operator", LABEL).ok).toBe(false);
     });
   }
 
   test("an underscore-leading name is a valid reference", () => {
-    expect(validateSecretRef("$_PRIVATE", "operator").ok).toBe(true);
+    expect(validateSecretRef("$_PRIVATE", "operator", LABEL).ok).toBe(true);
   });
 });
 
-const operator = (value: string): SourcedSecretValue => ({ value, source: "operator" });
+const operator = (value: string): SourcedSecretValue => ({
+  value,
+  label: LABEL,
+  source: "operator",
+});
 
 describe("resolveSecretRefs (resolution phase, injected environment)", () => {
   test("a valid reference resolves to the env value and lists it for masking", () => {
@@ -178,9 +185,12 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
   });
 
   test("a target-sourced value fails resolution even when the variable is set", () => {
-    const result = resolveSecretRefs([{ value: "$WEBHOOK_SECRET", source: "target" }], {
-      WEBHOOK_SECRET: "would-leak",
-    });
+    const result = resolveSecretRefs(
+      [{ value: "$WEBHOOK_SECRET", label: LABEL, source: "target" }],
+      {
+        WEBHOOK_SECRET: "would-leak",
+      },
+    );
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error("expected failure");
@@ -195,7 +205,7 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
     // documents: the operator's reference resolves while the target's is
     // refused, and the whole batch fails.
     const result = resolveSecretRefs(
-      [operator("$FLEET_SECRET"), { value: "$FLEET_SECRET", source: "target" }],
+      [operator("$FLEET_SECRET"), { value: "$FLEET_SECRET", label: LABEL, source: "target" }],
       { FLEET_SECRET: "fleet-value" },
     );
     expect(result.ok).toBe(false);

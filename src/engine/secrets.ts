@@ -38,13 +38,13 @@ export function collectSecretValues(
 ): SectionSecretValue[] {
   const out: SectionSecretValue[] = [];
   for (const section of sections) {
-    const declared = settings[section.key as keyof SettingsFile];
+    const declared = settings[section.key];
     if (declared === undefined || section.secretValues === undefined) {
       continue;
     }
     const source = sourceOf(section.key);
-    for (const value of section.secretValues(declared)) {
-      out.push({ section: section.key, value, source });
+    for (const { label, value } of section.secretValues(declared)) {
+      out.push({ section: section.key, label, value, source });
     }
   }
   return out;

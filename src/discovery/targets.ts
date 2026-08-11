@@ -24,6 +24,33 @@ export type Target = CentralTarget | RemoteTarget;
 export const SLUG_RE = /^[\w.-]+\/[\w.-]+$/;
 
 /**
+ * A repository reference PARSED ONCE at a validating boundary: the owner and
+ * name halves plus the original slug, so downstream code never re-splits a
+ * string (and an owner that disagrees with its slug is unconstructible in
+ * practice - the only constructor derives all three from one value).
+ */
+export interface RepoRef {
+  readonly owner: string;
+  readonly name: string;
+  readonly slug: string;
+}
+
+/**
+ * Parse an owner/name slug into a RepoRef, or null when it is not one. The
+ * smart constructor lives beside SLUG_RE so every boundary (the repository
+ * input, the repos list, discovery's full_name) validates and splits through
+ * the same definition; internal code then carries the parsed proof instead
+ * of a bare string.
+ */
+export function parseRepoSlug(raw: string): RepoRef | null {
+  if (!SLUG_RE.test(raw)) {
+    return null;
+  }
+  const separator = raw.indexOf("/");
+  return { owner: raw.slice(0, separator), name: raw.slice(separator + 1), slug: raw };
+}
+
+/**
  * Merge central and remote target lists. A central file wins over a
  * repos-input entry for the same repository (noticed, not an error).
  * The notice renders the repository slug through `display` so a redacted

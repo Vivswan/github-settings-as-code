@@ -176,7 +176,7 @@ describe("environments variables case-insensitive matching", () => {
         },
       ]),
     ).rejects.toThrow(
-      'environments: the "prod" entry declares variables "Region" and "REGION", which GitHub treats as the same variable (names are case-insensitive). Keep exactly one entry per variable',
+      'environments: the "prod" entry declares variables that GitHub treats as the same variable (names are case-insensitive): "Region" and "REGION". Keep exactly one entry per variable',
     );
     // Fail-fast: nothing was written, not even the environment PUT.
     expect(api.calls).toEqual([]);
@@ -457,7 +457,7 @@ describe("environments nested secrets validation and shape", () => {
           ],
         },
       ]),
-    ).rejects.toThrow(/"prod" entry declares secrets "token" and "TOKEN"/);
+    ).rejects.toThrow(/"prod" entry declares secrets .*"token" and "TOKEN"/);
     expect(api.calls).toEqual([]);
   });
 
@@ -493,7 +493,10 @@ describe("environments nested secrets validation and shape", () => {
       { name: "d", secrets: "garbage" },
       "not-an-entry",
     ]);
-    expect(values).toEqual(["$X", "$Y"]);
+    expect(values).toEqual([
+      { label: 'the secret entry "X" of environment "a"', value: "$X" },
+      { label: 'the secret entry "Y" of environment "b"', value: "$Y" },
+    ]);
     // A non-list section value contributes nothing (validation reports it).
     expect(environmentsSection.secretValues?.({ not: "a list" })).toEqual([]);
   });
@@ -695,7 +698,7 @@ describe("environments deployment branch policies validation and shape", () => {
         envWithPolicies([{ name: "release/*" }, { name: "release/*", type: "tag" }]),
       ]),
     ).rejects.toThrow(
-      'environments: the "prod" entry declares the deployment branch policy "release/*" twice. Keep exactly one entry per pattern',
+      'environments: the "prod" entry declares deployment branch policy "release/*" more than once. Keep exactly one entry per pattern',
     );
     expect(api.calls).toEqual([]);
   });
@@ -1009,7 +1012,7 @@ describe("environments deployment protection rules validation and shape", () => 
         },
       ]),
     ).rejects.toThrow(
-      'environments: the "prod" entry declares the deployment protection rule App "deploy-gate" twice. Keep exactly one entry per App',
+      'environments: the "prod" entry declares the deployment protection rule App "deploy-gate" more than once. Keep exactly one entry per App',
     );
     expect(api.calls).toEqual([]);
   });
@@ -1310,7 +1313,7 @@ describe("environments pinned apply mode", () => {
     });
     await expect(
       environmentsSection.run(ctx(api), [{ name: "prod", pinned: true }]),
-    ).rejects.toThrow(/returned a pin without a numeric position and an environment name/);
+    ).rejects.toThrow(/returned a pin node this section cannot read/);
   });
 });
 

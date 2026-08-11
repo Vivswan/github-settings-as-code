@@ -31,17 +31,22 @@ function captureIo(): { io: Io; annotations: string[] } {
   };
 }
 
+/** The label collectSecretValues derives for the fleet secret entry. */
+const FLEET_LABEL = 'the secret entry "FLEET_TOKEN"';
+/** The label webhooks derives for the test hook's config.secret. */
+const HOOK_LABEL = 'the webhook "https://x.test/h" config.secret';
+
 describe("secret provenance through the defaults merge", () => {
   test("a target declaring nothing leaves the defaults' values operator-sourced", () => {
     expect(mergedValues(FLEET_DEFAULTS, {} as SettingsFile)).toEqual([
-      { section: "actions_secrets", value: "$FLEET_TOKEN", source: "operator" },
+      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "operator" },
     ]);
   });
 
   test("a target declaring an unrelated section leaves the defaults' values operator-sourced", () => {
     const targetDoc = { labels: [{ name: "healthy", color: "00ff00" }] } as SettingsFile;
     expect(mergedValues(FLEET_DEFAULTS, targetDoc)).toEqual([
-      { section: "actions_secrets", value: "$FLEET_TOKEN", source: "operator" },
+      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "operator" },
     ]);
   });
 
@@ -50,7 +55,7 @@ describe("secret provenance through the defaults merge", () => {
       actions_secrets: [{ name: "FLEET_TOKEN", value: "$FLEET_TOKEN" }],
     } as SettingsFile;
     expect(mergedValues(FLEET_DEFAULTS, targetDoc)).toEqual([
-      { section: "actions_secrets", value: "$FLEET_TOKEN", source: "target" },
+      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "target" },
     ]);
   });
 
@@ -61,8 +66,8 @@ describe("secret provenance through the defaults merge", () => {
     expect(
       mergedValues(FLEET_DEFAULTS, targetDoc).sort((a, b) => (a.section < b.section ? -1 : 1)),
     ).toEqual([
-      { section: "actions_secrets", value: "$FLEET_TOKEN", source: "operator" },
-      { section: "webhooks", value: "$FLEET_TOKEN", source: "target" },
+      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "operator" },
+      { section: "webhooks", label: HOOK_LABEL, value: "$FLEET_TOKEN", source: "target" },
     ]);
   });
 
@@ -73,8 +78,8 @@ describe("secret provenance through the defaults merge", () => {
     expect(
       mergedValues(FLEET_DEFAULTS, targetDoc).sort((a, b) => (a.section < b.section ? -1 : 1)),
     ).toEqual([
-      { section: "actions_secrets", value: "$FLEET_TOKEN", source: "operator" },
-      { section: "webhooks", value: "$HOOK_SECRET", source: "target" },
+      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "operator" },
+      { section: "webhooks", label: HOOK_LABEL, value: "$HOOK_SECRET", source: "target" },
     ]);
   });
 
@@ -91,13 +96,18 @@ describe("secret provenance through the defaults merge", () => {
       },
     } as SettingsFile;
     expect(mergedValues(wrappedDefaults, {} as SettingsFile)).toEqual([
-      { section: "actions_secrets", value: "$FLEET_TOKEN", source: "operator" },
+      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "operator" },
     ]);
     const targetDoc = {
       actions_secrets: { entries: [{ name: "OWN_TOKEN", value: "$OWN_TOKEN" }] },
     } as SettingsFile;
     expect(mergedValues(wrappedDefaults, targetDoc)).toEqual([
-      { section: "actions_secrets", value: "$OWN_TOKEN", source: "target" },
+      {
+        section: "actions_secrets",
+        label: 'the secret entry "OWN_TOKEN"',
+        value: "$OWN_TOKEN",
+        source: "target",
+      },
     ]);
   });
 
@@ -156,20 +166,30 @@ describe("secret provenance through the defaults merge", () => {
       environments: [{ name: "prod", secrets: [{ name: "D", value: "$FLEET_TOKEN" }] }],
     } as SettingsFile;
     expect(mergedValues(envDefaults, {} as SettingsFile)).toEqual([
-      { section: "environments", value: "$FLEET_TOKEN", source: "operator" },
+      {
+        section: "environments",
+        label: 'the secret entry "D" of environment "prod"',
+        value: "$FLEET_TOKEN",
+        source: "operator",
+      },
     ]);
     const targetDoc = {
       environments: [{ name: "prod", secrets: [{ name: "T", value: "$ENV_SECRET" }] }],
     } as SettingsFile;
     expect(mergedValues(envDefaults, targetDoc)).toEqual([
-      { section: "environments", value: "$ENV_SECRET", source: "target" },
+      {
+        section: "environments",
+        label: 'the secret entry "T" of environment "prod"',
+        value: "$ENV_SECRET",
+        source: "target",
+      },
     ]);
   });
 });
 
 describe("runForRepo with merged provenance", () => {
   const runOpts = (settings: SettingsFile, targetDoc: SettingsFile) => ({
-    repo: "o/r",
+    repo: { owner: "o", name: "r", slug: "o/r" },
     settings,
     onMissingPermission: "fail" as const,
     requiredSections: new Set<string>(),

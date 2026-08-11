@@ -111,7 +111,7 @@ interface LiveProperty {
 function extractLive(data: unknown): LiveProperty[] {
   if (!Array.isArray(data)) {
     throw new Error(
-      `custom_properties: GET ${ENDPOINTS.list.route} returned a non-list body; check the "api-version" input against the GitHub REST docs for this endpoint`,
+      `custom_properties: GET ${ENDPOINTS.list.route} returned a non-list body (got ${(JSON.stringify(data) ?? String(data)).slice(0, 200)}); check the "api-version" input against the GitHub REST docs for this endpoint`,
     );
   }
   return data.map((entry) => {
@@ -124,7 +124,7 @@ function extractLive(data: unknown): LiveProperty[] {
       (Array.isArray(value) && value.every((element) => typeof element === "string"));
     if (typeof name !== "string" || !valueOk) {
       throw new Error(
-        `custom_properties: a live entry is missing its string property_name or carries a value outside string/string[]/null (${JSON.stringify(entry)}); the response violates the documented contract`,
+        `custom_properties: GET ${ENDPOINTS.list.route} returned an entry without a string property_name or with a value outside string/string[]/null (${JSON.stringify(entry)}); check the "api-version" input against the GitHub REST docs for this endpoint`,
       );
     }
     return { property_name: name, value: value as WireValue };
@@ -196,10 +196,12 @@ export const customPropertiesSection: SectionModule<"custom_properties"> = {
     // account the values endpoints 404. Probe once and no-op with a note
     // instead of failing; 403/5xx still flow through the permission policy
     // via probeAbsent.
-    const orgProbe = await probeAbsent(ctx, this, ENDPOINTS.org, { params: { org: ctx.owner } });
+    const orgProbe = await probeAbsent(ctx, this, ENDPOINTS.org, {
+      params: { org: ctx.repo.owner },
+    });
     if ("missing" in orgProbe) {
       result.notes.push(
-        `custom_properties: owner "${ctx.owner}" is a personal account, and custom properties require an organization-owned repository; section skipped - remove the custom_properties section from the settings file to silence this note`,
+        `custom_properties: owner "${ctx.repo.owner}" is a personal account, and custom properties require an organization-owned repository; section skipped - remove the custom_properties section from the settings file to silence this note`,
       );
       return result;
     }

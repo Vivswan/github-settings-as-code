@@ -46,24 +46,31 @@ export const RESERVED_REF_PREFIXES = ["INPUT_", "GITHUB_", "ACTIONS_", "RUNNER_"
 /**
  * Phase (a): syntax and policy validation for one designated secret field's
  * value. Takes no environment and reads no values, so check mode and
- * preflight can run it without touching secrets. Error strings name the rule
- * and the reference, and never echo a non-reference value: a rejected
- * literal or the text around an embedded `$NAME` may already be a secret.
+ * preflight can run it without touching secrets. `label` names the OWNING
+ * ENTRY (a secret name, a webhook url - configuration, never a secret), so
+ * the error points at the offending entry among many. Error strings name
+ * the rule, the label, and the reference, and never echo a non-reference
+ * value: a rejected literal or the text around an embedded `$NAME` may
+ * already be a secret.
  */
-export function validateSecretRef(value: string, source: SettingsSource): SecretRefCheck {
+export function validateSecretRef(
+  value: string,
+  source: SettingsSource,
+  label: string,
+): SecretRefCheck {
   if (REFERENCE_RE.test(value)) {
     const name = value.slice(1);
     if (source === "target") {
       return {
         ok: false,
-        error: `secret reference ${value} appears in a target-fetched settings file; references are honored only in operator-owned settings sources, so a target repository cannot read the operator's environment`,
+        error: `${label} uses the secret reference ${value} in a target-fetched settings file; references are honored only in operator-owned settings sources, so a target repository cannot read the operator's environment`,
       };
     }
     const reserved = RESERVED_REF_PREFIXES.find((prefix) => name.startsWith(prefix));
     if (reserved !== undefined) {
       return {
         ok: false,
-        error: `secret reference ${value} names a reserved runner variable (${reserved}* is refused): workflow inputs and GitHub/runner context cannot be routed into settings values`,
+        error: `${label} references the reserved runner variable ${value} (${reserved}* is refused): workflow inputs and GitHub/runner context cannot be routed into settings values`,
       };
     }
     return { ok: true, ref: { name } };
@@ -72,13 +79,12 @@ export function validateSecretRef(value: string, source: SettingsSource): Secret
   if (embedded !== undefined) {
     return {
       ok: false,
-      error: `a secret field value embeds ${embedded} without being a whole-value reference; it would otherwise ship verbatim as the secret. Make the entire value a single $NAME reference`,
+      error: `${label} embeds ${embedded} without being a whole-value reference; it would otherwise ship verbatim as the secret. Make the entire value a single $NAME reference`,
     };
   }
   return {
     ok: false,
-    error:
-      "a secret field carries a literal value, but settings files are committed plaintext - exactly what secret references exist to prevent. Set the field to a whole-value $NAME reference and define NAME in the step's env block",
+    error: `${label} carries a literal value, but settings files are committed plaintext - exactly what secret references exist to prevent. Set it to a whole-value $NAME reference and define NAME in the step's env block`,
   };
 }
 
@@ -104,6 +110,12 @@ export type SecretRefsResolution =
  */
 export interface SourcedSecretValue {
   readonly value: string;
+  /**
+   * Names the declared entry the value belongs to, for error messages: a
+   * secret name, an environment-plus-secret pair, a webhook url - always
+   * configuration the settings file already spells, never a value.
+   */
+  readonly label: string;
   readonly source: SettingsSource;
 }
 
@@ -125,8 +137,8 @@ export function resolveSecretRefs(
   const errors: string[] = [];
   const resolved: Record<string, string> = {};
   const mask = new Set<string>();
-  for (const { value, source } of values) {
-    const checked = validateSecretRef(value, source);
+  for (const { value, source, label } of values) {
+    const checked = validateSecretRef(value, source, label);
     if (!checked.ok) {
       errors.push(checked.error);
       continue;

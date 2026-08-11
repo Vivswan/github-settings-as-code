@@ -34,26 +34,24 @@ function listOf(...names: string[]) {
 }
 
 function ctx(api: MockApi, check: boolean, resolved?: Record<string, string>): SectionContext {
+  const repo = { owner: "o", name: "r", slug: "o/r" };
+  if (check) {
+    return { api, repo, check: true };
+  }
   return {
     api,
-    repo: "o/r",
-    owner: "o",
-    check,
-    // Faithful to the engine: the resolver exists ONLY when the run has
-    // references to resolve (apply mode with a nonempty declaration). Tests
-    // that pass no `resolved` get a resolver-less context, exactly like a
-    // check run or an apply over an empty inventory.
-    ...(resolved === undefined
-      ? {}
-      : {
-          resolveSecret: (reference: string): string => {
-            const plaintext = resolved[reference];
-            if (plaintext === undefined) {
-              throw new Error(`test resolver has no value for ${reference}`);
-            }
-            return plaintext;
-          },
-        }),
+    repo,
+    check: false,
+    // Faithful to the engine: apply mode ALWAYS carries a resolver. Tests
+    // that pass no `resolved` get the engine's stub posture - any lookup is
+    // a loud failure, exactly like an apply over an empty inventory.
+    resolveSecret: (reference: string): string => {
+      const plaintext = resolved?.[reference];
+      if (plaintext === undefined) {
+        throw new Error(`test resolver has no value for ${reference}`);
+      }
+      return plaintext;
+    },
   };
 }
 

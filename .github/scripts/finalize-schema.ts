@@ -41,22 +41,37 @@ const wrappers = Object.entries(schema.definitions ?? {}).filter(([name]) =>
 const expected = UNDECLARED_POLICY_SECTIONS.length + NESTED_POLICY_LISTS.length;
 if (wrappers.length !== expected) {
   throw new Error(
-    `finalize-schema: expected ${expected} UndeclaredPolicyList definitions (one per knobbed section plus the nested knobs), found ${wrappers.length} - the generator renamed or dropped some, update this script`,
+    `finalize-schema: expected ${expected} UndeclaredPolicyList definitions (one per knobbed section plus the nested knobs), found ${wrappers.length}: ${wrappers
+      .map(([name]) => name)
+      .sort()
+      .join(", ")} - the generator renamed or dropped some, update this script`,
   );
 }
-for (const nested of NESTED_POLICY_LISTS) {
-  if (!wrappers.some(([name]) => name === nested)) {
-    throw new Error(
-      `finalize-schema: nested wrapper "${nested}" is missing from the generated definitions - the generator renamed it, update NESTED_POLICY_LISTS`,
-    );
-  }
+const missingNested = NESTED_POLICY_LISTS.filter(
+  (nested) => !wrappers.some(([name]) => name === nested),
+);
+if (missingNested.length > 0) {
+  throw new Error(
+    `finalize-schema: nested wrapper(s) missing from the generated definitions: ${missingNested.join(", ")} (found: ${wrappers
+      .map(([name]) => name)
+      .sort()
+      .join(", ")}) - the generator renamed them, update NESTED_POLICY_LISTS`,
+  );
 }
+const malformedWrappers: string[] = [];
 for (const [name, definition] of wrappers) {
   const properties = definition.properties as Record<string, unknown> | undefined;
-  if (properties?.undeclared === undefined || properties?.entries === undefined) {
-    throw new Error(`finalize-schema: ${name} lacks the undeclared/entries properties`);
+  const missingProps = ["undeclared", "entries"].filter((prop) => properties?.[prop] === undefined);
+  if (missingProps.length > 0) {
+    malformedWrappers.push(`${name} lacks ${missingProps.join(" and ")}`);
+    continue;
   }
   definition.additionalProperties = false;
+}
+if (malformedWrappers.length > 0) {
+  throw new Error(
+    `finalize-schema: wrapper definition(s) missing their {undeclared, entries} shape: ${malformedWrappers.join("; ")} - the generator changed the UndeclaredPolicyList shape, update this script`,
+  );
 }
 
 // The flag-pairing invariant the runtime shape enforces (an environment

@@ -10,7 +10,9 @@ import { describe, expect, test } from "bun:test";
 import {
   callGraphql,
   type GraphqlOpDecl,
+  type GraphqlPaginatedReadDecl,
   grantFor,
+  graphqlOp,
   listGraphqlConnection,
   overrideAdviceLevel,
   PermissionDenied,
@@ -29,16 +31,23 @@ const section: SectionMeta = {
   undeclaredDefault: "untouched",
 };
 
-const READ_OP: GraphqlOpDecl<{ owner: string; repo: string }> = {
+const READ_OP = graphqlOp<{ owner: string; repo: string }>()({
   name: "RepoToggles",
   kind: "read",
   query:
     "query RepoToggles($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id } }",
   outcomes: { ok: "the repository's toggle states" },
-};
+});
 
 function ctx(api: MockApi): SectionContext {
-  return { api, repo: "o/r", owner: "o", check: false };
+  return {
+    api,
+    repo: { owner: "o", name: "r", slug: "o/r" },
+    check: false,
+    resolveSecret: (reference: string): string => {
+      throw new Error(`test resolver has no value for ${reference}`);
+    },
+  };
 }
 
 describe("callGraphql", () => {
@@ -129,10 +138,13 @@ describe("callGraphql", () => {
 });
 
 describe("tryCallGraphql tolerance", () => {
-  const tolerantOp: GraphqlOpDecl = {
-    ...READ_OP,
+  const tolerantOp = graphqlOp<{ owner: string; repo: string }>()({
+    name: "RepoToggles",
+    kind: "read",
+    query:
+      "query RepoToggles($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id } }",
     outcomes: { ok: "the toggles", NOT_FOUND: "the feature is not enabled" },
-  };
+  });
 
   test("a declared observed type comes back as { error }", async () => {
     const api = new MockApi({
@@ -194,19 +206,21 @@ describe("tryCallGraphql tolerance", () => {
     ).rejects.toThrow(PermissionDenied);
   });
 
-  test("an explicit tolerate naming an undeclared outcome is a BUG throw", async () => {
-    // keyof-a-Partial cannot pin the declared subset at the type level, so
-    // the runtime assert is what stops tolerate from broadening.
+  test("an explicit tolerate naming an undeclared outcome does not compile", () => {
+    // graphqlOp preserves the literal `outcomes` keys, so the declared
+    // subset is pinned at the type level (the REST `as const satisfies`
+    // symmetry) - broadening tolerate is a compile error, not a runtime BUG.
     const api = new MockApi({});
-    await expect(
+    const smuggle = () =>
       tryCallGraphql(
         ctx(api),
         section,
         tolerantOp,
         { owner: "o", repo: "r" },
+        // @ts-expect-error - UNPROCESSABLE is not a declared outcome of this op
         { tolerate: ["UNPROCESSABLE"] },
-      ),
-    ).rejects.toThrow(/BUG: tryCallGraphql for RepoToggles was told to tolerate \[UNPROCESSABLE\]/);
+      );
+    void smuggle;
     expect(api.calls).toHaveLength(0);
   });
 
@@ -300,7 +314,7 @@ describe("declaration readers", () => {
 });
 
 describe("listGraphqlConnection", () => {
-  const pagedOp: GraphqlOpDecl & { connection: { path: readonly [string, ...string[]] } } = {
+  const pagedOp: GraphqlPaginatedReadDecl = {
     name: "RepoRules",
     kind: "read",
     query:
@@ -393,23 +407,25 @@ describe("listGraphqlConnection", () => {
     ).rejects.toThrow(PermissionDenied);
   });
 
-  test("a query without $cursor is a BUG throw", async () => {
-    const api = pagedApi([page([], null, false)]);
-    const cursorless = { ...READ_OP, connection: { path: ["repository"] as const } };
-    await expect(
-      listGraphqlConnection(ctx(api), section, cursorless, { owner: "o", repo: "r" }),
-    ).rejects.toThrow(/BUG: GRAPHQL RepoToggles .* no \$cursor/);
+  test("a query without $cursor does not compile as a paginated read", () => {
+    // The cursor contract moved from listGraphqlConnection's runtime BUG
+    // throw into GraphqlPaginatedReadDecl's query template type.
+    // @ts-expect-error - the paginated arm's query type requires $cursor
+    const cursorless: GraphqlPaginatedReadDecl = {
+      ...READ_OP,
+      connection: { path: ["repository"] as const },
+    };
+    void cursorless;
   });
 
-  test("a caller-supplied cursor variable is a BUG throw (the loop owns it)", async () => {
+  test("a caller-supplied cursor variable does not compile (the loop owns it)", async () => {
     const api = pagedApi([page([], null, false)]);
-    await expect(
-      listGraphqlConnection(ctx(api), section, pagedOp, {
-        owner: "o",
-        repo: "r",
-        cursor: "SMUGGLED",
-      } as never),
-    ).rejects.toThrow(/BUG: GRAPHQL RepoRules was given a "cursor" variable/);
+    await listGraphqlConnection(ctx(api), section, pagedOp, {
+      owner: "o",
+      repo: "r",
+      // @ts-expect-error - the connection loop owns the cursor variable
+      cursor: "SMUGGLED",
+    });
   });
 
   test("a response without the connection shape fails loudly", async () => {

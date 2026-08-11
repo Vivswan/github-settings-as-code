@@ -16,6 +16,7 @@
  * if any target failed.
  */
 
+import type { RepoRef } from "../discovery/targets.js";
 import {
   runForRepo,
   skippedSectionKeys,
@@ -51,21 +52,21 @@ import { writeMultiSummary, writeRedactedSummary, writeSummary } from "./summary
  */
 async function resolveSingleRepoRedaction(
   api: GithubClient,
-  cfg: { privateRepos: string; repo: string; selfSlug: string },
+  cfg: { privateRepos: string; repo: RepoRef; selfSlug: string },
   io: { mask(value: string): void },
 ): Promise<{ redacted: boolean; deliverable: boolean }> {
   if (cfg.privateRepos !== "redact") {
     return { redacted: false, deliverable: false };
   }
-  if (cfg.repo.toLowerCase() === cfg.selfSlug.toLowerCase()) {
+  if (cfg.repo.slug.toLowerCase() === cfg.selfSlug.toLowerCase()) {
     return { redacted: false, deliverable: false };
   }
-  const visibility = await createVisibilityResolver(api)(cfg.repo);
+  const visibility = await createVisibilityResolver(api)(cfg.repo.slug);
   if (visibility === "public") {
     return { redacted: false, deliverable: false };
   }
-  io.mask(cfg.repo);
-  registerRedactedSlug(cfg.repo);
+  io.mask(cfg.repo.slug);
+  registerRedactedSlug(cfg.repo.slug);
   return { redacted: true, deliverable: isPrivateVisibility(visibility) };
 }
 
@@ -179,7 +180,7 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
     if (cfg.privateReport === "artifact") {
       const { body } = composeTargetReport(
         meta,
-        cfg.repo,
+        cfg.repo.slug,
         result.result,
         result.outcomes,
         capture.drain(),
@@ -193,7 +194,7 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
       await deliverReport(
         api,
         meta,
-        cfg.repo,
+        cfg.repo.slug,
         "private repository",
         result.result,
         result.outcomes,
@@ -204,10 +205,11 @@ export async function run(overrides?: { api?: GithubClient }): Promise<number> {
       );
     }
   } else if (redacted && cfg.privateReport !== "none" && !deliverable) {
-    // Redacted but not proven private: the report is withheld, said once, safely.
+    // Redacted but not proven private: the report is withheld, said once,
+    // safely (the cause and fix are slug-free; the placeholder stays).
     annotate(
       "notice",
-      "private repository: visibility could not be verified; the private report was not delivered",
+      "private repository: visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the target repository), so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified",
     );
   }
 

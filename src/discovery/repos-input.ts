@@ -18,20 +18,38 @@ export function parseReposInput(
     }
     return { slugs: [], discover: true };
   }
+  // Malformed and repeated entries are collected across the whole list and
+  // reported once, so N bad entries cost one run to discover, not N. Both
+  // pools are Sets: a bad entry pasted twice is one offender, not two.
   const seen = new Set<string>();
+  const invalid = new Set<string>();
+  const duplicated = new Set<string>();
   for (const item of items) {
     if (!SLUG_RE.test(item)) {
-      return {
-        error: `the "repos" input entry "${item}" is not an owner/name slug. Fix it to a value like "octocat/hello-world" (comma- or newline-separated), or use "*" alone to discover repositories`,
-      };
+      invalid.add(item);
+      continue;
     }
     const key = item.toLowerCase();
     if (seen.has(key)) {
-      return {
-        error: `the "repos" input lists ${item} more than once. Keep exactly one entry per repository`,
-      };
+      duplicated.add(item);
     }
     seen.add(key);
+  }
+  if (invalid.size > 0 || duplicated.size > 0) {
+    const parts: string[] = [];
+    if (invalid.size > 0) {
+      parts.push(
+        `${[...invalid].map((item) => `"${item}"`).join(", ")} ${invalid.size === 1 ? "is not an owner/name slug" : "are not owner/name slugs"} (use values like "octocat/hello-world", comma- or newline-separated)`,
+      );
+    }
+    if (duplicated.size > 0) {
+      parts.push(
+        `${[...duplicated].map((item) => `"${item}"`).join(", ")} ${duplicated.size === 1 ? "is" : "are"} listed more than once (keep exactly one entry per repository)`,
+      );
+    }
+    return {
+      error: `the "repos" input has ${invalid.size + duplicated.size} invalid entr${invalid.size + duplicated.size === 1 ? "y" : "ies"}: ${parts.join("; ")}. Or use "*" alone to discover repositories`,
+    };
   }
   return { slugs: items, discover: false };
 }

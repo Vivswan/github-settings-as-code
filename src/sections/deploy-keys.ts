@@ -107,13 +107,13 @@ function extractLive(raw: unknown[]): { live: LiveDeployKey[]; materialById: Map
       typeof entry.key !== "string"
     ) {
       throw new Error(
-        `deploy_keys: GET /repos/{owner}/{repo}/keys returned an entry without a numeric id, a string title, and a string key (${JSON.stringify(item)}); the response does not match the documented deploy key shape`,
+        `deploy_keys: GET /repos/{owner}/{repo}/keys returned an entry without a numeric id, a string title, and a string key (${JSON.stringify(item)}); the response does not match the documented deploy key shape - check the "api-version" input against the GitHub REST docs for this endpoint`,
       );
     }
     const material = normalizeKeyMaterial(entry.key);
     if (material === null) {
       throw new Error(
-        `deploy_keys: GET /repos/{owner}/{repo}/keys returned key id ${entry.id} ("${entry.title}") whose material has fewer than two whitespace-separated fields (${JSON.stringify(entry.key)}); the response does not match the documented deploy key shape`,
+        `deploy_keys: GET /repos/{owner}/{repo}/keys returned key id ${entry.id} ("${entry.title}") whose material has fewer than two whitespace-separated fields (${JSON.stringify(entry.key)}); the response does not match the documented deploy key shape - check the "api-version" input against the GitHub REST docs for this endpoint`,
       );
     }
     live.push(entry as LiveDeployKey);
@@ -169,18 +169,21 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
 
     // Ambiguity and upstream key conflicts are rejected BEFORE any write
     // (the webhooks precedent): a hard error mid-loop would leave earlier
-    // declared keys already written.
+    // declared keys already written. Every conflict is collected before the
+    // one throw - each fix is manual GitHub cleanup, so N conflicts must
+    // cost one run to discover, not N.
+    const conflicts: string[] = [];
     for (const { entry, material } of parsed) {
       const matches = live.filter((candidate) => candidate.title === entry.title);
       if (matches.length > 1) {
         // GitHub does not enforce title uniqueness, and replacing one of N
         // same-titled keys is a guess either way.
-        throw new Error(
-          `deploy_keys: the declared title "${entry.title}" matches ${matches.length} live deploy keys (ids ${matches
+        conflicts.push(
+          `the declared title "${entry.title}" matches ${matches.length} live deploy keys (ids ${matches
             .map((candidate) => candidate.id)
             .join(
               ", ",
-            )}), and this section manages at most one key per title. Delete the duplicates on GitHub so exactly one remains, then re-run`,
+            )}), and this section manages at most one key per title - delete the duplicates on GitHub so exactly one remains`,
         );
       }
       // A live key holding the declared material under ANOTHER title would
@@ -194,10 +197,15 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
           candidate.title !== entry.title && materialById.get(candidate.id) === material,
       );
       if (holder) {
-        throw new Error(
-          `deploy_keys: the entry "${entry.title}" declares key material that live key "${holder.title}" (id ${holder.id}) already holds, and GitHub attaches a public key to one repository once, so writing it would be rejected. Delete or rename the live key on GitHub, or declare the entry under its live title "${holder.title}"`,
+        conflicts.push(
+          `the entry "${entry.title}" declares key material that live key "${holder.title}" (id ${holder.id}) already holds, and GitHub attaches a public key to one repository once, so writing it would be rejected - delete or rename the live key on GitHub, or declare the entry under its live title "${holder.title}"`,
         );
       }
+    }
+    if (conflicts.length > 0) {
+      throw new Error(
+        `deploy_keys: ${conflicts.length} declared entr${conflicts.length === 1 ? "y conflicts" : "ies conflict"} with live keys: ${conflicts.join("; ")}. Resolve each conflict on GitHub, then re-run`,
+      );
     }
 
     const declared = new Set(desired.map((entry) => entry.title));

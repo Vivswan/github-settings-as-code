@@ -199,6 +199,6 @@ describe("custom_properties", () => {
     const api = new MockApi(orgRoutes([{ value: "x" } as never]));
     await expect(
       customPropertiesSection.run(ctx(api, true), [{ property_name: "team", value: "x" }]),
-    ).rejects.toThrow(/violates the documented contract/);
+    ).rejects.toThrow(/returned an entry without a string property_name/);
   });
 });

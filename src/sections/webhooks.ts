@@ -24,13 +24,14 @@ import { z } from "zod";
 import { subsetDiff } from "../engine/diff.js";
 import type { UndeclaredPolicyList, WebhookConfig } from "../schema.js";
 import {
+  type ApplySectionContext,
   call,
+  type DeclaredSecretValue,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   listAll,
   rejectDuplicates,
-  type SectionContext,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
@@ -96,30 +97,28 @@ function eventsMatch(declared: readonly string[], live: readonly string[]): bool
 
 /**
  * The declared config with the secret reference swapped for its resolved
- * plaintext. The engine resolved every reference up front and masked the
- * plaintexts, so the lookup cannot miss; a missing resolver is an engine
- * sequencing bug and throws loudly.
+ * plaintext. Takes the APPLY arm of SectionContext (call sites sit in
+ * apply-narrowed branches), whose resolver exists by construction: the
+ * engine resolved every reference up front and masked the plaintexts, so
+ * the lookup cannot miss.
  */
-function resolvedConfig(ctx: SectionContext, hook: WebhookConfig): Record<string, unknown> {
+function resolvedConfig(ctx: ApplySectionContext, hook: WebhookConfig): Record<string, unknown> {
   if (hook.config.secret === undefined) {
     return { ...hook.config };
-  }
-  if (ctx.resolveSecret === undefined) {
-    throw new Error(
-      "BUG: webhooks reached a write with no secret resolver on the context; the engine must resolve secret references before any section runs",
-    );
   }
   return { ...hook.config, secret: ctx.resolveSecret(hook.config.secret) };
 }
 
 /**
  * The declared value of every entry's config.secret, for the engine's
- * up-front resolution. DEFENSIVE by contract: a malformed container
+ * up-front resolution, each labelled with its hook's url (configuration
+ * that appears in drift lines on purpose - never a secret). DEFENSIVE by
+ * contract: a malformed container
  * (webhooks: null, a scalar, entries that are not mappings) returns []
  * instead of throwing, so the actionable error always comes from shape
  * validation, never a TypeError from here.
  */
-function secretValues(declared: unknown): string[] {
+function secretValues(declared: unknown): DeclaredSecretValue[] {
   const container = declared as WebhookConfig[] | UndeclaredPolicyList<WebhookConfig>;
   const isWrapper =
     typeof container === "object" &&
@@ -130,11 +129,18 @@ function secretValues(declared: unknown): string[] {
     return [];
   }
   const { entries } = undeclaredPolicy(container, "keep");
-  return entries
-    .map((entry) =>
-      typeof entry === "object" && entry !== null ? entry.config?.secret : undefined,
-    )
-    .filter((value): value is string => typeof value === "string");
+  return entries.flatMap((entry) => {
+    const value = typeof entry === "object" && entry !== null ? entry.config?.secret : undefined;
+    if (typeof value !== "string") {
+      return [];
+    }
+    const url = entry.config?.url;
+    const label =
+      typeof url === "string" && url !== ""
+        ? `the webhook "${url}" config.secret`
+        : "a webhook entry's config.secret";
+    return [{ label, value }];
+  });
 }
 
 /** How an undeclared live hook is named in notes and drift (its url, or its id). */
@@ -193,21 +199,27 @@ export const webhooksSection: SectionModule<"webhooks"> = {
 
     // Ambiguity is rejected BEFORE any write: a hard error mid-loop would
     // leave earlier declared hooks already written (the rejectDuplicates
-    // precedent - reject first, mutate after).
+    // precedent - reject first, mutate after). Every ambiguous url is
+    // collected before the one throw: each fix is manual GitHub cleanup, so
+    // N ambiguities must cost one run to discover, not N.
+    const ambiguous: string[] = [];
     for (const hook of desired) {
       const matches = live.filter((candidate) => candidate.config?.url === hook.config.url);
       if (matches.length > 1) {
         // No silent collapse: updating one of N same-url hooks (or all of
         // them) is a guess either way, so the user resolves the duplication
         // by hand once and the section converges from then on.
-        throw new Error(
-          `webhooks: the declared url "${hook.config.url}" matches ${matches.length} live hooks (ids ${matches
+        ambiguous.push(
+          `"${hook.config.url}" matches ${matches.length} live hooks (ids ${matches
             .map((candidate) => candidate.id)
-            .join(
-              ", ",
-            )}), and this section manages at most one hook per config.url. Delete the duplicates on GitHub so exactly one remains, then re-run`,
+            .join(", ")})`,
         );
       }
+    }
+    if (ambiguous.length > 0) {
+      throw new Error(
+        `webhooks: ${ambiguous.length} declared url(s) each match more than one live hook, and this section manages at most one hook per config.url: ${ambiguous.join("; ")}. Delete the duplicates on GitHub so exactly one remains per url, then re-run`,
+      );
     }
 
     for (const hook of desired) {

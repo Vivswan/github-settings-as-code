@@ -29,11 +29,18 @@ export function validateSectionShapes(
     }
     const parsed = sectionShape(key).safeParse(declared);
     if (!parsed.success) {
-      for (const issue of parsed.error.issues.slice(0, 5)) {
+      const issues = parsed.error.issues;
+      for (const issue of issues.slice(0, 5)) {
         const path = issue.path
           .map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`))
           .join("");
         problems.push(`${key}${path}: ${issue.message}`);
+      }
+      if (issues.length > 5) {
+        // The cap keeps the message readable, but a silently truncated list
+        // would cost one fix-and-rerun cycle per hidden offender - say how
+        // many more there are.
+        problems.push(`${key}: ...and ${issues.length - 5} more issue(s) in this section`);
       }
       continue;
     }
@@ -81,9 +88,6 @@ function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unk
   const known = new Set<string>(closed.known);
   const problems: string[] = [];
   for (const entry of entries) {
-    if (problems.length >= 5) {
-      break;
-    }
     if (typeof entry !== "object" || entry === null) {
       continue;
     }
@@ -95,6 +99,14 @@ function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unk
         `${key}[${closed.describe(record)}]: declares ${list}, which this section does not recognize (known keys: ${closed.known.join(", ")}) - ${closed.consequence}. Fix the key name, or remove it`,
       );
     }
+  }
+  if (problems.length > 5) {
+    // Same cap-with-a-count posture as the shape issues above: readable, but
+    // never silently incomplete.
+    return [
+      ...problems.slice(0, 5),
+      `${key}: ...and ${problems.length - 5} more entr${problems.length - 5 === 1 ? "y" : "ies"} with unrecognized keys in this section`,
+    ];
   }
   return problems;
 }

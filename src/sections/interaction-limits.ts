@@ -141,7 +141,7 @@ async function liveBypassLogins(ctx: SectionContext, section: SectionMeta): Prom
   const live = await call(ctx, section, ENDPOINTS.bypassList);
   if (!Array.isArray(live)) {
     throw new Error(
-      `${section.key}: GET ${expand(ENDPOINTS.bypassList, ctx)} returned a JSON value without a list. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+      `${section.key}: GET ${expand(ENDPOINTS.bypassList, ctx)} was expected to return a list of users but returned ${(JSON.stringify(live) ?? String(live)).slice(0, 200)}. Check the "api-version" input against the GitHub REST docs for this endpoint`,
     );
   }
   return live.map((user) => String((user as Record<string, unknown>).login));

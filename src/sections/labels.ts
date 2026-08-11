@@ -73,21 +73,31 @@ export const labelsSection: SectionModule<"labels"> = {
     );
     // Duplicate detection covers both identities of every entry: its name
     // and its rename target. Two entries resolving to the same label would
-    // fight each other on every run (or fail mid-rename).
+    // fight each other on every run (or fail mid-rename). Every collision is
+    // collected before the one throw, so N duplicate pairs cost one run to
+    // discover, not N.
     const claimed = new Map<string, string>();
+    const collisions: Array<{ first: string; second: string; key: string }> = [];
     for (const label of desired) {
       const identities = new Set([nameKey(label.name), nameKey(label.new_name ?? label.name)]);
       for (const key of identities) {
         const first = claimed.get(key);
         if (first !== undefined) {
-          throw new Error(
-            `labels: the entries for "${first}" and "${label.name}" both resolve to the label "${key}" (via name or new_name), so they cannot converge. Keep exactly one entry per label`,
-          );
+          collisions.push({ first, second: label.name, key });
         }
       }
       for (const key of identities) {
-        claimed.set(key, label.name);
+        if (!claimed.has(key)) {
+          claimed.set(key, label.name);
+        }
       }
+    }
+    if (collisions.length > 0) {
+      throw new Error(
+        `labels: ${collisions.length} pair(s) of entries resolve to the same label (via name or new_name), so they cannot converge: ${collisions
+          .map((c) => `"${c.first}" and "${c.second}" -> "${c.key}"`)
+          .join("; ")}. Keep exactly one entry per label`,
+      );
     }
     const live = (await listAll(ctx, this, ENDPOINTS.list)) as LiveLabel[];
     const liveByKey = new Map<string, LiveLabel>();

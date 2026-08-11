@@ -10,6 +10,7 @@ import {
   endpointPermission,
   expand,
   type GraphqlOpDecl,
+  type GraphqlPaginatedReadDecl,
   grantFor,
   matchesTemplate,
   probeAbsent,
@@ -682,17 +683,20 @@ describe("allGraphqlOps", () => {
     ).toThrow(/declares both a REST endpoint and a GraphQL operation under the role "get"/);
   });
 
-  test("a declared connection whose query takes no $cursor fails at construction", () => {
-    const paginated: GraphqlOpDecl & { kind: "read" } = {
+  test("a declared connection whose query takes no $cursor does not compile", () => {
+    // The cursor contract moved from a construction assert into the type:
+    // GraphqlPaginatedReadDecl's query template requires the $cursor variable
+    // listGraphqlConnection's loop feeds.
+    // @ts-expect-error - a connection op without $cursor in its query
+    const paginated: GraphqlPaginatedReadDecl = {
       ...op("RepoRules"),
       connection: { path: ["repository", "rules"] },
     };
-    expect(() => allGraphqlOps([graphqlSection("repository", { rules: paginated })])).toThrow(
-      /declares a connection but its query takes no \$cursor/,
-    );
-    const cursored: GraphqlOpDecl & { kind: "read" } = {
-      ...paginated,
+    void paginated;
+    const cursored: GraphqlPaginatedReadDecl = {
+      ...op("RepoRules"),
       query: "query RepoRules($cursor: String) { viewer { login } }",
+      connection: { path: ["repository", "rules"] },
     };
     expect(() => allGraphqlOps([graphqlSection("repository", { rules: cursored })])).not.toThrow();
   });
@@ -785,9 +789,8 @@ describe("matchesTemplate", () => {
     // Construction parity: each route template matches the path it expands to.
     const ctx: SectionContext = {
       api: { tryRequest: async () => ({ data: null }), tryGraphql: async () => ({ data: {} }) },
-      repo: "octo/repo",
-      owner: "octo",
-      check: false,
+      repo: { owner: "octo", name: "repo", slug: "octo/repo" },
+      check: true,
     };
     for (const endpoint of Object.values(allEndpoints())) {
       const tokens = [...endpointPath(endpoint.route).matchAll(/{([a-z_]+)}/g)]
@@ -803,9 +806,8 @@ describe("matchesTemplate", () => {
 describe("expand", () => {
   const ctx = (): SectionContext => ({
     api: { tryRequest: async () => ({ data: null }), tryGraphql: async () => ({ data: {} }) },
-    repo: "octo/repo",
-    owner: "octo",
-    check: false,
+    repo: { owner: "octo", name: "repo", slug: "octo/repo" },
+    check: true,
   });
 
   test("{owner} and {repo} fill from ctx (repo is the name half)", () => {
@@ -865,8 +867,7 @@ describe("probeAbsent tolerance derivation", () => {
       tryRequest: async () => ({ error: { status, message: "nope", body: "" } }),
       tryGraphql: async () => ({ error: { status, message: "nope", body: "" } }),
     },
-    repo: "octo/repo",
-    owner: "octo",
+    repo: { owner: "octo", name: "repo", slug: "octo/repo" },
     check: true,
   });
 

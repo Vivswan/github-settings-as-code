@@ -26,7 +26,6 @@ import {
 } from "./contract.js";
 import {
   listSecretValues,
-  prepareSecretValues,
   reconcileSecrets,
   rejectDuplicateSecretNames,
   type SecretsScope,
@@ -101,9 +100,7 @@ export const dependabotSecretsSection: SectionModule<"dependabot_secrets"> = {
     rejectDuplicateSecretNames(this, entries);
     // The engine validated every $NAME reference in both modes and, in
     // apply mode, resolved and masked the plaintexts before any section
-    // ran; this adapts ctx.resolveSecret into the per-entry lookup the
-    // sealed-write path takes.
-    const resolvedValueOf = prepareSecretValues(ctx, this, entries);
-    return reconcileSecrets(ctx, this, SCOPE, { entries, policy, resolvedValueOf });
+    // ran; the sealed-write path reads them through ctx.resolveSecret.
+    return reconcileSecrets(ctx, this, SCOPE, { entries, policy });
   },
 };

@@ -33,7 +33,7 @@ function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: s
 
 function opts(overrides: Partial<Parameters<typeof runForRepo>[1]> = {}) {
   return {
-    repo: "o/r",
+    repo: { owner: "o", name: "r", slug: "o/r" },
     settings: { repository: { has_wiki: false } } as SettingsFile,
     mode: "apply" as const,
     onMissingPermission: "fail" as const,
@@ -291,9 +291,9 @@ describe("readOnlyClient", () => {
         return { changes: [], drift: [], notes: [] };
       },
     } as unknown as (typeof SECTIONS)[number];
-    const ctx = { api, repo: "o/r", owner: "o", check: false };
+    const repoRef = { owner: "o", name: "r", slug: "o/r" };
     await expect(
-      preflightProbe(api, ctx, [buggySection], { repository: {} } as SettingsFile),
+      preflightProbe(api, repoRef, [buggySection], { repository: {} } as SettingsFile),
     ).rejects.toThrow(/preflight: repository: PATCH \/repos\/o\/r was attempted in check mode/);
     // An ordinary probe error is still swallowed (the apply pass surfaces it).
     const throwingSection = {
@@ -303,7 +303,7 @@ describe("readOnlyClient", () => {
       },
     } as unknown as (typeof SECTIONS)[number];
     await expect(
-      preflightProbe(api, ctx, [throwingSection], { repository: {} } as SettingsFile),
+      preflightProbe(api, repoRef, [throwingSection], { repository: {} } as SettingsFile),
     ).resolves.toEqual([]);
   });
 

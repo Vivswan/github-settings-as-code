@@ -269,10 +269,54 @@ function isPlainJsonContainer(value: unknown): boolean {
  * rules.
  * Note YAML can step OUTSIDE plain data through explicit tags
  * (!!timestamp parses to a Date, !!binary to a Uint8Array); those throw
- * here and abort the request with a message naming the tags, which beats
- * the garbage their old stringification produced.
+ * here and abort the request with a message naming the offending field's
+ * key path and value class, which beats the garbage their old
+ * stringification produced.
  */
-function normalizePlainData(value: unknown): unknown {
+/**
+ * The typed rejection normalizePlainData raises, carrying WHERE (the key
+ * path, field names only - never a value) and WHAT (the value class) so the
+ * abort message can name the offending field. redactSecretPayloadSafe
+ * rethrows only THIS class's information through its fail-closed catch;
+ * anything else a hostile object throws stays swallowed so no foreign
+ * message can leak.
+ */
+class NotPlainDataError extends Error {
+  constructor(
+    readonly path: readonly string[],
+    readonly kind: string,
+  ) {
+    super("not plain JSON data");
+  }
+}
+
+/** Render a normalizePlainData key path ("config.starts_at", "contexts[2]"). */
+function renderKeyPath(path: readonly string[]): string {
+  return path
+    .map((segment, index) =>
+      /^\d+$/.test(segment) ? `[${segment}]` : index === 0 ? segment : `.${segment}`,
+    )
+    .join("");
+}
+
+/** The value class of a non-plain value, without running any of its code. */
+function nonPlainKind(value: unknown): string {
+  if (typeof value !== "object" || value === null) {
+    return `a ${typeof value}`;
+  }
+  // Prototype comparison only - the same reflective read
+  // isPlainJsonContainer already performs; no payload method is dispatched.
+  const proto = Object.getPrototypeOf(value);
+  if (proto === Date.prototype) {
+    return "a Date, e.g. from a YAML !!timestamp tag";
+  }
+  if (proto === Uint8Array.prototype) {
+    return "binary data, e.g. from a YAML !!binary tag";
+  }
+  return "a non-plain object";
+}
+
+function normalizePlainData(value: unknown, path: string[] = []): unknown {
   if (value === null) {
     return null;
   }
@@ -285,10 +329,10 @@ function normalizePlainData(value: unknown): unknown {
     case "object":
       break;
     default:
-      throw new Error("not plain JSON data");
+      throw new NotPlainDataError(path, nonPlainKind(value));
   }
   if (!isPlainJsonContainer(value)) {
-    throw new Error("not plain JSON data");
+    throw new NotPlainDataError(path, nonPlainKind(value));
   }
   const descriptors = Object.getOwnPropertyDescriptors(value);
   if (Array.isArray(value)) {
@@ -303,10 +347,10 @@ function normalizePlainData(value: unknown): unknown {
         continue;
       }
       if (!("value" in descriptor)) {
-        throw new Error("not plain JSON data");
+        throw new NotPlainDataError([...path, String(index)], "an accessor property");
       }
       const item: unknown = descriptor.value;
-      items.push(item === undefined ? null : normalizePlainData(item));
+      items.push(item === undefined ? null : normalizePlainData(item, [...path, String(index)]));
     }
     return items;
   }
@@ -317,13 +361,13 @@ function normalizePlainData(value: unknown): unknown {
       continue;
     }
     if (!("value" in descriptor)) {
-      throw new Error("not plain JSON data");
+      throw new NotPlainDataError([...path, key], "an accessor property");
     }
     const item: unknown = descriptor.value;
     if (item === undefined) {
       continue;
     }
-    out[key] = normalizePlainData(item);
+    out[key] = normalizePlainData(item, [...path, key]);
   }
   return out;
 }
@@ -349,7 +393,9 @@ function normalizePlainData(value: unknown): unknown {
  */
 function redactSecretPayloadSafe(
   payload: unknown,
-): { ok: true; payload: unknown; traced: unknown; carriesSecret: boolean } | { ok: false } {
+):
+  | { ok: true; payload: unknown; traced: unknown; carriesSecret: boolean }
+  | { ok: false; reason?: string } {
   if (payload === undefined) {
     return { ok: true, payload: undefined, traced: undefined, carriesSecret: false };
   }
@@ -372,14 +418,28 @@ function redactSecretPayloadSafe(
         : { ok: false };
     }
     if (!isPlainJsonContainer(payload)) {
-      return { ok: false };
+      return {
+        ok: false,
+        reason: describeNotPlain(new NotPlainDataError([], nonPlainKind(payload))),
+      };
     }
     const normalized: unknown = normalizePlainData(payload);
     const scanned = redactSecretPayload(normalized);
     return { ok: true, payload: normalized, ...scanned };
-  } catch {
-    return { ok: false };
+  } catch (error) {
+    // Only our own typed rejection may contribute prose: it carries key
+    // PATHS (field names) and a value-class word, never a value - anything
+    // a hostile object threw is discarded wholesale.
+    return error instanceof NotPlainDataError
+      ? { ok: false, reason: describeNotPlain(error) }
+      : { ok: false };
   }
+}
+
+/** The abort-message clause for a non-plain payload, naming field and class. */
+function describeNotPlain(error: NotPlainDataError): string {
+  const where = error.path.length > 0 ? `the value at "${renderKeyPath(error.path)}"` : "the value";
+  return `${where} is not plain JSON data (${error.kind})`;
 }
 
 /** Request-payload field names whose values are secrets wherever they appear. */
@@ -724,8 +784,11 @@ export class GithubApi implements GithubClient {
     // show the scan one thing and the wire another.
     const secretScan = redactSecretPayloadSafe(payload);
     if (!secretScan.ok) {
+      const reason =
+        secretScan.reason ??
+        "its payload is not plain JSON data (a cyclic value, or a value carrying a function or exotic prototype)";
       throw new Error(
-        `${method} ${path} was not sent: its payload could not be safely inspected for secret fields - it is not plain JSON data (a cyclic value, or a YAML explicit tag such as !!timestamp or !!binary, which parse to Date and binary objects). Use a plain string in the settings file instead`,
+        `${method} ${path} was not sent: ${reason}, so it could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
       );
     }
     const trace = (status: number): void => {
@@ -809,8 +872,11 @@ export class GithubApi implements GithubClient {
     // from error bodies exactly like a REST payload field.
     const scan = redactSecretPayloadSafe(variables);
     if (!scan.ok) {
+      const reason =
+        scan.reason ??
+        "its variables are not plain JSON data (a cyclic value, or a value carrying a function or exotic prototype)";
       throw new Error(
-        `GRAPHQL ${op.name} was not sent: its variables could not be safely inspected for secret fields - they are not plain JSON data (a cyclic value, or a YAML explicit tag such as !!timestamp or !!binary, which parse to Date and binary objects). Use a plain string in the settings file instead`,
+        `GRAPHQL ${op.name} was not sent: ${reason}, so they could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
       );
     }
     const redacted = redactedSlugs.has(slug.toLowerCase());
@@ -990,7 +1056,15 @@ function apiErrorFromGraphqlErrors(errors: unknown[], carriesSecret: boolean): A
   }
   return {
     status,
-    message: messages.join("; ") || "GraphQL request failed",
+    // GitHub's GraphQL contract makes `message` required on every errors[]
+    // entry, so the fallback fires only on off-contract responses - name the
+    // structural types (safe enums, never echoes) so the reader is not left
+    // with a bare status.
+    message:
+      messages.join("; ") ||
+      (types.size > 0
+        ? `GraphQL request failed with no error message (error types: ${[...types].sort().join(", ")})`
+        : "GraphQL request failed with no error message or error type in the errors[] response"),
     body: JSON.stringify(errors),
     ...(rateLimited ? { rateLimited: true } : {}),
     ...graphqlTypes,

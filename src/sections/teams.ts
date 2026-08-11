@@ -66,10 +66,12 @@ export const teamsSection: SectionModule<"teams"> = {
     // Teams only exist on organization repos; on a personal account the org
     // endpoints 404. Probe once and no-op with a note instead of failing;
     // 403/5xx still flow through the permission policy via probeAbsent.
-    const orgProbe = await probeAbsent(ctx, this, ENDPOINTS.org, { params: { org: ctx.owner } });
+    const orgProbe = await probeAbsent(ctx, this, ENDPOINTS.org, {
+      params: { org: ctx.repo.owner },
+    });
     if ("missing" in orgProbe) {
       result.notes.push(
-        `teams: owner "${ctx.owner}" is a personal account, not an organization, so team access does not apply; section skipped - remove the teams section from the settings file to silence this note`,
+        `teams: owner "${ctx.repo.owner}" is a personal account, not an organization, so team access does not apply; section skipped - remove the teams section from the settings file to silence this note`,
       );
       return result;
     }
@@ -77,7 +79,7 @@ export const teamsSection: SectionModule<"teams"> = {
       const role = team.permission ?? DEFAULT_ROLE;
       if (!ctx.check) {
         await call(ctx, this, ENDPOINTS.grant, {
-          params: { org: ctx.owner, team_slug: team.name },
+          params: { org: ctx.repo.owner, team_slug: team.name },
           payload: { permission: role },
           describe: `granting team "${team.name}" access`,
         });
@@ -87,12 +89,12 @@ export const teamsSection: SectionModule<"teams"> = {
       // The repository media type makes this endpoint return the repo
       // object (with role_name) instead of 204.
       const probe = await probeAbsent(ctx, this, ENDPOINTS.probe, {
-        params: { org: ctx.owner, team_slug: team.name },
+        params: { org: ctx.repo.owner, team_slug: team.name },
         accept: "application/vnd.github.v3.repository+json",
       });
       if ("missing" in probe) {
         result.drift.push(
-          `teams[${team.name}]: no access to ${ctx.repo}; apply will grant "${role}"`,
+          `teams[${team.name}]: no access to ${ctx.repo.slug}; apply will grant "${role}"`,
         );
         continue;
       }

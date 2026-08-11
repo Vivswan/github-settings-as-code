@@ -13,6 +13,7 @@ import {
   type EndpointDecl,
   emptyResult,
   type GraphqlOpDecl,
+  graphqlOp,
   probeAbsent,
   repoVariables,
   type SectionContext,
@@ -295,7 +296,7 @@ const GRAPHQL_ROUTED_KEYS = [
   },
 ] as const satisfies readonly RoutedKey[];
 
-const FEATURES_QUERY: GraphqlOpDecl<{ owner: string; repo: string }> = {
+const FEATURES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   name: "RepositoryFeatures",
   kind: "read",
   query:
@@ -303,22 +304,22 @@ const FEATURES_QUERY: GraphqlOpDecl<{ owner: string; repo: string }> = {
   outcomes: {
     ok: "the sponsor-button and issue-creation-policy state, plus the node id the mutation addresses",
   },
-};
+});
 
 // The GraphQL absent-variable rule makes one mutation serve any declared
 // subset: an input field fed by an unprovided variable is treated as not
 // provided, so the input carries exactly the keys apply needs to move.
-const UPDATE_FEATURES: GraphqlOpDecl<{
+const UPDATE_FEATURES = graphqlOp<{
   repositoryId: string;
   hasSponsorshipsEnabled?: boolean;
   issueCreationPolicy?: (typeof ISSUE_CREATION_POLICIES)[IssueCreationPolicy];
-}> = {
+}>()({
   name: "UpdateRepositoryFeatures",
   kind: "write",
   query:
     "mutation UpdateRepositoryFeatures($repositoryId: ID!, $hasSponsorshipsEnabled: Boolean, $issueCreationPolicy: IssueCreationPolicy) { updateRepository(input: {repositoryId: $repositoryId, hasSponsorshipsEnabled: $hasSponsorshipsEnabled, issueCreationPolicy: $issueCreationPolicy}) { repository { hasSponsorshipsEnabled issueCreationPolicy } } }",
   outcomes: { ok: "the carried values set; the echoed state verifies each one took" },
-};
+});
 
 const GRAPHQL_OPS = {
   featuresQuery: FEATURES_QUERY,

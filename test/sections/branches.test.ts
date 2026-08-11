@@ -572,7 +572,7 @@ describe("branches wildcard entries", () => {
           protection: { enforce_admins: true, force_push_bypassers: ["ghost"] },
         },
       ]),
-    ).rejects.toThrow(/resolved to a response without a node id/);
+    ).rejects.toThrow(/GraphQL lookup succeeded but returned no node id/);
     expect(api.mutations()).toHaveLength(0);
   });
 

@@ -240,7 +240,7 @@ describe("deliverIssueReport", () => {
     if (!("warning" in result)) {
       throw new Error("expected a warning");
     }
-    expect(result.warning).toContain("unexpected shape");
+    expect(result.warning).toContain("the report-issue lookup returned a non-list response");
   });
 });
 
@@ -307,7 +307,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
     if (!("warning" in result)) {
       throw new Error("expected a warning");
     }
-    expect(result.warning).toContain("unexpected shape");
+    expect(result.warning).toContain("the open-issue lookup returned a non-list response");
   });
 
   test("needs-attention requests are identical to always, on both upsert paths", async () => {
