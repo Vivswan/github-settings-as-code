@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { validateSectionShapes } from "../../src/engine/validate.js";
-import { actionsSection } from "../../src/sections/actions.js";
-import { grantFor, PermissionDenied } from "../../src/sections/contract.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { validateSectionShapes } from "../../../src/engine/validate.js";
+import { grantFor, PermissionDenied } from "../../../src/sections/contract.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { actionsSection } from "./index.js";
 
 const ACTIONS_WRITES = [
   "PUT /repos/o/r/actions/permissions",
