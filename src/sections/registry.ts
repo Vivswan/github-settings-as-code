@@ -10,7 +10,7 @@
 import type { z } from "zod";
 import { SECTION_KEYS, type SectionKey } from "../schema.js";
 import { actionsSection } from "./actions.js";
-import { actionsSecretsSection } from "./actions-secrets.js";
+import { actionsSecretsSection } from "./actions_secrets/index.js";
 import { actionsVariablesSection } from "./actions-variables.js";
 import { agentsSecretsSection } from "./agents-secrets.js";
 import { agentsVariablesSection } from "./agents-variables.js";

@@ -88,6 +88,13 @@ describe("changed-sections file map", () => {
     // nothing to delete when the file moves.
     const golden: Record<string, SectionKey[]> = {
       "roles.ts": ["collaborators", "teams"],
+      "schema-helpers.ts": [
+        "actions_secrets",
+        "dependabot_secrets",
+        "codespaces_secrets",
+        "agents_secrets",
+        "environments",
+      ],
       "secrets-engine.ts": [
         "actions_secrets",
         "dependabot_secrets",

@@ -15,6 +15,7 @@
  */
 
 import { MAX_PINNED_ENVIRONMENTS } from "../../../src/schema.js";
+import { actionsSecretsMockHandlers } from "../../../src/sections/actions_secrets/mock.js";
 import { autolinksMockHandlers } from "../../../src/sections/autolinks/mock.js";
 import { customPropertiesMockHandlers } from "../../../src/sections/custom_properties/mock.js";
 import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
@@ -682,9 +683,9 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // actions_secrets / dependabot_secrets / codespaces_secrets / agents_secrets
+  // dependabot_secrets / codespaces_secrets / agents_secrets
   //
-  // The four repository-level secret families share one handler shape (see
+  // The repository-level secret families share one handler shape (see
   // the sealedSecretPut/secretsList/secretRemove helpers): the list serves
   // names and timestamps only (values are never part of the GET shape), and
   // the PUT is the crypto proof - it UNSEALS the uploaded ciphertext with the
@@ -693,20 +694,6 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
   // a deterministic digest of the unsealed value, never the plaintext. Every
   // PUT bumps updated_at (as GitHub does), so the idempotence snapshot's
   // volatile-field exclusion is exercised for real.
-  "actions_secrets.list": ({ state, query }) => secretsList(state.actions_secrets, query),
-  "actions_secrets.publicKey": () =>
-    ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "actions_secrets.put": ({ state, param, body }) =>
-    sealedSecretPut(
-      state,
-      state.actions_secrets,
-      state.actions_secret_digests,
-      param("secret_name"),
-      body,
-    ),
-  "actions_secrets.remove": ({ state, param }) =>
-    secretRemove(state.actions_secrets, state.actions_secret_digests, param("secret_name")),
-
   "dependabot_secrets.list": ({ state, query }) => secretsList(state.dependabot_secrets, query),
   "dependabot_secrets.publicKey": () =>
     ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
@@ -1756,6 +1743,7 @@ interface SectionMockFragment {
  * tables carrying every section not yet migrated.
  */
 const FRAGMENTS: readonly SectionMockFragment[] = [
+  { rest: actionsSecretsMockHandlers },
   { rest: autolinksMockHandlers },
   { rest: customPropertiesMockHandlers },
   { rest: labelsMockHandlers },
