@@ -37,26 +37,28 @@ import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import { prefixedIo } from "../io.js";
-import { type ArtifactUploader, deliverArtifactReport } from "../report/artifact-report.js";
-import { composeReport, type TranscriptLine } from "../report/composer.js";
+import type { ArtifactUploader } from "../report/artifact-report.js";
 import {
-  deliverIssueReport,
-  type IssueReportMode,
-  injectMarkerLabel,
-  MARKER_LABEL,
-} from "../report/issue-report.js";
+  applyMarkerInjection,
+  composeTargetReport,
+  deliverReport,
+  type ReportRunMeta,
+  uploadArtifactReport,
+} from "../report/delivery.js";
 import type { SettingsFile } from "../schema.js";
 import { DEFAULT_SETTINGS_FILE, quoteList } from "./inputs.js";
 import {
   capturingIo,
-  type IssueChannel,
+  emitRedactedResult,
   isIssueChannel,
+  isPrivateVisibility,
   type PrivateReportChannel,
   type PrivateReposPolicy,
   planRedaction,
-  REDACTED_DETAIL,
   REDACTED_NOTE,
   type RedactionPlan,
+  type TargetOutcome,
+  WITHHELD_REPORT_NOTICE,
 } from "./redact.js";
 import { parseSettingsDoc, readSettingsFile } from "./settings-read.js";
 
@@ -87,93 +89,6 @@ export interface MultiConfig {
    * undefined so the artifact channel uses the real @actions/artifact uploader.
    */
   uploader?: ArtifactUploader;
-}
-
-/**
- * One multi-repo target's full internal end state. `outcomes`, `note`, and
- * `slug` hold the UNREDACTED detail; `display` and `redacted` drive the
- * public view derived by toPublicView(). The summary and outputs render from
- * that view, never from this record directly.
- */
-export type TargetOutcome = Pick<Target, "slug" | "source" | "origin"> &
-  Pick<RepoRunResult, "result" | "outcomes"> & {
-    /** Human line for skips/failures that produced no section outcomes. */
-    note?: string;
-    /** The public label: the slug, or its "private repository #N" placeholder. */
-    display: string;
-    /** True when this target is hidden from the public view. */
-    redacted: boolean;
-  };
-
-/** A leak-free section outcome: key and status survive, detail is hidden. */
-export type RedactedOutcome = {
-  key: string;
-  status: RepoRunResult["outcomes"][number]["status"];
-  detail: string[];
-};
-
-/**
- * Strip a redacted target's section outcomes to safe values: the key and
- * status (closed enums, provably leak-free) survive, and every detail value is
- * replaced with the placeholder - plus the HTTP code on failed/skipped
- * sections, the one piece of error context that is a safe closed value. Shared
- * by the multi-repo public view and the single-repo redacted summary so both
- * render private targets through ONE definition of "hidden".
- */
-export function redactOutcomes(outcomes: RepoRunResult["outcomes"]): RedactedOutcome[] {
-  return outcomes.map((o) => {
-    // The SectionOutcome union proves a code exists only on failed/skipped
-    // rows, so presence alone decides.
-    const withCode =
-      o.httpStatus !== undefined ? `${REDACTED_DETAIL}, HTTP ${o.httpStatus}` : REDACTED_DETAIL;
-    return { key: o.key, status: o.status, detail: [withCode] };
-  });
-}
-
-/**
- * The leak-free projection of a TargetOutcome for the public view (summary,
- * outputs, annotations). For a redacted target the slug becomes its
- * placeholder, every detail value is replaced with the safe placeholder (plus
- * the HTTP code when known), and the note becomes the generic redacted note;
- * for a plain target it is byte-identical to the internal record. Deriving
- * this with a pure function makes "no private data in the public view" a
- * property of one testable function.
- */
-export interface PublicTargetView {
-  display: string;
-  source: Target["source"];
-  result: RepoRunResult["result"];
-  outcomes: Array<{
-    key: string;
-    status: RepoRunResult["outcomes"][number]["status"];
-    detail: string[];
-  }>;
-  note?: string;
-}
-
-/** Derive the public view of a target; redacted targets are stripped to safe statuses. */
-export function toPublicView(target: TargetOutcome): PublicTargetView {
-  if (!target.redacted) {
-    return {
-      display: target.slug,
-      source: target.source,
-      result: target.result,
-      outcomes: target.outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
-      note: target.note,
-    };
-  }
-  return {
-    display: target.display,
-    source: target.source,
-    result: target.result,
-    outcomes: redactOutcomes(target.outcomes),
-    note: REDACTED_NOTE,
-  };
-}
-
-/** True when a resolved visibility PROVES the repo private or internal. */
-export function isPrivateVisibility(visibility: RepoVisibility): boolean {
-  return visibility === "private" || visibility === "internal";
 }
 
 /**
@@ -660,10 +575,8 @@ export async function runMulti(
     } else if (reportOn && !deliverable) {
       // Redacted but not proven private: the report is withheld, said once,
       // safely (placeholder only; the cause and fix are slug-free).
-      const withheld =
-        "visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the repository), so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified";
-      io.annotate("notice", `${display}: ${withheld}`);
-      note = note ? `${note}; ${withheld}` : withheld;
+      io.annotate("notice", `${display}: ${WITHHELD_REPORT_NOTICE}`);
+      note = note ? `${note}; ${WITHHELD_REPORT_NOTICE}` : WITHHELD_REPORT_NOTICE;
     }
 
     results.push({
@@ -690,190 +603,7 @@ export async function runMulti(
   // The artifact channel uploads every accumulated report as one encrypted
   // document after the loop. A failure is one safe warning (naming the artifact
   // service, never a slug) and never changes any target's result.
-  await uploadArtifactReport(cfg, artifactReports, io);
+  await uploadArtifactReport(artifactReports, cfg.reportPublicKey, io, cfg.uploader);
 
   return { fatal: null, targets: results };
-}
-
-/**
- * Concatenate every accumulated per-target report into one document, encrypt it
- * to the operator's recipient, and upload it as the single workflow artifact.
- * A no-op when the channel is not `artifact` or no report was accumulated.
- * Delivery failure warns safely (the artifact service or missing runtime token,
- * never a slug or report content) and leaves the run result untouched.
- */
-async function uploadArtifactReport(
-  cfg: MultiConfig,
-  reports: Array<{ display: string; body: string }>,
-  io: Io,
-): Promise<void> {
-  if (cfg.privateReport !== "artifact" || reports.length === 0) {
-    return;
-  }
-  const document = concatArtifactReports(reports);
-  const delivery = await deliverArtifactReport(document, cfg.reportPublicKey, cfg.uploader);
-  if ("warning" in delivery) {
-    io.annotate("warning", delivery.warning);
-  }
-}
-
-/**
- * Join accumulated per-target reports into one document, each under a heading
- * carrying its public placeholder (the document itself is private, but the
- * heading is the only added text and stays placeholder-keyed for consistency
- * with the public surfaces).
- */
-function concatArtifactReports(reports: Array<{ display: string; body: string }>): string {
-  return reports.map((report) => `<!-- ${report.display} -->\n\n${report.body}`).join("\n\n");
-}
-
-/**
- * The single generic annotation a redacted target gets, its level chosen by
- * result: a failed run names the failed section keys and their HTTP codes (safe
- * closed values only); a check-mode drift warns; a skipped run notices; a
- * healthy run says nothing. The section lists are precomputed so no private
- * detail reaches this public surface.
- */
-function emitRedactedResult(
-  io: Io,
-  display: string,
-  result: RepoRunResult["result"],
-  failedSections: string[],
-  driftSections: string[],
-): void {
-  if (result === "failed") {
-    const sections = failedSections.length > 0 ? ` - ${failedSections.join(", ")}` : "";
-    io.annotate("error", `${display}: failed${sections}. ${REDACTED_NOTE}`);
-    return;
-  }
-  if (result === "drift") {
-    const sections = driftSections.length > 0 ? ` - ${driftSections.join(", ")}` : "";
-    io.annotate("warning", `${display}: drift${sections}. ${REDACTED_NOTE}`);
-    return;
-  }
-  if (result === "skipped") {
-    io.annotate("notice", `${display}: skipped. ${REDACTED_NOTE}`);
-  }
-}
-
-/** The run metadata a private report needs, minus the per-target fields. */
-export interface ReportRunMeta {
-  /** The admin repository the workflow ran in (GITHUB_REPOSITORY / selfSlug). */
-  adminRepo: string;
-  /** Link to the workflow run (may be empty on local runs). */
-  runUrl: string;
-  /** "apply" or "check". */
-  mode: string;
-  /** ISO timestamp captured once at the run's start, passed in (never Date.now here). */
-  timestamp: string;
-}
-
-/**
- * Apply the marker-label injection for the issue report channel and describe
- * the change. When `on` is false (the channel is off, or the target is not
- * redacted) the settings pass through untouched with no notice. Otherwise
- * injectMarkerLabel appends the report's marker label if the settings declare a
- * labels section and it is absent (or refuses a rename that would move the
- * marker away). The notice is returned rather than emitted, so the caller can
- * route it through the target's capturing sink (the private report).
- */
-export function applyMarkerInjection(
-  settings: SettingsFile,
-  on: boolean,
-): { settings: SettingsFile; notice?: string } {
-  if (!on) {
-    return { settings };
-  }
-  const injection = injectMarkerLabel(settings);
-  switch (injection.outcome) {
-    case "rename-refused":
-      return {
-        settings: injection.settings,
-        notice: `refused to rename the "${MARKER_LABEL}" marker label: private reporting reuses its issue by that exact name, so the rename was dropped`,
-      };
-    case "unchanged":
-      return { settings: injection.settings };
-    case "injected":
-      return {
-        settings: injection.settings,
-        notice: `added the "${MARKER_LABEL}" marker label to the managed labels so private reporting can reuse its issue; it is managed like any declared label`,
-      };
-  }
-}
-
-/**
- * Compose the full unredacted report document for one target. Shared by both
- * delivery channels: the issue channel PATCHes it into the target's report
- * issue, the artifact channel accumulates it for the encrypted upload. The
- * `check` flag decides needsAttention alongside the result (a check-mode drift
- * needs attention; an apply-mode drift cannot occur).
- */
-export function composeTargetReport(
-  meta: ReportRunMeta,
-  slug: string,
-  result: RepoRunResult["result"],
-  outcomes: RepoRunResult["outcomes"],
-  transcript: TranscriptLine[],
-  check: boolean,
-): { body: string; needsAttention: boolean } {
-  const body = composeReport({
-    target: slug,
-    adminRepo: meta.adminRepo,
-    runUrl: meta.runUrl,
-    mode: meta.mode,
-    result,
-    timestamp: meta.timestamp,
-    outcomes: outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
-    transcript,
-  });
-  const needsAttention = result === "failed" || (check && result === "drift");
-  return { body, needsAttention };
-}
-
-/**
- * Compose the full unredacted report for a redacted target and deliver it to
- * the issue channel. Under `always` this runs on EVERY result (the report is
- * the private mirror of the run log); under `on-failure` a healthy run at
- * most closes a leftover open issue and its no-op skip is silent. Returns a
- * safe summary-row note on delivery failure - and emits one public-safe
- * warning naming only the placeholder and the HTTP status - or undefined on
- * success; the target's result is never changed either way.
- */
-export async function deliverReport(
-  api: GithubClient,
-  meta: ReportRunMeta,
-  slug: string,
-  display: string,
-  result: RepoRunResult["result"],
-  outcomes: RepoRunResult["outcomes"],
-  transcript: TranscriptLine[],
-  check: boolean,
-  channel: IssueChannel,
-  io: Io,
-): Promise<string | undefined> {
-  const { body, needsAttention } = composeTargetReport(
-    meta,
-    slug,
-    result,
-    outcomes,
-    transcript,
-    check,
-  );
-  // The one channel-to-mode conversion, exhaustive over IssueChannel: a future
-  // issue channel fails to compile here instead of inheriting a default.
-  let mode: IssueReportMode;
-  switch (channel) {
-    case "issue":
-      mode = "always";
-      break;
-    case "issue-on-failure":
-      mode = "on-failure";
-      break;
-  }
-  const delivery = await deliverIssueReport(api, slug, body, needsAttention, mode);
-  if ("warning" in delivery) {
-    io.annotate("warning", `${display}: ${delivery.warning}`);
-    return delivery.warning;
-  }
-  return undefined;
 }

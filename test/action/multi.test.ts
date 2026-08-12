@@ -1,11 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
-import {
-  applyMarkerInjection,
-  redactOutcomes,
-  runMulti,
-  toPublicView,
-} from "../../src/action/multi.js";
+import { runMulti } from "../../src/action/multi.js";
+import { redactOutcomes, toPublicView } from "../../src/action/redact.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { clearRedactedSlugs } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
@@ -14,6 +10,7 @@ import {
   ARTIFACT_NAME,
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
+import { applyMarkerInjection } from "../../src/report/delivery.js";
 import { MockApi } from "../mock-api.js";
 
 // runMulti() registers every slug its redaction plan hides, permanently for
