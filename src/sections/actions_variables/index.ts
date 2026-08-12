@@ -14,7 +14,6 @@ import { variablesSection } from "../shared/repo-variables.js";
 
 export const actionsVariablesSection = variablesSection({
   key: "actions_variables",
-  pathSegment: "actions",
   resource: "variables",
   noun: "Actions variable",
 });

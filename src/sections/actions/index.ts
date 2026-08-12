@@ -7,7 +7,7 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import { type ActionsConfig, SettingsFile } from "../../schema.js";
+import { type ActionsConfig, type MustBeNever, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -154,6 +154,17 @@ const CACHE_ENDPOINT_BY_KEY = {
   },
   max_cache_size_gb: { get: "getCacheStorage", put: "putCacheStorage", label: "storage" },
 } as const;
+
+/**
+ * Compile-time lockstep between the cache config's fields and the endpoint
+ * table: the handlers below iterate the TABLE, so a new schema field with no
+ * entry would compile and then be rejected at run time (after earlier
+ * sections wrote) by the unknown-key backstop - fail it here instead. Both
+ * directions: an unlisted field and a phantom entry are each a compile error.
+ */
+type CacheKey = keyof NonNullable<ActionsConfig["cache"]>;
+type _CacheEndpointsComplete = MustBeNever<Exclude<CacheKey, keyof typeof CACHE_ENDPOINT_BY_KEY>>;
+type _CacheEndpointsSound = MustBeNever<Exclude<keyof typeof CACHE_ENDPOINT_BY_KEY, CacheKey>>;
 
 /**
  * Claim-key ORDER defines the OIDC subject format ("repo:...:context:..."),

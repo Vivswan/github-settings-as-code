@@ -38,8 +38,20 @@ import {
 /** The section keys the factory may mint, each with its API path segment. */
 type RepoVariablesKey = "actions_variables" | "agents_variables";
 
-/** The path segment under /repos/{owner}/{repo} a variable family lives at. */
-type VariablesSegment = "actions" | "agents";
+/**
+ * Each family's path segment under /repos/{owner}/{repo}, keyed by section:
+ * the factory derives the routes from THIS map, so a key paired with the
+ * other family's segment (which the mock would faithfully serve, hiding the
+ * swap) is unrepresentable rather than merely unreviewed.
+ */
+const VARIABLES_SEGMENTS = {
+  actions_variables: "actions",
+  agents_variables: "agents",
+} as const;
+
+/** The path segment a variable family lives at, derived from its key. */
+type VariablesSegment<K extends RepoVariablesKey = RepoVariablesKey> =
+  (typeof VARIABLES_SEGMENTS)[K];
 
 /**
  * The four-endpoint dictionary of one family, its routes derived from the
@@ -73,14 +85,11 @@ type RepoVariablesEndpoints<P extends VariablesSegment> = {
 type RepoVariablesDeclared = VariableEntry[] | UndeclaredPolicyList<VariableEntry>;
 
 /** The module shape variablesSection() mints (SectionModule<K> at the registry). */
-export interface RepoVariablesSectionModule<
-  K extends RepoVariablesKey,
-  P extends VariablesSegment,
-> {
+export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly key: K;
   readonly undeclaredDefault: "delete";
   readonly permission: { readonly repo: readonly [PatResource] };
-  readonly endpoints: RepoVariablesEndpoints<P>;
+  readonly endpoints: RepoVariablesEndpoints<VariablesSegment<K>>;
   readonly shape: z.ZodType;
   run(ctx: SectionContext, declared: RepoVariablesDeclared): Promise<SectionResult>;
 }
@@ -90,20 +99,20 @@ export interface RepoVariablesSectionModule<
  * families share - the upsert-by-case-insensitive-name run, the engine
  * wiring, the delete-undeclared-by-default posture (variables are readable,
  * recreatable configuration; the wrapped `undeclared: keep` form softens
- * deletion to notes) - lives here once; a family supplies only its key, path
- * segment, PAT resource, and noun.
+ * deletion to notes) - lives here once, and the routes derive from the key
+ * through VARIABLES_SEGMENTS; a family supplies only its key, PAT resource,
+ * and noun.
  */
-export function variablesSection<K extends RepoVariablesKey, P extends VariablesSegment>(family: {
+export function variablesSection<K extends RepoVariablesKey>(family: {
   key: K;
-  /** The API path segment: /repos/{owner}/{repo}/<segment>/variables. */
-  pathSegment: P;
   /** The fine-grained-PAT Repository permission gating the family. */
   resource: PatResource;
   /** The output noun ("Actions variable", "Copilot agents variable"). */
   noun: string;
-}): RepoVariablesSectionModule<K, P> {
-  const { key, pathSegment, resource, noun } = family;
-  const endpoints: RepoVariablesEndpoints<P> = {
+}): RepoVariablesSectionModule<K> {
+  const { key, resource, noun } = family;
+  const pathSegment: VariablesSegment<K> = VARIABLES_SEGMENTS[key];
+  const endpoints: RepoVariablesEndpoints<VariablesSegment<K>> = {
     list: {
       route: `GET /repos/{owner}/{repo}/${pathSegment}/variables`,
       statuses: { 200: `the ${noun}s list` },

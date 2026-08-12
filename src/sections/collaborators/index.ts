@@ -278,7 +278,13 @@ export const collaboratorsSection = {
         );
       } else if (run.check) {
         run.result.drift.push(
-          `collaborators[${invitee}]: undeclared - a pending invitation not in the settings file, so apply will CANCEL it; add them to the settings file to keep the invitation`,
+          undeclaredDrift(defaultUndeclaredPolicy(this), {
+            label: `collaborators[${invitee}]`,
+            state: "a pending invitation not in the settings file",
+            action: "CANCEL it",
+            add: "them",
+            keep: "the invitation",
+          }),
         );
       } else {
         await call(ctx, this, ENDPOINTS.cancelInvitation, {

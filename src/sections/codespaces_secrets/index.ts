@@ -22,7 +22,6 @@ import { repoSecretsSection } from "../shared/repo-secrets.js";
 
 export const codespacesSecretsSection = repoSecretsSection({
   key: "codespaces_secrets",
-  pathSegment: "codespaces",
   resource: "codespaces_secrets",
   noun: "Codespaces secret",
   accessGrade: "write",

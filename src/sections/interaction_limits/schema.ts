@@ -7,16 +7,17 @@
  */
 
 import { z } from "zod";
+import type { MustBeNever } from "../../types.js";
 
 /**
  * The interaction_limits keys routed to their own .../interaction-limits/pulls
  * sub-endpoints instead of the base PUT body, shared by the shape's base-key
- * sweep below and the section handler's strip.
+ * sweep below and the section handler's strip. The list is pinned to the
+ * config type after the schema (the _RoutedKeysReal check), so a typo'd or
+ * renamed key fails to compile instead of silently riding the base PUT.
  */
-export const INTERACTION_LIMITS_ROUTED_KEYS: ReadonlySet<string> = new Set([
-  "pull_request_creation_cap",
-  "pull_request_creation_bypass",
-]);
+const ROUTED_KEY_LIST = ["pull_request_creation_cap", "pull_request_creation_bypass"] as const;
+export const INTERACTION_LIMITS_ROUTED_KEYS: ReadonlySet<string> = new Set(ROUTED_KEY_LIST);
 
 export const InteractionLimitsConfig = z
   .object({
@@ -124,3 +125,8 @@ export const InteractionLimitsConfig = z
   )
   .meta({ id: "InteractionLimitsConfig" });
 export type InteractionLimitsConfig = z.infer<typeof InteractionLimitsConfig>;
+
+/** Compile-time pin: every routed key names a real InteractionLimitsConfig field. */
+type _RoutedKeysReal = MustBeNever<
+  Exclude<(typeof ROUTED_KEY_LIST)[number], keyof InteractionLimitsConfig>
+>;

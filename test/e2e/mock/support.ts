@@ -18,6 +18,7 @@ import type {
   TaggedEndpoint,
   TaggedGraphqlOp,
 } from "../../../src/sections/registry.js";
+import { variableKey } from "../../../src/sections/shared/variables-engine.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import { MOCK_SECRETS_KEY_ID, secretDigest, unsealSecretValue } from "./secrets.js";
 import type { MockState } from "./state.js";
@@ -308,7 +309,9 @@ export function labelName(label: Json): NameKey {
 
 /** A variable's case-insensitive matching key (GitHub uppercases the match). */
 export function environmentVariableName(variable: Json): string {
-  return String(variable.name).toUpperCase();
+  // The engine's own mint, so the mock's matching can never fold a name
+  // differently than the handler does (the labelName precedent).
+  return variableKey(String(variable.name));
 }
 
 /**
@@ -332,7 +335,7 @@ export function findLabel(state: MockState, name: string): Json | undefined {
 
 /** The uppercase stored name for a variables create payload. */
 export function variableName(payload: Json): string {
-  return String(payload.name ?? "").toUpperCase();
+  return variableKey(String(payload.name ?? ""));
 }
 
 /**

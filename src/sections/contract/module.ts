@@ -684,6 +684,12 @@ export function undeclaredDrift(
     label: string;
     /** What apply will do, with any consequence worth naming. */
     action: string;
+    /**
+     * How the undeclared resource presents, when the plain "not in the
+     * settings file" understates it (a PENDING INVITATION rather than an
+     * existing collaborator). The knob clause is appended after it.
+     */
+    state?: string;
     /** The pronoun for "add ... to the settings file" ("it" unless plural). */
     add?: string;
     /** What adding it would keep ("it", or "their access" for people). */
@@ -691,7 +697,8 @@ export function undeclaredDrift(
   },
 ): string {
   const knob = listDefault === "keep" ? ' and "undeclared: delete" is set' : "";
+  const state = opts.state ?? "not in the settings file";
   const add = opts.add ?? "it";
   const keep = opts.keep ?? "it";
-  return `${opts.label}: undeclared - not in the settings file${knob}, so apply will ${opts.action}; add ${add} to the settings file to keep ${keep}`;
+  return `${opts.label}: undeclared - ${state}${knob}, so apply will ${opts.action}; add ${add} to the settings file to keep ${keep}`;
 }

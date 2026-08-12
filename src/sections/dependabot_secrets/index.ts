@@ -15,7 +15,6 @@ import { repoSecretsSection } from "../shared/repo-secrets.js";
 
 export const dependabotSecretsSection = repoSecretsSection({
   key: "dependabot_secrets",
-  pathSegment: "dependabot",
   resource: "dependabot_secrets",
   noun: "Dependabot secret",
 });
