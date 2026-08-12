@@ -32,7 +32,7 @@ type Json = Record<string, unknown>;
  * declares a count and the mock synthesizes "<prefix>-1".."<prefix>-N", all in
  * the same color. Mirrors LabelsGenerateSchema in ../schema.ts.
  */
-export interface LabelsGenerate {
+interface LabelsGenerate {
   count: number;
   prefix: string;
   color: string;
@@ -465,7 +465,7 @@ export function decodeNodeId(
  * mutation-target resolution skips the "app" family (see GLOBAL_NODE_FAMILIES
  * in routes.ts).
  */
-export const GLOBAL_NODE_SLUG = "-";
+const GLOBAL_NODE_SLUG = "-";
 
 /** Mint the global node id of a GitHub App, keyed by its slug. */
 export function mintAppNodeId(appSlug: string): string {
@@ -480,7 +480,7 @@ export function mintAppNodeId(appSlug: string): string {
  * reads always name the repository they belong to. Write handlers mint ids
  * for resources they create with the same codec.
  */
-export function stampNodeIds(state: MockState): void {
+function stampNodeIds(state: MockState): void {
   state.repo.node_id = mintNodeId("repo", state.slug, "");
   for (const [name, environment] of Object.entries(state.environments)) {
     environment.node_id = mintNodeId("environment", state.slug, name);
@@ -500,10 +500,7 @@ export function stampNodeIds(state: MockState): void {
  * restRepoSurface, which strips them - so only the GraphQL handlers can
  * read or write them.
  */
-export const GRAPHQL_ONLY_REPO_FIELDS = [
-  "has_sponsorships_enabled",
-  "issue_creation_policy",
-] as const;
+const GRAPHQL_ONLY_REPO_FIELDS = ["has_sponsorships_enabled", "issue_creation_policy"] as const;
 
 /** The REST-visible projection of a repo body (see GRAPHQL_ONLY_REPO_FIELDS). */
 export function restRepoSurface(repo: Json): Json {
@@ -1286,7 +1283,7 @@ export function allRuleNodes(state: MockState): Json[] {
  * catch a dropped name. Environment names are case-insensitive on GitHub
  * and stored canonically, so a kept name echoes the STORED spelling.
  */
-export function dropMissingEnvironments(names: unknown, state: MockState): string[] {
+function dropMissingEnvironments(names: unknown, state: MockState): string[] {
   const canonical = new Map(
     Object.keys(state.environments).map((name) => [name.toLowerCase(), name]),
   );
@@ -1301,7 +1298,7 @@ export function dropMissingEnvironments(names: unknown, state: MockState): strin
 }
 
 /** Decode minted actor node ids back to the declared string vocabulary. */
-export function actorStringsFromIds(ids: unknown): { actors: string[] } | { bad: string } {
+function actorStringsFromIds(ids: unknown): { actors: string[] } | { bad: string } {
   const out: string[] = [];
   for (const id of Array.isArray(ids) ? ids : []) {
     const decoded = decodeNodeId(String(id));

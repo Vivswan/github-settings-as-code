@@ -488,7 +488,7 @@ async function reconcileNested<K extends NestedKey>(
  * ride into the PUT unnoticed - declare it on EnvironmentRoutedScalars,
  * never on the config body.
  */
-export const ROUTED_SCALAR_KEYS = [
+const ROUTED_SCALAR_KEYS = [
   "pinned",
 ] as const satisfies readonly (keyof EnvironmentRoutedScalars)[];
 type RoutedScalarKey = (typeof ROUTED_SCALAR_KEYS)[number];

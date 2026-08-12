@@ -13,7 +13,7 @@ export interface TranscriptLine {
 }
 
 /** One per-section outcome row, unredacted. */
-export interface OutcomeRow {
+interface OutcomeRow {
   key: string;
   status: string;
   detail: string[];

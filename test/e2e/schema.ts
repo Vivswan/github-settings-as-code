@@ -20,7 +20,7 @@ import type { LiveState } from "./mock/state.js";
 
 /** The tiers a scenario can run against. Only "mock" exists today; "live" is
  * reserved for a future App-token tier so scenarios can opt in later. */
-export const TierSchema = z.enum(["mock", "live"]);
+const TierSchema = z.enum(["mock", "live"]);
 
 /**
  * The permission mask keys: every fine-grained PAT resource plus the
@@ -52,10 +52,10 @@ export const MASK_KEYS = [
 /** Compile-time tripwire: a PatResource missing from MASK_KEYS fails here. */
 type _MaskCoversEveryResource = MustBeNever<Exclude<PatResource, (typeof MASK_KEYS)[number]>>;
 
-export const MaskKeySchema = z.enum(MASK_KEYS);
+const MaskKeySchema = z.enum(MASK_KEYS);
 
 /** Access level granted to a masked resource. */
-export const MaskGradeSchema = z.enum(["none", "read", "write"]);
+const MaskGradeSchema = z.enum(["none", "read", "write"]);
 
 /**
  * How denied resources answer. "fine_grained" (the default) mirrors real
@@ -63,21 +63,17 @@ export const MaskGradeSchema = z.enum(["none", "read", "write"]);
  * answers 403 "Resource not accessible by personal access token". The numeric
  * styles answer every denial uniformly with that status.
  */
-export const DenialStyleSchema = z.union([
-  z.literal("fine_grained"),
-  z.literal(403),
-  z.literal(404),
-]);
+const DenialStyleSchema = z.union([z.literal("fine_grained"), z.literal(403), z.literal(404)]);
 
 /** Which account kind the mock owner presents as (teams behave differently). */
-export const OwnerKindSchema = z.enum(["org", "user"]);
+const OwnerKindSchema = z.enum(["org", "user"]);
 
 /**
  * The action inputs a scenario can set; all optional with runner defaults.
  * required_sections and sections are comma-separated strings, matching the
  * action's own INPUT_REQUIRED-SECTIONS / INPUT_SECTIONS wire format.
  */
-export const InputsSchema = z
+const InputsSchema = z
   .object({
     mode: z.enum(["apply", "check"]).optional(),
     on_missing_permission: z.enum(["fail", "warn"]).optional(),
@@ -101,7 +97,7 @@ export const InputsSchema = z
  * first, then exit code, then the rest), so a partial expectation still pins
  * the parts it names.
  */
-export const ExpectSchema = z
+const ExpectSchema = z
   .object({
     /**
      * The process exit code (0 clean/applied, 1 failed). A non-empty array
@@ -400,7 +396,7 @@ const EnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
   }
 });
 
-export const ScenarioSchema = z
+const ScenarioSchema = z
   .object({
     name: z.string(),
     description: z.string().optional(),
@@ -466,14 +462,12 @@ export const ScenarioSchema = z
       "settings_raw is single-repo only; a multi-repo target's raw file is `repos.<slug>.settings_raw`",
   });
 
-export type Tier = z.infer<typeof TierSchema>;
 export type MaskKey = z.infer<typeof MaskKeySchema>;
 export type MaskGrade = z.infer<typeof MaskGradeSchema>;
 /** A token permission mask: MaskKey -> granted MaskGrade, closed vocabulary. */
 export type PermissionMask = z.infer<typeof TokenPermissionsSchema>;
 export type DenialStyle = z.infer<typeof DenialStyleSchema>;
 export type OwnerKind = z.infer<typeof OwnerKindSchema>;
-export type Inputs = z.infer<typeof InputsSchema>;
 /**
  * ExpectSchema's output with `fixpoint` optional: the transform always emits
  * the key, but a hand-built expectation (the fuzz cores) may simply omit it.
@@ -496,9 +490,6 @@ type MultiSettingsSource =
   | { settings_raw: string; settings?: never };
 export type MultiRepo = Omit<z.infer<typeof MultiRepoSchema>, "settings" | "settings_raw"> &
   MultiSettingsSource;
-export type DiscoveryRepo = z.infer<typeof DiscoveryRepoSchema>;
-export type Discovery = z.infer<typeof DiscoverySchema>;
-export type Fault = z.infer<typeof FaultSchema>;
 export type Scenario = Omit<
   z.infer<typeof ScenarioSchema>,
   "settings" | "settings_raw" | "repos" | "expect"

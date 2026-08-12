@@ -15,7 +15,7 @@ import { displayKeyOf, type MultiScenarioMeta, type ScenarioMeta } from "./gener
 import type { DenialStyle, MaskGrade, MaskKey } from "./schema.js";
 
 /** A section outcome the step summary can report. */
-export type Outcome = "applied" | "clean" | "drift" | "skipped" | "failed" | "excluded";
+type Outcome = "applied" | "clean" | "drift" | "skipped" | "failed" | "excluded";
 
 const PERMISSION_BY_KEY: Record<SectionKey, SectionPermission> = Object.fromEntries(
   SECTIONS.map((section) => [section.key, section.permission]),
@@ -364,7 +364,7 @@ function worstOutcomes(sections: SectionPrediction[]): Outcome[] {
 }
 
 /** The prediction for one multi-repo target: its per-repo run, or "skipped". */
-export interface RepoPrediction {
+interface RepoPrediction {
   slug: string;
   /**
    * The repos-result KEY the action emits for this target: the

@@ -55,7 +55,7 @@ export const AFFILIATIONS = ["owner", "collaborator", "organization_member"] as 
  * it for the unarchive-to-manage prose - a literal in one place and not the
  * other would silently drop that guidance.
  */
-export const ARCHIVED_REASON = "archived";
+const ARCHIVED_REASON = "archived";
 
 /** Filters applied to repos: "*" discovery only, never to explicit targets. */
 export interface DiscoveryFilters {

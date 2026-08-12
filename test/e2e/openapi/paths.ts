@@ -22,7 +22,7 @@ import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
  * from the report module (its marker-label create reuses the labels section's
  * path, so that one collapses into the section paths on dedup).
  */
-export const CORE_PATHS: readonly string[] = [
+const CORE_PATHS: readonly string[] = [
   "/repos/{owner}/{repo}",
   "/repos/{owner}/{repo}/contents/{path}",
   "/user/repos",

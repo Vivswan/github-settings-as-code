@@ -71,7 +71,7 @@ export const INPUT_NAMES = [
   "report-public-key",
 ] as const;
 
-export function input(name: (typeof INPUT_NAMES)[number]): string {
+function input(name: (typeof INPUT_NAMES)[number]): string {
   // @actions/core reads INPUT_<NAME> (uppercased, spaces to underscores -
   // dashes survive, e.g. `settings-file` -> INPUT_SETTINGS-FILE) and trims.
   return core.getInput(name);
@@ -159,7 +159,7 @@ function resolveReportPublicKey(channel: PrivateReportChannel): string | { error
 }
 
 /** The inputs shared by both modes. */
-export interface CommonConfig {
+interface CommonConfig {
   token: string;
   mode: "apply" | "check";
   onMissingPermission: "fail" | "warn";

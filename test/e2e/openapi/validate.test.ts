@@ -969,7 +969,7 @@ describe("the hand-written /graphql branch", () => {
     );
     const details = found.map((f) => f.detail).join("\n");
     expect(details).toContain(
-      'errors[].type "SERVICE_UNAVAILABLE" is not a known GraphqlErrorType',
+      'errors[].type "SERVICE_UNAVAILABLE" is not a known GraphQL error type',
     );
     expect(details).toContain("every errors[] entry must carry a string message");
   });

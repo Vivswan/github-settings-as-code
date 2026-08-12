@@ -23,7 +23,7 @@
 export type SettingsSource = "operator" | "target";
 
 /** A syntactically valid reference: the env var name, without the `$`. */
-export interface SecretRef {
+interface SecretRef {
   readonly name: string;
 }
 

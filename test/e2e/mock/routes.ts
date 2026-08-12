@@ -134,7 +134,7 @@ export interface LoggedRequest {
 }
 
 /** The reply a handler (or the pipeline) produces: a status and a JSON body. */
-export interface MockResponse {
+interface MockResponse {
   status: number;
   body: unknown;
   /** Extra response headers (e.g. Retry-After on the 429 fault). */
@@ -158,7 +158,7 @@ export interface MockResponse {
  * chaos-corruption directive is applied by the pipeline AFTER the handler
  * returns, so it is not passed here.
  */
-export interface HandlerContext {
+interface HandlerContext {
   state: MockState;
   endpoint: TaggedEndpoint;
   /**
@@ -206,12 +206,10 @@ const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 
 /**
  * A token permission mask: resource -> grade (see PermissionMask in
- * ../schema.ts, re-exported here for the pipeline's consumers). Unlisted
- * resources default to write. In single-repo mode this is the scenario's
+ * ../schema.ts). In single-repo mode this is the scenario's
  * token_permissions; in multi-repo mode it is the target slug's per-repo mask
  * (so a denial can be scoped to one repository).
  */
-export type { PermissionMask } from "../schema.js";
 
 /** The grade the token holds for a mask resource; unlisted resources are write. */
 function maskGrade(mask: PermissionMask, resource: MaskKey): MaskGrade {
@@ -2750,7 +2748,7 @@ export function graphqlDenialErrors(
  * values document the route each key names; the issue-report ones are built
  * from ISSUE_REPORT_ENDPOINTS so they cannot drift from the declared routes.
  */
-export const CORE_FAULT_KEYS = {
+const CORE_FAULT_KEYS = {
   "core.discoveryList": "GET /user/repos (multi-repo discovery listing)",
   "core.contentsGet": "GET /repos/{owner}/{repo}/contents/{path} (settings-file fetch)",
   "core.userGet": `${ISSUE_REPORT_ENDPOINTS.user.route} (report fallback creator scan)`,
@@ -2760,7 +2758,7 @@ export const CORE_FAULT_KEYS = {
   "core.issuePatch": `${ISSUE_REPORT_ENDPOINTS.update.route} (report issue update)`,
 } as const;
 
-export type CoreFaultKey = keyof typeof CORE_FAULT_KEYS;
+type CoreFaultKey = keyof typeof CORE_FAULT_KEYS;
 
 /**
  * Reject fault/corrupt directives that name an unknown endpoint or duplicate a
@@ -4608,5 +4606,3 @@ function applyCorruption(
   }
   return { response: { status: response.status, body: {} }, log, offSpecBody: true };
 }
-
-export { VIOLATION_PREFIX };

@@ -52,7 +52,7 @@ export function stemNegation(preceding: string): { negated: boolean } | { double
  * "delete plus recreate" cannot leak into a keep claim) and is capped so a
  * delimiter-free run cannot pull in half a table cell.
  */
-export function defaultClaimWindows(text: string): string[] {
+function defaultClaimWindows(text: string): string[] {
   return [...text.matchAll(/([^.;:!?]{0,80})by default/g)].map((match) => match[1] ?? "");
 }
 

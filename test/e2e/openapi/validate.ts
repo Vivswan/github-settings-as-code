@@ -447,7 +447,7 @@ export class OpenApiValidator {
    * carries {query: string, operationName: <a declared operation's name>,
    * variables: object}, and the response must be an HTTP 200 whose body
    * carries {data: object|null} plus an optional errors[] of
-   * {type: <a known GraphqlErrorType>, message: string} entries. Anything
+   * {type: <a GRAPHQL_ERROR_TYPES member>, message: string} entries. Anything
    * else is a finding, attributed like the OpenAPI checks: the request side
    * as "request-body", the response side as "response-body", and a wrong
    * method as "unknown-route".
@@ -544,7 +544,7 @@ export class OpenApiValidator {
           violations.push({
             request: label,
             kind: "response-body",
-            detail: `errors[].type "${String(type)}" is not a known GraphqlErrorType [${GRAPHQL_ERROR_TYPES.join(", ")}]`,
+            detail: `errors[].type "${String(type)}" is not a known GraphQL error type [${GRAPHQL_ERROR_TYPES.join(", ")}]`,
           });
         }
         if (typeof message !== "string") {

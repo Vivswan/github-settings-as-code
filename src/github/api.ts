@@ -204,7 +204,7 @@ function redactMessage(message: string): string {
 }
 
 /** The constant written over a secret-bearing request field in the debug trace. */
-export const SECRET_FIELD_PLACEHOLDER = "***";
+const SECRET_FIELD_PLACEHOLDER = "***";
 
 /**
  * The wholesale replacement for an error response to a secret-carrying

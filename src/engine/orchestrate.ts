@@ -148,7 +148,7 @@ export function validateSettingsDoc(
  * the apply pass with full context, but a check-mode write is legitimate-
  * looking under apply, so swallowing it here would hide the bug forever.
  */
-export class ReadOnlyViolation extends Error {}
+class ReadOnlyViolation extends Error {}
 
 /**
  * A GithubClient that refuses every mutation: non-GET REST requests and

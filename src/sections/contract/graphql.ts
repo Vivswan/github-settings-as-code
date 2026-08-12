@@ -5,7 +5,7 @@ import type { SectionPermission } from "./permissions.js";
 /**
  * The GraphQL error classes GitHub delivers in an errors[] entry's `type`
  * field, as far as this system models them. The runtime array feeds the e2e
- * validator's known-type check; the type derives from it.
+ * validator's known-type check.
  */
 export const GRAPHQL_ERROR_TYPES = [
   "FORBIDDEN",
@@ -15,8 +15,6 @@ export const GRAPHQL_ERROR_TYPES = [
   "UNPROCESSABLE",
 ] as const;
 
-export type GraphqlErrorType = (typeof GRAPHQL_ERROR_TYPES)[number];
-
 /**
  * The subset of GraphQL error types a section may DECLARE as tolerated
  * outcomes. RATE_LIMITED is deliberately absent (throttling is a transport
@@ -24,7 +22,7 @@ export type GraphqlErrorType = (typeof GRAPHQL_ERROR_TYPES)[number];
  * outcome), as is INSUFFICIENT_SCOPES (a wrong token, which no section
  * outcome can tolerate; the transport folds it into the 403 class).
  */
-export const GRAPHQL_TOLERABLE_ERRORS = ["FORBIDDEN", "NOT_FOUND", "UNPROCESSABLE"] as const;
+const GRAPHQL_TOLERABLE_ERRORS = ["FORBIDDEN", "NOT_FOUND", "UNPROCESSABLE"] as const;
 
 export type GraphqlTolerableError = (typeof GRAPHQL_TOLERABLE_ERRORS)[number];
 
@@ -36,7 +34,7 @@ export type GraphqlTolerableError = (typeof GRAPHQL_TOLERABLE_ERRORS)[number];
  * `after` argument (GraphqlPaginatedReadDecl's query type enforces the
  * variable at the declaration).
  */
-export interface GraphqlConnectionDecl {
+interface GraphqlConnectionDecl {
   readonly path: readonly [string, ...string[]];
 }
 

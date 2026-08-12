@@ -553,7 +553,7 @@ export function deliveredIssueBody(requests: LoggedRequest[], slug: string): str
  * POST /issues for the slug (0 proves no issue was created, e.g. the
  * permission-denied path).
  */
-export function assertIssueReport(
+function assertIssueReport(
   spec: NonNullable<Expect["issue_report"]>,
   requests: LoggedRequest[],
 ): string[] {

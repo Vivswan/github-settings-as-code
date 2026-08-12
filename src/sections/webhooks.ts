@@ -75,7 +75,7 @@ const ENDPOINTS = {
  * string form for comparison. Other values pass through as-is (GitHub is the
  * authority on what it accepts).
  */
-export function normalizeInsecureSsl(value: unknown): unknown {
+function normalizeInsecureSsl(value: unknown): unknown {
   return typeof value === "number" ? String(value) : value;
 }
 

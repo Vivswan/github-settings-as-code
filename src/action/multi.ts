@@ -723,7 +723,7 @@ async function uploadArtifactReport(
  * heading is the only added text and stays placeholder-keyed for consistency
  * with the public surfaces).
  */
-export function concatArtifactReports(reports: Array<{ display: string; body: string }>): string {
+function concatArtifactReports(reports: Array<{ display: string; body: string }>): string {
   return reports.map((report) => `<!-- ${report.display} -->\n\n${report.body}`).join("\n\n");
 }
 

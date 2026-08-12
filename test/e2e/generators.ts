@@ -333,7 +333,7 @@ function addRoutedGraphqlKeys(bprRng: Rng, protection: Json): void {
  * verified silent-drop behavior (the mock keeps only EXISTING names) never
  * turns a fully-granted apply into a read-back failure.
  */
-export const FUZZ_DEPLOYMENT_ENVIRONMENTS = ["fuzz-deploy-a", "fuzz-deploy-b"] as const;
+const FUZZ_DEPLOYMENT_ENVIRONMENTS = ["fuzz-deploy-a", "fuzz-deploy-b"] as const;
 
 function genEnvironments(rng: Rng): Json[] {
   // The variables draws are NEW, so they live on a forked stream: the main
@@ -800,7 +800,7 @@ function genActionsVariables(rng: Rng): EntriesForm {
  * reference can never name a variable the child env lacks. The values are
  * distinctive strings so leak checks can hunt them.
  */
-export const E2E_SECRET_ENV = {
+const E2E_SECRET_ENV = {
   E2E_SECRET_A: "e2e-hook-secret-alpha",
   E2E_SECRET_B: "e2e-hook-secret-bravo",
   E2E_SECRET_C: "e2e-hook-secret-charlie",
@@ -979,7 +979,7 @@ export function scenarioSecretEnv(settings: Json): Record<string, string> | unde
  * and every environment entry loses its nested secrets list. Mutates the
  * document in place through entriesOf's by-reference entries.
  */
-export function stripSecretReferences(settings: Json): void {
+function stripSecretReferences(settings: Json): void {
   const webhooks = settings.webhooks;
   if (webhooks !== undefined && webhooks !== null) {
     for (const entry of entriesOf(webhooks)) {
@@ -1015,7 +1015,7 @@ export function stripSecretReferences(settings: Json): void {
  * stream stays stable. The paired singular flag stays: it rides the
  * environment PUT under the section's own permission.
  */
-export function suppressMaskedEnvironmentOverrides(
+function suppressMaskedEnvironmentOverrides(
   settings: Json,
   mask: Partial<Record<MaskKey, MaskGrade>>,
 ): void {
@@ -1052,7 +1052,7 @@ export function suppressMaskedEnvironmentOverrides(
  * preserved. That is fine: the strip is itself a pure function of the
  * seed's own mask roll, so every replay of a seed strips identically.
  */
-export function suppressMaskedCustomProperties(
+function suppressMaskedCustomProperties(
   settings: Json,
   mask: Partial<Record<MaskKey, MaskGrade>>,
   sections: SectionKey[],
