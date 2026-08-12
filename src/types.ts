@@ -1,9 +1,8 @@
 /**
  * Leaf type vocabulary shared by the settings schema and its consumers.
  * Deliberately zod-free: these are the hand-written generic types the zod
- * single source in ./schema.ts cannot express (a generic wrapper interface,
- * a compile-time exhaustiveness helper), re-exported from there so importers
- * keep one import surface.
+ * schemas cannot express (a generic wrapper interface, a compile-time
+ * exhaustiveness helper); importers import them from here.
  */
 
 /** What apply does to live resources the settings file does not declare. */
