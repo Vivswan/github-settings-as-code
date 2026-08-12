@@ -1,10 +1,10 @@
-# Nightly CI starter. Generated once by Vivswan/repo-platform
-# and never overwritten by template sync, so edit freely. Replace the
-# placeholder step with this repository's own nightly checks (the suites too
-# slow for every PR: full end-to-end runs, docker image builds, live
-# integration tests); the report job below keeps working unchanged - a red
-# night files or updates one label-deduplicated tracking issue, a green
-# night closes it (see repo-platform's docs/nightly.md).
+# Nightly upstream-freshness probes. Generated from the repo-platform nightly
+# starter and never overwritten by template sync. The checks job re-cuts the
+# trimmed OpenAPI spec from upstream HEAD (a path-level staleness check) and
+# typechecks against the latest @octokit/types, so pinned-dependency staleness
+# fails a night instead of surprising the next manual bump; the report job
+# below files or updates one label-deduplicated tracking issue on a red night
+# and closes it on a green one (see repo-platform's docs/nightly.md).
 name: Nightly
 
 on:
@@ -30,19 +30,69 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Install dependencies
+        id: install
+        run: bun install --frozen-lockfile --ignore-scripts
 
-      # Set up whatever the nightly checks need here (toolchains, docker,
-      # service containers, caches, ...). Add sibling jobs freely: list
-      # every one in the report job's `needs` and fold its result into the
-      # red/green conditions there.
-
-      - name: Nightly checks
+      # PR CI proves USED_PATHS against the pinned descriptor; this probe
+      # re-cuts against upstream HEAD (deliberately bypassing the cached
+      # spec), so trim-openapi's own errors become the freshness signal: a
+      # newly documented UNDOCUMENTED_PATHS entry or a removed/renamed used
+      # path fails the night.
+      - name: Probe the latest OpenAPI descriptor
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Replace this placeholder with the repository's nightly checks.
-          # Any failing step in this job makes the report job below file
-          # or update the tracking issue. Until then this step is a green
-          # no-op on purpose: an uncustomized starter must not file issues.
-          echo "::warning::nightly starter not customized yet - replace the placeholder step (see repo-platform's docs/nightly.md)"
+          # Assign and export separately: `export X="$(cmd)"` takes export's
+          # exit status, so a failed gh would run the trim with an empty ref.
+          TRIM_UPSTREAM_REF="$(gh api repos/github/rest-api-description/commits/main --jq .sha)"
+          export TRIM_UPSTREAM_REF
+          case "$TRIM_UPSTREAM_REF" in
+            [0-9a-f]*[0-9a-f]) ;;
+            *) echo "::error::could not resolve the latest rest-api-description commit; got '$TRIM_UPSTREAM_REF'"; exit 1 ;;
+          esac
+          log="$(mktemp)"
+          if ! bun .github/scripts/trim-openapi.ts >"$log" 2>&1; then
+            cat "$log"
+            exit 1
+          fi
+          cat "$log"
+          # The script logs the descriptor URL, which embeds the ref it used.
+          # A pinned ref there means the override was ignored - which would
+          # make this probe pass green forever without probing anything.
+          if ! grep -q "$TRIM_UPSTREAM_REF" "$log"; then
+            echo "::error::trim-openapi.ts did not fetch $TRIM_UPSTREAM_REF; its TRIM_UPSTREAM_REF override is gone and this probe is testing nothing"
+            exit 1
+          fi
+
+      # always() so a red spec probe cannot mask this one (the job still
+      # fails if either step failed); gated on install because there is
+      # nothing to probe when setup itself broke. --no-save keeps the
+      # lockfile and package.json untouched; the upgraded node_modules stays
+      # ambient for the rest of this job, so keep later steps out of it.
+      - name: Probe the latest @octokit/types
+        if: always() && steps.install.outcome == 'success'
+        run: |
+          bun add --no-save --ignore-scripts @octokit/types@latest
+          log="$(mktemp)"
+          # --pretty false keeps the one-error-per-line format the grep below
+          # parses, independent of tsc's TTY detection.
+          if bun run typecheck --pretty false >"$log" 2>&1; then
+            echo "typecheck is clean against @octokit/types@latest"
+          else
+            cat "$log"
+            tripped="$(grep -E '^src/upstream-gaps/.+error TS2344' "$log" | cut -d'(' -f1 | sort -u)"
+            if [ -n "$tripped" ]; then
+              echo "::error::@octokit/types@latest fires upstream-gap tripwires; graduate (delete) these files:"
+              echo "$tripped"
+            else
+              echo "::error::typecheck against @octokit/types@latest failed outside the upstream-gap tripwires; a types major may have broken the build (see log above)"
+            fi
+            exit 1
+          fi
 
   # Runs whatever happened to the checks job, and treats a CANCELLED checks
   # job as red: a job that hits its timeout is cancelled, not failed, and a
