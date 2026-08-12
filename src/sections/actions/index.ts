@@ -14,9 +14,11 @@ import {
   type EndpointDecl,
   loosen,
   probeAbsent,
+  type SectionContext,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  type SectionRun,
 } from "../contract.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -139,41 +141,6 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-// Forward-compatible key routing: every DECLARED ActionsConfig key names its
-// destination here, and the `satisfies Record<keyof ActionsConfig, ...>`
-// makes a new schema field with no routing entry a compile error (the
-// "documented but unrouted" state cannot exist). Undeclared (future) keys
-// fall through to the base permissions PUT verbatim - never silently
-// dropped.
-const KEY_DESTINATION = {
-  enabled: "base",
-  allowed_actions: "base",
-  selected_actions: "own-endpoint",
-  default_workflow_permissions: "workflow",
-  can_approve_pull_request_reviews: "workflow",
-  access_level: "own-endpoint",
-  artifact_and_log_retention: "own-endpoint",
-  cache: "own-endpoint",
-  oidc_customization_sub: "own-endpoint",
-  fork_pr_contributor_approval: "own-endpoint",
-  fork_pr_workflows_private_repos: "own-endpoint",
-} as const satisfies Record<keyof ActionsConfig, "base" | "workflow" | "own-endpoint">;
-
-function keysTo(destination: "base" | "workflow" | "own-endpoint"): Set<string> {
-  return new Set(
-    Object.entries(KEY_DESTINATION)
-      .filter(([, dest]) => dest === destination)
-      .map(([key]) => key),
-  );
-}
-
-const WORKFLOW_KEYS = keysTo("workflow");
-
-const KNOWN_PERMISSION_KEYS = keysTo("base");
-
-/** Keys with their own sub-endpoint, excluded from the base permissions PUT. */
-const ROUTED_KEYS = keysTo("own-endpoint");
-
 /**
  * The cache object's keys: each is the whole body of its own single-field
  * PUT, and `label` names it in change lines and describe prose (kept here
@@ -197,6 +164,265 @@ function sameClaimKeyOrder(declared: readonly string[], live: readonly unknown[]
   return declared.length === live.length && declared.every((key, index) => live[index] === key);
 }
 
+/**
+ * A key served by its own endpoint pair: how check diffs the declared value
+ * and how apply writes it. The routing table holds these handlers DIRECTLY,
+ * so marking a key as endpoint-routed and implementing it are the same act -
+ * a bare tag naming a destination no branch serves cannot exist. Generic
+ * over the key so the declared value stays typed; function-valued
+ * properties on purpose, not method shorthand, so the per-key value types
+ * check strictly (the environments NESTED_RECONCILERS precedent).
+ */
+interface RoutedDestination<K extends keyof ActionsConfig> {
+  /** Diff the declared value against its own GET; check mode only. */
+  check: (
+    ctx: SectionContext,
+    section: SectionModule<"actions">,
+    declared: NonNullable<ActionsConfig[K]>,
+    run: CheckRun,
+  ) => Promise<void>;
+  /** PUT the declared value and report the change; apply mode only. */
+  apply: (
+    ctx: SectionContext,
+    section: SectionModule<"actions">,
+    declared: NonNullable<ActionsConfig[K]>,
+    run: ApplyRun,
+  ) => Promise<void>;
+}
+
+/**
+ * The mode arms of SectionRun, so each table phase receives the run already
+ * narrowed to its mode: a check handler structurally cannot push a change
+ * line, and an apply handler cannot push drift.
+ */
+type CheckRun = Extract<SectionRun, { check: true }>;
+type ApplyRun = Extract<SectionRun, { check: false }>;
+
+/**
+ * The standard routed-key handling - check GETs the live object and diffs
+ * the declared body against it under `label`; apply PUTs the body and
+ * reports `applied` - for keys whose endpoint pair speaks the declared
+ * value directly. The irregular keys (selected_actions' absent-policy
+ * probe, cache's two single-field endpoints, the OIDC claim-key order)
+ * spell their own phases in the table instead.
+ */
+function endpointRouted<V = unknown>(wiring: {
+  /** The GET role in ENDPOINTS check reads. */
+  get: keyof typeof ENDPOINTS;
+  /** The PUT role in ENDPOINTS apply writes. */
+  put: keyof typeof ENDPOINTS;
+  /** The drift-line prefix ("actions.access"). */
+  label: string;
+  /** The change line apply reports after the PUT lands. */
+  applied: string;
+  /** describe prose for the PUT, where the section spells one. */
+  describe?: string;
+  /** The PUT/diff body for the declared value (default: the value itself). */
+  body?: (declared: V) => unknown;
+}): {
+  check: (
+    ctx: SectionContext,
+    section: SectionModule<"actions">,
+    declared: V,
+    run: CheckRun,
+  ) => Promise<void>;
+  apply: (
+    ctx: SectionContext,
+    section: SectionModule<"actions">,
+    declared: V,
+    run: ApplyRun,
+  ) => Promise<void>;
+} {
+  const body = wiring.body ?? ((declared: V): unknown => declared);
+  return {
+    check: async (ctx, section, declared, run) => {
+      const live = await call(ctx, section, ENDPOINTS[wiring.get]);
+      run.result.drift.push(...subsetDiff(body(declared), live, wiring.label));
+    },
+    apply: async (ctx, section, declared, run) => {
+      await call(ctx, section, ENDPOINTS[wiring.put], {
+        payload: body(declared),
+        describe: wiring.describe,
+      });
+      run.result.changes.push(wiring.applied);
+    },
+  };
+}
+
+// Forward-compatible key routing: every DECLARED ActionsConfig key names its
+// destination here - "base" and "workflow" keys merge into those two PUT
+// bodies, and a key with its own endpoint pair carries the HANDLER that
+// serves it. The mapped `satisfies` makes a new schema field with no routing
+// entry a compile error (the "documented but unrouted" state cannot exist),
+// and because the routed entry is the handler itself, "routed but unhandled"
+// cannot exist either. Undeclared (future) keys fall through to the base
+// permissions PUT verbatim - never silently dropped.
+const KEY_DESTINATION = {
+  enabled: "base",
+  allowed_actions: "base",
+  selected_actions: {
+    check: async (ctx, section, declared, run) => {
+      // This GET errors (409) when the live allowed_actions policy is not
+      // "selected"; that is drift, not a failure. The declared statuses
+      // (200, 409, 404) make 409 and 404 tolerated automatically.
+      const probe = await probeAbsent(ctx, section, ENDPOINTS.getSelected);
+      if ("missing" in probe) {
+        run.result.drift.push(
+          'actions.selected: the live allowed_actions policy is not "selected", so no selected-actions allowlist exists; apply will set the declared policy and allowlist',
+        );
+      } else {
+        run.result.drift.push(...subsetDiff(declared, probe.data, "actions.selected"));
+      }
+    },
+    apply: async (ctx, section, declared, run) => {
+      await call(ctx, section, ENDPOINTS.putSelected, { payload: declared });
+      run.result.changes.push("applied selected-actions policy");
+    },
+  },
+  default_workflow_permissions: "workflow",
+  can_approve_pull_request_reviews: "workflow",
+  access_level: endpointRouted({
+    get: "getAccess",
+    put: "putAccess",
+    label: "actions.access",
+    applied: "applied workflows access level",
+    body: (value: unknown) => ({ access_level: value }),
+  }),
+  artifact_and_log_retention: endpointRouted({
+    get: "getRetention",
+    put: "putRetention",
+    label: "actions.artifact_and_log_retention",
+    applied: "applied artifact and log retention",
+    describe: "setting the artifact and log retention window",
+  }),
+  cache: {
+    check: async (ctx, section, declared, run) => {
+      const cache = declared as Record<string, unknown>;
+      for (const [key, wiring] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
+        if (!(key in cache)) {
+          continue;
+        }
+        const live = await call(ctx, section, ENDPOINTS[wiring.get]);
+        run.result.drift.push(...subsetDiff({ [key]: cache[key] }, live, "actions.cache"));
+      }
+    },
+    apply: async (ctx, section, declared, run) => {
+      const cache = declared as Record<string, unknown>;
+      for (const [key, wiring] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
+        if (!(key in cache)) {
+          continue;
+        }
+        await call(ctx, section, ENDPOINTS[wiring.put], {
+          payload: { [key]: cache[key] },
+          describe: `setting the cache ${wiring.label} limit`,
+        });
+        run.result.changes.push(`applied cache ${wiring.label} limit`);
+      }
+    },
+  },
+  oidc_customization_sub: {
+    check: async (ctx, section, declared, run) => {
+      const live = (await call(ctx, section, ENDPOINTS.getOidcSub)) as Record<string, unknown>;
+      // The claim-key list is special-cased below; everything ELSE in the
+      // declared object (use_default today, future fields tomorrow) rides
+      // the PUT verbatim, so it must be diffed verbatim too - the expiry
+      // precedent: exclude the special field, compare the remainder.
+      const { include_claim_keys, ...comparable } = declared;
+      run.result.drift.push(...subsetDiff(comparable, live, "actions.oidc_customization_sub"));
+      // GitHub ignores include_claim_keys when use_default is true, and
+      // an OMITTED list on a custom template is itself meaningful
+      // upstream (it opts the repository into the organization template,
+      // whose keys then show up live). So the list is compared only when
+      // the file declares it - declared-keys-only, like everything else.
+      if (declared.use_default === false && include_claim_keys !== undefined) {
+        const liveKeys = Array.isArray(live.include_claim_keys) ? live.include_claim_keys : [];
+        if (!sameClaimKeyOrder(include_claim_keys, liveKeys)) {
+          run.result.drift.push(
+            `actions.oidc_customization_sub.include_claim_keys: declared ${JSON.stringify(include_claim_keys)} != live ${JSON.stringify(liveKeys)} (claim-key order defines the subject format, so order counts); apply will set the declared value`,
+          );
+        }
+      }
+    },
+    apply: async (ctx, section, declared, run) => {
+      await call(ctx, section, ENDPOINTS.putOidcSub, {
+        payload: declared,
+        describe: "customizing the OIDC subject claim",
+      });
+      run.result.changes.push("applied the OIDC subject claim template");
+    },
+  },
+  fork_pr_contributor_approval: endpointRouted({
+    get: "getForkPrApproval",
+    put: "putForkPrApproval",
+    label: "actions.fork_pr_contributor_approval",
+    applied: "applied the fork PR contributor approval policy",
+    describe: "setting the fork PR contributor approval policy",
+  }),
+  fork_pr_workflows_private_repos: endpointRouted({
+    get: "getForkPrPrivate",
+    put: "putForkPrPrivate",
+    label: "actions.fork_pr_workflows_private_repos",
+    applied: "applied the private-repo fork PR workflow settings",
+    describe: "setting the private-repo fork PR workflow settings",
+  }),
+} satisfies { [K in keyof ActionsConfig]-?: "base" | "workflow" | RoutedDestination<K> };
+
+/** The keys served by their own endpoint pair, as the table declares them. */
+type RoutedKey = {
+  [K in keyof ActionsConfig]-?: (typeof KEY_DESTINATION)[K] extends string ? never : K;
+}[keyof ActionsConfig];
+
+/**
+ * The routing table's endpoint-routed slice under per-key handler types, so
+ * the generic dispatch in runRouted() stays correlated to one literal key
+ * (the environments NESTED_RECONCILERS pattern).
+ */
+const ROUTED_DESTINATIONS: { [K in RoutedKey]: RoutedDestination<K> } = KEY_DESTINATION;
+
+/** Routed keys in table order - the order check and apply visit them. */
+const ROUTED_KEYS = (Object.keys(KEY_DESTINATION) as (keyof ActionsConfig)[]).filter(
+  (key): key is RoutedKey => typeof KEY_DESTINATION[key] !== "string",
+);
+
+/** Routed keys as plain strings, for the base/workflow body split. */
+const ROUTED_KEY_SET: ReadonlySet<string> = new Set(ROUTED_KEYS);
+
+/**
+ * Run one routed key's phase for the run's mode; generic so the handler and
+ * the declared value stay correlated to the same literal key. A key the
+ * file does not declare is skipped.
+ */
+async function runRouted<K extends RoutedKey>(
+  key: K,
+  ctx: SectionContext,
+  section: SectionModule<"actions">,
+  desired: ActionsConfig,
+  run: SectionRun,
+): Promise<void> {
+  const declared = desired[key];
+  if (declared === undefined) {
+    return;
+  }
+  const destination = ROUTED_DESTINATIONS[key];
+  if (run.check) {
+    await destination.check(ctx, section, declared, run);
+  } else {
+    await destination.apply(ctx, section, declared, run);
+  }
+}
+
+function keysTo(destination: "base" | "workflow"): Set<string> {
+  return new Set(
+    Object.entries(KEY_DESTINATION)
+      .filter(([, dest]) => dest === destination)
+      .map(([key]) => key),
+  );
+}
+
+const WORKFLOW_KEYS = keysTo("workflow");
+
+const KNOWN_PERMISSION_KEYS = keysTo("base");
+
 export const actionsSection = {
   key: "actions",
   undeclaredDefault: "untouched",
@@ -209,7 +435,7 @@ export const actionsSection = {
     const permissions: Record<string, unknown> = {};
     const workflow: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(desired as Record<string, unknown>)) {
-      if (ROUTED_KEYS.has(key)) {
+      if (ROUTED_KEY_SET.has(key)) {
         continue;
       }
       if (WORKFLOW_KEYS.has(key)) {
@@ -256,154 +482,28 @@ export const actionsSection = {
       );
     }
 
-    if (run.check) {
-      if (Object.keys(permissions).length > 0) {
+    if (Object.keys(permissions).length > 0) {
+      if (run.check) {
         const live = await call(ctx, this, ENDPOINTS.getPermissions);
         run.result.drift.push(...subsetDiff(permissions, live, "actions.permissions"));
+      } else {
+        await call(ctx, this, ENDPOINTS.putPermissions, { payload: permissions });
+        run.result.changes.push("applied actions permissions");
       }
-      if (desired.selected_actions !== undefined) {
-        // This GET errors (409) when the live allowed_actions policy is not
-        // "selected"; that is drift, not a failure. The declared statuses
-        // (200, 409, 404) make 409 and 404 tolerated automatically.
-        const probe = await probeAbsent(ctx, this, ENDPOINTS.getSelected);
-        if ("missing" in probe) {
-          run.result.drift.push(
-            'actions.selected: the live allowed_actions policy is not "selected", so no selected-actions allowlist exists; apply will set the declared policy and allowlist',
-          );
-        } else {
-          run.result.drift.push(
-            ...subsetDiff(desired.selected_actions, probe.data, "actions.selected"),
-          );
-        }
-      }
-      if (Object.keys(workflow).length > 0) {
-        const live = await call(ctx, this, ENDPOINTS.getWorkflow);
-        run.result.drift.push(...subsetDiff(workflow, live, "actions.workflow"));
-      }
-      if (desired.access_level !== undefined) {
-        const live = await call(ctx, this, ENDPOINTS.getAccess);
-        run.result.drift.push(
-          ...subsetDiff({ access_level: desired.access_level }, live, "actions.access"),
-        );
-      }
-      if (desired.artifact_and_log_retention !== undefined) {
-        const live = await call(ctx, this, ENDPOINTS.getRetention);
-        run.result.drift.push(
-          ...subsetDiff(
-            desired.artifact_and_log_retention,
-            live,
-            "actions.artifact_and_log_retention",
-          ),
-        );
-      }
-      for (const [key, roles] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
-        if (!(key in cache)) {
-          continue;
-        }
-        const live = await call(ctx, this, ENDPOINTS[roles.get]);
-        run.result.drift.push(...subsetDiff({ [key]: cache[key] }, live, "actions.cache"));
-      }
-      if (desired.oidc_customization_sub !== undefined) {
-        const declared = desired.oidc_customization_sub;
-        const live = (await call(ctx, this, ENDPOINTS.getOidcSub)) as Record<string, unknown>;
-        // The claim-key list is special-cased below; everything ELSE in the
-        // declared object (use_default today, future fields tomorrow) rides
-        // the PUT verbatim, so it must be diffed verbatim too - the expiry
-        // precedent: exclude the special field, compare the remainder.
-        const { include_claim_keys, ...comparable } = declared;
-        run.result.drift.push(...subsetDiff(comparable, live, "actions.oidc_customization_sub"));
-        // GitHub ignores include_claim_keys when use_default is true, and
-        // an OMITTED list on a custom template is itself meaningful
-        // upstream (it opts the repository into the organization template,
-        // whose keys then show up live). So the list is compared only when
-        // the file declares it - declared-keys-only, like everything else.
-        if (declared.use_default === false && include_claim_keys !== undefined) {
-          const liveKeys = Array.isArray(live.include_claim_keys) ? live.include_claim_keys : [];
-          if (!sameClaimKeyOrder(include_claim_keys, liveKeys)) {
-            run.result.drift.push(
-              `actions.oidc_customization_sub.include_claim_keys: declared ${JSON.stringify(include_claim_keys)} != live ${JSON.stringify(liveKeys)} (claim-key order defines the subject format, so order counts); apply will set the declared value`,
-            );
-          }
-        }
-      }
-      if (desired.fork_pr_contributor_approval !== undefined) {
-        const live = await call(ctx, this, ENDPOINTS.getForkPrApproval);
-        run.result.drift.push(
-          ...subsetDiff(
-            desired.fork_pr_contributor_approval,
-            live,
-            "actions.fork_pr_contributor_approval",
-          ),
-        );
-      }
-      if (desired.fork_pr_workflows_private_repos !== undefined) {
-        const live = await call(ctx, this, ENDPOINTS.getForkPrPrivate);
-        run.result.drift.push(
-          ...subsetDiff(
-            desired.fork_pr_workflows_private_repos,
-            live,
-            "actions.fork_pr_workflows_private_repos",
-          ),
-        );
-      }
-      return run.result;
-    }
-
-    if (Object.keys(permissions).length > 0) {
-      await call(ctx, this, ENDPOINTS.putPermissions, { payload: permissions });
-      run.result.changes.push("applied actions permissions");
-    }
-    if (desired.selected_actions !== undefined) {
-      await call(ctx, this, ENDPOINTS.putSelected, { payload: desired.selected_actions });
-      run.result.changes.push("applied selected-actions policy");
     }
     if (Object.keys(workflow).length > 0) {
-      await call(ctx, this, ENDPOINTS.putWorkflow, { payload: workflow });
-      run.result.changes.push("applied workflow token permissions");
-    }
-    if (desired.access_level !== undefined) {
-      await call(ctx, this, ENDPOINTS.putAccess, {
-        payload: { access_level: desired.access_level },
-      });
-      run.result.changes.push("applied workflows access level");
-    }
-    if (desired.artifact_and_log_retention !== undefined) {
-      await call(ctx, this, ENDPOINTS.putRetention, {
-        payload: desired.artifact_and_log_retention,
-        describe: "setting the artifact and log retention window",
-      });
-      run.result.changes.push("applied artifact and log retention");
-    }
-    for (const [key, roles] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
-      if (!(key in cache)) {
-        continue;
+      if (run.check) {
+        const live = await call(ctx, this, ENDPOINTS.getWorkflow);
+        run.result.drift.push(...subsetDiff(workflow, live, "actions.workflow"));
+      } else {
+        await call(ctx, this, ENDPOINTS.putWorkflow, { payload: workflow });
+        run.result.changes.push("applied workflow token permissions");
       }
-      await call(ctx, this, ENDPOINTS[roles.put], {
-        payload: { [key]: cache[key] },
-        describe: `setting the cache ${roles.label} limit`,
-      });
-      run.result.changes.push(`applied cache ${roles.label} limit`);
     }
-    if (desired.oidc_customization_sub !== undefined) {
-      await call(ctx, this, ENDPOINTS.putOidcSub, {
-        payload: desired.oidc_customization_sub,
-        describe: "customizing the OIDC subject claim",
-      });
-      run.result.changes.push("applied the OIDC subject claim template");
-    }
-    if (desired.fork_pr_contributor_approval !== undefined) {
-      await call(ctx, this, ENDPOINTS.putForkPrApproval, {
-        payload: desired.fork_pr_contributor_approval,
-        describe: "setting the fork PR contributor approval policy",
-      });
-      run.result.changes.push("applied the fork PR contributor approval policy");
-    }
-    if (desired.fork_pr_workflows_private_repos !== undefined) {
-      await call(ctx, this, ENDPOINTS.putForkPrPrivate, {
-        payload: desired.fork_pr_workflows_private_repos,
-        describe: "setting the private-repo fork PR workflow settings",
-      });
-      run.result.changes.push("applied the private-repo fork PR workflow settings");
+    // Every key with its own endpoint pair runs through its table handler,
+    // in table order.
+    for (const key of ROUTED_KEYS) {
+      await runRouted(key, ctx, this, desired, run);
     }
     return run.result;
   },

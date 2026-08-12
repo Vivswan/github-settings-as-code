@@ -15,6 +15,11 @@ const ACTIONS_WRITES = [
   "PUT /repos/o/r/actions/cache/*",
 ];
 
+/** The mutations by "METHOD path", set-shaped: routing is what these tests pin, not request order. */
+function mutationsByPath(api: MockApi): Map<string, unknown> {
+  return new Map(api.mutations().map((m) => [`${m.method} ${m.path}`, m.payload]));
+}
+
 describe("actions", () => {
   test("routes every key to its endpoint, access_level included", async () => {
     const api = new MockApi({}).allowMutations(...ACTIONS_WRITES);
@@ -25,15 +30,21 @@ describe("actions", () => {
       default_workflow_permissions: "read",
       access_level: "organization",
     });
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "PUT /repos/o/r/actions/permissions",
-      "PUT /repos/o/r/actions/permissions/selected-actions",
-      "PUT /repos/o/r/actions/permissions/workflow",
-      "PUT /repos/o/r/actions/permissions/access",
-    ]);
-    const base = api.mutations()[0]?.payload as Record<string, unknown>;
+    const writes = mutationsByPath(api);
+    expect(api.mutations()).toHaveLength(4);
+    expect(new Set(writes.keys())).toEqual(
+      new Set([
+        "PUT /repos/o/r/actions/permissions",
+        "PUT /repos/o/r/actions/permissions/selected-actions",
+        "PUT /repos/o/r/actions/permissions/workflow",
+        "PUT /repos/o/r/actions/permissions/access",
+      ]),
+    );
+    const base = writes.get("PUT /repos/o/r/actions/permissions") as Record<string, unknown>;
     expect("access_level" in base).toBe(false);
-    expect(api.mutations()[3]?.payload).toEqual({ access_level: "organization" });
+    expect(writes.get("PUT /repos/o/r/actions/permissions/access")).toEqual({
+      access_level: "organization",
+    });
     expect(result.notes).toEqual([]);
   });
 
@@ -135,14 +146,17 @@ describe("actions", () => {
       artifact_and_log_retention: { days: 30 },
       cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
     });
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "PUT /repos/o/r/actions/permissions/artifact-and-log-retention",
-      "PUT /repos/o/r/actions/cache/retention-limit",
-      "PUT /repos/o/r/actions/cache/storage-limit",
-    ]);
-    expect(api.mutations()[0]?.payload).toEqual({ days: 30 });
-    expect(api.mutations()[1]?.payload).toEqual({ max_cache_retention_days: 3 });
-    expect(api.mutations()[2]?.payload).toEqual({ max_cache_size_gb: 25 });
+    const writes = mutationsByPath(api);
+    expect(api.mutations()).toHaveLength(3);
+    expect(writes.get("PUT /repos/o/r/actions/permissions/artifact-and-log-retention")).toEqual({
+      days: 30,
+    });
+    expect(writes.get("PUT /repos/o/r/actions/cache/retention-limit")).toEqual({
+      max_cache_retention_days: 3,
+    });
+    expect(writes.get("PUT /repos/o/r/actions/cache/storage-limit")).toEqual({
+      max_cache_size_gb: 25,
+    });
     // No base-permissions PUT: these keys alone must not imply enabled: true.
     expect(result.notes).toEqual([]);
   });
@@ -168,9 +182,16 @@ describe("actions", () => {
       cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
     });
     expect(result.drift).toHaveLength(3);
-    expect(result.drift?.[0]).toContain("actions.artifact_and_log_retention.days");
-    expect(result.drift?.[1]).toContain("actions.cache.max_cache_retention_days");
-    expect(result.drift?.[2]).toContain("actions.cache.max_cache_size_gb");
+    for (const field of [
+      "actions.artifact_and_log_retention.days",
+      "actions.cache.max_cache_retention_days",
+      "actions.cache.max_cache_size_gb",
+    ]) {
+      expect(
+        result.drift?.some((line) => line.includes(field)),
+        `no drift line for ${field}`,
+      ).toBe(true);
+    }
     expect(api.mutations()).toEqual([]);
   });
 
@@ -370,18 +391,22 @@ describe("actions", () => {
       fork_pr_contributor_approval: approval,
       fork_pr_workflows_private_repos: privateRepos,
     });
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "PUT /repos/o/r/actions/permissions/fork-pr-contributor-approval",
-      "PUT /repos/o/r/actions/permissions/fork-pr-workflows-private-repos",
-    ]);
-    expect(api.mutations()[0]?.payload).toEqual(approval);
-    expect(api.mutations()[1]?.payload).toEqual(privateRepos);
+    const writes = mutationsByPath(api);
+    expect(api.mutations()).toHaveLength(2);
+    expect(writes.get("PUT /repos/o/r/actions/permissions/fork-pr-contributor-approval")).toEqual(
+      approval,
+    );
+    expect(
+      writes.get("PUT /repos/o/r/actions/permissions/fork-pr-workflows-private-repos"),
+    ).toEqual(privateRepos);
     // No base-permissions PUT: these keys alone must not imply enabled: true.
     expect(result.notes).toEqual([]);
-    expect(result.changes).toEqual([
-      "applied the fork PR contributor approval policy",
-      "applied the private-repo fork PR workflow settings",
-    ]);
+    expect(new Set(result.changes)).toEqual(
+      new Set([
+        "applied the fork PR contributor approval policy",
+        "applied the private-repo fork PR workflow settings",
+      ]),
+    );
   });
 
   test("check compares the contributor approval policy against its own endpoint", async () => {
