@@ -20,8 +20,8 @@
  *   included - ever appears in a drift, note, or change line.
  * - Apply re-seals and re-writes every declared secret on every run, so a
  *   rotated source value propagates without any diff. The sealed-write path
- *   resolves each entry's `$NAME` reference through ctx.resolveSecret, which
- *   the apply arm of SectionContext carries by construction; the engine
+ *   resolves each entry's `$NAME` reference through the run's apply-arm
+ *   resolver, which SectionRun carries by construction; the engine
  *   resolved and masked every reference before any section ran (see
  *   engine/secrets.ts).
  * - Sealing is a libsodium sealed box against the scope's public key; the
@@ -36,11 +36,10 @@ import sodium from "libsodium-wrappers";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../schema.js";
 import {
   type DeclaredSecretValue,
-  emptyResult,
   rejectDuplicates,
   type SectionContext,
   type SectionMeta,
-  type SectionResult,
+  type SectionRun,
   undeclaredPolicy,
 } from "./contract.js";
 
@@ -240,32 +239,34 @@ function parsePublicKey(
 }
 
 /**
- * Reconcile one secret scope. Existence is the only comparable state (values
- * cannot be read back), so:
+ * Reconcile one secret scope into the caller's run. Existence is the only
+ * comparable state (values cannot be read back), so:
  * - check: a declared-but-missing name is drift; declared values earn ONE
  *   cannot-verify note; an undeclared live secret is a keep-note or (under
  *   the delete policy) deletion drift. Nothing here reads a value.
  * - apply: seal and PUT every declared secret (201 create / 204 update both
  *   land as normal outcomes; created-vs-updated is decided by the listing),
  *   then handle undeclared ones per the policy. Every entry's plaintext is
- *   resolved through ctx.resolveSecret (which the apply arm of
- *   SectionContext carries by construction) UP FRONT, before this scope's
+ *   resolved through the run's apply-arm resolver (which exists by
+ *   construction) UP FRONT, before this scope's
  *   first request, so a resolution failure writes nothing. The ENGINE
  *   validated every reference for syntax and provenance in both modes and,
  *   in apply mode, resolved and masked every plaintext before any section
  *   ran. Resolution is inherently keyed to THIS call's entries, so one
  *   scope can never seal another scope's same-named secret.
+ * Lines land directly on `run.result` - the caller's own accumulator - so a
+ * nested scope (environment secrets) needs no result merging, and this
+ * engine can never pair a check context with an apply result.
  */
 export async function reconcileSecrets(
-  ctx: SectionContext,
+  run: SectionRun,
   section: SectionMeta,
   scope: SecretsScope,
   opts: {
     entries: readonly SecretEntry[];
     policy: UndeclaredPolicy;
   },
-): Promise<SectionResult> {
-  const result = emptyResult();
+): Promise<void> {
   const { entries, policy } = opts;
   const home = scope.home ?? "the repo";
   const suffix = scope.changeSuffix ?? "";
@@ -275,11 +276,11 @@ export async function reconcileSecrets(
   // scope with zero writes. Each plaintext travels WITH its entry, so no
   // name-keyed lookup exists to miss.
   const resolvedEntries =
-    !ctx.check && entries.length > 0
-      ? entries.map((entry) => ({ entry, plaintext: ctx.resolveSecret(entry.value) }))
+    !run.check && entries.length > 0
+      ? entries.map((entry) => ({ entry, plaintext: run.ctx.resolveSecret(entry.value) }))
       : [];
 
-  const live = (await scope.ops.list(ctx, section)) as Array<{ name?: unknown }>;
+  const live = (await scope.ops.list(run.ctx, section)) as Array<{ name?: unknown }>;
   // Uppercase key -> the name as the API listed it (already uppercase on real
   // GitHub; normalizing keeps a differently-cased mock or proxy harmless).
   const liveByKey = new Map<string, string>();
@@ -289,10 +290,10 @@ export async function reconcileSecrets(
   }
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
 
-  if (ctx.check) {
+  if (run.check) {
     for (const entry of entries) {
       if (!liveByKey.has(secretKey(entry.name))) {
-        result.drift.push(
+        run.result.drift.push(
           `${scope.label}[${secretKey(entry.name)}]: missing - declared in the settings file but not on ${home}; apply will create it`,
         );
       }
@@ -300,7 +301,7 @@ export async function reconcileSecrets(
     if (entries.length > 0) {
       // ONE note for the whole section (the LFS precedent): the value side is
       // unverifiable by design, and saying it per entry would be noise.
-      result.notes.push(
+      run.result.notes.push(
         `${scope.noun} values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run`,
       );
     }
@@ -309,7 +310,7 @@ export async function reconcileSecrets(
     // libsodium synchronously.
     await readySodium();
     const keyData = await scope.ops.publicKey(
-      ctx,
+      run.ctx,
       section,
       `reading the ${scope.label} sealing key`,
     );
@@ -318,7 +319,7 @@ export async function reconcileSecrets(
       const name = secretKey(entry.name);
       const encryptedValue = await sealSecretValue(plaintext, key);
       await scope.ops.put(
-        ctx,
+        run.ctx,
         section,
         name,
         { encrypted_value: encryptedValue, key_id: keyId },
@@ -326,7 +327,7 @@ export async function reconcileSecrets(
       );
       // Existence from the listing decides the verb; the PUT's own 201/204
       // says the same thing but call() deliberately does not surface statuses.
-      result.changes.push(
+      run.result.changes.push(
         liveByKey.has(name)
           ? `updated secret "${name}"${suffix}`
           : `created secret "${name}"${suffix}`,
@@ -339,22 +340,21 @@ export async function reconcileSecrets(
       continue;
     }
     if (policy === "keep") {
-      result.notes.push(
+      run.result.notes.push(
         `${scope.noun} "${liveName}" exists on ${home} but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it (a deleted secret's value is unrecoverable)`,
       );
-    } else if (ctx.check) {
-      result.drift.push(
+    } else if (run.check) {
+      run.result.drift.push(
         `${scope.label}[${liveName}]: undeclared - not in the settings file, so apply will DELETE it (the value is unrecoverable); add it to the settings file to keep it`,
       );
     } else {
       await scope.ops.remove(
-        ctx,
+        run.ctx,
         section,
         liveName,
         `deleting undeclared secret "${liveName}"${suffix}`,
       );
-      result.changes.push(`DELETED undeclared secret "${liveName}"${suffix}`);
+      run.result.changes.push(`DELETED undeclared secret "${liveName}"${suffix}`);
     }
   }
-  return result;
 }

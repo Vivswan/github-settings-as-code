@@ -38,23 +38,72 @@ interface SectionContextBase {
  *   no secret values the resolver still exists, closed over an empty map,
  *   and any lookup fails with the engine's BUG error - a call it can never
  *   legitimately receive.
- * Handlers narrow on `ctx.check`, so the apply branch gets the resolver
- * structurally instead of re-checking for it at runtime.
+ * Handlers narrow on the SectionRun built from this context (beginRun), so
+ * the apply branch gets the resolver structurally instead of re-checking
+ * for it at runtime.
  */
 export type SectionContext =
   | (SectionContextBase & { check: true; resolveSecret?: never })
   | (SectionContextBase & { check: false; resolveSecret: (reference: string) => string });
 
+/** The check-mode arm of SectionContext, the ApplySectionContext sibling. */
+type CheckSectionContext = Extract<SectionContext, { check: true }>;
+
 /** The apply-mode arm of SectionContext, for helpers only apply may call. */
 export type ApplySectionContext = Extract<SectionContext, { check: false }>;
 
-export interface SectionResult {
-  /** Mutations performed (apply mode) or that WOULD be performed. */
-  changes: string[];
-  /** Drift lines (check mode). */
+/**
+ * What check mode may report: drift and notes. `changes?: never` makes a
+ * change line in check mode unrepresentable - the arm has no list to push
+ * one onto - instead of merely ignored by the engine.
+ */
+interface CheckResult {
+  /** Mirrors SectionContext.check; beginRun() copies it at construction. */
+  readonly check: true;
+  /** Drift lines: live state diverging from the settings file. */
   drift: string[];
   /** Informational notes (unmanaged resources left alone, skips). */
   notes: string[];
+  changes?: never;
+}
+
+/** What apply mode may report: mutations performed, and notes. */
+interface ApplyResult {
+  readonly check: false;
+  /** Mutations performed, one line each. */
+  changes: string[];
+  /** Informational notes (unmanaged resources left alone, skips). */
+  notes: string[];
+  drift?: never;
+}
+
+/**
+ * A section's outcome, discriminated on the same `check` flag as the
+ * context that produced it. The engine narrows on `result.check`, so the
+ * check branch structurally cannot read changes and the apply branch
+ * cannot read drift.
+ */
+export type SectionResult = CheckResult | ApplyResult;
+
+/**
+ * A handler's mode-correlated working state: the context arm and the result
+ * arm, paired under ONE discriminant so narrowing `run.check` narrows both
+ * together - the check branch gets `run.result.drift`, the apply branch gets
+ * `run.result.changes` AND `run.ctx.resolveSecret`, and a mixed pairing (a
+ * check context with an apply result) is unrepresentable. beginRun() is the
+ * only constructor, so `result.check` always mirrors the mode the handler
+ * actually ran under; mode-neutral facts (`notes`, the request helpers'
+ * `ctx` argument) read fine off the unnarrowed union.
+ */
+export type SectionRun =
+  | { readonly check: true; readonly ctx: CheckSectionContext; readonly result: CheckResult }
+  | { readonly check: false; readonly ctx: ApplySectionContext; readonly result: ApplyResult };
+
+/** Open a section run: pair the context with the empty result of its mode. */
+export function beginRun(ctx: SectionContext): SectionRun {
+  return ctx.check
+    ? { check: true, ctx, result: { check: true, drift: [], notes: [] } }
+    : { check: false, ctx, result: { check: false, changes: [], notes: [] } };
 }
 
 /** A section's REST endpoint dictionary: role -> declaration. */
@@ -554,8 +603,4 @@ export function defaultUndeclaredPolicy(
   section: SectionMeta<UndeclaredPolicySection>,
 ): UndeclaredPolicy {
   return section.undeclaredDefault;
-}
-
-export function emptyResult(): SectionResult {
-  return { changes: [], drift: [], notes: [] };
 }

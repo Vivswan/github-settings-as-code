@@ -6,9 +6,9 @@
 import { subsetDiff } from "../../engine/diff.js";
 import { SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   type EndpointDecl,
-  emptyResult,
   loosen,
   probeAbsent,
   type SectionModule,
@@ -40,7 +40,7 @@ export const pagesSection = {
   // shape must catch source: null or a source without a branch.
   shape: loosen(SettingsFile.shape.pages),
   async run(ctx, desired): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const probe = await probeAbsent(ctx, this, ENDPOINTS.get);
     const exists = !("missing" in probe);
     const liveSite = "data" in probe ? probe.data : undefined;
@@ -52,26 +52,26 @@ export const pagesSection = {
         // without the Pages permission (which also answers 404). The
         // non-null path stays loud either way (the POST would fail); this
         // no-op path must say so instead of silently succeeding.
-        result.notes.push(
+        run.result.notes.push(
           "pages: declared null and GitHub reports no Pages site, so there is nothing to disable. A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write",
         );
-        return result;
+        return run.result;
       }
-      if (ctx.check) {
-        result.drift.push(
+      if (run.check) {
+        run.result.drift.push(
           "pages: enabled live but the settings file declares pages: null; apply will disable GitHub Pages",
         );
-        return result;
+        return run.result;
       }
       await call(ctx, this, ENDPOINTS.remove);
-      result.changes.push("disabled GitHub Pages");
-      return result;
+      run.result.changes.push("disabled GitHub Pages");
+      return run.result;
     }
     if (Object.keys(desired).length === 0) {
-      result.notes.push(
+      run.result.notes.push(
         "pages: declared as an empty mapping, which configures nothing (the update endpoint rejects an empty body). Declare at least one field, use pages: null to disable the site, or remove the section",
       );
-      return result;
+      return run.result;
     }
     // The update PUT requires path alongside branch when source is sent;
     // the create POST defaults it, so default it everywhere.
@@ -80,21 +80,21 @@ export const pagesSection = {
       payload.source = { ...desired.source, path: "/" };
     }
 
-    if (ctx.check) {
+    if (run.check) {
       if (!exists) {
-        result.drift.push(
+        run.result.drift.push(
           "pages: declared in the settings file but GitHub Pages is not enabled on the repo; apply will enable it",
         );
       } else {
-        result.drift.push(...subsetDiff(payload, liveSite, "pages"));
+        run.result.drift.push(...subsetDiff(payload, liveSite, "pages"));
       }
-      return result;
+      return run.result;
     }
 
     if (exists) {
       await call(ctx, this, ENDPOINTS.update, { payload });
-      result.changes.push("updated GitHub Pages configuration");
-      return result;
+      run.result.changes.push("updated GitHub Pages configuration");
+      return run.result;
     }
     // The create endpoint accepts only build_type/source; cname and the
     // rest are update-only, so create first, then PUT the remainder.
@@ -106,12 +106,12 @@ export const pagesSection = {
       create.source = payload.source;
     }
     await call(ctx, this, ENDPOINTS.create, { payload: create });
-    result.changes.push("enabled GitHub Pages");
+    run.result.changes.push("enabled GitHub Pages");
     const rest = Object.keys(payload).filter((k) => !(k in create));
     if (rest.length > 0) {
       await call(ctx, this, ENDPOINTS.update, { payload });
-      result.changes.push("applied remaining Pages configuration");
+      run.result.changes.push("applied remaining Pages configuration");
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"pages">;

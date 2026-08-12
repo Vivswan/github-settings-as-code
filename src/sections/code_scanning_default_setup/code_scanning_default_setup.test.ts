@@ -18,7 +18,7 @@ describe("code_scanning_default_setup", () => {
       query_suite: "extended",
     });
     expect(drifted.drift).toHaveLength(1);
-    expect(drifted.drift[0]).toContain("query_suite");
+    expect(drifted.drift?.[0]).toContain("query_suite");
     const reordered = await codeScanningDefaultSetupSection.run(ctx(api, true), {
       languages: ["python", "javascript-typescript"],
     });
@@ -48,7 +48,7 @@ describe("code_scanning_default_setup", () => {
     });
     const result = await codeScanningDefaultSetupSection.run(ctx(api), { state: "configured" });
     expect(result.changes).toHaveLength(1);
-    expect(result.changes[0]).toContain("configuration run 42");
+    expect(result.changes?.[0]).toContain("configuration run 42");
   });
 
   test("409 gets wait-and-retry advice; 403 mentions Advanced Security", async () => {

@@ -8,10 +8,10 @@
 
 import { type CustomPropertyConfig, type MustBeNever, SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
-  emptyResult,
   loosen,
   probeAbsent,
   rejectDuplicates,
@@ -148,7 +148,7 @@ export const customPropertiesSection = {
       "the key would silently never reach GitHub and the misdeclared property would keep its live value",
   },
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // Exact-name matching: GitHub does not document case folding for custom
     // property names, so two declarations are duplicates only when they match
@@ -192,10 +192,10 @@ export const customPropertiesSection = {
       params: { org: ctx.repo.owner },
     });
     if ("missing" in orgProbe) {
-      result.notes.push(
+      run.result.notes.push(
         `custom_properties: owner "${ctx.repo.owner}" is a personal account, and custom properties require an organization-owned repository; section skipped - remove the custom_properties section from the settings file to silence this note`,
       );
-      return result;
+      return run.result;
     }
     // The values list endpoint is not paginated; a single GET returns every
     // property, and sending page params would not advance anything.
@@ -213,13 +213,13 @@ export const customPropertiesSection = {
       if (sameValue(wanted, current)) {
         continue;
       }
-      if (ctx.check) {
+      if (run.check) {
         if (wanted === null) {
-          result.drift.push(
+          run.result.drift.push(
             `custom_properties[${property.property_name}]: declared null but the live value is ${show(current)}; apply will unset it (reverting to the org default, if any)`,
           );
         } else {
-          result.drift.push(
+          run.result.drift.push(
             `custom_properties[${property.property_name}]: declared ${show(wanted)} != live ${show(current)}; apply will set the declared value`,
           );
         }
@@ -233,11 +233,11 @@ export const customPropertiesSection = {
         continue;
       }
       if (policy === "keep") {
-        result.notes.push(
+        run.result.notes.push(
           `custom property "${property.property_name}" is set on the repo but not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply UNSET it`,
         );
-      } else if (ctx.check) {
-        result.drift.push(
+      } else if (run.check) {
+        run.result.drift.push(
           `custom_properties[${property.property_name}]: undeclared - not in the settings file, so apply will unset it (reverting to the org default, if any); add it to the settings file to keep it`,
         );
       } else {
@@ -248,23 +248,23 @@ export const customPropertiesSection = {
     // One bulk PATCH carries every divergent property; nothing diverging
     // means no write at all (compare-before-write). Change lines land only
     // after the write succeeded.
-    if (!ctx.check && updates.length > 0) {
+    if (!run.check && updates.length > 0) {
       await call(ctx, this, ENDPOINTS.update, {
         payload: { properties: updates },
         describe: "updating custom property values",
       });
       for (const update of updates) {
         if (!declaredKeys.has(update.property_name)) {
-          result.changes.push(`unset undeclared custom property "${update.property_name}"`);
+          run.result.changes.push(`unset undeclared custom property "${update.property_name}"`);
         } else if (update.value === null) {
-          result.changes.push(`unset custom property "${update.property_name}"`);
+          run.result.changes.push(`unset custom property "${update.property_name}"`);
         } else {
-          result.changes.push(
+          run.result.changes.push(
             `set custom property "${update.property_name}" to ${show(update.value)}`,
           );
         }
       }
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"custom_properties">;

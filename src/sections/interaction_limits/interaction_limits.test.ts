@@ -22,7 +22,7 @@ describe("interaction_limits", () => {
       limit: "contributors_only",
     });
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("no live limit");
+    expect(result.drift?.[0]).toContain("no live limit");
     expect(api.mutations()).toEqual([]);
   });
 
@@ -33,8 +33,8 @@ describe("interaction_limits", () => {
       expiry: "one_week",
     });
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("interaction_limits.limit");
-    expect(result.drift.join(" ")).not.toContain("expiry");
+    expect(result.drift?.[0]).toContain("interaction_limits.limit");
+    expect(result.drift?.join(" ")).not.toContain("expiry");
     // The declared expiry produces the cannot-verify note instead.
     expect(result.notes.some((n) => n.includes("expiry"))).toBe(true);
   });
@@ -62,7 +62,7 @@ describe("interaction_limits", () => {
       limit: "collaborators_only",
     });
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("interaction_limits.limit");
+    expect(result.drift?.[0]).toContain("interaction_limits.limit");
     expect(result.notes.some((n) => n.includes("apply cannot change it"))).toBe(true);
   });
 
@@ -70,7 +70,7 @@ describe("interaction_limits", () => {
     const api = new MockApi({ [GET]: { data: { ...LIVE, origin: "organization" } } });
     const result = await interactionLimitsSection.run(ctx(api, true), null);
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("apply cannot remove it");
+    expect(result.drift?.[0]).toContain("apply cannot remove it");
   });
 
   test("declared null: clean when live is empty, drift when a repo limit is live", async () => {
@@ -82,7 +82,7 @@ describe("interaction_limits", () => {
     const api = new MockApi({ [GET]: { data: LIVE } });
     const drifted = await interactionLimitsSection.run(ctx(api, true), null);
     expect(drifted.drift).toHaveLength(1);
-    expect(drifted.drift[0]).toContain("apply will remove it");
+    expect(drifted.drift?.[0]).toContain("apply will remove it");
     expect(api.mutations()).toEqual([]);
   });
 
@@ -151,9 +151,9 @@ describe("interaction_limits pull request creation cap", () => {
     const result = await interactionLimitsSection.run(ctx(api, true), {
       pull_request_creation_cap: { enabled: true, max_open_pull_requests: 5 },
     });
-    expect(result.drift.some((d) => d.includes("pull_request_creation_cap.enabled"))).toBe(true);
+    expect(result.drift?.some((d) => d.includes("pull_request_creation_cap.enabled"))).toBe(true);
     expect(
-      result.drift.some((d) => d.includes("pull_request_creation_cap.max_open_pull_requests")),
+      result.drift?.some((d) => d.includes("pull_request_creation_cap.max_open_pull_requests")),
     ).toBe(true);
     // No base key is declared, so the base-limit GET never runs.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([CAP_GET]);
@@ -165,7 +165,7 @@ describe("interaction_limits pull request creation cap", () => {
       pull_request_creation_cap: { enabled: true },
     });
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("not available on this repository");
+    expect(result.drift?.[0]).toContain("not available on this repository");
     expect(api.mutations()).toEqual([]);
   });
 
@@ -237,8 +237,8 @@ describe("interaction_limits pull request creation bypass list", () => {
       pull_request_creation_bypass: ["Keeper", "newcomer"],
     });
     expect(result.drift).toHaveLength(2);
-    expect(result.drift[0]).toContain("[goner]");
-    expect(result.drift[1]).toContain("[newcomer]");
+    expect(result.drift?.[0]).toContain("[goner]");
+    expect(result.drift?.[1]).toContain("[newcomer]");
     expect(api.mutations()).toEqual([]);
   });
 

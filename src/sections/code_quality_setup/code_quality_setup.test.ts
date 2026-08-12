@@ -18,7 +18,7 @@ describe("code_quality_setup", () => {
       ai_findings_option: "on_push",
     });
     expect(drifted.drift).toHaveLength(1);
-    expect(drifted.drift[0]).toContain("ai_findings_option");
+    expect(drifted.drift?.[0]).toContain("ai_findings_option");
     const reordered = await codeQualitySetupSection.run(ctx(api, true), {
       languages: ["python", "javascript-typescript"],
     });
@@ -48,7 +48,7 @@ describe("code_quality_setup", () => {
     });
     const result = await codeQualitySetupSection.run(ctx(api), { state: "configured" });
     expect(result.changes).toHaveLength(1);
-    expect(result.changes[0]).toContain("configuration run 42");
+    expect(result.changes?.[0]).toContain("configuration run 42");
   });
 
   test("409 gets wait-and-retry advice; 403 mentions code quality availability", async () => {

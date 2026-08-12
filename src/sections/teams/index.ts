@@ -5,9 +5,9 @@
 
 import { type MustBeNever, SettingsFile, type TeamConfig } from "../../schema.js";
 import {
+  beginRun,
   call,
   type EndpointDecl,
-  emptyResult,
   loosen,
   probeAbsent,
   rejectDuplicates,
@@ -58,7 +58,7 @@ export const teamsSection = {
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
   async run(ctx, desired): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     rejectDuplicates(
       this,
       desired,
@@ -72,20 +72,20 @@ export const teamsSection = {
       params: { org: ctx.repo.owner },
     });
     if ("missing" in orgProbe) {
-      result.notes.push(
+      run.result.notes.push(
         `teams: owner "${ctx.repo.owner}" is a personal account, not an organization, so team access does not apply; section skipped - remove the teams section from the settings file to silence this note`,
       );
-      return result;
+      return run.result;
     }
     for (const team of desired) {
       const role = team.permission ?? DEFAULT_ROLE;
-      if (!ctx.check) {
+      if (!run.check) {
         await call(ctx, this, ENDPOINTS.grant, {
           params: { org: ctx.repo.owner, team_slug: team.name },
           payload: { permission: role },
           describe: `granting team "${team.name}" access`,
         });
-        result.changes.push(`granted team "${team.name}" ${role}`);
+        run.result.changes.push(`granted team "${team.name}" ${role}`);
         continue;
       }
       // The repository media type makes this endpoint return the repo
@@ -95,7 +95,7 @@ export const teamsSection = {
         accept: "application/vnd.github.v3.repository+json",
       });
       if ("missing" in probe) {
-        result.drift.push(
+        run.result.drift.push(
           `teams[${team.name}]: no access to ${ctx.repo.slug}; apply will grant "${role}"`,
         );
         continue;
@@ -103,11 +103,11 @@ export const teamsSection = {
       const wantRole = roleForPermission(role);
       const liveRole = (probe.data as { role_name?: string } | null)?.role_name ?? "";
       if (liveRole !== wantRole) {
-        result.drift.push(
+        run.result.drift.push(
           `teams[${team.name}]: live role "${liveRole}" != declared "${wantRole}"; apply will set the declared permission`,
         );
       }
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"teams">;

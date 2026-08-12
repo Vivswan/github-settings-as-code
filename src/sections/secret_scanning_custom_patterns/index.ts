@@ -22,10 +22,10 @@
 
 import { type MustBeNever, type SecretScanningPatternConfig, SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
-  emptyResult,
   listAll,
   loosen,
   rejectDuplicates,
@@ -173,7 +173,7 @@ export const secretScanningPatternsSection = {
       'the pattern endpoints accept no other field - in particular "state" and "push_protection_enabled" are read-only through this API surface - so the key would be dropped silently and never converge',
   },
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
@@ -200,8 +200,8 @@ export const secretScanningPatternsSection = {
       const existing = liveByName.get(declared.name);
       if (!existing) {
         toCreate.push(declared);
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `secret_scanning_custom_patterns[${declared.name}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
         }
@@ -230,10 +230,10 @@ export const secretScanningPatternsSection = {
           continue;
         }
         divergent[key] = declaredValue;
-        if (ctx.check) {
+        if (run.check) {
           // JSON.stringify(undefined) is not a string; spell absence out.
           const liveRendered = liveValue === undefined ? "(absent)" : JSON.stringify(liveValue);
-          result.drift.push(
+          run.result.drift.push(
             `secret_scanning_custom_patterns[${declared.name}].${key}: declared ${JSON.stringify(declaredValue)} != live ${liveRendered}; apply will set the declared value`,
           );
         }
@@ -253,21 +253,21 @@ export const secretScanningPatternsSection = {
         continue;
       }
       if (policy === "keep") {
-        result.notes.push(
+        run.result.notes.push(
           `secret scanning custom pattern "${pattern.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it (its alerts are then resolved, not deleted)`,
         );
         continue;
       }
-      if (ctx.check) {
-        result.drift.push(
+      if (run.check) {
+        run.result.drift.push(
           `secret_scanning_custom_patterns[${pattern.name}]: undeclared - not in the settings file, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it`,
         );
       } else {
         toDelete.push(pattern);
       }
     }
-    if (ctx.check) {
-      return result;
+    if (run.check) {
+      return run.result;
     }
 
     if (toCreate.length > 0) {
@@ -277,7 +277,7 @@ export const secretScanningPatternsSection = {
         describe: `creating secret scanning pattern(s) ${toCreate.map((p) => `"${p.name}"`).join(", ")}`,
       });
       for (const declared of toCreate) {
-        result.changes.push(`created secret scanning custom pattern "${declared.name}"`);
+        run.result.changes.push(`created secret scanning custom pattern "${declared.name}"`);
       }
     }
     for (const { live: existing, divergent } of toUpdate) {
@@ -289,7 +289,7 @@ export const secretScanningPatternsSection = {
         payload: { custom_pattern_version: existing.version ?? null, ...divergent },
         describe: `updating secret scanning pattern "${existing.name}"`,
       });
-      result.changes.push(`updated secret scanning custom pattern "${existing.name}"`);
+      run.result.changes.push(`updated secret scanning custom pattern "${existing.name}"`);
     }
     if (toDelete.length > 0) {
       // ONE bulk DELETE. post_delete_action is ALWAYS "resolve_alerts", by
@@ -308,11 +308,11 @@ export const secretScanningPatternsSection = {
         describe: `deleting undeclared secret scanning pattern(s) ${toDelete.map((p) => `"${p.name}"`).join(", ")}`,
       });
       for (const pattern of toDelete) {
-        result.changes.push(
+        run.result.changes.push(
           `DELETED undeclared secret scanning custom pattern "${pattern.name}" (alerts resolved, not deleted)`,
         );
       }
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"secret_scanning_custom_patterns">;

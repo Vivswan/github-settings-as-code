@@ -83,7 +83,8 @@ describe("custom_properties", () => {
       { property_name: "team", value: null },
     ]);
     expect(result.changes).toEqual([]);
-    expect(result.drift).toEqual([]);
+    // An apply-mode result has no drift list at all (the mode-split types).
+    expect(result.drift).toBeUndefined();
     expect(api.mutations()).toEqual([]);
   });
 

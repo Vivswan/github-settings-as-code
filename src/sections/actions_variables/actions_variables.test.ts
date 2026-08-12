@@ -56,7 +56,8 @@ describe("actions_variables", () => {
       { name: "Retired_Flag", value: "off" },
     ]);
     expect(result.changes).toEqual([]);
-    expect(result.drift).toEqual([]);
+    // An apply-mode result has no drift list at all (the mode-split types).
+    expect(result.drift).toBeUndefined();
     expect(api.mutations()).toEqual([]);
   });
 

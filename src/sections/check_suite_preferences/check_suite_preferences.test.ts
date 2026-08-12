@@ -17,7 +17,8 @@ describe("check_suite_preferences", () => {
     const result = await checkSuitePreferencesSection.run(ctx(api, true), declared);
     expect(api.calls).toEqual([]);
     expect(result.drift).toEqual([]);
-    expect(result.changes).toEqual([]);
+    // A check-mode result has no changes list at all (the mode-split types).
+    expect(result.changes).toBeUndefined();
     expect(result.notes).toHaveLength(1);
     expect(result.notes[0]).toContain("no read endpoint");
     expect(result.notes[0]).toContain("re-asserts");

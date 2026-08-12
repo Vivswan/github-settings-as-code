@@ -486,7 +486,10 @@ export async function runForRepo(
     for (const note of result.notes) {
       io.annotate("notice", `${section.key}: ${note}`);
     }
-    if (check) {
+    // Narrowing on the RESULT's own discriminant (which mirrors the context
+    // beginRun built it from) is what lets each branch read only the list
+    // its mode can carry: a check-mode result has no changes to misreport.
+    if (result.check) {
       if (result.drift.length > 0) {
         drifted = true;
         for (const line of result.drift) {

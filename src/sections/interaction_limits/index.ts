@@ -25,9 +25,9 @@
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { INTERACTION_LIMITS_ROUTED_KEYS, SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   type EndpointDecl,
-  emptyResult,
   expand,
   loosen,
   requirePlainMapping,
@@ -152,33 +152,33 @@ export const interactionLimitsSection = {
   endpoints: ENDPOINTS,
   shape: requirePlainMapping(loosen(SettingsFile.shape.interaction_limits)),
   async run(ctx, desired): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
 
     if (desired === null) {
       // null clears the BASE limit only; the cap and bypass list are
       // separate resources a clear must not touch.
-      if (ctx.check) {
+      if (run.check) {
         const live = (await call(ctx, this, ENDPOINTS.get)) as Record<string, unknown>;
         if (!noLiveLimit(live)) {
-          result.drift.push(
+          run.result.drift.push(
             overriddenFromAbove(live)
               ? `interaction_limits: declared null but a live "${String(live.limit)}" limit is set at the ${String(live.origin)} level; apply cannot remove it from the repository`
               : `interaction_limits: declared null but a live "${String(live.limit)}" limit is set; apply will remove it`,
           );
         }
-        return result;
+        return run.result;
       }
       const outcome = await tryCall(ctx, this, ENDPOINTS.remove, {
         describe: "clearing the interaction limit",
       });
       if ("error" in outcome) {
-        result.notes.push(
+        run.result.notes.push(
           `interaction_limits: ${ORG_OVERRIDE}, so the repository-level clear was not applied (${outcome.error.status})`,
         );
-        return result;
+        return run.result;
       }
-      result.changes.push("cleared the interaction limit");
-      return result;
+      run.result.changes.push("cleared the interaction limit");
+      return run.result;
     }
 
     const cap = desired.pull_request_creation_cap;
@@ -190,7 +190,7 @@ export const interactionLimitsSection = {
     );
     const baseDeclared = Object.keys(base).length > 0;
 
-    if (ctx.check) {
+    if (run.check) {
       if (baseDeclared) {
         const live = (await call(ctx, this, ENDPOINTS.get)) as Record<string, unknown>;
         // Declared != effective is drift REGARDLESS of who set the live limit;
@@ -198,7 +198,7 @@ export const interactionLimitsSection = {
         // cannot fix it (the org is the place to), but check stays red rather
         // than reporting a repo that does not match its declaration as clean.
         if (noLiveLimit(live)) {
-          result.drift.push(
+          run.result.drift.push(
             `interaction_limits: no live limit (never set, or it expired); apply will (re-)arm the declared "${desired.limit}" limit`,
           );
         } else {
@@ -206,15 +206,15 @@ export const interactionLimitsSection = {
           // declared expiry duration, so diffing expiry would be permanent
           // false drift; compare everything else.
           const { expiry: _expiry, ...comparable } = base;
-          result.drift.push(...subsetDiff(comparable, live, "interaction_limits"));
+          run.result.drift.push(...subsetDiff(comparable, live, "interaction_limits"));
           if (overriddenFromAbove(live)) {
-            result.notes.push(
+            run.result.notes.push(
               `interaction_limits: ${ORG_OVERRIDE} (origin: ${String(live.origin)}); apply cannot change it from the repository`,
             );
           }
         }
         if (desired.expiry !== undefined) {
-          result.notes.push(
+          run.result.notes.push(
             `interaction_limits.expiry: GitHub reports only the computed expires_at, so the declared duration cannot be verified; apply re-arms it on every run`,
           );
         }
@@ -226,11 +226,11 @@ export const interactionLimitsSection = {
         if ("error" in outcome) {
           // A tolerated 405: the declared cap cannot exist live, and apply
           // could not set it either - honest drift, not silence.
-          result.drift.push(
+          run.result.drift.push(
             `interaction_limits.pull_request_creation_cap: declared but ${CAP_UNAVAILABLE} (405); apply cannot set it`,
           );
         } else {
-          result.drift.push(
+          run.result.drift.push(
             ...subsetDiff(cap, outcome.data, "interaction_limits.pull_request_creation_cap"),
           );
         }
@@ -239,17 +239,17 @@ export const interactionLimitsSection = {
         const liveLogins = await liveBypassLogins(ctx, this);
         const { add, remove } = bypassDelta(bypass, liveLogins);
         if (remove.length > 0) {
-          result.drift.push(
+          run.result.drift.push(
             `interaction_limits.pull_request_creation_bypass: live login(s) [${remove.join(", ")}] are not declared; apply will remove them`,
           );
         }
         if (add.length > 0) {
-          result.drift.push(
+          run.result.drift.push(
             `interaction_limits.pull_request_creation_bypass: declared login(s) [${add.join(", ")}] are not on the live bypass list; apply will add them`,
           );
         }
       }
-      return result;
+      return run.result;
     }
 
     if (baseDeclared) {
@@ -258,11 +258,11 @@ export const interactionLimitsSection = {
         describe: `arming the "${desired.limit}" interaction limit`,
       });
       if ("error" in outcome) {
-        result.notes.push(
+        run.result.notes.push(
           `interaction_limits: ${ORG_OVERRIDE}, so the repository-level limit was not applied (${outcome.error.status})`,
         );
       } else {
-        result.changes.push(
+        run.result.changes.push(
           `armed the "${desired.limit}" interaction limit (expiry: ${desired.expiry ?? "one_day (GitHub default)"})`,
         );
       }
@@ -274,7 +274,7 @@ export const interactionLimitsSection = {
         describe: "reading the pull request creation cap",
       });
       if ("error" in outcome) {
-        result.notes.push(
+        run.result.notes.push(
           `interaction_limits.pull_request_creation_cap: ${CAP_UNAVAILABLE}, so the declared cap was not applied (${outcome.error.status})`,
         );
       } else {
@@ -283,7 +283,7 @@ export const interactionLimitsSection = {
         // converging; say so (the labels/milestones phantom-key idiom).
         const phantom = phantomKeys(cap as Record<string, unknown>, outcome.data);
         if (phantom.length > 0) {
-          result.notes.push(
+          run.result.notes.push(
             phantomNote(
               "interaction_limits.pull_request_creation_cap",
               phantom,
@@ -300,11 +300,11 @@ export const interactionLimitsSection = {
             describe: "setting the pull request creation cap",
           });
           if ("error" in patched) {
-            result.notes.push(
+            run.result.notes.push(
               `interaction_limits.pull_request_creation_cap: ${CAP_UNAVAILABLE}, so the declared cap was not applied (${patched.error.status})`,
             );
           } else {
-            result.changes.push(
+            run.result.changes.push(
               `set the pull request creation cap (enabled: ${cap.enabled}${cap.max_open_pull_requests !== undefined ? `, max_open_pull_requests: ${cap.max_open_pull_requests}` : ""})`,
             );
           }
@@ -319,7 +319,7 @@ export const interactionLimitsSection = {
           payload: { users: remove },
           describe: "removing users from the pull request creation cap bypass list",
         });
-        result.changes.push(
+        run.result.changes.push(
           `removed [${remove.join(", ")}] from the pull request creation cap bypass list`,
         );
       }
@@ -328,11 +328,11 @@ export const interactionLimitsSection = {
           payload: { users: add },
           describe: "adding users to the pull request creation cap bypass list",
         });
-        result.changes.push(
+        run.result.changes.push(
           `added [${add.join(", ")}] to the pull request creation cap bypass list`,
         );
       }
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"interaction_limits">;

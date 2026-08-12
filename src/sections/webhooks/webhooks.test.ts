@@ -304,7 +304,7 @@ describe("webhooks check", () => {
       { config: { url: "https://x.test/h", content_type: "json" }, events: ["push", "issues"] },
     ]);
     expect(drifted.drift).toHaveLength(1);
-    expect(drifted.drift[0]).toContain("order-insensitively");
+    expect(drifted.drift?.[0]).toContain("order-insensitively");
   });
 
   test("a missing declared hook is drift; an undeclared live hook under delete is drift", async () => {

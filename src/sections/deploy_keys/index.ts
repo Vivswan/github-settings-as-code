@@ -16,10 +16,10 @@
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { type DeployKeyConfig, SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
-  emptyResult,
   listAll,
   loosen,
   rejectDuplicates,
@@ -128,7 +128,7 @@ export const deployKeysSection = {
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.deploy_keys),
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // Titles are matched EXACTLY: GitHub does not document any case folding
     // for deploy key titles, so two titles differing in case are two keys.
@@ -201,8 +201,8 @@ export const deployKeysSection = {
       const existing = live.find((candidate) => candidate.title === entry.title);
       const { title: _title, key: _key, read_only, ...extraKeys } = entry;
       if (!existing) {
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `deploy_keys[${entry.title}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
           continue;
@@ -211,7 +211,7 @@ export const deployKeysSection = {
           payload: { ...entry }, // the declared entry (future fields included) passes through
           describe: `creating deploy key "${entry.title}"`,
         });
-        result.changes.push(`created deploy key "${entry.title}"`);
+        run.result.changes.push(`created deploy key "${entry.title}"`);
         continue;
       }
 
@@ -223,28 +223,28 @@ export const deployKeysSection = {
       if (!keyDrift && !readOnlyDrift && extraDrift.length === 0) {
         continue;
       }
-      if (ctx.check) {
-        result.drift.push(
+      if (run.check) {
+        run.result.drift.push(
           `deploy_keys[${entry.title}]: live settings differ from the settings file, and deploy keys cannot be edited; apply will delete and recreate it`,
         );
         // Name the differing fields; the generic line alone leaves the reader
         // guessing which field (or typo) forces the replace.
         if (keyDrift) {
-          result.drift.push(
+          run.result.drift.push(
             `deploy_keys[${entry.title}].key: declared material ${JSON.stringify(material)} != live ${JSON.stringify(materialById.get(existing.id))} (compared as algorithm + blob, comments ignored)`,
           );
         }
         if (readOnlyDrift) {
-          result.drift.push(
+          run.result.drift.push(
             `deploy_keys[${entry.title}].read_only: declared ${JSON.stringify(read_only)} != live ${JSON.stringify(existing.read_only ?? false)}`,
           );
         }
-        result.drift.push(...extraDrift);
+        run.result.drift.push(...extraDrift);
         continue;
       }
       const phantom = phantomKeys(extraKeys, existing);
       if (phantom.length > 0) {
-        result.notes.push(
+        run.result.notes.push(
           phantomNote(
             `deploy_keys[${entry.title}]`,
             phantom,
@@ -267,7 +267,7 @@ export const deployKeysSection = {
         payload: { read_only: existing.read_only ?? false, ...entry },
         describe: `recreating deploy key "${entry.title}"`,
       });
-      result.changes.push(`replaced deploy key "${entry.title}"`);
+      run.result.changes.push(`replaced deploy key "${entry.title}"`);
     }
 
     // Undeclared keys are kept by default: a live deploy key authenticates a
@@ -277,11 +277,11 @@ export const deployKeysSection = {
         continue;
       }
       if (policy === "keep") {
-        result.notes.push(
+        run.result.notes.push(
           `deploy key "${key.title}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
         );
-      } else if (ctx.check) {
-        result.drift.push(
+      } else if (run.check) {
+        run.result.drift.push(
           `deploy_keys[${key.title}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
         );
       } else {
@@ -289,9 +289,9 @@ export const deployKeysSection = {
           params: { key_id: String(key.id) },
           describe: `deleting undeclared deploy key "${key.title}"`,
         });
-        result.changes.push(`DELETED undeclared deploy key "${key.title}"`);
+        run.result.changes.push(`DELETED undeclared deploy key "${key.title}"`);
       }
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"deploy_keys">;

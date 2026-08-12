@@ -9,9 +9,9 @@
 import { subsetDiff } from "../../engine/diff.js";
 import { type ActionsConfig, SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   type EndpointDecl,
-  emptyResult,
   loosen,
   probeAbsent,
   type SectionModule,
@@ -205,7 +205,7 @@ export const actionsSection = {
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.actions),
   async run(ctx, desired): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const permissions: Record<string, unknown> = {};
     const workflow: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(desired as Record<string, unknown>)) {
@@ -249,17 +249,17 @@ export const actionsSection = {
       // JSON.stringify keeps a malformed quoted "false" distinguishable from
       // the boolean in the message.
       const enabledValue = JSON.stringify(permissions.enabled);
-      result.notes.push(
-        ctx.check
+      run.result.notes.push(
+        run.check
           ? `key(s) [${routed.join(", ")}] are not recognized by this action; apply would send them verbatim to PUT /actions/permissions (a body that also sets enabled: ${enabledValue}), where GitHub may ignore them - a "no such field" drift line for a key below means GitHub does not accept it there; remove it from the actions section of the settings file`
           : `key(s) [${routed.join(", ")}] are not recognized by this action; they were sent verbatim to PUT /actions/permissions (a body that also sets enabled: ${enabledValue}), where GitHub may ignore them - run mode: check to confirm they took effect, or remove them from the actions section of the settings file`,
       );
     }
 
-    if (ctx.check) {
+    if (run.check) {
       if (Object.keys(permissions).length > 0) {
         const live = await call(ctx, this, ENDPOINTS.getPermissions);
-        result.drift.push(...subsetDiff(permissions, live, "actions.permissions"));
+        run.result.drift.push(...subsetDiff(permissions, live, "actions.permissions"));
       }
       if (desired.selected_actions !== undefined) {
         // This GET errors (409) when the live allowed_actions policy is not
@@ -267,28 +267,28 @@ export const actionsSection = {
         // (200, 409, 404) make 409 and 404 tolerated automatically.
         const probe = await probeAbsent(ctx, this, ENDPOINTS.getSelected);
         if ("missing" in probe) {
-          result.drift.push(
+          run.result.drift.push(
             'actions.selected: the live allowed_actions policy is not "selected", so no selected-actions allowlist exists; apply will set the declared policy and allowlist',
           );
         } else {
-          result.drift.push(
+          run.result.drift.push(
             ...subsetDiff(desired.selected_actions, probe.data, "actions.selected"),
           );
         }
       }
       if (Object.keys(workflow).length > 0) {
         const live = await call(ctx, this, ENDPOINTS.getWorkflow);
-        result.drift.push(...subsetDiff(workflow, live, "actions.workflow"));
+        run.result.drift.push(...subsetDiff(workflow, live, "actions.workflow"));
       }
       if (desired.access_level !== undefined) {
         const live = await call(ctx, this, ENDPOINTS.getAccess);
-        result.drift.push(
+        run.result.drift.push(
           ...subsetDiff({ access_level: desired.access_level }, live, "actions.access"),
         );
       }
       if (desired.artifact_and_log_retention !== undefined) {
         const live = await call(ctx, this, ENDPOINTS.getRetention);
-        result.drift.push(
+        run.result.drift.push(
           ...subsetDiff(
             desired.artifact_and_log_retention,
             live,
@@ -301,7 +301,7 @@ export const actionsSection = {
           continue;
         }
         const live = await call(ctx, this, ENDPOINTS[roles.get]);
-        result.drift.push(...subsetDiff({ [key]: cache[key] }, live, "actions.cache"));
+        run.result.drift.push(...subsetDiff({ [key]: cache[key] }, live, "actions.cache"));
       }
       if (desired.oidc_customization_sub !== undefined) {
         const declared = desired.oidc_customization_sub;
@@ -311,7 +311,7 @@ export const actionsSection = {
         // the PUT verbatim, so it must be diffed verbatim too - the expiry
         // precedent: exclude the special field, compare the remainder.
         const { include_claim_keys, ...comparable } = declared;
-        result.drift.push(...subsetDiff(comparable, live, "actions.oidc_customization_sub"));
+        run.result.drift.push(...subsetDiff(comparable, live, "actions.oidc_customization_sub"));
         // GitHub ignores include_claim_keys when use_default is true, and
         // an OMITTED list on a custom template is itself meaningful
         // upstream (it opts the repository into the organization template,
@@ -320,7 +320,7 @@ export const actionsSection = {
         if (declared.use_default === false && include_claim_keys !== undefined) {
           const liveKeys = Array.isArray(live.include_claim_keys) ? live.include_claim_keys : [];
           if (!sameClaimKeyOrder(include_claim_keys, liveKeys)) {
-            result.drift.push(
+            run.result.drift.push(
               `actions.oidc_customization_sub.include_claim_keys: declared ${JSON.stringify(include_claim_keys)} != live ${JSON.stringify(liveKeys)} (claim-key order defines the subject format, so order counts); apply will set the declared value`,
             );
           }
@@ -328,7 +328,7 @@ export const actionsSection = {
       }
       if (desired.fork_pr_contributor_approval !== undefined) {
         const live = await call(ctx, this, ENDPOINTS.getForkPrApproval);
-        result.drift.push(
+        run.result.drift.push(
           ...subsetDiff(
             desired.fork_pr_contributor_approval,
             live,
@@ -338,7 +338,7 @@ export const actionsSection = {
       }
       if (desired.fork_pr_workflows_private_repos !== undefined) {
         const live = await call(ctx, this, ENDPOINTS.getForkPrPrivate);
-        result.drift.push(
+        run.result.drift.push(
           ...subsetDiff(
             desired.fork_pr_workflows_private_repos,
             live,
@@ -346,33 +346,33 @@ export const actionsSection = {
           ),
         );
       }
-      return result;
+      return run.result;
     }
 
     if (Object.keys(permissions).length > 0) {
       await call(ctx, this, ENDPOINTS.putPermissions, { payload: permissions });
-      result.changes.push("applied actions permissions");
+      run.result.changes.push("applied actions permissions");
     }
     if (desired.selected_actions !== undefined) {
       await call(ctx, this, ENDPOINTS.putSelected, { payload: desired.selected_actions });
-      result.changes.push("applied selected-actions policy");
+      run.result.changes.push("applied selected-actions policy");
     }
     if (Object.keys(workflow).length > 0) {
       await call(ctx, this, ENDPOINTS.putWorkflow, { payload: workflow });
-      result.changes.push("applied workflow token permissions");
+      run.result.changes.push("applied workflow token permissions");
     }
     if (desired.access_level !== undefined) {
       await call(ctx, this, ENDPOINTS.putAccess, {
         payload: { access_level: desired.access_level },
       });
-      result.changes.push("applied workflows access level");
+      run.result.changes.push("applied workflows access level");
     }
     if (desired.artifact_and_log_retention !== undefined) {
       await call(ctx, this, ENDPOINTS.putRetention, {
         payload: desired.artifact_and_log_retention,
         describe: "setting the artifact and log retention window",
       });
-      result.changes.push("applied artifact and log retention");
+      run.result.changes.push("applied artifact and log retention");
     }
     for (const [key, roles] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
       if (!(key in cache)) {
@@ -382,29 +382,29 @@ export const actionsSection = {
         payload: { [key]: cache[key] },
         describe: `setting the cache ${roles.label} limit`,
       });
-      result.changes.push(`applied cache ${roles.label} limit`);
+      run.result.changes.push(`applied cache ${roles.label} limit`);
     }
     if (desired.oidc_customization_sub !== undefined) {
       await call(ctx, this, ENDPOINTS.putOidcSub, {
         payload: desired.oidc_customization_sub,
         describe: "customizing the OIDC subject claim",
       });
-      result.changes.push("applied the OIDC subject claim template");
+      run.result.changes.push("applied the OIDC subject claim template");
     }
     if (desired.fork_pr_contributor_approval !== undefined) {
       await call(ctx, this, ENDPOINTS.putForkPrApproval, {
         payload: desired.fork_pr_contributor_approval,
         describe: "setting the fork PR contributor approval policy",
       });
-      result.changes.push("applied the fork PR contributor approval policy");
+      run.result.changes.push("applied the fork PR contributor approval policy");
     }
     if (desired.fork_pr_workflows_private_repos !== undefined) {
       await call(ctx, this, ENDPOINTS.putForkPrPrivate, {
         payload: desired.fork_pr_workflows_private_repos,
         describe: "setting the private-repo fork PR workflow settings",
       });
-      result.changes.push("applied the private-repo fork PR workflow settings");
+      run.result.changes.push("applied the private-repo fork PR workflow settings");
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"actions">;

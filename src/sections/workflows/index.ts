@@ -6,9 +6,9 @@
 
 import { type MustBeNever, SettingsFile, type WorkflowConfig } from "../../schema.js";
 import {
+  beginRun,
   call,
   type EndpointDecl,
-  emptyResult,
   listAllEnveloped,
   loosen,
   rejectDuplicates,
@@ -59,7 +59,7 @@ export const workflowsSection = {
     consequence: "the enable/disable calls send no payload, so the key would silently do nothing",
   },
   async run(ctx, desired): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     // Two entries naming the same file (e.g. "ci.yml" and
     // ".github/workflows/ci.yml") would fight each other on every run.
     rejectDuplicates(
@@ -77,12 +77,12 @@ export const workflowsSection = {
         (w) => w.path === workflow.path || w.path === `.github/workflows/${workflow.path}`,
       );
       if (!match) {
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `workflows[${workflow.path}]: declared in the settings file but no workflow with that path exists on the repo; apply will skip it - create the workflow file, or remove it from the workflows section`,
           );
         } else {
-          result.notes.push(
+          run.result.notes.push(
             `workflow "${workflow.path}" is declared in the settings file but no workflow with that path exists on the repo; skipped - create the workflow file, or remove it from the workflows section`,
           );
         }
@@ -94,18 +94,18 @@ export const workflowsSection = {
         continue;
       }
       const action = workflow.state === "active" ? "enable" : "disable";
-      if (ctx.check) {
+      if (run.check) {
         const raw = match.state === liveState ? "" : ` (${match.state})`;
-        result.drift.push(
+        run.result.drift.push(
           `workflows[${workflow.path}]: declared "${workflow.state}" != live "${liveState}"${raw}; apply will ${action} the workflow`,
         );
       } else {
         await call(ctx, this, ENDPOINTS[action], {
           params: { workflow_id: String(match.id) },
         });
-        result.changes.push(`${action}d workflow "${match.path}"`);
+        run.result.changes.push(`${action}d workflow "${match.path}"`);
       }
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"workflows">;

@@ -9,9 +9,9 @@
 import { subsetDiff } from "../../engine/diff.js";
 import { SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   type EndpointDecl,
-  emptyResult,
   expand,
   loosen,
   requirePlainMapping,
@@ -47,13 +47,13 @@ export const codeQualitySetupSection = {
   endpoints: ENDPOINTS,
   shape: requirePlainMapping(loosen(SettingsFile.shape.code_quality_setup)),
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const desired: Record<string, unknown> = declared;
 
-    if (ctx.check) {
+    if (run.check) {
       const live = await call(ctx, this, ENDPOINTS.get);
-      result.drift.push(...subsetDiff(desired, live, "code_quality_setup"));
-      return result;
+      run.result.drift.push(...subsetDiff(desired, live, "code_quality_setup"));
+      return run.result;
     }
 
     // Tolerate a 409 (a configuration run is already in progress) so it
@@ -65,15 +65,15 @@ export const codeQualitySetupSection = {
         `code_quality_setup: PATCH ${expand(ENDPOINTS.update, ctx)}: ${patch.error.status} ${patch.error.message}. A code quality configuration run is already in progress on the repository; re-run the workflow after it finishes`,
       );
     }
-    const run = patch.data as { run_id?: number; run_url?: string } | null;
-    if (run?.run_id !== undefined) {
-      const url = run.run_url ? ` (${run.run_url})` : "";
-      result.changes.push(
-        `applied code quality setup; GitHub started configuration run ${run.run_id}${url} to roll it out, and the settings take effect when it finishes`,
+    const configurationRun = patch.data as { run_id?: number; run_url?: string } | null;
+    if (configurationRun?.run_id !== undefined) {
+      const url = configurationRun.run_url ? ` (${configurationRun.run_url})` : "";
+      run.result.changes.push(
+        `applied code quality setup; GitHub started configuration run ${configurationRun.run_id}${url} to roll it out, and the settings take effect when it finishes`,
       );
     } else {
-      result.changes.push("applied code quality setup");
+      run.result.changes.push("applied code quality setup");
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"code_quality_setup">;

@@ -8,10 +8,10 @@
 import { subsetDiff } from "../../engine/diff.js";
 import { type RepositoryConfig, SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   callGraphql,
   type EndpointDecl,
-  emptyResult,
   type GraphqlOpDecl,
   graphqlOp,
   loosen,
@@ -405,7 +405,7 @@ export const repositorySection = {
   graphql: GRAPHQL_OPS,
   shape: requirePlainMapping(loosen(SettingsFile.shape.repository)),
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const desired: Record<string, unknown> = declared;
     const patch: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(desired)) {
@@ -414,11 +414,11 @@ export const repositorySection = {
       }
     }
 
-    if (ctx.check) {
+    if (run.check) {
       const live = (await call(ctx, this, ENDPOINTS.get)) as Record<string, unknown>;
-      result.drift.push(...subsetDiff(patch, live, "repository"));
+      run.result.drift.push(...subsetDiff(patch, live, "repository"));
       if ("topics" in desired) {
-        result.drift.push(
+        run.result.drift.push(
           ...subsetDiff(
             normalizeTopics(desired.topics).sort(),
             ((live.topics as string[]) ?? []).slice().sort(),
@@ -434,7 +434,7 @@ export const repositorySection = {
         const enabled = "missing" in probe ? false : toggle.isEnabled(probe.data);
         if (enabled !== desired[toggle.key]) {
           const enforced = "missing" in probe ? false : toggle.isEnforced?.(probe.data) === true;
-          result.drift.push(
+          run.result.drift.push(
             enforced
               ? `repository.${toggle.key}: declared ${desired[toggle.key]} != live ${enabled}; the repository owner enforces ${toggle.label}, so apply cannot change it from the repository`
               : `repository.${toggle.key}: declared ${desired[toggle.key]} != live ${enabled}; apply will set the declared value`,
@@ -445,7 +445,7 @@ export const repositorySection = {
         if (!(toggle.key in desired)) {
           continue;
         }
-        result.notes.push(
+        run.result.notes.push(
           `repository.${toggle.key}: GitHub exposes no endpoint to read this state back, so check mode cannot verify it; apply re-asserts the declared value (${JSON.stringify(desired[toggle.key])}) on every run`,
         );
       }
@@ -454,23 +454,23 @@ export const repositorySection = {
         const live = await fetchRoutedState(ctx, this, declaredRouted);
         for (const routed of declaredRouted) {
           if (desired[routed.key] !== live.values[routed.key]) {
-            result.drift.push(
+            run.result.drift.push(
               `repository.${routed.key}: declared ${routed.show(desired[routed.key])} != live ${routed.show(live.values[routed.key])}; apply will set the declared value`,
             );
           }
         }
       }
-      return result;
+      return run.result;
     }
 
     if (Object.keys(patch).length > 0) {
       await call(ctx, this, ENDPOINTS.update, { payload: patch });
-      result.changes.push(`patched repository fields: ${Object.keys(patch).join(", ")}`);
+      run.result.changes.push(`patched repository fields: ${Object.keys(patch).join(", ")}`);
     }
     if ("topics" in desired) {
       const names = normalizeTopics(desired.topics);
       await call(ctx, this, ENDPOINTS.topics, { payload: { names } });
-      result.changes.push(`set topics: ${names.join(", ") || "(none)"}`);
+      run.result.changes.push(`set topics: ${names.join(", ") || "(none)"}`);
     }
     for (const toggle of FEATURE_TOGGLES) {
       if (!(toggle.key in desired)) {
@@ -487,12 +487,12 @@ export const repositorySection = {
       const endpoint = desired[toggle.key] ? toggle.put : toggle.remove;
       const outcome = await tryCall(ctx, this, endpoint);
       if ("error" in outcome && outcome.error.status === 409) {
-        result.notes.push(
+        run.result.notes.push(
           `repository.${toggle.key}: ${(endpoint as EndpointDecl).statuses[409]}, so apply cannot change it from the repository (409)`,
         );
         continue;
       }
-      result.changes.push(`${toggle.label}: ${desired[toggle.key] ? "enabled" : "disabled"}`);
+      run.result.changes.push(`${toggle.label}: ${desired[toggle.key] ? "enabled" : "disabled"}`);
     }
     const declaredRouted = GRAPHQL_ROUTED_KEYS.filter((routed) => routed.key in desired);
     if (declaredRouted.length > 0) {
@@ -532,10 +532,10 @@ export const repositorySection = {
               `repository: GRAPHQL ${UPDATE_FEATURES.name} was accepted, but GitHub reports repository.${routed.key} ${routed.show(echoed[routed.key])} where ${routed.show(desired[routed.key])} was set, so the write did not take. GitHub may restrict this setting on the repository`,
             );
           }
-          result.changes.push(`${routed.label}: ${routed.changeText(echoed[routed.key])}`);
+          run.result.changes.push(`${routed.label}: ${routed.changeText(echoed[routed.key])}`);
         }
       }
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"repository">;
