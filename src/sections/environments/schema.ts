@@ -152,7 +152,8 @@ export const EnvironmentConfig = z
     // The flag-pairing invariant lives HERE, in the shape, not in the
     // section's validate hook: upfront document validation rejects the
     // document in BOTH modes before ANY section writes. A hook-level check
-    // would fire only when this section runs, after earlier sections already
+    // would fire only when this section runs (the apply-mode preflight
+    // ignores non-permission errors), after earlier sections already
     // wrote - and the pattern POST itself would 404 only after the
     // environment PUT landed, half-applying the run. The published schema
     // mirrors it as the if/then stamped through this schema's meta.
