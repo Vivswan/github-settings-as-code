@@ -23,7 +23,7 @@
  */
 
 import { z } from "zod";
-import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import { subsetDiff } from "../../engine/diff.js";
 import {
   type DeploymentBranchPolicyConfig,
   type DeploymentProtectionRuleConfig,
@@ -69,6 +69,13 @@ import {
   type SecretsScopeOps,
   secretKey,
 } from "../secrets-engine.js";
+import {
+  LiveVariable,
+  reconcileVariables as reconcileEngineVariables,
+  type VariablesScope,
+  type VariablesScopeOps,
+  variableKey,
+} from "../shared/variables-engine.js";
 
 const permission: SectionPermission = { repo: ["environments"] };
 
@@ -633,15 +640,6 @@ export const environmentsSection = {
   },
 } satisfies SectionModule<"environments">;
 
-/** The fields of a live variable this section reads; extras ride along. */
-const LiveVariable = z.looseObject({ name: z.string(), value: z.string() });
-type LiveVariable = z.infer<typeof LiveVariable>;
-
-/** GitHub matches variable names case-insensitively; uppercase both sides. */
-function variableKey(name: string): string {
-  return name.toUpperCase();
-}
-
 /**
  * Reject two declared variables whose names collapse to the same
  * case-insensitive key: they would fight each other on every run. All
@@ -670,103 +668,74 @@ function rejectDuplicateVariables(
 }
 
 /**
- * Reconcile one environment's declared `variables` list against the live
- * variables: create missing ones, update divergent values, and apply the
- * undeclared policy (unwrapped by the caller against the table default) to
- * the rest.
+ * ONE variables-engine scope per environment, the sibling of
+ * environmentSecretsScope below: the four operation closures close over this
+ * environment's name, so the per-route params contract typechecks here where
+ * the literal routes are known, and the engine never sees a route. The label
+ * and the suffixes carry the environment name, so every drift, note, and
+ * change line is unambiguous when several environments declare variables.
+ */
+function environmentVariablesScope(envName: string): VariablesScope {
+  const ops: VariablesScopeOps = {
+    list: async (ctx, section) =>
+      parseLive(
+        section,
+        ENDPOINTS.listVariables,
+        z.array(LiveVariable),
+        await listAllEnveloped(ctx, section, ENDPOINTS.listVariables, "variables", {
+          params: { environment_name: envName },
+        }),
+        `environment "${envName}"`,
+      ),
+    create: (ctx, section, name, payload) =>
+      call(ctx, section, ENDPOINTS.createVariable, {
+        params: { environment_name: envName },
+        payload,
+        describe: `creating variable "${name}" in environment "${envName}"`,
+      }),
+    update: (ctx, section, names, payload) =>
+      call(ctx, section, ENDPOINTS.updateVariable, {
+        params: { environment_name: envName, name: names.live },
+        payload,
+        describe: `updating variable "${names.declared}" in environment "${envName}"`,
+      }),
+    remove: (ctx, section, liveName) =>
+      call(ctx, section, ENDPOINTS.removeVariable, {
+        params: { environment_name: envName, name: liveName },
+        describe: `deleting undeclared variable "${liveName}" from environment "${envName}"`,
+      }),
+  };
+  return {
+    label: `environments[${envName}].variables`,
+    noun: "variable",
+    home: "the environment",
+    keepHome: `environment "${envName}"`,
+    changeSuffix: ` in environment "${envName}"`,
+    removeSuffix: ` from environment "${envName}"`,
+    ops,
+  };
+}
+
+/**
+ * Reconcile one environment's declared `variables` list through the shared
+ * variables engine, under the policy the caller unwrapped against the table
+ * default: create missing ones, update divergent values, and apply the
+ * undeclared policy to the rest.
  */
 async function reconcileVariables(
-  ctx: SectionContext,
+  _ctx: SectionContext,
   section: SectionModule<"environments">,
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly EnvironmentVariableConfig[],
   run: SectionRun,
 ): Promise<void> {
-  const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
-  const live = parseLive(
-    section,
-    ENDPOINTS.listVariables,
-    z.array(LiveVariable),
-    await listAllEnveloped(ctx, section, ENDPOINTS.listVariables, "variables", {
-      params: { environment_name: envName },
-    }),
-    `environment "${envName}"`,
-  );
-  const liveByKey = new Map<string, LiveVariable>();
-  for (const variable of live) {
-    liveByKey.set(variableKey(variable.name), variable);
-  }
-
-  for (const variable of entries) {
-    const label = `environments[${envName}].variables[${variable.name}]`;
-    const existing = liveByKey.get(variableKey(variable.name));
-    const { name: _name, value: _value, ...extraKeys } = variable;
-    if (!existing) {
-      if (run.check) {
-        run.result.drift.push(
-          `${label}: missing - declared in the settings file but not on the environment; apply will create it`,
-        );
-      } else {
-        await call(ctx, section, ENDPOINTS.createVariable, {
-          params: { environment_name: envName },
-          payload: { name: variable.name, value: variable.value, ...extraKeys },
-          describe: `creating variable "${variable.name}" in environment "${envName}"`,
-        });
-        run.result.changes.push(`created variable "${variable.name}" in environment "${envName}"`);
-      }
-      continue;
-    }
-    const valueDrift = existing.value !== variable.value;
-    const extraDrift = subsetDiff(extraKeys, existing, label);
-    if (!valueDrift && extraDrift.length === 0) {
-      continue;
-    }
-    if (run.check) {
-      if (valueDrift) {
-        run.result.drift.push(
-          `${label}.value: declared ${JSON.stringify(variable.value)} != live ${JSON.stringify(existing.value)}; apply will set the declared value`,
-        );
-      }
-      run.result.drift.push(...extraDrift);
-    } else {
-      const phantom = phantomKeys(extraKeys, existing);
-      if (phantom.length > 0) {
-        run.result.notes.push(phantomNote(label, phantom, "variable", "this update will re-run"));
-      }
-      await call(ctx, section, ENDPOINTS.updateVariable, {
-        // The live name addresses the PATCH: same variable under GitHub's
-        // case-insensitive matching, and the path always names what exists.
-        params: { environment_name: envName, name: existing.name },
-        payload: { value: variable.value, ...extraKeys },
-        describe: `updating variable "${variable.name}" in environment "${envName}"`,
-      });
-      run.result.changes.push(`updated variable "${variable.name}" in environment "${envName}"`);
-    }
-  }
-
-  for (const variable of liveByKey.values()) {
-    if (declaredKeys.has(variableKey(variable.name))) {
-      continue;
-    }
-    if (policy === "keep") {
-      run.result.notes.push(
-        `variable "${variable.name}" exists on environment "${envName}" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
-      );
-    } else if (run.check) {
-      run.result.drift.push(
-        `environments[${envName}].variables[${variable.name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
-      );
-    } else {
-      await call(ctx, section, ENDPOINTS.removeVariable, {
-        params: { environment_name: envName, name: variable.name },
-        describe: `deleting undeclared variable "${variable.name}" from environment "${envName}"`,
-      });
-      run.result.changes.push(
-        `DELETED undeclared variable "${variable.name}" from environment "${envName}"`,
-      );
-    }
-  }
+  // The engine accumulates directly onto run.result, so no merge exists to
+  // mispair; the context travels inside `run`, correlated with the result.
+  await reconcileEngineVariables(run, section, environmentVariablesScope(envName), {
+    entries,
+    policy,
+  });
 }
 
 /**
