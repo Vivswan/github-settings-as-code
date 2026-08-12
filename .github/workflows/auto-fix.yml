@@ -19,7 +19,7 @@
 # lib/settings.schema.json and src/upstream-gaps/ only: no code from the PR
 # runs on the runner that holds the write token, applying a patch executes
 # nothing, and the push job re-checks the applied paths before committing.
-# --ignore-scripts keeps husky (the prepare script) and dependency lifecycle
+# --ignore-scripts keeps lefthook (the prepare script) and dependency lifecycle
 # scripts out of the build job, and the push job never installs anything, so
 # no git hooks exist on either runner.
 #

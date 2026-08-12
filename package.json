@@ -17,7 +17,7 @@
     "build:bundle": "bun build src/main.ts --target=node --outfile lib/index.js",
     "build:schema": "ts-json-schema-generator --path src/schema.ts --type SettingsFile --tsconfig tsconfig.json --additional-properties --out lib/settings.schema.json && bun .github/scripts/finalize-schema.ts",
     "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep .",
-    "prepare": "husky"
+    "prepare": "lefthook install"
   },
   "dependencies": {
     "@actions/artifact": "^6.2.1",
@@ -41,8 +41,8 @@
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "graphql": "^17.0.2",
-    "husky": "^9.1.7",
     "ts-json-schema-generator": "^2.9.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "lefthook": "^2.1.10"
   }
 }

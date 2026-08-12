@@ -1,2 +1,0 @@
-biome check --staged --no-errors-on-unmatched
-bun run typecheck
