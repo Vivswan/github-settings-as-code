@@ -1,10 +1,9 @@
 /**
  * The custom_properties section's e2e mock fragment: one handler per
  * "custom_properties.<role>" key in the section's ENDPOINTS, registered in
- * test/e2e/mock/sections.ts. Only this section's "custom_properties.org" key
- * binds orgProbeHandler here; the same handler stays registered under
- * "teams.org" in the UNMOVED table of test/e2e/mock/sections.ts until the
- * teams section moves. Imports only the leaf seams
+ * test/e2e/mock/sections.ts. "custom_properties.org" binds the shared
+ * orgProbeHandler, the same handler the teams fragment registers under
+ * "teams.org", so the two probes cannot drift. Imports only the leaf seams
  * (mock/support.ts, mock/state.ts) - never routes.ts or sections.ts; the
  * bundle entry is src/main.ts, so this fragment never reaches lib/index.js.
  */
