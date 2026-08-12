@@ -34,12 +34,14 @@ import { AutolinkConfig } from "./sections/autolinks/schema.js";
 import { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 import { LabelConfig } from "./sections/labels/schema.js";
 import { MilestoneConfig } from "./sections/milestones/schema.js";
+import { PagesConfig } from "./sections/pages/schema.js";
 import type { MustBeNever } from "./types.js";
 
 export { AutolinkConfig } from "./sections/autolinks/schema.js";
 export { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 export { LabelConfig } from "./sections/labels/schema.js";
 export { MilestoneConfig } from "./sections/milestones/schema.js";
+export { PagesConfig } from "./sections/pages/schema.js";
 export type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "./types.js";
 
 /**
@@ -735,29 +737,6 @@ export const CheckSuitePreferencesConfig = z
   )
   .meta({ id: "CheckSuitePreferencesConfig" });
 export type CheckSuitePreferencesConfig = z.infer<typeof CheckSuitePreferencesConfig>;
-
-export const PagesConfig = z
-  .object({
-    build_type: z
-      .enum(["workflow", "legacy"])
-      .optional()
-      .describe('"workflow" (GitHub Actions) or "legacy" (branch).'),
-    source: z
-      .object({ branch: z.string(), path: z.string().optional() })
-      .optional()
-      .describe("The update PUT requires both branch and path when source is sent."),
-    cname: z.string().nullable().optional().describe("Custom domain; null removes it."),
-    https_enforced: z.boolean().optional().describe("Whether HTTPS is enforced for the site."),
-    public: z
-      .boolean()
-      .optional()
-      .describe(
-        "Enterprise Cloud site visibility: true for public, false for repository members only. Documented only in the GHEC flavor of the Pages PUT; the GET echoes it everywhere.",
-      ),
-  })
-  .describe("GitHub Pages site configuration; use `pages: null` to disable the site.")
-  .meta({ id: "PagesConfig" });
-export type PagesConfig = z.infer<typeof PagesConfig>;
 
 export const CollaboratorConfig = z
   .object({

@@ -19,6 +19,7 @@ import { autolinksMockHandlers } from "../../../src/sections/autolinks/mock.js";
 import { customPropertiesMockHandlers } from "../../../src/sections/custom_properties/mock.js";
 import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
 import { milestonesMockHandlers } from "../../../src/sections/milestones/mock.js";
+import { pagesMockHandlers } from "../../../src/sections/pages/mock.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG } from "../constants.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "./secrets.js";
@@ -68,7 +69,6 @@ import {
   noContent,
   ok,
   orgProbeHandler,
-  pagesUrl,
   pinTargetName,
   repoFeatureFields,
   repoNodeId,
@@ -773,32 +773,7 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // pages ------------------------------------------------------------------
-  "pages.get": ({ state }) => {
-    if (state.pages === null) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    return ok(state.pages);
-  },
-  "pages.create": ({ state, body }) => {
-    if (state.pages !== null) {
-      // POST creates; an existing site is a conflict. 409 is not declared for
-      // this endpoint (create only declares 201), so a real conflict here
-      // would be a scenario setup error; surface it loudly as a 422 the client
-      // will classify as a hard failure rather than fake a 201.
-      return { status: 422, body: { message: "Pages is already enabled" } };
-    }
-    state.pages = { url: pagesUrl(), ...asObject(body) };
-    return { status: 201, body: state.pages };
-  },
-  "pages.update": ({ state, body }) => {
-    state.pages = { url: pagesUrl(), ...asObject(state.pages), ...asObject(body) };
-    return noContent();
-  },
-  "pages.remove": ({ state }) => {
-    state.pages = null;
-    return noContent();
-  },
+  // pages: moved to src/sections/pages/mock.ts
 
   // code_scanning_default_setup -------------------------------------------
   "code_scanning_default_setup.get": ({ state }) => ok(state.code_scanning),
@@ -1785,6 +1760,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: customPropertiesMockHandlers },
   { rest: labelsMockHandlers },
   { rest: milestonesMockHandlers },
+  { rest: pagesMockHandlers },
   { rest: UNMOVED_SECTION_HANDLERS, graphql: UNMOVED_SECTION_GRAPHQL_HANDLERS },
 ];
 

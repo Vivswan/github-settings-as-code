@@ -3,8 +3,8 @@
  * declares Pages OFF (mirroring branches' `protection: null`).
  */
 
-import { subsetDiff } from "../engine/diff.js";
-import { type PagesConfig, SettingsFile } from "../schema.js";
+import { subsetDiff } from "../../engine/diff.js";
+import { type PagesConfig, SettingsFile } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -14,7 +14,7 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
-} from "./contract.js";
+} from "../contract.js";
 
 const permission: SectionPermission = { repo: ["pages"] };
 
