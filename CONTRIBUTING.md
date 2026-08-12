@@ -61,8 +61,8 @@ major also points).
 Runtime dependencies (such as @octokit/rest with the retry and throttling
 plugins, @actions/core, zod, and yaml) are compiled into that single bundle.
 
-Run `bun run check` for lint + typecheck + tests + schema freshness. The
-pre-commit hook runs lint and typecheck only.
+Run `bun run check` for lint + YAML lint + typecheck + tests + schema
+freshness. The pre-commit hook runs lint and typecheck only.
 
 [COVERAGE.md](COVERAGE.md) is the honest inventory of the supported API
 surface: what works today, the repo-scoped gaps, and what is out of scope

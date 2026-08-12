@@ -17,8 +17,8 @@ body:
     id: version
     attributes:
       label: Action version
-      description: The ref you pin in `uses:` (a tag like v1, or a commit sha).
-      placeholder: Vivswan/github-settings-as-code@v1
+      description: The ref you pin in `uses:` (a tag like `v2`, or a commit sha). # x-release-please-major
+      placeholder: Vivswan/github-settings-as-code@v2 # x-release-please-major
     validations:
       required: true
   - type: input
