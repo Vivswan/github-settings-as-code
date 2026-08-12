@@ -1,10 +1,12 @@
 /**
  * Shared building blocks for the mock's per-endpoint handlers: the handler
  * and reply types, the reply helpers, and the handler-local helpers the
- * section handler fragments compose. This module sits BELOW the pipeline
- * (routes.ts) and the section fragments (sections.ts, and later each
- * src/sections/<key>/mock.ts): it imports neither, so a per-section mock
- * fragment can depend on it without pulling the whole pipeline in.
+ * section handler fragments compose. This module sits BELOW its consumers -
+ * the pipeline (routes.ts), the core-path handlers (core-paths.ts), the
+ * merged handler tables (handlers.ts), and every section fragment
+ * (src/sections/<key>/mock.ts, registered in sections.ts): it imports none
+ * of them, so a per-section mock fragment can depend on it without pulling
+ * the whole pipeline in.
  */
 
 import type { SectionKey } from "../../../src/schema.js";

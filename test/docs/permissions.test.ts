@@ -151,7 +151,7 @@ describe("write-gated section reads", () => {
 describe("branches Contents advice", () => {
   test("the README row and permissions.md advise the branch probe's override grant", () => {
     // The advisory branch-existence probe carries a Contents permission
-    // override (src/sections/branches.ts), advised at the level the section
+    // override (src/sections/branches/index.ts), advised at the level the section
     // needs on that permission - the source both prose mentions restate.
     const probe = allEndpoints()["branches.branchProbe"];
     const override = probe?.permission;
