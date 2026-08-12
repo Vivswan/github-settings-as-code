@@ -46,7 +46,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const milestonesSection: SectionModule<"milestones"> = {
+export const milestonesSection = {
   key: "milestones",
   undeclaredDefault: "keep",
   permission,
@@ -140,4 +140,4 @@ export const milestonesSection: SectionModule<"milestones"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"milestones">;

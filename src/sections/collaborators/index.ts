@@ -89,7 +89,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const collaboratorsSection: SectionModule<"collaborators"> = {
+export const collaboratorsSection = {
   key: "collaborators",
   undeclaredDefault: "delete",
   permission,
@@ -272,4 +272,4 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"collaborators">;

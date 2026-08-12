@@ -520,7 +520,7 @@ function splitEntry(env: EnvironmentConfig): {
   return { settings: settings as Record<string, unknown>, nested, routed };
 }
 
-export const environmentsSection: SectionModule<"environments"> = {
+export const environmentsSection = {
   key: "environments",
   undeclaredDefault: "untouched",
   permission,
@@ -635,7 +635,7 @@ export const environmentsSection: SectionModule<"environments"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"environments">;
 
 /** The fields of a live variable this section reads. */
 interface LiveVariable {

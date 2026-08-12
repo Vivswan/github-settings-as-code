@@ -74,7 +74,7 @@ const SCOPE: SecretsScope = {
   ops: OPS,
 };
 
-export const dependabotSecretsSection: SectionModule<"dependabot_secrets"> = {
+export const dependabotSecretsSection = {
   key: "dependabot_secrets",
   undeclaredDefault: "keep",
   permission,
@@ -99,4 +99,4 @@ export const dependabotSecretsSection: SectionModule<"dependabot_secrets"> = {
     // ran; the sealed-write path reads them through ctx.resolveSecret.
     return reconcileSecrets(ctx, this, SCOPE, { entries, policy });
   },
-};
+} satisfies SectionModule<"dependabot_secrets">;

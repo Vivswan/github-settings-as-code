@@ -7,8 +7,14 @@
  * fragment can depend on it without pulling the whole pipeline in.
  */
 
+import type { SectionKey } from "../../../src/schema.js";
 import type { GraphqlTolerableError } from "../../../src/sections/contract.js";
-import type { TaggedEndpoint, TaggedGraphqlOp } from "../../../src/sections/registry.js";
+import type {
+  SectionEndpointKey,
+  SectionGraphqlKey,
+  TaggedEndpoint,
+  TaggedGraphqlOp,
+} from "../../../src/sections/registry.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import { MOCK_SECRETS_KEY_ID, secretDigest, unsealSecretValue } from "./secrets.js";
 import type { MockState } from "./state.js";
@@ -59,6 +65,22 @@ interface HandlerContext {
 }
 
 export type Handler = (ctx: HandlerContext) => MockResponse;
+
+/**
+ * One section's REST mock fragment: exactly one handler per declared
+ * endpoint role. The Record over the section's exact SectionEndpointKey<K>
+ * union makes both halves of handler completeness a compile-time fact for
+ * the fragment - a declared endpoint without a handler is a missing
+ * property, a handler naming no declared endpoint an excess one.
+ */
+export type SectionRestHandlers<K extends SectionKey> = Readonly<
+  Record<SectionEndpointKey<K>, Handler>
+>;
+
+/** The GraphQL sibling of SectionRestHandlers, over SectionGraphqlKey<K>. */
+export type SectionGraphqlHandlers<K extends SectionKey> = Readonly<
+  Record<SectionGraphqlKey<K>, GraphqlHandler>
+>;
 
 // --- Pagination -----------------------------------------------------------
 

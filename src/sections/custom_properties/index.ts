@@ -130,7 +130,7 @@ function extractLive(data: unknown): LiveProperty[] {
   });
 }
 
-export const customPropertiesSection: SectionModule<"custom_properties"> = {
+export const customPropertiesSection = {
   key: "custom_properties",
   undeclaredDefault: "keep",
   permission,
@@ -267,4 +267,4 @@ export const customPropertiesSection: SectionModule<"custom_properties"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"custom_properties">;

@@ -6,13 +6,13 @@
 import { restRepoSurface, teamRepoFromPut } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
-  type Handler,
   noContent,
   ok,
   orgProbeHandler,
+  type SectionRestHandlers,
 } from "../../../test/e2e/mock/support.js";
 
-export const teamsMockHandlers: Record<string, Handler> = {
+export const teamsMockHandlers: SectionRestHandlers<"teams"> = {
   "teams.org": orgProbeHandler,
   "teams.probe": ({ state, param }) => {
     const slug = param("team_slug");

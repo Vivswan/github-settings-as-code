@@ -121,7 +121,7 @@ function extractLive(raw: unknown[]): { live: LiveDeployKey[]; materialById: Map
   return { live, materialById };
 }
 
-export const deployKeysSection: SectionModule<"deploy_keys"> = {
+export const deployKeysSection = {
   key: "deploy_keys",
   undeclaredDefault: "keep",
   permission,
@@ -294,4 +294,4 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"deploy_keys">;

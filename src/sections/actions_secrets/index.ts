@@ -72,7 +72,7 @@ const SCOPE: SecretsScope = {
   ops: OPS,
 };
 
-export const actionsSecretsSection: SectionModule<"actions_secrets"> = {
+export const actionsSecretsSection = {
   key: "actions_secrets",
   undeclaredDefault: "keep",
   permission,
@@ -97,4 +97,4 @@ export const actionsSecretsSection: SectionModule<"actions_secrets"> = {
     // ran; the sealed-write path reads them through ctx.resolveSecret.
     return reconcileSecrets(ctx, this, SCOPE, { entries, policy });
   },
-};
+} satisfies SectionModule<"actions_secrets">;

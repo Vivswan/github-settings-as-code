@@ -8,13 +8,13 @@
 
 import {
   asObject,
-  type Handler,
   type Json,
   noContent,
   ok,
+  type SectionRestHandlers,
 } from "../../../test/e2e/mock/support.js";
 
-export const autolinksMockHandlers: Record<string, Handler> = {
+export const autolinksMockHandlers: SectionRestHandlers<"autolinks"> = {
   "autolinks.list": ({ state }) => ok(state.autolinks), // section GETs unpaginated
   "autolinks.create": ({ state, body }) => {
     const payload = asObject(body);

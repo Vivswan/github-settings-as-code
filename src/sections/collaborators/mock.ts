@@ -11,14 +11,14 @@ import {
 } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
-  type Handler,
   type Json,
   noContent,
   ok,
+  type SectionRestHandlers,
   slicePage,
 } from "../../../test/e2e/mock/support.js";
 
-export const collaboratorsMockHandlers: Record<string, Handler> = {
+export const collaboratorsMockHandlers: SectionRestHandlers<"collaborators"> = {
   "collaborators.list": ({ state, query }) => ok(slicePage(state.collaborators, query)),
   "collaborators.update": ({ state, param, body }) => {
     const username = param("username");

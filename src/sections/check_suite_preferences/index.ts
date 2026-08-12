@@ -27,7 +27,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const checkSuitePreferencesSection: SectionModule<"check_suite_preferences"> = {
+export const checkSuitePreferencesSection = {
   key: "check_suite_preferences",
   undeclaredDefault: "untouched",
   permission,
@@ -61,4 +61,4 @@ export const checkSuitePreferencesSection: SectionModule<"check_suite_preference
     );
     return result;
   },
-};
+} satisfies SectionModule<"check_suite_preferences">;

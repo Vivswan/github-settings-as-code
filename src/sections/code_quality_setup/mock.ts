@@ -5,9 +5,9 @@
  * file never reaches lib/index.js.
  */
 
-import { asObject, type Handler, ok } from "../../../test/e2e/mock/support.js";
+import { asObject, ok, type SectionRestHandlers } from "../../../test/e2e/mock/support.js";
 
-export const codeQualitySetupMockHandlers: Record<string, Handler> = {
+export const codeQualitySetupMockHandlers: SectionRestHandlers<"code_quality_setup"> = {
   "code_quality_setup.get": ({ state }) => ok(state.code_quality),
   "code_quality_setup.update": ({ state, body }) => {
     // Mirrors code_scanning_default_setup.update: the in-progress 409 flag

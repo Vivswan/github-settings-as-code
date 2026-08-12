@@ -12,17 +12,17 @@
 import { completeHook } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
-  type Handler,
   HOOK_CANONICAL_KEYS,
   maskedConfig,
   maskHookSecret,
   noContent,
   ok,
+  type SectionRestHandlers,
   slicePage,
   storedHookConfig,
 } from "../../../test/e2e/mock/support.js";
 
-export const webhooksMockHandlers: Record<string, Handler> = {
+export const webhooksMockHandlers: SectionRestHandlers<"webhooks"> = {
   "webhooks.list": ({ state, query }) => ok(slicePage(state.hooks.map(maskHookSecret), query)),
   "webhooks.create": ({ state, body }) => {
     const payload = asObject(body);

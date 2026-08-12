@@ -5,15 +5,15 @@
 
 import {
   asObject,
-  type Handler,
   invalidRuleTypeResponse,
   type Json,
   noContent,
   ok,
+  type SectionRestHandlers,
   slicePage,
 } from "../../../test/e2e/mock/support.js";
 
-export const rulesetsMockHandlers: Record<string, Handler> = {
+export const rulesetsMockHandlers: SectionRestHandlers<"rulesets"> = {
   "rulesets.list": ({ state, query }) => ok(slicePage(state.rulesets, query)),
   "rulesets.create": ({ state, body }) => {
     const invalid = invalidRuleTypeResponse(body, "create-a-repository-ruleset");

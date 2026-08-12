@@ -6,9 +6,15 @@
  * fragment never reaches lib/index.js.
  */
 
-import { asObject, type Handler, noContent, ok, pagesUrl } from "../../../test/e2e/mock/support.js";
+import {
+  asObject,
+  noContent,
+  ok,
+  pagesUrl,
+  type SectionRestHandlers,
+} from "../../../test/e2e/mock/support.js";
 
-export const pagesMockHandlers: Record<string, Handler> = {
+export const pagesMockHandlers: SectionRestHandlers<"pages"> = {
   "pages.get": ({ state }) => {
     if (state.pages === null) {
       return { status: 404, body: { message: "Not Found" } };

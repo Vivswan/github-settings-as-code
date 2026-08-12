@@ -17,21 +17,21 @@ import {
   asObject,
   branchPoliciesEnabled,
   environmentVariableName,
-  type GraphqlHandler,
-  type Handler,
   type Json,
   noContent,
   ok,
   pinTargetName,
+  type SectionGraphqlHandlers,
+  type SectionRestHandlers,
   sealedSecretPut,
   secretRemove,
   secretsList,
   slicePage,
 } from "../../../test/e2e/mock/support.js";
-import { allEndpoints } from "../registry.js";
+import { environmentsSection } from "./index.js";
 import { MAX_PINNED_ENVIRONMENTS } from "./schema.js";
 
-export const environmentsMockHandlers: Record<string, Handler> = {
+export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
   "environments.probe": ({ state, param }) => {
     const name = param("environment_name");
     const environment = state.environments[name];
@@ -80,11 +80,7 @@ export const environmentsMockHandlers: Record<string, Handler> = {
     // variables list: one source for the client loop, the sweep, and here.
     return ok({
       total_count: variables.length,
-      variables: slicePage(
-        variables,
-        query,
-        allEndpoints()["environments.listVariables"]?.pageSize,
-      ),
+      variables: slicePage(variables, query, environmentsSection.endpoints.listVariables.pageSize),
     });
   },
   "environments.createVariable": ({ state, param, body }) => {
@@ -319,7 +315,7 @@ export const environmentsMockHandlers: Record<string, Handler> = {
   },
 };
 
-export const environmentsMockGraphqlHandlers: Record<string, GraphqlHandler> = {
+export const environmentsMockGraphqlHandlers: SectionGraphqlHandlers<"environments"> = {
   "environments.pins": ({ state }) => ({
     data: {
       repository: {

@@ -6,9 +6,9 @@
  */
 
 import { restRepoSurface } from "../../../test/e2e/mock/state.js";
-import { asObject, type Handler, ok } from "../../../test/e2e/mock/support.js";
+import { asObject, ok, type SectionRestHandlers } from "../../../test/e2e/mock/support.js";
 
-export const checkSuitePreferencesMockHandlers: Record<string, Handler> = {
+export const checkSuitePreferencesMockHandlers: SectionRestHandlers<"check_suite_preferences"> = {
   "check_suite_preferences.update": ({ state, body }) => {
     // The one write-only endpoint: no GET exists, so the stored preferences
     // are visible only through this PATCH's echo ({preferences, repository}

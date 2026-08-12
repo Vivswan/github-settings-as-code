@@ -45,7 +45,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const workflowsSection: SectionModule<"workflows"> = {
+export const workflowsSection = {
   key: "workflows",
   undeclaredDefault: "untouched",
   permission,
@@ -108,4 +108,4 @@ export const workflowsSection: SectionModule<"workflows"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"workflows">;

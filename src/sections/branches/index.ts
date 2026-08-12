@@ -789,7 +789,7 @@ const WILDCARD_KEY_ERROR = (name: string, key: string): string =>
     ", ",
   )}]. For actor lists and richer controls, prefer the rulesets section (the modern successor of classic protection)`;
 
-export const branchesSection: SectionModule<"branches"> = {
+export const branchesSection = {
   key: "branches",
   undeclaredDefault: "untouched",
   permission,
@@ -905,7 +905,7 @@ export const branchesSection: SectionModule<"branches"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"branches">;
 
 /**
  * Reconcile one literal-branch entry (the REST path plus routed keys).

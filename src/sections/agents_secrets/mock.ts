@@ -9,14 +9,14 @@
 
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../../../test/e2e/mock/secrets.js";
 import {
-  type Handler,
   ok,
+  type SectionRestHandlers,
   sealedSecretPut,
   secretRemove,
   secretsList,
 } from "../../../test/e2e/mock/support.js";
 
-export const agentsSecretsMockHandlers: Record<string, Handler> = {
+export const agentsSecretsMockHandlers: SectionRestHandlers<"agents_secrets"> = {
   "agents_secrets.list": ({ state, query }) => secretsList(state.agents_secrets, query),
   "agents_secrets.publicKey": () =>
     ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),

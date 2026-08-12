@@ -397,7 +397,7 @@ export const SPECIAL_KEYS = new Set([
   ...GRAPHQL_ROUTED_KEYS.map((routed) => routed.key),
 ]);
 
-export const repositorySection: SectionModule<"repository"> = {
+export const repositorySection = {
   key: "repository",
   undeclaredDefault: "untouched",
   permission,
@@ -538,4 +538,4 @@ export const repositorySection: SectionModule<"repository"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"repository">;

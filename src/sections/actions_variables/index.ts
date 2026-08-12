@@ -59,7 +59,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const actionsVariablesSection: SectionModule<"actions_variables"> = {
+export const actionsVariablesSection = {
   key: "actions_variables",
   undeclaredDefault: "delete",
   permission,
@@ -164,4 +164,4 @@ export const actionsVariablesSection: SectionModule<"actions_variables"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"actions_variables">;

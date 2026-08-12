@@ -11,6 +11,7 @@ import { endpointMethod, endpointPath } from "../../../src/sections/contract.js"
 import {
   allEndpoints,
   allGraphqlOps,
+  type SectionEndpointKey,
   type TaggedEndpoint,
   type TaggedGraphqlOp,
 } from "../../../src/sections/registry.js";
@@ -210,9 +211,13 @@ export function statusAllowed(key: string, status: number): boolean {
 
 /** The declared status set for an endpoint (drives statusAllowed and tests). */
 export function declaredStatuses(key: string): Set<number> {
-  const endpoint = allEndpoints()[key];
-  if (!endpoint) {
+  const all = allEndpoints();
+  if (!(key in all)) {
     throw new Error(`BUG: no endpoint "${key}"`);
   }
+  // The `in` check above is the runtime proof behind the narrowing: callers
+  // hand dynamic strings (handler-table iteration), so the union is restored
+  // here at the one lookup boundary.
+  const endpoint = all[key as SectionEndpointKey];
   return new Set(Object.keys(endpoint.statuses).map(Number));
 }

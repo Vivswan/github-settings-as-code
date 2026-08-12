@@ -83,7 +83,7 @@ const SCOPE: SecretsScope = {
   ops: OPS,
 };
 
-export const codespacesSecretsSection: SectionModule<"codespaces_secrets"> = {
+export const codespacesSecretsSection = {
   key: "codespaces_secrets",
   undeclaredDefault: "keep",
   permission,
@@ -108,4 +108,4 @@ export const codespacesSecretsSection: SectionModule<"codespaces_secrets"> = {
     // ran; the sealed-write path reads them through ctx.resolveSecret.
     return reconcileSecrets(ctx, this, SCOPE, { entries, policy });
   },
-};
+} satisfies SectionModule<"codespaces_secrets">;

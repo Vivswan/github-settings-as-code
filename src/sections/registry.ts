@@ -1,8 +1,10 @@
 /**
- * The single registration point for section modules. `byKey` is a mapped
- * type, so the compiler enforces that every SectionKey has a module AND
- * that each module sits under its own key; execution order comes from
- * SECTION_KEYS alone. Adding a section: create sections/<key>.ts exporting
+ * The single registration point for section modules. `byKey` is checked
+ * against a mapped type, so the compiler enforces that every SectionKey has
+ * a module AND that each module sits under its own key, while `satisfies`
+ * keeps each module's LITERAL type - its exact endpoint and GraphQL role
+ * names - for the key unions derived below; execution order comes from
+ * SECTION_KEYS alone. Adding a section: create sections/<key>/ exporting
  * a SectionModule, add the key to SECTION_KEYS in schema.ts, and add one
  * line here.
  */
@@ -37,7 +39,7 @@ import { teamsSection } from "./teams/index.js";
 import { webhooksSection } from "./webhooks/index.js";
 import { workflowsSection } from "./workflows/index.js";
 
-const byKey: { [K in SectionKey]: SectionModule<K> } = {
+const byKey = {
   repository: repositorySection,
   labels: labelsSection,
   rulesets: rulesetsSection,
@@ -64,10 +66,46 @@ const byKey: { [K in SectionKey]: SectionModule<K> } = {
   custom_properties: customPropertiesSection,
   deploy_keys: deployKeysSection,
   secret_scanning_custom_patterns: secretScanningPatternsSection,
-};
+} satisfies { [K in SectionKey]: SectionModule<K> };
+
+/** Each section's module with its literal endpoint/GraphQL dictionaries. */
+type SectionModules = typeof byKey;
+
+/**
+ * The `${section}.${role}` key union for REST endpoints - per section, or
+ * across all sections by default. Derived from each module's literal
+ * ENDPOINTS type, so this union (and every consumer: the mock handler
+ * tables, dispatch, fault directives) tracks the declarations by
+ * construction; a key naming no declared endpoint does not compile.
+ */
+export type SectionEndpointKey<K extends SectionKey = SectionKey> = {
+  [S in SectionKey]: `${S}.${keyof SectionModules[S]["endpoints"] & string}`;
+}[K];
+
+/**
+ * The `${section}.${role}` key union for GraphQL operations, the
+ * SectionEndpointKey sibling. A module without a `graphql` dictionary
+ * contributes nothing (never), so the union spans exactly the declaring
+ * sections.
+ */
+export type SectionGraphqlKey<K extends SectionKey = SectionKey> = {
+  [S in SectionKey]: SectionModules[S] extends { readonly graphql: infer G }
+    ? `${S}.${keyof G & string}`
+    : never;
+}[K];
+
+/**
+ * The same registry under per-key SectionModule<K> types: the erased view
+ * SECTIONS and sectionModule() serve. Erasure must go through THIS mapped
+ * annotation (not straight from the literal types) because the compiler
+ * relates SectionModule<K> to SectionModule<SectionKey> by variance, while
+ * a literal module's closedSurface would be compared structurally against
+ * the union-collapsed (never-keyed) wide form and rejected.
+ */
+const byKeyErased: { [K in SectionKey]: SectionModule<K> } = byKey;
 
 /** Every section module, in execution order. */
-export const SECTIONS: readonly SectionModule[] = SECTION_KEYS.map((key) => byKey[key]);
+export const SECTIONS: readonly SectionModule[] = SECTION_KEYS.map((key) => byKeyErased[key]);
 
 /** The loose shape validation accepts for a section's declared value. */
 export function sectionShape(key: SectionKey): z.ZodType {
@@ -76,7 +114,7 @@ export function sectionShape(key: SectionKey): z.ZodType {
 
 /** The section module for a key (validate.ts reads shape + closedSurface). */
 export function sectionModule<K extends SectionKey>(key: K): SectionModule<K> {
-  return byKey[key];
+  return byKeyErased[key];
 }
 
 /** One endpoint in the flattened cross-section view, tagged with its owner. */
@@ -103,7 +141,9 @@ function assertScopeFree(kind: "section key" | "role", value: string): void {
 /**
  * Every section's endpoints flattened into one dictionary keyed
  * `${sectionKey}.${role}` ("labels.update", "teams.org", ...). Keys are
- * globally unique by construction (section key + local role). This is the
+ * globally unique by construction (section key + local role), and the
+ * record is keyed by the exact SectionEndpointKey union, so a consumer
+ * looking up a key no section declares does not compile. This is the
  * merge-ready single view downstream consumers (the e2e mock's route table,
  * USED_PATHS derivation) iterate, without renaming any section's local roles.
  *
@@ -113,8 +153,14 @@ function assertScopeFree(kind: "section key" | "role", value: string): void {
  * dictionaries through this view.
  *
  * `sections` is injectable so the scope-free assert is directly testable;
- * production callers take the registry default.
+ * production callers take the registry default, whose record is keyed by
+ * the exact SectionEndpointKey union (an injected synthetic list keeps
+ * string keys) - the allGraphqlOps overload shape.
  */
+export function allEndpoints(): Readonly<Record<SectionEndpointKey, TaggedEndpoint>>;
+export function allEndpoints(
+  sections: ReadonlyArray<Pick<SectionModule, "key" | "endpoints">>,
+): Readonly<Record<string, TaggedEndpoint>>;
 export function allEndpoints(
   sections: ReadonlyArray<Pick<SectionModule, "key" | "endpoints">> = SECTIONS,
 ): Readonly<Record<string, TaggedEndpoint>> {
@@ -158,8 +204,13 @@ export type TaggedGraphqlOp = GraphqlOpDecl & {
  * GraphqlPaginatedReadDecl query type makes a paginated operation that
  * cannot page uncompilable at its declaration.
  * `sections` is injectable so the asserts are directly testable; production
- * callers take the registry default.
+ * callers take the registry default, whose record is keyed by the exact
+ * SectionGraphqlKey union (an injected synthetic list keeps string keys).
  */
+export function allGraphqlOps(): Readonly<Record<SectionGraphqlKey, TaggedGraphqlOp>>;
+export function allGraphqlOps(
+  sections: ReadonlyArray<Pick<SectionModule, "key" | "endpoints" | "graphql">>,
+): Readonly<Record<string, TaggedGraphqlOp>>;
 export function allGraphqlOps(
   sections: ReadonlyArray<Pick<SectionModule, "key" | "endpoints" | "graphql">> = SECTIONS,
 ): Readonly<Record<string, TaggedGraphqlOp>> {
