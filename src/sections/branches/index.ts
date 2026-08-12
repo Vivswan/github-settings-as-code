@@ -18,13 +18,13 @@
  * a pure-REST declaration issues no GraphQL request at all.
  */
 
-import { subsetDiff } from "../engine/diff.js";
+import { subsetDiff } from "../../engine/diff.js";
 import {
   type BranchConfig,
   type BranchProtectionConfig,
   parseBypassActor,
   SettingsFile,
-} from "../schema.js";
+} from "../../schema.js";
 import {
   call,
   callGraphql,
@@ -44,7 +44,7 @@ import {
   type SectionPermission,
   type SectionResult,
   tryCall,
-} from "./contract.js";
+} from "../contract.js";
 
 const REQUIRED_PROTECTION_KEYS = [
   "required_status_checks",

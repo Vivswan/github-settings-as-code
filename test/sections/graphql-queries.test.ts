@@ -21,7 +21,7 @@ import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
-} from "../../src/sections/branches.js";
+} from "../../src/sections/branches/index.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";
 
 const SCHEMA_PATH = join(import.meta.dir, "..", "e2e", "graphql", "schema.docs.graphql");
