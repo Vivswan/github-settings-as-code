@@ -206,7 +206,7 @@ describe("secret_scanning_custom_patterns", () => {
       'secret_scanning_custom_patterns[internal-token].pattern: declared "int_[a-z0-9]{8}" != live "old_[0-9]{4}"; apply will set the declared value',
       'secret_scanning_custom_patterns[internal-token].end_delimiter: declared "\\\\b" != live "\\\\z"; apply will set the declared value',
       "secret_scanning_custom_patterns[vendor-key]: missing - declared in the settings file but not on the repo; apply will create it",
-      "secret_scanning_custom_patterns[stale]: undeclared - not in the settings file, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it",
+      'secret_scanning_custom_patterns[stale]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it',
     ]);
     expect(api.mutations()).toEqual([]);
   });

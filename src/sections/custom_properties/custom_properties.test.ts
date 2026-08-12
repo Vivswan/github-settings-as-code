@@ -180,7 +180,7 @@ describe("custom_properties", () => {
       entries: [],
     });
     expect(result.drift).toEqual([
-      "custom_properties[tier]: undeclared - not in the settings file, so apply will unset it (reverting to the org default, if any); add it to the settings file to keep it",
+      'custom_properties[tier]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will unset it (reverting to the org default, if any); add it to the settings file to keep it',
     ]);
     expect(api.mutations()).toEqual([]);
   });

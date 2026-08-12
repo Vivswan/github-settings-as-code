@@ -84,7 +84,7 @@ describe("agents_secrets check mode", () => {
       entries: [],
     });
     expect(deleted.drift?.join("\n")).toContain(
-      "agents_secrets[STALE]: undeclared - not in the settings file, so apply will DELETE it",
+      'agents_secrets[STALE]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it',
     );
     expect(api2.mutations()).toEqual([]);
   });

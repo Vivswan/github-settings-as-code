@@ -41,6 +41,8 @@ import {
   type SectionContext,
   type SectionMeta,
   type SectionRun,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "./contract.js";
 
@@ -280,9 +282,15 @@ export async function reconcileSecrets(
   opts: {
     entries: readonly SecretEntry[];
     policy: UndeclaredPolicy;
+    /**
+     * The DEFAULT the caller unwrapped `policy` against (the section's
+     * undeclaredDefault, or environments' fixed nested default), from which
+     * undeclaredDrift derives its explicit-knob clause.
+     */
+    defaultPolicy: UndeclaredPolicy;
   },
 ): Promise<void> {
-  const { entries, policy } = opts;
+  const { entries, policy, defaultPolicy } = opts;
   const home = scope.home ?? "the repo";
   const suffix = scope.changeSuffix ?? "";
 
@@ -355,11 +363,18 @@ export async function reconcileSecrets(
     }
     if (policy === "keep") {
       run.result.notes.push(
-        `${scope.noun} "${liveName}" exists on ${home} but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it (a deleted secret's value is unrecoverable)`,
+        undeclaredNote({
+          subject: `${scope.noun} "${liveName}"`,
+          state: `exists on ${home} but is not declared`,
+          action: "DELETE it (a deleted secret's value is unrecoverable)",
+        }),
       );
     } else if (run.check) {
       run.result.drift.push(
-        `${scope.label}[${liveName}]: undeclared - not in the settings file, so apply will DELETE it (the value is unrecoverable); add it to the settings file to keep it`,
+        undeclaredDrift(defaultPolicy, {
+          label: `${scope.label}[${liveName}]`,
+          action: "DELETE it (the value is unrecoverable)",
+        }),
       );
     } else {
       await scope.ops.remove(

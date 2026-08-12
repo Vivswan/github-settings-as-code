@@ -190,13 +190,14 @@ export function repoSecretsSection<K extends RepoSecretsKey, P extends SecretsSe
         "the API body carries only the sealed value, so the key would silently do nothing",
     },
     async run(ctx, declared): Promise<SectionResult> {
-      const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
+      const defaultPolicy = defaultUndeclaredPolicy(this);
+      const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
       rejectDuplicateSecretNames(this, entries);
       // The engine validated every $NAME reference in both modes and, in
       // apply mode, resolved and masked the plaintexts before any section
       // ran; the sealed-write path reads them through the run's apply arm.
       const run = beginRun(ctx);
-      await reconcileSecrets(run, this, scope, { entries, policy });
+      await reconcileSecrets(run, this, scope, { entries, policy, defaultPolicy });
       return run.result;
     },
   };

@@ -18,6 +18,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
 
@@ -119,11 +121,14 @@ export const autolinksSection = {
       }
       if (policy === "keep") {
         run.result.notes.push(
-          `autolink ${autolink.key_prefix} exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+          undeclaredNote({ subject: `autolink ${autolink.key_prefix}`, action: "DELETE it" }),
         );
       } else if (run.check) {
         run.result.drift.push(
-          `autolinks[${autolink.key_prefix}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
+          undeclaredDrift(defaultUndeclaredPolicy(this), {
+            label: `autolinks[${autolink.key_prefix}]`,
+            action: "DELETE it",
+          }),
         );
       } else {
         await call(ctx, this, ENDPOINTS.remove, { params: { autolink_id: String(autolink.id) } });

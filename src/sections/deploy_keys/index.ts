@@ -29,6 +29,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
 
@@ -274,11 +276,14 @@ export const deployKeysSection = {
       }
       if (policy === "keep") {
         run.result.notes.push(
-          `deploy key "${key.title}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+          undeclaredNote({ subject: `deploy key "${key.title}"`, action: "DELETE it" }),
         );
       } else if (run.check) {
         run.result.drift.push(
-          `deploy_keys[${key.title}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
+          undeclaredDrift(defaultUndeclaredPolicy(this), {
+            label: `deploy_keys[${key.title}]`,
+            action: "DELETE it",
+          }),
         );
       } else {
         await call(ctx, this, ENDPOINTS.remove, {

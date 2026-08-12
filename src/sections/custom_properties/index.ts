@@ -20,6 +20,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
 
@@ -213,11 +215,18 @@ export const customPropertiesSection = {
       }
       if (policy === "keep") {
         run.result.notes.push(
-          `custom property "${property.property_name}" is set on the repo but not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply UNSET it`,
+          undeclaredNote({
+            subject: `custom property "${property.property_name}"`,
+            state: "is set on the repo but not declared",
+            action: "UNSET it",
+          }),
         );
       } else if (run.check) {
         run.result.drift.push(
-          `custom_properties[${property.property_name}]: undeclared - not in the settings file, so apply will unset it (reverting to the org default, if any); add it to the settings file to keep it`,
+          undeclaredDrift(defaultUndeclaredPolicy(this), {
+            label: `custom_properties[${property.property_name}]`,
+            action: "unset it (reverting to the org default, if any)",
+          }),
         );
       } else {
         updates.push({ property_name: property.property_name, value: null });

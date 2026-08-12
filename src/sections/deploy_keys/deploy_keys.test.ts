@@ -292,7 +292,7 @@ describe("deploy_keys undeclared policy", () => {
       entries: [{ title: "deploy-bot", key: BOT_KEY }],
     });
     expect(result.drift).toEqual([
-      "deploy_keys[retired-service]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+      'deploy_keys[retired-service]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
     ]);
     expect(api.mutations()).toEqual([]);
   });

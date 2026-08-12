@@ -20,6 +20,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
 
@@ -179,7 +181,10 @@ export const rulesetsSection = {
         }
         if (run.check) {
           run.result.drift.push(
-            `rulesets[${live.name}]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it`,
+            undeclaredDrift(defaultUndeclaredPolicy(this), {
+              label: `rulesets[${live.name}]`,
+              action: "DELETE it",
+            }),
           );
         } else {
           await call(ctx, this, ENDPOINTS.remove, {
@@ -191,7 +196,7 @@ export const rulesetsSection = {
         continue;
       }
       run.result.notes.push(
-        `ruleset "${live.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+        undeclaredNote({ subject: `ruleset "${live.name}"`, action: "DELETE it" }),
       );
     }
     return run.result;
