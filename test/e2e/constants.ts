@@ -19,6 +19,18 @@ export const ADMIN_SLUG = `${ADMIN_OWNER}/${ADMIN_REPO}`;
 export const TOKEN_USER_LOGIN = "e2e-token-user";
 
 /**
+ * The inert token every e2e child run authenticates with (INPUT_TOKEN). The
+ * one constant is both what the runner's childEnv feeds the action and what
+ * its centralized leak sweep hunts on every public surface, so the
+ * token-leak invariant can never drift from the token actually in use. The
+ * literal must not be a substring of any other harness identity constant a
+ * run may legitimately render (TOKEN_USER_LOGIN very nearly was), or the
+ * sweep would false-positive on the fixture; the disjointness test in
+ * foundation.test.ts enforces that.
+ */
+export const E2E_TOKEN = "e2e-inert-token";
+
+/**
  * The marker every mock-originated contract-violation reply carries in its
  * message, so the runner and the OpenAPI validator can tell the mock's own
  * loud failures from GitHub-shaped error bodies. Single-sourced here, in the

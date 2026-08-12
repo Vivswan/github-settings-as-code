@@ -82,7 +82,7 @@
  * use for it, and both sides are guarded. A wrong `true` fails the first
  * apply_idempotent run that touches the section (the zero-write assertion).
  * A wrong `false` is caught corpus-wide by unwitnessedUnconditionalSections
- * (runner.ts, consulted by run.ts over the full corpus), which demands every
+ * (apply-idempotence-proof.ts, consulted by run.ts over the full corpus), which demands every
  * false-listed section BOTH appears in some apply_idempotent scenario's
  * first-apply writes AND is re-written by some second apply - so a section
  * that quietly becomes compare-before-write, or that loses its corpus
@@ -127,7 +127,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
  *
  * - Which WRITES must recur on a second apply comes from the EndpointDecl
  *   `alwaysRewrite` flag the sealed secret PUTs declare (see
- *   missingSecondApplyRewrites in runner.ts, which resolves each logged PUT
+ *   missingSecondApplyRewrites in apply-idempotence-proof.ts, which resolves each logged PUT
  *   to its endpoint). The property is per ENDPOINT, not per section, because
  *   environments carries a passthrough PUT and always-rewrite secret PUTs
  *   side by side.

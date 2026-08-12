@@ -23,11 +23,12 @@ export const codeQualitySetupMockHandlers: Record<string, Handler> = {
       JSON.stringify(payload.languages) !== JSON.stringify(state.code_quality.languages);
     Object.assign(state.code_quality, payload);
     if (changesLanguages) {
+      const runId = state.nextId++;
       return {
         status: 202,
         body: {
-          run_id: state.nextId++,
-          run_url: `https://api.github.com/repos/${state.slug}/code-quality/setup/runs/1`,
+          run_id: runId,
+          run_url: `https://api.github.com/repos/${state.slug}/code-quality/setup/runs/${runId}`,
         },
       };
     }

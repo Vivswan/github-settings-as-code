@@ -16,7 +16,7 @@ const NODE_ID_PREFIX = "MOCKNODE";
 
 /**
  * The closed vocabulary of node-id families: every mint site and every decode
- * consumer speaks these six literals, so a typo at either end is a compile
+ * consumer speaks these literals, so a typo at either end is a compile
  * error instead of a runtime NOT_FOUND hunt.
  */
 const NODE_FAMILIES = ["repo", "environment", "rule", "user", "team", "app"] as const;
