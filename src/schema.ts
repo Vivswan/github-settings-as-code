@@ -30,8 +30,10 @@
  */
 
 import { z } from "zod";
+import { LabelConfig } from "./sections/labels/schema.js";
 import type { MustBeNever } from "./types.js";
 
+export { LabelConfig } from "./sections/labels/schema.js";
 export type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "./types.js";
 
 /**
@@ -176,17 +178,6 @@ export const RepositoryConfig = z
   )
   .meta({ id: "RepositoryConfig" });
 export type RepositoryConfig = z.infer<typeof RepositoryConfig>;
-
-export const LabelConfig = z
-  .object({
-    name: z.string().describe("The label name, the natural key."),
-    color: z.string().optional().describe('Hex color, with or without the leading "#".'),
-    description: z.string().optional().describe("Short explanation shown in the label picker."),
-    new_name: z.string().optional().describe("Probot compat: rename an existing label."),
-  })
-  .describe("One label, matched to the live repo by name.")
-  .meta({ id: "LabelConfig" });
-export type LabelConfig = z.infer<typeof LabelConfig>;
 
 export const RulesetConfig = z
   .object({

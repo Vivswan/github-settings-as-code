@@ -5,8 +5,8 @@
  * the deletion to notes.
  */
 
-import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import { type LabelConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import { type LabelConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -18,7 +18,7 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 
 /** Case-insensitive key for name-matched resources (labels). */
 export function nameKey(name: string): string {
