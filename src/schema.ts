@@ -30,13 +30,20 @@
  */
 
 import { z } from "zod";
+import { ActionsSecretConfig } from "./sections/actions_secrets/schema.js";
 import { AutolinkConfig } from "./sections/autolinks/schema.js";
 import { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 import { LabelConfig } from "./sections/labels/schema.js";
 import { MilestoneConfig } from "./sections/milestones/schema.js";
 import { PagesConfig } from "./sections/pages/schema.js";
+import {
+  SEALED_SECRET_VALUE_DOC,
+  SECRET_NAME_DOC,
+  sealedSecretConfig,
+} from "./sections/shared/schema-helpers.js";
 import type { MustBeNever } from "./types.js";
 
+export { ActionsSecretConfig } from "./sections/actions_secrets/schema.js";
 export { AutolinkConfig } from "./sections/autolinks/schema.js";
 export { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 export { LabelConfig } from "./sections/labels/schema.js";
@@ -366,12 +373,6 @@ export const EnvironmentVariableConfig = z
   .meta({ id: "EnvironmentVariableConfig" });
 export type EnvironmentVariableConfig = z.infer<typeof EnvironmentVariableConfig>;
 
-const SEALED_SECRET_VALUE_DOC =
-  "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.";
-
-const SECRET_NAME_DOC =
-  "The secret name, the natural key; compared case-insensitively and written uppercase.";
-
 export const EnvironmentSecretConfig = z
   .strictObject({
     name: z.string().describe(SECRET_NAME_DOC),
@@ -604,23 +605,6 @@ export const ActionsConfig = z
   .describe("GitHub Actions settings, routed to the right endpoint by key.")
   .meta({ id: "ActionsConfig" });
 export type ActionsConfig = z.infer<typeof ActionsConfig>;
-
-/** A repository-scope sealed secret entry (name + `$NAME` reference value). */
-function sealedSecretConfig(id: string, description: string) {
-  return z
-    .object({
-      name: z.string().describe(SECRET_NAME_DOC),
-      value: z.string().describe(SEALED_SECRET_VALUE_DOC),
-    })
-    .describe(description)
-    .meta({ id });
-}
-
-export const ActionsSecretConfig = sealedSecretConfig(
-  "ActionsSecretConfig",
-  "One repository Actions secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
-);
-export type ActionsSecretConfig = z.infer<typeof ActionsSecretConfig>;
 
 export const DependabotSecretConfig = sealedSecretConfig(
   "DependabotSecretConfig",

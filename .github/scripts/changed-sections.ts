@@ -73,6 +73,16 @@ export const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
 export const SHARED_FAN_OUT: Record<string, SectionKey[]> = {
   // roles.ts is the shared permission-vocabulary normalizer for both sections.
   "roles.ts": ["collaborators", "teams"],
+  // schema-helpers.ts holds the sealed-secret config-schema helpers shared by
+  // the four repository-level secret sections and by environments (root
+  // schema.ts builds EnvironmentSecretConfig's docs from them).
+  "schema-helpers.ts": [
+    "actions_secrets",
+    "dependabot_secrets",
+    "codespaces_secrets",
+    "agents_secrets",
+    "environments",
+  ],
   // secrets-engine.ts is the shared sealing/reconciliation engine, consumed
   // by the four repository-level secret sections and by environments (its
   // nested per-environment secrets key).
