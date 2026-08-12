@@ -22,7 +22,7 @@
  * opts in).
  */
 
-import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import {
   type DeploymentBranchPolicyConfig,
   type DeploymentProtectionRuleConfig,
@@ -35,7 +35,7 @@ import {
   SettingsFile,
   type UndeclaredPolicy,
   type UndeclaredPolicyList,
-} from "../schema.js";
+} from "../../schema.js";
 import {
   call,
   callGraphql,
@@ -57,14 +57,14 @@ import {
   type SectionResult,
   tryCallGraphql,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 import {
   listSecretValues,
   reconcileSecrets,
   type SecretsScope,
   type SecretsScopeOps,
   secretKey,
-} from "./secrets-engine.js";
+} from "../secrets-engine.js";
 
 const permission: SectionPermission = { repo: ["environments"] };
 

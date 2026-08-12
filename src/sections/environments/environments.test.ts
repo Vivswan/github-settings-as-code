@@ -1,14 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import type { SectionContext } from "../../src/sections/contract.js";
-import { environmentsSection, flattenEnvironment } from "../../src/sections/environments.js";
+import type { SectionContext } from "../../../src/sections/contract.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
   unsealSecretValue,
-} from "../e2e/mock/secrets.js";
-import { FIXTURE_ENV_NAME, FLAG_PAIRING_FIXTURES } from "../fixtures/environment-flag-pairing.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+} from "../../../test/e2e/mock/secrets.js";
+import {
+  FIXTURE_ENV_NAME,
+  FLAG_PAIRING_FIXTURES,
+} from "../../../test/fixtures/environment-flag-pairing.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { environmentsSection, flattenEnvironment } from "./index.js";
 
 const VARIABLES_LIST = "GET /repos/o/r/environments/prod/variables?per_page=30&page=1";
 

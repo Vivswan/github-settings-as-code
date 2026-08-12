@@ -25,7 +25,7 @@ import type { EndpointDecl, GraphqlOpDecl, SectionModule } from "./contract.js";
 import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
 import { deployKeysSection } from "./deploy_keys/index.js";
-import { environmentsSection } from "./environments.js";
+import { environmentsSection } from "./environments/index.js";
 import { interactionLimitsSection } from "./interaction_limits/index.js";
 import { labelsSection } from "./labels/index.js";
 import { milestonesSection } from "./milestones/index.js";

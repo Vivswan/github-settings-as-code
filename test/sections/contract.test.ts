@@ -10,7 +10,7 @@ import {
   sectionOperations,
   throwFor,
 } from "../../src/sections/contract.js";
-import { environmentsSection } from "../../src/sections/environments.js";
+import { environmentsSection } from "../../src/sections/environments/index.js";
 import { repositorySection } from "../../src/sections/repository/index.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 

@@ -88,19 +88,30 @@ describe("changed-sections file map", () => {
     // nothing to delete when the file moves.
     const golden: Record<string, SectionKey[]> = {
       "roles.ts": ["collaborators", "teams"],
-      "schema-helpers.ts": [
-        "actions_secrets",
-        "dependabot_secrets",
-        "codespaces_secrets",
-        "agents_secrets",
-        "environments",
-      ],
       "secrets-engine.ts": [
         "actions_secrets",
         "dependabot_secrets",
         "codespaces_secrets",
         "agents_secrets",
         "environments",
+      ],
+      "schema-helpers.ts": [
+        "labels",
+        "rulesets",
+        "environments",
+        "autolinks",
+        "actions_secrets",
+        "dependabot_secrets",
+        "codespaces_secrets",
+        "agents_secrets",
+        "collaborators",
+        "milestones",
+        "actions_variables",
+        "agents_variables",
+        "webhooks",
+        "custom_properties",
+        "deploy_keys",
+        "secret_scanning_custom_patterns",
       ],
     };
     expect(SHARED_FAN_OUT).toEqual(golden);
