@@ -7,7 +7,7 @@
  * file and the offending field) rather than producing a confusing run.
  */
 
-import { type Dirent, readdirSync, readFileSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -588,12 +588,41 @@ function collectYmlFiles(dir: string): string[] {
 }
 
 /**
- * Load and validate every scenario under `dir` (recursively, all .yml files),
- * sorted by path for a stable run order. Each file is parsed as YAML and
- * validated through parseScenario, so a bad file fails loudly naming itself.
+ * The directories the curated corpus lives in: the flat legacy root
+ * (test/e2e/scenarios/, drained as sections move) plus every
+ * src/sections/<key>/scenarios/ directory on disk, enumerated at call time so
+ * a moved section's first scenario is picked up without touching a list.
+ * ONLY scenarios/ directories count - any other .yml under a section
+ * directory (a fixture, an example settings file) never loads as a scenario.
+ * run.ts and the endpoint-coverage tripwire both call this, so the two can
+ * never disagree about what the corpus is.
  */
-export function loadScenarios(dir: string): Scenario[] {
-  return collectYmlFiles(dir)
+export function scenarioRoots(): string[] {
+  const roots = [join(import.meta.dir, "scenarios")];
+  const sectionsDir = join(import.meta.dir, "..", "..", "src", "sections");
+  for (const entry of readdirSync(sectionsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const scenariosDir = join(sectionsDir, entry.name, "scenarios");
+    if (existsSync(scenariosDir)) {
+      roots.push(scenariosDir);
+    }
+  }
+  return roots;
+}
+
+/**
+ * Load and validate every scenario under `dirs` (recursively, all .yml files),
+ * sorted by path for a stable run order. Each file is parsed as YAML and
+ * validated through parseScenario, so a bad file fails loudly naming itself;
+ * two files claiming the same scenario name fail loudly naming both, since
+ * names key --scenario filtering and failure artifacts.
+ */
+export function loadScenarios(dirs: readonly string[]): Scenario[] {
+  const sourceByName = new Map<string, string>();
+  return dirs
+    .flatMap((dir) => collectYmlFiles(dir))
     .sort()
     .map((path) => {
       let raw: unknown;
@@ -604,6 +633,14 @@ export function loadScenarios(dir: string): Scenario[] {
           `cannot parse scenario ${path} as YAML: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      return parseScenario(raw, path);
+      const scenario = parseScenario(raw, path);
+      const previous = sourceByName.get(scenario.name);
+      if (previous !== undefined) {
+        throw new Error(
+          `duplicate scenario name "${scenario.name}": declared by both ${previous} and ${path}`,
+        );
+      }
+      sourceByName.set(scenario.name, path);
+      return scenario;
     });
 }

@@ -1,8 +1,10 @@
 /**
  * The curated e2e entrypoint: `bun test/e2e/run.ts`. Loads every scenario
- * under test/e2e/scenarios/, optionally filtered by --sections or --scenario,
- * runs each against a fresh mock, prints one line per scenario plus a final
- * table, and exits 1 if any scenario failed so CI gates on it.
+ * under the scenario roots (the flat test/e2e/scenarios/ directory plus the
+ * per-section src/sections/<key>/scenarios/ directories), optionally filtered
+ * by --sections or --scenario, runs each against a fresh mock, prints one
+ * line per scenario plus a final table, and exits 1 if any scenario failed so
+ * CI gates on it.
  *
  * Flags:
  *   --sections a,b|all   run only scenarios that touch one of these sections
@@ -11,11 +13,8 @@
  *   --scenario <name>    run only the scenario with this exact name
  */
 
-import { join } from "node:path";
 import { corpusUnwitnessedUnconditionalSections, runScenario } from "./runner.js";
-import { loadScenarios, type Scenario } from "./schema.js";
-
-const SCENARIO_DIR = join(import.meta.dir, "scenarios");
+import { loadScenarios, type Scenario, scenarioRoots } from "./schema.js";
 
 interface Flags {
   sections?: string[];
@@ -85,7 +84,8 @@ function selectScenarios(all: Scenario[], flags: Flags): Scenario[] {
 
 async function main(): Promise<number> {
   const flags = parseFlags(process.argv.slice(2));
-  const all = loadScenarios(SCENARIO_DIR);
+  const roots = scenarioRoots();
+  const all = loadScenarios(roots);
   const scenarios = selectScenarios(all, flags);
 
   if (scenarios.length === 0) {
@@ -97,13 +97,13 @@ async function main(): Promise<number> {
         flags.sections === undefined ? [] : [`--sections "${flags.sections.join(",")}"`],
       ].flat();
       console.error(
-        `none of the ${all.length} scenario(s) under ${SCENARIO_DIR} match ${filters.join(" / ")}; check the value against the scenario files' name: fields (or their settings keys for --sections)`,
+        `none of the ${all.length} scenario(s) under ${roots.join(", ")} match ${filters.join(" / ")}; check the value against the scenario files' name: fields (or their settings keys for --sections)`,
       );
       return 1;
     }
-    // Before the corpus phase the scenarios dir is empty; land green so the
+    // Before the corpus phase the scenarios dirs are empty; land green so the
     // script itself is not a failure.
-    console.log(`no scenario .yml files found under ${SCENARIO_DIR}`);
+    console.log(`no scenario .yml files found under ${roots.join(", ")}`);
     return 0;
   }
 

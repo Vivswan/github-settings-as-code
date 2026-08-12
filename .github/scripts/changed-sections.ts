@@ -4,12 +4,16 @@
  * touching one section runs that section's scenarios and fuzz rather than the
  * whole corpus, and a docs-only PR skips the smoke job entirely.
  *
- * The mapping is EXPLICIT, not inferred: every section file maps to the
- * section key(s) it affects, shared code (roles.ts) fans out to its consumers,
- * and the cross-cutting files (contract.ts, registry.ts, the engine, the
- * schema, the e2e harness) select every section. A unit test pins
- * the per-section entries against SECTION_KEYS so a new section cannot be added
- * without teaching this map about it.
+ * The mapping is EXPLICIT, not inferred, and it recognizes both section
+ * layouts during the per-section directory migration: the flat
+ * src/sections/<file>.ts files map through SECTIONS_BY_FILE (path-based, so
+ * a deleted flat file still resolves), and a src/sections/<key>/... directory
+ * (the key spelled verbatim) selects that key for every file under it.
+ * Shared code fans out to its consumers (SHARED_FAN_OUT, covering both the
+ * flat and the shared/ spelling), and the cross-cutting files (the contract,
+ * the registry, the engine, the schema, the e2e harness) select every
+ * section. A path under src/sections/ that none of the rules recognize
+ * throws, so a new file cannot silently skip the smoke job.
  *
  * Usage (CI): `bun .github/scripts/changed-sections.ts [base-ref]` prints one
  * of: a comma-separated section list, the literal `all`, or the literal
@@ -18,8 +22,6 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 
 /** The sentinel the CLI prints (and the job branches on) when every section is in play. */
@@ -28,9 +30,12 @@ export const ALL = "all";
 export const NONE = "none";
 
 /**
- * Section files whose name does NOT equal their key, or which fan out to more
- * than one section. Every other src/sections/<key>.ts maps to <key>; the
- * SECTIONS_BY_FILE builder fills those in from SECTION_KEYS.
+ * Section files whose name does NOT equal their key. Every other
+ * src/sections/<key>.ts maps to <key>; the SECTIONS_BY_FILE builder fills
+ * those in from SECTION_KEYS. Entries OUTLIVE the files they name: the maps
+ * are path-based, so a migration diff that deletes a kebab file (moving the
+ * section into src/sections/<key>/) still resolves the deleted path to its
+ * section. The whole map retires in one sweep after the last section moves.
  */
 export const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   // Kebab file names for underscore section keys.
@@ -56,6 +61,16 @@ export const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
   "deploy-keys.ts": ["deploy_keys"],
   // Kebab file name for the longer underscore section key.
   "secret-scanning-patterns.ts": ["secret_scanning_custom_patterns"],
+};
+
+/**
+ * Shared section code and the key(s) each file fans out to, by basename.
+ * Consulted for BOTH spellings - the flat src/sections/<file> of today and
+ * the src/sections/shared/<file> the migration moves it to - so each fan-out
+ * is declared exactly once and survives the move. A shared/ file with no
+ * entry throws in sectionsForFiles, forcing a fan-out declaration.
+ */
+export const SHARED_FAN_OUT: Record<string, SectionKey[]> = {
   // roles.ts is the shared permission-vocabulary normalizer for both sections.
   "roles.ts": ["collaborators", "teams"],
   // secrets-engine.ts is the shared sealing/reconciliation engine, consumed
@@ -76,22 +91,38 @@ export const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
  */
 const ALL_SELECTING_SECTION_FILES = new Set(["contract.ts", "registry.ts"]);
 
-const SECTIONS_DIR = join(import.meta.dir, "..", "..", "src", "sections");
+/** The section keys, as a Set of plain strings for path-segment lookups. */
+const SECTION_KEY_SET: ReadonlySet<string> = new Set(SECTION_KEYS);
 
-/** src/sections/<file> -> the section key(s) a change to it can affect. */
+/**
+ * src/sections/<file> -> the section key(s) a change to it can affect.
+ * Path-based, never disk-based: <key>.ts maps to [key] whether or not the
+ * file exists, so a diff that DELETES a flat file (a section moving into its
+ * directory, or a batch reported as delete-plus-add when git's rename
+ * heuristic misses) resolves to the same key its replacement selects instead
+ * of throwing. Duplicate names across the three sources would let one entry
+ * silently shadow another, so the merge asserts uniqueness loudly.
+ */
 export function buildSectionsByFile(): Record<string, SectionKey[]> {
   const map: Record<string, SectionKey[]> = {};
-  // The 1:1 files: <key>.ts -> [key], for every key whose handler file is on
-  // disk under that name. A key with no <key>.ts (kebab-named handlers) must
-  // instead be reachable through SPECIAL_SECTION_FILES, or the map's unit
-  // test fails.
-  for (const key of SECTION_KEYS) {
-    if (existsSync(join(SECTIONS_DIR, `${key}.ts`))) {
-      map[`${key}.ts`] = [key];
+  const duplicates: string[] = [];
+  const sources = [
+    Object.entries(SPECIAL_SECTION_FILES),
+    Object.entries(SHARED_FAN_OUT),
+    SECTION_KEYS.map((key): [string, SectionKey[]] => [`${key}.ts`, [key]]),
+  ];
+  for (const source of sources) {
+    for (const [file, keys] of source) {
+      if (file in map) {
+        duplicates.push(file);
+      }
+      map[file] = keys;
     }
   }
-  for (const [file, keys] of Object.entries(SPECIAL_SECTION_FILES)) {
-    map[file] = keys;
+  if (duplicates.length > 0) {
+    throw new Error(
+      `changed-sections: file(s) mapped more than once across SPECIAL_SECTION_FILES, SHARED_FAN_OUT, and the <key>.ts entries: [${duplicates.sort().join(", ")}]`,
+    );
   }
   return map;
 }
@@ -139,13 +170,60 @@ export type Selection =
   | { kind: "none" };
 
 /**
+ * Resolve one src/sections/ path (below the ALL_SELECTING_PREFIXES check, so
+ * src/sections/contract/ never reaches here) to the sections it selects, in
+ * either layout:
+ * - a flat file maps through ALL_SELECTING_SECTION_FILES or SECTIONS_BY_FILE
+ *   (which covers deleted files too - the maps are path-based);
+ * - src/sections/<key>/... (the section key spelled verbatim) selects <key>,
+ *   whatever the file under it is - module, mock, schema, test, or scenario;
+ * - src/sections/shared/<file> fans out through SHARED_FAN_OUT.
+ * Anything else throws: a silently ignored section path would let a PR skip
+ * the very scenarios its change needs, so an unrecognized file must either
+ * get a mapping or move under a recognized directory.
+ */
+function sectionsForSectionsPath(file: string): SectionKey[] | "all" {
+  const rest = file.slice("src/sections/".length);
+  const slash = rest.indexOf("/");
+  if (slash < 0) {
+    if (ALL_SELECTING_SECTION_FILES.has(rest)) {
+      return "all";
+    }
+    const keys = SECTIONS_BY_FILE[rest];
+    if (keys) {
+      return keys;
+    }
+    throw new Error(
+      `changed-sections: ${file} matches no selector rule; map it in SPECIAL_SECTION_FILES or SHARED_FAN_OUT, name it <key>.ts, or move it under a section directory`,
+    );
+  }
+  const dir = rest.slice(0, slash);
+  if (SECTION_KEY_SET.has(dir)) {
+    return [dir as SectionKey];
+  }
+  if (dir === "shared") {
+    const keys = SHARED_FAN_OUT[rest.slice(slash + 1)];
+    if (keys) {
+      return keys;
+    }
+    throw new Error(
+      `changed-sections: ${file} matches no selector rule; declare its consumers in SHARED_FAN_OUT`,
+    );
+  }
+  throw new Error(
+    `changed-sections: ${file} matches no selector rule; a section directory must spell its SectionKey verbatim (or add the directory to ALL_SELECTING_PREFIXES if it is cross-cutting)`,
+  );
+}
+
+/**
  * Map a set of changed file paths (repo-relative, forward slashes) to the
  * sections the smoke job must run. Any cross-cutting path forces "all"; section
- * files contribute their key(s); files that touch nothing settings-related are
- * ignored, so a purely docs/config PR yields "none". `lib/` contributes no
- * section either - the only committed file under it is the generated
- * settings.schema.json, which the schema-check job gates on its own - so a
- * lib-only diff selects "none".
+ * files contribute their key(s) through sectionsForSectionsPath, which throws
+ * on an unrecognized src/sections/ path; files that touch nothing
+ * settings-related are ignored, so a purely docs/config PR yields "none".
+ * `lib/` contributes no section either - the only committed file under it is
+ * the generated settings.schema.json, which the schema-check job gates on its
+ * own - so a lib-only diff selects "none".
  */
 export function sectionsForFiles(files: readonly string[]): Selection {
   const selected = new Set<SectionKey>();
@@ -158,19 +236,13 @@ export function sectionsForFiles(files: readonly string[]): Selection {
       // tests outside e2e) contributes no section.
       continue;
     }
-    const name = file.slice("src/sections/".length);
-    if (ALL_SELECTING_SECTION_FILES.has(name)) {
+    const keys = sectionsForSectionsPath(file);
+    if (keys === "all") {
       return { kind: "all" };
     }
-    const keys = SECTIONS_BY_FILE[name];
-    if (keys) {
-      for (const key of keys) {
-        selected.add(key);
-      }
+    for (const key of keys) {
+      selected.add(key);
     }
-    // A new, unmapped src/sections/*.ts file is conservatively ignored here;
-    // the map's unit test fails first if a section lacks an entry, so an
-    // unmapped file can only be a non-section helper.
   }
   if (selected.size === 0) {
     return { kind: "none" };

@@ -16,14 +16,11 @@
  * route was hit; exit 1 naming the cold routes otherwise.
  */
 
-import { join } from "node:path";
 import { endpointMethod, endpointPath, matchesTemplate } from "../../src/sections/contract.js";
 import { allEndpoints, allGraphqlOps } from "../../src/sections/registry.js";
 import type { LoggedRequest } from "../../test/e2e/mock/routes.js";
 import { runScenario } from "../../test/e2e/runner.js";
-import { loadScenarios } from "../../test/e2e/schema.js";
-
-const SCENARIO_DIR = join(import.meta.dir, "..", "..", "test", "e2e", "scenarios");
+import { loadScenarios, scenarioRoots } from "../../test/e2e/schema.js";
 
 /**
  * One registered route, discriminated by how a hit is attributed: a REST
@@ -88,9 +85,10 @@ async function main(): Promise<number> {
   const routes = registeredRoutes();
   const hit = new Set<string>();
 
-  const scenarios = loadScenarios(SCENARIO_DIR);
+  const roots = scenarioRoots();
+  const scenarios = loadScenarios(roots);
   if (scenarios.length === 0) {
-    console.error(`no scenarios found under ${SCENARIO_DIR}`);
+    console.error(`no scenarios found under ${roots.join(", ")}`);
     return 1;
   }
   for (const scenario of scenarios) {

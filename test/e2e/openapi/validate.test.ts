@@ -830,7 +830,7 @@ describe("mock rule-type catalog lockstep", () => {
     // falsely 422'd by the mock, or the mock accepts a type the validator then
     // flags. Pinning them equal makes a spec refresh the single update point.
     // Checked on BOTH operations the catalog serves (create and update).
-    const { RULESET_RULE_TYPES } = await import("../mock/routes.js");
+    const { RULESET_RULE_TYPES } = await import("../mock/support.js");
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const spec = JSON.parse(
