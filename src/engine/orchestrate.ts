@@ -134,6 +134,18 @@ export function validateSettingsDoc(
       error: `${sourceLabel} must be a YAML mapping of section names to settings, but its top level parsed as ${Array.isArray(settings) ? "a list" : `a ${settings === null ? "null" : typeof settings}`}. Rewrite the top level as "section: ..." keys`,
     };
   }
+  // Only a PLAIN mapping may pass: an explicit YAML tag (!!timestamp, !!set,
+  // !!binary) parses to a Date/Set/Uint8Array, which is an object with no
+  // meaningful keys - branding it valid would turn the document into a
+  // silent green no-op (and the merge's own plain-object guard would
+  // otherwise be the only thing standing between it and the defaults). The
+  // same prototype rule requirePlainMapping applies to section values.
+  const proto = Object.getPrototypeOf(settings);
+  if (proto !== Object.prototype && proto !== null) {
+    return {
+      error: `${sourceLabel} must be a plain YAML mapping of section names to settings, but its top level parsed as another type (a YAML-tagged value like !!timestamp parses to a Date). Rewrite the top level as "section: ..." keys`,
+    };
+  }
   const knownSections = new Set<string>(SECTION_KEYS);
   // The allowlist holds SectionKeys, but the DOCUMENT's unknown keys are
   // arbitrary strings; the widened view keeps the lookup honest without a

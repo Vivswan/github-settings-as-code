@@ -560,10 +560,12 @@ export async function runMulti(
     // included), record the outcome, and emit the single public annotation for a
     // redacted target.
     let note = outcome.note;
-    if (deliverable && capture && repo !== null) {
+    if (deliverable && capture) {
       const transcript = capture.drain();
       if (cfg.privateReport === "artifact") {
         // Accumulate now; the single encrypt+upload happens after the loop.
+        // The artifact channel never addresses the target repository, so it
+        // mirrors even a target whose slug failed to parse.
         const { body } = composeTargetReport(
           meta,
           target.slug,
@@ -574,20 +576,31 @@ export async function runMulti(
         );
         artifactReports.push({ display, body });
       } else if (isIssueChannel(cfg.privateReport)) {
-        const reportNote = await deliverReport(
-          api,
-          meta,
-          repo,
-          display,
-          outcome.result,
-          outcome.outcomes,
-          transcript,
-          cfg.mode === "check",
-          cfg.privateReport,
-          io,
-        );
-        if (reportNote) {
-          note = note ? `${note}; ${reportNote}` : reportNote;
+        if (repo === null) {
+          // The issue channel posts INTO the target repository, and an
+          // unparseable slug names none - delivery is impossible, but the
+          // loss must not be silent (the slug itself stays out of the
+          // public warning; only the placeholder renders).
+          const warning =
+            "could not deliver the private report: the target name is not an owner/name repository slug, so there is no repository to hold the report issue";
+          io.annotate("warning", `${display}: ${warning}`);
+          note = note ? `${note}; ${warning}` : warning;
+        } else {
+          const reportNote = await deliverReport(
+            api,
+            meta,
+            repo,
+            display,
+            outcome.result,
+            outcome.outcomes,
+            transcript,
+            cfg.mode === "check",
+            cfg.privateReport,
+            io,
+          );
+          if (reportNote) {
+            note = note ? `${note}; ${reportNote}` : reportNote;
+          }
         }
       }
     } else if (reportOn && !deliverable) {
@@ -621,7 +634,7 @@ export async function runMulti(
   // The artifact channel uploads every accumulated report as one encrypted
   // document after the loop. A failure is one safe warning (naming the artifact
   // service, never a slug) and never changes any target's result.
-  await uploadArtifactReport(artifactReports, cfg.reportPublicKey, io, uploader);
+  await uploadArtifactReport(cfg.privateReport, artifactReports, cfg.reportPublicKey, io, uploader);
 
   return { fatal: null, targets: results };
 }

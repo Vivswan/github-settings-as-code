@@ -87,7 +87,11 @@ fleet whose repositories do not all grant the same permissions.
 `required-sections` names the sections that must still fully apply even
 under `warn`: a denial on a required section fails the run regardless.
 It is a minimum-requirements floor - soften everything else, but never
-report success while, say, `rulesets` could not be applied.
+report success while, say, `rulesets` could not be applied. A required
+section must also be allowed by the `sections` input when that allowlist
+is set: an excluded section is never attempted, so requiring it would be
+a promise the run cannot check, and the pairing is rejected before any
+API call.
 
 ## Organization repositories
 

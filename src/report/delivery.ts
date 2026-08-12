@@ -6,7 +6,7 @@
  * needs so an apply cannot delete the label the report module creates.
  */
 
-import type { IssueChannel } from "../action/redact.js";
+import type { IssueChannel, PrivateReportChannel } from "../action/redact.js";
 import type { RepoRef } from "../discovery/targets.js";
 import type { RepoRunResult, ValidatedSettings } from "../engine/orchestrate.js";
 import type { GithubClient } from "../github/api.js";
@@ -152,19 +152,22 @@ export async function deliverReport(
 /**
  * Concatenate every accumulated per-target report into one document, encrypt it
  * to the operator's recipient, and upload it as the single workflow artifact.
- * A no-op when no report was accumulated. Delivery failure warns safely (the
- * artifact service or missing runtime token, never a slug or report content)
- * and leaves the run result untouched. `uploader` is the injectable test
- * port; production passes undefined and the real @actions/artifact
- * uploader applies.
+ * A no-op when the channel is not `artifact` or no report was accumulated -
+ * the guard lives HERE, not on caller discipline, so a non-artifact channel
+ * can never upload whatever a caller accumulated by mistake. Delivery failure
+ * warns safely (the artifact service or missing runtime token, never a slug
+ * or report content) and leaves the run result untouched. `uploader` is the
+ * injectable test port; production passes undefined and the real
+ * @actions/artifact uploader applies.
  */
 export async function uploadArtifactReport(
+  channel: PrivateReportChannel,
   reports: Array<{ display: string; body: string }>,
   reportPublicKey: string,
   io: Io,
   uploader?: ArtifactUploader,
 ): Promise<void> {
-  if (reports.length === 0) {
+  if (channel !== "artifact" || reports.length === 0) {
     return;
   }
   const document = concatArtifactReports(reports);

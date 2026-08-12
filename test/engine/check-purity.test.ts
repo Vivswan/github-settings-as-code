@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { runForRepo, type ValidatedSettings } from "../../src/engine/orchestrate.js";
+import { runForRepo, validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import type { SectionKey } from "../../src/schema.js";
 import { SECTION_KEYS } from "../../src/schema.js";
@@ -227,11 +227,17 @@ function silentIo(): Io {
 describe("check-mode purity", () => {
   test("every registered section stays read-only in check mode, even on its drift paths", async () => {
     const api = new MockApi(ROUTES);
+    // Brand the fixture document through the REAL boundary: an invalid
+    // fixture fails loudly here instead of riding a cast into runForRepo.
+    const verdict = validateSettingsDoc(FIXTURES, "purity fixtures", new Set(), silentIo());
+    if ("error" in verdict) {
+      throw new Error(`purity fixtures failed validation: ${verdict.error}`);
+    }
     const result = await runForRepo(
       api,
       {
         repo: { owner: "o", name: "r", slug: "o/r" },
-        settings: FIXTURES as ValidatedSettings,
+        settings: verdict.settings,
         mode: "check",
         onMissingPermission: "fail",
         requiredSections: new Set(),

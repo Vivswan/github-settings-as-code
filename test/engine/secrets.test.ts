@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import { applyDefaults } from "../../src/engine/merge.js";
-import { runForRepo, type ValidatedSettings } from "../../src/engine/orchestrate.js";
+import {
+  runForRepo,
+  type ValidatedSettings,
+  validateSettingsDoc,
+} from "../../src/engine/orchestrate.js";
 import { collectSecretValues, targetSecretSource } from "../../src/engine/secrets.js";
 import type { Io } from "../../src/io.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
@@ -190,11 +194,19 @@ describe("secret provenance through the defaults merge", () => {
 });
 
 describe("runForRepo with merged provenance", () => {
-  // The merged doc is schema-valid by construction here; the cast stands in
-  // for the validateSettingsDoc boundary the run flows go through.
+  // The merged doc is branded through the REAL boundary, exactly like the
+  // run flows; an invalid merge output fails here instead of riding a cast.
+  const validated = (doc: unknown): ValidatedSettings => {
+    const silent: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+    const verdict = validateSettingsDoc(doc, "merged fixture", new Set(), silent);
+    if ("error" in verdict) {
+      throw new Error(`merged fixture failed validation: ${verdict.error}`);
+    }
+    return verdict.settings;
+  };
   const runOpts = (settings: unknown, targetDoc: SettingsFile) => ({
     repo: { owner: "o", name: "r", slug: "o/r" },
-    settings: settings as ValidatedSettings,
+    settings: validated(settings),
     onMissingPermission: "fail" as const,
     requiredSections: new Set<SectionKey>(),
     onlySections: new Set<SectionKey>(),

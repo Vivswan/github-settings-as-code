@@ -3,7 +3,7 @@ import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encr
 import { runMulti } from "../../src/action/multi.js";
 import { redactOutcomes, toPublicView } from "../../src/action/redact.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
-import type { ValidatedSettings } from "../../src/engine/orchestrate.js";
+import { type ValidatedSettings, validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { clearRedactedSlugs } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
 import {
@@ -663,6 +663,44 @@ describe("runMulti private-report: issue wiring", () => {
     expect(shown.calls.some((c) => c.path.includes("/issues"))).toBe(false);
   });
 
+  test("an unparseable discovered slug on the issue channel warns instead of losing the report", async () => {
+    // Discovery hands back API data, so a garbage full_name can reach the
+    // loop. The issue channel posts INTO the target repository - impossible
+    // without an owner/name pair - and that loss must be a loud, safe
+    // warning, never silence (the withheld-visibility notice does not fire
+    // here: the target IS proven private).
+    const api = new MockApi({
+      "GET /user/repos?affiliation=owner&per_page=100&page=1": {
+        data: [
+          {
+            full_name: "justonename",
+            archived: false,
+            fork: false,
+            topics: [],
+            visibility: "private",
+            private: true,
+          },
+        ],
+      },
+    });
+    const { io, annotations } = captureIo();
+    const { targets } = await runMulti(
+      api,
+      cfg({ reposInput: "*", mode: "check", privateRepos: "redact", privateReport: "issue" }),
+      io,
+    );
+    expect(targets[0]?.result).toBe("failed");
+    expect(targets[0]?.redacted).toBe(true);
+    // No issue/label traffic was even attempted.
+    expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
+    // One safe warning names the loss through the placeholder, never the slug.
+    const warning = annotations.find((a) => a.includes("could not deliver the private report"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("private repository #1");
+    expect(warning).toContain("not an owner/name repository slug");
+    expect(annotations.join("\n")).not.toContain("justonename");
+  });
+
   test("unknown visibility redacts publicly but does NOT deliver the report (fail closed)", async () => {
     // The repo probe answers a body with neither `private` nor `visibility`, so
     // visibility resolves "unknown". Redaction still hides the target (fail
@@ -1053,9 +1091,16 @@ describe("runMulti private-report: artifact wiring", () => {
 
 describe("applyMarkerInjection", () => {
   const MARKER = "settings-as-code-report";
-  // Test fixtures are schema-valid by construction; the brand normally comes
-  // from validateSettingsDoc, so the cast stands in for that boundary here.
-  const validated = (doc: SettingsFile): ValidatedSettings => doc as ValidatedSettings;
+  // Fixtures are branded through the REAL boundary, so an invalid one fails
+  // here instead of riding a cast into the injection.
+  const validated = (doc: SettingsFile): ValidatedSettings => {
+    const silent: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+    const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silent);
+    if ("error" in verdict) {
+      throw new Error(`test fixture failed validation: ${verdict.error}`);
+    }
+    return verdict.settings;
+  };
 
   test("off: settings pass through untouched with no notice", () => {
     const settings = validated({ labels: [{ name: "bug", color: "d73a4a" }] });
