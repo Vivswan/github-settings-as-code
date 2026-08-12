@@ -568,7 +568,7 @@ export function parseScenario(raw: unknown, sourcePath: string): Scenario {
 }
 
 /** Recursively collect every .yml file under a directory (empty if absent). */
-function collectYmlFiles(dir: string): string[] {
+export function collectYmlFiles(dir: string): string[] {
   const out: string[] = [];
   let entries: Dirent[];
   try {

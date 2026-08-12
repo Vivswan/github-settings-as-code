@@ -12,8 +12,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import { parse } from "yaml";
@@ -22,6 +22,7 @@ import { validateSectionShapes } from "../src/engine/validate.js";
 import { SECTION_KEYS } from "../src/schema.js";
 import { genSettings } from "./e2e/generators.js";
 import { Rng } from "./e2e/prng.js";
+import { collectYmlFiles, scenarioRoots } from "./e2e/schema.js";
 
 interface CorpusDoc {
   /** Where the fragment came from ("labels-apply-converges.yml settings"). */
@@ -30,32 +31,47 @@ interface CorpusDoc {
 }
 
 /** Every settings-document fragment in the curated scenarios: the top-level
- * settings, the multi-repo defaults file, and each per-repo settings. */
+ * settings, the multi-repo defaults file, and each per-repo settings. The
+ * file set is definitionally what the e2e runner loads: every root
+ * scenarioRoots() names, walked by the same collectYmlFiles the scenario
+ * loader uses, with each root asserted non-empty so a renamed or dropped
+ * scenario directory fails here instead of silently shrinking the corpus. */
 function scenarioDocs(): CorpusDoc[] {
-  const root = join(import.meta.dir, "e2e", "scenarios");
   const files: string[] = [];
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      for (const nested of readdirSync(join(root, entry.name))) {
-        files.push(join(entry.name, nested));
-      }
-    } else if (entry.name.endsWith(".yml")) {
-      files.push(entry.name);
+  for (const root of scenarioRoots()) {
+    const inRoot = collectYmlFiles(root);
+    if (inRoot.length === 0) {
+      throw new Error(`scenario root ${root} contributed no .yml files - renamed or emptied?`);
     }
+    files.push(...inRoot);
   }
   const docs: CorpusDoc[] = [];
+  // Labels key KNOWN_DIVERGENCES, so file basenames must stay unique
+  // corpus-wide; nothing else pins that (loadScenarios pins the YAML name
+  // field, which is not in lockstep with the filename), hence this assert.
+  const seenBasenames = new Map<string, string>();
+  for (const file of [...files].sort()) {
+    const dup = seenBasenames.get(basename(file));
+    if (dup !== undefined) {
+      throw new Error(
+        `duplicate scenario file basename across roots: ${dup} and ${file} - labels key KNOWN_DIVERGENCES, so basenames must stay unique`,
+      );
+    }
+    seenBasenames.set(basename(file), file);
+  }
   const push = (label: string, value: unknown) => {
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       docs.push({ label, doc: value as Record<string, unknown> });
     }
   };
   for (const file of files.sort()) {
-    const scenario = parse(readFileSync(join(root, file), "utf8")) as Record<string, unknown>;
-    push(`${file} settings`, scenario.settings);
-    push(`${file} defaults_file`, scenario.defaults_file);
+    const scenario = parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    const name = basename(file);
+    push(`${name} settings`, scenario.settings);
+    push(`${name} defaults_file`, scenario.defaults_file);
     const repos = scenario.repos as Record<string, { settings?: unknown }> | undefined;
     for (const [repo, entry] of Object.entries(repos ?? {})) {
-      push(`${file} ${repo} settings`, entry?.settings);
+      push(`${name} ${repo} settings`, entry?.settings);
     }
   }
   expect(docs.length).toBeGreaterThan(150);
