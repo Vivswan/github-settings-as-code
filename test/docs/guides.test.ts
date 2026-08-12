@@ -16,7 +16,7 @@ import { parse as parseYaml } from "yaml";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { SECTION_KEYS } from "../../src/schema.js";
-import { NESTED_KEYS } from "../../src/sections/environments/index.js";
+import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
