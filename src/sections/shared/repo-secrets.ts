@@ -88,7 +88,7 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey, P extends Se
   readonly shape: z.ZodType;
   readonly secretValues: typeof listSecretValues;
   readonly closedSurface: {
-    readonly known: readonly ("name" | "value")[];
+    readonly known: { readonly name: true; readonly value: true };
     readonly describe: (entry: SecretEntry) => string;
     readonly consequence: string;
   };
@@ -184,7 +184,7 @@ export function repoSecretsSection<K extends RepoSecretsKey, P extends SecretsSe
     // never reaches GitHub: it would apply "successfully" forever while doing
     // nothing, which is exactly what closed surfaces exist to reject.
     closedSurface: {
-      known: ["name", "value"],
+      known: { name: true, value: true },
       describe: (entry) => entry.name,
       consequence:
         "the API body carries only the sealed value, so the key would silently do nothing",

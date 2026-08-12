@@ -20,7 +20,7 @@
  * optional and nullable) writes without the check, as the API allows.
  */
 
-import { type MustBeNever, type SecretScanningPatternConfig, SettingsFile } from "../../schema.js";
+import { type SecretScanningPatternConfig, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -37,20 +37,7 @@ import {
 
 const permission: SectionPermission = { repo: ["secret_scanning_alerts"] };
 
-const KNOWN_KEYS = [
-  "name",
-  "pattern",
-  "start_delimiter",
-  "end_delimiter",
-  "must_match",
-  "must_not_match",
-] as const;
-/** Compile-time lockstep: a SecretScanningPatternConfig field missing from KNOWN_KEYS fails here. */
-type _AllKeysKnown = MustBeNever<
-  Exclude<keyof SecretScanningPatternConfig, (typeof KNOWN_KEYS)[number]>
->;
-
-/** The subset of KNOWN_KEYS the update PATCH accepts (everything but the immutable name). */
+/** The subset of the known entry keys the update PATCH accepts (everything but the immutable name). */
 const UPDATABLE_KEYS = [
   "pattern",
   "start_delimiter",
@@ -167,7 +154,14 @@ export const secretScanningPatternsSection = {
   // Closed surface: the POST/PATCH bodies carry only the six declared
   // fields, so an extra key has no destination and can only be a typo.
   closedSurface: {
-    known: KNOWN_KEYS,
+    known: {
+      name: true,
+      pattern: true,
+      start_delimiter: true,
+      end_delimiter: true,
+      must_match: true,
+      must_not_match: true,
+    },
     describe: (p) => p.name,
     consequence:
       'the pattern endpoints accept no other field - in particular "state" and "push_protection_enabled" are read-only through this API surface - so the key would be dropped silently and never converge',

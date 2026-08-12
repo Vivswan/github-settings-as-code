@@ -335,18 +335,26 @@ export interface SectionModule<
    * section has written anything. Open passthrough sections must NOT
    * declare this: their extra keys genuinely reach GitHub, and future API
    * fields have to keep working. The conditional type enforces both edges:
-   * `known` may only name real entry keys from SettingsFile, and a
-   * non-list section cannot declare a closedSurface at all (the property
-   * collapses to never). EntryOf sees through the wrapped
-   * `{undeclared, entries}` form, so a closed section that also takes the
-   * policy knob (collaborators) keeps its closed-surface validation in both
-   * forms.
+   * `known` is a mapped record over EVERY entry key from SettingsFile, so a
+   * config field the declaration omits fails to compile (a new schema field
+   * forces a decision here) and a key the entry type does not carry is an
+   * excess property - no per-section lockstep pin needed. A non-list
+   * section cannot declare a closedSurface at all (the property collapses
+   * to never). EntryOf sees through the wrapped `{undeclared, entries}`
+   * form, so a closed section that also takes the policy knob
+   * (collaborators) keeps its closed-surface validation in both forms.
    */
   closedSurface?: [EntryOf<NonNullable<SettingsFile[K]>>] extends [never]
     ? never
     : {
-        /** Every entry key the section recognizes. */
-        known: readonly (keyof EntryOf<NonNullable<SettingsFile[K]>> & string)[];
+        /**
+         * Every entry key the section recognizes, one required `true` per
+         * key of the entry type - the exhaustiveness lives in this shape.
+         * Key order is the order error prose lists them in.
+         */
+        known: {
+          readonly [P in Extract<keyof EntryOf<NonNullable<SettingsFile[K]>>, string>]: true;
+        };
         /** The entry's natural key, to name it in the error. */
         describe: (entry: EntryOf<NonNullable<SettingsFile[K]>>) => string;
         /** What the unrecognized key would silently do, as message prose. */
