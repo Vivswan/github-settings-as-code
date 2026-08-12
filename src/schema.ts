@@ -35,6 +35,7 @@ import { ActionsVariableConfig } from "./sections/actions_variables/schema.js";
 import { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
 import { AgentsVariableConfig } from "./sections/agents_variables/schema.js";
 import { AutolinkConfig } from "./sections/autolinks/schema.js";
+import { CodeScanningDefaultSetupConfig } from "./sections/code_scanning_default_setup/schema.js";
 import { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
 import { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 import { DependabotSecretConfig } from "./sections/dependabot_secrets/schema.js";
@@ -49,6 +50,7 @@ export { ActionsVariableConfig } from "./sections/actions_variables/schema.js";
 export { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
 export { AgentsVariableConfig } from "./sections/agents_variables/schema.js";
 export { AutolinkConfig } from "./sections/autolinks/schema.js";
+export { CodeScanningDefaultSetupConfig } from "./sections/code_scanning_default_setup/schema.js";
 export { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
 export { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 export { DependabotSecretConfig } from "./sections/dependabot_secrets/schema.js";
@@ -624,35 +626,6 @@ export const WorkflowConfig = z
   )
   .meta({ id: "WorkflowConfig" });
 export type WorkflowConfig = z.infer<typeof WorkflowConfig>;
-
-export const CodeScanningDefaultSetupConfig = z
-  .object({
-    state: z
-      .enum(["configured", "not-configured"])
-      .optional()
-      .describe('Turn default setup on ("configured") or off ("not-configured").'),
-    query_suite: z.enum(["default", "extended"]).optional().describe("CodeQL query suite to run."),
-    languages: z
-      .array(z.string())
-      .optional()
-      .describe("Languages to scan, compared as a set; GitHub auto-detects when omitted."),
-    runner_type: z
-      .enum(["standard", "labeled"])
-      .optional()
-      .describe('Run on GitHub-hosted ("standard") or labeled self-hosted runners.'),
-    runner_label: z
-      .string()
-      .nullable()
-      .optional()
-      .describe('Runner label when runner_type is "labeled"; null clears it.'),
-    threat_model: z
-      .enum(["remote", "remote_and_local"])
-      .optional()
-      .describe("Whether to model local sources as threats in addition to remote ones."),
-  })
-  .describe("PATCH /repos/{r}/code-scanning/default-setup, sent verbatim.")
-  .meta({ id: "CodeScanningDefaultSetupConfig" });
-export type CodeScanningDefaultSetupConfig = z.infer<typeof CodeScanningDefaultSetupConfig>;
 
 export const CodeQualitySetupConfig = z
   .object({

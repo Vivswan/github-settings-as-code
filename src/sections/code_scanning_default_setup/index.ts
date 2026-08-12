@@ -3,8 +3,8 @@
  * configuration; a 409 (configuration run in progress) gets its own advice.
  */
 
-import { subsetDiff } from "../engine/diff.js";
-import { SettingsFile } from "../schema.js";
+import { subsetDiff } from "../../engine/diff.js";
+import { SettingsFile } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -16,7 +16,7 @@ import {
   type SectionPermission,
   type SectionResult,
   tryCall,
-} from "./contract.js";
+} from "../contract.js";
 
 const permission: SectionPermission = { repo: ["administration", "code_scanning_alerts"] };
 
