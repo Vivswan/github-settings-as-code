@@ -110,6 +110,9 @@ const SECTIONS_BY_FILE = buildSectionsByFile();
  * skipped.
  */
 export const ALL_SELECTING_PREFIXES = [
+  // The contract barrel's layered modules: every section is written
+  // against them, so a change there selects everything, like the barrel.
+  "src/sections/contract/",
   "src/engine/",
   "src/github/",
   "src/action/",

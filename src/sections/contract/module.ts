@@ -165,7 +165,7 @@ export interface SectionOperation {
 /**
  * Every operation a section may issue - its REST endpoints and GraphQL
  * operations flattened into one list. Consumers deriving cross-cutting facts
- * from "everything this section can call" (overrideAdviceLevel below, the
+ * from "everything this section can call" (overrideAdviceLevel in ./errors.ts, the
  * fuzz oracle's no-read and write-gated section sets, the registry
  * mixed-grade guard, the README PAT-form and permissions-doc sweeps) walk
  * THIS view instead of section.endpoints alone, so a derivation can never

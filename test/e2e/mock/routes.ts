@@ -3058,7 +3058,7 @@ function matchEndpoint(
 /**
  * The named `{token}` params a route template extracts from a concrete path,
  * URL-decoded, or null when the path does not match. The SAME walk
- * matchesTemplate (src/sections/contract.ts) proves, kept here so the match
+ * matchesTemplate (src/sections/contract/endpoints.ts) proves, kept here so the match
  * proof is not thrown away: the params handlers read come from the exact
  * declaration that routed the request.
  */

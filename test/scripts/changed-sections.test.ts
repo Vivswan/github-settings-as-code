@@ -220,3 +220,10 @@ describe("changed-sections selection", () => {
     expect(selection.kind).toBe("all");
   });
 });
+
+test("a contract-module-only diff selects every section", () => {
+  // The barrel split moved the cross-cutting code into src/sections/contract/;
+  // a change there must select "all" exactly like the barrel, or a
+  // contract-module PR would skip the e2e smoke entirely.
+  expect(sectionsForFiles(["src/sections/contract/requests.ts"])).toEqual({ kind: "all" });
+});
