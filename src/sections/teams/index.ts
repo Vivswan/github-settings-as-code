@@ -3,7 +3,6 @@
  * personal account the section no-ops with a note.
  */
 
-import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -16,6 +15,7 @@ import {
   type SectionResult,
 } from "../contract.js";
 import { DEFAULT_ROLE, roleForPermission } from "../roles.js";
+import { TeamsSlice } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"], org: "members" };
 
@@ -44,7 +44,7 @@ export const teamsSection = {
   // implements the personal-account no-op this declares.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.teams),
+  shape: loosen(TeamsSlice),
   // Closed surface: the grant PUT accepts exactly one setting ("permission"),
   // so an extra key is always a typo - and a misspelled "permission" would
   // silently grant the default role and report clean.

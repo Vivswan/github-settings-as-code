@@ -1,8 +1,4 @@
-/**
- * The `workflows:` entry-config declaration. The root src/schema.ts imports
- * it, keeps the SettingsFile property's array/describe call inline, and
- * re-exports the config so existing importers compile unchanged.
- */
+/** The `workflows:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
 
@@ -18,3 +14,6 @@ export const WorkflowConfig = z
   )
   .meta({ id: "WorkflowConfig" });
 export type WorkflowConfig = z.infer<typeof WorkflowConfig>;
+
+/** The `workflows:` document slice: the entry list the document composes from. */
+export const WorkflowsSlice = z.array(WorkflowConfig);

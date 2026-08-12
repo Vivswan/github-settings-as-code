@@ -7,7 +7,6 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -20,6 +19,7 @@ import {
   type SectionResult,
   tryCall,
 } from "../contract.js";
+import { CodeQualitySetupConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
@@ -45,7 +45,7 @@ export const codeQualitySetupSection = {
   grantCaveat:
     "a 403 on this endpoint can also mean code quality is unavailable on the repository, or the repository is archived",
   endpoints: ENDPOINTS,
-  shape: requirePlainMapping(loosen(SettingsFile.shape.code_quality_setup)),
+  shape: requirePlainMapping(loosen(CodeQualitySetupConfig)),
   async run(ctx, declared): Promise<SectionResult> {
     const run = beginRun(ctx);
     const desired: Record<string, unknown> = declared;

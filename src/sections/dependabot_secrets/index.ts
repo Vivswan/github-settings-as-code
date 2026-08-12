@@ -12,9 +12,11 @@
  */
 
 import { repoSecretsSection } from "../shared/repo-secrets.js";
+import { DependabotSecretConfig } from "./schema.js";
 
 export const dependabotSecretsSection = repoSecretsSection({
   key: "dependabot_secrets",
+  entry: DependabotSecretConfig,
   resource: "dependabot_secrets",
   noun: "Dependabot secret",
 });

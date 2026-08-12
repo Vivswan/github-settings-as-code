@@ -33,7 +33,6 @@ import {
   type EnvironmentVariableConfig,
   MAX_PINNED_ENVIRONMENTS,
   type MustBeNever,
-  SettingsFile,
   type UndeclaredPolicy,
   type UndeclaredPolicyList,
 } from "../../schema.js";
@@ -78,6 +77,7 @@ import {
   type VariablesScopeOps,
   variableKey,
 } from "../shared/variables-engine.js";
+import { EnvironmentsSlice } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["environments"] };
 
@@ -532,7 +532,7 @@ export const environmentsSection = {
   grantCaveat: NESTED_OVERRIDES_CAVEAT,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
-  shape: loosen(SettingsFile.shape.environments),
+  shape: loosen(EnvironmentsSlice),
   /**
    * The declared value of every entry's secrets list, across all declared
    * environments, for the engine's up-front reference resolution - each

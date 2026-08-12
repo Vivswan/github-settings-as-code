@@ -6,7 +6,6 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -22,6 +21,8 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { AutolinkConfig } from "./schema.js";
 
 /** The fields of a live autolink this section reads; extras ride along. */
 const LiveAutolink = z.looseObject({ id: z.number(), key_prefix: z.string() });
@@ -42,7 +43,7 @@ export const autolinksSection = {
   undeclaredDefault: "delete",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.autolinks),
+  shape: loosen(knobbed(AutolinkConfig)),
   async run(ctx, declared): Promise<SectionResult> {
     const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));

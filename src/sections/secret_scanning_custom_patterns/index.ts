@@ -20,7 +20,6 @@
  * optional and nullable) writes without the check, as the API allows.
  */
 
-import { type SecretScanningPatternConfig, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -36,6 +35,8 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { SecretScanningPatternConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["secret_scanning_alerts"] };
 
@@ -152,7 +153,7 @@ export const secretScanningPatternsSection = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.secret_scanning_custom_patterns),
+  shape: loosen(knobbed(SecretScanningPatternConfig)),
   // Closed surface: the POST/PATCH bodies carry only the six declared
   // fields, so an extra key has no destination and can only be a typo.
   closedSurface: {

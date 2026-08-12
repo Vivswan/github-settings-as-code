@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod";
-import { SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
+import type { UndeclaredPolicyList } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -26,6 +26,7 @@ import {
   type SectionResult,
   undeclaredPolicy,
 } from "../contract.js";
+import { knobbed } from "./schema-helpers.js";
 import {
   LiveVariable,
   reconcileVariables,
@@ -116,8 +117,10 @@ export function variablesSection<K extends RepoVariablesKey>(family: {
   resource: PatResource;
   /** The output noun ("Actions variable", "Copilot agents variable"). */
   noun: string;
+  /** The family's entry slice (src/sections/<key>/schema.ts), the runtime shape's source. */
+  entry: z.ZodType<VariableEntry>;
 }): RepoVariablesSectionModule<K> {
-  const { key, resource, noun } = family;
+  const { key, resource, noun, entry } = family;
   const pathSegment: VariablesSegment<K> = VARIABLES_SEGMENTS[key];
   const endpoints: RepoVariablesEndpoints<VariablesSegment<K>> = {
     list: {
@@ -172,7 +175,7 @@ export function variablesSection<K extends RepoVariablesKey>(family: {
     undeclaredDefault: "delete",
     permission: { repo: [resource] },
     endpoints,
-    shape: loosen(SettingsFile.shape[key]),
+    shape: loosen(knobbed(entry)),
     async run(ctx, declared): Promise<SectionResult> {
       const run = beginRun(ctx);
       const defaultPolicy = defaultUndeclaredPolicy(this);

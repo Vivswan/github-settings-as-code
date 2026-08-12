@@ -9,7 +9,6 @@
  */
 
 import { z } from "zod";
-import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -27,6 +26,8 @@ import {
   undeclaredPolicy,
 } from "../contract.js";
 import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "../roles.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { CollaboratorConfig } from "./schema.js";
 
 /** The fields of a live collaborator this section reads; extras ride along. */
 const LiveCollaborator = z.looseObject({
@@ -96,7 +97,7 @@ export const collaboratorsSection = {
   undeclaredDefault: "delete",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.collaborators),
+  shape: loosen(knobbed(CollaboratorConfig)),
   // Closed surface: the PUT accepts exactly one setting ("permission"), so
   // an extra key is always a typo - and a misspelled "permission" would
   // silently grant the default role and report clean forever.

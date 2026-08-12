@@ -1,8 +1,4 @@
-/**
- * The `webhooks:` entry-config declaration. The root src/schema.ts imports
- * it, keeps the SettingsFile property's knobbed/describe call inline, and
- * re-exports the configs so existing importers compile unchanged.
- */
+/** The `webhooks:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
 

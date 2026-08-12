@@ -1,8 +1,4 @@
-/**
- * The `actions:` entry-config declaration. The root src/schema.ts imports
- * it, keeps the SettingsFile property's optional/describe call inline, and
- * re-exports the config so existing importers compile unchanged.
- */
+/** The `actions:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
 

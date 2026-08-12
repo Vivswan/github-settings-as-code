@@ -25,11 +25,6 @@
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import {
-  INTERACTION_LIMITS_ROUTED_KEYS,
-  type InteractionLimitsConfig,
-  SettingsFile,
-} from "../../schema.js";
-import {
   beginRun,
   call,
   type EndpointDecl,
@@ -43,6 +38,11 @@ import {
   type SectionResult,
   tryCall,
 } from "../contract.js";
+import {
+  INTERACTION_LIMITS_ROUTED_KEYS,
+  type InteractionLimitsConfig,
+  InteractionLimitsSlice,
+} from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
@@ -224,7 +224,7 @@ export const interactionLimitsSection = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
-  shape: requirePlainMapping(loosen(SettingsFile.shape.interaction_limits)),
+  shape: requirePlainMapping(loosen(InteractionLimitsSlice)),
   async run(ctx, desired): Promise<SectionResult> {
     const run = beginRun(ctx);
 

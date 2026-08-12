@@ -6,7 +6,6 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import { type RepositoryConfig, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -25,6 +24,7 @@ import {
   type SectionResult,
   tryCall,
 } from "../contract.js";
+import { RepositoryConfig } from "./schema.js";
 
 /** Topics: accept a comma-separated string or an array; lowercase, dedupe. */
 export function normalizeTopics(raw: unknown): string[] {
@@ -403,7 +403,7 @@ export const repositorySection = {
   permission,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
-  shape: requirePlainMapping(loosen(SettingsFile.shape.repository)),
+  shape: requirePlainMapping(loosen(RepositoryConfig)),
   async run(ctx, declared): Promise<SectionResult> {
     const run = beginRun(ctx);
     const desired: Record<string, unknown> = declared;

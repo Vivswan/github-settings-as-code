@@ -22,7 +22,7 @@
 
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
-import { SettingsFile, type UndeclaredPolicyList, type WebhookConfig } from "../../schema.js";
+import type { UndeclaredPolicyList } from "../../schema.js";
 import {
   type ApplySectionContext,
   beginRun,
@@ -41,6 +41,8 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { WebhookConfig } from "./schema.js";
 
 /** The fields of a live hook this section reads; extras ride along. */
 const LiveHook = z.looseObject({
@@ -165,7 +167,7 @@ export const webhooksSection = {
   // name is pinned to "web" upfront: it is the only value GitHub's hooks API
   // accepts today, and any other value could only be a typo or a legacy
   // service hook this section does not manage.
-  shape: loosen(SettingsFile.shape.webhooks),
+  shape: loosen(knobbed(WebhookConfig)),
   secretValues,
   async run(ctx, declared): Promise<SectionResult> {
     const run = beginRun(ctx);

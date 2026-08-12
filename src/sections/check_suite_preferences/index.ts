@@ -7,7 +7,6 @@
  * on every run (the 200 echoes the resulting preferences).
  */
 
-import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -18,6 +17,7 @@ import {
   type SectionResult,
   writeOnlyCheckNote,
 } from "../contract.js";
+import { CheckSuitePreferencesConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["checks"] };
 
@@ -37,7 +37,7 @@ export const checkSuitePreferencesSection = {
   endpoints: ENDPOINTS,
   // Loose on purpose: the PATCH forwards the object verbatim, so future
   // fields ride along at both levels; only the natural pair is checked.
-  shape: loosen(SettingsFile.shape.check_suite_preferences),
+  shape: loosen(CheckSuitePreferencesConfig),
   async run(ctx, desired): Promise<SectionResult> {
     const run = beginRun(ctx);
 

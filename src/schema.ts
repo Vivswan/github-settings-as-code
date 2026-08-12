@@ -1,11 +1,16 @@
 /**
- * The settings-file schema, single-sourced in zod: each config below is ONE
- * declaration that produces the exported config type (z.infer), the engine's
- * tolerant runtime shape (loosen() in sections/contract), and the published
- * lib/settings.schema.json (.github/scripts/gen-settings-schema.ts). The
- * .describe() strings become the published schema's descriptions; .meta({id})
- * names its definitions; superRefine/refine checks are runtime-only (invisible
- * to toJSONSchema) and survive loosen(), so upfront document validation keeps
+ * The settings-file document, composed from the per-section schema slices
+ * (src/sections/<key>/schema.ts). Each slice is ONE declaration that produces
+ * its config type (z.infer), the section's tolerant runtime shape (the
+ * section module derives loosen(<slice>) itself; see sections/contract), and
+ * its part of the published lib/settings.schema.json
+ * (.github/scripts/gen-settings-schema.ts). This file adds only the
+ * document-level wrappers - the undeclared knob, .optional(), and the
+ * property .describe() strings - so a future org/user settings document can
+ * compose its own SettingsFile from the same slices. The .describe() strings
+ * become the published schema's descriptions; .meta({id}) names its
+ * definitions; superRefine/refine checks are runtime-only (invisible to
+ * toJSONSchema) and survive loosen(), so upfront document validation keeps
  * every invariant.
  *
  * Authoring rules:
@@ -36,7 +41,7 @@ import { ActionsVariableConfig } from "./sections/actions_variables/schema.js";
 import { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
 import { AgentsVariableConfig } from "./sections/agents_variables/schema.js";
 import { AutolinkConfig } from "./sections/autolinks/schema.js";
-import { BranchConfig } from "./sections/branches/schema.js";
+import { BranchesSlice } from "./sections/branches/schema.js";
 import { CheckSuitePreferencesConfig } from "./sections/check_suite_preferences/schema.js";
 import { CodeQualitySetupConfig } from "./sections/code_quality_setup/schema.js";
 import { CodeScanningDefaultSetupConfig } from "./sections/code_scanning_default_setup/schema.js";
@@ -45,18 +50,18 @@ import { CollaboratorConfig } from "./sections/collaborators/schema.js";
 import { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 import { DependabotSecretConfig } from "./sections/dependabot_secrets/schema.js";
 import { DeployKeyConfig } from "./sections/deploy_keys/schema.js";
-import { EnvironmentConfig, MAX_PINNED_ENVIRONMENTS } from "./sections/environments/schema.js";
-import { InteractionLimitsConfig } from "./sections/interaction_limits/schema.js";
+import { EnvironmentsSlice } from "./sections/environments/schema.js";
+import { InteractionLimitsSlice } from "./sections/interaction_limits/schema.js";
 import { LabelConfig } from "./sections/labels/schema.js";
 import { MilestoneConfig } from "./sections/milestones/schema.js";
-import { PagesConfig } from "./sections/pages/schema.js";
+import { PagesSlice } from "./sections/pages/schema.js";
 import { RepositoryConfig } from "./sections/repository/schema.js";
 import { RulesetConfig } from "./sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
 import { knobbed } from "./sections/shared/schema-helpers.js";
-import { TeamConfig } from "./sections/teams/schema.js";
+import { TeamsSlice } from "./sections/teams/schema.js";
 import { WebhookConfig } from "./sections/webhooks/schema.js";
-import { WorkflowConfig } from "./sections/workflows/schema.js";
+import { WorkflowsSlice } from "./sections/workflows/schema.js";
 import type { MustBeNever } from "./types.js";
 
 export { ActionsConfig } from "./sections/actions/schema.js";
@@ -115,124 +120,101 @@ export const SettingsFile = z
     repository: RepositoryConfig.optional().describe(
       "Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents.",
     ),
-    labels: knobbed(LabelConfig, "LabelConfig")
+    labels: knobbed(LabelConfig)
       .optional()
       .describe(
         "Issue/PR labels; undeclared labels are DELETED by default (Probot parity; the wrapped form can set `undeclared: keep`).",
       ),
-    rulesets: knobbed(RulesetConfig, "RulesetConfig")
+    rulesets: knobbed(RulesetConfig)
       .optional()
       .describe(
         "Repository rulesets, upserted by name; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`).",
       ),
-    branches: z.array(BranchConfig).optional().describe("Classic branch protection per branch."),
-    environments: z
-      .array(EnvironmentConfig)
-      .superRefine((entries, refineCtx) => {
-        // The cap invariant lives in the shape like the flag pairing: upfront
-        // document validation rejects the document in BOTH modes before ANY
-        // section writes, where a hook-level check would fire only mid-run.
-        const pinnedIndexes = entries.flatMap((entry, index) =>
-          entry.pinned === true ? [index] : [],
-        );
-        if (pinnedIndexes.length > MAX_PINNED_ENVIRONMENTS) {
-          refineCtx.addIssue({
-            code: "custom",
-            path: [pinnedIndexes[MAX_PINNED_ENVIRONMENTS] as number, "pinned"],
-            message: `the settings file declares ${pinnedIndexes.length} environments with pinned: true, but GitHub allows at most ${MAX_PINNED_ENVIRONMENTS} pinned environments per repository. Declare pinned: true on at most ${MAX_PINNED_ENVIRONMENTS} entries`,
-          });
-        }
-      })
-      .optional()
-      .describe("Deployment environments, upserted by name."),
-    autolinks: knobbed(AutolinkConfig, "AutolinkConfig")
+    branches: BranchesSlice.optional().describe("Classic branch protection per branch."),
+    environments: EnvironmentsSlice.optional().describe(
+      "Deployment environments, upserted by name.",
+    ),
+    autolinks: knobbed(AutolinkConfig)
       .optional()
       .describe(
         "Autolink references; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`).",
       ),
     actions: ActionsConfig.optional().describe("GitHub Actions permissions for the repository."),
-    actions_secrets: knobbed(ActionsSecretConfig, "ActionsSecretConfig")
+    actions_secrets: knobbed(ActionsSecretConfig)
       .optional()
       .describe(
         "Repository Actions secrets, written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable).",
       ),
-    dependabot_secrets: knobbed(DependabotSecretConfig, "DependabotSecretConfig")
+    dependabot_secrets: knobbed(DependabotSecretConfig)
       .optional()
       .describe(
         "Repository Dependabot secrets (private-registry credentials Dependabot uses), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable).",
       ),
-    codespaces_secrets: knobbed(CodespacesSecretConfig, "CodespacesSecretConfig")
+    codespaces_secrets: knobbed(CodespacesSecretConfig)
       .optional()
       .describe(
         "Repository Codespaces secrets (development environment secrets), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable).",
       ),
-    agents_secrets: knobbed(AgentsSecretConfig, "AgentsSecretConfig")
+    agents_secrets: knobbed(AgentsSecretConfig)
       .optional()
       .describe(
         "Repository Copilot agents secrets (the secret store Copilot coding agents read), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable).",
       ),
-    workflows: z
-      .array(WorkflowConfig)
-      .optional()
-      .describe("Per-workflow enable/disable state; undeclared workflows are untouched."),
+    workflows: WorkflowsSlice.optional().describe(
+      "Per-workflow enable/disable state; undeclared workflows are untouched.",
+    ),
     check_suite_preferences: CheckSuitePreferencesConfig.optional().describe(
       "Check suite preferences: per-GitHub-App `auto_trigger_checks` toggles controlling whether pushes automatically create check suites. Write-only upstream (GitHub exposes no read endpoint), so check mode cannot verify them and apply re-asserts the declared preferences on every run. The token owner must be a repository administrator.",
     ),
-    pages: PagesConfig.nullable()
-      .optional()
-      .describe("GitHub Pages configuration; null disables Pages on the repository."),
+    pages: PagesSlice.optional().describe(
+      "GitHub Pages configuration; null disables Pages on the repository.",
+    ),
     code_scanning_default_setup: CodeScanningDefaultSetupConfig.optional().describe(
       "Code scanning default setup (CodeQL).",
     ),
     code_quality_setup: CodeQualitySetupConfig.optional().describe("Code quality analysis setup."),
-    collaborators: knobbed(CollaboratorConfig, "CollaboratorConfig")
+    collaborators: knobbed(CollaboratorConfig)
       .optional()
       .describe(
         "Direct collaborators, with pending invitations reconciled alongside; undeclared ones are REMOVED (pending invitations cancelled) by default (owner never touched; the wrapped form can set `undeclared: keep`).",
       ),
-    teams: z
-      .array(TeamConfig)
-      .optional()
-      .describe("Org team access to the repo; skipped on personal accounts."),
-    milestones: knobbed(MilestoneConfig, "MilestoneConfig")
+    teams: TeamsSlice.optional().describe(
+      "Org team access to the repo; skipped on personal accounts.",
+    ),
+    milestones: knobbed(MilestoneConfig)
       .optional()
       .describe(
         "Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`, which detaches deleted milestones from their issues).",
       ),
-    interaction_limits: InteractionLimitsConfig.nullable()
-      .optional()
-      .describe(
-        "Temporary interaction limits; null clears an active repo-level limit, and an absent key leaves whatever is live untouched. Limits self-expire (GitHub's expiry tops out at six_months), so apply re-arms the declared limit on every run and check mode reports drift once it lapses. The pull_request_creation_cap and pull_request_creation_bypass keys manage the persistent pull request creation cap and its bypass list instead; `interaction_limits: null` clears the base limit only and never touches them.",
-      ),
-    actions_variables: knobbed(ActionsVariableConfig, "ActionsVariableConfig")
+    interaction_limits: InteractionLimitsSlice.optional().describe(
+      "Temporary interaction limits; null clears an active repo-level limit, and an absent key leaves whatever is live untouched. Limits self-expire (GitHub's expiry tops out at six_months), so apply re-arms the declared limit on every run and check mode reports drift once it lapses. The pull_request_creation_cap and pull_request_creation_bypass keys manage the persistent pull request creation cap and its bypass list instead; `interaction_limits: null` clears the base limit only and never touches them.",
+    ),
+    actions_variables: knobbed(ActionsVariableConfig)
       .optional()
       .describe(
         "GitHub Actions repository variables, upserted by name; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`). Names are case-insensitive (GitHub stores them uppercased). Values are plain text BY DESIGN - variables are readable configuration, which is what makes check-mode diffing possible; secrets are write-only material and deliberately not this section.",
       ),
-    agents_variables: knobbed(AgentsVariableConfig, "AgentsVariableConfig")
+    agents_variables: knobbed(AgentsVariableConfig)
       .optional()
       .describe(
         "Copilot agents repository variables (the plain-text configuration Copilot coding agents read), upserted by name; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`). Names are case-insensitive (GitHub stores them uppercased). Values are plain text BY DESIGN - variables are readable configuration, which is what makes check-mode diffing possible; secrets are write-only material and deliberately not this section.",
       ),
-    webhooks: knobbed(WebhookConfig, "WebhookConfig")
+    webhooks: knobbed(WebhookConfig)
       .optional()
       .describe(
         "Repository webhooks, managed one per config.url; undeclared hooks are kept by default and surfaced as notes, since integrations create their own hooks (the wrapped form can set `undeclared: delete`).",
       ),
-    custom_properties: knobbed(CustomPropertyConfig, "CustomPropertyConfig")
+    custom_properties: knobbed(CustomPropertyConfig)
       .optional()
       .describe(
         'Values of organization-defined custom properties, set per repository (the property DEFINITIONS are organization-scoped and out of scope); organization repos only, skipped with a note on personal accounts. `value: null` unsets a property (reverting to the org default, if any), and booleans/numbers are normalized to their string form (GitHub transports true_false values as the strings "true"/"false"). Undeclared live values are kept by default - an unset can revert to an org default this action does not model, and a property whose values only org actors may edit would reject the write - and the wrapped form can set `undeclared: delete` to opt into unsetting them.',
       ),
-    deploy_keys: knobbed(DeployKeyConfig, "DeployKeyConfig")
+    deploy_keys: knobbed(DeployKeyConfig)
       .optional()
       .describe(
         "Deploy keys, matched by title. The declared material is a PUBLIC key, safe in a committed settings file. Keys are immutable upstream, so any change is applied as delete plus recreate. Undeclared keys are kept by default - deleting a live deploy key breaks whatever service authenticates with it, and deployment tooling installs its own keys - and the wrapped form can set `undeclared: delete`.",
       ),
-    secret_scanning_custom_patterns: knobbed(
-      SecretScanningPatternConfig,
-      "SecretScanningPatternConfig",
-    )
+    secret_scanning_custom_patterns: knobbed(SecretScanningPatternConfig)
       .optional()
       .describe(
         "Repository-level secret scanning custom patterns, matched by name. The name is immutable upstream (the update PATCH takes no name field), so a renamed entry is applied as a create of the new name - plus, under `undeclared: delete`, deletion of the old one; under the default keep policy the old pattern stays live and is surfaced as a note. Undeclared patterns are kept by default: removing a pattern disposes of its alerts, so deletion stays a human opt-in (the wrapped form can set `undeclared: delete`). When this action deletes a pattern it always asks GitHub to RESOLVE the pattern's alerts rather than delete them, keeping the audit trail.",
@@ -355,3 +337,59 @@ export const PROBOT_PARITY_KEYS = [
 
 /** Compile-time lockstep: a SettingsFile property missing from SECTION_KEYS fails here. */
 type _UnlistedSection = MustBeNever<Exclude<keyof SettingsFile, SectionKey>>;
+
+// --- Slice-composition pins -----------------------------------------------------
+
+/**
+ * Each SettingsFile property's slice derivation: the schema the property is
+ * composed FROM, before this file's document-level wrappers (.optional() and
+ * the property .describe()). The knobbed sections derive as the undeclared
+ * knob over their entry slice; everything else is its slice verbatim.
+ * Indexing below is total over SectionKey, so a new section fails to compile
+ * until its derivation is declared here.
+ */
+type SliceDerivation = {
+  repository: typeof RepositoryConfig;
+  labels: ReturnType<typeof knobbed<typeof LabelConfig>>;
+  rulesets: ReturnType<typeof knobbed<typeof RulesetConfig>>;
+  environments: typeof EnvironmentsSlice;
+  branches: typeof BranchesSlice;
+  autolinks: ReturnType<typeof knobbed<typeof AutolinkConfig>>;
+  actions: typeof ActionsConfig;
+  actions_secrets: ReturnType<typeof knobbed<typeof ActionsSecretConfig>>;
+  dependabot_secrets: ReturnType<typeof knobbed<typeof DependabotSecretConfig>>;
+  codespaces_secrets: ReturnType<typeof knobbed<typeof CodespacesSecretConfig>>;
+  agents_secrets: ReturnType<typeof knobbed<typeof AgentsSecretConfig>>;
+  workflows: typeof WorkflowsSlice;
+  check_suite_preferences: typeof CheckSuitePreferencesConfig;
+  pages: typeof PagesSlice;
+  code_scanning_default_setup: typeof CodeScanningDefaultSetupConfig;
+  code_quality_setup: typeof CodeQualitySetupConfig;
+  collaborators: ReturnType<typeof knobbed<typeof CollaboratorConfig>>;
+  teams: typeof TeamsSlice;
+  milestones: ReturnType<typeof knobbed<typeof MilestoneConfig>>;
+  interaction_limits: typeof InteractionLimitsSlice;
+  actions_variables: ReturnType<typeof knobbed<typeof ActionsVariableConfig>>;
+  agents_variables: ReturnType<typeof knobbed<typeof AgentsVariableConfig>>;
+  webhooks: ReturnType<typeof knobbed<typeof WebhookConfig>>;
+  custom_properties: ReturnType<typeof knobbed<typeof CustomPropertyConfig>>;
+  deploy_keys: ReturnType<typeof knobbed<typeof DeployKeyConfig>>;
+  secret_scanning_custom_patterns: ReturnType<typeof knobbed<typeof SecretScanningPatternConfig>>;
+};
+
+/** The section keys whose SettingsFile property is NOT composed from its slice. */
+type SectionNotComposedFromItsSlice = {
+  [K in SectionKey]: (typeof SettingsFile.shape)[K] extends z.ZodOptional<SliceDerivation[K]>
+    ? never
+    : K;
+}[SectionKey];
+
+/**
+ * Compile-time lockstep: every SettingsFile property IS its declared slice
+ * derivation plus .optional(). A property rebuilt from a lookalike schema
+ * stops matching its slice's type and fails here naming the key, so the
+ * slices stay the single composition source - a future org/user settings
+ * document composes its own document from the same slices, and every section
+ * module keeps deriving its runtime shape from the slice it already owns.
+ */
+type _EverySectionComposedFromItsSlice = MustBeNever<SectionNotComposedFromItsSlice>;

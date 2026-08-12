@@ -4,7 +4,6 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import { type PagesConfig, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -15,6 +14,7 @@ import {
   type SectionPermission,
   type SectionResult,
 } from "../contract.js";
+import { type PagesConfig, PagesSlice } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["pages"] };
 
@@ -67,7 +67,7 @@ export const pagesSection = {
   endpoints: ENDPOINTS,
   // The handler dereferences source.path before the API sees it, so the
   // shape must catch source: null or a source without a branch.
-  shape: loosen(SettingsFile.shape.pages),
+  shape: loosen(PagesSlice),
   async run(ctx, desired): Promise<SectionResult> {
     const run = beginRun(ctx);
     // The probe stays the discriminated union probeAbsent returns; narrowing

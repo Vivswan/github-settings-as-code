@@ -7,7 +7,6 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -24,6 +23,8 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { MilestoneConfig } from "./schema.js";
 
 /** The fields of a live milestone this section reads; extras ride along. */
 const LiveMilestone = z.looseObject({ number: z.number(), title: z.string() });
@@ -51,7 +52,7 @@ export const milestonesSection = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.milestones),
+  shape: loosen(knobbed(MilestoneConfig)),
   async run(ctx, declared): Promise<SectionResult> {
     const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));

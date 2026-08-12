@@ -5,7 +5,6 @@
  */
 
 import { z } from "zod";
-import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -18,6 +17,7 @@ import {
   type SectionPermission,
   type SectionResult,
 } from "../contract.js";
+import { WorkflowsSlice } from "./schema.js";
 
 /** The fields of a live workflow this section reads; extras ride along. */
 const LiveWorkflow = z.looseObject({
@@ -48,7 +48,7 @@ export const workflowsSection = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.workflows),
+  shape: loosen(WorkflowsSlice),
   // Closed surface: the enable/disable PUTs carry no body at all, so an
   // extra key here can only be a typo that would silently do nothing.
   closedSurface: {

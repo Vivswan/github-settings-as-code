@@ -125,3 +125,6 @@ export const BranchConfig = z
   .describe("Classic protection for one branch name or wildcard pattern.")
   .meta({ id: "BranchConfig" });
 export type BranchConfig = z.infer<typeof BranchConfig>;
+
+/** The `branches:` document slice: the entry list the document composes from. */
+export const BranchesSlice = z.array(BranchConfig);

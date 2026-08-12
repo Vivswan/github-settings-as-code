@@ -19,9 +19,11 @@
  */
 
 import { repoSecretsSection } from "../shared/repo-secrets.js";
+import { CodespacesSecretConfig } from "./schema.js";
 
 export const codespacesSecretsSection = repoSecretsSection({
   key: "codespaces_secrets",
+  entry: CodespacesSecretConfig,
   resource: "codespaces_secrets",
   noun: "Codespaces secret",
   accessGrade: "write",

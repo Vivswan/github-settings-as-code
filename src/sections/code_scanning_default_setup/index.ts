@@ -4,7 +4,6 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -17,6 +16,7 @@ import {
   type SectionResult,
   tryCall,
 } from "../contract.js";
+import { CodeScanningDefaultSetupConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration", "code_scanning_alerts"] };
 
@@ -42,7 +42,7 @@ export const codeScanningDefaultSetupSection = {
   grantCaveat:
     "a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived",
   endpoints: ENDPOINTS,
-  shape: requirePlainMapping(loosen(SettingsFile.shape.code_scanning_default_setup)),
+  shape: requirePlainMapping(loosen(CodeScanningDefaultSetupConfig)),
   async run(ctx, declared): Promise<SectionResult> {
     const run = beginRun(ctx);
     const desired: Record<string, unknown> = declared;

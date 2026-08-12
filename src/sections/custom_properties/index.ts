@@ -7,7 +7,6 @@
  */
 
 import { z } from "zod";
-import { type CustomPropertyConfig, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -24,6 +23,8 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { CustomPropertyConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["custom_properties"] };
 
@@ -114,7 +115,7 @@ export const customPropertiesSection = {
   // below implements the personal-account no-op this declares.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.custom_properties),
+  shape: loosen(knobbed(CustomPropertyConfig)),
   // Closed surface: the bulk PATCH body is built from exactly property_name
   // and value, so an extra key has no destination and is always a typo.
   closedSurface: {

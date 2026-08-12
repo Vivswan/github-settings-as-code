@@ -7,7 +7,6 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -23,6 +22,8 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { LabelConfig } from "./schema.js";
 
 /**
  * The case-insensitive matching key of a label name, branded so only
@@ -84,7 +85,7 @@ export const labelsSection = {
   undeclaredDefault: "delete",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.labels),
+  shape: loosen(knobbed(LabelConfig)),
   async run(ctx, declared): Promise<SectionResult> {
     const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));

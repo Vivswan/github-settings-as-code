@@ -22,9 +22,17 @@ const WRAPPER_DOC =
  * strict {undeclared, entries} wrapper (published under the definition name
  * "UndeclaredPolicyList<Entry>", matching the UndeclaredPolicyList type).
  * loosen() recognizes this union and rewraps it with the routed check that
- * keeps precise per-entry issue paths.
+ * keeps precise per-entry issue paths. The wrapper's definition name derives
+ * from the entry schema's own .meta({id}), so the document composition and a
+ * section's runtime derivation can never label the same entry differently.
  */
-export function knobbed<T extends z.ZodType>(entry: T, entryName: string) {
+export function knobbed<T extends z.ZodType>(entry: T) {
+  const entryName = z.globalRegistry.get(entry)?.id;
+  if (entryName === undefined) {
+    throw new Error(
+      "knobbed(): the entry schema carries no .meta({id}) name to derive the wrapper's definition name from; give the entry config a .meta({id})",
+    );
+  }
   const wrapper = z
     .strictObject({
       undeclared: UndeclaredPolicySchema.describe(

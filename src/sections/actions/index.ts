@@ -7,7 +7,7 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import { type ActionsConfig, type MustBeNever, SettingsFile } from "../../schema.js";
+import type { MustBeNever } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -20,6 +20,7 @@ import {
   type SectionResult,
   type SectionRun,
 } from "../contract.js";
+import { ActionsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
@@ -440,7 +441,7 @@ export const actionsSection = {
   permission,
   grantCaveat: 'the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.actions),
+  shape: loosen(ActionsConfig),
   async run(ctx, desired): Promise<SectionResult> {
     const run = beginRun(ctx);
     const permissions: Record<string, unknown> = {};

@@ -7,7 +7,6 @@
 
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
-import { type RulesetConfig, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -24,6 +23,8 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { RulesetConfig } from "./schema.js";
 
 /**
  * Ruleset ref includes/excludes: the file may use short names ("staging",
@@ -111,7 +112,7 @@ export const rulesetsSection = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.rulesets),
+  shape: loosen(knobbed(RulesetConfig)),
   async run(ctx, declared): Promise<SectionResult> {
     const run = beginRun(ctx);
     const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));

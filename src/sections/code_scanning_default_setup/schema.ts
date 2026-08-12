@@ -1,9 +1,4 @@
-/**
- * The `code_scanning_default_setup:` entry-config declaration. The root
- * src/schema.ts imports it and keeps the SettingsFile property wiring
- * (.optional()/.describe()) inline, re-exporting the config so existing
- * importers of src/schema.js keep compiling unchanged.
- */
+/** The `code_scanning_default_setup:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
 

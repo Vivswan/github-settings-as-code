@@ -1,10 +1,8 @@
 /**
- * The `environments:` entry-config declarations. The root src/schema.ts
- * imports them, keeps the SettingsFile property's array/superRefine/describe
- * call inline, and re-exports everything here so existing importers compile
- * unchanged. Imports only zod and the leaf shared helpers - never root
- * schema.ts (a cycle whose top-level const evaluation TDZ-crashes at import
- * time).
+ * The `environments:` section's schema slice; root src/schema.ts composes
+ * the SettingsFile property from it. Imports only zod and the leaf shared
+ * helpers - never root schema.ts (a cycle whose top-level const evaluation
+ * TDZ-crashes at import time).
  */
 
 import { z } from "zod";
@@ -107,28 +105,22 @@ export const EnvironmentConfig = z
       .nullable()
       .optional()
       .describe("Which branches may deploy; null clears the policy."),
-    deployment_branch_policies: knobbed(
-      DeploymentBranchPolicyConfig,
-      "DeploymentBranchPolicyConfig",
-    )
+    deployment_branch_policies: knobbed(DeploymentBranchPolicyConfig)
       .optional()
       .describe(
         "Custom deployment branch-policy patterns for this environment, reconciled only when this key is declared (an absent key leaves the live patterns untouched). Declaring it requires the sibling `deployment_branch_policy` to set `custom_branch_policies: true`; without the flag GitHub rejects every pattern write. A pattern's `type` is immutable on GitHub, so a declared type that differs from the live one is applied as delete plus recreate. Within a declared key, live patterns the entries do not declare are DELETED by default; the wrapped `{undeclared: keep, entries}` form keeps them as notes.",
       ),
-    deployment_protection_rules: knobbed(
-      DeploymentProtectionRuleConfig,
-      "DeploymentProtectionRuleConfig",
-    )
+    deployment_protection_rules: knobbed(DeploymentProtectionRuleConfig)
       .optional()
       .describe(
         "Custom deployment protection rules for this environment, reconciled only when this key is declared (an absent key leaves the live rules untouched). Each rule is a GitHub App gate, declared by its App slug and resolved to the App's integration id at apply time; GitHub offers no update call, so the model is enable/disable only. Within a declared key, live rules the entries do not declare are KEPT by default - Apps can enable themselves as gates, and silently removing a deployment gate is security-relevant - and the wrapped `{undeclared: delete, entries}` form opts into disabling them.",
       ),
-    variables: knobbed(EnvironmentVariableConfig, "EnvironmentVariableConfig")
+    variables: knobbed(EnvironmentVariableConfig)
       .optional()
       .describe(
         "Actions variables for this environment, reconciled only when this key is declared (an absent key leaves the live variables untouched). Values are plain text by design - use environment secrets for anything sensitive. Within a declared `variables` key, live variables the entries do not declare are DELETED by default; the wrapped `{undeclared: keep, entries}` form keeps them as notes. Names match case-insensitively, as GitHub treats them.",
       ),
-    secrets: knobbed(EnvironmentSecretConfig, "EnvironmentSecretConfig")
+    secrets: knobbed(EnvironmentSecretConfig)
       .optional()
       .describe(
         "Actions secrets for this environment, reconciled only when this key is declared (an absent key leaves the live secrets untouched). Each value is a whole-value `$NAME` reference to the action step's environment, never a literal, sealed client-side against the environment's public key; GitHub cannot return a value, so check mode verifies existence only and apply re-seals every declared value on each run. Within a declared `secrets` key, live secrets the entries do not declare are KEPT by default (their values are unrecoverable); the wrapped `{undeclared: delete, entries}` form opts into deletion.",
@@ -185,6 +177,23 @@ export const EnvironmentConfig = z
     },
   });
 export type EnvironmentConfig = z.infer<typeof EnvironmentConfig>;
+
+/**
+ * The `environments:` document slice: the entry list plus the pinned-cap
+ * invariant. The cap lives in the slice like the flag pairing above: upfront
+ * document validation rejects the document in BOTH modes before ANY section
+ * writes, where a hook-level check would fire only mid-run.
+ */
+export const EnvironmentsSlice = z.array(EnvironmentConfig).superRefine((entries, refineCtx) => {
+  const pinnedIndexes = entries.flatMap((entry, index) => (entry.pinned === true ? [index] : []));
+  if (pinnedIndexes.length > MAX_PINNED_ENVIRONMENTS) {
+    refineCtx.addIssue({
+      code: "custom",
+      path: [pinnedIndexes[MAX_PINNED_ENVIRONMENTS] as number, "pinned"],
+      message: `the settings file declares ${pinnedIndexes.length} environments with pinned: true, but GitHub allows at most ${MAX_PINNED_ENVIRONMENTS} pinned environments per repository. Declare pinned: true on at most ${MAX_PINNED_ENVIRONMENTS} entries`,
+    });
+  }
+});
 
 /**
  * The per-environment keys ROUTED to their own API operations instead of the

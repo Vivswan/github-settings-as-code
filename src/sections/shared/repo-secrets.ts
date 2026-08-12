@@ -13,7 +13,7 @@
  */
 
 import type { z } from "zod";
-import { SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
+import type { UndeclaredPolicyList } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -36,6 +36,7 @@ import {
   type SecretsScope,
   type SecretsScopeOps,
 } from "../secrets-engine.js";
+import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 
 /** The section keys the factory may mint, each with its API path segment. */
 type RepoSecretsKey =
@@ -161,8 +162,10 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
    * write-graded by method already, so the override applies to the GETs.
    */
   accessGrade?: "write";
+  /** The family's entry slice (src/sections/<key>/schema.ts), the runtime shape's source. */
+  entry: ReturnType<typeof sealedSecretConfig>;
 }): RepoSecretsSectionModule<K> {
-  const { key, resource, noun, accessGrade } = family;
+  const { key, resource, noun, accessGrade, entry } = family;
   const pathSegment: SecretsSegment<K> = SECRETS_SEGMENTS[key];
   const readGrade = accessGrade === undefined ? {} : { accessGrade };
   const endpoints: RepoSecretsEndpoints<SecretsSegment<K>> = {
@@ -220,7 +223,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     undeclaredDefault: "keep",
     permission: { repo: [resource] },
     endpoints,
-    shape: loosen(SettingsFile.shape[key]),
+    shape: loosen(knobbed(entry)),
     // The engine's shared list extractor: the declared value of every entry,
     // for the up-front reference resolution.
     secretValues: listSecretValues,

@@ -15,3 +15,6 @@ export const TeamConfig = z
   )
   .meta({ id: "TeamConfig" });
 export type TeamConfig = z.infer<typeof TeamConfig>;
+
+/** The `teams:` document slice: the entry list the document composes from. */
+export const TeamsSlice = z.array(TeamConfig);

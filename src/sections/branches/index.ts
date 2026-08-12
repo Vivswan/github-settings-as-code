@@ -20,12 +20,6 @@
 
 import { subsetDiff } from "../../engine/diff.js";
 import {
-  type BranchConfig,
-  type BranchProtectionConfig,
-  parseBypassActor,
-  SettingsFile,
-} from "../../schema.js";
-import {
   beginRun,
   call,
   callGraphql,
@@ -46,6 +40,12 @@ import {
   type SectionRun,
   tryCall,
 } from "../contract.js";
+import {
+  type BranchConfig,
+  BranchesSlice,
+  type BranchProtectionConfig,
+  parseBypassActor,
+} from "./schema.js";
 
 const REQUIRED_PROTECTION_KEYS = [
   "required_status_checks",
@@ -801,7 +801,7 @@ export const branchesSection = {
   // the structured twins), which are this section's own machinery. Wildcard
   // entries reject every key outside those tables, since nothing else can
   // reach a wildcard rule.
-  shape: loosen(SettingsFile.shape.branches).superRefine((declared, refineCtx) => {
+  shape: loosen(BranchesSlice).superRefine((declared, refineCtx) => {
     if (!Array.isArray(declared)) {
       return;
     }

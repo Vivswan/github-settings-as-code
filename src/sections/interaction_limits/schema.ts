@@ -1,9 +1,7 @@
 /**
- * The `interaction_limits:` entry-config declaration and the routed-keys set
- * its base-key sweep and the section handler share. The root src/schema.ts
- * imports the config and keeps the SettingsFile property wiring
- * (.nullable().optional().describe()) inline, re-exporting both so existing
- * importers of src/schema.js keep compiling unchanged.
+ * The `interaction_limits:` section's schema slice and the routed-keys set
+ * its base-key sweep and the section handler share; root src/schema.ts
+ * composes the SettingsFile property from it.
  */
 
 import { z } from "zod";
@@ -130,3 +128,6 @@ export type InteractionLimitsConfig = z.infer<typeof InteractionLimitsConfig>;
 type _RoutedKeysReal = MustBeNever<
   Exclude<(typeof ROUTED_KEY_LIST)[number], keyof InteractionLimitsConfig>
 >;
+
+/** The `interaction_limits:` document slice: the config, or null to clear the base limit. */
+export const InteractionLimitsSlice = InteractionLimitsConfig.nullable();

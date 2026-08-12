@@ -24,3 +24,6 @@ export const PagesConfig = z
   .describe("GitHub Pages site configuration; use `pages: null` to disable the site.")
   .meta({ id: "PagesConfig" });
 export type PagesConfig = z.infer<typeof PagesConfig>;
+
+/** The `pages:` document slice: the config, or null to disable the site. */
+export const PagesSlice = PagesConfig.nullable();

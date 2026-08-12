@@ -15,7 +15,6 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import { type DeployKeyConfig, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -33,6 +32,8 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { DeployKeyConfig } from "./schema.js";
 
 /** The fields of a live deploy key this section reads; extras ride along. */
 const LiveDeployKey = z.looseObject({
@@ -124,7 +125,7 @@ export const deployKeysSection = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(SettingsFile.shape.deploy_keys),
+  shape: loosen(knobbed(DeployKeyConfig)),
   async run(ctx, declared): Promise<SectionResult> {
     const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
