@@ -13,7 +13,7 @@ export const GAP = defineGap({
   documentedInSpec: true,
 });
 
-/** Fires when @octokit/types gains any of these routes: DELETE THIS FILE and its two lines in index.ts. */
-type _DeleteThisFileOnceOctokitShipsIt = MustBeNever<
+/** Fires when @octokit/types gains any of these routes: the graduate script retires this file per its documentedInSpec lifecycle. */
+type _GraduateThisFileOnceOctokitShipsIt = MustBeNever<
   Extract<(typeof GAP.routes)[number], keyof Endpoints>
 >;

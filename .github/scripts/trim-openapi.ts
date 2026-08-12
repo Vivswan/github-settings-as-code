@@ -28,12 +28,35 @@ import { UNDOCUMENTED_PATHS, USED_PATHS } from "../../test/e2e/openapi/paths.js"
 const UPSTREAM_REF = "16bc535ad66fac59d585b1516d1d52f58f787962";
 
 /**
+ * The ref actually fetched: the TRIM_UPSTREAM_REF environment variable
+ * overrides the pin for one run (the nightly upstream probe points it at the
+ * latest descriptor); unset or blank means the pinned SHA, so default runs
+ * stay byte-identical.
+ */
+const REF = resolveRef(process.env.TRIM_UPSTREAM_REF);
+
+function resolveRef(override: string | undefined): string {
+  const ref = override?.trim();
+  if (!ref) {
+    return UPSTREAM_REF;
+  }
+  // The ref lands in a URL path: refuse anything that could reshape the URL
+  // (query, fragment, traversal) instead of fetching something surprising.
+  if (!/^[A-Za-z0-9._/-]+$/.test(ref) || ref.includes("..")) {
+    throw new Error(
+      `TRIM_UPSTREAM_REF "${ref}" is not a plain git ref (letters, digits, ".", "_", "/", "-"; no "..")`,
+    );
+  }
+  return ref;
+}
+
+/**
  * The dereferenced (no $ref) descriptor for our pinned API version. Dereferenced
  * so the trimmed slice is self-contained: keeping a path drags its inlined
  * schemas along, with no components/schemas graph to also carry.
  */
 const SPEC_URL =
-  `https://raw.githubusercontent.com/github/rest-api-description/${UPSTREAM_REF}` +
+  `https://raw.githubusercontent.com/github/rest-api-description/${REF}` +
   `/descriptions/api.github.com/dereferenced/api.github.com.${DEFAULT_API_VERSION}.deref.json`;
 
 const OUT_PATH = join(
@@ -143,14 +166,21 @@ async function main(): Promise<number> {
   // documents one, the carve-out must go (and validation switch on).
   const nowDocumented = UNDOCUMENTED_PATHS.filter((path) => doc.paths[path] !== undefined);
   if (nowDocumented.length > 0) {
+    // On a probe run (overridden ref) the pinned descriptor may still lack
+    // the paths, so retiring the gap right away would break pinned runs:
+    // the pin must move first.
+    const remedy =
+      REF === UPSTREAM_REF
+        ? "Retire the owning gap in src/upstream-gaps/ (delete the spec-only file, or flip documentedInSpec to true on an octokit-kind one), regenerate the index (bun .github/scripts/gen-gaps-index.ts), and re-run, so the validator covers them"
+        : `The probe ref documents them but the pinned ${UPSTREAM_REF} may not: bump UPSTREAM_REF in this script first, then retire the gap and regenerate the index`;
     throw new Error(
-      `the upstream descriptor at ${UPSTREAM_REF} now documents: ${nowDocumented.join(", ")}. Flip documentedInSpec to true on the owning gap file in src/upstream-gaps/ and re-run, so the validator covers them`,
+      `the upstream descriptor at ${REF} now documents: ${nowDocumented.join(", ")}. ${remedy}`,
     );
   }
   const { trimmed, kept, missing } = trimPaths(doc);
   if (missing.length > 0) {
     throw new Error(
-      `these USED_PATHS are not in the upstream descriptor at ${UPSTREAM_REF} for ${DEFAULT_API_VERSION}:\n  ${missing.join("\n  ")}\nEither the path is wrong in test/e2e/openapi/paths.ts, or UPSTREAM_REF/api-version needs updating`,
+      `these USED_PATHS are not in the upstream descriptor at ${REF} for ${DEFAULT_API_VERSION}:\n  ${missing.join("\n  ")}\nEither the path is wrong in test/e2e/openapi/paths.ts, or UPSTREAM_REF/api-version needs updating`,
     );
   }
   // The dereferenced slice must be fully inlined; a stray $ref means the
@@ -167,6 +197,11 @@ async function main(): Promise<number> {
   renameSync(tmpPath, OUT_PATH);
   const sizeKb = Math.round(Buffer.byteLength(json) / 1024);
   console.log(`wrote ${OUT_PATH} (${kept.length} paths, ${sizeKb} KB)`);
+  if (REF !== UPSTREAM_REF) {
+    console.log(
+      `note: trimmed from TRIM_UPSTREAM_REF override "${REF}", not the pinned UPSTREAM_REF - do not cache this artifact as the pinned slice`,
+    );
+  }
   return 0;
 }
 
