@@ -33,6 +33,7 @@ import { z } from "zod";
 import { ActionsSecretConfig } from "./sections/actions_secrets/schema.js";
 import { ActionsVariableConfig } from "./sections/actions_variables/schema.js";
 import { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
+import { AgentsVariableConfig } from "./sections/agents_variables/schema.js";
 import { AutolinkConfig } from "./sections/autolinks/schema.js";
 import { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
 import { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
@@ -46,6 +47,7 @@ import type { MustBeNever } from "./types.js";
 export { ActionsSecretConfig } from "./sections/actions_secrets/schema.js";
 export { ActionsVariableConfig } from "./sections/actions_variables/schema.js";
 export { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
+export { AgentsVariableConfig } from "./sections/agents_variables/schema.js";
 export { AutolinkConfig } from "./sections/autolinks/schema.js";
 export { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
 export { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
@@ -737,19 +739,6 @@ export const TeamConfig = z
   )
   .meta({ id: "TeamConfig" });
 export type TeamConfig = z.infer<typeof TeamConfig>;
-
-export const AgentsVariableConfig = z
-  .object({
-    name: z
-      .string()
-      .describe(
-        "The variable name, the natural key; case-insensitive (stored uppercased by GitHub).",
-      ),
-    value: z.string().describe("The plain-text value Copilot coding agents read."),
-  })
-  .describe("One Copilot agents repository variable, matched by case-insensitive name.")
-  .meta({ id: "AgentsVariableConfig" });
-export type AgentsVariableConfig = z.infer<typeof AgentsVariableConfig>;
 
 /**
  * The interaction_limits keys routed to their own .../interaction-limits/pulls

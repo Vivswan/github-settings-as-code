@@ -13,7 +13,7 @@ import { actionsSection } from "./actions.js";
 import { actionsSecretsSection } from "./actions_secrets/index.js";
 import { actionsVariablesSection } from "./actions_variables/index.js";
 import { agentsSecretsSection } from "./agents_secrets/index.js";
-import { agentsVariablesSection } from "./agents-variables.js";
+import { agentsVariablesSection } from "./agents_variables/index.js";
 import { autolinksSection } from "./autolinks/index.js";
 import { branchesSection } from "./branches.js";
 import { checkSuitePreferencesSection } from "./check-suite-preferences.js";
