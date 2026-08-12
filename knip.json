@@ -1,5 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/main.ts", "src/schema.ts", ".github/scripts/*.ts", "**/*.test.ts"],
+  "entry": [
+    "src/main.ts",
+    "src/schema.ts",
+    ".github/scripts/*.ts",
+    "**/*.test.ts",
+    "src/upstream-gaps/gap.ts"
+  ],
   "project": ["src/**/*.ts", "test/**/*.ts", ".github/scripts/**/*.ts"]
 }
