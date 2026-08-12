@@ -18,7 +18,7 @@ import type { Io } from "../../src/io.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
-import { STALE_VERSION_HINT } from "../../src/sections/secret-scanning-patterns.js";
+import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
 import { fencedBlocks } from "./markdown.js";
 
 const ROOT = join(import.meta.dir, "..", "..");

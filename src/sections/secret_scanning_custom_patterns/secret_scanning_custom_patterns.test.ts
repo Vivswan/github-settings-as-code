@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { Io } from "../../src/io.js";
-import { secretScanningPatternsSection } from "../../src/sections/secret-scanning-patterns.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { validateSettingsDoc } from "../../engine/orchestrate.js";
+import type { Io } from "../../io.js";
+import { secretScanningPatternsSection } from "./index.js";
 
 /** A no-op Io so validateSettingsDoc can run without @actions/core. */
 const silentIo: Io = { annotate() {}, log() {}, mask() {} };
