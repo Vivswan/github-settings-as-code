@@ -1,13 +1,13 @@
 /**
  * `code_quality_setup:` section - PATCH the code quality setup
  * configuration; a 409 (configuration run in progress) gets its own advice.
- * A near mirror of code-scanning.ts: both PATCH verbatim, both compare
- * declared keys only through subsetDiff (whose scalar-list branch compares
- * `languages` as a set), and both name the 202 configuration run.
+ * A near mirror of code_scanning_default_setup: both PATCH verbatim, both
+ * compare declared keys only through subsetDiff (whose scalar-list branch
+ * compares `languages` as a set), and both name the 202 configuration run.
  */
 
-import { subsetDiff } from "../engine/diff.js";
-import { SettingsFile } from "../schema.js";
+import { subsetDiff } from "../../engine/diff.js";
+import { SettingsFile } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -19,7 +19,7 @@ import {
   type SectionPermission,
   type SectionResult,
   tryCall,
-} from "./contract.js";
+} from "../contract.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
