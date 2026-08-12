@@ -20,7 +20,7 @@ describe("branches", () => {
     const api = new MockApi({}); // every GET 404s, including the branch itself
     const result = await branchesSection.run(ctx(api, true), declared);
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("does not exist");
+    expect(result.drift?.[0]).toContain("does not exist");
   });
 
   test("check: inconclusive branch probe falls back to unprotected drift", async () => {
@@ -29,7 +29,7 @@ describe("branches", () => {
     });
     const result = await branchesSection.run(ctx(api, true), declared);
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("apply will protect it");
+    expect(result.drift?.[0]).toContain("apply will protect it");
   });
 
   test("duplicate branch names are rejected before any API call", async () => {
@@ -306,11 +306,11 @@ describe("branches GraphQL-routed keys", () => {
       },
     ]);
     expect(result.drift).toHaveLength(2);
-    expect(result.drift[0]).toContain(
+    expect(result.drift?.[0]).toContain(
       "force_push_bypassers: the settings file declares [release-bot] but the live rule allows [octocat]",
     );
-    expect(result.drift[1]).toContain("required_deployments");
-    expect(result.drift[1]).toContain("[qa]");
+    expect(result.drift?.[1]).toContain("required_deployments");
+    expect(result.drift?.[1]).toContain("[qa]");
     expect(api.mutations()).toHaveLength(0);
   });
 

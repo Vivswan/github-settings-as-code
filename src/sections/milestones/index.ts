@@ -8,10 +8,10 @@
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
-  emptyResult,
   listAll,
   loosen,
   rejectDuplicates,
@@ -53,7 +53,7 @@ export const milestonesSection = {
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.milestones),
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
@@ -75,13 +75,13 @@ export const milestonesSection = {
       // never touched.
       const want: Record<string, unknown> = { ...milestone };
       if (!existing) {
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `milestones[${milestone.title}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
         } else {
           await call(ctx, this, ENDPOINTS.create, { payload: want });
-          result.changes.push(`created milestone "${milestone.title}"`);
+          run.result.changes.push(`created milestone "${milestone.title}"`);
         }
         continue;
       }
@@ -90,12 +90,12 @@ export const milestonesSection = {
       if (drift.length === 0) {
         continue;
       }
-      if (ctx.check) {
-        result.drift.push(...drift);
+      if (run.check) {
+        run.result.drift.push(...drift);
       } else {
         const phantom = phantomKeys(declaredFields, existing);
         if (phantom.length > 0) {
-          result.notes.push(
+          run.result.notes.push(
             phantomNote(
               `milestones[${milestone.title}]`,
               phantom,
@@ -108,7 +108,7 @@ export const milestonesSection = {
           params: { milestone_number: String(existing.number) },
           payload: want,
         });
-        result.changes.push(`updated milestone "${milestone.title}"`);
+        run.result.changes.push(`updated milestone "${milestone.title}"`);
       }
     }
     // Divergence from Probot: undeclared milestones are kept by default,
@@ -119,8 +119,8 @@ export const milestonesSection = {
         continue;
       }
       if (policy === "delete") {
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `milestones[${milestone.title}]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it, detaching it from every issue that carries it; add it to the settings file to keep it`,
           );
         } else {
@@ -128,16 +128,16 @@ export const milestonesSection = {
             params: { milestone_number: String(milestone.number) },
             describe: `deleting undeclared milestone "${milestone.title}"`,
           });
-          result.changes.push(
+          run.result.changes.push(
             `DELETED undeclared milestone "${milestone.title}" (detached from every issue that carried it)`,
           );
         }
         continue;
       }
-      result.notes.push(
+      run.result.notes.push(
         `milestone "${milestone.title}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it, detaching it from every issue that carries it (closing is not enough; closed milestones are still listed)`,
       );
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"milestones">;

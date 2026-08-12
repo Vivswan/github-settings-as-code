@@ -37,12 +37,12 @@ import {
   type UndeclaredPolicyList,
 } from "../../schema.js";
 import {
+  beginRun,
   call,
   callGraphql,
   type DeclaredSecretValue,
   type EndpointDecl,
   type EntryOf,
-  emptyResult,
   type GraphqlOpDecl,
   graphqlOp,
   listAllEnveloped,
@@ -55,6 +55,7 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  type SectionRun,
   tryCallGraphql,
   undeclaredPolicy,
 } from "../contract.js";
@@ -358,7 +359,7 @@ interface NestedReconciler<K extends NestedKey> {
     envName: string,
     policy: UndeclaredPolicy,
     entries: readonly NestedEntry<K>[],
-    result: SectionResult,
+    run: SectionRun,
     /**
      * The probed live environment body, present in CHECK mode only: the
      * branch-policy reconciler reads its custom_branch_policies flag to know
@@ -450,21 +451,13 @@ async function reconcileNested<K extends NestedKey>(
   key: K,
   envName: string,
   nested: Pick<EnvironmentConfig, NestedKey>,
-  result: SectionResult,
+  run: SectionRun,
   liveEnv: Record<string, unknown> | undefined,
 ): Promise<void> {
   const declared = nested[key];
   if (declared !== undefined) {
     const { policy, entries } = unwrapNested(key, declared);
-    await NESTED_RECONCILERS[key].reconcile(
-      ctx,
-      section,
-      envName,
-      policy,
-      entries,
-      result,
-      liveEnv,
-    );
+    await NESTED_RECONCILERS[key].reconcile(ctx, section, envName, policy, entries, run, liveEnv);
   }
 }
 
@@ -555,7 +548,7 @@ export const environmentsSection = {
     });
   },
   async run(ctx, desired): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     rejectDuplicates(
       this,
       desired,
@@ -590,26 +583,26 @@ export const environmentsSection = {
       if (routed.pinned !== undefined) {
         pinDeclarations.push({ name, pinned: routed.pinned });
       }
-      if (ctx.check) {
+      if (run.check) {
         const probe = await probeAbsent(ctx, this, ENDPOINTS.probe, {
           params: { environment_name: name },
         });
         if ("missing" in probe) {
-          result.drift.push(
+          run.result.drift.push(
             `environments[${name}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
           for (const key of NESTED_KEYS) {
             if (nested[key] !== undefined) {
-              result.notes.push(NESTED_RECONCILERS[key].missingNote(name));
+              run.result.notes.push(NESTED_RECONCILERS[key].missingNote(name));
             }
           }
         } else {
-          result.drift.push(
+          run.result.drift.push(
             ...subsetDiff(settings, flattenEnvironment(probe.data), `environments[${name}]`),
           );
           const liveEnv = (probe.data ?? {}) as Record<string, unknown>;
           for (const key of NESTED_KEYS) {
-            await reconcileNested(ctx, this, key, name, nested, result, liveEnv);
+            await reconcileNested(ctx, this, key, name, nested, run, liveEnv);
           }
         }
       } else {
@@ -619,9 +612,9 @@ export const environmentsSection = {
           describe: `upserting environment "${name}"`,
         });
         captureNodeId(name, updated);
-        result.changes.push(`applied environment "${name}"`);
+        run.result.changes.push(`applied environment "${name}"`);
         for (const key of NESTED_KEYS) {
-          await reconcileNested(ctx, this, key, name, nested, result, undefined);
+          await reconcileNested(ctx, this, key, name, nested, run, undefined);
         }
       }
     }
@@ -631,9 +624,9 @@ export const environmentsSection = {
     // could fire. Key-gated: without a declared `pinned` key the section
     // stays REST-only and never touches /graphql.
     if (pinDeclarations.length > 0) {
-      await reconcilePins(ctx, this, pinDeclarations, nodeIds, result);
+      await reconcilePins(ctx, this, pinDeclarations, nodeIds, run);
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"environments">;
 
@@ -687,7 +680,7 @@ async function reconcileVariables(
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly EnvironmentVariableConfig[],
-  result: SectionResult,
+  run: SectionRun,
 ): Promise<void> {
   const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
   const live = (await listAllEnveloped(ctx, section, ENDPOINTS.listVariables, "variables", {
@@ -703,8 +696,8 @@ async function reconcileVariables(
     const existing = liveByKey.get(variableKey(variable.name));
     const { name: _name, value: _value, ...extraKeys } = variable;
     if (!existing) {
-      if (ctx.check) {
-        result.drift.push(
+      if (run.check) {
+        run.result.drift.push(
           `${label}: missing - declared in the settings file but not on the environment; apply will create it`,
         );
       } else {
@@ -713,7 +706,7 @@ async function reconcileVariables(
           payload: { name: variable.name, value: variable.value, ...extraKeys },
           describe: `creating variable "${variable.name}" in environment "${envName}"`,
         });
-        result.changes.push(`created variable "${variable.name}" in environment "${envName}"`);
+        run.result.changes.push(`created variable "${variable.name}" in environment "${envName}"`);
       }
       continue;
     }
@@ -722,17 +715,17 @@ async function reconcileVariables(
     if (!valueDrift && extraDrift.length === 0) {
       continue;
     }
-    if (ctx.check) {
+    if (run.check) {
       if (valueDrift) {
-        result.drift.push(
+        run.result.drift.push(
           `${label}.value: declared ${JSON.stringify(variable.value)} != live ${JSON.stringify(existing.value)}; apply will set the declared value`,
         );
       }
-      result.drift.push(...extraDrift);
+      run.result.drift.push(...extraDrift);
     } else {
       const phantom = phantomKeys(extraKeys, existing);
       if (phantom.length > 0) {
-        result.notes.push(phantomNote(label, phantom, "variable", "this update will re-run"));
+        run.result.notes.push(phantomNote(label, phantom, "variable", "this update will re-run"));
       }
       await call(ctx, section, ENDPOINTS.updateVariable, {
         // The live name addresses the PATCH: same variable under GitHub's
@@ -741,7 +734,7 @@ async function reconcileVariables(
         payload: { value: variable.value, ...extraKeys },
         describe: `updating variable "${variable.name}" in environment "${envName}"`,
       });
-      result.changes.push(`updated variable "${variable.name}" in environment "${envName}"`);
+      run.result.changes.push(`updated variable "${variable.name}" in environment "${envName}"`);
     }
   }
 
@@ -750,11 +743,11 @@ async function reconcileVariables(
       continue;
     }
     if (policy === "keep") {
-      result.notes.push(
+      run.result.notes.push(
         `variable "${variable.name}" exists on environment "${envName}" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
       );
-    } else if (ctx.check) {
-      result.drift.push(
+    } else if (run.check) {
+      run.result.drift.push(
         `environments[${envName}].variables[${variable.name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
       );
     } else {
@@ -762,7 +755,7 @@ async function reconcileVariables(
         params: { environment_name: envName, name: variable.name },
         describe: `deleting undeclared variable "${variable.name}" from environment "${envName}"`,
       });
-      result.changes.push(
+      run.result.changes.push(
         `DELETED undeclared variable "${variable.name}" from environment "${envName}"`,
       );
     }
@@ -844,20 +837,19 @@ function environmentSecretsScope(envName: string): SecretsScope {
  * resolves each entry's own reference through ctx.resolveSecret.
  */
 async function reconcileEnvironmentSecrets(
-  ctx: SectionContext,
+  _ctx: SectionContext,
   section: SectionModule<"environments">,
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly EnvironmentSecretConfig[],
-  result: SectionResult,
+  run: SectionRun,
 ): Promise<void> {
-  const scoped = await reconcileSecrets(ctx, section, environmentSecretsScope(envName), {
+  // The engine accumulates directly onto run.result, so no merge exists to
+  // mispair; the context travels inside `run`, correlated with the result.
+  await reconcileSecrets(run, section, environmentSecretsScope(envName), {
     entries,
     policy,
   });
-  result.changes.push(...scoped.changes);
-  result.drift.push(...scoped.drift);
-  result.notes.push(...scoped.notes);
 }
 
 /**
@@ -963,10 +955,10 @@ async function reconcileBranchPolicies(
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly DeploymentBranchPolicyConfig[],
-  result: SectionResult,
+  run: SectionRun,
   liveEnv: Record<string, unknown> | undefined,
 ): Promise<void> {
-  if (ctx.check) {
+  if (run.check) {
     const flags = liveEnv?.deployment_branch_policy as
       | { custom_branch_policies?: unknown }
       | null
@@ -977,7 +969,7 @@ async function reconcileBranchPolicies(
       // surfaces only mid-apply, after the environment PUT - the same
       // deliberately accepted shape as the missing-environment case for
       // variables and secrets.
-      result.notes.push(
+      run.result.notes.push(
         `environments[${envName}].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and reconcile the declared patterns`,
       );
       return;
@@ -996,13 +988,13 @@ async function reconcileBranchPolicies(
     const label = `environments[${envName}].deployment_branch_policies[${pattern.name}]`;
     const existing = liveByName.get(pattern.name);
     if (!existing) {
-      if (ctx.check) {
-        result.drift.push(
+      if (run.check) {
+        run.result.drift.push(
           `${label}: missing - declared in the settings file but not on the environment; apply will create it`,
         );
       } else {
         await createBranchPolicy(ctx, section, envName, pattern);
-        result.changes.push(
+        run.result.changes.push(
           `created deployment branch policy "${pattern.name}" in environment "${envName}"`,
         );
       }
@@ -1013,20 +1005,20 @@ async function reconcileBranchPolicies(
     if (liveType === desiredType) {
       continue;
     }
-    if (ctx.check) {
-      result.drift.push(
+    if (run.check) {
+      run.result.drift.push(
         `${label}: the declared type differs from the live pattern's, and a policy's type is immutable; apply will delete and recreate it`,
       );
       // Name the differing values; the generic line alone left the reader
       // guessing which side says what.
-      result.drift.push(...subsetDiff({ type: desiredType }, { type: liveType }, label));
+      run.result.drift.push(...subsetDiff({ type: desiredType }, { type: liveType }, label));
     } else {
       await call(ctx, section, ENDPOINTS.removePolicy, {
         params: { environment_name: envName, branch_policy_id: livePolicyId(existing, envName) },
         describe: `deleting deployment branch policy "${pattern.name}" in environment "${envName}" to change its immutable type`,
       });
       await createBranchPolicy(ctx, section, envName, pattern);
-      result.changes.push(
+      run.result.changes.push(
         `replaced deployment branch policy "${pattern.name}" in environment "${envName}" (type is immutable; ${liveType} -> ${desiredType})`,
       );
     }
@@ -1037,11 +1029,11 @@ async function reconcileBranchPolicies(
       continue;
     }
     if (policy === "keep") {
-      result.notes.push(
+      run.result.notes.push(
         `deployment branch policy "${name}" exists on environment "${envName}" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
       );
-    } else if (ctx.check) {
-      result.drift.push(
+    } else if (run.check) {
+      run.result.drift.push(
         `environments[${envName}].deployment_branch_policies[${name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
       );
     } else {
@@ -1049,7 +1041,7 @@ async function reconcileBranchPolicies(
         params: { environment_name: envName, branch_policy_id: livePolicyId(existing, envName) },
         describe: `deleting undeclared deployment branch policy "${name}" from environment "${envName}"`,
       });
-      result.changes.push(
+      run.result.changes.push(
         `DELETED undeclared deployment branch policy "${name}" from environment "${envName}"`,
       );
     }
@@ -1219,7 +1211,7 @@ async function reconcileProtectionRules(
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly DeploymentProtectionRuleConfig[],
-  result: SectionResult,
+  run: SectionRun,
 ): Promise<void> {
   const live = await listProtectionRules(ctx, section, envName);
   const liveBySlug = new Map<string, LiveProtectionRule>();
@@ -1237,9 +1229,9 @@ async function reconcileProtectionRules(
   const declared = new Set(entries.map((rule) => rule.app));
 
   const missing = entries.filter((rule) => !liveBySlug.has(rule.app));
-  if (ctx.check) {
+  if (run.check) {
     for (const rule of missing) {
-      result.drift.push(
+      run.result.drift.push(
         `environments[${envName}].deployment_protection_rules[${rule.app}]: missing - declared in the settings file but not enabled on the environment; apply will enable it if the App is available to this environment`,
       );
     }
@@ -1259,7 +1251,7 @@ async function reconcileProtectionRules(
         payload: { integration_id: integrationId },
         describe: `enabling deployment protection rule "${rule.app}" in environment "${envName}"`,
       });
-      result.changes.push(
+      run.result.changes.push(
         `enabled deployment protection rule "${rule.app}" in environment "${envName}"`,
       );
     }
@@ -1270,11 +1262,11 @@ async function reconcileProtectionRules(
       continue;
     }
     if (policy === "keep") {
-      result.notes.push(
+      run.result.notes.push(
         `deployment protection rule "${slug}" is enabled on environment "${envName}" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DISABLE it`,
       );
-    } else if (ctx.check) {
-      result.drift.push(
+    } else if (run.check) {
+      run.result.drift.push(
         `environments[${envName}].deployment_protection_rules[${slug}]: undeclared - not in the settings file, so apply will DISABLE it; add it to the settings file to keep it`,
       );
     } else {
@@ -1282,7 +1274,7 @@ async function reconcileProtectionRules(
         params: { environment_name: envName, protection_rule_id: liveRuleId(rule, envName) },
         describe: `disabling undeclared deployment protection rule "${slug}" in environment "${envName}"`,
       });
-      result.changes.push(
+      run.result.changes.push(
         `DISABLED undeclared deployment protection rule "${slug}" in environment "${envName}"`,
       );
     }
@@ -1487,14 +1479,14 @@ async function reconcilePins(
   section: SectionModule<"environments">,
   declarations: readonly PinDeclaration[],
   nodeIds: ReadonlyMap<string, string>,
-  result: SectionResult,
+  run: SectionRun,
 ): Promise<void> {
   const desired = declarations.filter((entry) => entry.pinned).map((entry) => entry.name);
   const live = await listLivePins(ctx, section);
   const plan = planPins(declarations, live);
 
   if (plan.interleaved.length > 0) {
-    result.notes.push(
+    run.result.notes.push(
       `pinned environment(s) ${plan.interleaved.map((name) => `"${name}"`).join(", ")} have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins`,
     );
   }
@@ -1503,24 +1495,24 @@ async function reconcilePins(
       ? `pinning the ${plan.pins.length} declared environment(s) not yet pinned would leave ${plan.finalCount} environments pinned, but GitHub allows at most ${MAX_PINNED_ENVIRONMENTS}. Pins without a pinned declaration are left untouched, so declare pinned: false on entries for some of the currently pinned environments, or unpin them in the GitHub UI`
       : undefined;
 
-  if (ctx.check) {
+  if (run.check) {
     for (const name of plan.pins) {
-      result.drift.push(
+      run.result.drift.push(
         `environments[${name}].pinned: missing - declared pinned but the environment is not pinned on the repo; apply will pin it`,
       );
     }
     for (const name of plan.unpins) {
-      result.drift.push(
+      run.result.drift.push(
         `environments[${name}].pinned: pinned on the repo but declared pinned: false; apply will unpin it`,
       );
     }
     if (plan.reorders.length > 0) {
-      result.drift.push(
+      run.result.drift.push(
         `environments.pinned: the declared pin order is [${desired.join(", ")}] but the live pinned order is [${plan.liveOrder.join(", ")}]; apply will reorder the pins so the declared ones lead in declaration order`,
       );
     }
     if (overflow !== undefined) {
-      result.notes.push(`apply will fail: ${overflow}`);
+      run.result.notes.push(`apply will fail: ${overflow}`);
     }
     return;
   }
@@ -1541,7 +1533,7 @@ async function reconcilePins(
       { environmentId: id, pinned: false },
       { describe: `unpinning environment "${name}"` },
     );
-    result.changes.push(`unpinned environment "${name}"`);
+    run.result.changes.push(`unpinned environment "${name}"`);
   }
   for (const { name, id } of resolved.pins) {
     const pinned = await tryCallGraphql(
@@ -1559,7 +1551,7 @@ async function reconcilePins(
         `environments: pinning environment "${name}" failed - GRAPHQL ${PIN_ENVIRONMENT.name}: ${pinned.error.status} ${pinned.error.message}. GitHub allows at most ${MAX_PINNED_ENVIRONMENTS} pinned environments, and pins without a pinned declaration are left untouched - declare pinned: false on entries for some of the currently pinned environments, or unpin them in the GitHub UI`,
       );
     }
-    result.changes.push(`pinned environment "${name}"`);
+    run.result.changes.push(`pinned environment "${name}"`);
   }
   for (const { name, rank, id } of resolved.reorders) {
     await callGraphql(
@@ -1569,7 +1561,7 @@ async function reconcilePins(
       { environmentId: id, position: rank },
       { describe: `moving pinned environment "${name}" to position ${rank}` },
     );
-    result.changes.push(`moved pinned environment "${name}" to position ${rank}`);
+    run.result.changes.push(`moved pinned environment "${name}" to position ${rank}`);
   }
 }
 

@@ -83,7 +83,7 @@ describe("actions_secrets check mode", () => {
       undeclared: "delete",
       entries: [],
     });
-    expect(deleted.drift.join("\n")).toContain(
+    expect(deleted.drift?.join("\n")).toContain(
       "actions_secrets[STALE]: undeclared - not in the settings file, so apply will DELETE it",
     );
     expect(api2.mutations()).toEqual([]);
@@ -176,7 +176,9 @@ describe("actions_secrets apply mode", () => {
     const result = await actionsSecretsSection.run(ctx(api, false, { $H: hostile }), [
       { name: "EDGY", value: "$H" },
     ]);
-    const rendered = [...result.changes, ...result.drift, ...result.notes].join("\n");
+    const rendered = [...(result.changes ?? []), ...(result.drift ?? []), ...result.notes].join(
+      "\n",
+    );
     expect(rendered).not.toContain(hostile);
     expect(rendered).not.toContain(fragment);
     const put = api.mutations().find((call) => call.method === "PUT");

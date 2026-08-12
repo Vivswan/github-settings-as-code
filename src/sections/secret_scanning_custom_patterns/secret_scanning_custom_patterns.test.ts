@@ -74,7 +74,8 @@ describe("secret_scanning_custom_patterns", () => {
       { name: "internal-token", pattern: "int_[a-z0-9]{8}" },
     ]);
     expect(result.changes).toEqual([]);
-    expect(result.drift).toEqual([]);
+    // An apply-mode result has no drift list at all (the mode-split types).
+    expect(result.drift).toBeUndefined();
     expect(api.mutations()).toEqual([]);
   });
 
@@ -304,7 +305,7 @@ describe("secret_scanning_custom_patterns", () => {
       undeclared: "delete",
       entries: [],
     });
-    expect(checked.drift.join("\n")).toContain("apply will DELETE it");
+    expect(checked.drift?.join("\n")).toContain("apply will DELETE it");
     const applyApi = new MockApi(listRoute([versionless])).allowMutations(
       "DELETE /repos/o/r/secret-scanning/custom-patterns",
     );

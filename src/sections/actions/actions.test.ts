@@ -43,7 +43,7 @@ describe("actions", () => {
     });
     const result = await actionsSection.run(ctx(api, true), { access_level: "organization" });
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("actions.access.access_level");
+    expect(result.drift?.[0]).toContain("actions.access.access_level");
     expect(api.mutations()).toEqual([]);
   });
 
@@ -92,7 +92,7 @@ describe("actions", () => {
       allowed_actions: "selected",
       selected_actions: { github_owned_allowed: true },
     });
-    expect(result.drift.some((d) => d.includes('not "selected"'))).toBe(true);
+    expect(result.drift?.some((d) => d.includes('not "selected"'))).toBe(true);
     expect(api.mutations()).toEqual([]);
   });
 
@@ -168,9 +168,9 @@ describe("actions", () => {
       cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
     });
     expect(result.drift).toHaveLength(3);
-    expect(result.drift[0]).toContain("actions.artifact_and_log_retention.days");
-    expect(result.drift[1]).toContain("actions.cache.max_cache_retention_days");
-    expect(result.drift[2]).toContain("actions.cache.max_cache_size_gb");
+    expect(result.drift?.[0]).toContain("actions.artifact_and_log_retention.days");
+    expect(result.drift?.[1]).toContain("actions.cache.max_cache_retention_days");
+    expect(result.drift?.[2]).toContain("actions.cache.max_cache_size_gb");
     expect(api.mutations()).toEqual([]);
   });
 
@@ -217,9 +217,9 @@ describe("actions", () => {
     const result = await actionsSection.run(ctx(api, true), {
       oidc_customization_sub: { use_default: false, include_claim_keys: ["repo"] },
     });
-    expect(result.drift.some((d) => d.includes("actions.oidc_customization_sub.use_default"))).toBe(
-      true,
-    );
+    expect(
+      result.drift?.some((d) => d.includes("actions.oidc_customization_sub.use_default")),
+    ).toBe(true);
     expect(api.mutations()).toEqual([]);
   });
 
@@ -233,8 +233,8 @@ describe("actions", () => {
       oidc_customization_sub: { use_default: false, include_claim_keys: ["repo", "context"] },
     });
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("include_claim_keys");
-    expect(result.drift[0]).toContain("order");
+    expect(result.drift?.[0]).toContain("include_claim_keys");
+    expect(result.drift?.[0]).toContain("order");
 
     const matching = new MockApi({
       "GET /repos/o/r/actions/oidc/customization/sub": {
@@ -291,7 +291,7 @@ describe("actions", () => {
       },
     });
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("use_immutable_subject");
+    expect(result.drift?.[0]).toContain("use_immutable_subject");
   });
 
   test("the oidc shape rejects quoted booleans upfront", () => {
@@ -394,7 +394,7 @@ describe("actions", () => {
       fork_pr_contributor_approval: { approval_policy: "all_external_contributors" },
     });
     expect(result.drift).toHaveLength(1);
-    expect(result.drift[0]).toContain("actions.fork_pr_contributor_approval.approval_policy");
+    expect(result.drift?.[0]).toContain("actions.fork_pr_contributor_approval.approval_policy");
     expect(api.mutations()).toEqual([]);
   });
 
@@ -428,7 +428,7 @@ describe("actions", () => {
       "require_approval_for_fork_pr_workflows",
     ]) {
       expect(
-        result.drift.some((line) =>
+        result.drift?.some((line) =>
           line.includes(`actions.fork_pr_workflows_private_repos.${field}`),
         ),
         `no drift line for ${field}`,

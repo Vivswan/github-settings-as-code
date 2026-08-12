@@ -10,10 +10,10 @@
 
 import { type CollaboratorConfig, type MustBeNever, SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
-  emptyResult,
   listAll,
   loosen,
   rejectDuplicates,
@@ -104,7 +104,7 @@ export const collaboratorsSection = {
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
@@ -145,8 +145,8 @@ export const collaboratorsSection = {
         if ((existing.role_name ?? "") === wantRole) {
           continue;
         }
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `collaborators[${collaborator.username}]: live role "${existing.role_name}" != declared "${wantRole}"; apply will set the declared permission`,
           );
         } else {
@@ -155,7 +155,7 @@ export const collaboratorsSection = {
             payload: { permission: wantPermission },
             describe: `updating collaborator "${collaborator.username}"`,
           });
-          result.changes.push(
+          run.result.changes.push(
             `updated collaborator "${collaborator.username}" (${wantPermission})`,
           );
         }
@@ -169,7 +169,7 @@ export const collaboratorsSection = {
           // one. Cancelling and re-inviting would just repeat forever, so
           // leave it: the declared role applies through the regular
           // collaborator path once the invitation is accepted.
-          result.notes.push(
+          run.result.notes.push(
             `invitation for "${collaborator.username}" is pending; invitations report only the standard roles, so it cannot be compared to the declared custom role "${wantPermission}" - left untouched, the declared role is applied once the invitation is accepted`,
           );
           continue;
@@ -177,8 +177,8 @@ export const collaboratorsSection = {
         if ((invitation.permissions ?? "") === wantRole) {
           continue; // the pending invitation already grants the declared permission
         }
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `collaborators[${collaborator.username}]: pending invitation permission "${invitation.permissions}" != declared "${wantRole}"; apply will update the invitation`,
           );
           continue;
@@ -190,13 +190,13 @@ export const collaboratorsSection = {
           payload: { permissions: wantRole },
           describe: `updating the pending invitation for "${collaborator.username}"`,
         });
-        result.changes.push(
+        run.result.changes.push(
           `updated pending invitation for "${collaborator.username}" (${wantPermission})`,
         );
         continue;
       }
-      if (ctx.check) {
-        result.drift.push(
+      if (run.check) {
+        run.result.drift.push(
           invitation
             ? `collaborators[${collaborator.username}]: pending invitation expired; apply will cancel it and send a fresh invitation with "${wantPermission}"`
             : `collaborators[${collaborator.username}]: missing - not a collaborator on the repo; apply will send an invitation with "${wantPermission}"`,
@@ -216,7 +216,7 @@ export const collaboratorsSection = {
         payload: { permission: wantPermission },
         describe: `inviting collaborator "${collaborator.username}"`,
       });
-      result.changes.push(
+      run.result.changes.push(
         invitation
           ? `re-invited collaborator "${collaborator.username}" (${wantPermission}) - the pending invitation had expired`
           : `invited collaborator "${collaborator.username}" (${wantPermission})`,
@@ -229,18 +229,18 @@ export const collaboratorsSection = {
         continue; // never remove the owner (under either policy)
       }
       if (policy === "keep") {
-        result.notes.push(
+        run.result.notes.push(
           `collaborator "${collaborator.login}" has access but is not declared in the settings file; kept under "undeclared: keep" - add them to the settings file to manage their access, or set "undeclared: delete" to have apply REMOVE them`,
         );
-      } else if (ctx.check) {
-        result.drift.push(
+      } else if (run.check) {
+        run.result.drift.push(
           `collaborators[${collaborator.login}]: undeclared - not in the settings file, so apply will REMOVE them; add them to the settings file to keep their access`,
         );
       } else {
         await call(ctx, this, ENDPOINTS.remove, {
           params: { username: collaborator.login },
         });
-        result.changes.push(`REMOVED undeclared collaborator "${collaborator.login}"`);
+        run.result.changes.push(`REMOVED undeclared collaborator "${collaborator.login}"`);
       }
     }
 
@@ -250,26 +250,26 @@ export const collaboratorsSection = {
         continue;
       }
       if (policy === "keep") {
-        result.notes.push(
+        run.result.notes.push(
           `invitation for "${invitee}" is pending but not declared in the settings file; kept under "undeclared: keep" - add them to the settings file to manage their access, or set "undeclared: delete" to have apply CANCEL the invitation`,
         );
-      } else if (ctx.check) {
-        result.drift.push(
+      } else if (run.check) {
+        run.result.drift.push(
           `collaborators[${invitee}]: undeclared - a pending invitation not in the settings file, so apply will CANCEL it; add them to the settings file to keep the invitation`,
         );
       } else {
         await call(ctx, this, ENDPOINTS.cancelInvitation, {
           params: { invitation_id: String(invitation.id) },
         });
-        result.changes.push(`CANCELLED undeclared invitation for "${invitee}"`);
+        run.result.changes.push(`CANCELLED undeclared invitation for "${invitee}"`);
       }
     }
 
     for (const invitation of emailInvitations) {
-      result.notes.push(
+      run.result.notes.push(
         `invitation ${invitation.id} was sent by email, so no username can declare it; left untouched - cancel it from the repository's Access settings if it is unwanted`,
       );
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"collaborators">;

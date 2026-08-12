@@ -8,10 +8,10 @@
 import { subsetDiff } from "../../engine/diff.js";
 import { type RulesetConfig, SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
-  emptyResult,
   listAll,
   loosen,
   rejectDuplicates,
@@ -108,7 +108,7 @@ export const rulesetsSection = {
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.rulesets),
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     const desired = entries.map(normalizeRuleset);
     // Upsert matches by exact name, so two entries with the same name would
@@ -131,8 +131,8 @@ export const rulesetsSection = {
     for (const ruleset of desired) {
       const id = idByName.get(ruleset.name);
       if (id === undefined) {
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `rulesets[${ruleset.name}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
         } else {
@@ -140,20 +140,20 @@ export const rulesetsSection = {
             payload: ruleset,
             describe: `creating ruleset "${ruleset.name}"`,
           });
-          result.changes.push(`created ruleset "${ruleset.name}"`);
+          run.result.changes.push(`created ruleset "${ruleset.name}"`);
         }
         continue;
       }
-      if (ctx.check) {
+      if (run.check) {
         const live = await call(ctx, this, ENDPOINTS.get, { params: { ruleset_id: String(id) } });
-        result.drift.push(...subsetDiff(ruleset, live, `rulesets[${ruleset.name}]`));
+        run.result.drift.push(...subsetDiff(ruleset, live, `rulesets[${ruleset.name}]`));
       } else {
         await call(ctx, this, ENDPOINTS.update, {
           params: { ruleset_id: String(id) },
           payload: ruleset,
           describe: `updating ruleset "${ruleset.name}"`,
         });
-        result.changes.push(`updated ruleset "${ruleset.name}" (id ${id})`);
+        run.result.changes.push(`updated ruleset "${ruleset.name}" (id ${id})`);
       }
     }
 
@@ -164,13 +164,13 @@ export const rulesetsSection = {
       }
       if (policy === "delete") {
         if (live.source_type !== "Repository") {
-          result.notes.push(
+          run.result.notes.push(
             `ruleset "${live.name}" is undeclared, but the list response does not mark it source_type "Repository"; NOT deleting - only rulesets the API explicitly marks repository-owned are deleted; add it to the settings file to manage it, or delete it in GitHub if it should not exist`,
           );
           continue;
         }
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `rulesets[${live.name}]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it`,
           );
         } else {
@@ -178,14 +178,14 @@ export const rulesetsSection = {
             params: { ruleset_id: String(live.id) },
             describe: `deleting undeclared ruleset "${live.name}"`,
           });
-          result.changes.push(`DELETED undeclared ruleset "${live.name}"`);
+          run.result.changes.push(`DELETED undeclared ruleset "${live.name}"`);
         }
         continue;
       }
-      result.notes.push(
+      run.result.notes.push(
         `ruleset "${live.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
       );
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"rulesets">;

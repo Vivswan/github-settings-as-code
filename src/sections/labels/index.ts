@@ -8,10 +8,10 @@
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
-  emptyResult,
   listAll,
   loosen,
   type SectionModule,
@@ -63,7 +63,7 @@ export const labelsSection = {
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.labels),
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // Duplicate detection covers both identities of every entry: its name
     // and its rename target. Two entries resolving to the same label would
@@ -123,8 +123,8 @@ export const labelsSection = {
         ...extraKeys
       } = label;
       if (!existing) {
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `labels[${finalName}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
         } else {
@@ -136,7 +136,7 @@ export const labelsSection = {
               ...extraKeys, // future label fields pass through verbatim
             },
           });
-          result.changes.push(`created label "${finalName}"`);
+          run.result.changes.push(`created label "${finalName}"`);
         }
         continue;
       }
@@ -149,27 +149,27 @@ export const labelsSection = {
       if (!colorDrift && !descriptionDrift && !renameDrift && extraDrift.length === 0) {
         continue;
       }
-      if (ctx.check) {
+      if (run.check) {
         if (renameDrift) {
-          result.drift.push(
+          run.result.drift.push(
             `labels[${existing.name}]: should be named "${finalName}" per the settings file; apply will rename it`,
           );
         }
         if (colorDrift) {
-          result.drift.push(
+          run.result.drift.push(
             `labels[${finalName}].color: declared "${wantColor}" != live "${normalizeColor(existing.color)}"; apply will set the declared value`,
           );
         }
         if (descriptionDrift) {
-          result.drift.push(
+          run.result.drift.push(
             `labels[${finalName}].description: declared ${JSON.stringify(wantDescription)} != live ${JSON.stringify(existing.description ?? "")}; apply will set the declared value`,
           );
         }
-        result.drift.push(...extraDrift);
+        run.result.drift.push(...extraDrift);
       } else {
         const phantom = phantomKeys(extraKeys, existing);
         if (phantom.length > 0) {
-          result.notes.push(
+          run.result.notes.push(
             phantomNote(`labels[${finalName}]`, phantom, "label", "this update will re-run"),
           );
         }
@@ -182,7 +182,7 @@ export const labelsSection = {
             ...extraKeys, // future label fields pass through verbatim
           },
         });
-        result.changes.push(`updated label "${finalName}"`);
+        run.result.changes.push(`updated label "${finalName}"`);
       }
     }
 
@@ -193,18 +193,18 @@ export const labelsSection = {
         continue;
       }
       if (policy === "keep") {
-        result.notes.push(
+        run.result.notes.push(
           `label "${label.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
         );
-      } else if (ctx.check) {
-        result.drift.push(
+      } else if (run.check) {
+        run.result.drift.push(
           `labels[${label.name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
         );
       } else {
         await call(ctx, this, ENDPOINTS.remove, { params: { name: label.name } });
-        result.changes.push(`DELETED undeclared label "${label.name}"`);
+        run.result.changes.push(`DELETED undeclared label "${label.name}"`);
       }
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"labels">;

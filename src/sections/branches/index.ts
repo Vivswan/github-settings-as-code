@@ -26,10 +26,10 @@ import {
   SettingsFile,
 } from "../../schema.js";
 import {
+  beginRun,
   call,
   callGraphql,
   type EndpointDecl,
-  emptyResult,
   expand,
   type GraphqlOpDecl,
   graphqlOp,
@@ -853,7 +853,7 @@ export const branchesSection = {
     });
   }),
   async run(ctx, desired): Promise<SectionResult> {
-    const result = emptyResult();
+    const result = beginRun(ctx).result;
     // Protection is keyed by exact branch name or pattern; two entries for
     // the same one would overwrite each other's write on every run.
     rejectDuplicates(
@@ -926,7 +926,7 @@ async function runLiteralEntry(
     if ("missing" in probe) {
       return;
     }
-    if (ctx.check) {
+    if (result.check) {
       result.drift.push(
         `branches[${branch.name}]: protected live but the settings file declares protection: null; apply will remove the protection`,
       );
@@ -952,7 +952,7 @@ async function runLiteralEntry(
       payload[key] = null;
     }
   }
-  if (ctx.check) {
+  if (result.check) {
     const probe = await probeAbsent(ctx, section, ENDPOINTS.getProtection, {
       params: { branch: branch.name },
     });
@@ -1082,7 +1082,7 @@ async function runWildcardEntry(
     if (node === undefined) {
       return;
     }
-    if (ctx.check) {
+    if (result.check) {
       result.drift.push(
         `branches[${pattern}]: a live rule matches this pattern but the settings file declares protection: null; apply will delete the rule`,
       );
@@ -1099,7 +1099,7 @@ async function runWildcardEntry(
     result.changes.push(`deleted protection rule "${pattern}"`);
     return;
   }
-  if (ctx.check) {
+  if (result.check) {
     if (node === undefined) {
       result.drift.push(
         `branches[${pattern}]: no live rule matches this pattern but the settings file declares protection; apply will create the rule`,

@@ -57,7 +57,7 @@ describe("workflows", () => {
       { path: "nope.yml", state: "disabled" },
     ]);
     expect(check.drift).toHaveLength(1);
-    expect(check.drift[0]).toContain("no workflow with that path exists");
+    expect(check.drift?.[0]).toContain("no workflow with that path exists");
     // A live "deleted" workflow counts as absent too.
     const apply = await workflowsSection.run(ctx(api), [{ path: "gone.yml", state: "active" }]);
     expect(apply.notes).toHaveLength(1);

@@ -447,7 +447,7 @@ describe("environments nested secrets check mode", () => {
     const result = await environmentsSection.run(ctx(api, true), [
       { name: "prod", secrets: [{ name: "S", value: "$S" }] },
     ]);
-    expect(result.drift.join("\n")).toContain("environments[prod]: missing");
+    expect(result.drift?.join("\n")).toContain("environments[prod]: missing");
     expect(result.notes.join("\n")).toContain(
       "environments[prod].secrets: not verifiable while the environment is missing",
     );
@@ -661,7 +661,7 @@ describe("environments deployment branch policies check mode", () => {
       envWithPolicies([{ name: "release/*" }]),
     ]);
     // The flag drift itself comes from the environment subsetDiff.
-    expect(result.drift.join("\n")).toContain(
+    expect(result.drift?.join("\n")).toContain(
       "environments[prod].deployment_branch_policy.custom_branch_policies: true != false",
     );
     expect(result.notes).toContain(
@@ -980,7 +980,7 @@ describe("environments deployment protection rules apply mode", () => {
     ]);
     expect(api.mutations().filter((m) => m.method === "DELETE")).toEqual([]);
     expect(result.notes.join("\n")).not.toContain("change-window");
-    expect(result.changes.join("\n")).not.toContain("change-window");
+    expect(result.changes?.join("\n")).not.toContain("change-window");
   });
 });
 
@@ -1170,7 +1170,7 @@ describe("environments pinned apply mode", () => {
       { op: "PinEnvironment", payload: { environmentId: "EN_a", pinned: true } },
       { op: "ReorderEnvironment", payload: { environmentId: "EN_a", position: 1 } },
     ]);
-    expect(result.changes.slice(3)).toEqual([
+    expect(result.changes?.slice(3)).toEqual([
       'unpinned environment "c"',
       'pinned environment "a"',
       'moved pinned environment "a" to position 1',
@@ -1415,7 +1415,7 @@ describe("environments pinned check mode", () => {
       ]),
     });
     const result = await environmentsSection.run(ctx(api, true), [{ name: "prod", pinned: true }]);
-    expect(result.drift.join("\n")).toContain("environments[prod].pinned: missing");
+    expect(result.drift?.join("\n")).toContain("environments[prod].pinned: missing");
     expect(result.notes.join("\n")).toContain(
       "apply will fail: pinning the 1 declared environment(s) not yet pinned would leave 11 environments pinned",
     );

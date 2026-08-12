@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { SectionContext, SectionMeta } from "../../src/sections/contract.js";
+import { beginRun, type SectionContext, type SectionMeta } from "../../src/sections/contract.js";
 import {
   reconcileSecrets,
   rejectDuplicateSecretNames,
@@ -128,11 +128,12 @@ describe("reconcileSecrets and the apply-arm resolver", () => {
     // `actions_secrets: []` (or an entries-less `undeclared: delete` purge)
     // must still apply - nothing to seal means nothing to resolve.
     const puts: Array<{ name: string; payload: SealedSecretPayload }> = [];
-    const result = await reconcileSecrets(applyCtx(), section, fabricatedScope([], puts), {
+    const run = beginRun(applyCtx());
+    await reconcileSecrets(run, section, fabricatedScope([], puts), {
       entries: [],
       policy: "keep",
     });
-    expect(result.changes).toEqual([]);
+    expect(run.result.changes).toEqual([]);
     expect(puts).toEqual([]);
   });
 
@@ -140,7 +141,7 @@ describe("reconcileSecrets and the apply-arm resolver", () => {
     await mockSodiumReady();
     const puts: Array<{ name: string; payload: SealedSecretPayload }> = [];
     await reconcileSecrets(
-      applyCtx({ $ONE: "plain-1", $TWO: "plain-2" }),
+      beginRun(applyCtx({ $ONE: "plain-1", $TWO: "plain-2" })),
       section,
       fabricatedScope([], puts),
       {
@@ -161,7 +162,7 @@ describe("reconcileSecrets and the apply-arm resolver", () => {
   test("a value the engine never resolved fails the entry loudly", async () => {
     const puts: Array<{ name: string; payload: SealedSecretPayload }> = [];
     await expect(
-      reconcileSecrets(applyCtx({}), section, fabricatedScope([], puts), {
+      reconcileSecrets(beginRun(applyCtx({})), section, fabricatedScope([], puts), {
         entries: [{ name: "A", value: "$NEVER_RESOLVED" }],
         policy: "keep",
       }),

@@ -24,11 +24,11 @@ import { subsetDiff } from "../../engine/diff.js";
 import { SettingsFile, type UndeclaredPolicyList, type WebhookConfig } from "../../schema.js";
 import {
   type ApplySectionContext,
+  beginRun,
   call,
   type DeclaredSecretValue,
   defaultUndeclaredPolicy,
   type EndpointDecl,
-  emptyResult,
   listAll,
   loosen,
   rejectDuplicates,
@@ -162,7 +162,7 @@ export const webhooksSection = {
   shape: loosen(SettingsFile.shape.webhooks),
   secretValues,
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
@@ -204,26 +204,26 @@ export const webhooksSection = {
       const existing = matches[0];
       const secretDeclared = hook.config.secret !== undefined;
       if (!existing) {
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `webhooks["${url}"]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
           if (secretDeclared) {
-            result.notes.push(`webhooks["${url}"].config.secret: ${CANNOT_VERIFY_SECRET}`);
+            run.result.notes.push(`webhooks["${url}"].config.secret: ${CANNOT_VERIFY_SECRET}`);
           }
         } else {
           const { name: _name, config: _config, events, active, ...extraKeys } = hook;
           await call(ctx, this, ENDPOINTS.create, {
             payload: {
               name: "web",
-              config: resolvedConfig(ctx, hook),
+              config: resolvedConfig(run.ctx, hook),
               ...(events === undefined ? {} : { events }),
               ...(active === undefined ? {} : { active }),
               ...extraKeys, // future hook fields pass through verbatim
             },
             describe: `creating webhook "${url}"`,
           });
-          result.changes.push(`created webhook "${url}"`);
+          run.result.changes.push(`created webhook "${url}"`);
         }
         continue;
       }
@@ -238,21 +238,21 @@ export const webhooksSection = {
       const activeDrift = active !== undefined && (existing.active ?? true) !== active;
       const extraDrift = subsetDiff(extraKeys, existing, `webhooks["${url}"]`);
 
-      if (ctx.check) {
-        result.drift.push(...configDrift);
+      if (run.check) {
+        run.result.drift.push(...configDrift);
         if (eventsDrift) {
-          result.drift.push(
+          run.result.drift.push(
             `webhooks["${url}"].events: declared ${JSON.stringify(events)} != live ${JSON.stringify(existing.events ?? [])} (compared order-insensitively); apply will set the declared events`,
           );
         }
         if (activeDrift) {
-          result.drift.push(
+          run.result.drift.push(
             `webhooks["${url}"].active: declared ${JSON.stringify(active)} != live ${JSON.stringify(existing.active ?? true)}; apply will set the declared value`,
           );
         }
-        result.drift.push(...extraDrift);
+        run.result.drift.push(...extraDrift);
         if (secretDeclared) {
-          result.notes.push(`webhooks["${url}"].config.secret: ${CANNOT_VERIFY_SECRET}`);
+          run.result.notes.push(`webhooks["${url}"].config.secret: ${CANNOT_VERIFY_SECRET}`);
         }
         continue;
       }
@@ -265,10 +265,10 @@ export const webhooksSection = {
       if (secretDeclared || configDrift.length > 0) {
         await call(ctx, this, ENDPOINTS.updateConfig, {
           params: { hook_id: String(existing.id) },
-          payload: resolvedConfig(ctx, hook),
+          payload: resolvedConfig(run.ctx, hook),
           describe: `updating webhook "${url}" config`,
         });
-        result.changes.push(
+        run.result.changes.push(
           secretDeclared
             ? `updated webhook "${url}" config (the declared secret is re-sent every run)`
             : `updated webhook "${url}" config`,
@@ -286,7 +286,7 @@ export const webhooksSection = {
           },
           describe: `updating webhook "${url}"`,
         });
-        result.changes.push(`updated webhook "${url}"`);
+        run.result.changes.push(`updated webhook "${url}"`);
       }
     }
 
@@ -298,8 +298,8 @@ export const webhooksSection = {
         continue;
       }
       if (policy === "delete") {
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `webhooks[${describeHook(hook)}]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it`,
           );
         } else {
@@ -307,14 +307,14 @@ export const webhooksSection = {
             params: { hook_id: String(hook.id) },
             describe: `deleting undeclared webhook ${describeHook(hook)}`,
           });
-          result.changes.push(`DELETED undeclared webhook ${describeHook(hook)}`);
+          run.result.changes.push(`DELETED undeclared webhook ${describeHook(hook)}`);
         }
         continue;
       }
-      result.notes.push(
+      run.result.notes.push(
         `webhook ${describeHook(hook)} exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
       );
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"webhooks">;

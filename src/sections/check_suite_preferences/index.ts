@@ -9,9 +9,9 @@
 
 import { SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   type EndpointDecl,
-  emptyResult,
   loosen,
   type SectionModule,
   type SectionPermission,
@@ -38,13 +38,13 @@ export const checkSuitePreferencesSection = {
   // fields ride along at both levels; only the natural pair is checked.
   shape: loosen(SettingsFile.shape.check_suite_preferences),
   async run(ctx, desired): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
 
-    if (ctx.check) {
-      result.notes.push(
+    if (run.check) {
+      run.result.notes.push(
         "check_suite_preferences: GitHub exposes no read endpoint for check suite preferences, so check mode cannot verify them; apply re-asserts the declared preferences on every run",
       );
-      return result;
+      return run.result;
     }
 
     const data = (await call(ctx, this, ENDPOINTS.update, {
@@ -56,9 +56,9 @@ export const checkSuitePreferencesSection = {
     const echoed = data?.preferences?.auto_trigger_checks;
     const applied = Array.isArray(echoed) ? echoed : desired.auto_trigger_checks;
     const count = applied.length;
-    result.changes.push(
+    run.result.changes.push(
       `applied check suite preferences (${count} auto_trigger_checks ${count === 1 ? "entry" : "entries"})`,
     );
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"check_suite_preferences">;

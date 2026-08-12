@@ -12,6 +12,7 @@
 
 import { SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
@@ -95,7 +96,9 @@ export const agentsSecretsSection = {
     rejectDuplicateSecretNames(this, entries);
     // The engine validated every $NAME reference in both modes and, in
     // apply mode, resolved and masked the plaintexts before any section
-    // ran; the sealed-write path reads them through ctx.resolveSecret.
-    return reconcileSecrets(ctx, this, SCOPE, { entries, policy });
+    // ran; the sealed-write path reads them through the run's apply arm.
+    const run = beginRun(ctx);
+    await reconcileSecrets(run, this, SCOPE, { entries, policy });
+    return run.result;
   },
 } satisfies SectionModule<"agents_secrets">;

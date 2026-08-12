@@ -12,10 +12,10 @@
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { SettingsFile } from "../../schema.js";
 import {
+  beginRun,
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
-  emptyResult,
   listAllEnveloped,
   loosen,
   rejectDuplicates,
@@ -66,7 +66,7 @@ export const agentsVariablesSection = {
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.agents_variables),
   async run(ctx, declared): Promise<SectionResult> {
-    const result = emptyResult();
+    const run = beginRun(ctx);
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // Variable names are case-insensitive on GitHub, so two entries differing
     // only in case name the same variable and would fight on every run.
@@ -88,8 +88,8 @@ export const agentsVariablesSection = {
       const existing = liveByKey.get(variableKey(variable.name));
       const { name: _name, value: _value, ...extraKeys } = variable;
       if (!existing) {
-        if (ctx.check) {
-          result.drift.push(
+        if (run.check) {
+          run.result.drift.push(
             `agents_variables[${variable.name}]: missing - declared in the settings file but not on the repo; apply will create it`,
           );
         } else {
@@ -100,7 +100,7 @@ export const agentsVariablesSection = {
               ...extraKeys, // future variable fields pass through verbatim
             },
           });
-          result.changes.push(`created Copilot agents variable "${variable.name}"`);
+          run.result.changes.push(`created Copilot agents variable "${variable.name}"`);
         }
         continue;
       }
@@ -113,17 +113,17 @@ export const agentsVariablesSection = {
       if (!valueDrift && extraDrift.length === 0) {
         continue;
       }
-      if (ctx.check) {
+      if (run.check) {
         if (valueDrift) {
-          result.drift.push(
+          run.result.drift.push(
             `agents_variables[${variable.name}].value: declared ${JSON.stringify(variable.value)} != live ${JSON.stringify(existing.value)}; apply will set the declared value`,
           );
         }
-        result.drift.push(...extraDrift);
+        run.result.drift.push(...extraDrift);
       } else {
         const phantom = phantomKeys(extraKeys, existing);
         if (phantom.length > 0) {
-          result.notes.push(
+          run.result.notes.push(
             phantomNote(
               `agents_variables[${variable.name}]`,
               phantom,
@@ -139,7 +139,7 @@ export const agentsVariablesSection = {
             ...extraKeys, // future variable fields pass through verbatim
           },
         });
-        result.changes.push(`updated Copilot agents variable "${variable.name}"`);
+        run.result.changes.push(`updated Copilot agents variable "${variable.name}"`);
       }
     }
 
@@ -150,18 +150,18 @@ export const agentsVariablesSection = {
         continue;
       }
       if (policy === "keep") {
-        result.notes.push(
+        run.result.notes.push(
           `Copilot agents variable "${variable.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
         );
-      } else if (ctx.check) {
-        result.drift.push(
+      } else if (run.check) {
+        run.result.drift.push(
           `agents_variables[${variable.name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
         );
       } else {
         await call(ctx, this, ENDPOINTS.remove, { params: { name: variable.name } });
-        result.changes.push(`DELETED undeclared Copilot agents variable "${variable.name}"`);
+        run.result.changes.push(`DELETED undeclared Copilot agents variable "${variable.name}"`);
       }
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"agents_variables">;
