@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { codeScanningDefaultSetupSection } from "../../src/sections/code-scanning.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { codeScanningDefaultSetupSection } from "./index.js";
 
 describe("code_scanning_default_setup", () => {
   const path = "/repos/o/r/code-scanning/default-setup";
