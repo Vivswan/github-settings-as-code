@@ -575,6 +575,45 @@ describe("mock node ids", () => {
       expect(String(hook[field])).toContain("/repos/acme/private/hooks/");
     }
   });
+
+  test("no fixture identity survives anywhere in a re-slugged repo body", () => {
+    // reslugRepo rewrites the explicit identity fields AND every url/template
+    // string (html_url, hooks_url, clone_url, the owner's own urls, ...): a
+    // target's GET /repos/{slug} body must nowhere point at the admin
+    // fixture's repository.
+    const state = buildStateForSlug("acme/private", { settingsYaml: null }, "org");
+    const body = JSON.stringify(state.repo);
+    expect(body).not.toContain("e2e-owner");
+    expect(body).not.toContain("e2e-repo");
+    expect(String(state.repo.html_url)).toBe("https://github.com/acme/private");
+    expect(String((state.repo.owner as Record<string, unknown>).url)).toBe(
+      "https://api.github.com/users/acme",
+    );
+  });
+
+  test("re-slugging is exact for identities overlapping the fixture's", () => {
+    // The substitution is two-phase through placeholder tokens: a sequential
+    // replace would re-match the old owner INSIDE a new identity that
+    // contains it, corrupting the urls (e2e-owner-fork -> e2e-owner-fork-fork,
+    // my-e2e-owner-repo -> my-<owner>-repo).
+    const forkOwner = buildStateForSlug("e2e-owner-fork/service", { settingsYaml: null }, "org");
+    expect(String(forkOwner.repo.html_url)).toBe("https://github.com/e2e-owner-fork/service");
+    const nameCarrier = buildStateForSlug("acme/my-e2e-owner-repo", { settingsYaml: null }, "org");
+    expect(String(nameCarrier.repo.html_url)).toBe("https://github.com/acme/my-e2e-owner-repo");
+  });
+
+  test("re-slugging rewrites only url fields, never seeded content", () => {
+    // A description MENTIONING the fixture owner is content, not identity.
+    const state = buildStateForSlug(
+      "acme/private",
+      {
+        settingsYaml: null,
+        liveState: { repo: { description: "forked from e2e-owner long ago" } },
+      },
+      "org",
+    );
+    expect(state.repo.description).toBe("forked from e2e-owner long ago");
+  });
 });
 
 describe("normalizePinnedSeed", () => {

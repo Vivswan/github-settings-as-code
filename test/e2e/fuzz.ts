@@ -1321,7 +1321,11 @@ function faultBatteryPlan(master: number): SectionFaultPlan[] {
 
 /**
  * The coverage tripwire on the fault battery plan: every faultable section
- * AND every kind x budget combo must appear in EVERY soak's battery. Throws
+ * AND every kind x budget combo must appear in EVERY soak's battery. While
+ * faultBatteryPlan derives its entries from the full SECTION_PRIMARY_READ key
+ * list - so the section half cannot fire today and exists to survive a
+ * rewrite that plans from some other source - the combo half is live: it
+ * fires if the section list ever shrinks below the combo count. Throws
  * (failing the whole fuzz run) rather than returning a failure, because a
  * hole here is a plan-construction bug no seed can route around - exactly the
  * regression class that previously let 10 sections per soak go unexercised

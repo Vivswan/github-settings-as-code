@@ -7,7 +7,7 @@
  * Two tenets shape this file:
  * - Hermetic: the child environment is built FROM SCRATCH, never spread from
  *   process.env, so a developer's real token or GitHub URL can never leak into
- *   a run. The token is the inert string "e2e-token".
+ *   a run. The token is the inert E2E_TOKEN constant (constants.ts).
  * - Production parity: the child runs under `node` (the action's node24
  *   runtime), against a bundle built once per process from src/main.ts - the
  *   same single-file shape a release ships, freshly built so a run can never
@@ -25,7 +25,7 @@ import {
   type Invocation,
   type RerunCapture,
 } from "./apply-idempotence-proof.js";
-import { ADMIN_SLUG as REPO_SLUG } from "./constants.js";
+import { E2E_TOKEN, ADMIN_SLUG as REPO_SLUG } from "./constants.js";
 import { assertIssueReport } from "./issue-report-assert.js";
 import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { isWriteRequest } from "./mock/dispatch.js";
@@ -96,13 +96,6 @@ function builtBundle(): Promise<string> {
   })();
   return bundleBuild;
 }
-/**
- * The inert token every child run authenticates with (INPUT_TOKEN). The one
- * constant is both what childEnv feeds the action and what the centralized
- * leak sweep hunts on every public surface, so the token-leak invariant can
- * never drift from the token actually in use.
- */
-const E2E_TOKEN = "e2e-token";
 /**
  * The published output the skipped-sections assertion reads, pinned to the
  * action's own OUTPUT_NAMES declaration (src/action/io.ts): a rename there
@@ -708,6 +701,10 @@ export async function runScenario(
     // proof engine drives its re-runs through this runner's own invoke, bound
     // to the same temp dir and mock the primary invocation used.
     if (exp.fixpoint === "apply_idempotent") {
+      // Bound copies on purpose: `dir` and `handle` are mutable lets (the
+      // finally block owns their cleanup), so a closure over them widens back
+      // to `| undefined`; the consts carry the narrowed values into the
+      // invoker.
       const boundDir = dir;
       const mockUrl = handle.url;
       const idempotence = await assertApplyIdempotent(scenario, handle, {

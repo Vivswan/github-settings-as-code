@@ -29,11 +29,12 @@ export const codeScanningDefaultSetupMockHandlers: Record<string, Handler> = {
       JSON.stringify(payload.languages) !== JSON.stringify(state.code_scanning.languages);
     Object.assign(state.code_scanning, payload);
     if (changesLanguages) {
+      const runId = state.nextId++;
       return {
         status: 202,
         body: {
-          run_id: state.nextId++,
-          run_url: `https://api.github.com/repos/${state.slug}/code-scanning/default-setup/runs/1`,
+          run_id: runId,
+          run_url: `https://api.github.com/repos/${state.slug}/code-scanning/default-setup/runs/${runId}`,
         },
       };
     }

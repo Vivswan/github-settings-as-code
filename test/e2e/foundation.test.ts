@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
+import {
+  ADMIN_OWNER,
+  ADMIN_REPO,
+  ADMIN_SLUG,
+  E2E_TOKEN,
+  TOKEN_USER_LOGIN,
+  VIOLATION_PREFIX,
+} from "./constants.js";
 import { DENIAL_SEMANTICS } from "./denial-semantics.js";
 import { mulberry32, Rng } from "./prng.js";
 import { markerLabelFixtureMismatches, parseScenario } from "./schema.js";
@@ -295,5 +304,39 @@ describe("denial semantics", () => {
         "secret_scanning_custom_patterns",
       ].sort(),
     );
+  });
+});
+
+describe("harness identity constants", () => {
+  test("no identity constant contains the inert token (leak-sweep disjointness)", () => {
+    // The runner sweeps EVERY public surface for E2E_TOKEN as a substring; an
+    // identity constant containing it (TOKEN_USER_LOGIN once nearly did, back
+    // when the token was "e2e-token") would turn a legitimate rendering of
+    // that fixture into a phantom token leak.
+    const rendered = { ADMIN_OWNER, ADMIN_REPO, ADMIN_SLUG, TOKEN_USER_LOGIN, VIOLATION_PREFIX };
+    for (const [name, value] of Object.entries(rendered)) {
+      expect(`${name}="${value}"`.includes(E2E_TOKEN)).toBe(false);
+    }
+  });
+
+  test("section mock fragments mint identity from state.slug, never the harness constants", async () => {
+    // Served bodies must name the OWNING state's slug: the same bug (urls
+    // minted from ADMIN_SLUG, served verbatim for multi-repo targets)
+    // appeared independently in five fragments, so the class is banned at the
+    // import boundary - a fragment always has the owning state in scope and
+    // has no legitimate use for an identity constant.
+    const root = join(import.meta.dir, "..", "..");
+    const offenders: string[] = [];
+    let fragments = 0;
+    for await (const file of new Bun.Glob("src/sections/*/mock.ts").scan(root)) {
+      fragments++;
+      const text = await Bun.file(join(root, file)).text();
+      if (/from "[^"]*\/test\/e2e\/constants\.js"/.test(text)) {
+        offenders.push(file);
+      }
+    }
+    // Non-vacuity: the glob must actually find the fragments it polices.
+    expect(fragments).toBeGreaterThan(0);
+    expect(offenders.sort()).toEqual([]);
   });
 });

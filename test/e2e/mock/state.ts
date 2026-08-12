@@ -286,7 +286,7 @@ export interface MockState {
   /**
    * The monotonic position source for new pins (starts at the seeded
    * maximum). Underscore prefix: mock bookkeeping, excluded from the
-   * idempotence snapshot (see snapshotFamilies in runner.ts).
+   * idempotence snapshot (see snapshotFamilies in apply-idempotence-proof.ts).
    */
   _pinned_position_counter: number;
   autolinks: Json[];
@@ -314,7 +314,7 @@ export interface MockState {
    * Monotonic count of secret PUTs against this state - EVERY family shares
    * it - feeding each write's deterministic updated_at. Underscore prefix:
    * mock bookkeeping, excluded from the idempotence snapshot (see
-   * snapshotFamilies in runner.ts).
+   * snapshotFamilies in apply-idempotence-proof.ts).
    */
   _secret_write_counter: number;
   /**
@@ -366,7 +366,7 @@ export interface MockState {
    * Monotonic count of custom-pattern mutations against this state, feeding
    * each write's fresh custom_pattern_version - deterministic, never a
    * clock. Underscore prefix: mock bookkeeping, excluded from the
-   * idempotence snapshot (see snapshotFamilies in runner.ts).
+   * idempotence snapshot (see snapshotFamilies in apply-idempotence-proof.ts).
    */
   _secret_scanning_version_counter: number;
   /** Next id handed to a created resource (label, ruleset, autolink, ...). */
@@ -558,7 +558,8 @@ export function completeInvitation(seed: Json, id: number, repo: Json, slug: str
     node_id: `MDEwOlJlcG9JbnZpdGF0aW9u${invitationId}`,
     // A CLONE, not the live reference: stored invitations must not mirror
     // later repo mutations, or the snapshot layer (snapshotFamilies in
-    // runner.ts) would misattribute a repo-family change to invitations.
+    // apply-idempotence-proof.ts) would misattribute a repo-family change to
+    // invitations.
     repository: clone(repo),
     inviter: { login: ownerLogin, id: 0, type: "User", site_admin: false },
     permissions: "write",
@@ -854,15 +855,55 @@ export interface MultiMockState {
 }
 
 /**
- * Rewrite a MockState's repo object so its identity fields name `slug` instead
- * of the fixture's e2e-owner/e2e-repo. The disambiguation probe and every
- * section read then see a coherent repo for this target.
+ * Rewrite a MockState's repo object so its identity names `slug` instead of
+ * the fixture's: the explicit identity fields (full_name, name, owner.login)
+ * AND every url-keyed string carrying the old slug or owner - the fixture's
+ * ~15 url/template fields (html_url, hooks_url, labels_url, clone_url, ...)
+ * and the owner's own urls all name the repository, so leaving them on the
+ * fixture identity would serve a target whose body points at another repo.
+ * Only `url`/`*_url` fields are rewritten (a seeded description mentioning
+ * the fixture owner is content, not identity), and the substitution is
+ * two-phase through placeholder tokens so overlapping identities cannot
+ * corrupt: a target owner CONTAINING the old owner (e2e-owner-fork) or a
+ * target name containing it (my-e2e-owner-repo) would otherwise be re-matched
+ * by the sequential owner pass. The disambiguation probe and every section
+ * read then see a coherent repo for this target.
  */
 function reslugRepo(repo: Json, slug: string): void {
   const [owner, name] = slug.split("/");
+  const oldSlug = typeof repo.full_name === "string" ? repo.full_name : "";
+  const ownerObj = repo.owner;
+  const oldOwner =
+    isPlainObject(ownerObj) && typeof ownerObj.login === "string" ? ownerObj.login : "";
+  // NUL-delimited tokens: a url string can never legitimately contain NUL,
+  // so the tokens cannot collide with real content.
+  const SLUG_TOKEN = "\u0000slug\u0000";
+  const OWNER_TOKEN = "\u0000owner\u0000";
+  const rewriteUrl = (value: string): string => {
+    // Tokenize every OLD occurrence first (longest match first: the combined
+    // slug, then the bare owner the owner's own urls carry), then fill the
+    // tokens with the new identity - the new values are never re-scanned.
+    let out = value;
+    if (oldSlug !== "") {
+      out = out.replaceAll(oldSlug, SLUG_TOKEN);
+    }
+    if (oldOwner !== "") {
+      out = out.replaceAll(oldOwner, OWNER_TOKEN);
+    }
+    return out.replaceAll(SLUG_TOKEN, slug).replaceAll(OWNER_TOKEN, owner ?? "");
+  };
+  const rewriteUrlFields = (obj: Json): void => {
+    for (const [key, value] of Object.entries(obj)) {
+      if (typeof value === "string" && (key === "url" || key.endsWith("_url"))) {
+        obj[key] = rewriteUrl(value);
+      } else if (isPlainObject(value)) {
+        rewriteUrlFields(value);
+      }
+    }
+  };
+  rewriteUrlFields(repo);
   repo.full_name = slug;
   repo.name = name ?? slug;
-  const ownerObj = repo.owner;
   if (isPlainObject(ownerObj)) {
     ownerObj.login = owner ?? "";
   }

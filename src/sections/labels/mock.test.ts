@@ -5,20 +5,18 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { handlerTestContext } from "../../../test/e2e/mock/handler-test-ctx.js";
 import { buildStateForSlug, type MockState } from "../../../test/e2e/mock/state.js";
 import { labelsMockHandlers } from "./mock.js";
 
-/** A minimal handler context: labels.create reads only `state` and `body`. */
-function ctx(state: MockState, body: unknown): Parameters<(typeof labelsMockHandlers)[string]>[0] {
-  return {
-    state,
-    endpoint: undefined as never,
-    param: (name: string): string => {
-      throw new Error(`labels mock test context declares no path param "${name}"`);
-    },
-    query: {},
-    body,
-  };
+function create(state: MockState, body: Record<string, unknown>): Record<string, unknown> {
+  const handler = labelsMockHandlers["labels.create"];
+  if (!handler) {
+    throw new Error("labels mock fragment declares no create handler");
+  }
+  const response = handler(handlerTestContext("labels.create", state, { body }));
+  expect(response.status).toBe(201);
+  return response.body as Record<string, unknown>;
 }
 
 describe("labels.create identity minting", () => {
@@ -35,19 +33,9 @@ describe("labels.create identity minting", () => {
       },
       "org",
     );
-    const create = labelsMockHandlers["labels.create"];
-    if (!create) {
-      throw new Error("labels.create handler missing");
-    }
-    const first = create(ctx(state, { name: "bug", color: "d73a4a" })).body as Record<
-      string,
-      unknown
-    >;
-    const second = create(ctx(state, { name: "docs", color: "0075ca" })).body as Record<
-      string,
-      unknown
-    >;
-    for (const label of [...state.labels, first, second]) {
+    create(state, { name: "bug", color: "d73a4a" });
+    create(state, { name: "docs", color: "0075ca" });
+    for (const label of state.labels) {
       const body = label as Record<string, unknown>;
       expect(body.node_id).toBe(`MDU6TGFiZWw${body.id}`);
     }
@@ -58,14 +46,7 @@ describe("labels.create identity minting", () => {
 
   test("the created label's url names the state slug", () => {
     const state = buildStateForSlug("acme/private", { settingsYaml: null }, "org");
-    const create = labelsMockHandlers["labels.create"];
-    if (!create) {
-      throw new Error("labels.create handler missing");
-    }
-    const body = create(ctx(state, { name: "bug", color: "d73a4a" })).body as Record<
-      string,
-      unknown
-    >;
+    const body = create(state, { name: "bug", color: "d73a4a" });
     expect(body.url).toBe("https://api.github.com/repos/acme/private/labels/bug");
   });
 });
