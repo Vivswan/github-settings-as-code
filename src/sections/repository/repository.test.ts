@@ -1,13 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { validateSectionShapes } from "../../src/engine/validate.js";
-import { PermissionDenied, toleratedStatuses } from "../../src/sections/contract.js";
-import {
-  FEATURE_TOGGLES,
-  normalizeTopics,
-  repositorySection,
-} from "../../src/sections/repository.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { validateSectionShapes } from "../../engine/validate.js";
+import { PermissionDenied, toleratedStatuses } from "../contract.js";
+import { FEATURE_TOGGLES, normalizeTopics, repositorySection } from "./index.js";
 
 describe("feature-toggle write tolerances", () => {
   test("every toggle write tolerates only statuses the apply loop interprets", () => {
