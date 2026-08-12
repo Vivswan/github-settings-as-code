@@ -4,16 +4,15 @@
  * touching one section runs that section's scenarios and fuzz rather than the
  * whole corpus, and a docs-only PR skips the smoke job entirely.
  *
- * The mapping is EXPLICIT, not inferred, and it recognizes both section
- * layouts during the per-section directory migration: the flat
- * src/sections/<file>.ts files map through SECTIONS_BY_FILE (path-based, so
- * a deleted flat file still resolves), and a src/sections/<key>/... directory
- * (the key spelled verbatim) selects that key for every file under it.
- * Shared code fans out to its consumers (SHARED_FAN_OUT, covering both the
- * flat and the shared/ spelling), and the cross-cutting files (the contract,
- * the registry, the engine, the schema, the e2e harness) select every
- * section. A path under src/sections/ that none of the rules recognize
- * throws, so a new file cannot silently skip the smoke job.
+ * The mapping is EXPLICIT, not inferred, over the per-section layout: a
+ * src/sections/<key>/... directory (the key spelled verbatim) selects that
+ * key for every file under it, src/sections/shared/ code fans out to its
+ * consumers (SHARED_FAN_OUT), and the cross-cutting files (the contract
+ * modules, the registry, the engine, the schema, the e2e harness) select
+ * every section. A path under src/sections/ that none of the rules recognize
+ * throws, so a new file cannot silently skip the smoke job - and neither can
+ * a stale PR still touching a pre-migration flat file: rebase it onto the
+ * per-section layout.
  *
  * Usage (CI): `bun .github/scripts/changed-sections.ts [base-ref]` prints one
  * of: a comma-separated section list, the literal `all`, or the literal
@@ -30,45 +29,9 @@ export const ALL = "all";
 export const NONE = "none";
 
 /**
- * Section files whose name does NOT equal their key. Every other
- * src/sections/<key>.ts maps to <key>; the SECTIONS_BY_FILE builder fills
- * those in from SECTION_KEYS. Entries OUTLIVE the files they name: the maps
- * are path-based, so a migration diff that deletes a kebab file (moving the
- * section into src/sections/<key>/) still resolves the deleted path to its
- * section. The whole map retires in one sweep after the last section moves.
- */
-export const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
-  // Kebab file names for underscore section keys.
-  "actions-secrets.ts": ["actions_secrets"],
-  "dependabot-secrets.ts": ["dependabot_secrets"],
-  "codespaces-secrets.ts": ["codespaces_secrets"],
-  "agents-secrets.ts": ["agents_secrets"],
-  // The file is code-scanning.ts but the section key is the longer form.
-  "code-scanning.ts": ["code_scanning_default_setup"],
-  // The file is code-quality.ts but the section key is the longer form.
-  "code-quality.ts": ["code_quality_setup"],
-  // Kebab file name for the underscore section key, like code-scanning.ts.
-  "check-suite-preferences.ts": ["check_suite_preferences"],
-  // Kebab file name for the underscore section key, like code-scanning.ts.
-  "interaction-limits.ts": ["interaction_limits"],
-  // Kebab file name for the underscore section key, like code-scanning.ts.
-  "actions-variables.ts": ["actions_variables"],
-  // Kebab file name for the underscore section key, like code-scanning.ts.
-  "agents-variables.ts": ["agents_variables"],
-  // Kebab file name for the underscore section key, like code-scanning.ts.
-  "custom-properties.ts": ["custom_properties"],
-  // Kebab file name for the underscore section key.
-  "deploy-keys.ts": ["deploy_keys"],
-  // Kebab file name for the longer underscore section key.
-  "secret-scanning-patterns.ts": ["secret_scanning_custom_patterns"],
-};
-
-/**
- * Shared section code and the key(s) each file fans out to, by basename.
- * Consulted for BOTH spellings - the flat src/sections/<file> of today and
- * the src/sections/shared/<file> the migration moves it to - so each fan-out
- * is declared exactly once and survives the move. A shared/ file with no
- * entry throws in sectionsForFiles, forcing a fan-out declaration.
+ * src/sections/shared/<file> -> the key(s) each shared file fans out to, by
+ * basename. A shared/ file with no entry throws in sectionsForFiles, forcing
+ * a fan-out declaration.
  */
 export const SHARED_FAN_OUT: Record<string, SectionKey[]> = {
   // roles.ts is the shared permission-vocabulary normalizer for both sections.
@@ -108,48 +71,14 @@ export const SHARED_FAN_OUT: Record<string, SectionKey[]> = {
 };
 
 /**
- * Section files that select EVERY section because they are cross-cutting: the
- * section contract and the registry that wires all handlers together.
+ * The one flat file under src/sections/ - the registry that wires all
+ * handlers together - selects EVERY section; the contract's modules live
+ * under src/sections/contract/, an ALL_SELECTING_PREFIXES entry.
  */
-const ALL_SELECTING_SECTION_FILES = new Set(["contract.ts", "registry.ts"]);
+const ALL_SELECTING_SECTION_FILES = new Set(["registry.ts"]);
 
 /** The section keys, as a Set of plain strings for path-segment lookups. */
 const SECTION_KEY_SET: ReadonlySet<string> = new Set(SECTION_KEYS);
-
-/**
- * src/sections/<file> -> the section key(s) a change to it can affect.
- * Path-based, never disk-based: <key>.ts maps to [key] whether or not the
- * file exists, so a diff that DELETES a flat file (a section moving into its
- * directory, or a batch reported as delete-plus-add when git's rename
- * heuristic misses) resolves to the same key its replacement selects instead
- * of throwing. Duplicate names across the three sources would let one entry
- * silently shadow another, so the merge asserts uniqueness loudly.
- */
-export function buildSectionsByFile(): Record<string, SectionKey[]> {
-  const map: Record<string, SectionKey[]> = {};
-  const duplicates: string[] = [];
-  const sources = [
-    Object.entries(SPECIAL_SECTION_FILES),
-    Object.entries(SHARED_FAN_OUT),
-    SECTION_KEYS.map((key): [string, SectionKey[]] => [`${key}.ts`, [key]]),
-  ];
-  for (const source of sources) {
-    for (const [file, keys] of source) {
-      if (file in map) {
-        duplicates.push(file);
-      }
-      map[file] = keys;
-    }
-  }
-  if (duplicates.length > 0) {
-    throw new Error(
-      `changed-sections: file(s) mapped more than once across SPECIAL_SECTION_FILES, SHARED_FAN_OUT, and the <key>.ts entries: [${duplicates.sort().join(", ")}]`,
-    );
-  }
-  return map;
-}
-
-const SECTIONS_BY_FILE = buildSectionsByFile();
 
 /**
  * Path prefixes/files that select every section: the shared engine, transport,
@@ -163,8 +92,8 @@ const SECTIONS_BY_FILE = buildSectionsByFile();
  * skipped.
  */
 export const ALL_SELECTING_PREFIXES = [
-  // The contract barrel's layered modules: every section is written
-  // against them, so a change there selects everything, like the barrel.
+  // The contract's layered modules: every section is written against them,
+  // so a change there selects everything.
   "src/sections/contract/",
   "src/engine/",
   "src/github/",
@@ -193,16 +122,16 @@ export type Selection =
 
 /**
  * Resolve one src/sections/ path (below the ALL_SELECTING_PREFIXES check, so
- * src/sections/contract/ never reaches here) to the sections it selects, in
- * either layout:
- * - a flat file maps through ALL_SELECTING_SECTION_FILES or SECTIONS_BY_FILE
- *   (which covers deleted files too - the maps are path-based);
+ * src/sections/contract/ never reaches here) to the sections it selects:
  * - src/sections/<key>/... (the section key spelled verbatim) selects <key>,
  *   whatever the file under it is - module, mock, schema, test, or scenario;
- * - src/sections/shared/<file> fans out through SHARED_FAN_OUT.
+ * - src/sections/shared/<file> fans out through SHARED_FAN_OUT;
+ * - src/sections/registry.ts, the one flat file, selects every section.
  * Anything else throws: a silently ignored section path would let a PR skip
  * the very scenarios its change needs, so an unrecognized file must either
- * get a mapping or move under a recognized directory.
+ * get a mapping or move under a recognized directory. A pre-migration flat
+ * path (src/sections/<key>.ts, long deleted from main) throws here too -
+ * the loud signal a stale PR needs a rebase onto the per-section layout.
  */
 function sectionsForSectionsPath(file: string): SectionKey[] | "all" {
   const rest = file.slice("src/sections/".length);
@@ -211,12 +140,8 @@ function sectionsForSectionsPath(file: string): SectionKey[] | "all" {
     if (ALL_SELECTING_SECTION_FILES.has(rest)) {
       return "all";
     }
-    const keys = SECTIONS_BY_FILE[rest];
-    if (keys) {
-      return keys;
-    }
     throw new Error(
-      `changed-sections: ${file} matches no selector rule; map it in SPECIAL_SECTION_FILES or SHARED_FAN_OUT, name it <key>.ts, or move it under a section directory`,
+      `changed-sections: ${file} matches no selector rule; src/sections/ holds only registry.ts, the per-section <key>/ directories, contract/, and shared/ - move the file under its section directory (a flat src/sections/ file is the pre-migration layout; rebase the PR)`,
     );
   }
   const dir = rest.slice(0, slash);

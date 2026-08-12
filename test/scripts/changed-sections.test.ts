@@ -1,9 +1,9 @@
 /**
- * Unit test for the diff-aware section selector. Every section key's <key>.ts
- * alias is structural (built from SECTION_KEYS), so the tests here pin what
- * structure cannot: the golden fan-out maps, that every path on disk resolves
- * through some rule, that migration-shaped diffs (deleted flat files) keep
- * resolving, and the cross-cutting, docs-only, and fail-loud branches.
+ * Unit test for the diff-aware section selector: the golden fan-out map,
+ * that every path on disk resolves through some rule, and the cross-cutting,
+ * docs-only, and fail-loud branches - including the tripwire that a
+ * pre-migration flat src/sections/ path (a stale PR) throws instead of
+ * silently skipping the smoke job.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -11,10 +11,8 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   ALL_SELECTING_PREFIXES,
-  buildSectionsByFile,
   renderSelection,
   SHARED_FAN_OUT,
-  SPECIAL_SECTION_FILES,
   sectionsForFiles,
 } from "../../.github/scripts/changed-sections.js";
 import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
@@ -37,11 +35,9 @@ function sectionsPathsOnDisk(dir = SECTIONS_DIR, prefix = "src/sections"): strin
 }
 
 describe("changed-sections file map", () => {
-  const byFile = buildSectionsByFile();
-
   test("every mapped key is a real SECTION_KEYS member", () => {
     const known = new Set<string>(SECTION_KEYS);
-    for (const [file, keys] of [...Object.entries(byFile), ...Object.entries(SHARED_FAN_OUT)]) {
+    for (const [file, keys] of Object.entries(SHARED_FAN_OUT)) {
       for (const key of keys) {
         expect(known.has(key), `${file} maps to unknown section key "${key}"`).toBe(true);
       }
@@ -58,34 +54,10 @@ describe("changed-sections file map", () => {
     }
   });
 
-  test("every special-named file maps to exactly its declared keys", () => {
-    // A literal golden copy of the special mappings: changing one is a
-    // two-place edit on purpose, so a dropped or reworded fan-out cannot
-    // slip through. Entries deliberately OUTLIVE the files they name (the
-    // maps are path-based, so a migration diff deleting a kebab file still
-    // resolves); the whole map retires after the last section moves.
-    const golden: Record<string, SectionKey[]> = {
-      "actions-secrets.ts": ["actions_secrets"],
-      "dependabot-secrets.ts": ["dependabot_secrets"],
-      "codespaces-secrets.ts": ["codespaces_secrets"],
-      "agents-secrets.ts": ["agents_secrets"],
-      "code-scanning.ts": ["code_scanning_default_setup"],
-      "code-quality.ts": ["code_quality_setup"],
-      "check-suite-preferences.ts": ["check_suite_preferences"],
-      "interaction-limits.ts": ["interaction_limits"],
-      "actions-variables.ts": ["actions_variables"],
-      "agents-variables.ts": ["agents_variables"],
-      "custom-properties.ts": ["custom_properties"],
-      "deploy-keys.ts": ["deploy_keys"],
-      "secret-scanning-patterns.ts": ["secret_scanning_custom_patterns"],
-    };
-    expect(SPECIAL_SECTION_FILES).toEqual(golden);
-  });
-
   test("every shared file maps to exactly its declared keys", () => {
-    // The golden copy of the shared fan-outs, same two-place-edit rationale.
-    // One declaration serves both spellings (flat and shared/), so there is
-    // nothing to delete when the file moves.
+    // A literal golden copy of the shared fan-outs: changing one is a
+    // two-place edit on purpose, so a dropped or reworded fan-out cannot
+    // slip through.
     const golden: Record<string, SectionKey[]> = {
       "roles.ts": ["collaborators", "teams"],
       "secrets-engine.ts": [
@@ -110,16 +82,6 @@ describe("changed-sections file map", () => {
       "schema-helpers.ts": [...UNDECLARED_POLICY_SECTIONS, "environments"],
     };
     expect(SHARED_FAN_OUT).toEqual(golden);
-  });
-
-  test("each 1:1 section file maps to exactly its own key, on disk or not", () => {
-    // Path-based, not disk-based: the mapping must hold for a key whose flat
-    // file never existed (kebab-named handlers) or no longer exists (a moved
-    // section), so a deleted flat path in a migration diff still selects its
-    // section.
-    for (const key of SECTION_KEYS) {
-      expect(byFile[`${key}.ts`]).toEqual([key]);
-    }
   });
 
   test("every top-level src entry is either sections/ or all-selecting", () => {
@@ -155,17 +117,6 @@ describe("changed-sections selection", () => {
     expect(sectionsForFiles([".github/workflows/checks.yml"]).kind).toBe("all");
   });
 
-  test("a single section file selects just that section", () => {
-    const selection = sectionsForFiles(["src/sections/labels.ts"]);
-    expect(renderSelection(selection)).toBe("labels");
-  });
-
-  test("code-scanning.ts selects the long key", () => {
-    expect(renderSelection(sectionsForFiles(["src/sections/code-scanning.ts"]))).toBe(
-      "code_scanning_default_setup",
-    );
-  });
-
   test("a section directory selects its key for every file under it", () => {
     // The post-migration layout: src/sections/<key>/... spells the key
     // verbatim, and everything under it - module, mock, test, scenario -
@@ -183,32 +134,11 @@ describe("changed-sections selection", () => {
     ).toBe("secret_scanning_custom_patterns");
   });
 
-  test("a migration-shaped diff (flat file deleted, directory added) resolves", () => {
-    // git can report a section move as delete-plus-add when the rename
-    // heuristic misses. The deleted flat path must select the same key its
-    // replacement directory does, never throw - even when the flat file no
-    // longer exists on disk. code_scanning_default_setup has NO flat
-    // <key>.ts today, so it exercises the not-on-disk case for real.
-    expect(
-      renderSelection(sectionsForFiles(["src/sections/labels.ts", "src/sections/labels/index.ts"])),
-    ).toBe("labels");
-    expect(renderSelection(sectionsForFiles(["src/sections/code_scanning_default_setup.ts"]))).toBe(
-      "code_scanning_default_setup",
-    );
-    expect(renderSelection(sectionsForFiles(["src/sections/deploy-keys.ts"]))).toBe("deploy_keys");
-  });
-
-  test("shared files fan out identically in both spellings", () => {
+  test("shared files fan out to their consumers", () => {
     expect(renderSelection(sectionsForFiles(["src/sections/shared/roles.ts"]))).toBe(
       "collaborators,teams",
     );
-    expect(renderSelection(sectionsForFiles(["src/sections/roles.ts"]))).toBe(
-      "collaborators,teams",
-    );
     expect(renderSelection(sectionsForFiles(["src/sections/shared/secrets-engine.ts"]))).toBe(
-      "environments,actions_secrets,dependabot_secrets,codespaces_secrets,agents_secrets",
-    );
-    expect(renderSelection(sectionsForFiles(["src/sections/secrets-engine.ts"]))).toBe(
       "environments,actions_secrets,dependabot_secrets,codespaces_secrets,agents_secrets",
     );
   });
@@ -225,14 +155,34 @@ describe("changed-sections selection", () => {
     );
   });
 
-  test("multiple section files union in SECTION_KEYS order", () => {
-    const selection = sectionsForFiles(["src/sections/milestones.ts", "src/sections/labels.ts"]);
+  test("a pre-migration flat section path throws (the stale-PR tripwire)", () => {
+    // The flat src/sections/<file>.ts aliases served only the migration
+    // window and are retired; a PR whose diff still names one must fail
+    // loudly (rebase onto the per-section layout), never resolve quietly.
+    for (const stale of [
+      "src/sections/labels.ts",
+      "src/sections/deploy-keys.ts",
+      "src/sections/code-scanning.ts",
+      "src/sections/roles.ts",
+      "src/sections/secrets-engine.ts",
+      "src/sections/contract.ts",
+    ]) {
+      expect(() => sectionsForFiles([stale]), `${stale} must throw`).toThrow(
+        /matches no selector rule/,
+      );
+    }
+  });
+
+  test("multiple section directories union in SECTION_KEYS order", () => {
+    const selection = sectionsForFiles([
+      "src/sections/milestones/index.ts",
+      "src/sections/labels/index.ts",
+    ]);
     // labels precedes milestones in SECTION_KEYS, so the list is ordered.
     expect(renderSelection(selection)).toBe("labels,milestones");
   });
 
-  test("contract.ts and registry.ts each select all", () => {
-    expect(sectionsForFiles(["src/sections/contract.ts"]).kind).toBe("all");
+  test("registry.ts selects all", () => {
     expect(sectionsForFiles(["src/sections/registry.ts"]).kind).toBe("all");
     expect(renderSelection(sectionsForFiles(["src/sections/registry.ts"]))).toBe("all");
   });
@@ -256,7 +206,10 @@ describe("changed-sections selection", () => {
   test("a section change plus a regenerated schema scopes to the section, not all", () => {
     // lib/settings.schema.json regenerates alongside schema-affecting src
     // changes; the lib file must not force "all" or diff-awareness is dead.
-    const selection = sectionsForFiles(["src/sections/labels.ts", "lib/settings.schema.json"]);
+    const selection = sectionsForFiles([
+      "src/sections/labels/index.ts",
+      "lib/settings.schema.json",
+    ]);
     expect(renderSelection(selection)).toBe("labels");
   });
 
@@ -272,7 +225,7 @@ describe("changed-sections selection", () => {
 
   test("a core-path change wins over a section change", () => {
     // Any all-selecting path forces all, regardless of other changed files.
-    const selection = sectionsForFiles(["src/sections/labels.ts", "src/engine/diff.ts"]);
+    const selection = sectionsForFiles(["src/sections/labels/index.ts", "src/engine/diff.ts"]);
     expect(selection.kind).toBe("all");
   });
 });

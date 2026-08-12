@@ -1,6 +1,6 @@
 /**
  * Shape validation for one settings document. Each section's loose zod
- * shape lives on its module (sections/<key>.ts); this walks the declared
+ * shape lives on its module (sections/<key>/index.ts); this walks the declared
  * sections and reports every mismatch. Unrecognized keys are rejected HERE,
  * during upfront validation and before any section has written anything,
  * for two kinds of surface: closed sections (a `closedSurface` declaration

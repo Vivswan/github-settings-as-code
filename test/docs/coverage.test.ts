@@ -62,8 +62,8 @@ describe("COVERAGE Supported table", () => {
   });
 
   test("every src/ or test/ path citation resolves on disk", () => {
-    // Section moves (flat src/sections/<key>.ts files becoming directories)
-    // silently rot the prose citations; existence on disk is the contract.
+    // File moves (a module changing directories) silently rot the prose
+    // citations; existence on disk is the contract.
     // A citation must carry a file extension so prose slash-pairs
     // ("test/lint jobs") do not read as paths; a directory citation is
     // invisible to this test, so cite files.
