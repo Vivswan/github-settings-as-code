@@ -9,6 +9,7 @@
  * compare uppercased names.
  */
 
+import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { SettingsFile } from "../../schema.js";
 import {
@@ -18,6 +19,7 @@ import {
   type EndpointDecl,
   listAllEnveloped,
   loosen,
+  parseLive,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
@@ -30,10 +32,9 @@ export function variableKey(name: string): string {
   return name.toUpperCase();
 }
 
-interface LiveVariable {
-  name: string;
-  value: string;
-}
+/** The fields of a live variable this section reads; extras ride along. */
+const LiveVariable = z.looseObject({ name: z.string(), value: z.string() });
+type LiveVariable = z.infer<typeof LiveVariable>;
 
 const permission: SectionPermission = { repo: ["variables"] };
 
@@ -76,7 +77,12 @@ export const actionsVariablesSection = {
       (variable) => variableKey(variable.name),
       (variable) => variable.name,
     );
-    const live = (await listAllEnveloped(ctx, this, ENDPOINTS.list, "variables")) as LiveVariable[];
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveVariable),
+      await listAllEnveloped(ctx, this, ENDPOINTS.list, "variables"),
+    );
     const liveByKey = new Map<string, LiveVariable>();
     for (const variable of live) {
       liveByKey.set(variableKey(variable.name), variable);

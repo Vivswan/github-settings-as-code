@@ -477,6 +477,26 @@ function generateLabels(gen: LabelsGenerate, startId: number, slug: string): Jso
 }
 
 /**
+ * Complete a (possibly sparse) label body to the spec's required GET shape,
+ * the completeHook posture: scenario seeds stay terse ({name, color}), the
+ * seed's own fields win, and the server-owned scaffold (id, node_id, url,
+ * default, the required-nullable description) fills the rest - so every
+ * served label satisfies the shape the sections parse at their boundary.
+ * The url derives from `slug` (the owning state's fixed identity), so a
+ * multi-repo target's labels name the target.
+ */
+function completeLabel(seed: Json, id: number, slug: string): Json {
+  return {
+    id,
+    node_id: `MDU6TGFiZWw${id}`,
+    url: `https://api.github.com/repos/${slug}/labels/${String(seed.name ?? "")}`,
+    default: false,
+    description: null,
+    ...seed,
+  };
+}
+
+/**
  * Complete a (possibly sparse) webhook body to the spec's required GET shape,
  * so scenario seeds stay terse and every served hook validates: the seed's
  * own fields win, `id` comes from the caller unless the seed carries one, and
@@ -676,7 +696,7 @@ export function buildState(
   if (ls.labels === undefined) {
     labels = [];
   } else if (Array.isArray(ls.labels)) {
-    labels = clone(ls.labels);
+    labels = ls.labels.map((label) => completeLabel(clone(label), takeId(), stateSlug));
   } else {
     labels = generateLabels(ls.labels.generate, takeId(), stateSlug);
     nextId += ls.labels.generate.count;

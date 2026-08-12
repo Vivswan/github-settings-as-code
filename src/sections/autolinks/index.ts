@@ -4,6 +4,7 @@
  * wrapped `undeclared: keep` form softens that to notes.
  */
 
+import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { SettingsFile } from "../../schema.js";
 import {
@@ -12,6 +13,7 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   loosen,
+  parseLive,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
@@ -19,12 +21,8 @@ import {
   undeclaredPolicy,
 } from "../contract.js";
 
-interface LiveAutolink {
-  id: number;
-  key_prefix: string;
-  url_template: string;
-  is_alphanumeric: boolean;
-}
+/** The fields of a live autolink this section reads; extras ride along. */
+const LiveAutolink = z.looseObject({ id: z.number(), key_prefix: z.string() });
 
 const permission: SectionPermission = { repo: ["administration"] };
 
@@ -54,7 +52,12 @@ export const autolinksSection = {
     );
     // The autolinks list endpoint is not paginated; a single GET returns
     // everything, and sending page params would not advance anything.
-    const live = (await call(ctx, this, ENDPOINTS.list)) as LiveAutolink[];
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveAutolink),
+      await call(ctx, this, ENDPOINTS.list),
+    );
     const liveByPrefix = new Map(live.map((a) => [a.key_prefix, a]));
     const declaredKeys = new Set<string>();
 

@@ -13,6 +13,7 @@
  * stripped comment as drift and delete-and-recreate the key on every apply.
  */
 
+import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { type DeployKeyConfig, SettingsFile } from "../../schema.js";
 import {
@@ -22,19 +23,23 @@ import {
   type EndpointDecl,
   listAll,
   loosen,
+  parseLive,
   rejectDuplicates,
+  type SectionMeta,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
 } from "../contract.js";
 
-interface LiveDeployKey {
-  id: number;
-  title: string;
-  key: string;
-  read_only?: boolean;
-}
+/** The fields of a live deploy key this section reads; extras ride along. */
+const LiveDeployKey = z.looseObject({
+  id: z.number(),
+  title: z.string(),
+  key: z.string(),
+  read_only: z.boolean().optional(),
+});
+type LiveDeployKey = z.infer<typeof LiveDeployKey>;
 
 const permission: SectionPermission = { repo: ["administration"] };
 
@@ -84,38 +89,29 @@ function declaredMaterial(entry: DeployKeyConfig): string {
 }
 
 /**
- * Extract the live deploy keys LOUDLY: an entry without a numeric id, string
- * title, or two-field string key is a contract violation naming the endpoint,
- * never a silent skip - a skipped live key would read as absent and be
+ * Parse the live deploy keys LOUDLY (parseLive on id/title/key), never a
+ * silent skip - a skipped live key would read as absent and be
  * recreated (or escape the undeclared policy) forever. The normalized
  * material rides in a side map keyed by id, NOT on the returned objects:
  * subsetDiff and phantomKeys must see the RAW api body, so a declared
  * passthrough field named "material" diffs against what GitHub actually
- * returns instead of a synthetic field.
+ * returns instead of a synthetic field. Material stays a runtime check on
+ * top of the shape parse: two whitespace-separated fields is a semantic
+ * fact about the key STRING, not its type.
  */
-function extractLive(raw: unknown[]): { live: LiveDeployKey[]; materialById: Map<number, string> } {
-  const live: LiveDeployKey[] = [];
+function extractLive(
+  section: SectionMeta,
+  raw: unknown,
+): { live: LiveDeployKey[]; materialById: Map<number, string> } {
+  const live = parseLive(section, ENDPOINTS.list, z.array(LiveDeployKey), raw);
   const materialById = new Map<number, string>();
-  for (const item of raw) {
-    const entry = item as Partial<LiveDeployKey> | null;
-    if (
-      typeof entry !== "object" ||
-      entry === null ||
-      typeof entry.id !== "number" ||
-      typeof entry.title !== "string" ||
-      typeof entry.key !== "string"
-    ) {
-      throw new Error(
-        `deploy_keys: GET /repos/{owner}/{repo}/keys returned an entry without a numeric id, a string title, and a string key (${JSON.stringify(item)}); the response does not match the documented deploy key shape - check the "api-version" input against the GitHub REST docs for this endpoint`,
-      );
-    }
+  for (const entry of live) {
     const material = normalizeKeyMaterial(entry.key);
     if (material === null) {
       throw new Error(
         `deploy_keys: GET /repos/{owner}/{repo}/keys returned key id ${entry.id} ("${entry.title}") whose material has fewer than two whitespace-separated fields (${JSON.stringify(entry.key)}); the response does not match the documented deploy key shape - check the "api-version" input against the GitHub REST docs for this endpoint`,
       );
     }
-    live.push(entry as LiveDeployKey);
     materialById.set(entry.id, material);
   }
   return { live, materialById };
@@ -153,7 +149,7 @@ export const deployKeysSection = {
       (p) => p.material,
       (p) => p.entry.title,
     );
-    const { live, materialById } = extractLive(await listAll(ctx, this, ENDPOINTS.list));
+    const { live, materialById } = extractLive(this, await listAll(ctx, this, ENDPOINTS.list));
 
     // Ambiguity and upstream key conflicts are rejected BEFORE any write
     // (the webhooks precedent): a hard error mid-loop would leave earlier

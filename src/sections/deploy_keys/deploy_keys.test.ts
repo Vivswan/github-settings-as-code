@@ -120,7 +120,7 @@ describe("deploy_keys loud live extraction", () => {
     test(`a live entry with ${label} is a contract violation naming the endpoint`, async () => {
       const api = new MockApi({ [LIST]: { data: [entry] } });
       await expect(deployKeysSection.run(ctx(api), [])).rejects.toThrow(
-        /GET \/repos\/\{owner\}\/\{repo\}\/keys returned an entry without a numeric id, a string title, and a string key/,
+        /GET \/repos\/\{owner\}\/\{repo\}\/keys returned a body outside the documented shape/,
       );
       expect(api.mutations()).toEqual([]);
     });

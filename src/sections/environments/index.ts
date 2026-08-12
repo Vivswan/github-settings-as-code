@@ -22,6 +22,7 @@
  * opts in).
  */
 
+import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import {
   type DeploymentBranchPolicyConfig,
@@ -48,6 +49,7 @@ import {
   listAllEnveloped,
   listGraphqlConnection,
   loosen,
+  parseLive,
   probeAbsent,
   rejectDuplicates,
   repoVariables,
@@ -630,11 +632,9 @@ export const environmentsSection = {
   },
 } satisfies SectionModule<"environments">;
 
-/** The fields of a live variable this section reads. */
-interface LiveVariable {
-  name: string;
-  value: string;
-}
+/** The fields of a live variable this section reads; extras ride along. */
+const LiveVariable = z.looseObject({ name: z.string(), value: z.string() });
+type LiveVariable = z.infer<typeof LiveVariable>;
 
 /** GitHub matches variable names case-insensitively; uppercase both sides. */
 function variableKey(name: string): string {
@@ -683,9 +683,15 @@ async function reconcileVariables(
   run: SectionRun,
 ): Promise<void> {
   const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
-  const live = (await listAllEnveloped(ctx, section, ENDPOINTS.listVariables, "variables", {
-    params: { environment_name: envName },
-  })) as LiveVariable[];
+  const live = parseLive(
+    section,
+    ENDPOINTS.listVariables,
+    z.array(LiveVariable),
+    await listAllEnveloped(ctx, section, ENDPOINTS.listVariables, "variables", {
+      params: { environment_name: envName },
+    }),
+    `environment "${envName}"`,
+  );
   const liveByKey = new Map<string, LiveVariable>();
   for (const variable of live) {
     liveByKey.set(variableKey(variable.name), variable);
@@ -860,11 +866,12 @@ async function reconcileEnvironmentSecrets(
  * to reconcile by, and silently skipping it would let check report falsely
  * clean while the default delete policy neither removed nor noted it.
  */
-interface LiveBranchPolicy {
-  id?: number;
-  name?: string;
-  type?: string;
-}
+const LiveBranchPolicy = z.looseObject({
+  id: z.number().optional(),
+  name: z.string().optional(),
+  type: z.string().optional(),
+});
+type LiveBranchPolicy = z.infer<typeof LiveBranchPolicy>;
 
 /** A live policy's type; "branch" is GitHub's server-side default when absent. */
 function livePolicyType(policy: LiveBranchPolicy): string {
@@ -975,9 +982,15 @@ async function reconcileBranchPolicies(
       return;
     }
   }
-  const live = (await listAllEnveloped(ctx, section, ENDPOINTS.listPolicies, "branch_policies", {
-    params: { environment_name: envName },
-  })) as LiveBranchPolicy[];
+  const live = parseLive(
+    section,
+    ENDPOINTS.listPolicies,
+    z.array(LiveBranchPolicy),
+    await listAllEnveloped(ctx, section, ENDPOINTS.listPolicies, "branch_policies", {
+      params: { environment_name: envName },
+    }),
+    `environment "${envName}"`,
+  );
   const liveByName = new Map<string, LiveBranchPolicy>();
   for (const pattern of live) {
     liveByName.set(livePolicyName(pattern, envName), pattern);
@@ -1058,11 +1071,12 @@ async function reconcileBranchPolicies(
  * `enabled` is read anyway as a belt over that contract - a rule the API
  * ever reported as disabled must not satisfy a declared gate.
  */
-interface LiveProtectionRule {
-  id?: number;
-  enabled?: boolean;
-  app?: { id?: number; slug?: string };
-}
+const LiveProtectionRule = z.looseObject({
+  id: z.number().optional(),
+  enabled: z.boolean().optional(),
+  app: z.looseObject({ id: z.number().optional(), slug: z.string().optional() }).optional(),
+});
+type LiveProtectionRule = z.infer<typeof LiveProtectionRule>;
 
 /** The App slug a rule reconciles by, or a loud error when the response omitted it. */
 function liveRuleSlug(rule: LiveProtectionRule, envName: string): string {
@@ -1092,27 +1106,26 @@ function liveRuleId(rule: LiveProtectionRule, envName: string): string {
  * listAllEnveloped: this endpoint documents no page/per_page parameters, so
  * the page loop would append a query GitHub never specified. Both envelope
  * keys are optional in the spec, so an ABSENT list reads as empty - but a
- * PRESENT non-array value is a contract break that fails loudly.
+ * PRESENT off-shape value is a contract break parseLive fails loudly.
  */
 async function listProtectionRules(
   ctx: SectionContext,
   section: SectionModule<"environments">,
   envName: string,
 ): Promise<LiveProtectionRule[]> {
-  const data = (await call(ctx, section, ENDPOINTS.listProtectionRules, {
-    params: { environment_name: envName },
-    describe: `listing deployment protection rules of environment "${envName}"`,
-  })) as { custom_deployment_protection_rules?: unknown } | null;
-  const rules = data?.custom_deployment_protection_rules;
-  if (rules === undefined) {
-    return [];
-  }
-  if (!Array.isArray(rules)) {
-    throw new Error(
-      `environments: the deployment protection rule list for environment "${envName}" returned a custom_deployment_protection_rules value that is not a list, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
-    );
-  }
-  return rules as LiveProtectionRule[];
+  const data = parseLive(
+    section,
+    ENDPOINTS.listProtectionRules,
+    z
+      .looseObject({ custom_deployment_protection_rules: z.array(LiveProtectionRule).optional() })
+      .nullable(),
+    await call(ctx, section, ENDPOINTS.listProtectionRules, {
+      params: { environment_name: envName },
+      describe: `listing deployment protection rules of environment "${envName}"`,
+    }),
+    `environment "${envName}"`,
+  );
+  return data?.custom_deployment_protection_rules ?? [];
 }
 
 /**
@@ -1141,36 +1154,32 @@ function resolveIntegrationId(
 }
 
 /** The fields of an available protection-rule App this section reads. */
-interface LiveProtectionRuleApp {
-  id: number;
-  slug: string;
-}
+const LiveProtectionRuleApp = z.looseObject({ id: z.number(), slug: z.string() });
+type LiveProtectionRuleApp = z.infer<typeof LiveProtectionRuleApp>;
 
 /**
- * The available-Apps listing, with the identity fields extracted loudly
- * (an App without a slug or id could neither be offered in the
- * unknown-slug error nor resolve a declared rule).
+ * The available-Apps listing, parsed loudly at the boundary: an App without
+ * a slug or id could neither be offered in the unknown-slug error nor
+ * resolve a declared rule, so parseLive rejects the whole listing.
  */
 async function listProtectionRuleApps(
   ctx: SectionContext,
   section: SectionModule<"environments">,
   envName: string,
 ): Promise<LiveProtectionRuleApp[]> {
-  const apps = (await listAllEnveloped(
-    ctx,
+  return parseLive(
     section,
     ENDPOINTS.listProtectionRuleApps,
-    "available_custom_deployment_protection_rule_integrations",
-    { params: { environment_name: envName } },
-  )) as Array<{ id?: unknown; slug?: unknown }>;
-  return apps.map((app) => {
-    if (typeof app.id !== "number" || typeof app.slug !== "string") {
-      throw new Error(
-        `environments: the available protection-rule App list for environment "${envName}" returned an App without an id or slug, so declared rules cannot be resolved. Check the "api-version" input against the GitHub REST docs for this endpoint`,
-      );
-    }
-    return { id: app.id, slug: app.slug };
-  });
+    z.array(LiveProtectionRuleApp),
+    await listAllEnveloped(
+      ctx,
+      section,
+      ENDPOINTS.listProtectionRuleApps,
+      "available_custom_deployment_protection_rule_integrations",
+      { params: { environment_name: envName } },
+    ),
+    `environment "${envName}"`,
+  );
 }
 
 /**

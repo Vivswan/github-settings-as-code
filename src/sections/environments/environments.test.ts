@@ -928,7 +928,9 @@ describe("environments deployment protection rules apply mode", () => {
         environmentsSection.run(ctx(api), [
           { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
         ]),
-      ).rejects.toThrow(/custom_deployment_protection_rules value that is not a list/);
+      ).rejects.toThrow(
+        /returned a body outside the documented shape - custom_deployment_protection_rules/,
+      );
     }
   });
 
@@ -944,7 +946,9 @@ describe("environments deployment protection rules apply mode", () => {
         environmentsSection.run(ctx(api), [
           { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
         ]),
-      ).rejects.toThrow(/rule without a numeric id/);
+      ).rejects.toThrow(
+        /returned a body outside the documented shape - custom_deployment_protection_rules\[0\]\.id/,
+      );
       expect(api.mutations().filter((m) => m.method === "DELETE")).toEqual([]);
     }
   });

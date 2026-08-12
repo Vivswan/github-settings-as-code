@@ -6,6 +6,7 @@
  * `value: null` unsets a property, reverting to the org default, if any.
  */
 
+import { z } from "zod";
 import { type CustomPropertyConfig, type MustBeNever, SettingsFile } from "../../schema.js";
 import {
   beginRun,
@@ -13,6 +14,7 @@ import {
   defaultUndeclaredPolicy,
   type EndpointDecl,
   loosen,
+  parseLive,
   probeAbsent,
   rejectDuplicates,
   type SectionModule,
@@ -95,40 +97,16 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/** One live entry, after the loud extraction below. */
-interface LiveProperty {
-  property_name: string;
-  value: WireValue;
-}
-
 /**
- * Extract the live list loudly: both fields are REQUIRED on the wire, so an
- * entry without a string property_name (or with a value outside the
- * documented string/string[]/null space) is a contract violation, not
- * something to guess around.
+ * One live entry, parsed loudly at the boundary: both fields are REQUIRED on
+ * the wire, so an entry without a string property_name (or with a value
+ * outside the documented string/string[]/null space) is a contract
+ * violation parseLive rejects, not something to guess around.
  */
-function extractLive(data: unknown): LiveProperty[] {
-  if (!Array.isArray(data)) {
-    throw new Error(
-      `custom_properties: GET ${ENDPOINTS.list.route} returned a non-list body (got ${(JSON.stringify(data) ?? String(data)).slice(0, 200)}); check the "api-version" input against the GitHub REST docs for this endpoint`,
-    );
-  }
-  return data.map((entry) => {
-    const raw = entry as { property_name?: unknown; value?: unknown } | null;
-    const name = raw?.property_name;
-    const value = raw?.value;
-    const valueOk =
-      value === null ||
-      typeof value === "string" ||
-      (Array.isArray(value) && value.every((element) => typeof element === "string"));
-    if (typeof name !== "string" || !valueOk) {
-      throw new Error(
-        `custom_properties: GET ${ENDPOINTS.list.route} returned an entry without a string property_name or with a value outside string/string[]/null (${JSON.stringify(entry)}); check the "api-version" input against the GitHub REST docs for this endpoint`,
-      );
-    }
-    return { property_name: name, value: value as WireValue };
-  });
-}
+const LiveProperty = z.looseObject({
+  property_name: z.string(),
+  value: z.union([z.string(), z.array(z.string()), z.null()]),
+});
 
 export const customPropertiesSection = {
   key: "custom_properties",
@@ -199,7 +177,12 @@ export const customPropertiesSection = {
     }
     // The values list endpoint is not paginated; a single GET returns every
     // property, and sending page params would not advance anything.
-    const live = extractLive(await call(ctx, this, ENDPOINTS.list));
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveProperty),
+      await call(ctx, this, ENDPOINTS.list),
+    );
     const liveByName = new Map(live.map((p) => [p.property_name, p.value]));
     const declaredKeys = new Set<string>();
 
