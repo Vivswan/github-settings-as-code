@@ -20,8 +20,8 @@
  * events/active drift, never with a config key.
  */
 
-import { subsetDiff } from "../engine/diff.js";
-import { SettingsFile, type UndeclaredPolicyList, type WebhookConfig } from "../schema.js";
+import { subsetDiff } from "../../engine/diff.js";
+import { SettingsFile, type UndeclaredPolicyList, type WebhookConfig } from "../../schema.js";
 import {
   type ApplySectionContext,
   call,
@@ -36,7 +36,7 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 
 interface LiveHook {
   id: number;
