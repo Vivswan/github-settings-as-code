@@ -32,7 +32,7 @@ import { milestonesSection } from "./milestones/index.js";
 import { pagesSection } from "./pages/index.js";
 import { repositorySection } from "./repository.js";
 import { rulesetsSection } from "./rulesets.js";
-import { secretScanningPatternsSection } from "./secret-scanning-patterns.js";
+import { secretScanningPatternsSection } from "./secret_scanning_custom_patterns/index.js";
 import { teamsSection } from "./teams.js";
 import { webhooksSection } from "./webhooks.js";
 import { workflowsSection } from "./workflows.js";
