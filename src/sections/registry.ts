@@ -30,7 +30,7 @@ import { interactionLimitsSection } from "./interaction_limits/index.js";
 import { labelsSection } from "./labels/index.js";
 import { milestonesSection } from "./milestones/index.js";
 import { pagesSection } from "./pages/index.js";
-import { repositorySection } from "./repository.js";
+import { repositorySection } from "./repository/index.js";
 import { rulesetsSection } from "./rulesets/index.js";
 import { secretScanningPatternsSection } from "./secret_scanning_custom_patterns/index.js";
 import { teamsSection } from "./teams/index.js";

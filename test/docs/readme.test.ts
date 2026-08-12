@@ -24,7 +24,7 @@ import {
 } from "../../src/schema.js";
 import { type PatResource, sectionOperations } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { SPECIAL_KEYS } from "../../src/sections/repository.js";
+import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
 import { CLAIM_FAMILY, CLAIM_STEMS, defaultClaimProblems, stemNegation } from "./claims.js";
 import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 

@@ -5,8 +5,8 @@
  * keys (the Sponsor button and the issue creation policy).
  */
 
-import { subsetDiff } from "../engine/diff.js";
-import { type RepositoryConfig, SettingsFile } from "../schema.js";
+import { subsetDiff } from "../../engine/diff.js";
+import { type RepositoryConfig, SettingsFile } from "../../schema.js";
 import {
   call,
   callGraphql,
@@ -24,7 +24,7 @@ import {
   type SectionPermission,
   type SectionResult,
   tryCall,
-} from "./contract.js";
+} from "../contract.js";
 
 /** Topics: accept a comma-separated string or an array; lowercase, dedupe. */
 export function normalizeTopics(raw: unknown): string[] {
