@@ -187,6 +187,64 @@ describe("error classification", () => {
     expect(isRateLimitError(denied)).toBe(false);
     expect(isPermissionError(denied)).toBe(true);
   });
+
+  test("a 403 with retry-after classifies structurally even without the phrase", async () => {
+    // The body never says "rate limit", so the message fallback cannot fire:
+    // only the structural signals (here the retry-after header, which no
+    // documented non-limit 403 carries) prove the classification. Misreading
+    // this as a missing grant would hand out permission advice - and, under
+    // on-missing-permission: warn, a green run that silently skipped the
+    // section.
+    stubFetch([
+      () =>
+        new Response(JSON.stringify({ message: "Forbidden" }), {
+          status: 403,
+          headers: { "content-type": "application/json", "retry-after": "30" },
+        }),
+    ]);
+    const result = await api().tryRequest("GET", "/repos/o/r/labels");
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.rateLimited).toBe(true);
+    expect(isRateLimitError(result.error)).toBe(true);
+    expect(isPermissionError(result.error)).toBe(false);
+    // The common (non-secret) path keeps its diagnostic body.
+    expect(result.error.message).toBe("Forbidden");
+  });
+
+  test("an exhausted primary limit (x-ratelimit-remaining 0) flags without the phrase", async () => {
+    stubFetch([
+      () =>
+        new Response(JSON.stringify({ message: "Forbidden" }), {
+          status: 403,
+          headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
+        }),
+    ]);
+    const result = await api().tryRequest("GET", "/repos/o/r/labels");
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.rateLimited).toBe(true);
+    expect(isPermissionError(result.error)).toBe(false);
+  });
+
+  test("a plain permission 403 stays a permission error (no structural signal)", async () => {
+    stubFetch([
+      () =>
+        new Response(JSON.stringify({ message: "Resource not accessible by integration" }), {
+          status: 403,
+          headers: { "content-type": "application/json", "x-ratelimit-remaining": "42" },
+        }),
+    ]);
+    const result = await api().tryRequest("GET", "/repos/o/r/labels");
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.rateLimited).toBeUndefined();
+    expect(isRateLimitError(result.error)).toBe(false);
+    expect(isPermissionError(result.error)).toBe(true);
+  });
 });
 
 describe("error body shaping", () => {

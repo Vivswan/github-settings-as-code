@@ -588,11 +588,17 @@ function testRetryBaseMs(): number | undefined {
  * message/errors, where no field name finds it, and JSON escaping defeats
  * exact-literal masking - so nothing of the body survives (not even
  * documentation_url); only the HTTP status and the content-free rate-limit
- * classification flag do. Rate limiting normally classifies by message
- * content, which the replacement destroys - so the flag is computed FIRST,
- * from the signals the throttling plugin itself recognizes: the primary-limit
- * header (x-ratelimit-remaining 0), the plugin's secondary-limit message
- * predicate (\bsecondary rate\b - GitHub documents secondary limits where no
+ * classification flag do.
+ *
+ * The rate-limit classification is structural and computed FIRST, on EVERY
+ * path (not just the withheld one): GitHub's primary and secondary limits
+ * can arrive as a 403 whose message never contains the literal phrase
+ * "rate limit", and misreading one as a missing grant turns a transient
+ * limit into permission advice (and, under on-missing-permission: warn, a
+ * green run that silently skipped the section). The signals are the ones
+ * the throttling plugin itself recognizes: the primary-limit header
+ * (x-ratelimit-remaining 0), the plugin's secondary-limit message predicate
+ * (\bsecondary rate\b - GitHub documents secondary limits where no
  * rate-limit header is present), the structured errors[].type ===
  * "RATE_LIMITED", and the retry-after header. Accepting retry-after ALONE is
  * deliberately broader than the plugin (which reads it only after the phrase
@@ -604,31 +610,31 @@ function testRetryBaseMs(): number | undefined {
  */
 function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiError {
   const body = error.response?.data;
+  const headers = error.response?.headers ?? {};
+  const classificationText =
+    typeof body === "object" && body !== null && "message" in body
+      ? String((body as { message: unknown }).message)
+      : typeof body === "string" && body
+        ? body
+        : error.message;
+  const errorsRateLimited =
+    typeof body === "object" &&
+    body !== null &&
+    Array.isArray((body as { errors?: unknown }).errors) &&
+    ((body as { errors: unknown[] }).errors ?? []).some(
+      (entry) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        (entry as { type?: unknown }).type === "RATE_LIMITED",
+    );
+  const rateLimited =
+    error.status === 429 ||
+    (error.status === 403 &&
+      (String(headers["x-ratelimit-remaining"]) === "0" ||
+        headers["retry-after"] !== undefined ||
+        errorsRateLimited ||
+        /\bsecondary rate\b/i.test(classificationText)));
   if (carriesSecret) {
-    const headers = error.response?.headers ?? {};
-    const classificationText =
-      typeof body === "object" && body !== null && "message" in body
-        ? String((body as { message: unknown }).message)
-        : typeof body === "string" && body
-          ? body
-          : error.message;
-    const errorsRateLimited =
-      typeof body === "object" &&
-      body !== null &&
-      Array.isArray((body as { errors?: unknown }).errors) &&
-      ((body as { errors: unknown[] }).errors ?? []).some(
-        (entry) =>
-          typeof entry === "object" &&
-          entry !== null &&
-          (entry as { type?: unknown }).type === "RATE_LIMITED",
-      );
-    const rateLimited =
-      error.status === 429 ||
-      (error.status === 403 &&
-        (String(headers["x-ratelimit-remaining"]) === "0" ||
-          headers["retry-after"] !== undefined ||
-          errorsRateLimited ||
-          /\bsecondary rate\b/i.test(classificationText)));
     return {
       status: error.status,
       message: SECRET_RESPONSE_WITHHELD,
@@ -657,6 +663,7 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
     status: error.status,
     message,
     body: typeof body === "string" ? body : JSON.stringify(body ?? ""),
+    ...(rateLimited ? { rateLimited: true } : {}),
     ...(documentationUrl === undefined ? {} : { documentationUrl }),
   };
 }
