@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { branchesSection } from "../../src/sections/branches.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { branchesSection } from "./index.js";
 
 describe("branches", () => {
   const declared = [{ name: "main", protection: { enforce_admins: true } }];

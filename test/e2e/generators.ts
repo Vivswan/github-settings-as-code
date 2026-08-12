@@ -19,7 +19,7 @@ import {
   type SettingsFile,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
-import { isWildcardPattern } from "../../src/sections/branches.js";
+import { isWildcardPattern } from "../../src/sections/branches/index.js";
 import { endpointMethod, undeclaredPolicy } from "../../src/sections/contract.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { DEFAULT_ROLE, roleForPermission } from "../../src/sections/roles.js";

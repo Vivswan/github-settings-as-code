@@ -17,7 +17,7 @@ import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
-} from "../../../src/sections/branches.js";
+} from "../../../src/sections/branches/index.js";
 import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/roles.js";
 import { ADMIN_SLUG } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
