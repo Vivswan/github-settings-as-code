@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { agentsVariablesSection, variableKey } from "../../src/sections/agents-variables.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { agentsVariablesSection, variableKey } from "./index.js";
 
 describe("variableKey", () => {
   test("uppercases (GitHub stores variable names uppercased)", () => {
