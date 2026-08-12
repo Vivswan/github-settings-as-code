@@ -11,7 +11,6 @@ import { GAP as agentsSecrets } from "./agents-secrets.js";
 import { GAP as agentsVariables } from "./agents-variables.js";
 import { GAP as codeQualitySetup } from "./code-quality-setup.js";
 import { undocumentedRoutes } from "./gap.js";
-import { GAP as fakeShipped } from "./fake-shipped.js";
 import { GAP as interactionLimitPullCaps } from "./interaction-limit-pull-caps.js";
 import { GAP as lfs } from "./lfs.js";
 import { GAP as secretScanningCustomPatterns } from "./secret-scanning-custom-patterns.js";
@@ -21,7 +20,6 @@ const GAPS = [
   agentsSecrets,
   agentsVariables,
   codeQualitySetup,
-  fakeShipped,
   interactionLimitPullCaps,
   lfs,
   secretScanningCustomPatterns,
