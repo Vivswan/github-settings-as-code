@@ -50,20 +50,22 @@ jobs:
           # exit status, so a failed gh would run the trim with an empty ref.
           TRIM_UPSTREAM_REF="$(gh api repos/github/rest-api-description/commits/main --jq .sha)"
           export TRIM_UPSTREAM_REF
-          case "$TRIM_UPSTREAM_REF" in
-            [0-9a-f]*[0-9a-f]) ;;
-            *) echo "::error::could not resolve the latest rest-api-description commit; got '$TRIM_UPSTREAM_REF'"; exit 1 ;;
-          esac
+          if ! printf '%s' "$TRIM_UPSTREAM_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::could not resolve the latest rest-api-description commit; got '$TRIM_UPSTREAM_REF'"
+            exit 1
+          fi
           log="$(mktemp)"
           if ! bun .github/scripts/trim-openapi.ts >"$log" 2>&1; then
             cat "$log"
             exit 1
           fi
           cat "$log"
-          # The script logs the descriptor URL, which embeds the ref it used.
-          # A pinned ref there means the override was ignored - which would
-          # make this probe pass green forever without probing anything.
-          if ! grep -q "$TRIM_UPSTREAM_REF" "$log"; then
+          # The script's "fetching <URL>" line embeds the ref it actually
+          # used; anything else in the log (like the override note) also
+          # naming the sha must not satisfy this. A pinned ref here means
+          # the override was ignored - which would make this probe pass
+          # green forever without probing anything.
+          if ! grep "^fetching " "$log" | grep -qF "$TRIM_UPSTREAM_REF"; then
             echo "::error::trim-openapi.ts did not fetch $TRIM_UPSTREAM_REF; its TRIM_UPSTREAM_REF override is gone and this probe is testing nothing"
             exit 1
           fi
@@ -74,7 +76,7 @@ jobs:
       # lockfile and package.json untouched; the upgraded node_modules stays
       # ambient for the rest of this job, so keep later steps out of it.
       - name: Probe the latest @octokit/types
-        if: always() && steps.install.outcome == 'success'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           bun add --no-save --ignore-scripts @octokit/types@latest
           log="$(mktemp)"
@@ -84,9 +86,12 @@ jobs:
             echo "typecheck is clean against @octokit/types@latest"
           else
             cat "$log"
-            tripped="$(grep -E '^src/upstream-gaps/.+error TS2344' "$log" | cut -d'(' -f1 | sort -u)"
+            # `|| true`: inert under the default shell (the pipeline ends
+            # in sort -u), but guards the general-breakage branch below if
+            # this step ever declares shell: bash (which adds pipefail).
+            tripped="$(grep -E '^src/upstream-gaps/.+error TS2344' "$log" | cut -d'(' -f1 | sort -u || true)"
             if [ -n "$tripped" ]; then
-              echo "::error::@octokit/types@latest fires upstream-gap tripwires; graduate (delete) these files:"
+              echo "::error::@octokit/types@latest fires upstream-gap tripwires; run bun .github/scripts/graduate-upstream-gaps.ts for these files:"
               echo "$tripped"
             else
               echo "::error::typecheck against @octokit/types@latest failed outside the upstream-gap tripwires; a types major may have broken the build (see log above)"
@@ -114,6 +119,11 @@ jobs:
         id: file-issue
         if: needs.checks.result == 'failure' || needs.checks.result == 'cancelled'
         uses: Vivswan/repo-platform/actions/fuzz-issue@main
+        # This job checks nothing out (kept tight), so gh has no git
+        # context; GH_REPO points it at this repository (run 31563375394
+        # failed on exactly this).
+        env:
+          GH_REPO: ${{ github.repository }}
         with:
           mode: report
           label: "nightly-failure"
@@ -123,7 +133,7 @@ jobs:
           # the fuzzer's failure-report contract. The tuple below is used
           # only when the label has to be created and matches the
           # settings-sync declaration.
-          label-color: "D93F0B"
+          label-color: "B60205"
           label-description: Automated nightly CI failure
 
       # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
@@ -131,12 +141,15 @@ jobs:
         if: steps.file-issue.outputs.issue-number != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ steps.file-issue.outputs.issue-number }}
         run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
 
       - name: Close the nightly issue on a green night
         if: needs.checks.result == 'success'
         uses: Vivswan/repo-platform/actions/fuzz-issue@main
+        env:
+          GH_REPO: ${{ github.repository }}
         with:
           mode: resolve
           label: "nightly-failure"
