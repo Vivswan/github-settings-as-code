@@ -1,12 +1,11 @@
 /**
  * The labels section's e2e mock fragment: one handler per "labels.<role>"
  * key in the section's ENDPOINTS, registered in test/e2e/mock/sections.ts.
- * Imports only the leaf seams (mock/support.ts, mock/state.ts, the harness
- * constants) - never routes.ts or sections.ts; the bundle entry is
- * src/main.ts, so this fragment never reaches lib/index.js.
+ * Imports only the leaf seam (mock/support.ts) - never
+ * routes.ts or sections.ts; the bundle entry is src/main.ts, so this
+ * fragment never reaches lib/index.js.
  */
 
-import { ADMIN_SLUG } from "../../../test/e2e/constants.js";
 import {
   asObject,
   findLabel,
@@ -29,14 +28,19 @@ export const labelsMockHandlers: Record<string, Handler> = {
     if (findLabel(state, String(payload.name))) {
       return { status: 422, body: { message: "Validation Failed" } };
     }
+    // One id feeds both identity fields (the generateLabels pattern in
+    // state.ts): the node_id encodes the label's OWN id, and the url names
+    // the state's slug, so a multi-repo target's created label reads back as
+    // its own repository's resource.
+    const id = state.nextId++;
     // Spread the payload FIRST so passthrough fields the labels section sends
     // (and later subsetDiffs) are stored and read back; the known fields are
     // then normalized over them.
     const label: Json = {
       ...payload,
-      id: state.nextId++,
-      node_id: `MDU6TGFiZWw${state.nextId}`,
-      url: `https://api.github.com/repos/${ADMIN_SLUG}/labels/${String(payload.name)}`,
+      id,
+      node_id: `MDU6TGFiZWw${id}`,
+      url: `https://api.github.com/repos/${state.slug}/labels/${String(payload.name)}`,
       name: payload.name,
       color: payload.color ?? "ededed",
       default: false,

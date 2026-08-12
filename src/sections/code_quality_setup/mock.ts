@@ -5,7 +5,6 @@
  * file never reaches lib/index.js.
  */
 
-import { ADMIN_SLUG } from "../../../test/e2e/constants.js";
 import { asObject, type Handler, ok } from "../../../test/e2e/mock/support.js";
 
 export const codeQualitySetupMockHandlers: Record<string, Handler> = {
@@ -28,7 +27,7 @@ export const codeQualitySetupMockHandlers: Record<string, Handler> = {
         status: 202,
         body: {
           run_id: state.nextId++,
-          run_url: `https://api.github.com/repos/${ADMIN_SLUG}/code-quality/setup/runs/1`,
+          run_url: `https://api.github.com/repos/${state.slug}/code-quality/setup/runs/1`,
         },
       };
     }

@@ -9,7 +9,6 @@
 
 import type { GraphqlTolerableError } from "../../../src/sections/contract.js";
 import type { TaggedEndpoint, TaggedGraphqlOp } from "../../../src/sections/registry.js";
-import { ADMIN_SLUG } from "../constants.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import { MOCK_SECRETS_KEY_ID, secretDigest, unsealSecretValue } from "./secrets.js";
 import type { MockState } from "./state.js";
@@ -262,8 +261,9 @@ export const IMMUTABLE_OWNER_CONFLICT = {
 
 // --- Handler-local helpers ------------------------------------------------
 
-export function pagesUrl(): string {
-  return `https://api.github.com/repos/${ADMIN_SLUG}/pages`;
+/** The Pages API url a served Pages body carries, named for the OWNING repo. */
+export function pagesUrl(slug: string): string {
+  return `https://api.github.com/repos/${slug}/pages`;
 }
 
 /**

@@ -551,6 +551,30 @@ describe("mock node ids", () => {
       key: "prod",
     });
   });
+
+  test("generated labels and completed hooks name the TARGET slug in their urls", () => {
+    // The url is served state like any other field: a multi-repo target's
+    // generated labels and seeded hooks must name the target repository, not
+    // the admin fixture the mock happens to run as.
+    const state = buildStateForSlug(
+      "acme/private",
+      {
+        settingsYaml: null,
+        liveState: {
+          labels: { generate: { count: 2, prefix: "area", color: "abcdef" } },
+          hooks: [{ config: { url: "https://example.test/hook" } }],
+        },
+      },
+      "org",
+    );
+    for (const label of state.labels) {
+      expect(String((label as Record<string, unknown>).url)).toContain("/repos/acme/private/");
+    }
+    const hook = state.hooks[0] as Record<string, unknown>;
+    for (const field of ["url", "test_url", "ping_url", "deliveries_url"] as const) {
+      expect(String(hook[field])).toContain("/repos/acme/private/hooks/");
+    }
+  });
 });
 
 describe("normalizePinnedSeed", () => {

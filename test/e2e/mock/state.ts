@@ -19,7 +19,6 @@ import {
   GRAPHQL_STATUS_CHECK_TWINS,
 } from "../../../src/sections/branches/index.js";
 import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/roles.js";
-import { ADMIN_SLUG } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
 import type { OwnerKind, PermissionMask } from "../schema.js";
@@ -460,14 +459,14 @@ function clone<T>(value: T): T {
 }
 
 /** Expand the labels.generate sugar into concrete GET-shape label bodies. */
-function generateLabels(gen: LabelsGenerate, startId: number): Json[] {
+function generateLabels(gen: LabelsGenerate, startId: number, slug: string): Json[] {
   const out: Json[] = [];
   for (let i = 0; i < gen.count; i++) {
     const name = `${gen.prefix}-${i + 1}`;
     out.push({
       id: startId + i,
       node_id: `MDU6TGFiZWw${startId + i}`,
-      url: `https://api.github.com/repos/${ADMIN_SLUG}/labels/${name}`,
+      url: `https://api.github.com/repos/${slug}/labels/${name}`,
       name,
       color: gen.color,
       default: false,
@@ -482,10 +481,11 @@ function generateLabels(gen: LabelsGenerate, startId: number): Json[] {
  * so scenario seeds stay terse and every served hook validates: the seed's
  * own fields win, `id` comes from the caller unless the seed carries one, and
  * the server-owned scaffold (type, timestamps, urls, last_response) fills the
- * rest. Timestamps are FIXED so a repeat apply leaves the state byte-stable
- * for the idempotence proof.
+ * rest. The urls derive from `slug` (the owning state's fixed identity), so a
+ * multi-repo target's hooks name the target. Timestamps are FIXED so a repeat
+ * apply leaves the state byte-stable for the idempotence proof.
  */
-export function completeHook(seed: Json, id: number): Json {
+export function completeHook(seed: Json, id: number, slug: string): Json {
   const hookId = Number(seed.id ?? id);
   return {
     type: "Repository",
@@ -495,10 +495,10 @@ export function completeHook(seed: Json, id: number): Json {
     config: {},
     created_at: "2026-07-01T00:00:00Z",
     updated_at: "2026-07-01T00:00:00Z",
-    url: `https://api.github.com/repos/${ADMIN_SLUG}/hooks/${hookId}`,
-    test_url: `https://api.github.com/repos/${ADMIN_SLUG}/hooks/${hookId}/test`,
-    ping_url: `https://api.github.com/repos/${ADMIN_SLUG}/hooks/${hookId}/pings`,
-    deliveries_url: `https://api.github.com/repos/${ADMIN_SLUG}/hooks/${hookId}/deliveries`,
+    url: `https://api.github.com/repos/${slug}/hooks/${hookId}`,
+    test_url: `https://api.github.com/repos/${slug}/hooks/${hookId}/test`,
+    ping_url: `https://api.github.com/repos/${slug}/hooks/${hookId}/pings`,
+    deliveries_url: `https://api.github.com/repos/${slug}/hooks/${hookId}/deliveries`,
     last_response: { code: null, status: "unused", message: null },
     id: hookId,
     ...seed,
@@ -643,16 +643,6 @@ export function buildState(
   let nextId = 90_000_000;
   const takeId = (): number => nextId++;
 
-  let labels: Json[];
-  if (ls.labels === undefined) {
-    labels = [];
-  } else if (Array.isArray(ls.labels)) {
-    labels = clone(ls.labels);
-  } else {
-    labels = generateLabels(ls.labels.generate, takeId());
-    nextId += ls.labels.generate.count;
-  }
-
   // deepMerge shallow-copies the base top level and assigns OVERLAY values by
   // reference, so both sides must be cloned: the base clone keeps the module
   // fixture singleton private (a later reslugRepo mutating owner.login would
@@ -670,7 +660,9 @@ export function buildState(
   // targets) or the repo body's name at construction. Later repo mutations
   // (a PATCH writing full_name) cannot move it. A seed that blanks full_name
   // has no identity to fix, so it fails loudly at build instead of minting
-  // ids under a garbage slug.
+  // ids under a garbage slug. Fixed BEFORE any family completion runs, so
+  // bodies that mint identity from the slug (generated labels, hook urls,
+  // the invitation scaffold) name the target, not the fixture.
   const fullName = repo.full_name;
   if (slug === undefined && (typeof fullName !== "string" || fullName === "")) {
     throw new Error(
@@ -678,6 +670,16 @@ export function buildState(
     );
   }
   const stateSlug = slug ?? String(fullName);
+
+  let labels: Json[];
+  if (ls.labels === undefined) {
+    labels = [];
+  } else if (Array.isArray(ls.labels)) {
+    labels = clone(ls.labels);
+  } else {
+    labels = generateLabels(ls.labels.generate, takeId(), stateSlug);
+    nextId += ls.labels.generate.count;
+  }
 
   const pinnedSeed = normalizePinnedSeed(ls.pinned_environments ?? []);
 
@@ -783,7 +785,7 @@ export function buildState(
     pull_bypass_list: (ls.pull_bypass_list ?? []).map((user) => bypassUser(clone(user), takeId())),
     actions_variables: ls.actions_variables ? clone(ls.actions_variables) : [],
     agents_variables: ls.agents_variables ? clone(ls.agents_variables) : [],
-    hooks: (ls.hooks ?? []).map((hook) => completeHook(clone(hook), takeId())),
+    hooks: (ls.hooks ?? []).map((hook) => completeHook(clone(hook), takeId(), stateSlug)),
     deploy_keys: ls.deploy_keys ? clone(ls.deploy_keys) : [],
     issues: ls.issues ? clone(ls.issues) : [],
     custom_property_values: ls.custom_property_values ? clone(ls.custom_property_values) : [],
