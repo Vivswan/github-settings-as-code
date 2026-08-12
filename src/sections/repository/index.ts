@@ -5,9 +5,11 @@
  * keys (the Sponsor button and the issue creation policy).
  */
 
+import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
   loosen,
@@ -166,6 +168,14 @@ const ENDPOINTS = {
     denialHint: LFS_DENIAL_HINT,
   },
 } as const satisfies Record<string, EndpointDecl>;
+
+/**
+ * The repo GET fields this section reads BY NAME (the rest of the body rides
+ * into subsetDiff as passthrough): topics, whose set comparison below sorts
+ * a real string list; nullish absorbs an absent or null list exactly as the
+ * pre-parse fallback did.
+ */
+const LiveRepository = z.looseObject({ topics: z.array(z.string()).nullish() });
 
 const READABLE_TOGGLES = [
   {
@@ -410,13 +420,18 @@ export const repositorySection = {
     }
 
     if (run.check) {
-      const live = (await call(ctx, this, ENDPOINTS.get)) as Record<string, unknown>;
+      const live = parseLive(
+        this,
+        ENDPOINTS.get,
+        LiveRepository,
+        await call(ctx, this, ENDPOINTS.get),
+      );
       run.result.drift.push(...subsetDiff(patch, live, "repository"));
       if ("topics" in desired) {
         run.result.drift.push(
           ...subsetDiff(
             normalizeTopics(desired.topics).sort(),
-            ((live.topics as string[]) ?? []).slice().sort(),
+            [...(live.topics ?? [])].sort(),
             "repository.topics",
           ),
         );

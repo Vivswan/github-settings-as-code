@@ -18,9 +18,11 @@
  * a pure-REST declaration issues no GraphQL request at all.
  */
 
+import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { type EndpointDecl, expand, repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
   loosen,
@@ -41,7 +43,7 @@ import {
 } from "../contract/requests.js";
 import {
   type BranchConfig,
-  BranchesSlice,
+  BranchesConfig,
   type BranchProtectionConfig,
   parseBypassActor,
 } from "./schema.js";
@@ -163,6 +165,16 @@ const ENDPOINTS = {
     permission: "none",
   },
 } as const satisfies Record<string, EndpointDecl>;
+
+/**
+ * The protection GET body: a mapping, of which this section reads
+ * required_signatures BY NAME (its {enabled} wrapper flattens to the boolean
+ * the diff compares); every other field rides through flattenProtection as
+ * passthrough.
+ */
+const LiveProtection = z.looseObject({
+  required_signatures: z.looseObject({ enabled: z.boolean() }).optional(),
+});
 
 // --- GraphQL operations -------------------------------------------------------
 
@@ -800,7 +812,7 @@ export const branchesSection = {
   // the structured twins), which are this section's own machinery. Wildcard
   // entries reject every key outside those tables, since nothing else can
   // reach a wildcard rule.
-  shape: loosen(BranchesSlice).superRefine((declared, refineCtx) => {
+  shape: loosen(BranchesConfig).superRefine((declared, refineCtx) => {
     if (!Array.isArray(declared)) {
       return;
     }
@@ -982,7 +994,17 @@ async function runLiteralEntry(
       // against a flattened view. The routed keys were destructured off the
       // payload above; required_signatures is the one with a REST read to
       // diff against, the other two diff against the GraphQL rule below.
-      const live = flattenProtection(probe.data as Record<string, unknown>);
+      // The parse pins the one field read BY NAME (required_signatures'
+      // {enabled} wrapper); everything else flattens generically.
+      const live = flattenProtection(
+        parseLive(
+          section,
+          ENDPOINTS.getProtection,
+          LiveProtection,
+          probe.data,
+          `branch "${branch.name}"`,
+        ),
+      );
       // The protection GET OMITS required_signatures entirely when
       // signed commits are not required, so an absent live field means
       // false; normalize before the diff so declared false does not

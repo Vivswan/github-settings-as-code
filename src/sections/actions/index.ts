@@ -6,9 +6,11 @@
  * verbatim to the base permissions PUT.
  */
 
+import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
   loosen,
@@ -171,9 +173,17 @@ type _CacheEndpointsSound = MustBeNever<Exclude<keyof typeof CACHE_ENDPOINT_BY_K
  * so unlike subsetDiff's scalar-list set comparison, this list must match
  * element by element - a reordered live value is drift.
  */
-function sameClaimKeyOrder(declared: readonly string[], live: readonly unknown[]): boolean {
+function sameClaimKeyOrder(declared: readonly string[], live: readonly string[]): boolean {
   return declared.length === live.length && declared.every((key, index) => live[index] === key);
 }
+
+/**
+ * The OIDC subject-claim GET fields this section reads BY NAME: the claim-key
+ * list (order-sensitive, compared above; nullish absorbs a null or omitted
+ * list exactly as the pre-parse code did); the rest of the body rides into
+ * subsetDiff as passthrough.
+ */
+const LiveOidcSub = z.looseObject({ include_claim_keys: z.array(z.string()).nullish() });
 
 /**
  * A key served by its own endpoint pair: how check diffs the declared value
@@ -333,7 +343,12 @@ const KEY_DESTINATION = {
   },
   oidc_customization_sub: {
     check: async (ctx, section, declared, run) => {
-      const live = (await call(ctx, section, ENDPOINTS.getOidcSub)) as Record<string, unknown>;
+      const live = parseLive(
+        section,
+        ENDPOINTS.getOidcSub,
+        LiveOidcSub,
+        await call(ctx, section, ENDPOINTS.getOidcSub),
+      );
       // The claim-key list is special-cased below; everything ELSE in the
       // declared object (use_default today, future fields tomorrow) rides
       // the PUT verbatim, so it must be diffed verbatim too - the expiry
@@ -346,7 +361,7 @@ const KEY_DESTINATION = {
       // whose keys then show up live). So the list is compared only when
       // the file declares it - declared-keys-only, like everything else.
       if (declared.use_default === false && include_claim_keys !== undefined) {
-        const liveKeys = Array.isArray(live.include_claim_keys) ? live.include_claim_keys : [];
+        const liveKeys = live.include_claim_keys ?? [];
         if (!sameClaimKeyOrder(include_claim_keys, liveKeys)) {
           run.result.drift.push(
             `actions.oidc_customization_sub.include_claim_keys: declared ${JSON.stringify(include_claim_keys)} != live ${JSON.stringify(liveKeys)} (claim-key order defines the subject format, so order counts); apply will set the declared value`,

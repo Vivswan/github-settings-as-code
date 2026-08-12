@@ -20,7 +20,9 @@
  * optional and nullable) writes without the check, as the API allows.
  */
 
+import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
   defaultUndeclaredPolicy,
@@ -90,7 +92,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/** The live GET-shape fields the handler reads; extracted loudly below. */
+/** The live GET-shape fields the handler reads; parsed at the boundary below. */
 interface LivePattern {
   id: number;
   name: string;
@@ -99,38 +101,34 @@ interface LivePattern {
 }
 
 /**
- * Extract the fields the handler needs from one live list entry, loudly: an
- * entry without a string name or a numeric id cannot be reconciled at all,
- * so it is a contract violation, not something to skip. The version is
- * genuinely OPTIONAL (the GET marks it optional and nullable, and the write
- * bodies accept a null or absent version): a version-less pattern simply
- * forgoes optimistic concurrency, exactly where GitHub declines to offer it.
+ * One live list entry, parsed loudly at the boundary (parseLive): an entry
+ * without a string name or a numeric id cannot be reconciled at all, so it
+ * is a contract violation, not something to skip. The version is genuinely
+ * OPTIONAL (the GET marks it optional and nullable, and the write bodies
+ * accept a null or absent version): a version-less pattern simply forgoes
+ * optimistic concurrency, exactly where GitHub declines to offer it - but a
+ * PRESENT non-string version must not silently bypass the 412 protection,
+ * so only string/null/absent parse.
  */
-function liveFrom(entry: unknown): LivePattern {
-  const raw = (entry ?? {}) as Record<string, unknown>;
-  if (typeof raw.name !== "string" || typeof raw.id !== "number") {
-    throw new Error(
-      `secret_scanning_custom_patterns: the custom-pattern list returned an entry without a string "name" and numeric "id" (got ${JSON.stringify(entry)}). Check the "api-version" input against the GitHub REST docs for this endpoint`,
-    );
-  }
-  // string = concurrency token; null/absent = GitHub offers none. Anything
-  // else is off-contract and must not silently bypass the 412 protection.
-  const rawVersion = raw.custom_pattern_version;
-  if (rawVersion !== undefined && rawVersion !== null && typeof rawVersion !== "string") {
-    throw new Error(
-      `secret_scanning_custom_patterns: the custom-pattern list returned "${raw.name}" with a non-string custom_pattern_version (${JSON.stringify(rawVersion)}). Check the "api-version" input against the GitHub REST docs for this endpoint`,
-    );
-  }
+const LivePatternEntry = z.looseObject({
+  id: z.number(),
+  name: z.string(),
+  custom_pattern_version: z.string().nullish(),
+});
+
+/** Project one parsed entry onto the fields the reconciliation reads. */
+function liveFrom(entry: z.infer<typeof LivePatternEntry>): LivePattern {
   const fields: Partial<Record<UpdatableKey, unknown>> = {};
   for (const key of UPDATABLE_KEYS) {
-    if (raw[key] !== undefined) {
-      fields[key] = raw[key];
+    if (entry[key] !== undefined) {
+      fields[key] = entry[key];
     }
   }
   return {
-    id: raw.id,
-    name: raw.name,
-    version: typeof rawVersion === "string" ? rawVersion : undefined,
+    id: entry.id,
+    name: entry.name,
+    version:
+      typeof entry.custom_pattern_version === "string" ? entry.custom_pattern_version : undefined,
     fields,
   };
 }
@@ -176,14 +174,19 @@ export const secretScanningPatternsSection = {
       (p) => p.name,
       (p) => p.name,
     );
-    const live = (await listAll(ctx, this, ENDPOINTS.list)).map(liveFrom);
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LivePatternEntry),
+      await listAll(ctx, this, ENDPOINTS.list),
+    ).map(liveFrom);
     const liveByName = new Map(live.map((p) => [p.name, p]));
 
-    // Resolve EVERYTHING before the first write - liveFrom throws on a
-    // contract violation, and every extraction runs in THIS planning pass -
-    // so a failure between the bulk POST, the PATCHes, and the bulk DELETE
-    // can only be GitHub's own rejection, never a half-applied run this
-    // section could have avoided.
+    // Resolve EVERYTHING before the first write - parseLive rejected any
+    // off-contract entry above, and every extraction runs in THIS planning
+    // pass - so a failure between the bulk POST, the PATCHes, and the bulk
+    // DELETE can only be GitHub's own rejection, never a half-applied run
+    // this section could have avoided.
     const toCreate: SecretScanningPatternConfig[] = [];
     const toUpdate: Array<{
       live: LivePattern;

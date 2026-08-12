@@ -249,9 +249,13 @@ describe("secret_scanning_custom_patterns", () => {
   });
 
   test("a live entry without a string name or numeric id is a loud contract violation", async () => {
-    const api = new MockApi(listRoute([{ name: "no-id" }]));
-    await expect(secretScanningPatternsSection.run(ctx(api), [])).rejects.toThrow(
-      /without a string "name" and numeric "id"/,
+    const noId = new MockApi(listRoute([{ name: "no-id" }]));
+    await expect(secretScanningPatternsSection.run(ctx(noId), [])).rejects.toThrow(
+      /returned a body outside the documented shape.*\[0\]\.id/,
+    );
+    const badName = new MockApi(listRoute([{ id: 1, name: 5 }]));
+    await expect(secretScanningPatternsSection.run(ctx(badName), [])).rejects.toThrow(
+      /returned a body outside the documented shape.*\[0\]\.name/,
     );
   });
 
@@ -262,7 +266,7 @@ describe("secret_scanning_custom_patterns", () => {
       listRoute([livePattern({ id: 5, name: "stale", custom_pattern_version: 7 })]),
     );
     await expect(secretScanningPatternsSection.run(ctx(api), [])).rejects.toThrow(
-      /non-string custom_pattern_version \(7\)/,
+      /returned a body outside the documented shape.*\[0\]\.custom_pattern_version/,
     );
   });
 

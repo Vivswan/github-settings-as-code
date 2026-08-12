@@ -3,12 +3,14 @@
  * personal account the section no-ops with a note.
  */
 
+import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import { beginRun, loosen, type SectionModule, type SectionResult } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { call, probeAbsent, rejectDuplicates } from "../contract/requests.js";
 import { DEFAULT_ROLE, roleForPermission } from "../shared/roles.js";
-import { TeamsSlice } from "./schema.js";
+import { TeamsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"], org: "members" };
 
@@ -29,6 +31,14 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
+/**
+ * The probe body under the repository media type: the repo object, of which
+ * this section reads role_name (optional, so a body without one reads as no
+ * role rather than a hard failure). Nullish: a server ignoring the media
+ * type answers a bare 204, which still means "the team has access".
+ */
+const LiveTeamRepo = z.looseObject({ role_name: z.string().optional() }).nullish();
+
 export const teamsSection = {
   key: "teams",
   undeclaredDefault: "untouched",
@@ -37,7 +47,7 @@ export const teamsSection = {
   // implements the personal-account no-op this declares.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
-  shape: loosen(TeamsSlice),
+  shape: loosen(TeamsConfig),
   // Closed surface: the grant PUT accepts exactly one setting ("permission"),
   // so an extra key is always a typo - and a misspelled "permission" would
   // silently grant the default role and report clean.
@@ -90,7 +100,14 @@ export const teamsSection = {
         continue;
       }
       const wantRole = roleForPermission(role);
-      const liveRole = (probe.data as { role_name?: string } | null)?.role_name ?? "";
+      const live = parseLive(
+        this,
+        ENDPOINTS.probe,
+        LiveTeamRepo,
+        probe.data,
+        `team "${team.name}"`,
+      );
+      const liveRole = live?.role_name ?? "";
       if (liveRole !== wantRole) {
         run.result.drift.push(
           `teams[${team.name}]: live role "${liveRole}" != declared "${wantRole}"; apply will set the declared permission`,

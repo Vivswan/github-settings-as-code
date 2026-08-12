@@ -6,8 +6,10 @@
  * compares `languages` as a set), and both name the 202 configuration run.
  */
 
+import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { type EndpointDecl, expand } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
   loosen,
@@ -36,6 +38,15 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
+/**
+ * The PATCH answer's fields this section reads: the 202 body's async
+ * configuration run, both fields absent on a plain 200 (whose body is the
+ * setup object). Nullish covers an empty body.
+ */
+const LiveConfigurationRun = z
+  .looseObject({ run_id: z.number().optional(), run_url: z.string().optional() })
+  .nullish();
+
 export const codeQualitySetupSection = {
   key: "code_quality_setup",
   undeclaredDefault: "untouched",
@@ -63,7 +74,7 @@ export const codeQualitySetupSection = {
         `code_quality_setup: PATCH ${expand(ENDPOINTS.update, ctx)}: ${patch.error.status} ${patch.error.message}. A code quality configuration run is already in progress on the repository; re-run the workflow after it finishes`,
       );
     }
-    const configurationRun = patch.data as { run_id?: number; run_url?: string } | null;
+    const configurationRun = parseLive(this, ENDPOINTS.update, LiveConfigurationRun, patch.data);
     if (configurationRun?.run_id !== undefined) {
       const url = configurationRun.run_url ? ` (${configurationRun.run_url})` : "";
       run.result.changes.push(
