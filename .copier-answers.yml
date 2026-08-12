@@ -16,6 +16,8 @@ modules:
 - pr-title
 - auto-assign
 - fuzzer
+- nightly
+nightly_label: nightly-failure
 private: false
 project_name: GitHub Settings as Code
 project_slug: github-settings-as-code
