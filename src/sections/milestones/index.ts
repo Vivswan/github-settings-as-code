@@ -5,8 +5,8 @@
  * `undeclared: delete` form hardens that to deletion, detachment included.
  */
 
-import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import { type MilestoneConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import { type MilestoneConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -19,7 +19,7 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 
 interface LiveMilestone {
   number: number;

@@ -16,6 +16,7 @@
 
 import { MAX_PINNED_ENVIRONMENTS } from "../../../src/schema.js";
 import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
+import { milestonesMockHandlers } from "../../../src/sections/milestones/mock.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG } from "../constants.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "./secrets.js";
@@ -63,7 +64,6 @@ import {
   maskedConfig,
   maskHookSecret,
   mintSecretScanningVersion,
-  nextNumber,
   noContent,
   ok,
   orgProbeHandler,
@@ -985,39 +985,7 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // milestones -------------------------------------------------------------
-  "milestones.list": ({ state, query }) => ok(slicePage(state.milestones, query)),
-  "milestones.create": ({ state, body }) => {
-    const payload = asObject(body);
-    const number = nextNumber(state.milestones);
-    const milestone: Json = {
-      id: state.nextId++,
-      number,
-      state: "open",
-      description: null,
-      ...payload,
-    };
-    state.milestones.push(milestone);
-    return { status: 201, body: milestone };
-  },
-  "milestones.update": ({ state, param, body }) => {
-    const number = param("milestone_number");
-    const milestone = state.milestones.find((m) => String(m.number) === number);
-    if (!milestone) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    Object.assign(milestone, asObject(body));
-    return ok(milestone);
-  },
-  "milestones.remove": ({ state, param }) => {
-    const number = param("milestone_number");
-    const index = state.milestones.findIndex((m) => String(m.number) === number);
-    if (index < 0) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    state.milestones.splice(index, 1);
-    return noContent();
-  },
+  // milestones: moved to src/sections/milestones/mock.ts
 
   // interaction limits -------------------------------------------------------
   "interaction_limits.get": ({ state }) =>
@@ -1878,6 +1846,7 @@ interface SectionMockFragment {
  */
 const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: labelsMockHandlers },
+  { rest: milestonesMockHandlers },
   { rest: UNMOVED_SECTION_HANDLERS, graphql: UNMOVED_SECTION_GRAPHQL_HANDLERS },
 ];
 

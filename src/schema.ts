@@ -31,9 +31,11 @@
 
 import { z } from "zod";
 import { LabelConfig } from "./sections/labels/schema.js";
+import { MilestoneConfig } from "./sections/milestones/schema.js";
 import type { MustBeNever } from "./types.js";
 
 export { LabelConfig } from "./sections/labels/schema.js";
+export { MilestoneConfig } from "./sections/milestones/schema.js";
 export type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "./types.js";
 
 /**
@@ -797,19 +799,6 @@ export const TeamConfig = z
   )
   .meta({ id: "TeamConfig" });
 export type TeamConfig = z.infer<typeof TeamConfig>;
-
-export const MilestoneConfig = z
-  .object({
-    title: z.string().describe("The milestone title, the natural key."),
-    description: z.string().optional().describe("Longer explanation of the milestone."),
-    state: z
-      .enum(["open", "closed"])
-      .optional()
-      .describe("Open or closed; untouched unless declared."),
-  })
-  .describe("One milestone, matched by title.")
-  .meta({ id: "MilestoneConfig" });
-export type MilestoneConfig = z.infer<typeof MilestoneConfig>;
 
 export const ActionsVariableConfig = z
   .object({
