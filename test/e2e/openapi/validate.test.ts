@@ -269,7 +269,9 @@ describe("undocumented-route exemption", () => {
 
   test("excludeUndocumented removes declared paths and throws on a stale entry", () => {
     expect(excludeUndocumented(new Set(["/a", "/b"]), ["/b"])).toEqual(["/a"]);
-    expect(() => excludeUndocumented(new Set(["/a"]), ["/gone"])).toThrow(/stale entry/);
+    expect(() => excludeUndocumented(new Set(["/a"]), ["/gone"])).toThrow(
+      /fix or delete that gap file/,
+    );
   });
 
   test("USED_PATHS no longer carries the undocumented LFS path", () => {
@@ -356,7 +358,10 @@ describe("OpenApiValidator against the fetched spec", () => {
       const pathItem = spec.paths?.[path];
       const operation = pathItem?.[method];
       if (!operation) {
-        continue; // supplemental routes are absent from the spec
+        // Only the spec-undocumented supplemental routes miss here (LFS,
+        // the documentedInSpec: false gap); the other supplemental routes
+        // ARE in the trimmed spec and get checked below.
+        continue;
       }
       const parameters = [...(operation.parameters ?? []), ...(pathItem?.parameters ?? [])];
       const perPage = parameters.map(asParam).find((p) => p.name === "per_page");

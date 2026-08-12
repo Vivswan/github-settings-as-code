@@ -14,6 +14,7 @@ import type {
   UndeclaredPolicyList,
   UndeclaredPolicySection,
 } from "../schema.js";
+import type { SupplementalRoute } from "../upstream-gaps/index.js";
 
 export class PermissionDenied extends Error {
   constructor(
@@ -155,44 +156,6 @@ export function grantFor(
   const grant = `grant ${orgClause}${repoClause}`;
   return caveat ? `${grant}; ${caveat}` : grant;
 }
-
-/**
- * Routes GitHub documents but the pinned @octokit/types release does not
- * carry yet (its release cadence trails the API). Only the route STRING is
- * consumed (never octokit's parameter/response typing), so a literal union
- * is enough. The _SupplementalRoutesStillMissing pin below turns the
- * per-bump audit into a compile error: delete entries the upstream
- * Endpoints map has gained.
- */
-type SupplementalRoute =
-  | "PUT /repos/{owner}/{repo}/lfs"
-  | "DELETE /repos/{owner}/{repo}/lfs"
-  | "GET /repos/{owner}/{repo}/secret-scanning/custom-patterns"
-  | "POST /repos/{owner}/{repo}/secret-scanning/custom-patterns"
-  | "PATCH /repos/{owner}/{repo}/secret-scanning/custom-patterns/{pattern_id}"
-  | "DELETE /repos/{owner}/{repo}/secret-scanning/custom-patterns"
-  | "GET /repos/{owner}/{repo}/agents/secrets"
-  | "GET /repos/{owner}/{repo}/agents/secrets/public-key"
-  | "PUT /repos/{owner}/{repo}/agents/secrets/{secret_name}"
-  | "DELETE /repos/{owner}/{repo}/agents/secrets/{secret_name}"
-  | "GET /repos/{owner}/{repo}/agents/variables"
-  | "POST /repos/{owner}/{repo}/agents/variables"
-  | "PATCH /repos/{owner}/{repo}/agents/variables/{name}"
-  | "DELETE /repos/{owner}/{repo}/agents/variables/{name}"
-  | "GET /repos/{owner}/{repo}/code-quality/setup"
-  | "PATCH /repos/{owner}/{repo}/code-quality/setup"
-  | "GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap"
-  | "PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap"
-  | "GET /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list"
-  | "PUT /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list"
-  | "DELETE /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list";
-
-/**
- * The audit above, enforced by the compiler: a supplemental route that HAS
- * landed in the pinned @octokit/types Endpoints map fails here on the bump,
- * naming the entry to delete (the _UnlistedSection idiom from schema.ts).
- */
-type _SupplementalRoutesStillMissing = MustBeNever<Extract<SupplementalRoute, keyof Endpoints>>;
 
 /**
  * A GitHub REST route as octokit spells it: "METHOD /path/{param}". Using

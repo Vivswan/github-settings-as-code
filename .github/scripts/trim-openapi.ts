@@ -144,7 +144,7 @@ async function main(): Promise<number> {
   const nowDocumented = UNDOCUMENTED_PATHS.filter((path) => doc.paths[path] !== undefined);
   if (nowDocumented.length > 0) {
     throw new Error(
-      `the upstream descriptor at ${UPSTREAM_REF} now documents: ${nowDocumented.join(", ")}. Remove these from UNDOCUMENTED_ROUTES in test/e2e/openapi/paths.ts and re-run, so the validator covers them`,
+      `the upstream descriptor at ${UPSTREAM_REF} now documents: ${nowDocumented.join(", ")}. Flip documentedInSpec to true on the owning gap file in src/upstream-gaps/ and re-run, so the validator covers them`,
     );
   }
   const { trimmed, kept, missing } = trimPaths(doc);

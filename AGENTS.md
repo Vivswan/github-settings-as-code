@@ -121,6 +121,10 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   section key (or that maps to several sections) needs a hand-written entry in
   `SPECIAL_SECTION_FILES`, and the map's unit test fails if a section key has no
   file mapped to it.
+- `src/upstream-gaps/` holds one file per GitHub feature whose routes
+  @octokit/types does not type yet. Each file's tripwire fails typecheck
+  naming the file when octokit catches up; the auto-fix workflow deletes
+  it automatically (mechanics in the folder's index.ts header).
 - The `release` job in ci.yml is deliberately NOT in all-green's `needs`:
   it runs downstream of the gate (calling release-please.yml via
   workflow_call), so releases and release-PR refreshes only happen on a

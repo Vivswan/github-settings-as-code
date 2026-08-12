@@ -114,6 +114,8 @@ export const ALL_SELECTING_PREFIXES = [
   "src/action/",
   "src/discovery/",
   "src/report/",
+  // Cross-cutting: gap files define supplemental route typing across sections.
+  "src/upstream-gaps/",
   "src/io.ts",
   "src/main.ts",
   "src/schema.ts",

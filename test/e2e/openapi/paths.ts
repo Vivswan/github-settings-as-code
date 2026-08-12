@@ -9,8 +9,9 @@
  */
 
 import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";
-import { endpointPath, type Route } from "../../../src/sections/contract.js";
+import { endpointPath } from "../../../src/sections/contract.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
+import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 
 /**
  * Path templates the action calls outside any section: the repository probe
@@ -30,19 +31,17 @@ export const CORE_PATHS: readonly string[] = [
 /**
  * Routes the action calls that GitHub's api.github.com OpenAPI descriptor
  * does not document (verified absent at the pinned UPSTREAM_REF; the
- * endpoints are real: https://docs.github.com/en/rest/repos/lfs). Their
- * paths are excluded from USED_PATHS so trim-openapi does not hard-error,
- * and the e2e validator exempts exactly these METHOD+path pairs from the
- * unknown-route check - an unlisted method on the same path still fails.
- * Staleness is checked in both directions: excludeUndocumented() below
- * throws when an entry is no longer a declared endpoint path, and
- * trim-openapi.ts errors when the upstream descriptor starts documenting
- * one (delete the entry and re-run).
+ * endpoints are real: https://docs.github.com/en/rest/repos/lfs), derived
+ * from the gap files in src/upstream-gaps/ whose documentedInSpec is false.
+ * Their paths are excluded from USED_PATHS so trim-openapi does not
+ * hard-error, and the e2e validator exempts exactly these METHOD+path pairs
+ * from the unknown-route check - an unlisted method on the same path still
+ * fails. Staleness is checked in both directions: excludeUndocumented()
+ * below throws when an entry is no longer a declared endpoint path, and
+ * trim-openapi.ts errors when the upstream descriptor starts documenting one
+ * (flip the gap's documentedInSpec to true and re-run).
  */
-export const UNDOCUMENTED_ROUTES: readonly Route[] = [
-  "PUT /repos/{owner}/{repo}/lfs",
-  "DELETE /repos/{owner}/{repo}/lfs",
-];
+export { UNDOCUMENTED_ROUTES };
 
 /** The distinct path templates of UNDOCUMENTED_ROUTES. */
 export const UNDOCUMENTED_PATHS: readonly string[] = [
@@ -62,7 +61,7 @@ export function excludeUndocumented(
   for (const entry of undocumented) {
     if (!remaining.has(entry)) {
       throw new Error(
-        `UNDOCUMENTED_PATHS entry "${entry}" is not a declared endpoint path; delete the stale entry`,
+        `UNDOCUMENTED_PATHS entry "${entry}" is not a declared endpoint path; the owning gap file in src/upstream-gaps/ names a route no endpoint declares - fix or delete that gap file`,
       );
     }
     remaining.delete(entry);
