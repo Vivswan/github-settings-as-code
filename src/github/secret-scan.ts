@@ -6,6 +6,8 @@
  * fields are masked in traces - must hold independent of any transport.
  */
 
+import { nonPlainKind } from "../plain-data.js";
+
 /** The constant written over a secret-bearing request field in the debug trace. */
 const SECRET_FIELD_PLACEHOLDER = "***";
 
@@ -49,23 +51,6 @@ function renderKeyPath(path: readonly string[]): string {
       /^\d+$/.test(segment) ? `[${segment}]` : index === 0 ? segment : `.${segment}`,
     )
     .join("");
-}
-
-/** The value class of a non-plain value, without running any of its code. */
-function nonPlainKind(value: unknown): string {
-  if (typeof value !== "object" || value === null) {
-    return `a ${typeof value}`;
-  }
-  // Prototype comparison only - the same reflective read
-  // isPlainJsonContainer already performs; no payload method is dispatched.
-  const proto = Object.getPrototypeOf(value);
-  if (proto === Date.prototype) {
-    return "a Date, e.g. from a YAML !!timestamp tag";
-  }
-  if (proto === Uint8Array.prototype) {
-    return "binary data, e.g. from a YAML !!binary tag";
-  }
-  return "a non-plain object";
 }
 
 /**

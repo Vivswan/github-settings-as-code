@@ -20,6 +20,7 @@ import {
 import { parseBypassActor } from "../../../src/sections/branches/schema.js";
 import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/shared/roles.js";
 import type { MustBeNever } from "../../../src/types.js";
+import { ADMIN_OWNER } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
 import type { OwnerKind, PermissionMask } from "../schema.js";
@@ -1194,8 +1195,8 @@ export const BYPASS_ACTOR_USERS: readonly string[] = ["octocat", "release-bot"];
  * (GitHub's nullable-field shape).
  */
 export const BYPASS_ACTOR_TEAMS: readonly string[] = [
-  "e2e-owner/platform",
-  "e2e-owner/release-guild",
+  `${ADMIN_OWNER}/platform`,
+  `${ADMIN_OWNER}/release-guild`,
 ];
 
 /**

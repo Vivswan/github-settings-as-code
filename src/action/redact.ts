@@ -13,7 +13,7 @@
 import type { Target } from "../discovery/targets.js";
 import type { RepoRunResult } from "../engine/orchestrate.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
-import type { Io } from "../io.js";
+import type { AnnotationLevel, Io } from "../io.js";
 import type { SectionKey } from "../schema.js";
 
 /** The `private-repos` input values; the single source its type derives from. */
@@ -251,7 +251,7 @@ export function planRedaction(
 
 /** One recorded line from a captured Io: annotations carry a level, log lines do not. */
 export interface CapturedLine {
-  level?: "notice" | "warning" | "error";
+  level?: AnnotationLevel;
   line: string;
 }
 

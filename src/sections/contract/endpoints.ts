@@ -136,10 +136,10 @@ export function toleratedStatuses(endpoint: EndpointDecl): number[] {
 
 /**
  * Split a path into segments, dropping any query string and the leading
- * slash. Shared by the template matcher and its callers so both strip the
- * query the same way.
+ * slash. Shared by the template matcher and its callers (the e2e mock's
+ * dispatcher included) so every consumer strips the query the same way.
  */
-function pathSegments(path: string): string[] {
+export function pathSegments(path: string): string[] {
   const withoutQuery = path.split("?")[0] ?? "";
   return withoutQuery.split("/").filter((segment) => segment.length > 0);
 }

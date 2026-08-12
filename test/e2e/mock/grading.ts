@@ -11,7 +11,13 @@ import { endpointKind } from "../../../src/sections/contract/endpoints.js";
 import { endpointPermission } from "../../../src/sections/contract/module.js";
 import type { SectionPermission } from "../../../src/sections/contract/permissions.js";
 import { SECTIONS, type TaggedEndpoint } from "../../../src/sections/registry.js";
-import type { DenialStyle, MaskGrade, MaskKey, PermissionMask } from "../schema.js";
+import {
+  type DenialStyle,
+  GRADE_RANK,
+  type MaskGrade,
+  type MaskKey,
+  type PermissionMask,
+} from "../schema.js";
 import type { GraphqlErrorReply, MockResponse } from "./support.js";
 
 /** Look up a section module by key (for endpointPermission resolution). */
@@ -38,8 +44,6 @@ export function endpointRequirement(endpoint: TaggedEndpoint): Requirement {
 }
 
 // --- Permission mask grading ---------------------------------------------
-
-const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 
 /**
  * A token permission mask: resource -> grade (see PermissionMask in

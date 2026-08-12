@@ -9,7 +9,7 @@
 
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { FILTER_INPUTS } from "../../src/action/inputs.js";
 import { RESERVED_REF_PREFIXES } from "../../src/action/secret-refs.js";
@@ -469,6 +469,12 @@ const ScenarioSchema = z
 
 export type MaskKey = z.infer<typeof MaskKeySchema>;
 export type MaskGrade = z.infer<typeof MaskGradeSchema>;
+/**
+ * The grade ordering, beside the vocabulary it ranks. Shared DATA for the
+ * mock's permission gate and the oracle - unlike their grading predicates,
+ * which stay separate on purpose (deliberately independent mirrors).
+ */
+export const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 /** A token permission mask: MaskKey -> granted MaskGrade, closed vocabulary. */
 export type PermissionMask = z.infer<typeof TokenPermissionsSchema>;
 export type DenialStyle = z.infer<typeof DenialStyleSchema>;
@@ -500,6 +506,30 @@ export type Scenario = Omit<
   "settings" | "settings_raw" | "repos" | "expect"
 > &
   SettingsSource & { repos?: Record<string, MultiRepo>; expect: Expect };
+
+/**
+ * The raw settings.yml body a settings source produces: `settings_raw`
+ * verbatim when set (raw text can be unparseable YAML or a non-mapping
+ * document, which a serialized object cannot produce), else the settings
+ * object serialized to YAML, else null (a target with NO settings file).
+ * The ONE derivation the single-repo runner and the multi-repo contents
+ * endpoint share; a Scenario always carries one of the two sources, so its
+ * overload never yields null.
+ */
+export function settingsYamlFor(source: SettingsSource): string;
+export function settingsYamlFor(source: MultiSettingsSource): string | null;
+export function settingsYamlFor(source: {
+  settings?: Record<string, unknown> | null;
+  settings_raw?: string;
+}): string | null {
+  if (source.settings_raw !== undefined) {
+    return source.settings_raw;
+  }
+  if (source.settings === null || source.settings === undefined) {
+    return null;
+  }
+  return stringifyYaml(source.settings);
+}
 
 /**
  * Where a scenario re-types MARKER_LABEL_CONFIG as fixture data because .yml

@@ -31,7 +31,7 @@ import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { isWriteRequest } from "./mock/dispatch.js";
 import { type ServerOptions, startMockServer } from "./mock/server.js";
 import { sharedValidator } from "./openapi/validate.js";
-import type { Scenario } from "./schema.js";
+import { type Scenario, settingsYamlFor } from "./schema.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 /**
@@ -286,18 +286,6 @@ function expectedReposResult(scenario: Scenario): Record<string, string> | null 
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
-/**
- * The settings.yml body the single-repo child reads: `settings_raw` verbatim
- * when set (raw text can be unparseable YAML or a non-mapping document, which
- * a serialized object cannot produce), else the settings object serialized to
- * YAML. Mirrors settingsYamlFor in mock/server.ts for multi-repo targets.
- */
-function settingsFileBody(scenario: Scenario): string {
-  return scenario.settings_raw !== undefined
-    ? scenario.settings_raw
-    : stringifyYaml(scenario.settings);
-}
-
 /** Build the child environment from scratch: nothing leaks from process.env. */
 function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.ProcessEnv {
   const inputs = scenario.inputs ?? {};
@@ -407,18 +395,23 @@ function expandRepo(pattern: string): string {
   return pattern.replaceAll("{repo}", REPO_SLUG);
 }
 
+/** Drop every line starting with `prefix`; every other line is matched as-is. */
+function stripLines(text: string, prefix: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !line.startsWith(prefix))
+    .join("\n");
+}
+
 /**
  * Strip the `::add-mask::<value>` workflow-command lines core.setSecret emits.
  * Those lines legitimately carry the raw slug so the real GitHub runner can
  * mask it in every later line; the runner consumes and never echoes them, so
  * the harness must drop them before checking that a redacted slug leaked
- * NOWHERE else on stdout. Every other line is matched as-is.
+ * NOWHERE else on stdout.
  */
 export function stripMaskLines(stdout: string): string {
-  return stdout
-    .split("\n")
-    .filter((line) => !line.startsWith("::add-mask::"))
-    .join("\n");
+  return stripLines(stdout, "::add-mask::");
 }
 
 /**
@@ -430,10 +423,7 @@ export function stripMaskLines(stdout: string): string {
  * only in a debug trace does not prove the rendered detail was ever produced.
  */
 export function stripDebugLines(text: string): string {
-  return text
-    .split("\n")
-    .filter((line) => !line.startsWith("::debug::"))
-    .join("\n");
+  return stripLines(text, "::debug::");
 }
 
 /**
@@ -533,7 +523,7 @@ export async function runScenario(
         : {}),
       ...opts?.serverOptions,
     });
-    writeFileSync(join(dir, "settings.yml"), settingsFileBody(scenario));
+    writeFileSync(join(dir, "settings.yml"), settingsYamlFor(scenario));
     first = await invoke(scenario, dir, handle.url);
     // Snapshot the fault fire counts NOW: every other report field (exit code,
     // outputs, reposResult) describes this primary invocation, so a fault that

@@ -5,6 +5,7 @@
 
 import { appendFileSync } from "node:fs";
 import type { RepoResult, SectionOutcome } from "../engine/orchestrate.js";
+import { markdownCell } from "../report/markdown.js";
 import { type PublicTargetView, REDACTED_NOTE, redactOutcomes } from "./redact.js";
 
 // Typed over every status both summary writers can meet, so a new status
@@ -19,21 +20,13 @@ const STATUS_ICON: Record<SectionOutcome["status"] | RepoResult, string> = {
   failed: "x",
 };
 
-function summaryCell(text: string): string {
-  // Escape the escape character first, then the table delimiter.
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/\|/g, "\\|")
-    .replace(/\r\n?|\n/g, " ");
-}
-
 /** The fields the section table renders; both SectionOutcome and the public view meet it. */
 type OutcomeRow = Pick<SectionOutcome, "key" | "status" | "detail">;
 
 function outcomeRows(outcomes: OutcomeRow[]): string[] {
   const rows = ["| Section | Status | Detail |", "|---|---|---|"];
   for (const outcome of outcomes) {
-    const detail = outcome.detail.map(summaryCell).join("<br>") || "-";
+    const detail = outcome.detail.map(markdownCell).join("<br>") || "-";
     rows.push(
       `| ${outcome.key} | :${STATUS_ICON[outcome.status]}: ${outcome.status} | ${detail} |`,
     );
@@ -90,13 +83,13 @@ export function writeMultiSummary(views: PublicTargetView[], mode: string): void
     ];
     for (const view of views) {
       lines.push(
-        `| ${summaryCell(view.display)} | ${view.source} | :${STATUS_ICON[view.result]}: ${view.result} |`,
+        `| ${markdownCell(view.display)} | ${view.source} | :${STATUS_ICON[view.result]}: ${view.result} |`,
       );
     }
     for (const view of views) {
-      lines.push("", `### ${summaryCell(view.display)} (${view.result})`, "");
+      lines.push("", `### ${markdownCell(view.display)} (${view.result})`, "");
       if (view.note) {
-        lines.push(summaryCell(view.note), "");
+        lines.push(markdownCell(view.note), "");
       }
       if (view.outcomes.length > 0) {
         lines.push(...outcomeRows(view.outcomes));

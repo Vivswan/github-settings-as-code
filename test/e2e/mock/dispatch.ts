@@ -7,7 +7,11 @@
  */
 
 import type { SectionKey } from "../../../src/schema.js";
-import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
+import {
+  endpointMethod,
+  endpointPath,
+  pathSegments,
+} from "../../../src/sections/contract/endpoints.js";
 import {
   allEndpoints,
   allGraphqlOps,
@@ -49,8 +53,8 @@ function matchTemplateParams(
   template: string,
   concretePath: string,
 ): Record<string, string> | null {
-  const templateSegs = pathSegmentsOf(template);
-  const pathSegs = pathSegmentsOf(concretePath);
+  const templateSegs = pathSegments(template);
+  const pathSegs = pathSegments(concretePath);
   if (templateSegs.length !== pathSegs.length) {
     return null;
   }
@@ -72,12 +76,6 @@ function matchTemplateParams(
     }
   }
   return params;
-}
-
-/** A path's non-empty segments, query string dropped (matchesTemplate's split). */
-function pathSegmentsOf(path: string): string[] {
-  const withoutQuery = path.split("?")[0] ?? "";
-  return withoutQuery.split("/").filter((segment) => segment.length > 0);
 }
 
 /**

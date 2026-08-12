@@ -6,9 +6,12 @@
  * so this module depends on no action-layer types.
  */
 
+import type { AnnotationLevel } from "../io.js";
+import { markdownCell } from "./markdown.js";
+
 /** One captured Io line: annotations carry a level, plain log lines do not. */
 export interface TranscriptLine {
-  level?: "notice" | "warning" | "error";
+  level?: AnnotationLevel;
   line: string;
 }
 
@@ -39,19 +42,6 @@ export interface ReportInput {
 }
 
 /**
- * Escape a markdown table cell the same way summary.ts's summaryCell does:
- * backslashes FIRST (a bare backslash before an escaped pipe would read as an
- * escaped backslash plus a live pipe and split the row), then pipes, then
- * newlines flattened to spaces.
- */
-function cell(text: string): string {
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/\|/g, "\\|")
-    .replace(/\r\n?|\n/g, " ");
-}
-
-/**
  * A code fence guaranteed longer than any backtick run inside the content,
  * so a transcript line can never terminate the transcript block early.
  */
@@ -74,12 +64,12 @@ export function composeReport(input: ReportInput): string {
     "",
     "| | |",
     "|---|---|",
-    `| Target | ${cell(input.target)} |`,
-    `| Admin repository | ${cell(input.adminRepo)} |`,
-    `| Run | ${cell(input.runUrl)} |`,
-    `| Mode | ${cell(input.mode)} |`,
-    `| Result | ${cell(input.result)} |`,
-    `| Generated | ${cell(input.timestamp)} |`,
+    `| Target | ${markdownCell(input.target)} |`,
+    `| Admin repository | ${markdownCell(input.adminRepo)} |`,
+    `| Run | ${markdownCell(input.runUrl)} |`,
+    `| Mode | ${markdownCell(input.mode)} |`,
+    `| Result | ${markdownCell(input.result)} |`,
+    `| Generated | ${markdownCell(input.timestamp)} |`,
     "",
     "## Sections",
     "",
@@ -89,8 +79,8 @@ export function composeReport(input: ReportInput): string {
   } else {
     lines.push("| Section | Status | Detail |", "|---|---|---|");
     for (const outcome of input.outcomes) {
-      const detail = outcome.detail.map(cell).join("<br>");
-      lines.push(`| ${cell(outcome.key)} | ${cell(outcome.status)} | ${detail} |`);
+      const detail = outcome.detail.map(markdownCell).join("<br>");
+      lines.push(`| ${markdownCell(outcome.key)} | ${markdownCell(outcome.status)} | ${detail} |`);
     }
   }
   lines.push("", "## Transcript", "");

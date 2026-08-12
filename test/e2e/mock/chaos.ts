@@ -80,6 +80,26 @@ export function assertFaultKeys(
 }
 
 /**
+ * Consume one firing from a per-key `times` budget (default 1; "always" =
+ * every match), counted in `counts` and mutated in place: returns the
+ * pre-increment fire index, or null when the budget is spent. The ONE
+ * counting rule faults and corruptions share.
+ */
+function takeBudgeted(
+  counts: Map<string, number>,
+  key: string,
+  times: number | "always" | undefined,
+): number | null {
+  const fired = counts.get(key) ?? 0;
+  const limit = times ?? 1;
+  if (limit !== "always" && fired >= limit) {
+    return null;
+  }
+  counts.set(key, fired + 1);
+  return fired;
+}
+
+/**
  * Consume one firing of the fault registered for `key`, when one remains: each
  * fault fires on the first `times` (default 1; "always" = every match)
  * matching requests, counted in `faultCounts` (which doubles as the
@@ -95,13 +115,8 @@ export function takeFault(
   if (!fault) {
     return null;
   }
-  const fired = options.faultCounts.get(key) ?? 0;
-  const limit = fault.times ?? 1;
-  if (limit !== "always" && fired >= limit) {
-    return null;
-  }
-  options.faultCounts.set(key, fired + 1);
-  return { kind: fault.kind, fired };
+  const fired = takeBudgeted(options.faultCounts, key, fault.times);
+  return fired === null ? null : { kind: fault.kind, fired };
 }
 
 /**
@@ -119,12 +134,9 @@ export function takeCorruption(
   if (!corrupt || corrupt.key !== key) {
     return null;
   }
-  const done = options.corruptCounts.get(key) ?? 0;
-  const limit = corrupt.times ?? 1;
-  if (limit !== "always" && done >= limit) {
+  if (takeBudgeted(options.corruptCounts, key, corrupt.times) === null) {
     return null;
   }
-  options.corruptCounts.set(key, done + 1);
   return applyCorruption(corrupt.mode, response, { ...log, status: response.status });
 }
 

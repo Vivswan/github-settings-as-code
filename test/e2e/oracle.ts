@@ -13,7 +13,7 @@ import type { SectionPermission } from "../../src/sections/contract/permissions.
 import { SECTIONS } from "../../src/sections/registry.js";
 import { DENIAL_SEMANTICS } from "./denial-semantics.js";
 import { displayKeyOf, type MultiScenarioMeta, type ScenarioMeta } from "./generators.js";
-import type { DenialStyle, MaskGrade, MaskKey } from "./schema.js";
+import { type DenialStyle, GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
 
 /** A section outcome the step summary can report. */
 type Outcome = "applied" | "clean" | "drift" | "skipped" | "failed" | "excluded";
@@ -41,8 +41,6 @@ const READS_REQUIRE_WRITE: ReadonlySet<SectionKey> = new Set(
     return readGates.length > 0 && readGates.every((gate) => gate === "write");
   }).map((section) => section.key),
 );
-
-const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 
 /**
  * Sections whose resources exist only under an ORGANIZATION owner: on a

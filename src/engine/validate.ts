@@ -8,6 +8,7 @@
  * section's zod shape, e.g. actions.cache).
  */
 
+import { nonPlainKind } from "../plain-data.js";
 import { SECTION_KEYS } from "../schema.js";
 import { sectionModule, sectionShape } from "../sections/registry.js";
 
@@ -43,15 +44,7 @@ function findNonPlain(value: unknown, path: string, seen: WeakSet<object>): stri
   }
   const proto = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== null) {
-    const kind =
-      proto === Date.prototype
-        ? "a Date, e.g. from a YAML !!timestamp tag"
-        : proto === Uint8Array.prototype
-          ? "binary data, e.g. from a YAML !!binary tag"
-          : proto === Set.prototype
-            ? "a set, e.g. from a YAML !!set tag"
-            : "a non-plain object";
-    return `${path} is not plain YAML data (${kind}); replace it with a plain value`;
+    return `${path} is not plain YAML data (${nonPlainKind(value)}); replace it with a plain value`;
   }
   for (const [key, entry] of Object.entries(value)) {
     const hit = findNonPlain(entry, `${path}.${key}`, seen);

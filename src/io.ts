@@ -4,8 +4,12 @@
  * action layer (which implements it over @actions/core) share one
  * contract without importing each other.
  */
+
+/** The level of one workflow annotation, as the Io port (and its captures) spell it. */
+export type AnnotationLevel = "notice" | "warning" | "error";
+
 export interface Io {
-  annotate(level: "notice" | "warning" | "error", message: string): void;
+  annotate(level: AnnotationLevel, message: string): void;
   log(line: string): void;
   /**
    * Register a value the runner must mask (`***`) wherever it appears in

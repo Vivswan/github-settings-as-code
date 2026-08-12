@@ -204,7 +204,7 @@ const CLASS_BY_METHOD: Record<string, MutationClass> = {
  * Structural validity of the summary's section table: a header row, a
  * separator row, and data rows that all carry the SAME cell-separator count,
  * with at least `expectedRows` data rows. The engine escapes cells with
- * backslash-then-pipe (summary.ts summaryCell), so a pipe is a real delimiter
+ * backslash-then-pipe (markdownCell in src/report/markdown.ts), so a pipe is a real delimiter
  * only after an EVEN run of backslashes - under HOSTILE_NAMES a broken escape
  * changes a row's separator count, the regression class nothing else watches.
  */

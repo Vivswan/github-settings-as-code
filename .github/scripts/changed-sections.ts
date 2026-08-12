@@ -104,6 +104,7 @@ export const ALL_SELECTING_PREFIXES = [
   "src/upstream-gaps/",
   "src/io.ts",
   "src/main.ts",
+  "src/plain-data.ts",
   "src/schema.ts",
   "src/types.ts",
   "test/e2e/",
