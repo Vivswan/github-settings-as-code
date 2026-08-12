@@ -58,11 +58,14 @@ describe("COVERAGE Supported table", () => {
   });
 
   test("each knobbed section's kept/deleted-by-default wording matches its undeclaredDefault", () => {
-    // SectionMeta.undeclaredDefault's JSDoc (src/sections/contract.ts) names
-    // this table as a consumer of the declaration; this test is that guard.
-    // Both names must stay in that JSDoc (word order free) so the pointer and
-    // the guard cannot part ways silently.
-    const contractSrc = readFileSync(join(ROOT, "src", "sections", "contract.ts"), "utf8");
+    // SectionMeta.undeclaredDefault's JSDoc (src/sections/contract/module.ts)
+    // names this table as a consumer of the declaration; this test is that
+    // guard. Both names must stay in that JSDoc (word order free) so the
+    // pointer and the guard cannot part ways silently.
+    const contractSrc = readFileSync(
+      join(ROOT, "src", "sections", "contract", "module.ts"),
+      "utf8",
+    );
     const undeclaredDoc = contractSrc.match(
       /\/\*\*([^*]|\*(?!\/))*\*\/\s*\n\s*readonly undeclaredDefault:/m,
     )?.[0];

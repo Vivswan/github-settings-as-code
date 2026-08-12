@@ -455,8 +455,16 @@ describe("schema.ts file-header additions claim", () => {
   });
 });
 
-describe("contract.ts README-heading references", () => {
-  const contractSrc = readFileSync(join(ROOT, "src", "sections", "contract.ts"), "utf8");
+describe("section-contract README-heading references", () => {
+  const contractDir = join(ROOT, "src", "sections", "contract");
+  const contractSrc = [
+    join(ROOT, "src", "sections", "contract.ts"),
+    ...readdirSync(contractDir)
+      .filter((file) => file.endsWith(".ts"))
+      .map((file) => join(contractDir, file)),
+  ]
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
   // Headings count only outside fenced code blocks: the README carries a
   // "# yaml-language-server:" line inside a yaml fence that is not a heading.
   const readmeProse = readme.replace(/```[\s\S]*?```/g, "");
@@ -473,18 +481,18 @@ describe("contract.ts README-heading references", () => {
       }
       named.push(...[...line.slice(mention).matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? ""));
     }
-    // Zero extracted names while contract.ts still mentions the README means
+    // Zero extracted names while the contract still mentions the README means
     // the extraction went blind (e.g. a rewrap split a mention from its
     // quotes); fail loudly rather than pass on an empty list.
     expect(
       named.length,
-      "contract.ts mentions the README but no quoted heading name was extracted; fix the JSDoc line wrap or this extraction",
+      "the section contract mentions the README but no quoted heading name was extracted; fix the JSDoc line wrap or this extraction",
     ).toBeGreaterThan(0);
     for (const name of named) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       expect(
         new RegExp(`^#{1,6} ${escaped}\\s*$`, "m").test(readmeProse),
-        `contract.ts JSDoc names the README's "${name}", but README.md has no such heading`,
+        `a section-contract JSDoc names the README's "${name}", but README.md has no such heading`,
       ).toBe(true);
     }
   });
