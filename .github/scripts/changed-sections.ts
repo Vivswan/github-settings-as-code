@@ -73,16 +73,6 @@ export const SPECIAL_SECTION_FILES: Record<string, SectionKey[]> = {
 export const SHARED_FAN_OUT: Record<string, SectionKey[]> = {
   // roles.ts is the shared permission-vocabulary normalizer for both sections.
   "roles.ts": ["collaborators", "teams"],
-  // schema-helpers.ts holds the sealed-secret config-schema helpers shared by
-  // the four repository-level secret sections and by environments (root
-  // schema.ts builds EnvironmentSecretConfig's docs from them).
-  "schema-helpers.ts": [
-    "actions_secrets",
-    "dependabot_secrets",
-    "codespaces_secrets",
-    "agents_secrets",
-    "environments",
-  ],
   // secrets-engine.ts is the shared sealing/reconciliation engine, consumed
   // by the four repository-level secret sections and by environments (its
   // nested per-environment secrets key).
@@ -92,6 +82,29 @@ export const SHARED_FAN_OUT: Record<string, SectionKey[]> = {
     "codespaces_secrets",
     "agents_secrets",
     "environments",
+  ],
+  // schema-helpers.ts holds the leaf zod helpers the per-section schema
+  // files and root schema.ts share: knobbed() shapes the wrapped
+  // {undeclared, entries} form of every UNDECLARED_POLICY_SECTIONS value
+  // (and environments' nested lists), and the sealed-secret doc strings feed
+  // the secret families' configs, so a change fans out to all of them.
+  "schema-helpers.ts": [
+    "labels",
+    "rulesets",
+    "environments",
+    "autolinks",
+    "actions_secrets",
+    "dependabot_secrets",
+    "codespaces_secrets",
+    "agents_secrets",
+    "collaborators",
+    "milestones",
+    "actions_variables",
+    "agents_variables",
+    "webhooks",
+    "custom_properties",
+    "deploy_keys",
+    "secret_scanning_custom_patterns",
   ],
 };
 

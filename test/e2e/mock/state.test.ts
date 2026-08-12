@@ -16,7 +16,7 @@ import {
   classicViewOfRule,
   flattenProtection,
 } from "../../../src/sections/branches/index.js";
-import { flattenEnvironment } from "../../../src/sections/environments.js";
+import { flattenEnvironment } from "../../../src/sections/environments/index.js";
 import { roleForPermission } from "../../../src/sections/roles.js";
 import {
   applyRuleInput,
