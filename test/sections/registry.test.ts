@@ -961,3 +961,60 @@ describe("probeAbsent tolerance derivation", () => {
     await expect(probeAbsent(ctxWith(404), section, endpoint)).rejects.toThrow();
   });
 });
+
+describe("owner sensitivity", () => {
+  test('ownerSensitivity: "org" agrees with the tolerated-404 org probe on every section', () => {
+    // The bare GET /orgs/{org} probe with a tolerated 404 ("not an
+    // organization") is the MECHANISM behind the personal-account no-op the
+    // ownerSensitivity declaration models (the oracle folds on the
+    // declaration, the handler acts on the probe). The two must never
+    // disagree: a declared sensitivity without the probe would predict a
+    // no-op the handler cannot perform, and a probe without the declaration
+    // would hide the no-op from the oracle.
+    const ORG_PROBE = "GET /orgs/{org}";
+    for (const section of SECTIONS) {
+      const hasProbe = Object.values(section.endpoints).some(
+        (endpoint) => endpoint.route === ORG_PROBE && toleratedStatuses(endpoint).includes(404),
+      );
+      expect(
+        section.ownerSensitivity === "org",
+        `section "${section.key}": ownerSensitivity ("${section.ownerSensitivity ?? "default"}") and the tolerated-404 org probe (present: ${hasProbe}) must agree`,
+      ).toBe(hasProbe);
+    }
+  });
+
+  test("the org-only set is exactly teams and custom_properties today", () => {
+    const declared = SECTIONS.filter((s) => s.ownerSensitivity === "org").map((s) => s.key);
+    expect(declared.sort()).toEqual(["custom_properties", "teams"]);
+  });
+});
+
+describe("the section.role key space reserves ':'", () => {
+  /** The injectable section slice allEndpoints takes. */
+  type EndpointSlice = NonNullable<Parameters<typeof allEndpoints>[0]>[number];
+
+  function endpointSection(key: string, endpoints: EndpointSlice["endpoints"]): EndpointSlice {
+    return { key: key as (typeof SECTION_KEYS)[number], endpoints };
+  }
+  const LIST = { route: "GET /repos/{owner}/{repo}/labels", statuses: { 200: "x" } } as const;
+
+  test("a role containing ':' fails allEndpoints at construction", () => {
+    expect(() => allEndpoints([endpointSection("labels", { "ring:list": LIST })])).toThrow(
+      /role "ring:list" contains ":".*reserves.*scope prefix/,
+    );
+  });
+
+  test("a section key containing ':' fails both flatteners", () => {
+    expect(() => allEndpoints([endpointSection("prod:labels", { list: LIST })])).toThrow(
+      /section key "prod:labels" contains ":"/,
+    );
+    expect(() =>
+      allGraphqlOps([{ key: "prod:labels" as (typeof SECTION_KEYS)[number], endpoints: {} }]),
+    ).toThrow(/section key "prod:labels" contains ":"/);
+  });
+
+  test("the live registry's keys and roles are colon-free", () => {
+    expect(() => allEndpoints()).not.toThrow();
+    expect(() => allGraphqlOps()).not.toThrow();
+  });
+});

@@ -86,6 +86,21 @@ export type TaggedEndpoint = EndpointDecl & {
 };
 
 /**
+ * Construction-time guard on the "section.role" key space: ":" is RESERVED
+ * for a future scope prefix ("<scope>:<section>.<role>", where a scope could
+ * qualify a key by owner or ring), so no bare section key or role may
+ * contain it - a colon smuggled in today would be indistinguishable from a
+ * scoped key later. Both flattened views call this on every entry.
+ */
+function assertScopeFree(kind: "section key" | "role", value: string): void {
+  if (value.includes(":")) {
+    throw new Error(
+      `BUG: ${kind} "${value}" contains ":", which the "section.role" key space reserves for a future scope prefix ("<scope>:<section>.<role>"); rename it without a colon`,
+    );
+  }
+}
+
+/**
  * Every section's endpoints flattened into one dictionary keyed
  * `${sectionKey}.${role}` ("labels.update", "teams.org", ...). Keys are
  * globally unique by construction (section key + local role). This is the
@@ -96,11 +111,18 @@ export type TaggedEndpoint = EndpointDecl & {
  * objects are frozen: they are (or reference) the section declarations, which
  * must never mutate at runtime, so a consumer cannot corrupt the source
  * dictionaries through this view.
+ *
+ * `sections` is injectable so the scope-free assert is directly testable;
+ * production callers take the registry default.
  */
-export function allEndpoints(): Readonly<Record<string, TaggedEndpoint>> {
+export function allEndpoints(
+  sections: ReadonlyArray<Pick<SectionModule, "key" | "endpoints">> = SECTIONS,
+): Readonly<Record<string, TaggedEndpoint>> {
   const out: Record<string, TaggedEndpoint> = {};
-  for (const section of SECTIONS) {
+  for (const section of sections) {
+    assertScopeFree("section key", section.key);
     for (const [role, endpoint] of Object.entries(section.endpoints)) {
+      assertScopeFree("role", role);
       Object.freeze(endpoint.statuses);
       if (endpoint.permission && typeof endpoint.permission === "object") {
         Object.freeze(endpoint.permission);
@@ -144,7 +166,9 @@ export function allGraphqlOps(
   const out: Record<string, TaggedGraphqlOp> = {};
   const byName = new Map<string, string>();
   for (const section of sections) {
+    assertScopeFree("section key", section.key);
     for (const [role, op] of Object.entries(section.graphql ?? {})) {
+      assertScopeFree("role", role);
       const key = `${section.key}.${role}`;
       if (section.endpoints[role] !== undefined) {
         throw new Error(

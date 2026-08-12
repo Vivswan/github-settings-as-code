@@ -77,6 +77,19 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
    */
   readonly grantCaveat?: string;
   /**
+   * Owner-kind sensitivity. "org" marks a section whose resources exist
+   * only under an ORGANIZATION owner: its handler probes the owner (the
+   * bare GET /orgs/{org} endpoint, 404 tolerated) and NO-OPS with a note on
+   * a personal account, so check reports clean and apply reports applied
+   * there. Omitted (the default), the section works under any repository
+   * owner. The single source for owner-kind modeling outside the handler:
+   * the fuzz oracle's personal-account fold derives its section set from
+   * this, and the registry unit test pins the declaration to the org-probe
+   * endpoint that implements it - so a new org-only section declares it
+   * here and the consumers follow.
+   */
+  readonly ownerSensitivity?: "org";
+  /**
    * Every REST endpoint this section may call, keyed by role (list, create,
    * update, remove, probe, ...). Handlers build their paths by passing these
    * declarations to the request helpers; the mock server and USED_PATHS

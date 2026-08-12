@@ -44,6 +44,9 @@ export const teamsSection: SectionModule<"teams"> = {
   key: "teams",
   undeclaredDefault: "untouched",
   permission,
+  // Teams exist only under an organization owner; the org probe below
+  // implements the personal-account no-op this declares.
+  ownerSensitivity: "org",
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.teams),
   // Closed surface: the grant PUT accepts exactly one setting ("permission"),
