@@ -293,6 +293,29 @@ type _OperationDictionariesFlattened = MustBeNever<
 >;
 
 /**
+ * The check-mode note of a WRITE-ONLY section: one that declares no read
+ * operation at all, so check mode can verify nothing (and issues no request)
+ * while apply re-asserts the declared state on every run. Derived from the
+ * section's own operation list rather than restated per section: a read
+ * endpoint added later makes the note's claim false, so the helper throws
+ * the BUG loudly instead of letting the prose and the declarations drift
+ * apart. `resource` names what cannot be read back ("check suite
+ * preferences"); `reasserts` names what apply rewrites ("the declared
+ * preferences").
+ */
+export function writeOnlyCheckNote(
+  section: SectionMeta,
+  opts: { resource: string; reasserts: string },
+): string {
+  if (sectionOperations(section).some((op) => op.wire === "read")) {
+    throw new Error(
+      `BUG: ${section.key} declares a read operation, so it is not write-only and the cannot-verify note would be false; diff against the read instead`,
+    );
+  }
+  return `${section.key}: GitHub exposes no read endpoint for ${opts.resource}, so check mode cannot verify them; apply re-asserts ${opts.reasserts} on every run`;
+}
+
+/**
  * The declared value a section receives once its key is present: the
  * section's slice of the validated settings document. The document was
  * parsed once at the boundary (validateSettingsDoc runs every section's

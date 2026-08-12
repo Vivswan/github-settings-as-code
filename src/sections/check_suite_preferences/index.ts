@@ -16,6 +16,7 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  writeOnlyCheckNote,
 } from "../contract.js";
 
 const permission: SectionPermission = { repo: ["checks"] };
@@ -41,8 +42,13 @@ export const checkSuitePreferencesSection = {
     const run = beginRun(ctx);
 
     if (run.check) {
+      // Derived, not restated: writeOnlyCheckNote proves against ENDPOINTS
+      // that no read exists, so this claim cannot outlive the declarations.
       run.result.notes.push(
-        "check_suite_preferences: GitHub exposes no read endpoint for check suite preferences, so check mode cannot verify them; apply re-asserts the declared preferences on every run",
+        writeOnlyCheckNote(this, {
+          resource: "check suite preferences",
+          reasserts: "the declared preferences",
+        }),
       );
       return run.result;
     }
