@@ -33,6 +33,7 @@ import { pagesMockHandlers } from "../../../src/sections/pages/mock.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import { rulesetsMockHandlers } from "../../../src/sections/rulesets/mock.js";
 import { secretScanningCustomPatternsMockHandlers } from "../../../src/sections/secret_scanning_custom_patterns/mock.js";
+import { teamsMockHandlers } from "../../../src/sections/teams/mock.js";
 import { ADMIN_SLUG } from "../constants.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "./secrets.js";
 import {
@@ -54,7 +55,6 @@ import {
   restRepoSurface,
   ruleFromProtection,
   ruleWireNode,
-  teamRepoFromPut,
 } from "./state.js";
 import {
   asObject,
@@ -72,7 +72,6 @@ import {
   maskHookSecret,
   noContent,
   ok,
-  orgProbeHandler,
   pinTargetName,
   repoFeatureFields,
   repoNodeId,
@@ -730,27 +729,9 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // teams ------------------------------------------------------------------
-  "teams.org": orgProbeHandler,
-  "teams.probe": ({ state, param }) => {
-    const slug = param("team_slug");
-    const access = state.teams[slug];
-    if (!access) {
-      // The spec documents this 404 ("team does not have permission for the
-      // repository") with NO response content, so the body is empty.
-      return { status: 404, body: null };
-    }
-    // The repository media type makes this return the repo object with the
-    // team's role_name folded in.
-    return ok({ ...restRepoSurface(state.repo), role_name: access.role_name });
-  },
-  "teams.grant": ({ state, param, body }) => {
-    const slug = param("team_slug");
-    state.teams[slug] = teamRepoFromPut(asObject(body));
-    return noContent();
-  },
-
   // interaction_limits: moved to src/sections/interaction_limits/mock.ts
+
+  // teams: moved to src/sections/teams/mock.ts
 
   // milestones: moved to src/sections/milestones/mock.ts
 
@@ -819,8 +800,6 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
   },
 
   // custom_properties: moved to src/sections/custom_properties/mock.ts
-  // (the shared orgProbeHandler stays bound under "teams.org" above until
-  // the teams section moves)
 
   // deploy_keys ---------------------------------------------------------------
   "deploy_keys.list": ({ state, query }) => ok(slicePage(state.deploy_keys, query)),
@@ -1254,6 +1233,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: pagesMockHandlers },
   { rest: rulesetsMockHandlers },
   { rest: secretScanningCustomPatternsMockHandlers },
+  { rest: teamsMockHandlers },
   { rest: UNMOVED_SECTION_HANDLERS, graphql: UNMOVED_SECTION_GRAPHQL_HANDLERS },
 ];
 

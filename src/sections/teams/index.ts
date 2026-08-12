@@ -3,7 +3,7 @@
  * personal account the section no-ops with a note.
  */
 
-import { type MustBeNever, SettingsFile, type TeamConfig } from "../schema.js";
+import { type MustBeNever, SettingsFile, type TeamConfig } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -14,8 +14,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
-} from "./contract.js";
-import { DEFAULT_ROLE, roleForPermission } from "./roles.js";
+} from "../contract.js";
+import { DEFAULT_ROLE, roleForPermission } from "../roles.js";
 
 const permission: SectionPermission = { repo: ["administration"], org: "members" };
 
