@@ -28,6 +28,11 @@
 #   git tag -f <major> build/<tag>^{} && git push --force origin <major>
 #   gh release upload <tag> lib/settings.schema.json lib/index.js --clobber
 #   gh release edit <tag> --draft=false
+# The provenance attestation cannot be produced by hand: the sigstore
+# bundle needs the workflow's OIDC identity, so a hand-finished release
+# ships without the lib-index-js.sigstore.json asset unless a partial run
+# already uploaded it. Attesting the same bytes again in a later rerun is
+# safe: the attestation log is append-only, extra entries verify fine.
 # Everything runs in the same workflow run, so it works with the default
 # GITHUB_TOKEN too, which cannot trigger `on: release` workflows.
 #
@@ -65,6 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # also what makes the draft visible to gh
+      id-token: write # OIDC identity for the provenance attestation
+      attestations: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -141,14 +148,33 @@ jobs:
             -m "workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           git tag "build/$RELEASE_TAG"
           git push origin "refs/tags/build/$RELEASE_TAG"
-      # Both files come from the fresh build above (the rerun path byte-
-      # verified the bundle against the existing tag first), so the assets
-      # always match the build tag; --clobber makes repeats converge.
+      # Attest the exact bytes the build tag carries: on the fresh path the
+      # push above just tagged this working tree's lib/index.js, and on the
+      # rerun path the byte-verify proved the working tree matches the
+      # existing tag. Reruns re-attest identical bytes, which is fine (the
+      # attestation log is append-only) and re-produces the bundle so the
+      # upload below always has one to attach.
+      - name: Attest build provenance for the bundle
+        id: attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: lib/index.js
+      # The bundle and schema are the build tag's bytes (the rerun path
+      # byte-verified the bundle against the existing tag first); the
+      # sigstore asset is not in the tag - it attests lib/index.js only.
+      # --clobber makes repeats converge. gh names assets after the file,
+      # so the attestation is copied to a stable, self-describing name
+      # for offline verification:
+      #   gh attestation verify lib/index.js --bundle <asset> -R <owner>/<repo>
       - name: Upload the packaged artifacts to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: gh release upload "$RELEASE_TAG" lib/settings.schema.json lib/index.js --clobber
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$ATTESTATION_BUNDLE" "$RUNNER_TEMP/lib-index-js.sigstore.json"
+          gh release upload "$RELEASE_TAG" lib/settings.schema.json lib/index.js \
+            "$RUNNER_TEMP/lib-index-js.sigstore.json" --clobber
 
   # Move the moving major tag to the build commit of the release this run
   # just cut, but only when the released tag points at the commit this run

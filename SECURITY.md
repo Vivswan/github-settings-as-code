@@ -52,7 +52,15 @@ so the interesting surface is:
   provenance message, and published as a `build/vX.Y.Z` tag in a namespace
   the release-tags ruleset freezes; main carries no executable bundle. A
   build commit whose bundle a rebuild of its parent's src/ does not
-  reproduce is a vulnerability.
+  reproduce is a vulnerability. The release workflow also attests the
+  bundle's build provenance: fetch `lib/index.js` from the `build/vX.Y.Z`
+  tag or the release assets, then check it with `gh attestation verify
+  lib/index.js -R vivswan/github-settings-as-code` (add
+  `--signer-workflow vivswan/github-settings-as-code/.github/workflows/release.yml`
+  to also pin the producing workflow), or without the attestations API via
+  `--bundle` against the `lib-index-js.sigstore.json` release asset. A
+  release finished by hand carries no attestation at all: producing one
+  needs the workflow's OIDC identity.
 
 Fixes ship in the next release and are not backported; upgrade the `uses:`
 pin to pick them up.
