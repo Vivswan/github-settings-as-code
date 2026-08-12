@@ -13,7 +13,7 @@ import {
   type MustBeNever,
   SettingsFile,
   type UndeclaredPolicyList,
-} from "../schema.js";
+} from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -26,8 +26,8 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
-import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "./roles.js";
+} from "../contract.js";
+import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "../roles.js";
 
 interface LiveCollaborator {
   login: string;

@@ -39,6 +39,7 @@ import { CheckSuitePreferencesConfig } from "./sections/check_suite_preferences/
 import { CodeQualitySetupConfig } from "./sections/code_quality_setup/schema.js";
 import { CodeScanningDefaultSetupConfig } from "./sections/code_scanning_default_setup/schema.js";
 import { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
+import { CollaboratorConfig } from "./sections/collaborators/schema.js";
 import { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 import { DependabotSecretConfig } from "./sections/dependabot_secrets/schema.js";
 import { InteractionLimitsConfig } from "./sections/interaction_limits/schema.js";
@@ -63,6 +64,7 @@ export {
 export { CodeQualitySetupConfig } from "./sections/code_quality_setup/schema.js";
 export { CodeScanningDefaultSetupConfig } from "./sections/code_scanning_default_setup/schema.js";
 export { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
+export { CollaboratorConfig } from "./sections/collaborators/schema.js";
 export { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 export { DependabotSecretConfig } from "./sections/dependabot_secrets/schema.js";
 export {
@@ -603,22 +605,6 @@ export const WorkflowConfig = z
   )
   .meta({ id: "WorkflowConfig" });
 export type WorkflowConfig = z.infer<typeof WorkflowConfig>;
-
-export const CollaboratorConfig = z
-  .object({
-    username: z.string().describe("GitHub login, the natural key."),
-    permission: z
-      .string()
-      .optional()
-      .describe(
-        '"pull", "triage", "push", "maintain", "admin", or a custom org role; defaults to "push".',
-      ),
-  })
-  .describe(
-    'One direct collaborator, matched by username. Keys other than username and permission are rejected (a misspelled "permission" would otherwise silently grant the default role).',
-  )
-  .meta({ id: "CollaboratorConfig" });
-export type CollaboratorConfig = z.infer<typeof CollaboratorConfig>;
 
 export const WebhookDeliveryConfig = z
   .looseObject({

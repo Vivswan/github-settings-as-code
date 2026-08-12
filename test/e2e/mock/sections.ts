@@ -24,6 +24,7 @@ import { checkSuitePreferencesMockHandlers } from "../../../src/sections/check_s
 import { codeQualitySetupMockHandlers } from "../../../src/sections/code_quality_setup/mock.js";
 import { codeScanningDefaultSetupMockHandlers } from "../../../src/sections/code_scanning_default_setup/mock.js";
 import { codespacesSecretsMockHandlers } from "../../../src/sections/codespaces_secrets/mock.js";
+import { collaboratorsMockHandlers } from "../../../src/sections/collaborators/mock.js";
 import { customPropertiesMockHandlers } from "../../../src/sections/custom_properties/mock.js";
 import { dependabotSecretsMockHandlers } from "../../../src/sections/dependabot_secrets/mock.js";
 import { interactionLimitsMockHandlers } from "../../../src/sections/interaction_limits/mock.js";
@@ -42,13 +43,10 @@ import {
   applyRuleInputToLiteral,
   BYPASS_ACTOR_TEAMS,
   BYPASS_ACTOR_USERS,
-  collaboratorFromPut,
   completeHook,
   completeRule,
   decodeNodeId,
   environmentFromPut,
-  invitationFromPut,
-  invitationPermissionFromPut,
   mintNodeId,
   PROTECTION_RULE_APPS,
   protectionFromPut,
@@ -660,76 +658,9 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
 
   // pages: moved to src/sections/pages/mock.ts
 
-  // collaborators ----------------------------------------------------------
-  "collaborators.list": ({ state, query }) => ok(slicePage(state.collaborators, query)),
-  "collaborators.update": ({ state, param, body }) => {
-    const username = param("username");
-    const existing = state.collaborators.find(
-      (c) => String(c.login).toLowerCase() === username.toLowerCase(),
-    );
-    if (existing) {
-      Object.assign(existing, collaboratorFromPut(username, asObject(body)));
-      return noContent(); // 204: already a collaborator, access updated
-    }
-    // Matching real GitHub, a PUT for a non-collaborator does NOT grant
-    // access: it creates (or refreshes) a pending invitation and answers 201
-    // with the repository-invitation body, whose `permissions` is a STRING
-    // (read/write/admin/...), not the collaborator role object. The user
-    // joins state.collaborators only in a scenario that seeds them there.
-    const pending = state.invitations.find(
-      (i) =>
-        String((i.invitee as Json | undefined)?.login).toLowerCase() === username.toLowerCase(),
-    );
-    if (pending) {
-      pending.permissions = invitationPermissionFromPut(asObject(body));
-      pending.expired = false; // a re-PUT refreshes the invitation
-      return { status: 201, body: pending };
-    }
-    const stored = invitationFromPut(
-      username,
-      asObject(body),
-      state.nextId++,
-      state.repo,
-      state.slug,
-    );
-    state.invitations.push(stored);
-    return { status: 201, body: stored };
-  },
-  "collaborators.remove": ({ state, param }) => {
-    const username = param("username");
-    const index = state.collaborators.findIndex(
-      (c) => String(c.login).toLowerCase() === username.toLowerCase(),
-    );
-    if (index >= 0) {
-      state.collaborators.splice(index, 1);
-    }
-    return noContent();
-  },
-  "collaborators.listInvitations": ({ state, query }) => ok(slicePage(state.invitations, query)),
-  "collaborators.updateInvitation": ({ state, param, body }) => {
-    const id = param("invitation_id");
-    const invitation = state.invitations.find((i) => String(i.id) === id);
-    if (!invitation) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    // The PATCH speaks the invitation's own read vocabulary (read/write/...),
-    // so the body's `permissions` is stored verbatim.
-    const permissions = asObject(body).permissions;
-    if (permissions !== undefined) {
-      invitation.permissions = permissions;
-    }
-    return ok(invitation);
-  },
-  "collaborators.cancelInvitation": ({ state, param }) => {
-    const id = param("invitation_id");
-    const index = state.invitations.findIndex((i) => String(i.id) === id);
-    if (index >= 0) {
-      state.invitations.splice(index, 1);
-    }
-    return noContent();
-  },
-
   // interaction_limits: moved to src/sections/interaction_limits/mock.ts
+
+  // collaborators: moved to src/sections/collaborators/mock.ts
 
   // teams: moved to src/sections/teams/mock.ts
 
@@ -1225,6 +1156,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: codeQualitySetupMockHandlers },
   { rest: codeScanningDefaultSetupMockHandlers },
   { rest: codespacesSecretsMockHandlers },
+  { rest: collaboratorsMockHandlers },
   { rest: customPropertiesMockHandlers },
   { rest: dependabotSecretsMockHandlers },
   { rest: interactionLimitsMockHandlers },

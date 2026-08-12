@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { collaboratorsSection } from "../../src/sections/collaborators.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { collaboratorsSection } from "./index.js";
 
 const LIST_KEY = "GET /repos/o/r/collaborators?affiliation=direct&per_page=100&page=1";
 const INVITATIONS_KEY = "GET /repos/o/r/invitations?per_page=100&page=1";
