@@ -61,6 +61,11 @@ labels:
   - name: e2e-fuzz
     color: "B60205"
     description: Automated e2e nightly failure
+  # nightly.yml (the nightly module starter) files its tracking issue under
+  # this label, so it must survive the label sync too.
+  - name: nightly-failure
+    color: "B60205"
+    description: Automated nightly CI failure
   # release-please manages these two; listing them here keeps the settings
   # sync from deleting them (it removes any label not declared in this file).
   - name: "autorelease: pending"
