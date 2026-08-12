@@ -49,6 +49,8 @@ jobs:
         run: bun run lint
       - name: Typecheck
         run: bun run typecheck
+      - name: Dead code (knip)
+        run: bun run knip
       - name: Test
         run: bun run test
 
@@ -155,3 +157,34 @@ jobs:
             bun test/e2e/run.ts --sections "$SECTIONS"
             bun test/e2e/fuzz.ts --iterations 25 --sections "$SECTIONS"
           fi
+
+  # Endpoint-coverage tripwire: every "section.role" route in allEndpoints()
+  # and allGraphqlOps() must be hit at least once by the curated corpus. The
+  # nightly also runs this, but a PR that adds an endpoint without a scenario
+  # reaching it must fail on that PR, not the next night. The checker runs
+  # the full corpus itself (the diff-aware smoke job may run a subset), and
+  # the action bundle runs under node24, so node is installed here too.
+  endpoint-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      # Same fetched, gitignored artifact and cache key as e2e-smoke above.
+      - name: Cache the trimmed OpenAPI spec
+        id: openapi-cache
+        uses: actions/cache@v6
+        with:
+          path: test/e2e/openapi/github-openapi.trimmed.json
+          key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**', 'src/upstream-gaps/**', 'src/schema.ts', 'src/github/api.ts') }}
+      - name: Fetch the trimmed OpenAPI spec (cache miss)
+        if: steps.openapi-cache.outputs.cache-hit != 'true'
+        run: bun .github/scripts/trim-openapi.ts
+      - name: Endpoint-coverage tripwire
+        run: bun .github/scripts/check-endpoint-coverage.ts

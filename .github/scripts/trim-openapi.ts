@@ -19,6 +19,7 @@ import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_API_VERSION } from "../../src/github/api.js";
 import { UNDOCUMENTED_PATHS, USED_PATHS } from "../../test/e2e/openapi/paths.js";
+import { fetchWithRetry } from "./fetch-retry.js";
 
 /**
  * The github/rest-api-description commit the trimmed spec is cut from. Bump
@@ -77,21 +78,14 @@ interface OpenApiDoc {
   [key: string]: unknown;
 }
 
-/** Abandon the fetch if the (large) descriptor has not arrived in this long. */
+/** Abandon a fetch attempt if the (large) descriptor has not arrived in this long. */
 const FETCH_TIMEOUT_MS = 60_000;
 
 async function fetchSpec(url: string): Promise<OpenApiDoc> {
-  // A timeout so a hung connection fails loudly with advice instead of the
-  // script appearing to stall forever on the multi-MB descriptor.
-  const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }).catch(
-    (error) => {
-      const reason =
-        error instanceof Error && error.name === "TimeoutError" ? "timed out" : "failed";
-      throw new Error(
-        `fetching the OpenAPI descriptor ${reason} after ${FETCH_TIMEOUT_MS}ms for ${url}: ${error instanceof Error ? error.message : String(error)}. Check network access to raw.githubusercontent.com and re-run`,
-      );
-    },
-  );
+  // Per-attempt timeout plus bounded retry (fetch-retry.ts): a hung
+  // connection or a transient blip fails loudly with advice instead of the
+  // script stalling forever - or one blip failing the whole CI gate.
+  const response = await fetchWithRetry(url, FETCH_TIMEOUT_MS);
   if (!response.ok) {
     throw new Error(
       `failed to fetch the OpenAPI descriptor: ${response.status} ${response.statusText} for ${url}. Check UPSTREAM_REF and the DEFAULT_API_VERSION file name`,

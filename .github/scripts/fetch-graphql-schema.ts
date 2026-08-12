@@ -20,6 +20,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { buildSchema } from "graphql";
+import { fetchWithRetry } from "./fetch-retry.js";
 
 /**
  * The github/docs commit the schema is fetched at. Bump this (and re-run) to
@@ -35,20 +36,15 @@ const SCHEMA_URL =
 
 const OUT_PATH = join(import.meta.dir, "..", "..", "test", "e2e", "graphql", "schema.docs.graphql");
 
-/** Abandon the fetch if the (large) schema has not arrived in this long. */
+/** Abandon a fetch attempt if the (large) schema has not arrived in this long. */
 const FETCH_TIMEOUT_MS = 60_000;
 
 async function main(): Promise<number> {
   console.log(`fetching ${SCHEMA_URL}`);
-  const response = await fetch(SCHEMA_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }).catch(
-    (error) => {
-      const reason =
-        error instanceof Error && error.name === "TimeoutError" ? "timed out" : "failed";
-      throw new Error(
-        `fetching the GraphQL schema ${reason} after ${FETCH_TIMEOUT_MS}ms for ${SCHEMA_URL}: ${error instanceof Error ? error.message : String(error)}. Check network access to raw.githubusercontent.com and re-run`,
-      );
-    },
-  );
+  // Per-attempt timeout plus bounded retry (fetch-retry.ts): a hung
+  // connection or a transient blip fails loudly with advice instead of the
+  // script stalling forever - or one blip failing the whole CI gate.
+  const response = await fetchWithRetry(SCHEMA_URL, FETCH_TIMEOUT_MS);
   if (!response.ok) {
     throw new Error(
       `failed to fetch the GraphQL schema: ${response.status} ${response.statusText} for ${SCHEMA_URL}. Check UPSTREAM_REF and the schema path`,
