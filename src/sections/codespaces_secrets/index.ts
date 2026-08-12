@@ -18,7 +18,11 @@
  * grant fails the list exactly like a missing one.
  */
 
-import { type CodespacesSecretConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
+import {
+  type CodespacesSecretConfig,
+  SettingsFile,
+  type UndeclaredPolicyList,
+} from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -29,14 +33,14 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 import {
   listSecretValues,
   reconcileSecrets,
   rejectDuplicateSecretNames,
   type SecretsScope,
   type SecretsScopeOps,
-} from "./secrets-engine.js";
+} from "../secrets-engine.js";
 
 const permission: SectionPermission = { repo: ["codespaces_secrets"] };
 

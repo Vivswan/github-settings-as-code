@@ -19,7 +19,7 @@ import { branchesSection } from "./branches.js";
 import { checkSuitePreferencesSection } from "./check-suite-preferences.js";
 import { codeQualitySetupSection } from "./code-quality.js";
 import { codeScanningDefaultSetupSection } from "./code-scanning.js";
-import { codespacesSecretsSection } from "./codespaces-secrets.js";
+import { codespacesSecretsSection } from "./codespaces_secrets/index.js";
 import { collaboratorsSection } from "./collaborators.js";
 import type { EndpointDecl, GraphqlOpDecl, SectionModule } from "./contract.js";
 import { customPropertiesSection } from "./custom_properties/index.js";

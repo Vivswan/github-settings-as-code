@@ -33,6 +33,7 @@ import { z } from "zod";
 import { ActionsSecretConfig } from "./sections/actions_secrets/schema.js";
 import { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
 import { AutolinkConfig } from "./sections/autolinks/schema.js";
+import { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
 import { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 import { LabelConfig } from "./sections/labels/schema.js";
 import { MilestoneConfig } from "./sections/milestones/schema.js";
@@ -47,6 +48,7 @@ import type { MustBeNever } from "./types.js";
 export { ActionsSecretConfig } from "./sections/actions_secrets/schema.js";
 export { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
 export { AutolinkConfig } from "./sections/autolinks/schema.js";
+export { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
 export { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 export { LabelConfig } from "./sections/labels/schema.js";
 export { MilestoneConfig } from "./sections/milestones/schema.js";
@@ -613,12 +615,6 @@ export const DependabotSecretConfig = sealedSecretConfig(
   "One repository Dependabot secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
 );
 export type DependabotSecretConfig = z.infer<typeof DependabotSecretConfig>;
-
-export const CodespacesSecretConfig = sealedSecretConfig(
-  "CodespacesSecretConfig",
-  "One repository Codespaces secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
-);
-export type CodespacesSecretConfig = z.infer<typeof CodespacesSecretConfig>;
 
 export const WorkflowConfig = z
   .object({

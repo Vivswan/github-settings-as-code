@@ -18,6 +18,7 @@ import { MAX_PINNED_ENVIRONMENTS } from "../../../src/schema.js";
 import { actionsSecretsMockHandlers } from "../../../src/sections/actions_secrets/mock.js";
 import { agentsSecretsMockHandlers } from "../../../src/sections/agents_secrets/mock.js";
 import { autolinksMockHandlers } from "../../../src/sections/autolinks/mock.js";
+import { codespacesSecretsMockHandlers } from "../../../src/sections/codespaces_secrets/mock.js";
 import { customPropertiesMockHandlers } from "../../../src/sections/custom_properties/mock.js";
 import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
 import { milestonesMockHandlers } from "../../../src/sections/milestones/mock.js";
@@ -684,7 +685,7 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // dependabot_secrets / codespaces_secrets / agents_secrets
+  // dependabot_secrets
   //
   // The repository-level secret families share one handler shape (see
   // the sealedSecretPut/secretsList/secretRemove helpers): the list serves
@@ -708,20 +709,6 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     ),
   "dependabot_secrets.remove": ({ state, param }) =>
     secretRemove(state.dependabot_secrets, state.dependabot_secret_digests, param("secret_name")),
-
-  "codespaces_secrets.list": ({ state, query }) => secretsList(state.codespaces_secrets, query),
-  "codespaces_secrets.publicKey": () =>
-    ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "codespaces_secrets.put": ({ state, param, body }) =>
-    sealedSecretPut(
-      state,
-      state.codespaces_secrets,
-      state.codespaces_secret_digests,
-      param("secret_name"),
-      body,
-    ),
-  "codespaces_secrets.remove": ({ state, param }) =>
-    secretRemove(state.codespaces_secrets, state.codespaces_secret_digests, param("secret_name")),
 
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {
@@ -1733,6 +1720,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: actionsSecretsMockHandlers },
   { rest: agentsSecretsMockHandlers },
   { rest: autolinksMockHandlers },
+  { rest: codespacesSecretsMockHandlers },
   { rest: customPropertiesMockHandlers },
   { rest: labelsMockHandlers },
   { rest: milestonesMockHandlers },

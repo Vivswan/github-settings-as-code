@@ -1,21 +1,22 @@
 /**
  * codespaces_secrets section tests: the engine behavior (existence
  * reconciliation, sealing, the resolver contract) is pinned by
- * secrets-engine.test.ts and actions-secrets.test.ts; these tests pin what
+ * secrets-engine.test.ts and the actions_secrets section tests; these tests
+ * pin what
  * is THIS section's own - its routes, its label/noun wording, and its
  * keep-by-default policy.
  */
 
 import { describe, expect, test } from "bun:test";
-import { codespacesSecretsSection } from "../../src/sections/codespaces-secrets.js";
-import type { SectionContext } from "../../src/sections/contract.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
   unsealSecretValue,
-} from "../e2e/mock/secrets.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+} from "../../../test/e2e/mock/secrets.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import type { SectionContext } from "../contract.js";
+import { codespacesSecretsSection } from "./index.js";
 
 const LIST = "GET /repos/o/r/codespaces/secrets?per_page=100&page=1";
 const PUBLIC_KEY = "GET /repos/o/r/codespaces/secrets/public-key";
