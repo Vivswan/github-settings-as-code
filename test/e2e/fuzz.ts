@@ -19,6 +19,7 @@
 
 import { MAX_RETRIES } from "../../src/github/api.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
+import type { LiveWitness, LiveWitnessKind } from "./gen-support.js";
 import {
   canariesOf,
   displayKeyOf,
@@ -30,8 +31,6 @@ import {
   genScenario,
   genSettings,
   INVALID_SETTINGS_CASES,
-  type LiveWitness,
-  type LiveWitnessKind,
   type MultiRepoMeta,
   type MultiScenarioMeta,
   NON_MAPPING_YAML,

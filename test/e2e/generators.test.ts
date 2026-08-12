@@ -4,6 +4,7 @@ import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
+import type { LiveWitnessKind } from "./gen-support.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
   canariesOf,
@@ -14,7 +15,6 @@ import {
   genScenario,
   genSettings,
   INVALID_SETTINGS_CASES,
-  type LiveWitnessKind,
   NON_MAPPING_YAML,
   ORG_GATED_SECTIONS,
   SECTION_PRIMARY_READ,
