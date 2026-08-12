@@ -623,10 +623,12 @@ export function collectYmlFiles(dir: string): string[] {
 }
 
 /**
- * The directories the curated corpus lives in: the flat legacy root
- * (test/e2e/scenarios/, drained as sections move) plus every
- * src/sections/<key>/scenarios/ directory on disk, enumerated at call time so
- * a moved section's first scenario is picked up without touching a list.
+ * The directories the curated corpus lives in: the cross-cutting root
+ * (test/e2e/scenarios/ - multi-repo flows, discovery, report delivery, and
+ * other scenarios spanning sections; a scenario exercising ONE section lives
+ * in that section's directory) plus every src/sections/<key>/scenarios/
+ * directory on disk, enumerated at call time so a new section's first
+ * scenario is picked up without touching a list.
  * ONLY scenarios/ directories count - any other .yml under a section
  * directory (a fixture, an example settings file) never loads as a scenario.
  * run.ts and the endpoint-coverage tripwire both call this, so the two can
