@@ -16,6 +16,7 @@
 
 import { MAX_PINNED_ENVIRONMENTS } from "../../../src/schema.js";
 import { actionsSecretsMockHandlers } from "../../../src/sections/actions_secrets/mock.js";
+import { agentsSecretsMockHandlers } from "../../../src/sections/agents_secrets/mock.js";
 import { autolinksMockHandlers } from "../../../src/sections/autolinks/mock.js";
 import { customPropertiesMockHandlers } from "../../../src/sections/custom_properties/mock.js";
 import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
@@ -721,20 +722,6 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     ),
   "codespaces_secrets.remove": ({ state, param }) =>
     secretRemove(state.codespaces_secrets, state.codespaces_secret_digests, param("secret_name")),
-
-  "agents_secrets.list": ({ state, query }) => secretsList(state.agents_secrets, query),
-  "agents_secrets.publicKey": () =>
-    ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "agents_secrets.put": ({ state, param, body }) =>
-    sealedSecretPut(
-      state,
-      state.agents_secrets,
-      state.agents_secret_digests,
-      param("secret_name"),
-      body,
-    ),
-  "agents_secrets.remove": ({ state, param }) =>
-    secretRemove(state.agents_secrets, state.agents_secret_digests, param("secret_name")),
 
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {
@@ -1744,6 +1731,7 @@ interface SectionMockFragment {
  */
 const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: actionsSecretsMockHandlers },
+  { rest: agentsSecretsMockHandlers },
   { rest: autolinksMockHandlers },
   { rest: customPropertiesMockHandlers },
   { rest: labelsMockHandlers },
