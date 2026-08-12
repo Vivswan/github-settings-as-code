@@ -3,6 +3,7 @@ import { validateSectionShapes } from "../../../src/engine/validate.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
 import { webhooksSection } from "./index.js";
+import type { WebhookConfig } from "./schema.js";
 
 const LIST = "GET /repos/o/r/hooks?per_page=100&page=1";
 
@@ -97,7 +98,8 @@ describe("webhooks secretValues", () => {
     // value, so a malformed declaration must not throw here - validation is
     // where the user gets the actionable message.
     for (const malformed of [null, "hooks", 42, { undeclared: "keep" }, [null, "x"]]) {
-      expect(webhooksSection.secretValues?.(malformed)).toEqual([]);
+      // The double cast feeds the extractor a PRE-VALIDATION value on purpose.
+      expect(webhooksSection.secretValues?.(malformed as unknown as WebhookConfig[])).toEqual([]);
     }
   });
 });

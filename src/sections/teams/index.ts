@@ -57,9 +57,8 @@ export const teamsSection: SectionModule<"teams"> = {
     describe: (t) => t.name,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, desired): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as TeamConfig[];
     rejectDuplicates(
       this,
       desired,

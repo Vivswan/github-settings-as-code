@@ -7,7 +7,7 @@
  * on every run (the 200 echoes the resulting preferences).
  */
 
-import { type CheckSuitePreferencesConfig, SettingsFile } from "../../schema.js";
+import { SettingsFile } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -37,9 +37,8 @@ export const checkSuitePreferencesSection: SectionModule<"check_suite_preference
   // Loose on purpose: the PATCH forwards the object verbatim, so future
   // fields ride along at both levels; only the natural pair is checked.
   shape: loosen(SettingsFile.shape.check_suite_preferences),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, desired): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as CheckSuitePreferencesConfig;
 
     if (ctx.check) {
       result.notes.push(

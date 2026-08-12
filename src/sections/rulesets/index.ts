@@ -6,7 +6,7 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import { type RulesetConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
+import { type RulesetConfig, SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -107,12 +107,9 @@ export const rulesetsSection: SectionModule<"rulesets"> = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.rulesets),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries } = undeclaredPolicy(
-      desiredRaw as RulesetConfig[] | UndeclaredPolicyList<RulesetConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     const desired = entries.map(normalizeRuleset);
     // Upsert matches by exact name, so two entries with the same name would
     // fight each other (create twice, then trade updates) on every run.

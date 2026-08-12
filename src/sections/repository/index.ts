@@ -404,9 +404,9 @@ export const repositorySection: SectionModule<"repository"> = {
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
   shape: requirePlainMapping(loosen(SettingsFile.shape.repository)),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as Record<string, unknown>;
+    const desired: Record<string, unknown> = declared;
     const patch: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(desired)) {
       if (!SPECIAL_KEYS.has(key)) {

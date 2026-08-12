@@ -20,12 +20,7 @@
  * optional and nullable) writes without the check, as the API allows.
  */
 
-import {
-  type MustBeNever,
-  type SecretScanningPatternConfig,
-  SettingsFile,
-  type UndeclaredPolicyList,
-} from "../../schema.js";
+import { type MustBeNever, type SecretScanningPatternConfig, SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -177,14 +172,9 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
     consequence:
       'the pattern endpoints accept no other field - in particular "state" and "push_protection_enabled" are read-only through this API surface - so the key would be dropped silently and never converge',
   },
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries: desired } = undeclaredPolicy(
-      desiredRaw as
-        | SecretScanningPatternConfig[]
-        | UndeclaredPolicyList<SecretScanningPatternConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
       desired,

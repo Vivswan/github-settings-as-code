@@ -6,7 +6,7 @@
  */
 
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import { type LabelConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
+import { SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -62,12 +62,9 @@ export const labelsSection: SectionModule<"labels"> = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.labels),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries: desired } = undeclaredPolicy(
-      desiredRaw as LabelConfig[] | UndeclaredPolicyList<LabelConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // Duplicate detection covers both identities of every entry: its name
     // and its rename target. Two entries resolving to the same label would
     // fight each other on every run (or fail mid-rename). Every collision is

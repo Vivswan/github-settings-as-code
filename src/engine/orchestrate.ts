@@ -243,8 +243,13 @@ export async function preflightProbe(
   };
   const denied: string[] = [];
   for (const section of active) {
+    const declared = settings[section.key];
+    if (declared === undefined) {
+      // `active` is filtered to declared sections; this narrows the type.
+      continue;
+    }
     try {
-      await section.run(probeCtx, settings[section.key]);
+      await section.run(probeCtx, declared);
     } catch (error) {
       if (error instanceof PermissionDenied) {
         denied.push(`${section.key}: ${error.detail}`);
