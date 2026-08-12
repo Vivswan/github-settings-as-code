@@ -3,6 +3,13 @@
  * section, random mock live state, and random whole scenarios. Everything is a
  * pure function of an Rng, so a failing fuzz iteration replays from its seed.
  *
+ * The section-shaped generators live with their sections
+ * (src/sections/<key>/generators.ts, over the shared helpers in
+ * gen-support.ts); this module aggregates them into the SETTINGS_GENERATORS
+ * table and keeps the cross-section machinery: the generators shared by
+ * whole section families, the scenario/multi-repo/discovery generators, the
+ * invalid-settings catalog, and the fault-target catalog.
+ *
  * Three-way drift detection: every settings document a generator produces is
  * also validated against the published lib/settings.schema.json with ajv. If a
  * generator emits something the schema rejects, either the generator or the
@@ -19,18 +26,46 @@ import {
   type SettingsFile,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
-import { isWildcardPattern } from "../../src/sections/branches/index.js";
-import { endpointMethod, undeclaredPolicy } from "../../src/sections/contract.js";
-import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
-import { DEFAULT_ROLE, roleForPermission } from "../../src/sections/roles.js";
-import { ADMIN_SLUG } from "./constants.js";
-import type { LiveState } from "./mock/state.js";
+import { genActions } from "../../src/sections/actions/generators.js";
+import { genAutolinks } from "../../src/sections/autolinks/generators.js";
 import {
-  BYPASS_ACTOR_TEAMS,
-  BYPASS_ACTOR_USERS,
-  CUSTOM_PROPERTY_DEFINITIONS,
-  PROTECTION_RULE_APPS,
-} from "./mock/state.js";
+  FUZZ_DEPLOYMENT_ENVIRONMENTS,
+  genBranches,
+} from "../../src/sections/branches/generators.js";
+import { isWildcardPattern } from "../../src/sections/branches/index.js";
+import { genCheckSuitePreferences } from "../../src/sections/check_suite_preferences/generators.js";
+import { genCodeQuality } from "../../src/sections/code_quality_setup/generators.js";
+import { genCodeScanning } from "../../src/sections/code_scanning_default_setup/generators.js";
+import {
+  genCollaborators,
+  genInvitationsState,
+} from "../../src/sections/collaborators/generators.js";
+import { endpointMethod } from "../../src/sections/contract.js";
+import { genCustomProperties } from "../../src/sections/custom_properties/generators.js";
+import { genDeployKeys } from "../../src/sections/deploy_keys/generators.js";
+import { genEnvironments } from "../../src/sections/environments/generators.js";
+import { genInteractionLimits } from "../../src/sections/interaction_limits/generators.js";
+import { genLabels, labelsWitness } from "../../src/sections/labels/generators.js";
+import { genMilestones, milestonesWitness } from "../../src/sections/milestones/generators.js";
+import { genPages } from "../../src/sections/pages/generators.js";
+import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
+import { genRepository } from "../../src/sections/repository/generators.js";
+import { genRulesets } from "../../src/sections/rulesets/generators.js";
+import { genSecretScanningPatterns } from "../../src/sections/secret_scanning_custom_patterns/generators.js";
+import { genTeams } from "../../src/sections/teams/generators.js";
+import { genWebhooks } from "../../src/sections/webhooks/generators.js";
+import { genWorkflows } from "../../src/sections/workflows/generators.js";
+import { ADMIN_SLUG } from "./constants.js";
+import {
+  E2E_SECRET_ENV,
+  type EntriesForm,
+  entriesOf,
+  type Json,
+  type LiveWitness,
+  type LiveWitnessKind,
+  maybeWrapUndeclared,
+} from "./gen-support.js";
+import type { LiveState } from "./mock/state.js";
 import type { Rng } from "./prng.js";
 import {
   type DenialStyle,
@@ -41,73 +76,6 @@ import {
   MASK_KEYS as SCHEMA_MASK_KEYS,
   type Scenario,
 } from "./schema.js";
-
-type Json = Record<string, unknown>;
-
-/** Either form a knobbed list section's generated value can take. */
-type EntriesForm = Json[] | { undeclared?: "keep" | "delete"; entries: Json[] };
-
-/**
- * Unwrap a generated section value into its entry list through the SAME
- * helper the engine uses, so harness code reads both the plain and the
- * wrapped form without hand-rolled casts. Entries come back by reference:
- * mutating them (or pushing into them) edits the generated document in
- * place, whichever form was drawn. The default policy is irrelevant here -
- * only the entries are read.
- */
-function entriesOf(value: unknown): Json[] {
-  return undeclaredPolicy(value as EntriesForm, "keep").entries as Json[];
-}
-
-/**
- * Sometimes rewrap a generated entry list in the `{undeclared, entries}`
- * form, so the fuzz corpus exercises the knob's parsing, merging, and
- * schema surface alongside the plain form. The policy draw is skewed toward
- * OMITTING `undeclared` (the wrapper alone), because with the mock's empty
- * live baselines an explicit policy changes no outcome - the delete/keep
- * behavior itself is pinned by curated scenarios (labels-undeclared-keep,
- * rulesets-undeclared-delete, milestones-undeclared-delete).
- *
- * The WITNESS sections (labels, milestones) must never call this: the
- * oracle refines their predictions from the seeded witness alone, so a
- * generated `undeclared: keep` over an extra-undeclared labels witness
- * would flip the engine's outcome (a kept note instead of drift/deletion)
- * and fail the iteration, and milestones' delete path has no witness
- * modeling it. New draws live on a forked stream so the pre-existing
- * main-stream sequence (and every recorded seed) stays stable.
- */
-function maybeWrapUndeclared(rng: Rng, entries: Json[]): EntriesForm {
-  const knobRng = rng.fork("undeclared-knob");
-  if (!knobRng.bool(0.25)) {
-    return entries;
-  }
-  return knobRng.bool(0.5)
-    ? { undeclared: knobRng.pick(["keep", "delete"] as const), entries }
-    : { entries };
-}
-
-/**
- * Hostile string pool for names that flow into URLs, step-summary cells, and
- * request paths: pipes and backslashes (summary-table escaping), quotes,
- * spaces, percent signs and slashes (URL encoding), unicode, and a near-limit
- * length. A generator that mixes these in exercises the escaping and encoding
- * paths that a tidy ASCII name would never reach.
- */
-const HOSTILE_NAMES = [
-  "plain",
-  "with space",
-  "with|pipe",
-  'with"quote',
-  "with\\backslash",
-  "with%percent",
-  "with/slash",
-  "with#hash",
-  "unicode-éñ中",
-  "emoji-\u{1f600}",
-  "a".repeat(48),
-] as const;
-
-const HEX_COLORS = ["d73a4a", "a2eeef", "ededed", "0e8a16", "ffffff", "000000"] as const;
 
 /**
  * A fixed, valid age recipient for the `artifact` private-report channel:
@@ -122,396 +90,6 @@ const HEX_COLORS = ["d73a4a", "a2eeef", "ededed", "0e8a16", "ffffff", "000000"] 
  */
 export const ARTIFACT_TEST_RECIPIENT =
   "age1wshulnlu6mpa4rx54w6xs9kscqw7uqem3fh748xsrfyqusgmfv2qfca3qt";
-
-/** Fixed ISO due dates: a pool, never Date.now, so generation stays deterministic. */
-const DUE_DATES = ["2026-01-15T00:00:00Z", "2026-06-30T00:00:00Z", "2026-12-31T00:00:00Z"] as const;
-
-/** The four core branch-protection keys the classic PUT requires. */
-const PROTECTION_CORE_KEYS = [
-  "required_status_checks",
-  "enforce_admins",
-  "required_pull_request_reviews",
-  "restrictions",
-] as const;
-
-/** A hostile-or-plain name, biased toward plain so most docs stay readable. */
-function name(rng: Rng): string {
-  return rng.bool(0.6)
-    ? rng.pick(["bug", "chore", "docs", "feature", "infra"])
-    : rng.pick(HOSTILE_NAMES);
-}
-
-// Per-section settings generators. Each returns a valid-shaped value for that
-// section's SettingsFile property.
-
-function genLabels(rng: Rng): Json[] {
-  const count = rng.int(4) + 1;
-  const used = new Set<string>();
-  const labels: Json[] = [];
-  for (let i = 0; i < count; i++) {
-    let n = name(rng);
-    while (used.has(n.toLowerCase())) {
-      n = `${n}-${i}`;
-    }
-    used.add(n.toLowerCase());
-    const label: Json = { name: n };
-    if (rng.bool(0.8)) {
-      label.color = rng.pick(HEX_COLORS);
-    }
-    if (rng.bool(0.5)) {
-      label.description = rng.pick(["", "does a thing", name(rng)]);
-    }
-    labels.push(label);
-  }
-  // labels is a WITNESS section: always the plain array form, never
-  // maybeWrapUndeclared (its rationale explains why).
-  return labels;
-}
-
-function genRepository(rng: Rng): Json {
-  const repo: Json = {};
-  if (rng.bool()) {
-    repo.has_issues = rng.bool();
-  }
-  if (rng.bool()) {
-    repo.has_wiki = rng.bool();
-  }
-  if (rng.bool()) {
-    repo.allow_merge_commit = rng.bool();
-  }
-  if (rng.bool(0.5)) {
-    repo.topics = Array.from({ length: rng.int(3) + 1 }, () =>
-      rng.pick(["automation", "governance", "settings", "infra"]),
-    );
-  }
-  if (rng.bool(0.4)) {
-    repo.enable_vulnerability_alerts = rng.bool();
-  }
-  if (rng.bool(0.3)) {
-    repo.enable_git_lfs = rng.bool();
-  }
-  if (rng.bool(0.3)) {
-    repo.enable_immutable_releases = rng.bool();
-  }
-  // The GraphQL-routed keys are NEW draws, so they live on a forked stream:
-  // the main stream stays stable and recorded seeds keep reproducing (the
-  // required-signatures precedent in genBranches).
-  const toggleRng = rng.fork("repo-toggles");
-  if (toggleRng.bool(0.3)) {
-    repo.enable_sponsorships = toggleRng.bool();
-  }
-  if (toggleRng.bool(0.3)) {
-    repo.issue_creation_policy = toggleRng.pick(["all", "collaborators_only"]);
-  }
-  // Always leave at least one key so the section does real work.
-  if (Object.keys(repo).length === 0) {
-    repo.has_issues = rng.bool();
-  }
-  return repo;
-}
-
-function genRulesets(rng: Rng): EntriesForm {
-  const entries = Array.from({ length: rng.int(2) + 1 }, (_, i) => {
-    const target = rng.pick(["branch", "tag"] as const);
-    return {
-      name: `${rng.pick(["protect", "guard", "lock"])}-${i}`,
-      target,
-      enforcement: rng.pick(["active", "disabled", "evaluate"]),
-      conditions: {
-        ref_name: {
-          include: [target === "tag" ? "~ALL" : "~DEFAULT_BRANCH"],
-          exclude: [],
-        },
-      },
-      rules: [{ type: rng.pick(["deletion", "non_fast_forward", "required_signatures"]) }],
-    };
-  });
-  return maybeWrapUndeclared(rng, entries);
-}
-
-function genBranches(rng: Rng): Json[] {
-  // The required_signatures draws are NEW, so they live on a forked stream:
-  // the main stream stays stable and recorded seeds keep reproducing.
-  const sigRng = rng.fork("required-signatures");
-  // The wildcard/bypassers/deployments draws are NEWER still - the GraphQL
-  // rule surface - forked for the same stability reason, and gated onto a
-  // MINORITY of entries so most iterations stay pure-REST (the
-  // zero-GraphQL-for-existing-users guarantee keeps getting exercised).
-  const bprRng = rng.fork("bpr");
-  return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
-    const name = `${rng.pick(["main", "release", "dev"])}-${i}`;
-    if (rng.bool(0.3)) {
-      return { name, protection: null };
-    }
-    // A random subset of the four core protection keys, with realistic values;
-    // the handler null-fills the omitted ones, so any subset is valid input.
-    const protection: Json = {};
-    if (rng.bool(0.6)) {
-      protection.required_pull_request_reviews = {
-        required_approving_review_count: rng.int(3) + 1,
-      };
-    }
-    if (rng.bool(0.5)) {
-      protection.enforce_admins = rng.bool();
-    }
-    if (rng.bool(0.4)) {
-      protection.required_status_checks = { strict: rng.bool(), contexts: [] };
-    }
-    if (rng.bool(0.3)) {
-      protection.restrictions = null;
-    }
-    // Guarantee at least one core key so the payload is not empty.
-    if (Object.keys(protection).length === 0) {
-      const key = rng.pick(PROTECTION_CORE_KEYS);
-      protection[key] = key === "enforce_admins" ? true : null;
-    }
-    if (sigRng.bool(0.3)) {
-      protection.required_signatures = sigRng.bool();
-    }
-    if (bprRng.bool(0.25)) {
-      // A WILDCARD entry replaces the literal one: only translated keys, so
-      // the whole entry reconciles through the GraphQL rule mutations.
-      const wildcard: Json = {};
-      if (bprRng.bool(0.6)) {
-        wildcard.enforce_admins = bprRng.bool();
-      }
-      if (bprRng.bool(0.4)) {
-        wildcard.required_status_checks = bprRng.bool(0.3)
-          ? null
-          : { strict: bprRng.bool(), contexts: [] };
-      }
-      if (bprRng.bool(0.4)) {
-        wildcard.required_pull_request_reviews = {
-          required_approving_review_count: bprRng.int(3) + 1,
-        };
-      }
-      if (Object.keys(wildcard).length === 0) {
-        wildcard.required_linear_history = true;
-      }
-      addRoutedGraphqlKeys(bprRng, wildcard);
-      return {
-        name: `${rng.pick(["main", "release", "dev"])}-${i}/*`,
-        protection: bprRng.bool(0.15) ? null : wildcard,
-      };
-    }
-    addRoutedGraphqlKeys(bprRng, protection);
-    return { name, protection };
-  });
-}
-
-/**
- * The minority draws for the two GraphQL-routed protection keys, shared by
- * literal and wildcard entries. Actors come from the mock's known rosters so
- * a generated allowance always resolves; deployment environment names come
- * from the fixed pool presenceLiveState seeds as live environments, so the
- * mutation's silent drop never fires on a generated document.
- */
-function addRoutedGraphqlKeys(bprRng: Rng, protection: Json): void {
-  if (bprRng.bool(0.25)) {
-    const pool = [
-      ...BYPASS_ACTOR_USERS,
-      ...BYPASS_ACTOR_TEAMS,
-      ...PROTECTION_RULE_APPS.map((app) => `app/${String(app.slug)}`),
-    ];
-    const count = bprRng.int(3);
-    const picked = new Set<string>();
-    for (let i = 0; i < count; i++) {
-      picked.add(bprRng.pick(pool));
-    }
-    protection.force_push_bypassers = [...picked];
-  }
-  if (bprRng.bool(0.2)) {
-    protection.required_deployments = bprRng.bool(0.3)
-      ? null
-      : { environments: [bprRng.pick(FUZZ_DEPLOYMENT_ENVIRONMENTS)] };
-  }
-}
-
-/**
- * The deployment environments a generated required_deployments key may name.
- * presenceLiveState seeds every one of them as a live environment, so the
- * verified silent-drop behavior (the mock keeps only EXISTING names) never
- * turns a fully-granted apply into a read-back failure.
- */
-const FUZZ_DEPLOYMENT_ENVIRONMENTS = ["fuzz-deploy-a", "fuzz-deploy-b"] as const;
-
-function genEnvironments(rng: Rng): Json[] {
-  // The variables draws are NEW, so they live on a forked stream: the main
-  // stream stays stable and recorded seeds keep reproducing.
-  const variablesRng = rng.fork("variables");
-  // The nested secrets draws are NEWER still, so they fork off their own
-  // stream for the same reason.
-  const secretsRng = rng.fork("secrets");
-  // And the branch-policy pattern draws are the newest, on their own fork.
-  const policiesRng = rng.fork("branch-policies");
-  // Protection-rule draws, newer again, fork the same way.
-  const rulesRng = rng.fork("protection-rules");
-  // Pin draws are the newest, again on their own forked stream.
-  const pinnedRng = rng.fork("pinned");
-  return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
-    const env: Json = { name: `${rng.pick(["staging", "prod", "qa"])}-${i}` };
-    if (rng.bool()) {
-      env.wait_timer = rng.int(30);
-    }
-    if (rng.bool()) {
-      env.prevent_self_review = rng.bool();
-    }
-    if (variablesRng.bool(0.35)) {
-      // Names are unique per environment by the suffix even after the
-      // case-insensitive uppercase match, and mixed-case picks exercise it.
-      // The empty live baseline means an explicit `undeclared` policy would
-      // change no outcome, so the wrapped draw omits it (the keep-note and
-      // delete paths are pinned by curated scenarios); the bare `{entries}`
-      // wrapper still exercises the nested knob's parsing and schema surface.
-      const entries: Json[] = Array.from({ length: variablesRng.int(2) + 1 }, (_, j) => ({
-        name: `${variablesRng.pick(["DEPLOY_REGION", "log_level", "Retries"])}_${j}`,
-        value: variablesRng.pick(["eu-west-1", "debug", "3"]),
-      }));
-      env.variables = variablesRng.bool(0.25) ? { entries } : entries;
-    }
-    if (secretsRng.bool(0.3)) {
-      // References come from the fixed pool, like every secret family, so
-      // scenarioSecretEnv can wire the child env. Same-named secrets across
-      // sibling environments are deliberately common here (the pool is
-      // small): per-environment scope resolution is exactly what that
-      // exercises.
-      const names = Object.keys(E2E_SECRET_ENV);
-      const count = secretsRng.int(names.length) + 1;
-      const entries: Json[] = names.slice(0, count).map((name) => ({
-        name,
-        value: `$${name}`,
-      }));
-      env.secrets = secretsRng.bool(0.25) ? { entries } : entries;
-    }
-    if (policiesRng.bool(0.3)) {
-      // The index suffix keeps names unique (the natural key is the exact
-      // pattern string). The generator ALWAYS pairs the list with the
-      // singular flag object set to custom_branch_policies: true, so the
-      // oracle never sees the section's validation-error path.
-      const entries: Json[] = Array.from({ length: policiesRng.int(2) + 1 }, (_, j) => {
-        const entry: Json = { name: `${policiesRng.pick(["release/*", "hotfix/*", "v*"])}-${j}` };
-        if (policiesRng.bool(0.4)) {
-          entry.type = policiesRng.pick(["branch", "tag"]);
-        }
-        return entry;
-      });
-      env.deployment_branch_policies = policiesRng.bool(0.25) ? { entries } : entries;
-      env.deployment_branch_policy = { protected_branches: false, custom_branch_policies: true };
-    }
-    if (rulesRng.bool(0.3)) {
-      // App slugs come ONLY from the shared PROTECTION_RULE_APPS fixture (the
-      // mock's available-Apps listing serves the same objects), so a declared
-      // rule can always resolve and enable. The slice keeps slugs unique per
-      // environment. The empty live baseline means an explicit `undeclared`
-      // policy would change no outcome, so the wrapped draw omits it (the
-      // keep-note and disable paths are pinned by curated scenarios).
-      const slugs = PROTECTION_RULE_APPS.map((app) => String(app.slug));
-      const count = rulesRng.int(slugs.length) + 1;
-      const entries: Json[] = slugs.slice(0, count).map((slug) => ({ app: slug }));
-      env.deployment_protection_rules = rulesRng.bool(0.25) ? { entries } : entries;
-    }
-    if (pinnedRng.bool(0.25)) {
-      // A small subset declares a pin state, gating the GraphQL pins read
-      // onto those iterations. The entry count stays tiny (<= 3), so the
-      // declared pinned: true count can never approach GitHub's 10 cap;
-      // pinned: false over the empty pins baseline is a no-op unpin, which
-      // exercises the read without a mutation. The interleaving and cap
-      // paths are pinned by curated scenarios.
-      env.pinned = pinnedRng.bool(0.7);
-    }
-    return env;
-  });
-}
-
-function genAutolinks(rng: Rng): EntriesForm {
-  const entries = Array.from({ length: rng.int(2) + 1 }, (_, i) => ({
-    key_prefix: `${rng.pick(["JIRA", "TICKET", "REF"])}-${i}-`,
-    url_template: `https://example.com/browse/<num>?ref=${i}`,
-    is_alphanumeric: rng.bool(),
-  }));
-  return maybeWrapUndeclared(rng, entries);
-}
-
-function genActions(rng: Rng): Json {
-  // oidc_customization_sub is deliberately NEVER generated here: its
-  // endpoints carry a per-endpoint permission override (Actions instead of
-  // Administration) that the fuzz oracle's section-level PERMISSION_BY_KEY
-  // model cannot grade, so any masked iteration declaring it would
-  // mispredict the outcome. Curated scenarios (actions-oidc-*) cover the
-  // key, including both denial directions. If a second mixed-permission
-  // section ever appears, model per-endpoint requirements in the oracle
-  // instead of widening this exclusion.
-  const actions: Json = {};
-  if (rng.bool()) {
-    actions.default_workflow_permissions = rng.pick(["read", "write"]);
-  }
-  if (rng.bool()) {
-    actions.can_approve_pull_request_reviews = rng.bool();
-  }
-  // Coupling: selected_actions only applies under allowed_actions "selected".
-  if (rng.bool(0.5)) {
-    actions.allowed_actions = "selected";
-    actions.selected_actions = {
-      github_owned_allowed: rng.bool(),
-      verified_allowed: rng.bool(),
-      patterns_allowed: [`${rng.pick(["actions", "octo"])}/*`],
-    };
-  } else if (rng.bool()) {
-    actions.allowed_actions = rng.pick(["all", "local_only"]);
-  }
-  if (rng.bool(0.3)) {
-    actions.access_level = rng.pick(["none", "user", "organization"]);
-  }
-  if (rng.bool(0.3)) {
-    actions.artifact_and_log_retention = { days: rng.int(400) + 1 };
-  }
-  if (rng.bool(0.3)) {
-    const cache: Json = {};
-    if (rng.bool()) {
-      cache.max_cache_retention_days = rng.int(14) + 1;
-    }
-    if (rng.bool() || Object.keys(cache).length === 0) {
-      cache.max_cache_size_gb = rng.int(50) + 1;
-    }
-    actions.cache = cache;
-  }
-  if (Object.keys(actions).length === 0) {
-    actions.default_workflow_permissions = rng.pick(["read", "write"]);
-  }
-  // The fork PR policy keys are NEW draws appended after the original body,
-  // each on its own forked stream, so pre-existing seeds keep producing the
-  // same document above (the seed-stability convention; see genCodeScanning).
-  const approvalRng = rng.fork("fork-pr-approval");
-  if (approvalRng.bool(0.3)) {
-    actions.fork_pr_contributor_approval = {
-      approval_policy: approvalRng.pick([
-        "first_time_contributors_new_to_github",
-        "first_time_contributors",
-        "all_external_contributors",
-      ]),
-    };
-  }
-  const privateReposRng = rng.fork("fork-pr-private");
-  if (privateReposRng.bool(0.3)) {
-    // The shape requires the COMPLETE policy (GitHub does not document
-    // whether the PUT preserves an omitted toggle), so every draw carries
-    // all four booleans.
-    actions.fork_pr_workflows_private_repos = {
-      run_workflows_from_fork_pull_requests: privateReposRng.bool(),
-      send_write_tokens_to_workflows: privateReposRng.bool(),
-      send_secrets_and_variables: privateReposRng.bool(),
-      require_approval_for_fork_pr_workflows: privateReposRng.bool(),
-    };
-  }
-  return actions;
-}
-
-function genWorkflows(rng: Rng): Json[] {
-  return Array.from({ length: rng.int(2) + 1 }, (_, i) => ({
-    path: `.github/workflows/${rng.pick(["ci", "release", "lint"])}-${i}.yml`,
-    state: rng.pick(["active", "disabled"] as const),
-  }));
-}
 
 /**
  * The secret sections' entries draw their `$NAME` references from
@@ -529,245 +107,6 @@ function genSecretEntries(rng: Rng): EntriesForm {
     value: `$${name}`,
   })) as Json[];
   return maybeWrapUndeclared(rng, entries);
-}
-
-function genPages(rng: Rng): Json | null {
-  if (rng.bool(0.25)) {
-    return null;
-  }
-  // source is required to CREATE Pages (the POST body must carry it), and the
-  // generator never seeds Pages into live state, so every Pages scenario is a
-  // create - always emit source. Other fields are optional extras.
-  const pages: Json = {
-    source: { branch: rng.pick(["main", "gh-pages"]), path: rng.pick(["/", "/docs"]) },
-  };
-  if (rng.bool(0.4)) {
-    pages.https_enforced = rng.bool();
-  }
-  return pages;
-}
-
-/**
- * The code-scanning default-setup languages the real API accepts (the enum from
- * GitHub's OpenAPI). The published settings schema is looser, but the mock
- * validates the PATCH request body against the real spec, so the generator must
- * emit only these canonical values.
- */
-const CODE_SCANNING_LANGUAGES = [
-  "actions",
-  "c-cpp",
-  "csharp",
-  "go",
-  "java-kotlin",
-  "javascript-typescript",
-  "python",
-  "ruby",
-  "swift",
-] as const;
-
-function genCodeScanning(rng: Rng): Json {
-  const cfg: Json = { state: rng.pick(["configured", "not-configured"]) };
-  if (rng.bool()) {
-    cfg.query_suite = rng.pick(["default", "extended"]);
-  }
-  // threat_model occupies the draw slots of the duplicated query_suite
-  // branch it replaced (same bool threshold, same two-way pick), so every
-  // draw after it in this function is byte-identical across the swap.
-  if (rng.bool()) {
-    cfg.threat_model = rng.pick(["remote", "remote_and_local"]);
-  }
-  // The runner fields are NEW draws, so they live on a forked stream: the
-  // main stream stays stable and recorded seeds keep reproducing.
-  const runnerRng = rng.fork("runner");
-  if (runnerRng.bool(0.3)) {
-    cfg.runner_type = runnerRng.pick(["standard", "labeled"] as const);
-    if (cfg.runner_type === "labeled") {
-      // runner_label pairs with the labeled runner type (schema.ts).
-      cfg.runner_label = "e2e-runner";
-    }
-  }
-  if (rng.bool(0.5)) {
-    cfg.languages = Array.from({ length: rng.int(3) + 1 }, () => rng.pick(CODE_SCANNING_LANGUAGES));
-  }
-  return cfg;
-}
-
-/** The languages the code-quality PATCH accepts (a subset of the GET enum). */
-const CODE_QUALITY_LANGUAGES = [
-  "csharp",
-  "go",
-  "java-kotlin",
-  "javascript-typescript",
-  "python",
-  "ruby",
-] as const;
-
-function genCodeQuality(rng: Rng): Json {
-  const cfg: Json = { state: rng.pick(["configured", "not-configured"]) };
-  if (rng.bool(0.3)) {
-    cfg.runner_type = rng.pick(["standard", "labeled"] as const);
-    if (cfg.runner_type === "labeled") {
-      // runner_label pairs with the labeled runner type (schema.ts).
-      cfg.runner_label = "e2e-runner";
-    }
-  }
-  if (rng.bool(0.5)) {
-    cfg.languages = Array.from({ length: rng.int(3) + 1 }, () => rng.pick(CODE_QUALITY_LANGUAGES));
-  }
-  if (rng.bool(0.3)) {
-    cfg.ai_findings_option = rng.pick(["disabled", "on_push"]);
-  }
-  return cfg;
-}
-
-/** GitHub App ids for auto_trigger_checks entries; count <= pool keeps them unique. */
-const AUTO_TRIGGER_APP_IDS = [15368, 29310, 62410] as const;
-
-function genCheckSuitePreferences(rng: Rng): Json {
-  return {
-    auto_trigger_checks: Array.from(
-      { length: rng.int(AUTO_TRIGGER_APP_IDS.length) + 1 },
-      (_, i) => ({
-        app_id: AUTO_TRIGGER_APP_IDS[i] as number,
-        setting: rng.bool(),
-      }),
-    ),
-  };
-}
-
-function genCollaborators(rng: Rng): EntriesForm {
-  const used = new Set<string>();
-  const out: Json[] = [];
-  const count = rng.int(3) + 1;
-  for (let i = 0; i < count; i++) {
-    const username = `${rng.pick(["octocat", "hubot", "dev"])}-${i}`;
-    if (used.has(username.toLowerCase())) {
-      continue;
-    }
-    used.add(username.toLowerCase());
-    out.push({ username, permission: rng.pick(["pull", "push", "maintain", "admin"]) });
-  }
-  return maybeWrapUndeclared(rng, out);
-}
-
-/** The undeclared pending-invitation invitee; no generated username collides with it. */
-const UNDECLARED_INVITEE = "zz-undeclared-invitee";
-
-/**
- * Pending-invitation live state for the declared collaborators: some
- * declared users get a pending invitation (matching the declared permission,
- * mismatched, or expired), and sometimes an undeclared invitee rides along.
- * Every relation converges under a fully-granted apply - matched invitations
- * are left alone, mismatches PATCHed, expired ones re-sent, the undeclared
- * one cancelled (or kept as a note) - so the fixpoint and convergence gates
- * hold without the oracle modeling a collaborators witness kind.
- */
-function genInvitationsState(rng: Rng, declared: Json[]): Json[] {
-  const out: Json[] = [];
-  for (const entry of declared) {
-    if (!rng.bool(0.5)) {
-      continue;
-    }
-    const wantRole = roleForPermission(String(entry.permission ?? DEFAULT_ROLE));
-    const kind = rng.pick(["matching", "mismatched", "expired"] as const);
-    const invitation: Json = { invitee: { login: entry.username }, permissions: wantRole };
-    if (kind === "mismatched") {
-      invitation.permissions = rng.pick(
-        ["read", "write", "maintain", "triage", "admin"].filter((role) => role !== wantRole),
-      );
-    } else if (kind === "expired") {
-      invitation.expired = true;
-    }
-    out.push(invitation);
-  }
-  if (rng.bool(0.3)) {
-    out.push({ invitee: { login: UNDECLARED_INVITEE }, permissions: "write" });
-  }
-  return out;
-}
-
-function genTeams(rng: Rng): Json[] {
-  return Array.from({ length: rng.int(2) + 1 }, (_, i) => ({
-    name: `${rng.pick(["core", "reviewers", "ops"])}-${i}`,
-    permission: rng.pick(["pull", "push", "maintain", "admin"]),
-  }));
-}
-
-function genMilestones(rng: Rng): Json[] {
-  const used = new Set<string>();
-  const out: Json[] = [];
-  const count = rng.int(3) + 1;
-  for (let i = 0; i < count; i++) {
-    const title = `${rng.pick(["v1", "v2", "backlog"])}-${i}`;
-    if (used.has(title)) {
-      continue;
-    }
-    used.add(title);
-    const m: Json = { title };
-    if (rng.bool()) {
-      m.description = rng.pick(["", "the milestone", name(rng)]);
-    }
-    if (rng.bool()) {
-      m.state = rng.pick(["open", "closed"]);
-    }
-    if (rng.bool(0.4)) {
-      m.due_on = rng.pick(DUE_DATES);
-    }
-    out.push(m);
-  }
-  // milestones is a WITNESS section: always the plain array form, never
-  // maybeWrapUndeclared (its rationale explains why).
-  return out;
-}
-
-function genInteractionLimits(rng: Rng): Json | null {
-  // null (a clear) is a first-class declared value, like pages: null.
-  if (rng.bool(0.2)) {
-    return null;
-  }
-  const limits: Json = {
-    limit: rng.pick(["existing_users", "contributors_only", "collaborators_only"]),
-  };
-  if (rng.bool()) {
-    limits.expiry = rng.pick(["one_day", "three_days", "one_week", "one_month", "six_months"]);
-  }
-  // The pulls keys are NEW draws appended after the original body, each on
-  // its own forked stream, so pre-existing seeds keep producing the same
-  // document above (the seed-stability convention; see genActions).
-  const capRng = rng.fork("pulls-cap");
-  if (capRng.bool(0.3)) {
-    const cap: Json = { enabled: capRng.bool() };
-    if (capRng.bool()) {
-      cap.max_open_pull_requests = capRng.pick([1, 5, 100, 1000]);
-    }
-    limits.pull_request_creation_cap = cap;
-  }
-  const bypassRng = rng.fork("pulls-bypass");
-  if (bypassRng.bool(0.3)) {
-    // Unique under the case-insensitive login key. The uppercase draw buys
-    // shape variety only: fuzz live lists originate from declared PUTs, so a
-    // live/declared case mismatch never arises here; the case-insensitive
-    // match is pinned by the curated bypass add-remove scenario and the
-    // section's unit tests.
-    const logins = Array.from({ length: bypassRng.int(3) }, (_, i) => {
-      const login = `${bypassRng.pick(["octocat", "hubot", "dev"])}-${i}`;
-      return bypassRng.bool(0.3) ? login.toUpperCase() : login;
-    });
-    limits.pull_request_creation_bypass = logins;
-  }
-  // A pulls-only document (no base group at all) is valid and takes the
-  // apply path that skips the base PUT entirely; dropping the base keys is
-  // its own forked draw so documents whose pulls forks decline are
-  // untouched. Both base keys go together: expiry without limit is invalid.
-  if (
-    (limits.pull_request_creation_cap !== undefined ||
-      limits.pull_request_creation_bypass !== undefined) &&
-    rng.fork("pulls-only").bool(0.25)
-  ) {
-    delete limits.limit;
-    delete limits.expiry;
-  }
-  return limits;
 }
 
 function genActionsVariables(rng: Rng): EntriesForm {
@@ -790,128 +129,6 @@ function genActionsVariables(rng: Rng): EntriesForm {
     out.push({ name, value: rng.pick(["us-east-1", "production", "debug", "on", "42"]) });
   }
   return maybeWrapUndeclared(rng, out);
-}
-
-/**
- * The ONE fixed pool secret references draw from, name -> plaintext: webhook
- * config.secret and actions_secrets values alike. Single-sourced: the
- * generators draw `$NAME` references from these keys and scenarioSecretEnv()
- * (below) builds the scenario `env` from the same map, so a generated
- * reference can never name a variable the child env lacks. The values are
- * distinctive strings so leak checks can hunt them.
- */
-const E2E_SECRET_ENV = {
-  E2E_SECRET_A: "e2e-hook-secret-alpha",
-  E2E_SECRET_B: "e2e-hook-secret-bravo",
-  E2E_SECRET_C: "e2e-hook-secret-charlie",
-} as const;
-
-/** The whole-value references the webhook generator draws from. */
-const E2E_SECRET_REFS = Object.keys(E2E_SECRET_ENV).map((name) => `$${name}`);
-
-function genWebhooks(rng: Rng): EntriesForm {
-  const count = rng.int(2) + 1;
-  const entries: Json[] = Array.from({ length: count }, (_, i) => {
-    const config: Json = {
-      url: `https://hooks.example.com/${rng.pick(["ci", "deploy", "notify"])}-${i}`,
-    };
-    if (rng.bool(0.6)) {
-      config.content_type = rng.pick(["json", "form"]);
-    }
-    // Both spellings on purpose: GitHub stores insecure_ssl as a string, so
-    // a declared number exercises the compare-side normalization.
-    if (rng.bool(0.4)) {
-      config.insecure_ssl = rng.pick(["0", "1", 0, 1] as const);
-    }
-    if (rng.bool(0.4)) {
-      config.secret = rng.pick(E2E_SECRET_REFS);
-    }
-    const hook: Json = { config };
-    if (rng.bool(0.6)) {
-      hook.events = [
-        ...new Set(
-          Array.from({ length: rng.int(2) + 1 }, () =>
-            rng.pick(["push", "pull_request", "issues", "release"]),
-          ),
-        ),
-      ];
-    }
-    if (rng.bool(0.5)) {
-      hook.active = rng.bool();
-    }
-    return hook;
-  });
-  return maybeWrapUndeclared(rng, entries);
-}
-
-/**
- * Custom property values, drawn ONLY from CUSTOM_PROPERTY_DEFINITIONS (the
- * mock's org-level definition fixture, shared with the values PATCH handler)
- * with type-appropriate values, so a generated declaration never trips the
- * undefined-property 422 the oracle does not model. A small null draw
- * exercises the unset path (a declared null over an empty live baseline is
- * simply already-converged).
- */
-function genCustomProperties(rng: Rng): EntriesForm {
-  const entries: Json[] = [];
-  for (const definition of CUSTOM_PROPERTY_DEFINITIONS) {
-    if (!rng.bool(0.6)) {
-      continue;
-    }
-    let value: Json[keyof Json];
-    if (rng.bool(0.15)) {
-      value = null;
-    } else if (definition.value_type === "string") {
-      value = rng.pick(["platform", "payments", "infra"]);
-    } else if (definition.value_type === "true_false") {
-      // Both spellings on purpose: a declared boolean must normalize to the
-      // "true"/"false" string GitHub stores.
-      value = rng.pick([true, false, "true", "false"] as const);
-    } else {
-      const allowed = [...(definition.allowed_values ?? [])];
-      const picked = allowed.slice(0, rng.int(allowed.length) + 1);
-      // Sometimes reversed: multi_select compares order-insensitively.
-      value = rng.bool(0.5) ? picked : picked.reverse();
-    }
-    entries.push({ property_name: definition.property_name, value });
-  }
-  if (entries.length === 0) {
-    const definition = rng.pick(
-      CUSTOM_PROPERTY_DEFINITIONS.filter((d) => d.value_type === "string"),
-    );
-    entries.push({ property_name: definition.property_name, value: "platform" });
-  }
-  return maybeWrapUndeclared(rng, entries);
-}
-
-/**
- * The fixed pool deploy-key entries draw from: plausible
- * "algorithm blob comment" strings whose blobs are DISTINCT (GitHub rejects a
- * reused public key with a 422, account-wide, and the mock mirrors that per
- * repo). The comments are load-bearing for the corpus: the mock strips them on
- * storage the way GitHub normalizes stored material, so a converging apply
- * proves the section compares algorithm + blob, not the raw string.
- */
-const DEPLOY_KEY_POOL = [
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzAlphaAlphaAlphaAlphaAlphaAlphaAlph deploy@alpha",
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzBravoBravoBravoBravoBravoBravoBrav deploy@bravo",
-  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCe2eFuzzCharlieCharlieCharlieCharlieCharlie deploy@charlie",
-  "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTZAAAAIbmlzdHAyNTYAAABBBe2e deploy@delta",
-] as const;
-
-function genDeployKeys(rng: Rng): EntriesForm {
-  // Distinct keys AND distinct titles per document: the pool is sliced, never
-  // sampled with replacement, because a duplicated blob 422s on create and a
-  // duplicated title is rejected by the section's own duplicate check.
-  const count = rng.int(DEPLOY_KEY_POOL.length) + 1;
-  const entries: Json[] = DEPLOY_KEY_POOL.slice(0, count).map((key, i) => {
-    const entry: Json = { title: `deploy-${rng.pick(["bot", "ci", "mirror"])}-${i}`, key };
-    if (rng.bool(0.5)) {
-      entry.read_only = rng.bool();
-    }
-    return entry;
-  });
-  return maybeWrapUndeclared(rng, entries);
 }
 
 /** The top-level sections whose entries are {name, value: $NAME} secret lists. */
@@ -1069,35 +286,12 @@ function suppressMaskedCustomProperties(
 }
 
 /**
- * Names and regexes come from small fixed pools (the index suffix keeps
- * names unique under the exact-name natural key); delimiters and the
- * must_match/must_not_match extras ride along occasionally so the optional
- * fields are exercised. The regexes are inert strings to this action
- * (passthrough), so simple realistic shapes are enough.
+ * One settings generator per section, aggregated from the per-section
+ * fragments (src/sections/<key>/generators.ts) plus the family-shared
+ * generators above. The Record<SectionKey, ...> type IS the completeness
+ * assert, both directions: a new section without a fragment entry and an
+ * entry naming no section both fail typecheck here.
  */
-function genSecretScanningPatterns(rng: Rng): EntriesForm {
-  const entries: Json[] = Array.from({ length: rng.int(3) + 1 }, (_, i) => {
-    const entry: Json = {
-      name: `${rng.pick(["internal-api-token", "staging-key", "vendor-secret", "license-key"])}-${i}`,
-      pattern: rng.pick(["int_[a-z0-9]{8}", "key-[0-9]{6}", "tok_[A-Za-z0-9]{12}"]),
-    };
-    if (rng.bool(0.3)) {
-      entry.start_delimiter = "\\b";
-    }
-    if (rng.bool(0.3)) {
-      entry.end_delimiter = rng.pick(["\\b", "\\z"]);
-    }
-    if (rng.bool(0.2)) {
-      entry.must_match = ["^prefix_prod"];
-    }
-    if (rng.bool(0.2)) {
-      entry.must_not_match = ["test", "example"];
-    }
-    return entry;
-  });
-  return maybeWrapUndeclared(rng, entries);
-}
-
 const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   repository: genRepository,
   labels: genLabels,
@@ -1133,24 +327,6 @@ export function genSettings(rng: Rng, key: SectionKey): unknown {
 }
 
 /**
- * How a section's seeded live state relates to its declared settings, as a
- * SEMANTIC WITNESS the oracle can predict from exactly:
- *
- * - "matching": the live state mirrors EVERY field the handler diffs, so a
- *   correct engine reports exactly clean (check) or a no-op applied (apply).
- * - "drift-update": one DECLARED field diverges (never an omitted optional -
- *   a divergent value in a field the settings do not declare is not drift),
- *   so check must report drift and apply must issue an update.
- * - "extra-undeclared" (labels only): a live label the settings do not
- *   declare, so check reports undeclared drift and apply DELETEs it.
- *   Milestones keep undeclared entries by default, and their wrapped
- *   `undeclared: delete` path is pinned by a curated scenario
- *   (milestones-undeclared-delete) rather than a witness kind, so this
- *   kind is never generated for them.
- */
-export type LiveWitnessKind = "matching" | "drift-update" | "extra-undeclared";
-
-/**
  * The sections the witness generator models. Repository is deferred: a
  * faithful matching witness needs normalized topics, the enable_* toggles,
  * and fixture-aware treatment of absent fields.
@@ -1164,193 +340,20 @@ export const WITNESS_KINDS: Record<WitnessSection, readonly LiveWitnessKind[]> =
   milestones: ["matching", "drift-update"],
 };
 
-/** Perturbation color: absent from HEX_COLORS, so it always reads as drift. */
-const DRIFT_COLOR = "123456";
-/** Perturbation description: absent from every description pool. */
-const DRIFT_DESCRIPTION = "witness-drift";
-/** The extra-undeclared live label; no generated name collides with it. */
-const UNDECLARED_LABEL: Json = {
-  name: "zz-undeclared-witness",
-  color: "cccccc",
-  description: "live label the settings never declare",
+/**
+ * One witness builder per modeled section, aggregated from the section
+ * fragments like SETTINGS_GENERATORS: the Record type keeps WITNESS_SECTIONS
+ * and the builders in lockstep, so a new witness section without a builder
+ * entry fails typecheck here instead of silently routing to another
+ * section's builder.
+ */
+const WITNESS_BUILDERS: Record<
+  WitnessSection,
+  (rng: Rng, declared: Json[], kind: LiveWitnessKind) => LiveWitness
+> = {
+  labels: labelsWitness,
+  milestones: milestonesWitness,
 };
-
-/** A generated live-state witness: the kind that actually holds, plus state. */
-export interface LiveWitness {
-  /**
-   * The kind the state actually witnesses. May fall back to "matching" when
-   * "drift-update" was requested but no entry declares a perturbable field.
-   */
-  kind: LiveWitnessKind;
-  state: LiveState;
-}
-
-/**
- * Loud disjointness guard: a perturbation sentinel that collides with a
- * generated value would silently turn a drift witness into a matching one
- * (or an "undeclared" label into a declared one), so the collision throws
- * instead of degrading the witness.
- */
-function assertSentinelDisjoint(condition: boolean, detail: string): void {
-  if (!condition) {
-    throw new Error(`witness sentinel collision: ${detail}`);
-  }
-}
-
-/**
- * A live label body that the labels handler diffs as EXACTLY equal
- * (src/sections/labels.ts): the live label carries the FINAL name (new_name
- * wins - the handler matches by source or target key and treats any other
- * live name as rename drift), the declared color/description verbatim (they
- * are diffed only when DECLARED, so undeclared ones take fixed fillers), and
- * every extra declared key verbatim (extras are subsetDiffed as passthrough
- * fields, so a hardcoded field list would silently read as drift).
- */
-function matchingLiveLabel(label: Json): Json {
-  const { name, new_name, color, description, ...extras } = label;
-  return {
-    name: new_name ?? name,
-    color: color ?? "ededed",
-    description: description ?? null,
-    ...extras,
-  };
-}
-
-/**
- * True when uppercasing changes the name but keeps its case-insensitive key,
- * so the flipped live name still matches the declared label and the handler
- * reads it as rename drift (existing.name !== finalName).
- */
-function caseFlippable(name: string): boolean {
-  const flipped = name.toUpperCase();
-  return flipped !== name && flipped.toLowerCase() === name.toLowerCase();
-}
-
-/**
- * The fields of one declared label a drift-update witness may perturb. The
- * name candidate flips the case of the FINAL name (new_name resolved), so the
- * divergence reads as rename drift against the post-rename state.
- */
-function labelDriftFields(label: Json): Array<"color" | "description" | "name"> {
-  const fields: Array<"color" | "description" | "name"> = [];
-  if (label.color !== undefined) {
-    fields.push("color");
-  }
-  if (label.description !== undefined) {
-    fields.push("description");
-  }
-  if (caseFlippable(String(label.new_name ?? label.name))) {
-    fields.push("name");
-  }
-  return fields;
-}
-
-function labelsWitness(rng: Rng, declared: Json[], kind: LiveWitnessKind): LiveWitness {
-  const labels = declared.map(matchingLiveLabel);
-  if (kind === "matching") {
-    return { kind, state: { labels } };
-  }
-  if (kind === "extra-undeclared") {
-    const undeclaredKey = String(UNDECLARED_LABEL.name).toLowerCase();
-    for (const label of declared) {
-      assertSentinelDisjoint(
-        String(label.name).toLowerCase() !== undeclaredKey &&
-          String(label.new_name ?? label.name).toLowerCase() !== undeclaredKey,
-        `a declared label resolves to the undeclared sentinel "${undeclaredKey}"`,
-      );
-    }
-    return { kind, state: { labels: [...labels, { ...UNDECLARED_LABEL }] } };
-  }
-  const eligible = declared
-    .map((label, index) => ({ index, fields: labelDriftFields(label) }))
-    .filter((entry) => entry.fields.length > 0);
-  if (eligible.length === 0) {
-    return { kind: "matching", state: { labels } };
-  }
-  const { index, fields } = rng.pick(eligible);
-  const source = declared[index] as Json;
-  const live = labels[index] as Json;
-  const field = rng.pick(fields);
-  if (field === "color") {
-    assertSentinelDisjoint(
-      source.color !== DRIFT_COLOR,
-      `the label color pool contains ${DRIFT_COLOR}`,
-    );
-    live.color = DRIFT_COLOR;
-  } else if (field === "description") {
-    assertSentinelDisjoint(
-      source.description !== DRIFT_DESCRIPTION,
-      `the label description pool contains "${DRIFT_DESCRIPTION}"`,
-    );
-    live.description = DRIFT_DESCRIPTION;
-  } else {
-    live.name = String(source.new_name ?? source.name).toUpperCase();
-  }
-  return { kind: "drift-update", state: { labels } };
-}
-
-/**
- * A live milestone body the milestones handler diffs as EXACTLY equal
- * (src/sections/milestones.ts): the handler subsetDiffs EVERY declared field
- * verbatim, passthrough fields included, so the whole declaration is spread
- * over the handler-visible defaults - a future passthrough field is mirrored
- * automatically instead of silently reading as drift.
- */
-function matchingLiveMilestone(milestone: Json, index: number): Json {
-  return {
-    id: 910_000 + index,
-    number: index + 1,
-    state: "open",
-    description: null,
-    ...milestone,
-  };
-}
-
-/** The fields of one declared milestone a drift-update witness may perturb. */
-function milestoneDriftFields(milestone: Json): Array<"description" | "state" | "due_on"> {
-  const fields: Array<"description" | "state" | "due_on"> = [];
-  if (milestone.description !== undefined) {
-    fields.push("description");
-  }
-  if (milestone.state !== undefined) {
-    fields.push("state");
-  }
-  if (milestone.due_on !== undefined) {
-    fields.push("due_on");
-  }
-  return fields;
-}
-
-function milestonesWitness(rng: Rng, declared: Json[], kind: LiveWitnessKind): LiveWitness {
-  const milestones = declared.map(matchingLiveMilestone);
-  if (kind === "matching") {
-    return { kind, state: { milestones } };
-  }
-  const eligible = declared
-    .map((milestone, index) => ({ index, fields: milestoneDriftFields(milestone) }))
-    .filter((entry) => entry.fields.length > 0);
-  if (eligible.length === 0) {
-    // Every milestone declares only its title: no field can legitimately
-    // diverge, so the witness degrades to matching (and says so).
-    return { kind: "matching", state: { milestones } };
-  }
-  const { index, fields } = rng.pick(eligible);
-  const source = declared[index] as Json;
-  const live = milestones[index] as Json;
-  const field = rng.pick(fields);
-  if (field === "description") {
-    assertSentinelDisjoint(
-      source.description !== DRIFT_DESCRIPTION,
-      `the milestone description pool contains "${DRIFT_DESCRIPTION}"`,
-    );
-    live.description = DRIFT_DESCRIPTION;
-  } else if (field === "state") {
-    live.state = source.state === "open" ? "closed" : "open";
-  } else {
-    live.due_on = rng.pick(DUE_DATES.filter((d) => d !== source.due_on));
-  }
-  return { kind: "drift-update", state: { milestones } };
-}
 
 /**
  * A live-state witness for one section: mock live state with a KNOWN semantic
@@ -1373,9 +376,7 @@ export function genLiveWitness(
   // The witness sections are generated in the plain array form only, but the
   // unwrap keeps this correct if that exclusion ever moves.
   const declared = entriesOf(settings);
-  return key === "labels"
-    ? labelsWitness(rng, declared, kind)
-    : milestonesWitness(rng, declared, kind);
+  return WITNESS_BUILDERS[key](rng, declared, kind);
 }
 
 // --- Invalid-settings catalog (input-mode fuzz) -----------------------------
