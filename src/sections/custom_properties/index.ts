@@ -11,7 +11,7 @@ import {
   type MustBeNever,
   SettingsFile,
   type UndeclaredPolicyList,
-} from "../schema.js";
+} from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -24,7 +24,7 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 
 const permission: SectionPermission = { repo: ["custom_properties"] };
 

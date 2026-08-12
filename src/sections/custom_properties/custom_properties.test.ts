@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { customPropertiesSection, normalizeValue } from "../../src/sections/custom-properties.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { customPropertiesSection, normalizeValue } from "./index.js";
 
 describe("normalizeValue", () => {
   test("booleans and numbers become their string form (GitHub's true_false wire shape)", () => {
