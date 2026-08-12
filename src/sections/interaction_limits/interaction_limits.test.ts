@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { PermissionDenied } from "../../src/sections/contract.js";
-import { interactionLimitsSection } from "../../src/sections/interaction-limits.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { PermissionDenied } from "../contract.js";
+import { interactionLimitsSection } from "./index.js";
 
 const GET = "GET /repos/o/r/interaction-limits";
 const CAP_GET = "GET /repos/o/r/interaction-limits/pulls/creation-cap";

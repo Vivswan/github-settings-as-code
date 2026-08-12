@@ -26,7 +26,7 @@ import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
 import { deployKeysSection } from "./deploy-keys.js";
 import { environmentsSection } from "./environments.js";
-import { interactionLimitsSection } from "./interaction-limits.js";
+import { interactionLimitsSection } from "./interaction_limits/index.js";
 import { labelsSection } from "./labels/index.js";
 import { milestonesSection } from "./milestones/index.js";
 import { pagesSection } from "./pages/index.js";
