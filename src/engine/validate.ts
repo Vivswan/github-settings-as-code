@@ -12,6 +12,57 @@ import { SECTION_KEYS } from "../schema.js";
 import { sectionModule, sectionShape } from "../sections/registry.js";
 
 /**
+ * The first non-plain object anywhere in a declared value, as "path (kind)"
+ * prose - or null when the value is plain JSON data throughout. YAML's
+ * explicit tags (!!timestamp, !!set, !!binary) parse to Date/Set/Uint8Array,
+ * which zod's object schemas accept as empty mappings, so a tagged value
+ * nested ANYWHERE (actions.cache, a pages mapping, a future section) would
+ * otherwise validate and then silently configure nothing - or die later at
+ * the request boundary with less context. One walk here covers every
+ * section, present and future, instead of a per-shape guard that each new
+ * mapping must remember (requirePlainMapping remains the shape-level belt
+ * for the sections that wear it). `seen` breaks YAML anchor cycles: a
+ * cyclic document is not endorsed, but the validator must not hang on one.
+ */
+function findNonPlain(value: unknown, path: string, seen: WeakSet<object>): string | null {
+  if (value === null || typeof value !== "object") {
+    return null;
+  }
+  if (seen.has(value)) {
+    return null;
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      const hit = findNonPlain(value[index], `${path}[${index}]`, seen);
+      if (hit !== null) {
+        return hit;
+      }
+    }
+    return null;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) {
+    const kind =
+      proto === Date.prototype
+        ? "a Date, e.g. from a YAML !!timestamp tag"
+        : proto === Uint8Array.prototype
+          ? "binary data, e.g. from a YAML !!binary tag"
+          : proto === Set.prototype
+            ? "a set, e.g. from a YAML !!set tag"
+            : "a non-plain object";
+    return `${path} is not plain YAML data (${kind}); replace it with a plain value`;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    const hit = findNonPlain(entry, `${path}.${key}`, seen);
+    if (hit !== null) {
+      return hit;
+    }
+  }
+  return null;
+}
+
+/**
  * Validate the declared sections' shapes. Returns an error message naming
  * the source file, the exact entries, and what to fix - or null when the
  * document is well-formed. The parsed values are NOT used (zod would clone
@@ -25,6 +76,14 @@ export function validateSectionShapes(
   for (const key of SECTION_KEYS) {
     const declared = settings[key];
     if (declared === undefined) {
+      continue;
+    }
+    // Plain-data gate first: zod object schemas accept a Date or Set as an
+    // empty mapping, so the tagged-value rejection must not depend on any
+    // shape.
+    const nonPlain = findNonPlain(declared, key, new WeakSet());
+    if (nonPlain !== null) {
+      problems.push(nonPlain);
       continue;
     }
     const parsed = sectionShape(key).safeParse(declared);

@@ -213,10 +213,10 @@ describe("error classification", () => {
     expect(result.error.message).toBe("Forbidden");
   });
 
-  test("an exhausted primary limit (x-ratelimit-remaining 0) flags without the phrase", async () => {
+  test("an exhausted primary limit classifies through its message, zero header or not", async () => {
     stubFetch([
       () =>
-        new Response(JSON.stringify({ message: "Forbidden" }), {
+        new Response(JSON.stringify({ message: "API rate limit exceeded for user" }), {
           status: 403,
           headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
         }),
@@ -225,8 +225,29 @@ describe("error classification", () => {
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
-    expect(result.error.rateLimited).toBe(true);
+    expect(isRateLimitError(result.error)).toBe(true);
     expect(isPermissionError(result.error)).toBe(false);
+  });
+
+  test("a permission 403 on the token's LAST quota unit stays a permission error", async () => {
+    // x-ratelimit-remaining: 0 is ambiguous alone: a genuine denial issued on
+    // the last quota unit carries it too, and misreading it as a rate limit
+    // would hide the missing grant behind retry advice. The readable message
+    // disambiguates, so the zero header must contribute nothing here.
+    stubFetch([
+      () =>
+        new Response(JSON.stringify({ message: "Resource not accessible by integration" }), {
+          status: 403,
+          headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
+        }),
+    ]);
+    const result = await api().tryRequest("GET", "/repos/o/r/labels");
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.rateLimited).toBeUndefined();
+    expect(isRateLimitError(result.error)).toBe(false);
+    expect(isPermissionError(result.error)).toBe(true);
   });
 
   test("a plain permission 403 stays a permission error (no structural signal)", async () => {
@@ -814,6 +835,29 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
     expect(isRateLimitError(result.error)).toBe(true);
     expect(JSON.stringify(result.error)).not.toContain("he said");
+  });
+
+  test("a WITHHELD 403 with only the zero-quota header still reads as a rate limit", async () => {
+    // The wholesale replacement destroys the message that would normally
+    // disambiguate, so the ambiguous x-ratelimit-remaining: 0 is accepted on
+    // this path only - the lesser evil against telling a rate-limited user
+    // to fix their token.
+    stubFetch([
+      () =>
+        new Response(JSON.stringify({ message: `denied (echo: ${hostileSecret})` }), {
+          status: 403,
+          headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
+        }),
+    ]);
+    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      secret: hostileSecret,
+    });
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+    expect(isRateLimitError(result.error)).toBe(true);
   });
 
   test("an echoed 'rate limit' string cannot spoof the classification", async () => {

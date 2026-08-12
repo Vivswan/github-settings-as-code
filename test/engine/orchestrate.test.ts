@@ -34,11 +34,16 @@ function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: s
 }
 
 /**
- * Test fixtures are schema-valid by construction; the brand normally comes
- * from validateSettingsDoc, so this cast stands in for that boundary.
+ * Brand test fixtures through the REAL boundary: an invalid fixture fails
+ * here instead of riding a cast into runForRepo.
  */
 function validated(doc: SettingsFile): ValidatedSettings {
-  return doc as ValidatedSettings;
+  const silent: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+  const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silent);
+  if ("error" in verdict) {
+    throw new Error(`test fixture failed validation: ${verdict.error}`);
+  }
+  return verdict.settings;
 }
 
 function opts(overrides: Partial<RepoRunOptions> = {}): RepoRunOptions {
@@ -229,6 +234,19 @@ describe("validateSettingsDoc", () => {
   test("non-mapping documents are rejected", () => {
     const { io } = captureIo();
     expect(errorOf(validateSettingsDoc([], "f.yml", new Set(), io))).toContain("a list");
+  });
+
+  test("a YAML-tagged top-level value (a Date) is rejected, never branded", () => {
+    // parse("!!timestamp ...") returns a Date - an object with no keys - and
+    // branding it valid would turn the whole document into a silent green
+    // no-op. Only a plain-prototype mapping may pass the boundary.
+    const { io } = captureIo();
+    const err = errorOf(validateSettingsDoc(new Date(0), "f.yml", new Set(), io));
+    expect(err).toContain("plain YAML mapping");
+    expect(err).toContain("!!timestamp");
+    expect(errorOf(validateSettingsDoc(new Set(["a"]), "f.yml", new Set(), io))).toContain(
+      "plain YAML mapping",
+    );
   });
 
   test("a valid document comes back branded, ready for runForRepo", () => {

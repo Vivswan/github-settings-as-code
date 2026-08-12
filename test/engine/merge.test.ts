@@ -225,6 +225,22 @@ describe("applyDefaults undeclared-policy knob", () => {
     expect(settings.labels).toBe("oops" as never);
   });
 
+  test("a YAML-tagged top-level value never merges with the defaults", () => {
+    // A Date IS an object, so a naive mapping check would spread it into {}
+    // and quietly hand the target the fleet defaults as if it had written
+    // an empty document. It must survive the merge as written, for
+    // validation to reject.
+    const tagged = new Date(0);
+    const { settings, disabled } = applyDefaults(
+      { labels: [{ name: "fleet", color: "cccccc" }] } as SettingsFile,
+      tagged,
+    );
+    expect(settings).toBeInstanceOf(Date);
+    expect(disabled).toEqual([]);
+    const verdict = validateSettingsDoc(settings, "target", new Set(), silentIo);
+    expect("error" in verdict ? verdict.error : "").toContain("plain YAML mapping");
+  });
+
   test("a non-mapping document passes through whole, so the top-level gate still fires", () => {
     // A raw list parses fine but is not a settings mapping; normalization
     // must not turn it into {0: ..., 1: ...} or the "must be a YAML mapping"

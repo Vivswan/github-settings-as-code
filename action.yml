@@ -42,7 +42,10 @@ inputs:
   required-sections:
     description: >-
       Comma-separated section names that must fully apply even under
-      on-missing-permission: warn (minimum requirements).
+      on-missing-permission: warn (minimum requirements). Every name must
+      also be allowed by the "sections" input when that allowlist is set;
+      a required section the allowlist excludes is rejected up front,
+      because the run could never attempt it.
     required: false
     default: ""
   sections:

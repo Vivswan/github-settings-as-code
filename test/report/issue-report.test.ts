@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import type { Io } from "../../src/io.js";
 import {
   deliverIssueReport,
   ISSUE_TITLE,
@@ -440,6 +442,47 @@ describe("injectMarkerLabel", () => {
     };
     const result = injectMarkerLabel(settings);
     expect(result.outcome).toBe("unchanged");
+  });
+
+  test("every injection outcome preserves document validity, in both label forms", () => {
+    // applyMarkerInjection (src/report/delivery.ts) carries the injected
+    // document across the ValidatedSettings brand on the strength of this
+    // property: the injection appends the constant marker config or strips a
+    // new_name, and neither may ever produce a document validateSettingsDoc
+    // rejects. The rename-refused arm is the risky one - it writes an
+    // explicit `new_name: undefined` key - so all three outcomes are pinned
+    // here, in the plain-array and wrapped forms alike.
+    const silentIo: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+    const cases: Array<{ doc: SettingsFile; expected: string }> = [
+      { doc: { labels: [{ name: "bug", color: "d73a4a" }] }, expected: "injected" },
+      {
+        doc: { labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] } },
+        expected: "injected",
+      },
+      { doc: { labels: [{ name: MARKER_LABEL, color: "0e2a47" }] }, expected: "unchanged" },
+      {
+        doc: { labels: [{ name: MARKER_LABEL, new_name: "elsewhere", color: "0e2a47" }] },
+        expected: "rename-refused",
+      },
+      {
+        doc: {
+          labels: {
+            undeclared: "keep",
+            entries: [{ name: MARKER_LABEL, new_name: "elsewhere", color: "0e2a47" }],
+          },
+        },
+        expected: "rename-refused",
+      },
+    ];
+    for (const { doc, expected } of cases) {
+      const result = injectMarkerLabel(doc);
+      expect(result.outcome).toBe(expected as typeof result.outcome);
+      const verdict = validateSettingsDoc(result.settings, "injected doc", new Set(), silentIo);
+      expect(
+        "error" in verdict ? verdict.error : null,
+        `outcome "${expected}" produced a document validation rejects`,
+      ).toBeNull();
+    }
   });
 
   test("no labels section means nothing to inject", () => {

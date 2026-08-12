@@ -38,6 +38,42 @@ describe("section shape validation", () => {
   });
 });
 
+describe("YAML-tagged values are rejected anywhere in a section", () => {
+  test("a tagged section VALUE is rejected for mapping sections without a required key", () => {
+    // zod object schemas accept a Date or Set as an empty mapping, so
+    // without the plain-data gate these would validate and silently
+    // configure nothing.
+    for (const doc of [{ actions: new Date(0) }, { pages: new Date(0) }]) {
+      const error = validateSectionShapes(doc as Record<string, unknown>, "settings.yml");
+      expect(error).toContain("not plain YAML data");
+      expect(error).toContain("!!timestamp");
+    }
+  });
+
+  test("a tagged NESTED value is rejected with its key path", () => {
+    const error = validateSectionShapes(
+      { actions: { cache: new Date(0) } } as Record<string, unknown>,
+      "settings.yml",
+    );
+    expect(error).toContain("actions.cache is not plain YAML data");
+    const inList = validateSectionShapes(
+      { labels: [{ name: "bug", color: new Set(["d73a4a"]) }] } as Record<string, unknown>,
+      "settings.yml",
+    );
+    expect(inList).toContain("labels[0].color is not plain YAML data");
+    expect(inList).toContain("!!set");
+  });
+
+  test("a cyclic document (YAML anchors) does not hang the validator", () => {
+    const cyclic: Record<string, unknown> = { description: "x" };
+    cyclic.self = cyclic;
+    // Not endorsed, but the walk must terminate; the shape parse still rules.
+    expect(() =>
+      validateSectionShapes({ repository: cyclic } as Record<string, unknown>, "settings.yml"),
+    ).not.toThrow();
+  });
+});
+
 describe("closed-surface sections reject unrecognized entry keys upfront", () => {
   test("a misspelled collaborator permission fails validation, before any write", () => {
     const error = validateSectionShapes(

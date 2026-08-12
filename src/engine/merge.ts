@@ -11,8 +11,20 @@ import { UNDECLARED_POLICY_SECTIONS } from "../schema.js";
 import { defaultUndeclaredPolicy } from "../sections/contract.js";
 import { sectionModule } from "../sections/registry.js";
 
+/**
+ * A PLAIN mapping only: the prototype must be Object.prototype or null. A
+ * YAML explicit tag (!!timestamp, !!set) parses to a Date or Set, which is
+ * an object too - treating one as a mapping would spread it into `{}` and
+ * quietly hand the merge (or a knobbed-section normalization) a document
+ * nobody wrote. Non-plain objects REPLACE like scalars, surviving the merge
+ * as written for post-merge validation to reject.
+ */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }
 
 export function deepMerge(base: unknown, override: unknown): unknown {

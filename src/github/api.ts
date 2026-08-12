@@ -22,10 +22,13 @@ export interface ApiError {
   /** GitHub's documentation_url for the failing endpoint, when the body carries one. */
   documentationUrl?: string;
   /**
-   * Content-free rate-limit classification, set only when the response to a
-   * secret-carrying request was withheld: isRateLimitError normally reads
-   * the message, which the wholesale replacement destroys, and a secondary
-   * rate limit arriving as 403 must not be misread as a permission failure.
+   * Content-free rate-limit classification, from structural signals alone
+   * (429, retry-after, errors[].type RATE_LIMITED, the secondary-rate
+   * phrase - and, only when the body was withheld for a secret-carrying
+   * request, the ambiguous zero-quota header). isRateLimitError reads it
+   * alongside its message fallback, so a secondary limit arriving as a 403
+   * is never misread as a permission failure even when the message says
+   * nothing - or no longer exists.
    */
   rateLimited?: true;
   /**
@@ -324,18 +327,27 @@ function testRetryBaseMs(): number | undefined {
  * can arrive as a 403 whose message never contains the literal phrase
  * "rate limit", and misreading one as a missing grant turns a transient
  * limit into permission advice (and, under on-missing-permission: warn, a
- * green run that silently skipped the section). The signals are the ones
- * the throttling plugin itself recognizes: the primary-limit header
- * (x-ratelimit-remaining 0), the plugin's secondary-limit message predicate
- * (\bsecondary rate\b - GitHub documents secondary limits where no
- * rate-limit header is present), the structured errors[].type ===
- * "RATE_LIMITED", and the retry-after header. Accepting retry-after ALONE is
- * deliberately broader than the plugin (which reads it only after the phrase
- * matches): no documented 403 carries retry-after without being a rate limit,
- * and a header cannot be spoofed by an echoed value. The residual spoof is an
- * operator's own secret containing the exact phrase "secondary rate" echoed
- * into a 403 - theoretical (permission 403s do not echo payloads) and
- * strictly less harmful than telling a rate-limited user to fix their token.
+ * green run that silently skipped the section). The DEFINITIVE signals are
+ * the ones the throttling plugin itself recognizes and no permission 403
+ * carries: the plugin's secondary-limit message predicate (\bsecondary
+ * rate\b - GitHub documents secondary limits where no rate-limit header is
+ * present), the structured errors[].type === "RATE_LIMITED", and the
+ * retry-after header. Accepting retry-after ALONE is deliberately broader
+ * than the plugin (which reads it only after the phrase matches): no
+ * documented 403 carries retry-after without being a rate limit, and a
+ * header cannot be spoofed by an echoed value.
+ *
+ * x-ratelimit-remaining: 0 is AMBIGUOUS on its own: a genuine permission
+ * 403 issued on the token's last quota unit carries it too, and flagging
+ * that as a rate limit would hide the missing grant behind retry advice. So
+ * on the readable path the zero header contributes nothing (a real
+ * primary-limit exhaustion says "API rate limit exceeded", which
+ * isRateLimitError's message fallback already classifies); only a WITHHELD
+ * response - where no message survives to disambiguate - accepts it, the
+ * lesser evil against telling a rate-limited user to fix their token. The
+ * residual spoof is an operator's own secret containing the exact phrase
+ * "secondary rate" echoed into a 403 - theoretical (permission 403s do not
+ * echo payloads) and equally bounded.
  */
 function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiError {
   const body = error.response?.data;
@@ -356,13 +368,17 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
         entry !== null &&
         (entry as { type?: unknown }).type === "RATE_LIMITED",
     );
-  const rateLimited =
+  const definitiveRateLimit =
     error.status === 429 ||
     (error.status === 403 &&
-      (String(headers["x-ratelimit-remaining"]) === "0" ||
-        headers["retry-after"] !== undefined ||
+      (headers["retry-after"] !== undefined ||
         errorsRateLimited ||
         /\bsecondary rate\b/i.test(classificationText)));
+  const rateLimited =
+    definitiveRateLimit ||
+    // The ambiguous zero-quota header counts only when the body is withheld
+    // and cannot disambiguate; see the doc comment above.
+    (carriesSecret && error.status === 403 && String(headers["x-ratelimit-remaining"]) === "0");
   if (carriesSecret) {
     return {
       status: error.status,
