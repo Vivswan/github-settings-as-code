@@ -22,7 +22,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
+import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 
 /** The sentinel the CLI prints (and the job branches on) when every section is in play. */
 export const ALL = "all";
@@ -87,25 +87,9 @@ export const SHARED_FAN_OUT: Record<string, SectionKey[]> = {
   // files and root schema.ts share: knobbed() shapes the wrapped
   // {undeclared, entries} form of every UNDECLARED_POLICY_SECTIONS value
   // (and environments' nested lists), and the sealed-secret doc strings feed
-  // the secret families' configs, so a change fans out to all of them.
-  "schema-helpers.ts": [
-    "labels",
-    "rulesets",
-    "environments",
-    "autolinks",
-    "actions_secrets",
-    "dependabot_secrets",
-    "codespaces_secrets",
-    "agents_secrets",
-    "collaborators",
-    "milestones",
-    "actions_variables",
-    "agents_variables",
-    "webhooks",
-    "custom_properties",
-    "deploy_keys",
-    "secret_scanning_custom_patterns",
-  ],
+  // the secret families' configs - all inside that same set. Derived from
+  // the schema's own list so the fan-out cannot go stale against it.
+  "schema-helpers.ts": [...UNDECLARED_POLICY_SECTIONS, "environments"],
 };
 
 /**

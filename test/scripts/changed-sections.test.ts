@@ -17,7 +17,7 @@ import {
   SPECIAL_SECTION_FILES,
   sectionsForFiles,
 } from "../../.github/scripts/changed-sections.js";
-import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
+import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 
 const SRC_DIR = join(import.meta.dir, "..", "..", "src");
 const SECTIONS_DIR = join(SRC_DIR, "sections");
@@ -95,24 +95,11 @@ describe("changed-sections file map", () => {
         "agents_secrets",
         "environments",
       ],
-      "schema-helpers.ts": [
-        "labels",
-        "rulesets",
-        "environments",
-        "autolinks",
-        "actions_secrets",
-        "dependabot_secrets",
-        "codespaces_secrets",
-        "agents_secrets",
-        "collaborators",
-        "milestones",
-        "actions_variables",
-        "agents_variables",
-        "webhooks",
-        "custom_properties",
-        "deploy_keys",
-        "secret_scanning_custom_patterns",
-      ],
+      // Derived on purpose, matching the selector's own expression: the
+      // helpers shape every knobbed section's wrapped form plus
+      // environments' nested lists, so hand-copying the keys here would
+      // just let both lists go stale together.
+      "schema-helpers.ts": [...UNDECLARED_POLICY_SECTIONS, "environments"],
     };
     expect(SHARED_FAN_OUT).toEqual(golden);
   });
