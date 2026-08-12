@@ -1113,7 +1113,7 @@ export function genScenario(
   // (a future generated write whose endpoint TOLERATES 404 would break that
   // parity) - 403 stays the discriminating style.
   const denialStyle: DenialStyle = rng.pick(["fine_grained", 403, 404] as const);
-  const requiredSections = chosen.filter(() => rng.bool(0.25));
+  const requiredDraw = chosen.filter(() => rng.bool(0.25));
   // Occasionally run under a `sections` allowlist so the EXCLUDED outcome is
   // exercised: a strict nonempty subset of the declared sections is allowed
   // and the rest must render excluded. The oracle folds this before
@@ -1132,6 +1132,15 @@ export function genScenario(
           ? subset.slice(1)
           : subset;
   }
+  // Input validation rejects a required section the allowlist excludes (the
+  // run could never attempt it), so the generated inputs keep the two
+  // consistent: required sections are drawn from the ALLOWED set. A
+  // post-draw filter, not a different draw, so the main-stream sequence
+  // (and every recorded seed) stays stable.
+  const requiredSections =
+    onlySections === undefined
+      ? requiredDraw
+      : requiredDraw.filter((key) => onlySections.includes(key));
 
   // The step-env half of any generated secret references (webhook secrets
   // and actions_secrets values), from the SAME fixed pool the generators
