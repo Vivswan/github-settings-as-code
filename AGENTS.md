@@ -97,9 +97,8 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   `runner.ts` builds the bundle to a temp path and spawns it against the
   mock, `mock/` is the in-process GitHub API (request pipeline in
   `mock/routes.ts`, merged handler tables in `mock/handlers.ts`, the
-  per-SectionKey fragment registration in `mock/sections.ts` over the shared
-  helpers in
-  `mock/support.ts`, state in `mock/state.ts`), and
+  per-SectionKey fragment registration in `mock/sections.ts` over the
+  shared helpers in `mock/support.ts`, state in `mock/state.ts`), and
   `oracle.ts` predicts
   outcome classes. On-contract mock
   responses are validated against a trimmed OpenAPI spec
@@ -113,8 +112,7 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   mock fragment (`src/sections/<key>/mock.ts`; each fragment is registered
   per SectionKey in `test/e2e/mock/sections.ts`, and its handler record is
   typed over the section's exact key union, so a missing or phantom handler
-  fails to compile). The section route
-  table, permission gate, and
+  fails to compile). The section route table, permission gate, and
   tolerated statuses derive from `allEndpoints()`, so `assertHandlerCompleteness()`
   fails at construction if a declared endpoint has no handler or a handler names
   no endpoint. Core routes the action calls outside the sections (the repo

@@ -22,14 +22,15 @@
  * touches the cap or bypass list.
  */
 
+import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { INTERACTION_LIMITS_ROUTED_KEYS, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
   type EndpointDecl,
-  expand,
   loosen,
+  parseLive,
   requirePlainMapping,
   type SectionContext,
   type SectionMeta,
@@ -130,19 +131,21 @@ function bypassDelta(
 }
 
 /**
- * The live bypass-list logins. A single GET, not listAll(): the endpoint
+ * The live bypass-list logins, parsed at the boundary (a user without a
+ * string login has no identity to reconcile by). A single GET, not
+ * listAll(): the endpoint
  * documents no pagination parameters (the list holds at most 100 users), so
  * a page loop would re-request the same full body forever on a
  * page-ignoring endpoint.
  */
 async function liveBypassLogins(ctx: SectionContext, section: SectionMeta): Promise<string[]> {
-  const live = await call(ctx, section, ENDPOINTS.bypassList);
-  if (!Array.isArray(live)) {
-    throw new Error(
-      `${section.key}: GET ${expand(ENDPOINTS.bypassList, ctx)} was expected to return a list of users but returned ${(JSON.stringify(live) ?? String(live)).slice(0, 200)}. Check the "api-version" input against the GitHub REST docs for this endpoint`,
-    );
-  }
-  return live.map((user) => String((user as Record<string, unknown>).login));
+  const live = parseLive(
+    section,
+    ENDPOINTS.bypassList,
+    z.array(z.looseObject({ login: z.string() })),
+    await call(ctx, section, ENDPOINTS.bypassList),
+  );
+  return live.map((user) => user.login);
 }
 
 export const interactionLimitsSection = {

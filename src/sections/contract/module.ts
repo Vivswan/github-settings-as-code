@@ -91,9 +91,12 @@ export type SectionResult = CheckResult | ApplyResult;
  * together - the check branch gets `run.result.drift`, the apply branch gets
  * `run.result.changes` AND `run.ctx.resolveSecret`, and a mixed pairing (a
  * check context with an apply result) is unrepresentable. beginRun() is the
- * only constructor, so `result.check` always mirrors the mode the handler
- * actually ran under; mode-neutral facts (`notes`, the request helpers'
- * `ctx` argument) read fine off the unnarrowed union.
+ * sole sanctioned constructor and copies ctx.check, so `result.check`
+ * mirrors the mode the handler ran under; run()'s signature cannot encode
+ * that correlation on its own (it would force a cast into every handler),
+ * so the engine asserts it once where the result comes back. Mode-neutral
+ * facts (`notes`, the request helpers' `ctx` argument) read fine off the
+ * unnarrowed union.
  */
 export type SectionRun =
   | { readonly check: true; readonly ctx: CheckSectionContext; readonly result: CheckResult }

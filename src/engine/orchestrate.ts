@@ -245,8 +245,12 @@ export async function preflightProbe(
   for (const section of active) {
     const declared = settings[section.key];
     if (declared === undefined) {
-      // `active` is filtered to declared sections; this narrows the type.
-      continue;
+      // `active` is filtered to declared sections, so this can only fire on
+      // a caller bug (the parameter is injectable for tests); probing
+      // nothing silently would make such a test pass vacuously.
+      throw new Error(
+        `BUG: preflightProbe was given section "${section.key}" but the settings document does not declare it; the active list must be filtered to declared sections`,
+      );
     }
     try {
       await section.run(probeCtx, declared);
@@ -445,6 +449,16 @@ export async function runForRepo(
     let result: SectionResult;
     try {
       result = await section.run(runCtx, desired);
+      if (result.check !== check) {
+        // run()'s signature cannot correlate its return arm with the context
+        // arm without forcing a cast into every handler, so the correlation
+        // (beginRun copies ctx.check) is asserted once here at the only
+        // consumer - a cross-mode result must fail loudly, not steer the
+        // narrowing below into the wrong branch.
+        throw new Error(
+          `BUG: section returned ${result.check ? "a check" : "an apply"} result in ${check ? "check" : "apply"} mode; handlers must build their result via beginRun(ctx)`,
+        );
+      }
     } catch (error) {
       if (error instanceof PermissionDenied) {
         const required = opts.requiredSections.has(section.key);

@@ -19,12 +19,14 @@ import {
   type EndpointDecl,
   listAllEnveloped,
   loosen,
+  parseLive,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
 } from "../contract.js";
 import {
+  LIVE_SECRET_NAMES,
   listSecretValues,
   reconcileSecrets,
   rejectDuplicateSecretNames,
@@ -57,7 +59,13 @@ const ENDPOINTS = {
 // The engine's four operations, built here where the literal routes are
 // known so the params contract compile-checks (secret_name on put/remove).
 const OPS: SecretsScopeOps = {
-  list: (ctx, section) => listAllEnveloped(ctx, section, ENDPOINTS.list, "secrets"),
+  list: async (ctx, section) =>
+    parseLive(
+      section,
+      ENDPOINTS.list,
+      LIVE_SECRET_NAMES,
+      await listAllEnveloped(ctx, section, ENDPOINTS.list, "secrets"),
+    ),
   publicKey: (ctx, section, describe) => call(ctx, section, ENDPOINTS.publicKey, { describe }),
   put: (ctx, section, secretName, payload, describe) =>
     call(ctx, section, ENDPOINTS.put, {
