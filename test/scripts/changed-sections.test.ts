@@ -171,6 +171,11 @@ describe("changed-sections selection", () => {
         /matches no selector rule/,
       );
     }
+    // A cross-cutting path in the same diff must not mask the stale path:
+    // the selector resolves every src/sections/ path before answering "all".
+    expect(() => sectionsForFiles(["src/schema.ts", "src/sections/labels.ts"])).toThrow(
+      /matches no selector rule/,
+    );
   });
 
   test("multiple section directories union in SECTION_KEYS order", () => {

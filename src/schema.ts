@@ -2,7 +2,7 @@
  * The settings-file document, composed from the per-section schema slices
  * (src/sections/<key>/schema.ts). Each slice is ONE declaration that produces
  * its config type (z.infer), the section's tolerant runtime shape (the
- * section module derives loosen(<slice>) itself; see sections/contract), and
+ * section module derives loosen(<slice>) itself; see sections/contract/module.ts), and
  * its part of the published lib/settings.schema.json
  * (.github/scripts/gen-settings-schema.ts). This file adds only the
  * document-level wrappers - the undeclared knob, .optional(), and the
@@ -337,10 +337,15 @@ type SectionNotComposedFromItsSlice = {
 
 /**
  * Compile-time lockstep: every SettingsFile property IS its declared slice
- * derivation plus .optional(). A property rebuilt from a lookalike schema
- * stops matching its slice's type and fails here naming the key, so the
- * slices stay the single composition source - a future org/user settings
- * document composes its own document from the same slices, and every section
- * module keeps deriving its runtime shape from the slice it already owns.
+ * derivation plus .optional(). The check is STRUCTURAL (zod types
+ * refinements as `this`, so a lookalike rebuilt without a slice's
+ * superRefine still matches); test/schema-slices.test.ts closes that hole by
+ * asserting object identity per key. Together they keep the slices the
+ * single composition source: a future org/user settings document composes
+ * its own document from the same slices, and every section module keeps
+ * deriving its runtime shape from the slice it already owns.
  */
 type _EverySectionComposedFromItsSlice = MustBeNever<SectionNotComposedFromItsSlice>;
+
+/** Compile-time lockstep: a SliceDerivation key that is not a section fails here. */
+type _SliceDerivationKeysReal = MustBeNever<Exclude<keyof SliceDerivation, SectionKey>>;

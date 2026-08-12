@@ -24,7 +24,13 @@ const WRAPPER_DOC =
  * loosen() recognizes this union and rewraps it with the routed check that
  * keeps precise per-entry issue paths. The wrapper's definition name derives
  * from the entry schema's own .meta({id}), so the document composition and a
- * section's runtime derivation can never label the same entry differently.
+ * section's runtime derivation can never label the same entry differently -
+ * an entry without an id (or a .describe() clone, which sheds it) throws at
+ * MODULE LOAD, not typecheck. Each call mints a fresh wrapper registered
+ * under the same id; that is fine for z.toJSONSchema(SettingsFile) (it
+ * resolves metadata by schema identity), but a generator iterating
+ * z.globalRegistry's id map would see only the last-registered wrapper -
+ * keep the published schema on the single-schema path.
  */
 export function knobbed<T extends z.ZodType>(entry: T) {
   const entryName = z.globalRegistry.get(entry)?.id;

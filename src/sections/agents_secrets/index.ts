@@ -11,11 +11,9 @@
  */
 
 import { repoSecretsSection } from "../shared/repo-secrets.js";
-import { AgentsSecretConfig } from "./schema.js";
 
 export const agentsSecretsSection = repoSecretsSection({
   key: "agents_secrets",
-  entry: AgentsSecretConfig,
   resource: "agent_secrets",
   noun: "Copilot agents secret",
 });

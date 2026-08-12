@@ -11,11 +11,9 @@
  */
 
 import { variablesSection } from "../shared/repo-variables.js";
-import { ActionsVariableConfig } from "./schema.js";
 
 export const actionsVariablesSection = variablesSection({
   key: "actions_variables",
-  entry: ActionsVariableConfig,
   resource: "variables",
   noun: "Actions variable",
 });

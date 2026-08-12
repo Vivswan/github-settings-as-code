@@ -14,6 +14,9 @@
 
 import type { z } from "zod";
 import type { UndeclaredPolicyList } from "../../types.js";
+import { ActionsSecretConfig } from "../actions_secrets/schema.js";
+import { AgentsSecretConfig } from "../agents_secrets/schema.js";
+import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
 import { parseLive } from "../contract/live.js";
 import {
   beginRun,
@@ -26,6 +29,7 @@ import {
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
 import { call, listAllEnveloped } from "../contract/requests.js";
+import { DependabotSecretConfig } from "../dependabot_secrets/schema.js";
 import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
   LIVE_SECRET_NAMES,
@@ -59,6 +63,19 @@ const SECRETS_SEGMENTS = {
   codespaces_secrets: "codespaces",
   agents_secrets: "agents",
 } as const satisfies { [K in RepoSecretsKey]: SegmentOfSecretsKey<K> };
+
+/**
+ * Each family's entry slice (src/sections/<key>/schema.ts), keyed by section
+ * like SECRETS_SEGMENTS: the factory derives the runtime shape from THIS
+ * map, so a key paired with another family's config - structurally identical
+ * and invisible to every gate - is unrepresentable.
+ */
+const SECRETS_ENTRIES = {
+  actions_secrets: ActionsSecretConfig,
+  dependabot_secrets: DependabotSecretConfig,
+  codespaces_secrets: CodespacesSecretConfig,
+  agents_secrets: AgentsSecretConfig,
+} as const satisfies Record<RepoSecretsKey, ReturnType<typeof sealedSecretConfig>>;
 
 /** The path segment a `<segment>_secrets` section key spells. */
 type SegmentOfSecretsKey<K extends RepoSecretsKey> = K extends `${infer S}_secrets` ? S : never;
@@ -161,10 +178,8 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
    * write-graded by method already, so the override applies to the GETs.
    */
   accessGrade?: "write";
-  /** The family's entry slice (src/sections/<key>/schema.ts), the runtime shape's source. */
-  entry: ReturnType<typeof sealedSecretConfig>;
 }): RepoSecretsSectionModule<K> {
-  const { key, resource, noun, accessGrade, entry } = family;
+  const { key, resource, noun, accessGrade } = family;
   const pathSegment: SecretsSegment<K> = SECRETS_SEGMENTS[key];
   const readGrade = accessGrade === undefined ? {} : { accessGrade };
   const endpoints: RepoSecretsEndpoints<SecretsSegment<K>> = {
@@ -222,7 +237,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     undeclaredDefault: "keep",
     permission: { repo: [resource] },
     endpoints,
-    shape: loosen(knobbed(entry)),
+    shape: loosen(knobbed(SECRETS_ENTRIES[key])),
     // The engine's shared list extractor: the declared value of every entry,
     // for the up-front reference resolution.
     secretValues: listSecretValues,

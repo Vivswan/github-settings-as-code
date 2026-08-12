@@ -13,6 +13,8 @@
 
 import { z } from "zod";
 import type { UndeclaredPolicyList } from "../../types.js";
+import { ActionsVariableConfig } from "../actions_variables/schema.js";
+import { AgentsVariableConfig } from "../agents_variables/schema.js";
 import { parseLive } from "../contract/live.js";
 import {
   beginRun,
@@ -49,6 +51,17 @@ const VARIABLES_SEGMENTS = {
   actions_variables: "actions",
   agents_variables: "agents",
 } as const satisfies { [K in RepoVariablesKey]: SegmentOfVariablesKey<K> };
+
+/**
+ * Each family's entry slice (src/sections/<key>/schema.ts), keyed by section
+ * like VARIABLES_SEGMENTS: the factory derives the runtime shape from THIS
+ * map, so a key paired with the other family's config - structurally
+ * identical and invisible to every gate - is unrepresentable.
+ */
+const VARIABLES_ENTRIES = {
+  actions_variables: ActionsVariableConfig,
+  agents_variables: AgentsVariableConfig,
+} as const satisfies Record<RepoVariablesKey, z.ZodType<VariableEntry>>;
 
 /** The path segment a `<segment>_variables` section key spells. */
 type SegmentOfVariablesKey<K extends RepoVariablesKey> = K extends `${infer S}_variables`
@@ -115,10 +128,8 @@ export function variablesSection<K extends RepoVariablesKey>(family: {
   resource: PatResource;
   /** The output noun ("Actions variable", "Copilot agents variable"). */
   noun: string;
-  /** The family's entry slice (src/sections/<key>/schema.ts), the runtime shape's source. */
-  entry: z.ZodType<VariableEntry>;
 }): RepoVariablesSectionModule<K> {
-  const { key, resource, noun, entry } = family;
+  const { key, resource, noun } = family;
   const pathSegment: VariablesSegment<K> = VARIABLES_SEGMENTS[key];
   const endpoints: RepoVariablesEndpoints<VariablesSegment<K>> = {
     list: {
@@ -173,7 +184,7 @@ export function variablesSection<K extends RepoVariablesKey>(family: {
     undeclaredDefault: "delete",
     permission: { repo: [resource] },
     endpoints,
-    shape: loosen(knobbed(entry)),
+    shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
     async run(ctx, declared): Promise<SectionResult> {
       const run = beginRun(ctx);
       const defaultPolicy = defaultUndeclaredPolicy(this);

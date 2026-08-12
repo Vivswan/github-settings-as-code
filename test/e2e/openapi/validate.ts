@@ -26,9 +26,9 @@ import {
 } from "../../../src/sections/contract/endpoints.js";
 import { GRAPHQL_ERROR_TYPES } from "../../../src/sections/contract/graphql.js";
 import { allGraphqlOps } from "../../../src/sections/registry.js";
+import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 import { VIOLATION_PREFIX } from "../constants.js";
 import type { LoggedRequest } from "../mock/contract.js";
-import { UNDOCUMENTED_ROUTES } from "./paths.js";
 
 /** A plain JSON object. */
 type Json = Record<string, unknown>;

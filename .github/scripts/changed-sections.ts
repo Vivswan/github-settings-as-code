@@ -164,9 +164,10 @@ function sectionsForSectionsPath(file: string): SectionKey[] | "all" {
 
 /**
  * Map a set of changed file paths (repo-relative, forward slashes) to the
- * sections the smoke job must run. Any cross-cutting path forces "all"; section
- * files contribute their key(s) through sectionsForSectionsPath, which throws
- * on an unrecognized src/sections/ path; files that touch nothing
+ * sections the smoke job must run. Any cross-cutting path forces "all", but
+ * every src/sections/ path is still resolved through sectionsForSectionsPath,
+ * which throws on an unrecognized one - a stale flat path cannot ride along
+ * unnoticed behind a cross-cutting change. Files that touch nothing
  * settings-related are ignored, so a purely docs/config PR yields "none".
  * `lib/` contributes no section either - the only committed file under it is
  * the generated settings.schema.json, which the schema-check job gates on its
@@ -174,21 +175,37 @@ function sectionsForSectionsPath(file: string): SectionKey[] | "all" {
  */
 export function sectionsForFiles(files: readonly string[]): Selection {
   const selected = new Set<SectionKey>();
+  // No early return on an all-selecting path: every src/sections/ path is
+  // still resolved (and can throw), so an unrecognized or stale flat path
+  // fails loudly even when a cross-cutting file in the same diff already
+  // forces "all".
+  let all = false;
   for (const file of files) {
     if (ALL_SELECTING_PREFIXES.some((prefix) => file.startsWith(prefix))) {
-      return { kind: "all" };
+      all = true;
+      continue;
     }
     if (!file.startsWith("src/sections/")) {
       // Everything else (README, COVERAGE, lib/, workflows, package.json,
       // tests outside e2e) contributes no section.
       continue;
     }
-    const keys = sectionsForSectionsPath(file);
-    if (keys === "all") {
-      return { kind: "all" };
+    if (sectionsForSectionsPath(file) === "all") {
+      all = true;
     }
-    for (const key of keys) {
-      selected.add(key);
+  }
+  if (all) {
+    return { kind: "all" };
+  }
+  for (const file of files) {
+    if (!file.startsWith("src/sections/")) {
+      continue;
+    }
+    const keys = sectionsForSectionsPath(file);
+    if (keys !== "all") {
+      for (const key of keys) {
+        selected.add(key);
+      }
     }
   }
   if (selected.size === 0) {

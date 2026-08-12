@@ -41,11 +41,9 @@ const CORE_PATHS: readonly string[] = [
  * below throws when an entry is no longer a declared endpoint path, and
  * trim-openapi.ts errors when the upstream descriptor starts documenting one
  * (retire the gap: delete a spec-only file, or flip documentedInSpec on an
- * octokit-kind one, then regenerate the index and re-run).
+ * octokit-kind one, then regenerate the index and re-run). These are the
+ * distinct path templates of UNDOCUMENTED_ROUTES (src/upstream-gaps).
  */
-export { UNDOCUMENTED_ROUTES };
-
-/** The distinct path templates of UNDOCUMENTED_ROUTES. */
 export const UNDOCUMENTED_PATHS: readonly string[] = [
   ...new Set(UNDOCUMENTED_ROUTES.map(endpointPath)),
 ];
