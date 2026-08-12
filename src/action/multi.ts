@@ -22,6 +22,7 @@ import {
   dedupeTargets,
   parseRepoSlug,
   type RemoteTarget,
+  type RepoRef,
   type Target,
 } from "../discovery/targets.js";
 import { applyDefaults } from "../engine/merge.js";
@@ -45,7 +46,7 @@ import {
   type ReportRunMeta,
   uploadArtifactReport,
 } from "../report/delivery.js";
-import type { SettingsFile } from "../schema.js";
+import type { SectionKey, SettingsFile } from "../schema.js";
 import { DEFAULT_SETTINGS_FILE, quoteList } from "./inputs.js";
 import {
   capturingIo,
@@ -69,8 +70,8 @@ export interface MultiConfig {
   adminOwner: string;
   mode: "apply" | "check";
   onMissingPermission: "fail" | "warn";
-  requiredSections: Set<string>;
-  onlySections: Set<string>;
+  requiredSections: Set<SectionKey>;
+  onlySections: Set<SectionKey>;
   discoveryFilters: DiscoveryFilters;
   /** Filter inputs the user explicitly set, for the misuse rejections. */
   discoveryFiltersSet: string[];
@@ -84,11 +85,6 @@ export interface MultiConfig {
   selfSlug: string;
   /** Link to the workflow run, for the private report metadata (may be empty). */
   runUrl: string;
-  /**
-   * The artifact upload port, injected only by tests; production leaves it
-   * undefined so the artifact channel uses the real @actions/artifact uploader.
-   */
-  uploader?: ArtifactUploader;
 }
 
 /**
@@ -144,6 +140,8 @@ function targetFailure(
 async function processTarget(ctx: {
   api: GithubClient;
   target: Target;
+  /** The target as an owner/name pair, parsed once at the caller's boundary. */
+  repo: RepoRef;
   defaults: SettingsFile;
   cfg: MultiConfig;
   redacted: boolean;
@@ -192,14 +190,9 @@ async function processTarget(ctx: {
   // target must not route the operator's environment into itself). Central
   // files and the defaults file are operator-authored, so everything else
   // stays the "operator" default.
-  const secretSource = target.source === "remote" ? targetSecretSource(parsed.settings) : undefined;
+  const secretSource = target.source === "remote" ? targetSecretSource(parsed.doc) : undefined;
 
-  const { settings: merged, disabled } = applyDefaults(defaults, parsed.settings);
-  const injected = applyMarkerInjection(merged, injectMarker);
-  const settings = injected.settings;
-  if (injected.notice) {
-    targetIo.annotate("notice", injected.notice);
-  }
+  const { settings: merged, disabled } = applyDefaults(defaults, parsed.doc);
   for (const key of disabled) {
     targetIo.annotate(
       "notice",
@@ -210,32 +203,32 @@ async function processTarget(ctx: {
   // validateSettingsDoc emits through its sink and names sourceLabel (the slug
   // for remote targets). A redacted target routes it through the capturing sink
   // so its warnings land in the report, not the public log; a plain target uses
-  // the raw io, keeping validation warnings unprefixed as before.
-  const invalid = validateSettingsDoc(
-    settings,
+  // the raw io, keeping validation warnings unprefixed as before. Its branded
+  // return is the engine's admission ticket, so the merge-then-validate order
+  // is enforced by the types.
+  const validated = validateSettingsDoc(
+    merged,
     read.sourceLabel,
     cfg.onlySections,
     redacted ? targetIo : ctx.io,
   );
-  if (invalid) {
-    return fail(invalid);
+  if ("error" in validated) {
+    return fail(validated.error);
   }
 
-  // Central files and the repos input validated their slugs at parse time;
-  // discovery's full_name is API data, so the shared constructor is the
-  // boundary that proves every engine-bound target is an owner/name pair.
-  const repoRef = parseRepoSlug(target.slug);
-  if (repoRef === null) {
-    return fail(
-      `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be targeted`,
-    );
+  // Marker injection is validity-preserving (it appends the constant marker
+  // label config, or strips a rename), so it happens after validation and
+  // keeps the brand.
+  const injected = applyMarkerInjection(validated.settings, injectMarker);
+  if (injected.notice) {
+    targetIo.annotate("notice", injected.notice);
   }
 
   const run = await runForRepo(
     api,
     {
-      repo: repoRef,
-      settings,
+      repo: ctx.repo,
+      settings: injected.settings,
       mode: cfg.mode,
       onMissingPermission: cfg.onMissingPermission,
       requiredSections: cfg.requiredSections,
@@ -313,6 +306,10 @@ export async function runMulti(
   api: GithubClient,
   cfg: MultiConfig,
   io: Io,
+  // The artifact upload port, injected only by tests alongside the stub api
+  // and capturing io; production omits it and the real @actions/artifact
+  // uploader applies.
+  uploader?: ArtifactUploader,
 ): Promise<{ fatal: string | null; targets: TargetOutcome[] }> {
   // One timestamp for the whole run, so every target's report shares it and the
   // pure composer never reaches for Date.now itself.
@@ -348,11 +345,11 @@ export async function runMulti(
         `cannot read the defaults file ${cfg.defaultsFile}: ${read.error}. Check the "defaults-file" path and that the file is valid YAML`,
       );
     }
-    defaults = read.settings;
-    const err = validateSettingsDoc(defaults, cfg.defaultsFile, cfg.onlySections, io);
-    if (err) {
-      return fail(err);
+    const validated = validateSettingsDoc(read.doc, cfg.defaultsFile, cfg.onlySections, io);
+    if ("error" in validated) {
+      return fail(validated.error);
     }
+    defaults = validated.settings;
   }
 
   let central: CentralTarget[] = [];
@@ -441,8 +438,12 @@ export async function runMulti(
       visibilityBySlug.set(key, known ?? (await resolveVisibility(slug)));
     }
   }
+  // Under `redact` the map holds every target slug, so the fallback only
+  // fires under `show` (where visibility is never consulted) - but it still
+  // fails CLOSED: an unresolved slug is "unknown", which redaction treats as
+  // private and delivery treats as unproven, never "public".
   const visibilityOf = (slug: string): RepoVisibility =>
-    visibilityBySlug.get(slug.toLowerCase()) ?? "public";
+    visibilityBySlug.get(slug.toLowerCase()) ?? "unknown";
 
   const plan: RedactionPlan = redact
     ? planRedaction(
@@ -515,26 +516,43 @@ export async function runMulti(
     const capture = redacted ? capturingIo(prefixedIo(io, `${display}: `)) : null;
     const targetIo = capture ? capture.io : prefixedIo(io, `${target.slug}: `);
 
+    // Central files and the repos input validated their slugs at parse time;
+    // discovery's full_name is API data, so the shared constructor is the
+    // boundary that proves every engine- and delivery-bound target is an
+    // owner/name pair (report delivery consumes the same RepoRef below).
+    const repo = parseRepoSlug(target.slug);
+
     // A crash mid-processing (e.g. a network error that escaped tryRequest)
     // never stops the rest of the fleet; it becomes this target's failure and
     // still flows through the one finalizer below (so its report is delivered).
     let outcome: TargetResult;
-    try {
-      outcome = await processTarget({
-        api,
-        target,
-        defaults,
-        cfg,
-        redacted,
-        // The marker label is an issue-channel mechanism (its report reuses the
-        // labelled issue); inject it only when an issue channel will deliver.
-        injectMarker: deliverable && isIssueChannel(cfg.privateReport),
+    if (repo === null) {
+      outcome = targetFailure(
         io,
         targetIo,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      outcome = targetFailure(io, targetIo, redacted, message, `${target.slug}: `);
+        redacted,
+        `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be targeted`,
+        `${target.slug}: `,
+      );
+    } else {
+      try {
+        outcome = await processTarget({
+          api,
+          target,
+          repo,
+          defaults,
+          cfg,
+          redacted,
+          // The marker label is an issue-channel mechanism (its report reuses the
+          // labelled issue); inject it only when an issue channel will deliver.
+          injectMarker: deliverable && isIssueChannel(cfg.privateReport),
+          io,
+          targetIo,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        outcome = targetFailure(io, targetIo, redacted, message, `${target.slug}: `);
+      }
     }
 
     // ONE finalization path for every target, however it exited: deliver or
@@ -542,7 +560,7 @@ export async function runMulti(
     // included), record the outcome, and emit the single public annotation for a
     // redacted target.
     let note = outcome.note;
-    if (deliverable && capture) {
+    if (deliverable && capture && repo !== null) {
       const transcript = capture.drain();
       if (cfg.privateReport === "artifact") {
         // Accumulate now; the single encrypt+upload happens after the loop.
@@ -559,7 +577,7 @@ export async function runMulti(
         const reportNote = await deliverReport(
           api,
           meta,
-          target.slug,
+          repo,
           display,
           outcome.result,
           outcome.outcomes,
@@ -603,7 +621,7 @@ export async function runMulti(
   // The artifact channel uploads every accumulated report as one encrypted
   // document after the loop. A failure is one safe warning (naming the artifact
   // service, never a slug) and never changes any target's result.
-  await uploadArtifactReport(artifactReports, cfg.reportPublicKey, io, cfg.uploader);
+  await uploadArtifactReport(artifactReports, cfg.reportPublicKey, io, uploader);
 
   return { fatal: null, targets: results };
 }

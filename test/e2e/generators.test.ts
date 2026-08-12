@@ -45,9 +45,11 @@ describe("three-way drift detection", () => {
           );
         }
         // 2. The action's own doc validator (unknown-key check + more).
-        const verdict = validateSettingsDoc(doc, "fuzz", new Set<string>(), silentIo);
-        if (verdict !== null) {
-          offenders.push(`${key} seed ${i}: validateSettingsDoc rejected the doc: ${verdict}`);
+        const verdict = validateSettingsDoc(doc, "fuzz", new Set(), silentIo);
+        if ("error" in verdict) {
+          offenders.push(
+            `${key} seed ${i}: validateSettingsDoc rejected the doc: ${verdict.error}`,
+          );
         }
         // 3. The section's zod shape parses the raw value.
         const parsed = shape.safeParse(value);
@@ -467,12 +469,14 @@ describe("genInvalidSettings", () => {
     for (const { name, build } of INVALID_SETTINGS_CASES) {
       for (let i = 0; i < 25; i++) {
         const { doc, offendingToken } = build(new Rng(i * 13 + 1));
-        const error = validateSettingsDoc(doc, "settings.yml", new Set(), silentIo);
-        if (error === null) {
+        const verdict = validateSettingsDoc(doc, "settings.yml", new Set(), silentIo);
+        if (!("error" in verdict)) {
           throw new Error(`case "${name}" produced a doc the validator accepts`);
         }
-        if (!error.includes(offendingToken)) {
-          throw new Error(`case "${name}" token "${offendingToken}" missing from error: ${error}`);
+        if (!verdict.error.includes(offendingToken)) {
+          throw new Error(
+            `case "${name}" token "${offendingToken}" missing from error: ${verdict.error}`,
+          );
         }
       }
     }

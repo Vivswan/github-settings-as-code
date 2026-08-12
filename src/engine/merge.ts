@@ -40,14 +40,14 @@ export function deepMerge(base: unknown, override: unknown): unknown {
  * untouched so the null semantics and post-merge validation see them as
  * written. Returns a shallow copy; the input is never mutated.
  */
-function normalizeKnobbedSections(settings: SettingsFile): unknown {
+function normalizeKnobbedSections(settings: unknown): unknown {
   // A document that is not a mapping (a raw list, a scalar) has no sections
   // to normalize; hand it to deepMerge untouched so the top-level validator
   // still sees exactly what was written.
   if (!isPlainObject(settings)) {
     return settings;
   }
-  const out: Record<string, unknown> = { ...(settings as Record<string, unknown>) };
+  const out: Record<string, unknown> = { ...settings };
   for (const key of UNDECLARED_POLICY_SECTIONS) {
     const value = out[key];
     if (Array.isArray(value)) {
@@ -115,8 +115,8 @@ function isMalformedWrapper(value: unknown): boolean {
  */
 export function applyDefaults(
   defaults: SettingsFile,
-  repoSettings: SettingsFile,
-): { settings: SettingsFile; disabled: string[] } {
+  repoSettings: unknown,
+): { settings: unknown; disabled: string[] } {
   const normalizedDefaults = normalizeKnobbedSections(defaults);
   const normalizedRepo = normalizeKnobbedSections(repoSettings);
   if (isPlainObject(normalizedDefaults) && isPlainObject(normalizedRepo)) {
@@ -128,7 +128,13 @@ export function applyDefaults(
       }
     }
   }
-  const merged = deepMerge(normalizedDefaults, normalizedRepo) as Record<string, unknown>;
+  const merged = deepMerge(normalizedDefaults, normalizedRepo);
+  if (!isPlainObject(merged)) {
+    // A non-mapping target document rode through untouched (see
+    // normalizeKnobbedSections); it has no sections to disable or resolve,
+    // and post-merge validation rejects it as written.
+    return { settings: merged, disabled: [] };
+  }
   const disabled: string[] = [];
   for (const [key, value] of Object.entries(merged)) {
     if (value === null && (defaults as Record<string, unknown>)[key] != null) {
@@ -137,5 +143,5 @@ export function applyDefaults(
     }
   }
   resolveUndeclaredPolicies(merged);
-  return { settings: merged as SettingsFile, disabled };
+  return { settings: merged, disabled };
 }

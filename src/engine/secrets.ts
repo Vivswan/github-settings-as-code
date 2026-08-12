@@ -71,9 +71,7 @@ export function collectSecretValues(
  * over-refused. The merge-invariant test in test/engine/secrets.test.ts
  * pins that half for every secretValues-declaring section.
  */
-export function targetSecretSource(
-  targetDoc: SettingsFile,
-): (section: SectionKey) => SettingsSource {
+export function targetSecretSource(targetDoc: unknown): (section: SectionKey) => SettingsSource {
   const declared = new Set<string>();
   if (typeof targetDoc === "object" && targetDoc !== null && !Array.isArray(targetDoc)) {
     for (const [key, value] of Object.entries(targetDoc)) {

@@ -3,6 +3,7 @@ import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encr
 import { runMulti } from "../../src/action/multi.js";
 import { redactOutcomes, toPublicView } from "../../src/action/redact.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
+import type { ValidatedSettings } from "../../src/engine/orchestrate.js";
 import { clearRedactedSlugs } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
 import {
@@ -11,6 +12,7 @@ import {
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
 import { applyMarkerInjection } from "../../src/report/delivery.js";
+import type { SectionKey, SettingsFile } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 
 // runMulti() registers every slug its redaction plan hides, permanently for
@@ -62,8 +64,8 @@ function cfg(overrides: Partial<Parameters<typeof runMulti>[1]> = {}) {
     adminOwner: "o",
     mode: "apply" as const,
     onMissingPermission: "fail" as const,
-    requiredSections: new Set<string>(),
-    onlySections: new Set<string>(),
+    requiredSections: new Set<SectionKey>(),
+    onlySections: new Set<SectionKey>(),
     discoveryFilters: DEFAULT_DISCOVERY_FILTERS,
     discoveryFiltersSet: [],
     // Existing scenarios predate redaction and assert on raw slugs; default
@@ -921,9 +923,9 @@ describe("runMulti private-report: artifact wiring", () => {
         privateReport: "artifact",
         reportPublicKey: recipient,
         selfSlug: "admin/repo",
-        uploader,
       }),
       io,
+      uploader,
     );
     expect(targets.map((t) => t.result)).toEqual(["drift", "drift"]);
     // exactly one artifact upload for the whole run, under the fixed names
@@ -969,9 +971,9 @@ describe("runMulti private-report: artifact wiring", () => {
         privateReport: "artifact",
         reportPublicKey: recipient,
         selfSlug: "admin/repo",
-        uploader,
       }),
       io,
+      uploader,
     );
     // both are redacted in the public view
     expect(targets.every((t) => t.redacted)).toBe(true);
@@ -1004,9 +1006,9 @@ describe("runMulti private-report: artifact wiring", () => {
         privateReport: "artifact",
         reportPublicKey: recipient,
         selfSlug: "admin/repo",
-        uploader,
       }),
       captureIo().io,
+      uploader,
     );
     expect(uploads).toHaveLength(0);
   });
@@ -1034,9 +1036,9 @@ describe("runMulti private-report: artifact wiring", () => {
         privateReport: "artifact",
         reportPublicKey: recipient,
         selfSlug: "admin/repo",
-        uploader,
       }),
       io,
+      uploader,
     );
     // the delivery failure does not change the target's result
     expect(targets[0]?.result).toBe("drift");
@@ -1051,23 +1053,26 @@ describe("runMulti private-report: artifact wiring", () => {
 
 describe("applyMarkerInjection", () => {
   const MARKER = "settings-as-code-report";
+  // Test fixtures are schema-valid by construction; the brand normally comes
+  // from validateSettingsDoc, so the cast stands in for that boundary here.
+  const validated = (doc: SettingsFile): ValidatedSettings => doc as ValidatedSettings;
 
   test("off: settings pass through untouched with no notice", () => {
-    const settings = { labels: [{ name: "bug", color: "d73a4a" }] };
+    const settings = validated({ labels: [{ name: "bug", color: "d73a4a" }] });
     const result = applyMarkerInjection(settings, false);
     expect(result.settings).toBe(settings);
     expect(result.notice).toBeUndefined();
   });
 
   test("on but no labels section: no injection, no notice", () => {
-    const settings = { repository: { has_wiki: false } };
+    const settings = validated({ repository: { has_wiki: false } });
     const result = applyMarkerInjection(settings, true);
     expect(result.settings).toEqual(settings);
     expect(result.notice).toBeUndefined();
   });
 
   test("on with a labels section lacking the marker: appends it and returns a notice", () => {
-    const settings = { labels: [{ name: "bug", color: "d73a4a" }] };
+    const settings = validated({ labels: [{ name: "bug", color: "d73a4a" }] });
     const result = applyMarkerInjection(settings, true);
     expect(result.notice).toContain(MARKER);
     const names = ((result.settings.labels ?? []) as Array<{ name: string }>).map((l) => l.name);
@@ -1076,14 +1081,16 @@ describe("applyMarkerInjection", () => {
   });
 
   test("on with the marker already declared: no duplicate, no notice", () => {
-    const settings = { labels: [{ name: MARKER, color: "0e2a47" }] };
+    const settings = validated({ labels: [{ name: MARKER, color: "0e2a47" }] });
     const result = applyMarkerInjection(settings, true);
     expect(result.notice).toBeUndefined();
     expect(result.settings.labels).toHaveLength(1);
   });
 
   test("on with a rename moving the marker away: the rename-refused notice, not the injected one", () => {
-    const settings = { labels: [{ name: MARKER, new_name: "something-else", color: "0e2a47" }] };
+    const settings = validated({
+      labels: [{ name: MARKER, new_name: "something-else", color: "0e2a47" }],
+    });
     const result = applyMarkerInjection(settings, true);
     expect(result.notice).toBe(
       `refused to rename the "${MARKER}" marker label: private reporting reuses its issue by that exact name, so the rename was dropped`,

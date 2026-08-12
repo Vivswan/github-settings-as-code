@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { applyDefaults } from "../../src/engine/merge.js";
-import { runForRepo } from "../../src/engine/orchestrate.js";
+import { runForRepo, type ValidatedSettings } from "../../src/engine/orchestrate.js";
 import { collectSecretValues, targetSecretSource } from "../../src/engine/secrets.js";
 import type { Io } from "../../src/io.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
@@ -16,7 +16,9 @@ const FLEET_DEFAULTS = {
 /** Merge a target document over defaults and collect the surviving secret values. */
 function mergedValues(defaults: SettingsFile, targetDoc: SettingsFile) {
   const { settings } = applyDefaults(defaults, targetDoc);
-  return collectSecretValues(settings, SECTIONS, targetSecretSource(targetDoc));
+  // The merge under test emits an unvalidated document; the collection walk
+  // is what these tests exercise, so the boundary cast lives here.
+  return collectSecretValues(settings as SettingsFile, SECTIONS, targetSecretSource(targetDoc));
 }
 
 function captureIo(): { io: Io; annotations: string[] } {
@@ -188,12 +190,14 @@ describe("secret provenance through the defaults merge", () => {
 });
 
 describe("runForRepo with merged provenance", () => {
-  const runOpts = (settings: SettingsFile, targetDoc: SettingsFile) => ({
+  // The merged doc is schema-valid by construction here; the cast stands in
+  // for the validateSettingsDoc boundary the run flows go through.
+  const runOpts = (settings: unknown, targetDoc: SettingsFile) => ({
     repo: { owner: "o", name: "r", slug: "o/r" },
-    settings,
+    settings: settings as ValidatedSettings,
     onMissingPermission: "fail" as const,
-    requiredSections: new Set<string>(),
-    onlySections: new Set<string>(),
+    requiredSections: new Set<SectionKey>(),
+    onlySections: new Set<SectionKey>(),
     secretSource: targetSecretSource(targetDoc),
   });
 

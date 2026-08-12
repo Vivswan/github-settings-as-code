@@ -9,9 +9,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { runForRepo } from "../../src/engine/orchestrate.js";
+import { runForRepo, type ValidatedSettings } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
-import type { SectionKey, SettingsFile } from "../../src/schema.js";
+import type { SectionKey } from "../../src/schema.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 
@@ -231,7 +231,7 @@ describe("check-mode purity", () => {
       api,
       {
         repo: { owner: "o", name: "r", slug: "o/r" },
-        settings: FIXTURES as SettingsFile,
+        settings: FIXTURES as ValidatedSettings,
         mode: "check",
         onMissingPermission: "fail",
         requiredSections: new Set(),

@@ -160,7 +160,10 @@ describe("README example settings.yml blocks", () => {
         continue; // not a settings document
       }
       const invalid = validateSettingsDoc(doc, "README example", new Set(), silentIo);
-      expect(invalid, `README settings.yml example failed validation: ${invalid}`).toBeNull();
+      expect(
+        "error" in invalid ? invalid.error : null,
+        `README settings.yml example failed validation: ${"error" in invalid ? invalid.error : ""}`,
+      ).toBeNull();
       const repository = (doc as Record<string, unknown>).repository;
       if (repository && typeof repository === "object") {
         for (const key of Object.keys(repository)) {

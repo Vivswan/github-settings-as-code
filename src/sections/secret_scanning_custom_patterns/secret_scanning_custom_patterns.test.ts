@@ -241,7 +241,9 @@ describe("secret_scanning_custom_patterns", () => {
         ],
       };
       const invalid = validateSettingsDoc(doc, "test doc", new Set(), silentIo);
-      expect(invalid ?? "").toContain("cannot be cleared with an empty string");
+      expect("error" in invalid ? invalid.error : "").toContain(
+        "cannot be cleared with an empty string",
+      );
     }
   });
 
@@ -336,9 +338,10 @@ describe("secret_scanning_custom_patterns closed surface", () => {
         new Set(),
         silentIo,
       );
-      expect(error, `a declared "${key}" must be rejected`).not.toBeNull();
-      expect(error).toContain(`"${key}"`);
-      expect(error).toContain("read-only");
+      expect("error" in error, `a declared "${key}" must be rejected`).toBe(true);
+      const message = "error" in error ? error.error : "";
+      expect(message).toContain(`"${key}"`);
+      expect(message).toContain("read-only");
     }
   });
 });
