@@ -12,8 +12,10 @@ import {
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
 import type { LoggedRequest } from "./mock/routes.js";
 import {
+  bundleBuildParityFailure,
   changedFamilies,
   checkLeaks,
+  declaredBuildBundleScript,
   exitCodeFailure,
   forbiddenPresent,
   insertReplay,
@@ -29,6 +31,29 @@ import {
   type UnconditionalWriteWitness,
   unwitnessedUnconditionalSections,
 } from "./runner.js";
+
+describe("bundle build parity (harness vs production)", () => {
+  test("the declared build:bundle script matches what the harness builds", () => {
+    // The e2e children run a bundle the HARNESS builds, so a flag added to
+    // build:bundle (minify, sourcemap, define) would ship an artifact e2e
+    // never exercises. This assertion lives in a unit test on purpose: it is
+    // the only place the pin can fire on the PR that trips it, since a
+    // package.json-only diff selects no sections and skips the e2e smoke job.
+    expect(bundleBuildParityFailure(declaredBuildBundleScript())).toBeUndefined();
+  });
+
+  test("a drifted or missing script is reported, naming both sides", () => {
+    // The inverse leg: prove the check can fail at all, and that its message
+    // carries the two commands a reader must reconcile.
+    const drifted = bundleBuildParityFailure(
+      "bun build src/main.ts --target=node --minify --outfile lib/index.js",
+    );
+    expect(drifted).toBeDefined();
+    expect(drifted).toContain("--minify");
+    expect(drifted).toContain("Bun.build");
+    expect(bundleBuildParityFailure(undefined)).toBeDefined();
+  });
+});
 
 describe("ARTIFACT_TEST_RECIPIENT", () => {
   test("is a valid age recipient the action's config validation accepts", () => {

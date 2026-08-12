@@ -45,6 +45,30 @@ const ROOT = join(import.meta.dir, "..", "..");
  * Bun.build options together.
  */
 const BUILD_BUNDLE_SCRIPT = "bun build src/main.ts --target=node --outfile lib/index.js";
+
+/**
+ * The parity verdict for a package.json `build:bundle` script: failure text
+ * when it no longer matches BUILD_BUNDLE_SCRIPT, undefined when it does.
+ * Pure over its argument and exported so a UNIT test can assert it on every
+ * PR: builtBundle() below only runs when a scenario runs, and the e2e smoke
+ * job skips on a package.json-only diff - exactly the PR that changes this
+ * script - so the harness-side check alone could never fire on the change it
+ * guards.
+ */
+export function bundleBuildParityFailure(script: string | undefined): string | undefined {
+  return script === BUILD_BUNDLE_SCRIPT
+    ? undefined
+    : `package.json build:bundle is "${script}", but the e2e harness builds with "${BUILD_BUNDLE_SCRIPT}"; mirror the change in the harness's Bun.build options and update BUILD_BUNDLE_SCRIPT (test/e2e/runner.ts) to keep production parity`;
+}
+
+/** The `build:bundle` script this repository's package.json declares. */
+export function declaredBuildBundleScript(): string | undefined {
+  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  return pkg.scripts?.["build:bundle"];
+}
+
 /**
  * Build src/main.ts into a temp-directory bundle once per process, memoized
  * as a promise so concurrent scenarios share the one build instead of racing
@@ -54,13 +78,10 @@ const BUILD_BUNDLE_SCRIPT = "bun build src/main.ts --target=node --outfile lib/i
 let bundleBuild: Promise<string> | undefined;
 function builtBundle(): Promise<string> {
   bundleBuild ??= (async () => {
-    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
-      scripts?: Record<string, string>;
-    };
-    if (pkg.scripts?.["build:bundle"] !== BUILD_BUNDLE_SCRIPT) {
-      throw new Error(
-        `package.json build:bundle is now "${pkg.scripts?.["build:bundle"]}"; mirror the change in the harness's Bun.build options and update BUILD_BUNDLE_SCRIPT (test/e2e/runner.ts) to keep production parity`,
-      );
+    // A fast local signal; the binding assertion is the unit test.
+    const parityFailure = bundleBuildParityFailure(declaredBuildBundleScript());
+    if (parityFailure !== undefined) {
+      throw new Error(parityFailure);
     }
     const outdir = mkdtempSync(join(tmpdir(), "e2e-bundle-"));
     process.on("exit", () => rmSync(outdir, { recursive: true, force: true }));
