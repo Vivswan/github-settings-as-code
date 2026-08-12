@@ -7,14 +7,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { agentsSecretsSection } from "../../src/sections/agents-secrets.js";
-import type { SectionContext } from "../../src/sections/contract.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
   unsealSecretValue,
-} from "../e2e/mock/secrets.js";
-import { MockApi } from "../mock-api.js";
+} from "../../../test/e2e/mock/secrets.js";
+import { MockApi } from "../../../test/mock-api.js";
+import type { SectionContext } from "../contract.js";
+import { agentsSecretsSection } from "./index.js";
 
 const LIST = "GET /repos/o/r/agents/secrets?per_page=100&page=1";
 const PUBLIC_KEY = "GET /repos/o/r/agents/secrets/public-key";

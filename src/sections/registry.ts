@@ -12,7 +12,7 @@ import { SECTION_KEYS, type SectionKey } from "../schema.js";
 import { actionsSection } from "./actions.js";
 import { actionsSecretsSection } from "./actions_secrets/index.js";
 import { actionsVariablesSection } from "./actions-variables.js";
-import { agentsSecretsSection } from "./agents-secrets.js";
+import { agentsSecretsSection } from "./agents_secrets/index.js";
 import { agentsVariablesSection } from "./agents-variables.js";
 import { autolinksSection } from "./autolinks/index.js";
 import { branchesSection } from "./branches.js";
