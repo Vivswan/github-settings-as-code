@@ -22,12 +22,12 @@
  * touches the cap or bypass list.
  */
 
-import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import {
   INTERACTION_LIMITS_ROUTED_KEYS,
   type InteractionLimitsConfig,
   SettingsFile,
-} from "../schema.js";
+} from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -41,7 +41,7 @@ import {
   type SectionPermission,
   type SectionResult,
   tryCall,
-} from "./contract.js";
+} from "../contract.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
