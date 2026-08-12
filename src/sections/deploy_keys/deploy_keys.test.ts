@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { deployKeysSection, normalizeKeyMaterial } from "../../src/sections/deploy-keys.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { deployKeysSection, normalizeKeyMaterial } from "./index.js";
 
 const LIST = "GET /repos/o/r/keys?per_page=100&page=1";
 
