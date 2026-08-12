@@ -3,13 +3,13 @@
  * declares Pages OFF (mirroring branches' `protection: null`).
  */
 
-import { z } from "zod";
 import { subsetDiff } from "../engine/diff.js";
-import type { PagesConfig } from "../schema.js";
+import { type PagesConfig, SettingsFile } from "../schema.js";
 import {
   call,
   type EndpointDecl,
   emptyResult,
+  loosen,
   probeAbsent,
   type SectionModule,
   type SectionPermission,
@@ -38,7 +38,7 @@ export const pagesSection: SectionModule<"pages"> = {
   endpoints: ENDPOINTS,
   // The handler dereferences source.path before the API sees it, so the
   // shape must catch source: null or a source without a branch.
-  shape: z.looseObject({ source: z.looseObject({ branch: z.string() }).optional() }).nullable(),
+  shape: loosen(SettingsFile.shape.pages),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const probe = await probeAbsent(ctx, this, ENDPOINTS.get);

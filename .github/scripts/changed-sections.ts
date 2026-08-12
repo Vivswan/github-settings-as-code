@@ -123,6 +123,7 @@ export const ALL_SELECTING_PREFIXES = [
   "src/io.ts",
   "src/main.ts",
   "src/schema.ts",
+  "src/types.ts",
   "test/e2e/",
   // The selection machinery itself: a PR touching only this selector, a
   // sibling CI script, or the smoke job's own workflow would otherwise

@@ -10,18 +10,17 @@
  * deletion.
  */
 
-import { z } from "zod";
-import type { AgentsSecretConfig, UndeclaredPolicyList } from "../schema.js";
+import { type AgentsSecretConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   listAllEnveloped,
+  loosen,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 import {
   listSecretValues,
@@ -79,7 +78,7 @@ export const agentsSecretsSection: SectionModule<"agents_secrets"> = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(z.array(z.looseObject({ name: z.string(), value: z.string() }))),
+  shape: loosen(SettingsFile.shape.agents_secrets),
   // The engine's shared list extractor: the declared value of every entry,
   // for the up-front reference resolution.
   secretValues: listSecretValues,

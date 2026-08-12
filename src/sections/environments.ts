@@ -22,18 +22,19 @@
  * opts in).
  */
 
-import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import type {
-  DeploymentBranchPolicyConfig,
-  DeploymentProtectionRuleConfig,
-  EnvironmentConfig,
-  EnvironmentRoutedScalars,
-  EnvironmentSecretConfig,
-  EnvironmentVariableConfig,
-  MustBeNever,
-  UndeclaredPolicy,
-  UndeclaredPolicyList,
+import {
+  type DeploymentBranchPolicyConfig,
+  type DeploymentProtectionRuleConfig,
+  type EnvironmentConfig,
+  type EnvironmentRoutedScalars,
+  type EnvironmentSecretConfig,
+  type EnvironmentVariableConfig,
+  MAX_PINNED_ENVIRONMENTS,
+  type MustBeNever,
+  SettingsFile,
+  type UndeclaredPolicy,
+  type UndeclaredPolicyList,
 } from "../schema.js";
 import {
   call,
@@ -46,6 +47,7 @@ import {
   graphqlOp,
   listAllEnveloped,
   listGraphqlConnection,
+  loosen,
   probeAbsent,
   rejectDuplicates,
   repoVariables,
@@ -55,7 +57,6 @@ import {
   type SectionResult,
   tryCallGraphql,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 import {
   listSecretValues,
@@ -203,13 +204,6 @@ const ENDPOINTS = {
     denialHint: PROTECTION_RULES_DENIAL_HINT,
   },
 } as const satisfies Record<string, EndpointDecl>;
-
-/**
- * GitHub's hard cap on pinned environments per repository. The single source
- * for the shape's upfront rejection, the full-cap apply error, and the e2e
- * mock's cap enforcement.
- */
-export const MAX_PINNED_ENVIRONMENTS = 10;
 
 /**
  * The pinned-environments listing: each node is a PinnedEnvironment carrying
@@ -533,93 +527,7 @@ export const environmentsSection: SectionModule<"environments"> = {
   grantCaveat: NESTED_OVERRIDES_CAVEAT,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
-  shape: z
-    .array(
-      z
-        .looseObject({
-          name: z.string(),
-          // A ROUTED SCALAR (see ROUTED_SCALAR_KEYS), never part of the PUT
-          // body: splitEntry strips it and the pin reconciliation applies it
-          // through the GraphQL pin mutations after every PUT.
-          pinned: z.boolean().optional(),
-          // Loose like the repository actions_variables entries: the POST/PATCH
-          // bodies pass extra fields through verbatim, so a field GitHub ships
-          // tomorrow can be declared here the day it appears.
-          variables: undeclaredPolicyShape(
-            z.array(z.looseObject({ name: z.string(), value: z.string() })),
-          ).optional(),
-          // STRICT entries, unlike variables: a secret's PUT body is built from
-          // the sealed value alone, so an extra entry key has no destination and
-          // would silently do nothing (the actions_secrets closedSurface rule;
-          // closedSurface itself cannot reach a nested list, so the shape
-          // enforces it here).
-          secrets: undeclaredPolicyShape(
-            z.array(z.strictObject({ name: z.string(), value: z.string() })),
-          ).optional(),
-          // Loose like the variables entries: the create POST passes extra
-          // fields through verbatim. `type` is checked as a plain string (the
-          // handler compares it against the live pattern); GitHub stays the
-          // authority on its values, and the published schema documents the
-          // upstream enum.
-          deployment_branch_policies: undeclaredPolicyShape(
-            z.array(z.looseObject({ name: z.string(), type: z.string().optional() })),
-          ).optional(),
-          // STRICT entries, like secrets: the enable POST is built solely from
-          // the App's resolved integration_id, so an extra entry key has no
-          // destination and would silently do nothing.
-          deployment_protection_rules: undeclaredPolicyShape(
-            z.array(z.strictObject({ app: z.string() })),
-          ).optional(),
-          // Secrets live under the plural `secrets` list; a singular entry-level
-          // `secret` would pass the loose shape into the environment PUT body
-          // verbatim and configure nothing, so the misplacement is rejected by
-          // name (the webhooks entry-level `secret` pin precedent).
-          secret: z
-            .undefined({
-              error:
-                "environment secrets belong under the entry's `secrets` list, not a singular `secret` key; here it would pass through to the environment PUT verbatim and configure nothing",
-            })
-            .optional(),
-        })
-        .superRefine((entry, refineCtx) => {
-          // The flag-pairing invariant lives HERE, in the shape, not in the
-          // section's validate hook: upfront document validation rejects the
-          // document in BOTH modes before ANY section writes. A hook-level check
-          // would fire only when this section runs (the apply-mode preflight
-          // ignores non-permission errors), after earlier sections already
-          // wrote - and the pattern POST itself would 404 only after the
-          // environment PUT landed, half-applying the run.
-          if (entry.deployment_branch_policies === undefined) {
-            return;
-          }
-          const flags = (entry as Record<string, unknown>).deployment_branch_policy as
-            | { custom_branch_policies?: unknown }
-            | null
-            | undefined;
-          if (flags?.custom_branch_policies !== true) {
-            refineCtx.addIssue({
-              code: "custom",
-              path: ["deployment_branch_policies"],
-              message: `the "${entry.name}" entry declares deployment_branch_policies, so it must also declare deployment_branch_policy with custom_branch_policies: true - GitHub rejects every pattern write while the flag is off`,
-            });
-          }
-        }),
-    )
-    .superRefine((entries, refineCtx) => {
-      // The cap invariant lives in the shape like the flag pairing: upfront
-      // document validation rejects the document in BOTH modes before ANY
-      // section writes, where a hook-level check would fire only mid-run.
-      const pinnedIndexes = entries.flatMap((entry, index) =>
-        entry.pinned === true ? [index] : [],
-      );
-      if (pinnedIndexes.length > MAX_PINNED_ENVIRONMENTS) {
-        refineCtx.addIssue({
-          code: "custom",
-          path: [pinnedIndexes[MAX_PINNED_ENVIRONMENTS] as number, "pinned"],
-          message: `the settings file declares ${pinnedIndexes.length} environments with pinned: true, but GitHub allows at most ${MAX_PINNED_ENVIRONMENTS} pinned environments per repository. Declare pinned: true on at most ${MAX_PINNED_ENVIRONMENTS} entries`,
-        });
-      }
-    }),
+  shape: loosen(SettingsFile.shape.environments),
   /**
    * The declared value of every entry's secrets list, across all declared
    * environments, for the engine's up-front reference resolution - each

@@ -44,7 +44,7 @@ on:
       - "bun.lock"
       - "tsconfig.json"
       - ".bun-version"
-      - ".github/scripts/finalize-schema.ts"
+      - ".github/scripts/gen-settings-schema.ts"
       - ".github/scripts/graduate-upstream-gaps.ts"
       - ".github/scripts/gen-gaps-index.ts"
       # The schema's $id derives its v<MAJOR> from this manifest, so the

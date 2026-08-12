@@ -13,21 +13,20 @@
  * stripped comment as drift and delete-and-recreate the key on every apply.
  */
 
-import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import type { DeployKeyConfig, UndeclaredPolicyList } from "../schema.js";
+import { type DeployKeyConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   listAll,
+  loosen,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 
 interface LiveDeployKey {
@@ -127,15 +126,7 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(
-    z.array(
-      z.looseObject({
-        title: z.string(),
-        key: z.string(),
-        read_only: z.boolean().optional(),
-      }),
-    ),
-  ),
+  shape: loosen(SettingsFile.shape.deploy_keys),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const { policy, entries: desired } = undeclaredPolicy(

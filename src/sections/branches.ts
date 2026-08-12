@@ -18,9 +18,13 @@
  * a pure-REST declaration issues no GraphQL request at all.
  */
 
-import { z } from "zod";
 import { subsetDiff } from "../engine/diff.js";
-import type { BranchConfig, BranchProtectionConfig } from "../schema.js";
+import {
+  type BranchConfig,
+  type BranchProtectionConfig,
+  parseBypassActor,
+  SettingsFile,
+} from "../schema.js";
 import {
   call,
   callGraphql,
@@ -30,6 +34,7 @@ import {
   type GraphqlOpDecl,
   graphqlOp,
   listGraphqlConnection,
+  loosen,
   probeAbsent,
   rejectDuplicates,
   repoVariables,
@@ -103,41 +108,6 @@ const WILDCARD_KEYS = [
 ] as const;
 
 const WILDCARD_KEY_SET: ReadonlySet<string> = new Set(WILDCARD_KEYS);
-
-// --- Actor vocabulary --------------------------------------------------------
-
-/** A parsed force_push_bypassers actor string. */
-export type BypassActor =
-  | { kind: "user"; login: string }
-  | { kind: "team"; org: string; team: string }
-  | { kind: "app"; slug: string };
-
-const NAME_SEGMENT = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*)$/;
-
-/**
- * Parse one declared actor string, or null when it fits no form: a bare
- * login is a user, "org/team-slug" is a team, and "app/slug" is a GitHub
- * App (the "app" head is reserved; an organization named "app" cannot be
- * addressed as a team holder here).
- */
-export function parseBypassActor(raw: string): BypassActor | null {
-  const parts = raw.split("/");
-  if (parts.length === 1) {
-    const login = parts[0] as string;
-    return NAME_SEGMENT.test(login) ? { kind: "user", login } : null;
-  }
-  if (parts.length !== 2) {
-    return null;
-  }
-  const [head, tail] = parts as [string, string];
-  if (!NAME_SEGMENT.test(head) || !NAME_SEGMENT.test(tail)) {
-    return null;
-  }
-  return head === "app" ? { kind: "app", slug: tail } : { kind: "team", org: head, team: tail };
-}
-
-const ACTOR_FORM_ERROR =
-  'each force_push_bypassers actor must be a bare user login ("octocat"), "org/team-slug" for a team, or "app/slug" for a GitHub App';
 
 const permission: SectionPermission = { repo: ["administration"] };
 
@@ -819,132 +789,69 @@ const WILDCARD_KEY_ERROR = (name: string, key: string): string =>
     ", ",
   )}]. For actor lists and richer controls, prefer the rulesets section (the modern successor of classic protection)`;
 
-/** Reject case-insensitive duplicates in a routed-key list upfront. */
-function duplicateIn(list: readonly string[]): string | null {
-  const seen = new Set<string>();
-  for (const item of list) {
-    const key = item.toLowerCase();
-    if (seen.has(key)) {
-      return item;
-    }
-    seen.add(key);
-  }
-  return null;
-}
-
 export const branchesSection: SectionModule<"branches"> = {
   key: "branches",
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL,
-  // protection stays a passthrough record except its routed keys, which are
-  // typed so a wrong shape fails upfront in document validation, before any
-  // section writes (the 1A/1C precedent). Wildcard entries additionally
-  // reject every key outside the GraphQL translation tables, since nothing
-  // else can reach a wildcard rule.
-  shape: z.array(
-    z
-      .looseObject({
-        name: z.string(),
-        protection: z
-          .looseObject({
-            required_signatures: z
-              .boolean({
-                error:
-                  'required_signatures must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the toggle direction is unambiguous',
-              })
-              .optional(),
-            force_push_bypassers: z
-              .array(
-                z.string().refine((raw) => parseBypassActor(raw) !== null, {
-                  error: ACTOR_FORM_ERROR,
-                }),
-              )
-              .optional(),
-            required_deployments: z
-              .strictObject({ environments: z.array(z.string()) })
-              .nullable()
-              .optional(),
-          })
-          .nullable(),
-      })
-      .superRefine((entry, refineCtx) => {
-        // The routed lists are replace-wholesale semantics keyed by actor or
-        // environment identity, which GitHub canonicalizes case-insensitively:
-        // a duplicate would apply "successfully" and then drift forever
-        // against the deduplicated read-back, so both lists reject them
-        // upfront (rejectDuplicates' precedent, at the field level).
-        const routed = entry.protection;
-        if (routed !== null) {
-          const duplicateActor = duplicateIn(routed.force_push_bypassers ?? []);
-          if (duplicateActor !== null) {
+  // The wildcard-entry key sweep composes onto the schema-derived shape HERE,
+  // not in schema.ts: it reads the GraphQL translation tables (WILDCARD_KEYS,
+  // the structured twins), which are this section's own machinery. Wildcard
+  // entries reject every key outside those tables, since nothing else can
+  // reach a wildcard rule.
+  shape: loosen(SettingsFile.shape.branches).superRefine((declared, refineCtx) => {
+    if (!Array.isArray(declared)) {
+      return;
+    }
+    declared.forEach((entry: BranchConfig, index) => {
+      if (!isWildcardPattern(entry.name) || entry.protection === null) {
+        return;
+      }
+      const protection = entry.protection as Record<string, unknown>;
+      for (const key of Object.keys(protection)) {
+        if (!WILDCARD_KEY_SET.has(key)) {
+          refineCtx.addIssue({
+            code: "custom",
+            path: [index, "protection", key],
+            message: WILDCARD_KEY_ERROR(entry.name, key),
+          });
+        }
+      }
+      // The structured pairs translate NAMED sub-keys only, so an unknown
+      // sub-key on a wildcard entry would be silently lost - reject it with
+      // the same pointer. A non-object value (a scalar or an array, both of
+      // which the classic REST endpoint would reject server-side) is
+      // rejected here too: nothing downstream could translate it.
+      const nested: Array<[string, Record<string, string>]> = [
+        ["required_status_checks", GRAPHQL_STATUS_CHECK_TWINS],
+        ["required_pull_request_reviews", GRAPHQL_REVIEW_TWINS],
+      ];
+      for (const [key, twins] of nested) {
+        const value = protection[key];
+        if (value === null || value === undefined) {
+          continue;
+        }
+        if (typeof value !== "object" || Array.isArray(value)) {
+          refineCtx.addIssue({
+            code: "custom",
+            path: [index, "protection", key],
+            message: `the wildcard entry "${entry.name}" declares protection.${key} as ${Array.isArray(value) ? "a list" : JSON.stringify(value)}, but on a wildcard rule it must be a mapping of its sub-keys [${Object.keys(twins).join(", ")}], or null to turn the control off`,
+          });
+          continue;
+        }
+        for (const subKey of Object.keys(value)) {
+          if (!(subKey in twins)) {
             refineCtx.addIssue({
               code: "custom",
-              path: ["protection", "force_push_bypassers"],
-              message: `force_push_bypassers lists "${duplicateActor}" more than once (actor names are case-insensitive); keep one entry per actor`,
-            });
-          }
-          const duplicateEnv = duplicateIn(
-            routed.required_deployments === null
-              ? []
-              : (routed.required_deployments?.environments ?? []),
-          );
-          if (duplicateEnv !== null) {
-            refineCtx.addIssue({
-              code: "custom",
-              path: ["protection", "required_deployments", "environments"],
-              message: `required_deployments.environments lists "${duplicateEnv}" more than once (environment names are case-insensitive); keep one entry per environment`,
+              path: [index, "protection", key, subKey],
+              message: WILDCARD_KEY_ERROR(entry.name, `${key}.${subKey}`),
             });
           }
         }
-        if (!isWildcardPattern(entry.name) || entry.protection === null) {
-          return;
-        }
-        const protection = entry.protection as Record<string, unknown>;
-        for (const key of Object.keys(protection)) {
-          if (!WILDCARD_KEY_SET.has(key)) {
-            refineCtx.addIssue({
-              code: "custom",
-              path: ["protection", key],
-              message: WILDCARD_KEY_ERROR(entry.name, key),
-            });
-          }
-        }
-        // The structured pairs translate NAMED sub-keys only, so an unknown
-        // sub-key on a wildcard entry would be silently lost - reject it with
-        // the same pointer. A non-object value (a scalar or an array, both of
-        // which the classic REST endpoint would reject server-side) is
-        // rejected here too: nothing downstream could translate it.
-        const nested: Array<[string, Record<string, string>]> = [
-          ["required_status_checks", GRAPHQL_STATUS_CHECK_TWINS],
-          ["required_pull_request_reviews", GRAPHQL_REVIEW_TWINS],
-        ];
-        for (const [key, twins] of nested) {
-          const value = protection[key];
-          if (value === null || value === undefined) {
-            continue;
-          }
-          if (typeof value !== "object" || Array.isArray(value)) {
-            refineCtx.addIssue({
-              code: "custom",
-              path: ["protection", key],
-              message: `the wildcard entry "${entry.name}" declares protection.${key} as ${Array.isArray(value) ? "a list" : JSON.stringify(value)}, but on a wildcard rule it must be a mapping of its sub-keys [${Object.keys(twins).join(", ")}], or null to turn the control off`,
-            });
-            continue;
-          }
-          for (const subKey of Object.keys(value)) {
-            if (!(subKey in twins)) {
-              refineCtx.addIssue({
-                code: "custom",
-                path: ["protection", key, subKey],
-                message: WILDCARD_KEY_ERROR(entry.name, `${key}.${subKey}`),
-              });
-            }
-          }
-        }
-      }),
-  ),
+      }
+    });
+  }),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as BranchConfig[];

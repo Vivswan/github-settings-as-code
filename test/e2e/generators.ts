@@ -1420,7 +1420,7 @@ const ARRAY_SECTIONS = [
   "secret_scanning_custom_patterns",
 ] as const satisfies readonly SectionKey[];
 
-/** The sections whose settings value is a single object (anyRecord or looseObject shapes). */
+/** The sections whose settings value is a single mapping (object-shaped schemas). */
 const RECORD_SECTIONS = [
   "repository",
   "actions",

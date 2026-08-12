@@ -20,6 +20,7 @@ import {
   MARKER_LABEL_CONFIG,
 } from "../../../src/report/issue-report.js";
 import type { SectionKey } from "../../../src/schema.js";
+import { MAX_PINNED_ENVIRONMENTS } from "../../../src/schema.js";
 import {
   endpointKind,
   endpointMethod,
@@ -31,7 +32,6 @@ import {
   toleratedGraphqlErrors,
   toleratedStatuses,
 } from "../../../src/sections/contract.js";
-import { MAX_PINNED_ENVIRONMENTS } from "../../../src/sections/environments.js";
 import {
   allEndpoints,
   allGraphqlOps,

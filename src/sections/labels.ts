@@ -5,20 +5,19 @@
  * the deletion to notes.
  */
 
-import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import type { LabelConfig, UndeclaredPolicyList } from "../schema.js";
+import { type LabelConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   listAll,
+  loosen,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 
 /** Case-insensitive key for name-matched resources (labels). */
@@ -62,9 +61,7 @@ export const labelsSection: SectionModule<"labels"> = {
   undeclaredDefault: "delete",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(
-    z.array(z.looseObject({ name: z.string(), new_name: z.string().optional() })),
-  ),
+  shape: loosen(SettingsFile.shape.labels),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const { policy, entries: desired } = undeclaredPolicy(

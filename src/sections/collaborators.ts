@@ -8,20 +8,24 @@
  * notes.
  */
 
-import { z } from "zod";
-import type { CollaboratorConfig, MustBeNever, UndeclaredPolicyList } from "../schema.js";
+import {
+  type CollaboratorConfig,
+  type MustBeNever,
+  SettingsFile,
+  type UndeclaredPolicyList,
+} from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   listAll,
+  loosen,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "./roles.js";
 
@@ -95,7 +99,7 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
   undeclaredDefault: "delete",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(z.array(z.looseObject({ username: z.string() }))),
+  shape: loosen(SettingsFile.shape.collaborators),
   // Closed surface: the PUT accepts exactly one setting ("permission"), so
   // an extra key is always a typo - and a misspelled "permission" would
   // silently grant the default role and report clean forever.

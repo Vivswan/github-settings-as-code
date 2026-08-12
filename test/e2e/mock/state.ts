@@ -12,11 +12,11 @@
  * proves the round trip.
  */
 
+import { parseBypassActor } from "../../../src/schema.js";
 import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
-  parseBypassActor,
 } from "../../../src/sections/branches.js";
 import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/roles.js";
 import { ADMIN_SLUG } from "../constants.js";

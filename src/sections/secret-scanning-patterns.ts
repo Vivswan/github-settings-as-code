@@ -20,20 +20,24 @@
  * optional and nullable) writes without the check, as the API allows.
  */
 
-import { z } from "zod";
-import type { MustBeNever, SecretScanningPatternConfig, UndeclaredPolicyList } from "../schema.js";
+import {
+  type MustBeNever,
+  type SecretScanningPatternConfig,
+  SettingsFile,
+  type UndeclaredPolicyList,
+} from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   listAll,
+  loosen,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 
 const permission: SectionPermission = { repo: ["secret_scanning_alerts"] };
@@ -164,33 +168,7 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(
-    z.array(
-      z.looseObject({
-        name: z.string(),
-        pattern: z.string(),
-        // min(1): "" cannot mean "clear the delimiter" - the PATCH updates
-        // provided fields only - so the spelling fails at document
-        // validation, before any repository is touched.
-        start_delimiter: z
-          .string()
-          .min(
-            1,
-            "a delimiter cannot be cleared with an empty string; remove the pattern and redeclare it without the field instead",
-          )
-          .optional(),
-        end_delimiter: z
-          .string()
-          .min(
-            1,
-            "a delimiter cannot be cleared with an empty string; remove the pattern and redeclare it without the field instead",
-          )
-          .optional(),
-        must_match: z.array(z.string()).optional(),
-        must_not_match: z.array(z.string()).optional(),
-      }),
-    ),
-  ),
+  shape: loosen(SettingsFile.shape.secret_scanning_custom_patterns),
   // Closed surface: the POST/PATCH bodies carry only the six declared
   // fields, so an extra key has no destination and can only be a typo.
   closedSurface: {

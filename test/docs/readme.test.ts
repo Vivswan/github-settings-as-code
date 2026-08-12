@@ -16,7 +16,12 @@ import {
 import { REPO_RESULTS, validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
-import { PROBOT_PARITY_KEYS, SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import {
+  PROBOT_PARITY_KEYS,
+  SECTION_KEYS,
+  SettingsFile as SettingsFileSchema,
+  UNDECLARED_POLICY_SECTIONS,
+} from "../../src/schema.js";
 import { type PatResource, sectionOperations } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository.js";
@@ -254,25 +259,28 @@ describe("schema $schema hints and $id", () => {
   });
 
   test("the $id points at this repository's raw major-tag copy of the build output", () => {
-    // The $id is stamped by finalize-schema.ts with the current release
+    // The $id is stamped by gen-settings-schema.ts with the current release
     // line's moving major tag - the ref the release pipeline points at
     // every release's build commit, so the URL always serves the line's
     // newest schema...
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
       name: string;
-      scripts: Record<string, string>;
     };
-    const buildSchema = pkg.scripts["build:schema"] ?? "";
-    const outFlag = buildSchema.match(/--out (\S+)/)?.[1];
-    expect(outFlag, "package.json build:schema lost its --out flag").toBeDefined();
     // ...and the URL's parts must each match their own single source:
     // https://raw.githubusercontent.com/<owner>/<repo>/<major tag>/<path>.
     const url = new URL(id);
     expect(url.protocol).toBe("https:");
     expect(url.hostname).toBe("raw.githubusercontent.com");
     const [owner, repo, ref, ...rest] = url.pathname.split("/").filter(Boolean);
-    // <path> is the build output, exactly where --out writes it.
-    expect(rest.join("/")).toBe(outFlag as string);
+    // <path> is the build output, exactly where the generator writes it.
+    const genScript = readFileSync(
+      join(ROOT, ".github", "scripts", "gen-settings-schema.ts"),
+      "utf8",
+    );
+    expect(
+      genScript.includes(`join(ROOT, ${rest.map((part) => JSON.stringify(part)).join(", ")})`),
+      `gen-settings-schema.ts does not write to ${rest.join("/")}, where the $id points`,
+    ).toBe(true);
     // <repo> matching the package name is a convention witness, not an
     // authority - nothing forces a repository to be named after its package,
     // but this one is, and the equality catches a rename on either side.
@@ -399,26 +407,21 @@ describe("private repositories guide", () => {
   });
 });
 
-describe("schema.ts SettingsFile JSDoc deletion claims", () => {
-  const schemaSrc = readFileSync(join(ROOT, "src", "schema.ts"), "utf8");
-
-  test("the JSDoc for delete/keep sections claims its own policy and never the opposite", () => {
-    // Each knobbed JSDoc states its default in a "... by default" clause and
-    // may mention the opposite word elsewhere (the `undeclared:` opt-in it
+describe("schema.ts SettingsFile deletion claims", () => {
+  test("the description of delete/keep sections claims its own policy and never the opposite", () => {
+    // Each knobbed section's .describe() string (the published schema's
+    // description) states its default in a "... by default" clause and may
+    // mention the opposite word elsewhere (the `undeclared:` opt-in it
     // documents). The claim windows, families, and negator handling live in
     // ./claims.ts, shared with the COVERAGE sweep.
     for (const section of SECTIONS) {
       if (section.undeclaredDefault === "untouched") {
         continue; // "untouched" sections make no per-key deletion claim
       }
-      const propRe = new RegExp(`/\\*\\*([^*]|\\*(?!/))*\\*/\\s*\\n\\s*${section.key}\\?:`, "m");
-      const match = schemaSrc.match(propRe);
-      expect(match, `no JSDoc found above SettingsFile.${section.key}`).not.toBeNull();
-      // Flatten the comment decoration so a claim wrapped across lines still
-      // sits in one window.
-      const flat = (match?.[0] ?? "").replace(/\s*\n\s*\*\s*/g, " ");
-      for (const problem of defaultClaimProblems(flat, section.undeclaredDefault)) {
-        throw new Error(`SettingsFile.${section.key} JSDoc: ${problem}`);
+      const description = SettingsFileSchema.shape[section.key].description;
+      expect(description, `no description on SettingsFile.${section.key}`).toBeTruthy();
+      for (const problem of defaultClaimProblems(description ?? "", section.undeclaredDefault)) {
+        throw new Error(`SettingsFile.${section.key} description: ${problem}`);
       }
     }
   });

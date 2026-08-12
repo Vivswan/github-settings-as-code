@@ -6,16 +6,18 @@
  */
 
 import { subsetDiff } from "../engine/diff.js";
+import { type RepositoryConfig, SettingsFile } from "../schema.js";
 import {
-  anyRecord,
   call,
   callGraphql,
   type EndpointDecl,
   emptyResult,
   type GraphqlOpDecl,
   graphqlOp,
+  loosen,
   probeAbsent,
   repoVariables,
+  requirePlainMapping,
   type SectionContext,
   type SectionMeta,
   type SectionModule,
@@ -34,9 +36,18 @@ export function normalizeTopics(raw: unknown): string[] {
   return [...new Set(values.map((t) => t.toLowerCase()).filter(Boolean))];
 }
 
+/**
+ * A repository key the settings schema declares a type for. Typing the
+ * toggle and routed-key tables with it keeps them in lockstep with
+ * schema.ts, which now carries the value validation (and its YAML
+ * boolean-gotcha error prose) the shape sweep here used to do: a toggle
+ * added below without a schema declaration fails to compile.
+ */
+type DeclaredRepositoryKey = keyof typeof RepositoryConfig.shape & string;
+
 /** One boolean settings key backed by PUT/DELETE on its own sub-resource. */
 interface FeatureToggle {
-  key: string;
+  key: DeclaredRepositoryKey;
   label: string;
   put: EndpointDecl;
   remove: EndpointDecl;
@@ -218,20 +229,19 @@ const WRITE_ONLY_TOGGLES = [
  * mutation addresses, so neither mode needs an extra REST round trip.
  *
  * Each key is a RoutedKey descriptor, and everything else derives from the
- * table: SPECIAL_KEYS (the PATCH strip), the shape sweep, the check-mode
- * compare, and the apply-mode mutate-and-verify loop all iterate
- * GRAPHQL_ROUTED_KEYS - so a new key cannot compile into a silently
- * stripped-but-never-applied no-op.
+ * table: SPECIAL_KEYS (the PATCH strip), the check-mode compare, and the
+ * apply-mode mutate-and-verify loop all iterate GRAPHQL_ROUTED_KEYS - so a
+ * new key cannot compile into a silently stripped-but-never-applied no-op.
+ * Value validation (with its YAML-gotcha prose) lives on the schema.ts
+ * declarations the DeclaredRepositoryKey typing pins these keys to.
  */
 interface RoutedKey {
   /** The settings-file key. */
-  readonly key: string;
+  readonly key: DeclaredRepositoryKey;
   /** The change-line label ("sponsor button: enabled"). */
   readonly label: string;
   /** The Repository read field, also the UpdateRepositoryInput field. */
   readonly field: "hasSponsorshipsEnabled" | "issueCreationPolicy";
-  /** Why a declared value is invalid, or null when it passes; feeds the shape sweep. */
-  invalid(declared: unknown): string | null;
   /** Map a valid declared value to its GraphQL variable value. */
   encode(declared: unknown): boolean | string;
   /**
@@ -266,10 +276,6 @@ const GRAPHQL_ROUTED_KEYS = [
     key: "enable_sponsorships",
     label: "sponsor button",
     field: "hasSponsorshipsEnabled",
-    invalid: (declared) =>
-      typeof declared === "boolean"
-        ? null
-        : `${describeToggleValue(declared)} is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
     encode: (declared) => declared as boolean,
     decode: (live) => (typeof live === "boolean" ? live : undefined),
     show: (value) => String(value),
@@ -279,10 +285,6 @@ const GRAPHQL_ROUTED_KEYS = [
     key: "issue_creation_policy",
     label: "issue creation policy",
     field: "issueCreationPolicy",
-    invalid: (declared) =>
-      typeof declared === "string" && Object.hasOwn(ISSUE_CREATION_POLICIES, declared)
-        ? null
-        : `${describeToggleValue(declared)} is not a recognized policy. Use "all" (everyone) or "collaborators_only"`,
     encode: (declared) => ISSUE_CREATION_POLICIES[declared as IssueCreationPolicy],
     decode: (live) =>
       live === "ALL" ? "all" : live === "COLLABORATORS_ONLY" ? "collaborators_only" : undefined,
@@ -395,66 +397,13 @@ export const SPECIAL_KEYS = new Set([
   ...GRAPHQL_ROUTED_KEYS.map((routed) => routed.key),
 ]);
 
-/**
- * Cycle-safe description of a rejected toggle value for the shape error:
- * scalars verbatim (strings quoted, so a YAML "no" stays visibly a string),
- * containers by kind only - JSON.stringify on an arbitrary YAML value would
- * throw on a cyclic alias and kill the run before the normal failure path.
- */
-function describeToggleValue(value: unknown): string {
-  if (value === null) {
-    return "null";
-  }
-  if (typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return "a list";
-  }
-  if (typeof value === "object") {
-    return "a mapping";
-  }
-  return String(value);
-}
-
-/**
- * The toggle-type invariant lives HERE, on the shape, not in run(): upfront
- * document validation rejects the document in BOTH modes before ANY section
- * writes - a run()-time throw would fire only after earlier sections already
- * wrote (the environments flag-pairing precedent). The base stays anyRecord,
- * so the accepted surface is unchanged: unknown keys still ride the PATCH
- * verbatim, and non-mapping documents are rejected as before. The sweep
- * derives from FEATURE_TOGGLES and each GRAPHQL_ROUTED_KEYS descriptor's
- * own `invalid`, so a new toggle or routed key is covered automatically.
- */
-const shape = anyRecord.superRefine((declared, refineCtx) => {
-  for (const toggle of FEATURE_TOGGLES) {
-    if (toggle.key in declared && typeof declared[toggle.key] !== "boolean") {
-      refineCtx.addIssue({
-        code: "custom",
-        path: [toggle.key],
-        message: `${describeToggleValue(declared[toggle.key])} is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
-      });
-    }
-  }
-  for (const routed of GRAPHQL_ROUTED_KEYS) {
-    if (!(routed.key in declared)) {
-      continue;
-    }
-    const message = routed.invalid(declared[routed.key]);
-    if (message !== null) {
-      refineCtx.addIssue({ code: "custom", path: [routed.key], message });
-    }
-  }
-});
-
 export const repositorySection: SectionModule<"repository"> = {
   key: "repository",
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
-  shape,
+  shape: requirePlainMapping(loosen(SettingsFile.shape.repository)),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as Record<string, unknown>;

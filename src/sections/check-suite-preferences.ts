@@ -7,12 +7,12 @@
  * on every run (the 200 echoes the resulting preferences).
  */
 
-import { z } from "zod";
-import type { CheckSuitePreferencesConfig } from "../schema.js";
+import { type CheckSuitePreferencesConfig, SettingsFile } from "../schema.js";
 import {
   call,
   type EndpointDecl,
   emptyResult,
+  loosen,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
@@ -36,9 +36,7 @@ export const checkSuitePreferencesSection: SectionModule<"check_suite_preference
   endpoints: ENDPOINTS,
   // Loose on purpose: the PATCH forwards the object verbatim, so future
   // fields ride along at both levels; only the natural pair is checked.
-  shape: z.looseObject({
-    auto_trigger_checks: z.array(z.looseObject({ app_id: z.number().int(), setting: z.boolean() })),
-  }),
+  shape: loosen(SettingsFile.shape.check_suite_preferences),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as CheckSuitePreferencesConfig;

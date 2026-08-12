@@ -3,12 +3,12 @@
  * personal account the section no-ops with a note.
  */
 
-import { z } from "zod";
-import type { MustBeNever, TeamConfig } from "../schema.js";
+import { type MustBeNever, SettingsFile, type TeamConfig } from "../schema.js";
 import {
   call,
   type EndpointDecl,
   emptyResult,
+  loosen,
   probeAbsent,
   rejectDuplicates,
   type SectionModule,
@@ -45,7 +45,7 @@ export const teamsSection: SectionModule<"teams"> = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
-  shape: z.array(z.looseObject({ name: z.string() })),
+  shape: loosen(SettingsFile.shape.teams),
   // Closed surface: the grant PUT accepts exactly one setting ("permission"),
   // so an extra key is always a typo - and a misspelled "permission" would
   // silently grant the default role and report clean.

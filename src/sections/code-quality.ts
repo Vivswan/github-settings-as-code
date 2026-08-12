@@ -7,12 +7,14 @@
  */
 
 import { subsetDiff } from "../engine/diff.js";
+import { SettingsFile } from "../schema.js";
 import {
-  anyRecord,
   call,
   type EndpointDecl,
   emptyResult,
   expand,
+  loosen,
+  requirePlainMapping,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
@@ -43,7 +45,7 @@ export const codeQualitySetupSection: SectionModule<"code_quality_setup"> = {
   grantCaveat:
     "a 403 on this endpoint can also mean code quality is unavailable on the repository, or the repository is archived",
   endpoints: ENDPOINTS,
-  shape: anyRecord,
+  shape: requirePlainMapping(loosen(SettingsFile.shape.code_quality_setup)),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as Record<string, unknown>;

@@ -20,9 +20,8 @@
  * events/active drift, never with a config key.
  */
 
-import { z } from "zod";
 import { subsetDiff } from "../engine/diff.js";
-import type { UndeclaredPolicyList, WebhookConfig } from "../schema.js";
+import { SettingsFile, type UndeclaredPolicyList, type WebhookConfig } from "../schema.js";
 import {
   type ApplySectionContext,
   call,
@@ -31,12 +30,12 @@ import {
   type EndpointDecl,
   emptyResult,
   listAll,
+  loosen,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 
 interface LiveHook {
@@ -160,27 +159,7 @@ export const webhooksSection: SectionModule<"webhooks"> = {
   // name is pinned to "web" upfront: it is the only value GitHub's hooks API
   // accepts today, and any other value could only be a typo or a legacy
   // service hook this section does not manage.
-  shape: undeclaredPolicyShape(
-    z.array(
-      z.looseObject({
-        name: z.literal("web").optional(),
-        config: z.looseObject({ url: z.string(), secret: z.string().optional() }),
-        events: z.array(z.string()).optional(),
-        active: z.boolean().optional(),
-        // The secret lives under config; an ENTRY-level secret would pass
-        // the loose shape, ship the raw reference text verbatim, and create
-        // a silently unauthenticated hook - the exact failure this feature
-        // exists to prevent - so the misplacement is rejected by name (the
-        // `name: "web"` pin precedent).
-        secret: z
-          .undefined({
-            error:
-              "a webhook secret belongs under config.secret, not at the entry level; here it would pass through verbatim and the hook would be created without a working secret",
-          })
-          .optional(),
-      }),
-    ),
-  ),
+  shape: loosen(SettingsFile.shape.webhooks),
   secretValues,
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();

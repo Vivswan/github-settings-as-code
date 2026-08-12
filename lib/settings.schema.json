@@ -4,28 +4,50 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "ActionsConfig": {
-      "description": "GitHub Actions settings, routed to the right endpoint by key.",
+      "type": "object",
       "properties": {
-        "access_level": {
-          "description": "PUT /repos/{r}/actions/permissions/access (private repositories only)",
-          "enum": [
-            "none",
-            "user",
-            "organization"
-          ],
-          "type": "string"
+        "enabled": {
+          "description": "PUT /repos/{r}/actions/permissions: whether Actions runs at all.",
+          "type": "boolean"
         },
         "allowed_actions": {
           "description": "Which actions may run; \"selected\" pairs with selected_actions below.",
+          "type": "string",
           "enum": [
             "all",
             "local_only",
             "selected"
-          ],
-          "type": "string"
+          ]
+        },
+        "selected_actions": {
+          "description": "PUT /repos/{r}/actions/permissions/selected-actions (allowed_actions: selected)",
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "default_workflow_permissions": {
+          "description": "PUT /repos/{r}/actions/permissions/workflow: the default GITHUB_TOKEN grant.",
+          "type": "string",
+          "enum": [
+            "read",
+            "write"
+          ]
+        },
+        "can_approve_pull_request_reviews": {
+          "description": "Whether workflows may approve pull request reviews.",
+          "type": "boolean"
+        },
+        "access_level": {
+          "description": "PUT /repos/{r}/actions/permissions/access (private repositories only)",
+          "type": "string",
+          "enum": [
+            "none",
+            "user",
+            "organization"
+          ]
         },
         "artifact_and_log_retention": {
           "description": "PUT /repos/{r}/actions/permissions/artifact-and-log-retention: how many days artifacts and workflow logs are kept, e.g. { days: 90 }. The body passes through verbatim, so future fields GitHub adds work unchanged.",
+          "type": "object",
           "properties": {
             "days": {
               "type": "number"
@@ -33,11 +55,11 @@
           },
           "required": [
             "days"
-          ],
-          "type": "object"
+          ]
         },
         "cache": {
           "description": "Actions cache limits, each key routed to its own endpoint: max_cache_retention_days -> PUT /repos/{r}/actions/cache/retention-limit, max_cache_size_gb -> PUT /repos/{r}/actions/cache/storage-limit. Keys other than these two are rejected (each limit has its own single-field endpoint, so an extra key could only be a typo).",
+          "type": "object",
           "properties": {
             "max_cache_retention_days": {
               "type": "number"
@@ -46,26 +68,32 @@
               "type": "number"
             }
           },
-          "type": "object"
+          "additionalProperties": false
         },
-        "can_approve_pull_request_reviews": {
-          "description": "Whether workflows may approve pull request reviews.",
-          "type": "boolean"
-        },
-        "default_workflow_permissions": {
-          "description": "PUT /repos/{r}/actions/permissions/workflow: the default GITHUB_TOKEN grant.",
-          "enum": [
-            "read",
-            "write"
-          ],
-          "type": "string"
-        },
-        "enabled": {
-          "description": "PUT /repos/{r}/actions/permissions: whether Actions runs at all.",
-          "type": "boolean"
+        "oidc_customization_sub": {
+          "description": "PUT /repos/{r}/actions/oidc/customization/sub: the OIDC subject claim template for this repository's workflow tokens, e.g. { use_default: false, include_claim_keys: [repo, context] } (keys must be unique). Claim-key ORDER defines the subject format, so check mode compares a declared list positionally; an omitted list on a custom template opts into the organization template and is not compared. use_immutable_subject switches the whole subject to the stable repository-ID-based format; omitted, the organization setting or the repository's creation date decides, and only a declared value is compared. Unlike the rest of this section, these endpoints need the \"Actions\" PAT permission rather than Administration.",
+          "type": "object",
+          "properties": {
+            "use_default": {
+              "type": "boolean"
+            },
+            "include_claim_keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "use_immutable_subject": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "use_default"
+          ]
         },
         "fork_pr_contributor_approval": {
           "description": "PUT /repos/{r}/actions/permissions/fork-pr-contributor-approval: when workflows triggered by fork pull requests need a maintainer's approval before they run, e.g. { approval_policy: first_time_contributors }. The policies GitHub accepts today are first_time_contributors_new_to_github, first_time_contributors, and all_external_contributors. The body passes through verbatim, so future fields GitHub adds work unchanged.",
+          "type": "object",
           "properties": {
             "approval_policy": {
               "type": "string"
@@ -73,22 +101,22 @@
           },
           "required": [
             "approval_policy"
-          ],
-          "type": "object"
+          ]
         },
         "fork_pr_workflows_private_repos": {
           "description": "PUT /repos/{r}/actions/permissions/fork-pr-workflows-private-repos: whether pull requests from forks may run workflows on this private repository, and what those workflows receive. All four toggles are required: GitHub does not document whether the PUT preserves or resets an omitted toggle, so the file declares the complete policy - which is also the posture that leaves no toggle unwatched. The body passes through verbatim, so future fields GitHub adds work unchanged.",
+          "type": "object",
           "properties": {
-            "require_approval_for_fork_pr_workflows": {
+            "run_workflows_from_fork_pull_requests": {
               "type": "boolean"
             },
-            "run_workflows_from_fork_pull_requests": {
+            "send_write_tokens_to_workflows": {
               "type": "boolean"
             },
             "send_secrets_and_variables": {
               "type": "boolean"
             },
-            "send_write_tokens_to_workflows": {
+            "require_approval_for_fork_pr_workflows": {
               "type": "boolean"
             }
           },
@@ -97,156 +125,129 @@
             "send_write_tokens_to_workflows",
             "send_secrets_and_variables",
             "require_approval_for_fork_pr_workflows"
-          ],
-          "type": "object"
-        },
-        "oidc_customization_sub": {
-          "description": "PUT /repos/{r}/actions/oidc/customization/sub: the OIDC subject claim template for this repository's workflow tokens, e.g. { use_default: false, include_claim_keys: [repo, context] } (keys must be unique). Claim-key ORDER defines the subject format, so check mode compares a declared list positionally; an omitted list on a custom template opts into the organization template and is not compared. use_immutable_subject switches the whole subject to the stable repository-ID-based format; omitted, the organization setting or the repository's creation date decides, and only a declared value is compared. Unlike the rest of this section, these endpoints need the \"Actions\" PAT permission rather than Administration.",
-          "properties": {
-            "include_claim_keys": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "use_default": {
-              "type": "boolean"
-            },
-            "use_immutable_subject": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "use_default"
-          ],
-          "type": "object"
-        },
-        "selected_actions": {
-          "additionalProperties": {},
-          "description": "PUT /repos/{r}/actions/permissions/selected-actions (allowed_actions: selected)",
-          "type": "object"
+          ]
         }
       },
-      "type": "object"
+      "description": "GitHub Actions settings, routed to the right endpoint by key."
     },
     "ActionsSecretConfig": {
-      "description": "One repository Actions secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "type": "string",
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase."
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
-          "type": "string"
+          "type": "string",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run."
         }
       },
       "required": [
         "name",
         "value"
       ],
-      "type": "object"
+      "description": "One repository Actions secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing."
     },
     "ActionsVariableConfig": {
-      "description": "One GitHub Actions repository variable, matched by case-insensitive name.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The variable name, the natural key; case-insensitive (stored uppercased by GitHub).",
-          "type": "string"
+          "type": "string",
+          "description": "The variable name, the natural key; case-insensitive (stored uppercased by GitHub)."
         },
         "value": {
-          "description": "The plain-text value workflows read through the vars context.",
-          "type": "string"
+          "type": "string",
+          "description": "The plain-text value workflows read through the vars context."
         }
       },
       "required": [
         "name",
         "value"
       ],
-      "type": "object"
+      "description": "One GitHub Actions repository variable, matched by case-insensitive name."
     },
     "AgentsSecretConfig": {
-      "description": "One repository Copilot agents secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "type": "string",
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase."
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
-          "type": "string"
+          "type": "string",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run."
         }
       },
       "required": [
         "name",
         "value"
       ],
-      "type": "object"
+      "description": "One repository Copilot agents secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing."
     },
     "AgentsVariableConfig": {
-      "description": "One Copilot agents repository variable, matched by case-insensitive name.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The variable name, the natural key; case-insensitive (stored uppercased by GitHub).",
-          "type": "string"
+          "type": "string",
+          "description": "The variable name, the natural key; case-insensitive (stored uppercased by GitHub)."
         },
         "value": {
-          "description": "The plain-text value Copilot coding agents read.",
-          "type": "string"
+          "type": "string",
+          "description": "The plain-text value Copilot coding agents read."
         }
       },
       "required": [
         "name",
         "value"
       ],
-      "type": "object"
+      "description": "One Copilot agents repository variable, matched by case-insensitive name."
     },
     "AutoTriggerCheckConfig": {
-      "description": "One per-app auto-trigger toggle. Extra fields pass through verbatim.",
+      "type": "object",
       "properties": {
         "app_id": {
-          "description": "The id of the GitHub App the preference applies to.",
-          "type": "integer"
+          "type": "integer",
+          "description": "The id of the GitHub App the preference applies to."
         },
         "setting": {
-          "description": "Whether pushes automatically create check suites for this app; GitHub defaults each app to true.",
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether pushes automatically create check suites for this app; GitHub defaults each app to true."
         }
       },
       "required": [
         "app_id",
         "setting"
       ],
-      "type": "object"
+      "description": "One per-app auto-trigger toggle. Extra fields pass through verbatim."
     },
     "AutolinkConfig": {
-      "description": "One autolink reference, matched by key prefix.",
+      "type": "object",
       "properties": {
+        "key_prefix": {
+          "type": "string",
+          "description": "Text prefix that triggers the link (e.g. \"TICKET-\"), the natural key."
+        },
+        "url_template": {
+          "type": "string",
+          "description": "Target URL template containing \"<num>\"."
+        },
         "is_alphanumeric": {
           "description": "Whether <num> also matches letters; upstream default is true.",
           "type": "boolean"
-        },
-        "key_prefix": {
-          "description": "Text prefix that triggers the link (e.g. \"TICKET-\"), the natural key.",
-          "type": "string"
-        },
-        "url_template": {
-          "description": "Target URL template containing \"<num>\".",
-          "type": "string"
         }
       },
       "required": [
         "key_prefix",
         "url_template"
       ],
-      "type": "object"
+      "description": "One autolink reference, matched by key prefix."
     },
     "BranchConfig": {
-      "description": "Classic protection for one branch name or wildcard pattern.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The branch name, or a wildcard pattern (any name containing `*`, `?`, or `[`, e.g. \"release/*\"). A literal name applies through the REST protection endpoints; a wildcard rule is REST-invisible, so it applies entirely through the GraphQL branch-protection-rule mutations and its protection accepts only the keys this action can round-trip through that surface (the validator names them; prefer rulesets for new pattern-based configuration).",
-          "type": "string"
+          "type": "string",
+          "description": "The branch name, or a wildcard pattern (any name containing `*`, `?`, or `[`, e.g. \"release/*\"). A literal name applies through the REST protection endpoints; a wildcard rule is REST-invisible, so it applies entirely through the GraphQL branch-protection-rule mutations and its protection accepts only the keys this action can round-trip through that surface (the validator names them; prefer rulesets for new pattern-based configuration)."
         },
         "protection": {
           "anyOf": [
@@ -264,204 +265,213 @@
         "name",
         "protection"
       ],
-      "type": "object"
+      "description": "Classic protection for one branch name or wildcard pattern."
     },
     "BranchProtectionConfig": {
-      "additionalProperties": {},
-      "description": "The protection PUT payload, passed through verbatim except its routed keys.",
+      "type": "object",
       "properties": {
+        "required_signatures": {
+          "description": "Require signed commits on the branch. A routed key the PUT silently drops, so it is applied through the POST/DELETE .../protection/required_signatures sub-endpoint after the PUT. GitHub does not document whether the protection PUT preserves an existing signature requirement, so declare the toggle on any branch that carries one - a declared value is pinned either way.",
+          "type": "boolean"
+        },
         "force_push_bypassers": {
           "description": "Who may force-push to the branch when \"allow force pushes\" is in its \"specify who\" mode. Each actor is one string: a bare login is a user (\"octocat\"), \"org/team-slug\" is a team, and \"app/slug\" is a GitHub App. A REST-invisible surface, so this routed key is stripped from the protection PUT and applied through the updateBranchProtectionRule GraphQL mutation after it; check mode reads the live list back through GraphQL. An empty list clears every allowance; an absent key leaves the live list untouched.",
+          "type": "array",
           "items": {
             "type": "string"
-          },
-          "type": "array"
+          }
         },
         "required_deployments": {
+          "description": "Require deployments to succeed before merging (the checkbox and its environment list). REST-invisible like force_push_bypassers, so the routed key rides the same GraphQL mutation. Declaring `null` turns the requirement OFF; an absent key leaves the live state untouched. GitHub SILENTLY drops environment names that do not exist on the repository, so apply verifies the mutation's read-back and fails loudly naming any dropped name; the environments section runs before branches, so environments declared in the same settings file exist by the time this key applies.",
           "anyOf": [
             {
+              "type": "object",
               "properties": {
                 "environments": {
+                  "type": "array",
                   "items": {
                     "type": "string"
-                  },
-                  "type": "array"
+                  }
                 }
               },
               "required": [
                 "environments"
               ],
-              "type": "object"
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
-          ],
-          "description": "Require deployments to succeed before merging (the checkbox and its environment list). REST-invisible like force_push_bypassers, so the routed key rides the same GraphQL mutation. Declaring `null` turns the requirement OFF; an absent key leaves the live state untouched. GitHub SILENTLY drops environment names that do not exist on the repository, so apply verifies the mutation's read-back and fails loudly naming any dropped name; the environments section runs before branches, so environments declared in the same settings file exist by the time this key applies."
-        },
-        "required_signatures": {
-          "description": "Require signed commits on the branch. A routed key the PUT silently drops, so it is applied through the POST/DELETE .../protection/required_signatures sub-endpoint after the PUT. GitHub does not document whether the protection PUT preserves an existing signature requirement, so declare the toggle on any branch that carries one - a declared value is pinned either way.",
-          "type": "boolean"
+          ]
         }
       },
-      "type": "object"
+      "additionalProperties": {},
+      "description": "The protection PUT payload, passed through verbatim except its routed keys."
     },
     "CheckSuitePreferencesConfig": {
-      "additionalProperties": {
-        "description": "Future preference fields pass through verbatim."
-      },
-      "description": "PATCH /repos/{r}/check-suites/preferences, sent verbatim. Write-only upstream: GitHub exposes no read endpoint for these preferences, so check mode cannot verify them and apply re-asserts the declared preferences on every run.",
+      "type": "object",
       "properties": {
         "auto_trigger_checks": {
-          "description": "Per-app toggles for whether pushes automatically create check suites.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/AutoTriggerCheckConfig"
           },
-          "type": "array"
+          "description": "Per-app toggles for whether pushes automatically create check suites."
         }
       },
       "required": [
         "auto_trigger_checks"
       ],
-      "type": "object"
+      "additionalProperties": {
+        "description": "Future preference fields pass through verbatim."
+      },
+      "description": "PATCH /repos/{r}/check-suites/preferences, sent verbatim. Write-only upstream: GitHub exposes no read endpoint for these preferences, so check mode cannot verify them and apply re-asserts the declared preferences on every run."
     },
     "CodeQualitySetupConfig": {
-      "description": "PATCH /repos/{r}/code-quality/setup, sent verbatim.",
+      "type": "object",
       "properties": {
-        "ai_findings_option": {
-          "description": "AI-powered findings: \"on_push\" runs them on every push, \"disabled\" turns them off.",
+        "state": {
+          "description": "Turn code quality analysis on (\"configured\") or off (\"not-configured\").",
+          "type": "string",
           "enum": [
-            "disabled",
-            "on_push"
-          ],
-          "type": "string"
+            "configured",
+            "not-configured"
+          ]
         },
         "languages": {
           "description": "Languages to analyze, compared as a set; GitHub auto-detects when omitted.",
+          "type": "array",
           "items": {
             "type": "string"
-          },
-          "type": "array"
-        },
-        "runner_label": {
-          "description": "Runner label when runner_type is \"labeled\"; null clears it.",
-          "type": [
-            "string",
-            "null"
-          ]
+          }
         },
         "runner_type": {
           "description": "Run on GitHub-hosted (\"standard\") or labeled self-hosted runners.",
+          "type": "string",
           "enum": [
             "standard",
             "labeled"
-          ],
-          "type": "string"
+          ]
         },
+        "runner_label": {
+          "description": "Runner label when runner_type is \"labeled\"; null clears it.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ai_findings_option": {
+          "description": "AI-powered findings: \"on_push\" runs them on every push, \"disabled\" turns them off.",
+          "type": "string",
+          "enum": [
+            "disabled",
+            "on_push"
+          ]
+        }
+      },
+      "description": "PATCH /repos/{r}/code-quality/setup, sent verbatim."
+    },
+    "CodeScanningDefaultSetupConfig": {
+      "type": "object",
+      "properties": {
         "state": {
-          "description": "Turn code quality analysis on (\"configured\") or off (\"not-configured\").",
+          "description": "Turn default setup on (\"configured\") or off (\"not-configured\").",
+          "type": "string",
           "enum": [
             "configured",
             "not-configured"
-          ],
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "CodeScanningDefaultSetupConfig": {
-      "description": "PATCH /repos/{r}/code-scanning/default-setup, sent verbatim.",
-      "properties": {
-        "languages": {
-          "description": "Languages to scan, compared as a set; GitHub auto-detects when omitted.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+          ]
         },
         "query_suite": {
           "description": "CodeQL query suite to run.",
+          "type": "string",
           "enum": [
             "default",
             "extended"
-          ],
-          "type": "string"
-        },
-        "runner_label": {
-          "description": "Runner label when runner_type is \"labeled\"; null clears it.",
-          "type": [
-            "string",
-            "null"
           ]
+        },
+        "languages": {
+          "description": "Languages to scan, compared as a set; GitHub auto-detects when omitted.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "runner_type": {
           "description": "Run on GitHub-hosted (\"standard\") or labeled self-hosted runners.",
+          "type": "string",
           "enum": [
             "standard",
             "labeled"
-          ],
-          "type": "string"
+          ]
         },
-        "state": {
-          "description": "Turn default setup on (\"configured\") or off (\"not-configured\").",
-          "enum": [
-            "configured",
-            "not-configured"
-          ],
-          "type": "string"
+        "runner_label": {
+          "description": "Runner label when runner_type is \"labeled\"; null clears it.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "threat_model": {
           "description": "Whether to model local sources as threats in addition to remote ones.",
+          "type": "string",
           "enum": [
             "remote",
             "remote_and_local"
-          ],
-          "type": "string"
+          ]
         }
       },
-      "type": "object"
+      "description": "PATCH /repos/{r}/code-scanning/default-setup, sent verbatim."
     },
     "CodespacesSecretConfig": {
-      "description": "One repository Codespaces secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "type": "string",
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase."
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
-          "type": "string"
+          "type": "string",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run."
         }
       },
       "required": [
         "name",
         "value"
       ],
-      "type": "object"
+      "description": "One repository Codespaces secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing."
     },
     "CollaboratorConfig": {
-      "description": "One direct collaborator, matched by username. Keys other than username and permission are rejected (a misspelled \"permission\" would otherwise silently grant the default role).",
+      "type": "object",
       "properties": {
+        "username": {
+          "type": "string",
+          "description": "GitHub login, the natural key."
+        },
         "permission": {
           "description": "\"pull\", \"triage\", \"push\", \"maintain\", \"admin\", or a custom org role; defaults to \"push\".",
-          "type": "string"
-        },
-        "username": {
-          "description": "GitHub login, the natural key.",
           "type": "string"
         }
       },
       "required": [
         "username"
       ],
-      "type": "object"
+      "description": "One direct collaborator, matched by username. Keys other than username and permission are rejected (a misspelled \"permission\" would otherwise silently grant the default role)."
     },
     "CustomPropertyConfig": {
-      "description": "One custom property value, matched by the API's property_name verbatim. Keys other than property_name and value are rejected: the bulk PATCH body is built from exactly these two fields, so an extra key would have no destination.",
+      "type": "object",
       "properties": {
         "property_name": {
-          "description": "The organization-defined property's name, the natural key.",
-          "type": "string"
+          "type": "string",
+          "description": "The organization-defined property's name, the natural key."
         },
         "value": {
           "anyOf": [
@@ -469,10 +479,10 @@
               "type": "string"
             },
             {
+              "type": "array",
               "items": {
                 "type": "string"
-              },
-              "type": "array"
+              }
             },
             {
               "type": "boolean"
@@ -491,54 +501,54 @@
         "property_name",
         "value"
       ],
-      "type": "object"
+      "description": "One custom property value, matched by the API's property_name verbatim. Keys other than property_name and value are rejected: the bulk PATCH body is built from exactly these two fields, so an extra key would have no destination."
     },
     "DependabotSecretConfig": {
-      "description": "One repository Dependabot secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "type": "string",
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase."
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
-          "type": "string"
+          "type": "string",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run."
         }
       },
       "required": [
         "name",
         "value"
       ],
-      "type": "object"
+      "description": "One repository Dependabot secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing."
     },
     "DeployKeyConfig": {
-      "description": "One deploy key, matched by exact title (GitHub documents no case folding for titles). Extra fields pass through to the create call verbatim.",
+      "type": "object",
       "properties": {
+        "title": {
+          "type": "string",
+          "description": "The key title shown in the settings UI, the natural key."
+        },
         "key": {
-          "description": "The PUBLIC key material, e.g. \"ssh-ed25519 AAAAC3... comment\". Public by nature, so it is safe in a committed file. Compared as algorithm + blob with the trailing comment ignored (GitHub may strip or rewrite comments on storage); keys are immutable upstream, so a changed key is applied as delete plus recreate.",
-          "type": "string"
+          "type": "string",
+          "description": "The PUBLIC key material, e.g. \"ssh-ed25519 AAAAC3... comment\". Public by nature, so it is safe in a committed file. Compared as algorithm + blob with the trailing comment ignored (GitHub may strip or rewrite comments on storage); keys are immutable upstream, so a changed key is applied as delete plus recreate."
         },
         "read_only": {
           "description": "Whether the key is restricted to read-only access; GitHub defaults to false (read/write).",
           "type": "boolean"
-        },
-        "title": {
-          "description": "The key title shown in the settings UI, the natural key.",
-          "type": "string"
         }
       },
       "required": [
         "title",
         "key"
       ],
-      "type": "object"
+      "description": "One deploy key, matched by exact title (GitHub documents no case folding for titles). Extra fields pass through to the create call verbatim."
     },
     "DeploymentBranchPolicyConfig": {
-      "description": "One custom deployment branch-policy pattern, matched by exact name. Extra fields pass through to the create call verbatim.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The name pattern branches or tags must match to deploy (e.g. \"release/*\"), the natural key.",
-          "type": "string"
+          "type": "string",
+          "description": "The name pattern branches or tags must match to deploy (e.g. \"release/*\"), the natural key."
         },
         "type": {
           "description": "What the pattern matches: \"branch\" (the upstream default) or \"tag\". Immutable on GitHub, so changing it is applied as delete plus recreate.",
@@ -552,84 +562,36 @@
       "required": [
         "name"
       ],
-      "type": "object"
+      "description": "One custom deployment branch-policy pattern, matched by exact name. Extra fields pass through to the create call verbatim."
     },
     "DeploymentProtectionRuleConfig": {
-      "description": "One custom deployment protection rule, matched by the slug of the GitHub App that provides it. No other key is accepted: the enable call sends only the App's resolved integration id, so an extra key would have no destination.",
+      "type": "object",
       "properties": {
         "app": {
-          "description": "The slug of the GitHub App providing the gate (e.g. \"my-gate-app\"), the natural key.",
-          "type": "string"
+          "type": "string",
+          "description": "The slug of the GitHub App providing the gate (e.g. \"my-gate-app\"), the natural key."
         }
       },
       "required": [
         "app"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "description": "One custom deployment protection rule, matched by the slug of the GitHub App that provides it. No other key is accepted: the enable call sends only the App's resolved integration id, so an extra key would have no destination."
     },
     "EnvironmentConfig": {
-      "description": "One deployment environment, matched by name.",
+      "type": "object",
       "properties": {
-        "deployment_branch_policies": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/DeploymentBranchPolicyConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CDeploymentBranchPolicyConfig%3E"
-            }
-          ],
-          "description": "Custom deployment branch-policy patterns for this environment, reconciled only when this key is declared (an absent key leaves the live patterns untouched). Declaring it requires the sibling `deployment_branch_policy` to set `custom_branch_policies: true`; without the flag GitHub rejects every pattern write. A pattern's `type` is immutable on GitHub, so a declared type that differs from the live one is applied as delete plus recreate. Within a declared key, live patterns the entries do not declare are DELETED by default; the wrapped `{undeclared: keep, entries}` form keeps them as notes."
-        },
-        "deployment_branch_policy": {
-          "anyOf": [
-            {
-              "properties": {
-                "custom_branch_policies": {
-                  "description": "Restrict to name patterns, declared under `deployment_branch_policies`.",
-                  "type": "boolean"
-                },
-                "protected_branches": {
-                  "description": "Restrict to branches with protection rules.",
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "protected_branches",
-                "custom_branch_policies"
-              ],
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Which branches may deploy; null clears the policy."
-        },
-        "deployment_protection_rules": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/DeploymentProtectionRuleConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CDeploymentProtectionRuleConfig%3E"
-            }
-          ],
-          "description": "Custom deployment protection rules for this environment, reconciled only when this key is declared (an absent key leaves the live rules untouched). Each rule is a GitHub App gate, declared by its App slug and resolved to the App's integration id at apply time; GitHub offers no update call, so the model is enable/disable only. Within a declared key, live rules the entries do not declare are KEPT by default - Apps can enable themselves as gates, and silently removing a deployment gate is security-relevant - and the wrapped `{undeclared: delete, entries}` form opts into disabling them."
-        },
         "name": {
-          "description": "The environment name, the natural key.",
-          "type": "string"
+          "type": "string",
+          "description": "The environment name, the natural key."
         },
         "pinned": {
           "description": "Pin this environment on the repository home page's deployments sidebar (GraphQL-only; the REST environment PUT carries no pin field). Pin ORDER is the declaration order of the entries with `pinned: true` - together they must LEAD the repository's pinned list in that order, compared by rank (GitHub's live position numbers may carry holes after an unpin and are never read literally). `pinned: false` unpins; an entry without the key leaves its pin state untouched. Live pins on environments the settings file does not declare are never unpinned; when they sit among the declared ranks, apply moves them after the declared pins (surfaced as a note). GitHub allows at most 10 pinned environments, so more than 10 `pinned: true` entries are rejected upfront.",
           "type": "boolean"
+        },
+        "wait_timer": {
+          "description": "Minutes to wait before deployments proceed.",
+          "type": "number"
         },
         "prevent_self_review": {
           "description": "Whether the deployer may approve their own deployment.",
@@ -637,64 +599,113 @@
         },
         "reviewers": {
           "description": "Required reviewers by numeric user/team id.",
+          "type": "array",
           "items": {
+            "type": "object",
             "properties": {
-              "id": {
-                "type": "number"
-              },
               "type": {
+                "type": "string",
                 "enum": [
                   "User",
                   "Team"
-                ],
-                "type": "string"
+                ]
+              },
+              "id": {
+                "type": "number"
               }
             },
             "required": [
               "type",
               "id"
-            ],
-            "type": "object"
-          },
-          "type": "array"
+            ]
+          }
         },
-        "secrets": {
+        "deployment_branch_policy": {
+          "description": "Which branches may deploy; null clears the policy.",
           "anyOf": [
             {
-              "items": {
-                "$ref": "#/definitions/EnvironmentSecretConfig"
+              "type": "object",
+              "properties": {
+                "protected_branches": {
+                  "type": "boolean",
+                  "description": "Restrict to branches with protection rules."
+                },
+                "custom_branch_policies": {
+                  "type": "boolean",
+                  "description": "Restrict to name patterns, declared under `deployment_branch_policies`."
+                }
               },
-              "type": "array"
+              "required": [
+                "protected_branches",
+                "custom_branch_policies"
+              ]
             },
             {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CEnvironmentSecretConfig%3E"
+              "type": "null"
             }
-          ],
-          "description": "Actions secrets for this environment, reconciled only when this key is declared (an absent key leaves the live secrets untouched). Each value is a whole-value `$NAME` reference to the action step's environment, never a literal, sealed client-side against the environment's public key; GitHub cannot return a value, so check mode verifies existence only and apply re-seals every declared value on each run. Within a declared `secrets` key, live secrets the entries do not declare are KEPT by default (their values are unrecoverable); the wrapped `{undeclared: delete, entries}` form opts into deletion."
+          ]
         },
-        "variables": {
+        "deployment_branch_policies": {
+          "description": "Custom deployment branch-policy patterns for this environment, reconciled only when this key is declared (an absent key leaves the live patterns untouched). Declaring it requires the sibling `deployment_branch_policy` to set `custom_branch_policies: true`; without the flag GitHub rejects every pattern write. A pattern's `type` is immutable on GitHub, so a declared type that differs from the live one is applied as delete plus recreate. Within a declared key, live patterns the entries do not declare are DELETED by default; the wrapped `{undeclared: keep, entries}` form keeps them as notes.",
           "anyOf": [
             {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DeploymentBranchPolicyConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CDeploymentBranchPolicyConfig%3E"
+            }
+          ]
+        },
+        "deployment_protection_rules": {
+          "description": "Custom deployment protection rules for this environment, reconciled only when this key is declared (an absent key leaves the live rules untouched). Each rule is a GitHub App gate, declared by its App slug and resolved to the App's integration id at apply time; GitHub offers no update call, so the model is enable/disable only. Within a declared key, live rules the entries do not declare are KEPT by default - Apps can enable themselves as gates, and silently removing a deployment gate is security-relevant - and the wrapped `{undeclared: delete, entries}` form opts into disabling them.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DeploymentProtectionRuleConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CDeploymentProtectionRuleConfig%3E"
+            }
+          ]
+        },
+        "variables": {
+          "description": "Actions variables for this environment, reconciled only when this key is declared (an absent key leaves the live variables untouched). Values are plain text by design - use environment secrets for anything sensitive. Within a declared `variables` key, live variables the entries do not declare are DELETED by default; the wrapped `{undeclared: keep, entries}` form keeps them as notes. Names match case-insensitively, as GitHub treats them.",
+          "anyOf": [
+            {
+              "type": "array",
               "items": {
                 "$ref": "#/definitions/EnvironmentVariableConfig"
-              },
-              "type": "array"
+              }
             },
             {
               "$ref": "#/definitions/UndeclaredPolicyList%3CEnvironmentVariableConfig%3E"
             }
-          ],
-          "description": "Actions variables for this environment, reconciled only when this key is declared (an absent key leaves the live variables untouched). Values are plain text by design - use environment secrets for anything sensitive. Within a declared `variables` key, live variables the entries do not declare are DELETED by default; the wrapped `{undeclared: keep, entries}` form keeps them as notes. Names match case-insensitively, as GitHub treats them."
+          ]
         },
-        "wait_timer": {
-          "description": "Minutes to wait before deployments proceed.",
-          "type": "number"
+        "secrets": {
+          "description": "Actions secrets for this environment, reconciled only when this key is declared (an absent key leaves the live secrets untouched). Each value is a whole-value `$NAME` reference to the action step's environment, never a literal, sealed client-side against the environment's public key; GitHub cannot return a value, so check mode verifies existence only and apply re-seals every declared value on each run. Within a declared `secrets` key, live secrets the entries do not declare are KEPT by default (their values are unrecoverable); the wrapped `{undeclared: delete, entries}` form opts into deletion.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/EnvironmentSecretConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CEnvironmentSecretConfig%3E"
+            }
+          ]
         }
       },
       "required": [
         "name"
       ],
-      "type": "object",
+      "description": "One deployment environment, matched by name.",
       "if": {
         "required": [
           "deployment_branch_policies"
@@ -720,65 +731,60 @@
       }
     },
     "EnvironmentSecretConfig": {
-      "description": "One per-environment Actions secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "type": "string",
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase."
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
-          "type": "string"
+          "type": "string",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run."
         }
       },
       "required": [
         "name",
         "value"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "description": "One per-environment Actions secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing."
     },
     "EnvironmentVariableConfig": {
-      "description": "One per-environment Actions variable, matched by case-insensitive name.",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The variable name, the natural key (case-insensitive on GitHub).",
-          "type": "string"
+          "type": "string",
+          "description": "The variable name, the natural key (case-insensitive on GitHub)."
         },
         "value": {
-          "description": "The plain-text value; environment secrets are the place for secrets.",
-          "type": "string"
+          "type": "string",
+          "description": "The plain-text value; environment secrets are the place for secrets."
         }
       },
       "required": [
         "name",
         "value"
       ],
-      "type": "object"
+      "description": "One per-environment Actions variable, matched by case-insensitive name."
     },
     "InteractionLimitsConfig": {
-      "description": "The `interaction_limits:` section. The base object is sent verbatim to PUT /repos/{r}/interaction-limits minus the two routed keys below, which go to their own .../interaction-limits/pulls sub-endpoints instead. GitHub reads the base limit back as limit, origin, and the computed expires_at only. Declare at least one of `limit`, `pull_request_creation_cap`, or `pull_request_creation_bypass`.",
+      "type": "object",
       "properties": {
-        "expiry": {
-          "description": "How long the limit lasts (\"one_day\" through \"six_months\"); GitHub defaults to one_day. Write-only: GitHub reports back the computed expires_at, never the duration, so check mode cannot verify this field and apply re-arms it on every run. Requires a sibling `limit`.",
-          "type": "string"
-        },
         "limit": {
           "description": "Who may interact: \"existing_users\", \"contributors_only\", or \"collaborators_only\". Optional when only the pull-request keys below are declared; an omitted limit leaves the live base limit untouched.",
           "type": "string"
         },
-        "pull_request_creation_bypass": {
-          "description": "User logins exempt from the pull request creation cap, routed to GET/PUT/DELETE /repos/{r}/interaction-limits/pulls/bypass-list and reconciled: apply removes the undeclared logins and then adds the missing ones (removals first - the list holds at most 100 users); logins compare case-insensitively. An empty list removes everyone. At most 100 logins.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "expiry": {
+          "description": "How long the limit lasts (\"one_day\" through \"six_months\"); GitHub defaults to one_day. Write-only: GitHub reports back the computed expires_at, never the duration, so check mode cannot verify this field and apply re-arms it on every run. Requires a sibling `limit`.",
+          "type": "string"
         },
         "pull_request_creation_cap": {
           "description": "The pull request creation cap, routed to GET/PATCH /repos/{r}/interaction-limits/pulls/creation-cap. Unlike the base limit it is persistent desired state with no self-expiry and reads back verbatim, so check mode diffs it exactly and apply PATCHes only on divergence. max_open_pull_requests is 1-1000. On repositories where the cap is not available, the endpoints answer 405: apply surfaces that as a note, check mode as drift.",
+          "type": "object",
           "properties": {
             "enabled": {
-              "description": "Whether the cap is enforced.",
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Whether the cap is enforced."
             },
             "max_open_pull_requests": {
               "description": "The maximum number of open pull requests one user may have (1-1000).",
@@ -787,25 +793,31 @@
           },
           "required": [
             "enabled"
-          ],
-          "type": "object"
+          ]
+        },
+        "pull_request_creation_bypass": {
+          "description": "User logins exempt from the pull request creation cap, routed to GET/PUT/DELETE /repos/{r}/interaction-limits/pulls/bypass-list and reconciled: apply removes the undeclared logins and then adds the missing ones (removals first - the list holds at most 100 users); logins compare case-insensitively. An empty list removes everyone. At most 100 logins.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
-      "type": "object"
+      "description": "The `interaction_limits:` section. The base object is sent verbatim to PUT /repos/{r}/interaction-limits minus the two routed keys below, which go to their own .../interaction-limits/pulls sub-endpoints instead. GitHub reads the base limit back as limit, origin, and the computed expires_at only. Declare at least one of `limit`, `pull_request_creation_cap`, or `pull_request_creation_bypass`."
     },
     "LabelConfig": {
-      "description": "One label, matched to the live repo by name.",
+      "type": "object",
       "properties": {
+        "name": {
+          "type": "string",
+          "description": "The label name, the natural key."
+        },
         "color": {
           "description": "Hex color, with or without the leading \"#\".",
           "type": "string"
         },
         "description": {
           "description": "Short explanation shown in the label picker.",
-          "type": "string"
-        },
-        "name": {
-          "description": "The label name, the natural key.",
           "type": "string"
         },
         "new_name": {
@@ -816,61 +828,47 @@
       "required": [
         "name"
       ],
-      "type": "object"
+      "description": "One label, matched to the live repo by name."
     },
     "MilestoneConfig": {
-      "description": "One milestone, matched by title.",
+      "type": "object",
       "properties": {
+        "title": {
+          "type": "string",
+          "description": "The milestone title, the natural key."
+        },
         "description": {
           "description": "Longer explanation of the milestone.",
           "type": "string"
         },
         "state": {
           "description": "Open or closed; untouched unless declared.",
+          "type": "string",
           "enum": [
             "open",
             "closed"
-          ],
-          "type": "string"
-        },
-        "title": {
-          "description": "The milestone title, the natural key.",
-          "type": "string"
+          ]
         }
       },
       "required": [
         "title"
       ],
-      "type": "object"
+      "description": "One milestone, matched by title."
     },
     "PagesConfig": {
-      "description": "GitHub Pages site configuration; use `pages: null` to disable the site.",
+      "type": "object",
       "properties": {
         "build_type": {
           "description": "\"workflow\" (GitHub Actions) or \"legacy\" (branch).",
+          "type": "string",
           "enum": [
             "workflow",
             "legacy"
-          ],
-          "type": "string"
-        },
-        "cname": {
-          "description": "Custom domain; null removes it.",
-          "type": [
-            "string",
-            "null"
           ]
-        },
-        "https_enforced": {
-          "description": "Whether HTTPS is enforced for the site.",
-          "type": "boolean"
-        },
-        "public": {
-          "description": "Enterprise Cloud site visibility: true for public, false for repository members only. Documented only in the GHEC flavor of the Pages PUT; the GET echoes it everywhere.",
-          "type": "boolean"
         },
         "source": {
           "description": "The update PUT requires both branch and path when source is sent.",
+          "type": "object",
           "properties": {
             "branch": {
               "type": "string"
@@ -881,20 +879,57 @@
           },
           "required": [
             "branch"
-          ],
-          "type": "object"
+          ]
+        },
+        "cname": {
+          "description": "Custom domain; null removes it.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "https_enforced": {
+          "description": "Whether HTTPS is enforced for the site.",
+          "type": "boolean"
+        },
+        "public": {
+          "description": "Enterprise Cloud site visibility: true for public, false for repository members only. Documented only in the GHEC flavor of the Pages PUT; the GET echoes it everywhere.",
+          "type": "boolean"
         }
       },
-      "type": "object"
+      "description": "GitHub Pages site configuration; use `pages: null` to disable the site."
     },
     "RepositoryConfig": {
-      "additionalProperties": {
-        "description": "Everything else passes through to PATCH /repos/{r} verbatim."
-      },
-      "description": "The `repository:` section. Every field not documented here is sent verbatim to PATCH /repos/{r} (Probot parity), so current and future repo fields work unchanged; the keys below route to their own endpoints instead. Only declared keys are ever applied or compared.",
+      "type": "object",
       "properties": {
+        "topics": {
+          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "enable_vulnerability_alerts": {
+          "description": "Dependabot alerts, via PUT/DELETE /repos/{r}/vulnerability-alerts. On read, 404 means off.",
+          "type": "boolean"
+        },
         "enable_automated_security_fixes": {
           "description": "Dependabot security updates, via PUT/DELETE /repos/{r}/automated-security-fixes. On read, 404 means off, as does a 200 body with enabled: false.",
+          "type": "boolean"
+        },
+        "enable_private_vulnerability_reporting": {
+          "description": "Private vulnerability reporting, via PUT/DELETE /repos/{r}/private-vulnerability-reporting. Repositories where the feature does not apply (observed: private repos) read as off.",
           "type": "boolean"
         },
         "enable_git_lfs": {
@@ -905,373 +940,291 @@
           "description": "Immutable releases, via PUT/DELETE /repos/{r}/immutable-releases. On read, 404 means off. When the repository owner enforces immutable releases (enforced_by_owner in the GET body), writes answer 409 and the setting cannot be changed from the repository; apply reports that as a note instead of a change.",
           "type": "boolean"
         },
-        "enable_private_vulnerability_reporting": {
-          "description": "Private vulnerability reporting, via PUT/DELETE /repos/{r}/private-vulnerability-reporting. Repositories where the feature does not apply (observed: private repos) read as off.",
-          "type": "boolean"
-        },
         "enable_sponsorships": {
           "description": "Display a Sponsor button on the repository, via the GraphQL updateRepository mutation (hasSponsorshipsEnabled) - GraphQL is the setting's only read and write surface (the REST repo PATCH and GET carry no such field). A stored repository toggle independent of any FUNDING.yml content.",
           "type": "boolean"
         },
-        "enable_vulnerability_alerts": {
-          "description": "Dependabot alerts, via PUT/DELETE /repos/{r}/vulnerability-alerts. On read, 404 means off.",
-          "type": "boolean"
-        },
         "issue_creation_policy": {
           "description": "Who may create issues: \"all\" (everyone) or \"collaborators_only\", mapped to GitHub's ALL/COLLABORATORS_ONLY GraphQL enum at the API boundary. GraphQL-only upstream (Repository.issueCreationPolicy and the updateRepository mutation): the REST repo PATCH accepts an issue_creation_policy field and silently ignores it, and no REST GET returns it.",
+          "type": "string",
           "enum": [
             "all",
             "collaborators_only"
-          ],
-          "type": "string"
-        },
-        "topics": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            }
-          ],
-          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped."
+          ]
         }
       },
-      "type": "object"
+      "additionalProperties": {
+        "description": "Everything else passes through to PATCH /repos/{r} verbatim."
+      },
+      "description": "The `repository:` section. Every field not documented here is sent verbatim to PATCH /repos/{r} (Probot parity), so current and future repo fields work unchanged; the keys below route to their own endpoints instead. Only declared keys are ever applied or compared."
     },
     "RulesetConfig": {
-      "description": "One repository ruleset, matched to the live repo by name.",
+      "type": "object",
       "properties": {
-        "bypass_actors": {
-          "description": "Who may bypass the ruleset, passed through verbatim.",
-          "items": {
-            "additionalProperties": {},
-            "type": "object"
-          },
-          "type": "array"
+        "name": {
+          "type": "string",
+          "description": "The ruleset name, the natural key."
         },
-        "conditions": {
-          "description": "Which refs the ruleset covers.",
-          "properties": {
-            "ref_name": {
-              "description": "Short ref names are auto-prefixed (staging -> refs/heads/staging).",
-              "properties": {
-                "exclude": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "include": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                }
-              },
-              "type": "object"
-            }
-          },
-          "type": "object"
+        "target": {
+          "description": "What the ruleset applies to; defaults to \"branch\" upstream.",
+          "type": "string",
+          "enum": [
+            "branch",
+            "tag",
+            "push"
+          ]
         },
         "enforcement": {
           "description": "\"active\", \"evaluate\", or \"disabled\". Created rulesets default to \"active\".",
           "type": "string"
         },
-        "name": {
-          "description": "The ruleset name, the natural key.",
-          "type": "string"
+        "conditions": {
+          "description": "Which refs the ruleset covers.",
+          "type": "object",
+          "properties": {
+            "ref_name": {
+              "description": "Short ref names are auto-prefixed (staging -> refs/heads/staging).",
+              "type": "object",
+              "properties": {
+                "include": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "exclude": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
         },
         "rules": {
           "description": "Rule list, passed through verbatim (future rule types included).",
+          "type": "array",
           "items": {
+            "type": "object",
             "properties": {
-              "parameters": {
-                "additionalProperties": {},
-                "type": "object"
-              },
               "type": {
                 "type": "string"
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": {}
               }
             },
             "required": [
               "type"
-            ],
-            "type": "object"
-          },
-          "type": "array"
+            ]
+          }
         },
-        "target": {
-          "description": "What the ruleset applies to; defaults to \"branch\" upstream.",
-          "enum": [
-            "branch",
-            "tag",
-            "push"
-          ],
-          "type": "string"
+        "bypass_actors": {
+          "description": "Who may bypass the ruleset, passed through verbatim.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": {}
+          }
         }
       },
       "required": [
         "name"
       ],
-      "type": "object"
+      "description": "One repository ruleset, matched to the live repo by name."
     },
     "SecretScanningPatternConfig": {
-      "description": "One secret scanning custom pattern, matched by exact name. Only the fields below are accepted: `state` and `push_protection_enabled` are readable but NOT writable through the custom-pattern endpoints, so they cannot be declared. A delimiter, once set, cannot be cleared back to GitHub's default through the update PATCH (the endpoint updates provided fields only); remove the pattern and redeclare it without the field instead.",
+      "type": "object",
       "properties": {
-        "end_delimiter": {
-          "description": "Regular expression for the characters that must come after the secret. An empty string is rejected, like start_delimiter.",
-          "type": "string"
-        },
-        "must_match": {
-          "description": "Additional regular expressions a match must also satisfy, compared in order.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "must_not_match": {
-          "description": "Regular expressions a match must NOT satisfy, compared in order.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "name": {
-          "description": "The pattern name, the natural key; immutable upstream, so a rename creates the new name (the old one follows the undeclared policy).",
-          "type": "string"
+          "type": "string",
+          "description": "The pattern name, the natural key; immutable upstream, so a rename creates the new name (the old one follows the undeclared policy)."
         },
         "pattern": {
-          "description": "The regular expression the secret format must match.",
-          "type": "string"
+          "type": "string",
+          "description": "The regular expression the secret format must match."
         },
         "start_delimiter": {
           "description": "Regular expression for the characters that must come before the secret. An empty string is rejected: a delimiter cannot be cleared through the update call - remove the pattern and redeclare it without the field instead.",
-          "type": "string"
+          "type": "string",
+          "minLength": 1
+        },
+        "end_delimiter": {
+          "description": "Regular expression for the characters that must come after the secret. An empty string is rejected, like start_delimiter.",
+          "type": "string",
+          "minLength": 1
+        },
+        "must_match": {
+          "description": "Additional regular expressions a match must also satisfy, compared in order.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "must_not_match": {
+          "description": "Regular expressions a match must NOT satisfy, compared in order.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
         "name",
         "pattern"
       ],
-      "type": "object"
+      "description": "One secret scanning custom pattern, matched by exact name. Only the fields below are accepted: `state` and `push_protection_enabled` are readable but NOT writable through the custom-pattern endpoints, so they cannot be declared. A delimiter, once set, cannot be cleared back to GitHub's default through the update PATCH (the endpoint updates provided fields only); remove the pattern and redeclare it without the field instead."
     },
     "SettingsFile": {
-      "description": "One settings.yml document: every top-level section is optional.",
+      "type": "object",
       "properties": {
-        "actions": {
-          "$ref": "#/definitions/ActionsConfig",
-          "description": "GitHub Actions permissions for the repository."
-        },
-        "actions_secrets": {
-          "anyOf": [
+        "repository": {
+          "description": "Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents.",
+          "allOf": [
             {
-              "items": {
-                "$ref": "#/definitions/ActionsSecretConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CActionsSecretConfig%3E"
+              "$ref": "#/definitions/RepositoryConfig"
             }
-          ],
-          "description": "Repository Actions secrets, written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable)."
-        },
-        "actions_variables": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/ActionsVariableConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CActionsVariableConfig%3E"
-            }
-          ],
-          "description": "GitHub Actions repository variables, upserted by name; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`). Names are case-insensitive (GitHub stores them uppercased). Values are plain text BY DESIGN - variables are readable configuration, which is what makes check-mode diffing possible; secrets are write-only material and deliberately not this section."
-        },
-        "agents_secrets": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/AgentsSecretConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CAgentsSecretConfig%3E"
-            }
-          ],
-          "description": "Repository Copilot agents secrets (the secret store Copilot coding agents read), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable)."
-        },
-        "agents_variables": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/AgentsVariableConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CAgentsVariableConfig%3E"
-            }
-          ],
-          "description": "Copilot agents repository variables (the plain-text configuration Copilot coding agents read), upserted by name; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`). Names are case-insensitive (GitHub stores them uppercased). Values are plain text BY DESIGN - variables are readable configuration, which is what makes check-mode diffing possible; secrets are write-only material and deliberately not this section."
-        },
-        "autolinks": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/AutolinkConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CAutolinkConfig%3E"
-            }
-          ],
-          "description": "Autolink references; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`)."
-        },
-        "branches": {
-          "description": "Classic branch protection per branch.",
-          "items": {
-            "$ref": "#/definitions/BranchConfig"
-          },
-          "type": "array"
-        },
-        "check_suite_preferences": {
-          "$ref": "#/definitions/CheckSuitePreferencesConfig",
-          "description": "Check suite preferences: per-GitHub-App `auto_trigger_checks` toggles controlling whether pushes automatically create check suites. Write-only upstream (GitHub exposes no read endpoint), so check mode cannot verify them and apply re-asserts the declared preferences on every run. The token owner must be a repository administrator."
-        },
-        "code_quality_setup": {
-          "$ref": "#/definitions/CodeQualitySetupConfig",
-          "description": "Code quality analysis setup."
-        },
-        "code_scanning_default_setup": {
-          "$ref": "#/definitions/CodeScanningDefaultSetupConfig",
-          "description": "Code scanning default setup (CodeQL)."
-        },
-        "codespaces_secrets": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/CodespacesSecretConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CCodespacesSecretConfig%3E"
-            }
-          ],
-          "description": "Repository Codespaces secrets (development environment secrets), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable)."
-        },
-        "collaborators": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/CollaboratorConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CCollaboratorConfig%3E"
-            }
-          ],
-          "description": "Direct collaborators, with pending invitations reconciled alongside; undeclared ones are REMOVED (pending invitations cancelled) by default (owner never touched; the wrapped form can set `undeclared: keep`)."
-        },
-        "custom_properties": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/CustomPropertyConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CCustomPropertyConfig%3E"
-            }
-          ],
-          "description": "Values of organization-defined custom properties, set per repository (the property DEFINITIONS are organization-scoped and out of scope); organization repos only, skipped with a note on personal accounts. `value: null` unsets a property (reverting to the org default, if any), and booleans/numbers are normalized to their string form (GitHub transports true_false values as the strings \"true\"/\"false\"). Undeclared live values are kept by default - an unset can revert to an org default this action does not model, and a property whose values only org actors may edit would reject the write - and the wrapped form can set `undeclared: delete` to opt into unsetting them."
-        },
-        "dependabot_secrets": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/DependabotSecretConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CDependabotSecretConfig%3E"
-            }
-          ],
-          "description": "Repository Dependabot secrets (private-registry credentials Dependabot uses), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable)."
-        },
-        "deploy_keys": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/DeployKeyConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CDeployKeyConfig%3E"
-            }
-          ],
-          "description": "Deploy keys, matched by title. The declared material is a PUBLIC key, safe in a committed settings file. Keys are immutable upstream, so any change is applied as delete plus recreate. Undeclared keys are kept by default - deleting a live deploy key breaks whatever service authenticates with it, and deployment tooling installs its own keys - and the wrapped form can set `undeclared: delete`."
-        },
-        "environments": {
-          "description": "Deployment environments, upserted by name.",
-          "items": {
-            "$ref": "#/definitions/EnvironmentConfig"
-          },
-          "type": "array"
-        },
-        "interaction_limits": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/InteractionLimitsConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Temporary interaction limits; null clears an active repo-level limit, and an absent key leaves whatever is live untouched. Limits self-expire (GitHub's expiry tops out at six_months), so apply re-arms the declared limit on every run and check mode reports drift once it lapses. The pull_request_creation_cap and pull_request_creation_bypass keys manage the persistent pull request creation cap and its bypass list instead; `interaction_limits: null` clears the base limit only and never touches them."
+          ]
         },
         "labels": {
+          "description": "Issue/PR labels; undeclared labels are DELETED by default (Probot parity; the wrapped form can set `undeclared: keep`).",
           "anyOf": [
             {
+              "type": "array",
               "items": {
                 "$ref": "#/definitions/LabelConfig"
-              },
-              "type": "array"
+              }
             },
             {
               "$ref": "#/definitions/UndeclaredPolicyList%3CLabelConfig%3E"
             }
-          ],
-          "description": "Issue/PR labels; undeclared labels are DELETED by default (Probot parity; the wrapped form can set `undeclared: keep`)."
+          ]
         },
-        "milestones": {
+        "rulesets": {
+          "description": "Repository rulesets, upserted by name; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`).",
           "anyOf": [
             {
+              "type": "array",
               "items": {
-                "$ref": "#/definitions/MilestoneConfig"
-              },
-              "type": "array"
+                "$ref": "#/definitions/RulesetConfig"
+              }
             },
             {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CMilestoneConfig%3E"
+              "$ref": "#/definitions/UndeclaredPolicyList%3CRulesetConfig%3E"
             }
-          ],
-          "description": "Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`, which detaches deleted milestones from their issues)."
+          ]
+        },
+        "branches": {
+          "description": "Classic branch protection per branch.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BranchConfig"
+          }
+        },
+        "environments": {
+          "description": "Deployment environments, upserted by name.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EnvironmentConfig"
+          }
+        },
+        "autolinks": {
+          "description": "Autolink references; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`).",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/AutolinkConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CAutolinkConfig%3E"
+            }
+          ]
+        },
+        "actions": {
+          "description": "GitHub Actions permissions for the repository.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ActionsConfig"
+            }
+          ]
+        },
+        "actions_secrets": {
+          "description": "Repository Actions secrets, written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable).",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ActionsSecretConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CActionsSecretConfig%3E"
+            }
+          ]
+        },
+        "dependabot_secrets": {
+          "description": "Repository Dependabot secrets (private-registry credentials Dependabot uses), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable).",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DependabotSecretConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CDependabotSecretConfig%3E"
+            }
+          ]
+        },
+        "codespaces_secrets": {
+          "description": "Repository Codespaces secrets (development environment secrets), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable).",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CodespacesSecretConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CCodespacesSecretConfig%3E"
+            }
+          ]
+        },
+        "agents_secrets": {
+          "description": "Repository Copilot agents secrets (the secret store Copilot coding agents read), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable).",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/AgentsSecretConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CAgentsSecretConfig%3E"
+            }
+          ]
+        },
+        "workflows": {
+          "description": "Per-workflow enable/disable state; undeclared workflows are untouched.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkflowConfig"
+          }
+        },
+        "check_suite_preferences": {
+          "description": "Check suite preferences: per-GitHub-App `auto_trigger_checks` toggles controlling whether pushes automatically create check suites. Write-only upstream (GitHub exposes no read endpoint), so check mode cannot verify them and apply re-asserts the declared preferences on every run. The token owner must be a repository administrator.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CheckSuitePreferencesConfig"
+            }
+          ]
         },
         "pages": {
+          "description": "GitHub Pages configuration; null disables Pages on the repository.",
           "anyOf": [
             {
               "$ref": "#/definitions/PagesConfig"
@@ -1279,78 +1232,163 @@
             {
               "type": "null"
             }
-          ],
-          "description": "GitHub Pages configuration; null disables Pages on the repository."
+          ]
         },
-        "repository": {
-          "$ref": "#/definitions/RepositoryConfig",
-          "description": "Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents."
+        "code_scanning_default_setup": {
+          "description": "Code scanning default setup (CodeQL).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CodeScanningDefaultSetupConfig"
+            }
+          ]
         },
-        "rulesets": {
+        "code_quality_setup": {
+          "description": "Code quality analysis setup.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CodeQualitySetupConfig"
+            }
+          ]
+        },
+        "collaborators": {
+          "description": "Direct collaborators, with pending invitations reconciled alongside; undeclared ones are REMOVED (pending invitations cancelled) by default (owner never touched; the wrapped form can set `undeclared: keep`).",
           "anyOf": [
             {
+              "type": "array",
               "items": {
-                "$ref": "#/definitions/RulesetConfig"
-              },
-              "type": "array"
+                "$ref": "#/definitions/CollaboratorConfig"
+              }
             },
             {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CRulesetConfig%3E"
+              "$ref": "#/definitions/UndeclaredPolicyList%3CCollaboratorConfig%3E"
             }
-          ],
-          "description": "Repository rulesets, upserted by name; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`)."
-        },
-        "secret_scanning_custom_patterns": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/definitions/SecretScanningPatternConfig"
-              },
-              "type": "array"
-            },
-            {
-              "$ref": "#/definitions/UndeclaredPolicyList%3CSecretScanningPatternConfig%3E"
-            }
-          ],
-          "description": "Repository-level secret scanning custom patterns, matched by name. The name is immutable upstream (the update PATCH takes no name field), so a renamed entry is applied as a create of the new name - plus, under `undeclared: delete`, deletion of the old one; under the default keep policy the old pattern stays live and is surfaced as a note. Undeclared patterns are kept by default: removing a pattern disposes of its alerts, so deletion stays a human opt-in (the wrapped form can set `undeclared: delete`). When this action deletes a pattern it always asks GitHub to RESOLVE the pattern's alerts rather than delete them, keeping the audit trail."
+          ]
         },
         "teams": {
           "description": "Org team access to the repo; skipped on personal accounts.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/TeamConfig"
-          },
-          "type": "array"
+          }
         },
-        "webhooks": {
+        "milestones": {
+          "description": "Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`, which detaches deleted milestones from their issues).",
           "anyOf": [
             {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/MilestoneConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CMilestoneConfig%3E"
+            }
+          ]
+        },
+        "interaction_limits": {
+          "description": "Temporary interaction limits; null clears an active repo-level limit, and an absent key leaves whatever is live untouched. Limits self-expire (GitHub's expiry tops out at six_months), so apply re-arms the declared limit on every run and check mode reports drift once it lapses. The pull_request_creation_cap and pull_request_creation_bypass keys manage the persistent pull request creation cap and its bypass list instead; `interaction_limits: null` clears the base limit only and never touches them.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InteractionLimitsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actions_variables": {
+          "description": "GitHub Actions repository variables, upserted by name; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`). Names are case-insensitive (GitHub stores them uppercased). Values are plain text BY DESIGN - variables are readable configuration, which is what makes check-mode diffing possible; secrets are write-only material and deliberately not this section.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ActionsVariableConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CActionsVariableConfig%3E"
+            }
+          ]
+        },
+        "agents_variables": {
+          "description": "Copilot agents repository variables (the plain-text configuration Copilot coding agents read), upserted by name; undeclared ones are DELETED by default (the wrapped form can set `undeclared: keep`). Names are case-insensitive (GitHub stores them uppercased). Values are plain text BY DESIGN - variables are readable configuration, which is what makes check-mode diffing possible; secrets are write-only material and deliberately not this section.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/AgentsVariableConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CAgentsVariableConfig%3E"
+            }
+          ]
+        },
+        "webhooks": {
+          "description": "Repository webhooks, managed one per config.url; undeclared hooks are kept by default and surfaced as notes, since integrations create their own hooks (the wrapped form can set `undeclared: delete`).",
+          "anyOf": [
+            {
+              "type": "array",
               "items": {
                 "$ref": "#/definitions/WebhookConfig"
-              },
-              "type": "array"
+              }
             },
             {
               "$ref": "#/definitions/UndeclaredPolicyList%3CWebhookConfig%3E"
             }
-          ],
-          "description": "Repository webhooks, managed one per config.url; undeclared hooks are kept by default and surfaced as notes, since integrations create their own hooks (the wrapped form can set `undeclared: delete`)."
+          ]
         },
-        "workflows": {
-          "description": "Per-workflow enable/disable state; undeclared workflows are untouched.",
-          "items": {
-            "$ref": "#/definitions/WorkflowConfig"
-          },
-          "type": "array"
+        "custom_properties": {
+          "description": "Values of organization-defined custom properties, set per repository (the property DEFINITIONS are organization-scoped and out of scope); organization repos only, skipped with a note on personal accounts. `value: null` unsets a property (reverting to the org default, if any), and booleans/numbers are normalized to their string form (GitHub transports true_false values as the strings \"true\"/\"false\"). Undeclared live values are kept by default - an unset can revert to an org default this action does not model, and a property whose values only org actors may edit would reject the write - and the wrapped form can set `undeclared: delete` to opt into unsetting them.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CustomPropertyConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CCustomPropertyConfig%3E"
+            }
+          ]
+        },
+        "deploy_keys": {
+          "description": "Deploy keys, matched by title. The declared material is a PUBLIC key, safe in a committed settings file. Keys are immutable upstream, so any change is applied as delete plus recreate. Undeclared keys are kept by default - deleting a live deploy key breaks whatever service authenticates with it, and deployment tooling installs its own keys - and the wrapped form can set `undeclared: delete`.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DeployKeyConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CDeployKeyConfig%3E"
+            }
+          ]
+        },
+        "secret_scanning_custom_patterns": {
+          "description": "Repository-level secret scanning custom patterns, matched by name. The name is immutable upstream (the update PATCH takes no name field), so a renamed entry is applied as a create of the new name - plus, under `undeclared: delete`, deletion of the old one; under the default keep policy the old pattern stays live and is surfaced as a note. Undeclared patterns are kept by default: removing a pattern disposes of its alerts, so deletion stays a human opt-in (the wrapped form can set `undeclared: delete`). When this action deletes a pattern it always asks GitHub to RESOLVE the pattern's alerts rather than delete them, keeping the audit trail.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SecretScanningPatternConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CSecretScanningPatternConfig%3E"
+            }
+          ]
         }
       },
-      "type": "object"
+      "description": "One settings.yml document: every top-level section is optional."
     },
     "TeamConfig": {
-      "description": "One org team's access to the repository, matched by team slug. Keys other than name and permission are rejected (a misspelled \"permission\" would otherwise silently grant the default role).",
+      "type": "object",
       "properties": {
         "name": {
-          "description": "The team slug, the natural key.",
-          "type": "string"
+          "type": "string",
+          "description": "The team slug, the natural key."
         },
         "permission": {
           "description": "Same vocabulary as collaborators; defaults to \"push\".",
@@ -1360,496 +1398,580 @@
       "required": [
         "name"
       ],
-      "type": "object"
+      "description": "One org team's access to the repository, matched by team slug. Keys other than name and permission are rejected (a misspelled \"permission\" would otherwise silently grant the default role)."
     },
     "UndeclaredPolicy": {
-      "description": "What apply does to live resources the settings file does not declare.",
+      "type": "string",
       "enum": [
         "keep",
         "delete"
       ],
-      "type": "string"
+      "description": "What apply does to live resources the settings file does not declare."
     },
     "UndeclaredPolicyList<ActionsSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/ActionsSecretConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<ActionsVariableConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/ActionsVariableConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<AgentsSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/AgentsSecretConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<AgentsVariableConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/AgentsVariableConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<AutolinkConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/AutolinkConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<CodespacesSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/CodespacesSecretConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<CollaboratorConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/CollaboratorConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<CustomPropertyConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/CustomPropertyConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<DependabotSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/DependabotSecretConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<DeployKeyConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/DeployKeyConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<DeploymentBranchPolicyConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/DeploymentBranchPolicyConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<DeploymentProtectionRuleConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/DeploymentProtectionRuleConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<EnvironmentSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/EnvironmentSecretConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<EnvironmentVariableConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/EnvironmentVariableConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<LabelConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/LabelConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<MilestoneConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/MilestoneConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<RulesetConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/RulesetConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<SecretScanningPatternConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/SecretScanningPatternConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "UndeclaredPolicyList<WebhookConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "type": "object",
       "properties": {
+        "undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
         "entries": {
-          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
           "items": {
             "$ref": "#/definitions/WebhookConfig"
           },
-          "type": "array"
-        },
-        "undeclared": {
-          "$ref": "#/definitions/UndeclaredPolicy",
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies."
+          "description": "The declared entries, exactly as the plain array form lists them."
         }
       },
       "required": [
         "entries"
       ],
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo."
     },
     "WebhookConfig": {
-      "description": "One repository webhook, matched to the live repo by config.url. Hook URLs are configuration, not credentials: they appear in drift lines and notes on purpose. The secret never does.",
+      "type": "object",
       "properties": {
-        "active": {
-          "description": "Whether deliveries fire; GitHub defaults a new hook to true.",
-          "type": "boolean"
+        "name": {
+          "description": "GitHub's hook name; \"web\" is the only value modern hooks take, so anything else is rejected.",
+          "type": "string",
+          "const": "web"
         },
         "config": {
-          "$ref": "#/definitions/WebhookDeliveryConfig",
-          "description": "The delivery settings; config.url is the natural key."
+          "description": "The delivery settings; config.url is the natural key.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebhookDeliveryConfig"
+            }
+          ]
         },
         "events": {
           "description": "Events that trigger deliveries, compared order-insensitively; GitHub defaults a new hook to [\"push\"].",
+          "type": "array",
           "items": {
             "type": "string"
-          },
-          "type": "array"
+          }
         },
-        "name": {
-          "const": "web",
-          "description": "GitHub's hook name; \"web\" is the only value modern hooks take, so anything else is rejected.",
-          "type": "string"
+        "active": {
+          "description": "Whether deliveries fire; GitHub defaults a new hook to true.",
+          "type": "boolean"
         }
       },
       "required": [
         "config"
       ],
-      "type": "object"
+      "description": "One repository webhook, matched to the live repo by config.url. Hook URLs are configuration, not credentials: they appear in drift lines and notes on purpose. The secret never does."
     },
     "WebhookDeliveryConfig": {
-      "additionalProperties": {
-        "description": "Future config fields pass through verbatim."
-      },
-      "description": "A webhook's `config` mapping, sent to the config sub-endpoint on update.",
+      "type": "object",
       "properties": {
+        "url": {
+          "type": "string",
+          "description": "The delivery URL, the natural key: a changed url declares a NEW hook (the old one becomes undeclared)."
+        },
         "content_type": {
           "description": "Payload encoding: \"json\" or \"form\".",
           "type": "string"
-        },
-        "insecure_ssl": {
-          "description": "Whether to skip TLS verification (\"0\" verify / \"1\" skip); GitHub stores it as a string.",
-          "type": [
-            "string",
-            "number"
-          ]
         },
         "secret": {
           "description": "The shared delivery secret, as a whole-value `$NAME` reference to an environment variable on the action step (never a literal: settings files are committed plaintext). Resolved at apply time; GitHub echoes it back as \"********\", so check mode cannot verify it and apply re-sends it on every run so rotations propagate.",
           "type": "string"
         },
-        "url": {
-          "description": "The delivery URL, the natural key: a changed url declares a NEW hook (the old one becomes undeclared).",
-          "type": "string"
+        "insecure_ssl": {
+          "description": "Whether to skip TLS verification (\"0\" verify / \"1\" skip); GitHub stores it as a string.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
         }
       },
       "required": [
         "url"
       ],
-      "type": "object"
+      "additionalProperties": {
+        "description": "Future config fields pass through verbatim."
+      },
+      "description": "A webhook's `config` mapping, sent to the config sub-endpoint on update."
     },
     "WorkflowConfig": {
-      "description": "One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo).",
+      "type": "object",
       "properties": {
         "path": {
-          "description": "Full \".github/workflows/ci.yml\" or the bare \"ci.yml\" file name.",
-          "type": "string"
+          "type": "string",
+          "description": "Full \".github/workflows/ci.yml\" or the bare \"ci.yml\" file name."
         },
         "state": {
-          "description": "Desired state; every live disabled_* variant counts as \"disabled\".",
+          "type": "string",
           "enum": [
             "active",
             "disabled"
           ],
-          "type": "string"
+          "description": "Desired state; every live disabled_* variant counts as \"disabled\"."
         }
       },
       "required": [
         "path",
         "state"
       ],
-      "type": "object"
+      "description": "One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo)."
     }
   }
 }

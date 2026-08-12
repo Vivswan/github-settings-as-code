@@ -16,7 +16,7 @@
     "fuzz": "bun test/e2e/fuzz.ts",
     "build": "bun run build:bundle && bun run build:schema",
     "build:bundle": "bun build src/main.ts --target=node --outfile lib/index.js",
-    "build:schema": "ts-json-schema-generator --path src/schema.ts --type SettingsFile --tsconfig tsconfig.json --additional-properties --out lib/settings.schema.json && bun .github/scripts/finalize-schema.ts",
+    "build:schema": "bun .github/scripts/gen-settings-schema.ts",
     "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep .",
     "prepare": "lefthook install"
   },
@@ -43,7 +43,6 @@
     "graphql": "^17.0.2",
     "knip": "^6.32.2",
     "lefthook": "^2.1.10",
-    "ts-json-schema-generator": "^2.9.0",
     "typescript": "^7.0.2"
   }
 }

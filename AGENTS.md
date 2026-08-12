@@ -57,8 +57,11 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
 <!-- repo-platform:local-section -->
 
 - `lib/settings.schema.json` is the COMMITTED JSON Schema for settings.yml,
-  generated from the `SettingsFile` types (JSDoc comments in `src/schema.ts`
-  become the schema descriptions); regenerate it with `bun run build:schema`
+  generated from the zod schemas in `src/schema.ts` - the single source for
+  the config types (z.infer), each section's runtime shape
+  (`loosen(SettingsFile.shape.<key>)`), and the published schema
+  (`.describe()` strings become its descriptions, `.meta({id})` its
+  definition names). Regenerate it with `bun run build:schema`
   after a schema-affecting `src/` change - CI's schema-check job fails when
   it drifts. `lib/index.js`, the bundled entrypoint the action runs
   (node24), is NOT committed on main: every workflow that executes the
@@ -66,8 +69,8 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   to a temp path, and the runnable bundle a `uses:` ref resolves is built
   and committed on the release build tags (`build/vX.Y.Z`, where the
   moving major also points); plain `vX.Y.Z` tags are source-only. `lib/` is exempt from the typography
-  check (third-party unicode in the bundle; schema JSDoc is checked at
-  source) and excluded from [biome](https://biomejs.dev).
+  check (third-party unicode in the bundle; the schema descriptions are
+  checked at source) and excluded from [biome](https://biomejs.dev).
 - The apply/check engine layout: `src/main.ts` is the thin bundled
   entrypoint; `src/action/` is the GitHub Actions layer (inputs, Io over
   @actions/core, settings reading, step summaries, the single- and
@@ -78,8 +81,9 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   section is a self-contained `SectionModule`
   (key, PAT grant advice, loose zod shape, handler) registered in
   `src/sections/registry.ts`; adding a section means declaring its
-  property on `SettingsFile` in `src/schema.ts` (with a JSDoc comment,
-  which feeds the published schema), adding the key to `SECTION_KEYS`,
+  zod config schema and its property on the `SettingsFile` schema in
+  `src/schema.ts` (with `.describe()` strings, which feed the published
+  schema), adding the key to `SECTION_KEYS`,
   creating `src/sections/<key>.ts`, and adding one registry line - the
   compiler flags any forgotten step. All GitHub API list calls must go through
   `listAll()` (bare-array endpoints) or `listAllEnveloped()` (endpoints

@@ -4,20 +4,19 @@
  * wrapped `undeclared: keep` form softens that to notes.
  */
 
-import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import type { AutolinkConfig, UndeclaredPolicyList } from "../schema.js";
+import { type AutolinkConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
+  loosen,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 
 interface LiveAutolink {
@@ -43,9 +42,7 @@ export const autolinksSection: SectionModule<"autolinks"> = {
   undeclaredDefault: "delete",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(
-    z.array(z.looseObject({ key_prefix: z.string(), url_template: z.string() })),
-  ),
+  shape: loosen(SettingsFile.shape.autolinks),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const { policy, entries: desired } = undeclaredPolicy(

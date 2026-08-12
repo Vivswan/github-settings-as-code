@@ -6,20 +6,24 @@
  * `value: null` unsets a property, reverting to the org default, if any.
  */
 
-import { z } from "zod";
-import type { CustomPropertyConfig, MustBeNever, UndeclaredPolicyList } from "../schema.js";
+import {
+  type CustomPropertyConfig,
+  type MustBeNever,
+  SettingsFile,
+  type UndeclaredPolicyList,
+} from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
+  loosen,
   probeAbsent,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 
 const permission: SectionPermission = { repo: ["custom_properties"] };
@@ -136,14 +140,7 @@ export const customPropertiesSection: SectionModule<"custom_properties"> = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(
-    z.array(
-      z.looseObject({
-        property_name: z.string(),
-        value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]),
-      }),
-    ),
-  ),
+  shape: loosen(SettingsFile.shape.custom_properties),
   // Closed surface: the bulk PATCH body is built from exactly property_name
   // and value, so an extra key has no destination and is always a typo.
   closedSurface: {

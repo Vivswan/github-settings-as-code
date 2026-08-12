@@ -5,21 +5,20 @@
  * action. The wrapped `undeclared: delete` form hardens that to deletion.
  */
 
-import { z } from "zod";
 import { subsetDiff } from "../engine/diff.js";
-import type { RulesetConfig, UndeclaredPolicyList } from "../schema.js";
+import { type RulesetConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   listAll,
+  loosen,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 
 /**
@@ -107,25 +106,7 @@ export const rulesetsSection: SectionModule<"rulesets"> = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(
-    z.array(
-      z.looseObject({
-        name: z.string(),
-        // normalizeRuleset maps over these before the API can reject them, so
-        // the shape must catch a non-list here (a classic missing "-" typo).
-        conditions: z
-          .looseObject({
-            ref_name: z
-              .looseObject({
-                include: z.array(z.string()).optional(),
-                exclude: z.array(z.string()).optional(),
-              })
-              .optional(),
-          })
-          .optional(),
-      }),
-    ),
-  ),
+  shape: loosen(SettingsFile.shape.rulesets),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const { policy, entries } = undeclaredPolicy(

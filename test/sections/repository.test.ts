@@ -215,10 +215,10 @@ describe("repository", () => {
     expect(error).toContain("a mapping is not a boolean");
   });
 
-  test("the section accepts plain mappings only, like anyRecord always did", () => {
-    // The toggle check rides ON anyRecord, so moving it upfront must not
-    // widen the accepted set: a YAML !!timestamp document parses to a Date,
-    // which is not a plain mapping and fails shape validation.
+  test("the section accepts plain mappings only, like the record shape always did", () => {
+    // requirePlainMapping guards the passthrough mapping: a YAML !!timestamp
+    // document parses to a Date, which zod's object schemas would accept as
+    // an empty mapping, so it must fail shape validation instead.
     expect(validateSectionShapes({ repository: new Date("2020-01-01") }, "f.yml")).toContain(
       "repository",
     );

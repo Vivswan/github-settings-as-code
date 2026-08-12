@@ -284,8 +284,188 @@ export interface DeclaredSecretValue {
   readonly value: string;
 }
 
-/** The loose "any YAML mapping" shape for passthrough-heavy sections. */
-export const anyRecord = z.record(z.string(), z.unknown());
+/**
+ * Reject non-plain mappings before an object shape sees them: zod's object
+ * schemas accept any non-array object, so a YAML-tagged scalar like
+ * !!timestamp (which parses to a Date) would otherwise validate as an empty
+ * mapping and silently configure nothing. Scalars, arrays, and null pass
+ * through so the piped shape reports its own, more precise error for them.
+ * Applied by the sections whose value is one mapping with no required
+ * keys (repository, the code-scanning setups, interaction_limits) -
+ * everywhere else a required natural key already fails the impostor.
+ */
+export function requirePlainMapping(shape: z.ZodType): z.ZodType {
+  return z
+    .unknown()
+    .superRefine((value, ctx) => {
+      if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) {
+          ctx.addIssue({
+            code: "custom",
+            message:
+              "Invalid input: expected a plain mapping (a YAML-tagged value like !!timestamp parses to another type)",
+          });
+        }
+      }
+    })
+    .pipe(shape);
+}
+
+/** The zod internals loosen() reads: the def discriminator and its children. */
+interface LoosenDef {
+  type: string;
+  shape?: Record<string, z.ZodType>;
+  catchall?: z.ZodType;
+  element?: z.ZodType;
+  innerType?: z.ZodType;
+  options?: readonly z.ZodType[];
+  valueType?: z.ZodType;
+  checks?: readonly unknown[];
+}
+
+function defOf(schema: z.ZodType): LoosenDef {
+  return (schema as unknown as { _zod: { def: LoosenDef } })._zod.def;
+}
+
+/** Clone a schema with a patched def, keeping its checks (refinements). */
+function cloneWith(schema: z.ZodType, patch: Partial<LoosenDef>): z.ZodType {
+  const def = (schema as unknown as { _zod: { def: Record<string, unknown> } })._zod.def;
+  return z.util.clone(
+    schema as unknown as Parameters<typeof z.util.clone>[0],
+    { ...def, ...patch } as never,
+  ) as unknown as z.ZodType;
+}
+
+/**
+ * The tolerant runtime derivative of an authored schema from src/schema.ts:
+ * every plain (strip) object becomes a passthrough looseObject, so unknown
+ * keys ride through to GitHub instead of being dropped and superRefine
+ * checks that read undeclared keys can see them. Deliberately preserved as
+ * authored:
+ * - strictObject stays strict (the {undeclared, entries} wrapper and the
+ *   nested shapes whose endpoints offer no passthrough destination);
+ * - every refine/superRefine survives (clones carry the checks), so the
+ *   runtime-only invariants keep firing;
+ * - a knobbed-section union (entry array | strict wrapper) is rewrapped as
+ *   a container-routed check, so a failing entry keeps its precise issue
+ *   path (`labels[2].name`, or `labels.entries[2].name` in the wrapped
+ *   form) instead of a plain union's pathless "Invalid input".
+ * Leaf types (strings, enums, numbers, literals, records) pass through
+ * untouched; an unrecognized CONTAINER type fails loudly rather than ship a
+ * shape that silently skipped loosening.
+ */
+export function loosen(schema: z.ZodType): z.ZodType {
+  const def = defOf(schema);
+  switch (def.type) {
+    case "object": {
+      const shape = def.shape ?? {};
+      const loosened = Object.fromEntries(
+        Object.entries(shape).map(([key, value]) => [key, loosen(value)]),
+      );
+      // The catchall is loosened like any other child (z.never stays never,
+      // so strict objects stay strict; an absent catchall means strip, which
+      // becomes passthrough).
+      const catchall = def.catchall === undefined ? z.unknown() : loosen(def.catchall);
+      return cloneWith(schema, { shape: loosened, catchall });
+    }
+    case "array":
+      return cloneWith(schema, { element: loosen(def.element as z.ZodType) });
+    case "record":
+      return cloneWith(schema, { valueType: loosen(def.valueType as z.ZodType) });
+    case "optional":
+    case "nullable":
+      return cloneWith(schema, { innerType: loosen(def.innerType as z.ZodType) });
+    case "union": {
+      const options = def.options ?? [];
+      const knob = detectKnobUnion(options);
+      if (knob !== null) {
+        if ((def.checks?.length ?? 0) > 0) {
+          // The rewrap replaces the union with a container-routed custom
+          // check, which cannot carry the union's own refinements; attach
+          // the invariant to the entry array or the wrapper instead.
+          throw new Error(
+            "loosen(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
+          );
+        }
+        return routedListShape(loosen(knob.list), loosen(knob.wrapper));
+      }
+      return cloneWith(schema, { options: options.map(loosen) });
+    }
+    default:
+      if (!LOOSEN_LEAF_TYPES.has(def.type)) {
+        throw new Error(
+          `loosen(): unhandled schema type "${def.type}" - teach loosen() its runtime derivation before authoring it in src/schema.ts`,
+        );
+      }
+      return schema;
+  }
+}
+
+/** The schema types loosen() passes through untouched (no children to derive). */
+const LOOSEN_LEAF_TYPES: ReadonlySet<string> = new Set([
+  "string",
+  "number",
+  "boolean",
+  "enum",
+  "literal",
+  "unknown",
+  "never",
+  "null",
+]);
+
+/**
+ * Recognize a knobbed-section union: exactly the entry array plus the strict
+ * {undeclared, entries} wrapper (see knobbed() in src/schema.ts).
+ */
+function detectKnobUnion(
+  options: readonly z.ZodType[],
+): { list: z.ZodType; wrapper: z.ZodType } | null {
+  if (options.length !== 2) {
+    return null;
+  }
+  const list = options.find((option) => defOf(option).type === "array");
+  const wrapper = options.find((option) => {
+    const def = defOf(option);
+    return (
+      def.type === "object" &&
+      def.catchall !== undefined &&
+      defOf(def.catchall).type === "never" &&
+      def.shape?.entries !== undefined
+    );
+  });
+  return list !== undefined && wrapper !== undefined ? { list, wrapper } : null;
+}
+
+/**
+ * The runtime shape for a knobbed list section: the union of the plain entry
+ * array and the strict `{undeclared, entries}` wrapper, routed by container
+ * type instead of z.union so a failing entry keeps its precise issue path.
+ */
+function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
+  return z
+    .custom<unknown>(() => true)
+    .superRefine((value, ctx) => {
+      const shape = Array.isArray(value)
+        ? list
+        : typeof value === "object" && value !== null
+          ? wrapper
+          : null;
+      if (shape === null) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "undeclared" policy), but this section parsed as ${value === null ? "null" : typeof value}`,
+        });
+        return;
+      }
+      const parsed = shape.safeParse(value);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({ ...issue });
+        }
+      }
+    });
+}
 
 /**
  * The entry type of a list section's declared value, whichever form it
@@ -331,45 +511,6 @@ export function defaultUndeclaredPolicy(
   section: SectionMeta<UndeclaredPolicySection>,
 ): UndeclaredPolicy {
   return section.undeclaredDefault;
-}
-
-/**
- * The zod shape for a knobbed list section: the union of the plain entry
- * array and the strict `{undeclared, entries}` wrapper. Routed by container
- * type instead of z.union so a failing entry keeps its precise issue path
- * (`labels[2].name`, or `labels.entries[2].name` in the wrapped form) - a
- * plain union collapses every failure into one pathless "Invalid input".
- * The wrapper is strictObject because it is this action's own vocabulary
- * (nothing in it passes through to GitHub), so an unrecognized key can only
- * be a typo.
- */
-export function undeclaredPolicyShape(list: z.ZodType): z.ZodType {
-  const wrapper = z.strictObject({
-    undeclared: z.enum(["keep", "delete"]).optional(),
-    entries: list,
-  });
-  return z
-    .custom<unknown>(() => true)
-    .superRefine((value, ctx) => {
-      const shape = Array.isArray(value)
-        ? list
-        : typeof value === "object" && value !== null
-          ? wrapper
-          : null;
-      if (shape === null) {
-        ctx.addIssue({
-          code: "custom",
-          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "undeclared" policy), but this section parsed as ${value === null ? "null" : typeof value}`,
-        });
-        return;
-      }
-      const parsed = shape.safeParse(value);
-      if (!parsed.success) {
-        for (const issue of parsed.error.issues) {
-          ctx.addIssue({ ...issue });
-        }
-      }
-    });
 }
 
 export function emptyResult(): SectionResult {

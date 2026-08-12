@@ -9,21 +9,20 @@
  * compare uppercased names.
  */
 
-import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import type { AgentsVariableConfig, UndeclaredPolicyList } from "../schema.js";
+import { type AgentsVariableConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   listAllEnveloped,
+  loosen,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 
 /** Case-insensitive key for variable names (GitHub stores them uppercased). */
@@ -65,7 +64,7 @@ export const agentsVariablesSection: SectionModule<"agents_variables"> = {
   undeclaredDefault: "delete",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(z.array(z.looseObject({ name: z.string(), value: z.string() }))),
+  shape: loosen(SettingsFile.shape.agents_variables),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const { policy, entries: desired } = undeclaredPolicy(

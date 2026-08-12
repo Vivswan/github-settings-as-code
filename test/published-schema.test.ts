@@ -3,8 +3,9 @@
  * and CI linters validate settings.yml against, so where the runtime is
  * strict the schema must be too. The wrapper keys are this action's own
  * vocabulary and the runtime rejects unknown keys in them upfront; these
- * tests pin the finalize-schema build step that closes the generated wrapper
- * definitions, and prove the closure with a real AJV round-trip.
+ * tests pin the strictObject wrapper declarations in src/schema.ts that
+ * close the emitted definitions, and prove the closure with a real AJV
+ * round-trip.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -23,7 +24,7 @@ const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json")
 
 describe("published schema identity", () => {
   test("$id is the raw copy at the moving major tag, majored from the release manifest", () => {
-    // The identity finalize-schema stamps: the raw URL at the moving
+    // The identity gen-settings-schema stamps: the raw URL at the moving
     // v<MAJOR> tag, with the major read from the same release-please
     // manifest the script derives it from - so a major bump that
     // regenerates the schema keeps this test green, while a schema whose
@@ -48,8 +49,7 @@ describe("published schema wrapper strictness", () => {
    * The nested {undeclared, entries} knobs inside a section entry
    * (environments[].variables, environments[].secrets,
    * environments[].deployment_branch_policies, and
-   * environments[].deployment_protection_rules), mirroring
-   * NESTED_POLICY_LISTS in finalize-schema.ts: each adds one wrapper
+   * environments[].deployment_protection_rules): each adds one wrapper
    * definition beyond the knobbed sections.
    */
   const NESTED_WRAPPERS = [
@@ -67,7 +67,7 @@ describe("published schema wrapper strictness", () => {
     for (const name of wrapperNames) {
       expect(
         schema.definitions[name]?.additionalProperties,
-        `${name} must carry additionalProperties: false (the finalize-schema build step sets it)`,
+        `${name} must carry additionalProperties: false (the strictObject wrapper emits it)`,
       ).toBe(false);
     }
   });
@@ -186,14 +186,44 @@ describe("published schema wrapper strictness", () => {
           ],
         }),
       ).toBe(true);
-      // The wrapper is closed (this action's own vocabulary); the entry
-      // strictness itself is runtime-only, like the nested secrets entries -
-      // the generator opens every object for passthrough sections and
-      // finalize-schema closes only the wrappers.
+      // The wrapper is closed (this action's own vocabulary), and so is
+      // the entry itself: the enable call sends only the App's resolved
+      // integration id, so the runtime shape is strict and the published
+      // schema says the same (additionalProperties: false).
       expect(
         validate({
           environments: [
             { name: "prod", deployment_protection_rules: { entires: [], entries: [] } },
+          ],
+        }),
+      ).toBe(false);
+      expect(
+        validate({
+          environments: [
+            { name: "prod", deployment_protection_rules: [{ app: "my-gate-app", extra: 1 }] },
+          ],
+        }),
+      ).toBe(false);
+    });
+
+    test("strict runtime shapes are closed in the schema too", () => {
+      // These four surfaces reject unknown keys at runtime (strictObject in
+      // src/schema.ts: no passthrough destination exists for an extra key),
+      // and the published schema must say the same - the old generator left
+      // them open, validating typos the run then failed on.
+      expect(
+        validate({
+          environments: [{ name: "prod", secrets: [{ name: "A", value: "$A", extra: 1 }] }],
+        }),
+      ).toBe(false);
+      expect(validate({ actions: { cache: { max_cache_size: 25 } } })).toBe(false);
+      expect(
+        validate({
+          branches: [
+            {
+              name: "main",
+              protection: { required_deployments: { environments: ["prod"], extra: 1 } },
+            },
           ],
         }),
       ).toBe(false);
@@ -216,7 +246,7 @@ describe("published schema wrapper strictness", () => {
     });
 
     test("the branch-policies flag pairing is enforced, agreeing with the runtime per fixture", () => {
-      // The if/then finalize-schema stamps onto EnvironmentConfig, run
+      // The if/then the EnvironmentConfig schema's meta stamps, run
       // against the ONE shared fixture set the zod superRefine is also
       // tested with - and, per fixture, the AJV verdict must agree with
       // validateSectionShapes (null = valid), so the schema copy of the

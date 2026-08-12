@@ -9,18 +9,17 @@
  * the wrapped `undeclared: delete` form opts into deletion.
  */
 
-import { z } from "zod";
-import type { ActionsSecretConfig, UndeclaredPolicyList } from "../schema.js";
+import { type ActionsSecretConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   listAllEnveloped,
+  loosen,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 import {
   listSecretValues,
@@ -78,7 +77,7 @@ export const actionsSecretsSection: SectionModule<"actions_secrets"> = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(z.array(z.looseObject({ name: z.string(), value: z.string() }))),
+  shape: loosen(SettingsFile.shape.actions_secrets),
   // The engine's shared list extractor: the declared value of every entry,
   // for the up-front reference resolution.
   secretValues: listSecretValues,

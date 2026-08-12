@@ -2,8 +2,8 @@
  * The environments flag-pairing invariant (declaring
  * deployment_branch_policies requires a sibling deployment_branch_policy
  * with custom_branch_policies: true) is implemented TWICE: the runtime zod
- * superRefine in src/sections/environments.ts and the JSON Schema if/then
- * that .github/scripts/finalize-schema.ts stamps onto the published schema.
+ * superRefine on the EnvironmentConfig schema and the JSON Schema if/then
+ * its meta stamps onto the published schema (both in src/schema.ts).
  * These fixtures are the one set both implementations are tested against -
  * the published-schema test runs them through AJV, the environments section
  * test through the zod shape, and an agreement test asserts the two verdicts

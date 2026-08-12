@@ -4,13 +4,13 @@
  * created (workflow files are code, not settings).
  */
 
-import { z } from "zod";
-import type { MustBeNever, WorkflowConfig } from "../schema.js";
+import { type MustBeNever, SettingsFile, type WorkflowConfig } from "../schema.js";
 import {
   call,
   type EndpointDecl,
   emptyResult,
   listAllEnveloped,
+  loosen,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
@@ -50,7 +50,7 @@ export const workflowsSection: SectionModule<"workflows"> = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
-  shape: z.array(z.looseObject({ path: z.string(), state: z.enum(["active", "disabled"]) })),
+  shape: loosen(SettingsFile.shape.workflows),
   // Closed surface: the enable/disable PUTs carry no body at all, so an
   // extra key here can only be a typo that would silently do nothing.
   closedSurface: {

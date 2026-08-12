@@ -4,12 +4,14 @@
  */
 
 import { subsetDiff } from "../engine/diff.js";
+import { SettingsFile } from "../schema.js";
 import {
-  anyRecord,
   call,
   type EndpointDecl,
   emptyResult,
   expand,
+  loosen,
+  requirePlainMapping,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
@@ -40,7 +42,7 @@ export const codeScanningDefaultSetupSection: SectionModule<"code_scanning_defau
   grantCaveat:
     "a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived",
   endpoints: ENDPOINTS,
-  shape: anyRecord,
+  shape: requirePlainMapping(loosen(SettingsFile.shape.code_scanning_default_setup)),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as Record<string, unknown>;

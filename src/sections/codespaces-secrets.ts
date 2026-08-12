@@ -18,18 +18,17 @@
  * grant fails the list exactly like a missing one.
  */
 
-import { z } from "zod";
-import type { CodespacesSecretConfig, UndeclaredPolicyList } from "../schema.js";
+import { type CodespacesSecretConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   listAllEnveloped,
+  loosen,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 import {
   listSecretValues,
@@ -89,7 +88,7 @@ export const codespacesSecretsSection: SectionModule<"codespaces_secrets"> = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(z.array(z.looseObject({ name: z.string(), value: z.string() }))),
+  shape: loosen(SettingsFile.shape.codespaces_secrets),
   // The engine's shared list extractor: the declared value of every entry,
   // for the up-front reference resolution.
   secretValues: listSecretValues,

@@ -5,21 +5,20 @@
  * `undeclared: delete` form hardens that to deletion, detachment included.
  */
 
-import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import type { MilestoneConfig, UndeclaredPolicyList } from "../schema.js";
+import { type MilestoneConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
   type EndpointDecl,
   emptyResult,
   listAll,
+  loosen,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-  undeclaredPolicyShape,
 } from "./contract.js";
 
 interface LiveMilestone {
@@ -52,7 +51,7 @@ export const milestonesSection: SectionModule<"milestones"> = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: undeclaredPolicyShape(z.array(z.looseObject({ title: z.string() }))),
+  shape: loosen(SettingsFile.shape.milestones),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const { policy, entries: desired } = undeclaredPolicy(

@@ -6,13 +6,13 @@
  * verbatim to the base permissions PUT.
  */
 
-import { z } from "zod";
 import { subsetDiff } from "../engine/diff.js";
-import type { ActionsConfig } from "../schema.js";
+import { type ActionsConfig, SettingsFile } from "../schema.js";
 import {
   call,
   type EndpointDecl,
   emptyResult,
+  loosen,
   probeAbsent,
   type SectionModule,
   type SectionPermission,
@@ -197,77 +197,13 @@ function sameClaimKeyOrder(declared: readonly string[], live: readonly unknown[]
   return declared.length === live.length && declared.every((key, index) => live[index] === key);
 }
 
-/**
- * Top level and retention stay loose (unknown keys pass through to their
- * PUT bodies verbatim), but cache is strict: each cache limit is the entire
- * body of its own endpoint, so an unrecognized cache key has no passthrough
- * destination and can only be a typo. Rejected upfront by validate.ts,
- * before any section writes.
- */
-const shape = z
-  .looseObject({
-    artifact_and_log_retention: z.looseObject({ days: z.number() }).optional(),
-    cache: z
-      .strictObject({
-        max_cache_retention_days: z.number().optional(),
-        max_cache_size_gb: z.number().optional(),
-      })
-      .optional(),
-    // The positional claim-key comparator below needs a shape-guaranteed
-    // string array, and the subject-format flag is a YAML boolean-gotcha
-    // magnet; the rest of the object stays loose (future fields ride the
-    // PUT verbatim).
-    oidc_customization_sub: z
-      .looseObject({
-        use_default: z.boolean(),
-        include_claim_keys: z.array(z.string()).optional(),
-        use_immutable_subject: z.boolean().optional(),
-      })
-      .optional(),
-    // The one field each PUT requires must be present before any section
-    // writes (the private-repos flag is also a YAML boolean-gotcha magnet);
-    // the rest of each object rides the PUT verbatim.
-    fork_pr_contributor_approval: z.looseObject({ approval_policy: z.string() }).optional(),
-    // All four toggles are REQUIRED: GitHub does not document whether an
-    // omitted toggle is preserved or reset by the PUT, so the file declares
-    // the complete policy and upstream omission semantics can never matter.
-    // Future fields still ride the looseObject verbatim.
-    fork_pr_workflows_private_repos: z
-      .looseObject({
-        run_workflows_from_fork_pull_requests: z.boolean(),
-        send_write_tokens_to_workflows: z.boolean(),
-        send_secrets_and_variables: z.boolean(),
-        require_approval_for_fork_pr_workflows: z.boolean(),
-      })
-      .optional(),
-  })
-  .superRefine((declared, refineCtx) => {
-    // The policy-allowlist contradiction lives HERE, in the shape, not in
-    // run(): upfront document validation rejects the document in BOTH modes
-    // before ANY section writes. A run()-time throw would fire only when this
-    // section runs, after earlier sections already wrote - half-applying the
-    // run (the environments flag-pairing precedent). Both keys are loose
-    // passthrough keys, so they are read off the parsed record.
-    const record = declared as Record<string, unknown>;
-    if (record.selected_actions === undefined || record.allowed_actions === undefined) {
-      return;
-    }
-    if (record.allowed_actions !== "selected") {
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["selected_actions"],
-        message: `selected_actions is declared together with allowed_actions: "${record.allowed_actions}", but an allowlist only applies under allowed_actions: "selected". Set allowed_actions to "selected", or remove selected_actions`,
-      });
-    }
-  });
-
 export const actionsSection: SectionModule<"actions"> = {
   key: "actions",
   undeclaredDefault: "untouched",
   permission,
   grantCaveat: 'the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
   endpoints: ENDPOINTS,
-  shape,
+  shape: loosen(SettingsFile.shape.actions),
   async run(ctx, desiredRaw): Promise<SectionResult> {
     const result = emptyResult();
     const desired = desiredRaw as ActionsConfig;
