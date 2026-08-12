@@ -9,8 +9,12 @@
  * compare uppercased names.
  */
 
-import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import { type ActionsVariableConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import {
+  type ActionsVariableConfig,
+  SettingsFile,
+  type UndeclaredPolicyList,
+} from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -23,7 +27,7 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 
 /** Case-insensitive key for variable names (GitHub stores them uppercased). */
 export function variableKey(name: string): string {
