@@ -16,7 +16,7 @@ import { agentsSecretsSection } from "./agents_secrets/index.js";
 import { agentsVariablesSection } from "./agents_variables/index.js";
 import { autolinksSection } from "./autolinks/index.js";
 import { branchesSection } from "./branches.js";
-import { checkSuitePreferencesSection } from "./check-suite-preferences.js";
+import { checkSuitePreferencesSection } from "./check_suite_preferences/index.js";
 import { codeQualitySetupSection } from "./code_quality_setup/index.js";
 import { codeScanningDefaultSetupSection } from "./code_scanning_default_setup/index.js";
 import { codespacesSecretsSection } from "./codespaces_secrets/index.js";

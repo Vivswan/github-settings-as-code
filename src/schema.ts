@@ -35,6 +35,7 @@ import { ActionsVariableConfig } from "./sections/actions_variables/schema.js";
 import { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
 import { AgentsVariableConfig } from "./sections/agents_variables/schema.js";
 import { AutolinkConfig } from "./sections/autolinks/schema.js";
+import { CheckSuitePreferencesConfig } from "./sections/check_suite_preferences/schema.js";
 import { CodeQualitySetupConfig } from "./sections/code_quality_setup/schema.js";
 import { CodeScanningDefaultSetupConfig } from "./sections/code_scanning_default_setup/schema.js";
 import { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
@@ -51,6 +52,10 @@ export { ActionsVariableConfig } from "./sections/actions_variables/schema.js";
 export { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
 export { AgentsVariableConfig } from "./sections/agents_variables/schema.js";
 export { AutolinkConfig } from "./sections/autolinks/schema.js";
+export {
+  AutoTriggerCheckConfig,
+  CheckSuitePreferencesConfig,
+} from "./sections/check_suite_preferences/schema.js";
 export { CodeQualitySetupConfig } from "./sections/code_quality_setup/schema.js";
 export { CodeScanningDefaultSetupConfig } from "./sections/code_scanning_default_setup/schema.js";
 export { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
@@ -628,32 +633,6 @@ export const WorkflowConfig = z
   )
   .meta({ id: "WorkflowConfig" });
 export type WorkflowConfig = z.infer<typeof WorkflowConfig>;
-
-export const AutoTriggerCheckConfig = z
-  .object({
-    app_id: z.int().describe("The id of the GitHub App the preference applies to."),
-    setting: z
-      .boolean()
-      .describe(
-        "Whether pushes automatically create check suites for this app; GitHub defaults each app to true.",
-      ),
-  })
-  .describe("One per-app auto-trigger toggle. Extra fields pass through verbatim.")
-  .meta({ id: "AutoTriggerCheckConfig" });
-export type AutoTriggerCheckConfig = z.infer<typeof AutoTriggerCheckConfig>;
-
-export const CheckSuitePreferencesConfig = z
-  .looseObject({
-    auto_trigger_checks: z
-      .array(AutoTriggerCheckConfig)
-      .describe("Per-app toggles for whether pushes automatically create check suites."),
-  })
-  .catchall(z.unknown().describe("Future preference fields pass through verbatim."))
-  .describe(
-    "PATCH /repos/{r}/check-suites/preferences, sent verbatim. Write-only upstream: GitHub exposes no read endpoint for these preferences, so check mode cannot verify them and apply re-asserts the declared preferences on every run.",
-  )
-  .meta({ id: "CheckSuitePreferencesConfig" });
-export type CheckSuitePreferencesConfig = z.infer<typeof CheckSuitePreferencesConfig>;
 
 export const CollaboratorConfig = z
   .object({

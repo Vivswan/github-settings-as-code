@@ -7,7 +7,7 @@
  * on every run (the 200 echoes the resulting preferences).
  */
 
-import { type CheckSuitePreferencesConfig, SettingsFile } from "../schema.js";
+import { type CheckSuitePreferencesConfig, SettingsFile } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -16,7 +16,7 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
-} from "./contract.js";
+} from "../contract.js";
 
 const permission: SectionPermission = { repo: ["checks"] };
 
