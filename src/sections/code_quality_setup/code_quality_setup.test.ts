@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { codeQualitySetupSection } from "../../src/sections/code-quality.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { codeQualitySetupSection } from "./index.js";
 
 describe("code_quality_setup", () => {
   const path = "/repos/o/r/code-quality/setup";

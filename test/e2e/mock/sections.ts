@@ -20,6 +20,7 @@ import { actionsVariablesMockHandlers } from "../../../src/sections/actions_vari
 import { agentsSecretsMockHandlers } from "../../../src/sections/agents_secrets/mock.js";
 import { agentsVariablesMockHandlers } from "../../../src/sections/agents_variables/mock.js";
 import { autolinksMockHandlers } from "../../../src/sections/autolinks/mock.js";
+import { codeQualitySetupMockHandlers } from "../../../src/sections/code_quality_setup/mock.js";
 import { codeScanningDefaultSetupMockHandlers } from "../../../src/sections/code_scanning_default_setup/mock.js";
 import { codespacesSecretsMockHandlers } from "../../../src/sections/codespaces_secrets/mock.js";
 import { customPropertiesMockHandlers } from "../../../src/sections/custom_properties/mock.js";
@@ -712,35 +713,6 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
   },
 
   // pages: moved to src/sections/pages/mock.ts
-
-  // code_quality_setup ------------------------------------------------------
-  "code_quality_setup.get": ({ state }) => ok(state.code_quality),
-  "code_quality_setup.update": ({ state, body }) => {
-    // Mirrors code_scanning_default_setup.update: the in-progress 409 flag
-    // (set via live_state.code_quality) is checked first so a scenario can
-    // trigger it independently, then the deterministic 200-vs-202 rule - a
-    // `languages` change starts an async configuration run.
-    if (state.code_quality.configuration_run_in_progress === true) {
-      return { status: 409, body: { message: "A configuration run is already in progress" } };
-    }
-    const payload = asObject(body);
-    const changesLanguages =
-      "languages" in payload &&
-      JSON.stringify(payload.languages) !== JSON.stringify(state.code_quality.languages);
-    Object.assign(state.code_quality, payload);
-    if (changesLanguages) {
-      return {
-        status: 202,
-        body: {
-          run_id: state.nextId++,
-          run_url: `https://api.github.com/repos/${ADMIN_SLUG}/code-quality/setup/runs/1`,
-        },
-      };
-    }
-    // Like code-scanning's, the spec's 200 response is an EMPTY object
-    // (additionalProperties: false); state is still updated above.
-    return ok({});
-  },
 
   // check_suite_preferences --------------------------------------------------
   "check_suite_preferences.update": ({ state, body }) => {
@@ -1540,6 +1512,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: agentsSecretsMockHandlers },
   { rest: agentsVariablesMockHandlers },
   { rest: autolinksMockHandlers },
+  { rest: codeQualitySetupMockHandlers },
   { rest: codeScanningDefaultSetupMockHandlers },
   { rest: codespacesSecretsMockHandlers },
   { rest: customPropertiesMockHandlers },
