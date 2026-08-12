@@ -56,7 +56,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const labelsSection: SectionModule<"labels"> = {
+export const labelsSection = {
   key: "labels",
   undeclaredDefault: "delete",
   permission,
@@ -207,4 +207,4 @@ export const labelsSection: SectionModule<"labels"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"labels">;

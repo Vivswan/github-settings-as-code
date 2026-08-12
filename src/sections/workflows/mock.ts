@@ -5,9 +5,14 @@
  * reaches lib/index.js - and never routes.ts or sections.ts.
  */
 
-import { type Handler, noContent, ok, slicePage } from "../../../test/e2e/mock/support.js";
+import {
+  noContent,
+  ok,
+  type SectionRestHandlers,
+  slicePage,
+} from "../../../test/e2e/mock/support.js";
 
-export const workflowsMockHandlers: Record<string, Handler> = {
+export const workflowsMockHandlers: SectionRestHandlers<"workflows"> = {
   "workflows.list": ({ state, query }) => {
     const page = slicePage(state.workflows, query);
     return ok({ total_count: state.workflows.length, workflows: page });

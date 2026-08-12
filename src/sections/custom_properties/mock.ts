@@ -12,14 +12,14 @@
 import { CUSTOM_PROPERTY_DEFINITIONS } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
-  type Handler,
   type Json,
   noContent,
   ok,
   orgProbeHandler,
+  type SectionRestHandlers,
 } from "../../../test/e2e/mock/support.js";
 
-export const customPropertiesMockHandlers: Record<string, Handler> = {
+export const customPropertiesMockHandlers: SectionRestHandlers<"custom_properties"> = {
   "custom_properties.org": orgProbeHandler,
   // Not paginated upstream: the single GET returns every value.
   "custom_properties.list": ({ state }) => ok(state.custom_property_values),

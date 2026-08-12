@@ -40,7 +40,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const teamsSection: SectionModule<"teams"> = {
+export const teamsSection = {
   key: "teams",
   undeclaredDefault: "untouched",
   permission,
@@ -110,4 +110,4 @@ export const teamsSection: SectionModule<"teams"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"teams">;

@@ -8,19 +8,18 @@
  * constructed.
  */
 
-import { allEndpoints } from "../../../src/sections/registry.js";
+import { allEndpoints, type SectionEndpointKey } from "../../../src/sections/registry.js";
 import type { MockState } from "./state.js";
 import type { Handler } from "./support.js";
 
 export function handlerTestContext(
-  key: string,
+  key: SectionEndpointKey,
   state: MockState,
   opts: { body?: unknown; params?: Record<string, string>; query?: Record<string, string> } = {},
 ): Parameters<Handler>[0] {
+  // The key union already proves the endpoint exists; the lookup needs no
+  // runtime guard.
   const endpoint = allEndpoints()[key];
-  if (endpoint === undefined) {
-    throw new Error(`handlerTestContext: "${key}" is not a declared section endpoint`);
-  }
   return {
     state,
     endpoint,

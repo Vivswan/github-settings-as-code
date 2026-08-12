@@ -57,12 +57,26 @@ export interface SectionResult {
   notes: string[];
 }
 
+/** A section's REST endpoint dictionary: role -> declaration. */
+type EndpointDict = Readonly<Record<string, EndpointDecl>>;
+
+/** A section's GraphQL operation dictionary: role -> declaration. */
+type GraphqlDict = Readonly<Record<string, GraphqlOpDecl>>;
+
 /**
  * The identity every helper needs to classify an error: the section's key
  * and its fine-grained-PAT grant advice. Handlers pass `this`, so the
- * advice always travels with the section that owns it.
+ * advice always travels with the section that owns it. `E` and `G` carry
+ * the section's LITERAL endpoint and GraphQL dictionaries (each module
+ * declares them `as const`), so the `${key}.${role}` key unions the
+ * registry derives - and everything downstream of them: the e2e mock's
+ * handler tables, its dispatch, USED_PATHS - are exact types, not strings.
  */
-export interface SectionMeta<K extends SectionKey = SectionKey> {
+export interface SectionMeta<
+  K extends SectionKey = SectionKey,
+  E extends EndpointDict = EndpointDict,
+  G extends GraphqlDict = GraphqlDict,
+> {
   readonly key: K;
   /**
    * The machine-readable permission this section requires, from which its
@@ -95,14 +109,14 @@ export interface SectionMeta<K extends SectionKey = SectionKey> {
    * declarations to the request helpers; the mock server and USED_PATHS
    * derivation iterate Object.values(...).
    */
-  readonly endpoints: Readonly<Record<string, EndpointDecl>>;
+  readonly endpoints: E;
   /**
    * Every GraphQL operation this section may issue, keyed by role exactly
    * like `endpoints`. Handlers pass these declarations to the GraphQL
    * request helpers; the mock's dispatch table, the coverage tripwire, and
    * the fuzz oracle iterate allGraphqlOps(). Omitted by REST-only sections.
    */
-  readonly graphql?: Readonly<Record<string, GraphqlOpDecl>>;
+  readonly graphql?: G;
   /**
    * The DEFAULT policy for live resources this section does NOT declare, the
    * single source the README Sections table and COVERAGE derive their
@@ -243,7 +257,11 @@ type SectionInput<K extends SectionKey> = Exclude<SettingsFile[K], undefined>;
  * (SectionMeta), the loose shape validation accepts for its declared
  * value, and the handler. Modules register in ./registry.ts.
  */
-export interface SectionModule<K extends SectionKey = SectionKey> extends SectionMeta<K> {
+export interface SectionModule<
+  K extends SectionKey = SectionKey,
+  E extends EndpointDict = EndpointDict,
+  G extends GraphqlDict = GraphqlDict,
+> extends SectionMeta<K, E, G> {
   /**
    * Loose zod shape for the declared value: only the natural keys the
    * handler needs are checked, and unknown fields pass through untouched,

@@ -9,16 +9,16 @@
 import {
   asObject,
   findLabel,
-  type Handler,
   type Json,
   LABEL_CANONICAL_KEYS,
   labelName,
   noContent,
   ok,
+  type SectionRestHandlers,
   slicePage,
 } from "../../../test/e2e/mock/support.js";
 
-export const labelsMockHandlers: Record<string, Handler> = {
+export const labelsMockHandlers: SectionRestHandlers<"labels"> = {
   "labels.list": ({ state, query }) => ok(slicePage(state.labels, query)),
   "labels.create": ({ state, body }) => {
     const payload = asObject(body);

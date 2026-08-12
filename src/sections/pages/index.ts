@@ -31,7 +31,7 @@ const ENDPOINTS = {
   remove: { route: "DELETE /repos/{owner}/{repo}/pages", statuses: { 204: "Pages disabled" } },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const pagesSection: SectionModule<"pages"> = {
+export const pagesSection = {
   key: "pages",
   undeclaredDefault: "untouched",
   permission,
@@ -114,4 +114,4 @@ export const pagesSection: SectionModule<"pages"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"pages">;

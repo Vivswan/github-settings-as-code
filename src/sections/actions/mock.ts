@@ -5,9 +5,14 @@
  * reaches lib/index.js - and never routes.ts or sections.ts.
  */
 
-import { asObject, type Handler, noContent, ok } from "../../../test/e2e/mock/support.js";
+import {
+  asObject,
+  noContent,
+  ok,
+  type SectionRestHandlers,
+} from "../../../test/e2e/mock/support.js";
 
-export const actionsMockHandlers: Record<string, Handler> = {
+export const actionsMockHandlers: SectionRestHandlers<"actions"> = {
   "actions.getPermissions": ({ state }) => ok(state.actions_permissions),
   "actions.putPermissions": ({ state, body }) => {
     state.actions_permissions = asObject(body);

@@ -145,7 +145,7 @@ async function liveBypassLogins(ctx: SectionContext, section: SectionMeta): Prom
   return live.map((user) => String((user as Record<string, unknown>).login));
 }
 
-export const interactionLimitsSection: SectionModule<"interaction_limits"> = {
+export const interactionLimitsSection = {
   key: "interaction_limits",
   undeclaredDefault: "untouched",
   permission,
@@ -335,4 +335,4 @@ export const interactionLimitsSection: SectionModule<"interaction_limits"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"interaction_limits">;

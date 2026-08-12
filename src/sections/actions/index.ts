@@ -197,7 +197,7 @@ function sameClaimKeyOrder(declared: readonly string[], live: readonly unknown[]
   return declared.length === live.length && declared.every((key, index) => live[index] === key);
 }
 
-export const actionsSection: SectionModule<"actions"> = {
+export const actionsSection = {
   key: "actions",
   undeclaredDefault: "untouched",
   permission,
@@ -407,4 +407,4 @@ export const actionsSection: SectionModule<"actions"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"actions">;

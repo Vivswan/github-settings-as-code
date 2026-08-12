@@ -8,19 +8,19 @@ import { restRepoSurface } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
   booleanToggleGet,
-  type GraphqlHandler,
-  type Handler,
   IMMUTABLE_OWNER_CONFLICT,
   noContent,
   ok,
   repoFeatureFields,
   repoNodeId,
+  type SectionGraphqlHandlers,
+  type SectionRestHandlers,
 } from "../../../test/e2e/mock/support.js";
 
 // Every repo body a REST handler serves - and the PATCH body it accepts -
 // goes through restRepoSurface, which strips the GraphQL-only fields
 // (state.ts), so the REST paths stay as blind to them as real GitHub's.
-export const repositoryMockHandlers: Record<string, Handler> = {
+export const repositoryMockHandlers: SectionRestHandlers<"repository"> = {
   "repository.get": ({ state }) => ok(restRepoSurface(state.repo)),
   "repository.update": ({ state, body }) => {
     Object.assign(state.repo, restRepoSurface(asObject(body)));
@@ -109,7 +109,7 @@ export const repositoryMockHandlers: Record<string, Handler> = {
 // every REST handler (restRepoSurface): the read serves both plus the repo's
 // canonical minted node id, the mutation resolves its target back through
 // the codec.
-export const repositoryMockGraphqlHandlers: Record<string, GraphqlHandler> = {
+export const repositoryMockGraphqlHandlers: SectionGraphqlHandlers<"repository"> = {
   "repository.featuresQuery": ({ state }) => ({
     data: { repository: { id: repoNodeId(state), ...repoFeatureFields(state) } },
   }),

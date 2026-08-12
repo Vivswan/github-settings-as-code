@@ -8,15 +8,15 @@
 
 import {
   asObject,
-  type Handler,
   type Json,
   noContent,
   ok,
+  type SectionRestHandlers,
   slicePage,
   storedKeyMaterial,
 } from "../../../test/e2e/mock/support.js";
 
-export const deployKeysMockHandlers: Record<string, Handler> = {
+export const deployKeysMockHandlers: SectionRestHandlers<"deploy_keys"> = {
   "deploy_keys.list": ({ state, query }) => ok(slicePage(state.deploy_keys, query)),
   "deploy_keys.create": ({ state, body }) => {
     const payload = asObject(body);

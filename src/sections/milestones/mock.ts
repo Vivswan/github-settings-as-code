@@ -8,15 +8,15 @@
 
 import {
   asObject,
-  type Handler,
   type Json,
   nextNumber,
   noContent,
   ok,
+  type SectionRestHandlers,
   slicePage,
 } from "../../../test/e2e/mock/support.js";
 
-export const milestonesMockHandlers: Record<string, Handler> = {
+export const milestonesMockHandlers: SectionRestHandlers<"milestones"> = {
   "milestones.list": ({ state, query }) => ok(slicePage(state.milestones, query)),
   "milestones.create": ({ state, body }) => {
     const payload = asObject(body);

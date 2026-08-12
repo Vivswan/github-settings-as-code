@@ -18,17 +18,17 @@ import {
 } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
-  type GraphqlHandler,
   type GraphqlHandlerResult,
-  type Handler,
   integrationBody,
   type Json,
   noContent,
   ok,
   repoNodeId,
+  type SectionGraphqlHandlers,
+  type SectionRestHandlers,
 } from "../../../test/e2e/mock/support.js";
 
-export const branchesMockHandlers: Record<string, Handler> = {
+export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   "branches.getProtection": ({ state, param }) => {
     const branch = param("branch");
     const protection = state.branch_protection[branch];
@@ -111,7 +111,7 @@ export const branchesMockHandlers: Record<string, Handler> = {
   },
 };
 
-export const branchesMockGraphqlHandlers: Record<string, GraphqlHandler> = {
+export const branchesMockGraphqlHandlers: SectionGraphqlHandlers<"branches"> = {
   "branches.rulesQuery": ({ state }) => ({
     data: {
       repository: {
@@ -226,7 +226,7 @@ export const branchesMockGraphqlHandlers: Record<string, GraphqlHandler> = {
         },
       ],
     };
-    if (!decoded || decoded.family !== "rule") {
+    if (decoded?.family !== "rule") {
       return notFound;
     }
     const pattern = decoded.key;
@@ -283,7 +283,7 @@ export const branchesMockGraphqlHandlers: Record<string, GraphqlHandler> = {
     const input = asObject((variables as Json).input);
     const id = String(input.branchProtectionRuleId ?? "");
     const decoded = decodeNodeId(id);
-    if (!decoded || decoded.family !== "rule") {
+    if (decoded?.family !== "rule") {
       return {
         errors: [
           {

@@ -434,6 +434,14 @@ export async function runForRepo(
         break;
     }
     const desired = settings[section.key];
+    if (desired === undefined) {
+      // disposition() already classified this section "active", which
+      // requires a declared value; reaching here is an engine bug, and
+      // probing on undefined would violate run()'s SectionInput contract.
+      throw new Error(
+        `BUG: section "${section.key}" was classified active but the settings document does not declare it`,
+      );
+    }
     let result: SectionResult;
     try {
       result = await section.run(runCtx, desired);

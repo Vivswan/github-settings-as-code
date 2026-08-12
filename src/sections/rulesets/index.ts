@@ -101,7 +101,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const rulesetsSection: SectionModule<"rulesets"> = {
+export const rulesetsSection = {
   key: "rulesets",
   undeclaredDefault: "keep",
   permission,
@@ -188,4 +188,4 @@ export const rulesetsSection: SectionModule<"rulesets"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"rulesets">;

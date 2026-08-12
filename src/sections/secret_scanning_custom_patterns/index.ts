@@ -158,7 +158,7 @@ function createBody(declared: SecretScanningPatternConfig): Record<string, unkno
   return body;
 }
 
-export const secretScanningPatternsSection: SectionModule<"secret_scanning_custom_patterns"> = {
+export const secretScanningPatternsSection = {
   key: "secret_scanning_custom_patterns",
   undeclaredDefault: "keep",
   permission,
@@ -315,4 +315,4 @@ export const secretScanningPatternsSection: SectionModule<"secret_scanning_custo
     }
     return result;
   },
-};
+} satisfies SectionModule<"secret_scanning_custom_patterns">;

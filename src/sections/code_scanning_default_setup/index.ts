@@ -35,7 +35,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const codeScanningDefaultSetupSection: SectionModule<"code_scanning_default_setup"> = {
+export const codeScanningDefaultSetupSection = {
   key: "code_scanning_default_setup",
   undeclaredDefault: "untouched",
   permission,
@@ -73,4 +73,4 @@ export const codeScanningDefaultSetupSection: SectionModule<"code_scanning_defau
     }
     return result;
   },
-};
+} satisfies SectionModule<"code_scanning_default_setup">;

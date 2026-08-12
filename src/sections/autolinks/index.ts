@@ -37,7 +37,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const autolinksSection: SectionModule<"autolinks"> = {
+export const autolinksSection = {
   key: "autolinks",
   undeclaredDefault: "delete",
   permission,
@@ -127,4 +127,4 @@ export const autolinksSection: SectionModule<"autolinks"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"autolinks">;

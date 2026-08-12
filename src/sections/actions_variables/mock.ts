@@ -7,17 +7,17 @@
 
 import {
   asObject,
-  type Handler,
   type Json,
   noContent,
   ok,
+  type SectionRestHandlers,
   slicePage,
   VARIABLE_CANONICAL_KEYS,
   variableName,
 } from "../../../test/e2e/mock/support.js";
-import { allEndpoints } from "../registry.js";
+import { actionsVariablesSection } from "./index.js";
 
-export const actionsVariablesMockHandlers: Record<string, Handler> = {
+export const actionsVariablesMockHandlers: SectionRestHandlers<"actions_variables"> = {
   "actions_variables.list": ({ state, query }) => {
     // The cap comes from the endpoint DECLARATION, the same single source
     // the client's page loop and the spec-derived pageSize sweep read - so
@@ -25,7 +25,7 @@ export const actionsVariablesMockHandlers: Record<string, Handler> = {
     const page = slicePage(
       state.actions_variables,
       query,
-      allEndpoints()["actions_variables.list"]?.pageSize,
+      actionsVariablesSection.endpoints.list.pageSize,
     );
     return ok({ total_count: state.actions_variables.length, variables: page });
   },

@@ -10,16 +10,16 @@ import {
   asObject,
   bypassLogins,
   CAP_UNAVAILABLE_405,
-  type Handler,
   INTERACTION_EXPIRES,
   INTERACTION_ORG_CONFLICT,
   INTERACTION_ORG_LIMIT,
   noContent,
   ok,
+  type SectionRestHandlers,
   sameLogin,
 } from "../../../test/e2e/mock/support.js";
 
-export const interactionLimitsMockHandlers: Record<string, Handler> = {
+export const interactionLimitsMockHandlers: SectionRestHandlers<"interaction_limits"> = {
   "interaction_limits.get": ({ state }) =>
     // A literal empty object is GitHub's "no limit set" answer (the spec's
     // empty-object anyOf branch), never null or a 404. When the org-override

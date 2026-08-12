@@ -11,12 +11,10 @@ import { handlerTestContext } from "../../../test/e2e/mock/handler-test-ctx.js";
 import { buildStateForSlug, type MockState } from "../../../test/e2e/mock/state.js";
 import { pagesMockHandlers } from "./mock.js";
 
-function handler(key: string): NonNullable<(typeof pagesMockHandlers)[string]> {
-  const found = pagesMockHandlers[key];
-  if (!found) {
-    throw new Error(`pages mock fragment declares no "${key}" handler`);
-  }
-  return found;
+// The fragment's exact key union makes a typo'd key a compile error, so no
+// runtime not-found guard is needed here.
+function handler<K extends keyof typeof pagesMockHandlers>(key: K): (typeof pagesMockHandlers)[K] {
+  return pagesMockHandlers[key];
 }
 
 function slugged(pages: Record<string, unknown> | null): MockState {

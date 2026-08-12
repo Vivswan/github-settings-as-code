@@ -10,22 +10,22 @@
 
 import {
   asObject,
-  type Handler,
   type Json,
   noContent,
   ok,
+  type SectionRestHandlers,
   slicePage,
   VARIABLE_CANONICAL_KEYS,
   variableName,
 } from "../../../test/e2e/mock/support.js";
-import { allEndpoints } from "../registry.js";
+import { agentsVariablesSection } from "./index.js";
 
-export const agentsVariablesMockHandlers: Record<string, Handler> = {
+export const agentsVariablesMockHandlers: SectionRestHandlers<"agents_variables"> = {
   "agents_variables.list": ({ state, query }) => {
     const page = slicePage(
       state.agents_variables,
       query,
-      allEndpoints()["agents_variables.list"]?.pageSize,
+      agentsVariablesSection.endpoints.list.pageSize,
     );
     return ok({ total_count: state.agents_variables.length, variables: page });
   },

@@ -151,7 +151,7 @@ function describeHook(hook: LiveHook): string {
 const CANNOT_VERIFY_SECRET =
   'GitHub never reveals a webhook secret (reads echo "********"), so the declared value cannot be verified; apply re-sends it on every run so rotations propagate';
 
-export const webhooksSection: SectionModule<"webhooks"> = {
+export const webhooksSection = {
   key: "webhooks",
   undeclaredDefault: "keep",
   permission,
@@ -317,4 +317,4 @@ export const webhooksSection: SectionModule<"webhooks"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"webhooks">;

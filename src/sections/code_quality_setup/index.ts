@@ -38,7 +38,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const codeQualitySetupSection: SectionModule<"code_quality_setup"> = {
+export const codeQualitySetupSection = {
   key: "code_quality_setup",
   undeclaredDefault: "untouched",
   permission,
@@ -76,4 +76,4 @@ export const codeQualitySetupSection: SectionModule<"code_quality_setup"> = {
     }
     return result;
   },
-};
+} satisfies SectionModule<"code_quality_setup">;
