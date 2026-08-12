@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { milestonesSection } from "../../src/sections/milestones.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { milestonesSection } from "./index.js";
 
 describe("milestones undeclared policy", () => {
   const liveMilestones = [
