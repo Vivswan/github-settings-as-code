@@ -23,7 +23,7 @@ import { codespacesSecretsSection } from "./codespaces_secrets/index.js";
 import { collaboratorsSection } from "./collaborators.js";
 import type { EndpointDecl, GraphqlOpDecl, SectionModule } from "./contract.js";
 import { customPropertiesSection } from "./custom_properties/index.js";
-import { dependabotSecretsSection } from "./dependabot-secrets.js";
+import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
 import { deployKeysSection } from "./deploy-keys.js";
 import { environmentsSection } from "./environments.js";
 import { interactionLimitsSection } from "./interaction-limits.js";
