@@ -20,11 +20,11 @@ import {
   assertFaultKeys,
   assertHandlerCompleteness,
   declaredStatuses,
-  slicePage,
   statusAllowed,
 } from "./routes.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./server.js";
 import type { MockState, MultiMockState } from "./state.js";
+import { slicePage } from "./support.js";
 
 const AUTH = { authorization: "Bearer test-token", "x-github-api-version": "2022-11-28" };
 

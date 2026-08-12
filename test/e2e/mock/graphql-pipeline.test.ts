@@ -21,8 +21,6 @@ import { ADMIN_SLUG, ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constan
 import { parseScenario, type Scenario } from "../schema.js";
 import {
   assertGraphqlHandlerCompleteness,
-  type GraphqlHandlerContext,
-  type GraphqlHandlerResult,
   graphqlDenialErrors,
   handleGraphqlRequest,
   isWriteRequest,
@@ -34,6 +32,7 @@ import {
 } from "./routes.js";
 import { type MockHandle, startMockServer } from "./server.js";
 import { buildMultiState, buildState, mintNodeId } from "./state.js";
+import type { GraphqlHandlerContext, GraphqlHandlerResult } from "./support.js";
 
 type Json = Record<string, unknown>;
 type GraphqlHandler = (ctx: GraphqlHandlerContext) => GraphqlHandlerResult;
@@ -433,7 +432,7 @@ describe("GraphQL response guard and chaos", () => {
 describe("assertGraphqlHandlerCompleteness", () => {
   test("both drift directions fail loudly", () => {
     expect(() => assertGraphqlHandlerCompleteness(OPS, {})).toThrow(
-      /GraphQL operations with no mock handler in routes\.ts/,
+      /GraphQL operations with no mock handler in the section fragments \(mock\/sections\.ts\)/,
     );
     expect(() => assertGraphqlHandlerCompleteness({}, HANDLERS)).toThrow(
       /GraphQL handlers naming no declared operation/,

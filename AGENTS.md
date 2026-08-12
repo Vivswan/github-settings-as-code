@@ -92,10 +92,13 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   through `call()`/`throwFor()` so the permission policy
   (`on-missing-permission`, `required-sections`) works.
 - The end-to-end harness lives under `test/e2e/`: `run.ts` runs the curated
-  scenarios in `test/e2e/scenarios/`, `fuzz.ts` runs seeded property fuzzing,
+  scenarios (`test/e2e/scenarios/` plus each `src/sections/<key>/scenarios/`),
+  `fuzz.ts` runs seeded property fuzzing,
   `runner.ts` builds the bundle to a temp path and spawns it against the
-  mock, `mock/` is the in-process GitHub API (route table in
-  `mock/routes.ts`, state in `mock/state.ts`), and `oracle.ts` predicts
+  mock, `mock/` is the in-process GitHub API (pipeline and route table in
+  `mock/routes.ts`, per-section handler fragments in `mock/sections.ts` over
+  the shared helpers in `mock/support.ts`, state in `mock/state.ts`), and
+  `oracle.ts` predicts
   outcome classes. On-contract mock
   responses are validated against a trimmed OpenAPI spec
   (`openapi/github-openapi.trimmed.json`, a fetched gitignored artifact -
@@ -104,8 +107,10 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   media types, injected transport faults, chaos-corrupted bodies, permission
   denials, and the mock's own contract-violation replies.
 - Adding a section endpoint: declare it in the section module's `ENDPOINTS`,
-  then add a matching handler under its `section.role` key in
-  `test/e2e/mock/routes.ts`. The section route table, permission gate, and
+  then add a matching handler under its `section.role` key in the section's
+  mock fragment (`test/e2e/mock/sections.ts` for a not-yet-moved section, the
+  section's own `src/sections/<key>/mock.ts` once moved). The section route
+  table, permission gate, and
   tolerated statuses derive from `allEndpoints()`, so `assertHandlerCompleteness()`
   fails at construction if a declared endpoint has no handler or a handler names
   no endpoint. Core routes the action calls outside the sections (the repo

@@ -26,6 +26,7 @@ import {
   matchesTemplate,
 } from "../../../src/sections/contract.js";
 import { allGraphqlOps } from "../../../src/sections/registry.js";
+import { VIOLATION_PREFIX } from "../constants.js";
 import type { LoggedRequest } from "../mock/routes.js";
 import { UNDOCUMENTED_ROUTES } from "./paths.js";
 
@@ -559,8 +560,6 @@ export class OpenApiValidator {
     return violations;
   }
 }
-
-const VIOLATION_PREFIX = "E2E MOCK VIOLATION:";
 
 /**
  * True when a documented response declares NO body content: either no `content`

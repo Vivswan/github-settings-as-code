@@ -17,3 +17,13 @@ export const ADMIN_SLUG = `${ADMIN_OWNER}/${ADMIN_REPO}`;
 
 /** The token user GET /user reports; the report module reads only `login`. */
 export const TOKEN_USER_LOGIN = "e2e-token-user";
+
+/**
+ * The marker every mock-originated contract-violation reply carries in its
+ * message, so the runner and the OpenAPI validator can tell the mock's own
+ * loud failures from GitHub-shaped error bodies. Single-sourced here, in the
+ * harness's dependency-free identity module, so the validator can read it
+ * without any runtime edge into the mock pipeline (validate.ts used to keep
+ * a deliberately unlinked copy for exactly that isolation).
+ */
+export const VIOLATION_PREFIX = "E2E MOCK VIOLATION:";
