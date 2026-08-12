@@ -7,21 +7,20 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
-  call,
   defaultUndeclaredPolicy,
-  type EndpointDecl,
-  listAll,
   loosen,
-  parseLive,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, listAll } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { LabelConfig } from "./schema.js";
 

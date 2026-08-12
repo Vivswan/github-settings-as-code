@@ -7,11 +7,9 @@
  */
 
 import type { SectionKey } from "../../../src/schema.js";
-import {
-  endpointKind,
-  endpointPermission,
-  type SectionPermission,
-} from "../../../src/sections/contract.js";
+import { endpointKind } from "../../../src/sections/contract/endpoints.js";
+import { endpointPermission } from "../../../src/sections/contract/module.js";
+import type { SectionPermission } from "../../../src/sections/contract/permissions.js";
 import { SECTIONS, type TaggedEndpoint } from "../../../src/sections/registry.js";
 import type { DenialStyle, MaskGrade, MaskKey, PermissionMask } from "../schema.js";
 import type { GraphqlErrorReply, MockResponse } from "./support.js";

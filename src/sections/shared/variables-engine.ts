@@ -36,7 +36,7 @@ import {
   type SectionRun,
   undeclaredDrift,
   undeclaredNote,
-} from "../contract.js";
+} from "../contract/module.js";
 
 /** Case-insensitive key for variable names (GitHub stores them uppercased). */
 export function variableKey(name: string): string {

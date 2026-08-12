@@ -24,20 +24,19 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
-  call,
-  type EndpointDecl,
   loosen,
-  parseLive,
   requirePlainMapping,
   type SectionContext,
   type SectionMeta,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
-  tryCall,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, tryCall } from "../contract/requests.js";
 import {
   INTERACTION_LIMITS_ROUTED_KEYS,
   type InteractionLimitsConfig,

@@ -14,7 +14,7 @@ import { z } from "zod";
 import { FILTER_INPUTS } from "../../src/action/inputs.js";
 import { RESERVED_REF_PREFIXES } from "../../src/action/secret-refs.js";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
-import type { PatResource } from "../../src/sections/contract.js";
+import type { PatResource } from "../../src/sections/contract/permissions.js";
 import type { MustBeNever } from "../../src/types.js";
 import type { LiveState } from "./mock/state.js";
 import { LIVE_STATE_KEYS } from "./mock/state.js";

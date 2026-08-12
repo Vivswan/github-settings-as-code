@@ -9,7 +9,11 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SECTION_KEYS } from "../../src/schema.js";
-import { endpointMethod, endpointPath, matchesTemplate } from "../../src/sections/contract.js";
+import {
+  endpointMethod,
+  endpointPath,
+  matchesTemplate,
+} from "../../src/sections/contract/endpoints.js";
 import { allEndpoints, SECTIONS } from "../../src/sections/registry.js";
 import { defaultClaimProblems } from "./claims.js";
 import { sectionLines, tableRows } from "./markdown.js";

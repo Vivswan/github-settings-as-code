@@ -7,22 +7,20 @@
  */
 
 import { z } from "zod";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
-  call,
   defaultUndeclaredPolicy,
-  type EndpointDecl,
   loosen,
-  parseLive,
-  probeAbsent,
-  rejectDuplicates,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, probeAbsent, rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { CustomPropertyConfig } from "./schema.js";
 

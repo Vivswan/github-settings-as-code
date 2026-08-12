@@ -16,12 +16,9 @@
  * guard.
  */
 
-import {
-  endpointPath,
-  endpointPermission,
-  toleratedGraphqlErrors,
-  toleratedStatuses,
-} from "../../../src/sections/contract.js";
+import { endpointPath, toleratedStatuses } from "../../../src/sections/contract/endpoints.js";
+import { toleratedGraphqlErrors } from "../../../src/sections/contract/graphql.js";
+import { endpointPermission } from "../../../src/sections/contract/module.js";
 import { allGraphqlOps, type TaggedGraphqlOp } from "../../../src/sections/registry.js";
 import { DENIAL_SEMANTICS } from "../denial-semantics.js";
 import type { PermissionMask } from "../schema.js";

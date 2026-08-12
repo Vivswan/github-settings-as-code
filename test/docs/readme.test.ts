@@ -22,7 +22,8 @@ import {
   SettingsFile as SettingsFileSchema,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
-import { type PatResource, sectionOperations } from "../../src/sections/contract.js";
+import { sectionOperations } from "../../src/sections/contract/module.js";
+import type { PatResource } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
 import {
@@ -490,13 +491,9 @@ describe("schema.ts file-header additions claim", () => {
 
 describe("section-contract README-heading references", () => {
   const contractDir = join(ROOT, "src", "sections", "contract");
-  const contractSrc = [
-    join(ROOT, "src", "sections", "contract.ts"),
-    ...readdirSync(contractDir)
-      .filter((file) => file.endsWith(".ts"))
-      .map((file) => join(contractDir, file)),
-  ]
-    .map((file) => readFileSync(file, "utf8"))
+  const contractSrc = readdirSync(contractDir)
+    .filter((file) => file.endsWith(".ts"))
+    .map((file) => readFileSync(join(contractDir, file), "utf8"))
     .join("\n");
   // Headings count only outside fenced code blocks: the README carries a
   // "# yaml-language-server:" line inside a yaml fence that is not a heading.

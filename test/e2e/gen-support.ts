@@ -7,7 +7,7 @@
  * fragments can depend on it without an import cycle.
  */
 
-import { undeclaredPolicy } from "../../src/sections/contract.js";
+import { undeclaredPolicy } from "../../src/sections/contract/module.js";
 import type { LiveState } from "./mock/state.js";
 import type { Rng } from "./prng.js";
 

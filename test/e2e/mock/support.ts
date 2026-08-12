@@ -10,7 +10,7 @@
  */
 
 import type { SectionKey } from "../../../src/schema.js";
-import type { GraphqlTolerableError } from "../../../src/sections/contract.js";
+import type { GraphqlTolerableError } from "../../../src/sections/contract/graphql.js";
 import { type NameKey, nameKey } from "../../../src/sections/labels/index.js";
 import type {
   SectionEndpointKey,

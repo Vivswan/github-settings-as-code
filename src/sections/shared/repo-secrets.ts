@@ -14,19 +14,18 @@
 
 import type { z } from "zod";
 import type { UndeclaredPolicyList } from "../../types.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
-  call,
   defaultUndeclaredPolicy,
-  listAllEnveloped,
   loosen,
-  type PatResource,
-  parseLive,
   type SectionContext,
   type SectionModule,
   type SectionResult,
   undeclaredPolicy,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { PatResource } from "../contract/permissions.js";
+import { call, listAllEnveloped } from "../contract/requests.js";
 import {
   LIVE_SECRET_NAMES,
   listSecretValues,

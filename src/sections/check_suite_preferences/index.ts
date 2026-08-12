@@ -7,16 +7,16 @@
  * on every run (the 200 echoes the resulting preferences).
  */
 
+import type { EndpointDecl } from "../contract/endpoints.js";
 import {
   beginRun,
-  call,
-  type EndpointDecl,
   loosen,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
   writeOnlyCheckNote,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call } from "../contract/requests.js";
 import { CheckSuitePreferencesConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["checks"] };

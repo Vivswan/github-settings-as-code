@@ -14,7 +14,7 @@ import {
 } from "../../../test/e2e/mock/secrets.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
-import type { SectionContext } from "../contract.js";
+import type { SectionContext } from "../contract/module.js";
 import { codespacesSecretsSection } from "./index.js";
 
 const LIST = "GET /repos/o/r/codespaces/secrets?per_page=100&page=1";

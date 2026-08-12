@@ -23,24 +23,22 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicyList } from "../../types.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import {
   type ApplySectionContext,
   beginRun,
-  call,
   type DeclaredSecretValue,
   defaultUndeclaredPolicy,
-  type EndpointDecl,
-  listAll,
   loosen,
-  parseLive,
-  rejectDuplicates,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, listAll, rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { WebhookConfig } from "./schema.js";
 

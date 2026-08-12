@@ -19,27 +19,26 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
+import { type EndpointDecl, expand, repoVariables } from "../contract/endpoints.js";
+import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import {
   beginRun,
-  call,
-  callGraphql,
-  type EndpointDecl,
-  expand,
-  type GraphqlOpDecl,
-  graphqlOp,
-  listGraphqlConnection,
   loosen,
-  probeAbsent,
-  rejectDuplicates,
-  repoVariables,
   type SectionContext,
   type SectionMeta,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
   type SectionRun,
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import {
+  call,
+  callGraphql,
+  listGraphqlConnection,
+  probeAbsent,
+  rejectDuplicates,
   tryCall,
-} from "../contract.js";
+} from "../contract/requests.js";
 import {
   type BranchConfig,
   BranchesSlice,

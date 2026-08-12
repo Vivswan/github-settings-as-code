@@ -8,7 +8,7 @@
 
 import type { SettingsFile } from "../schema.js";
 import { UNDECLARED_POLICY_SECTIONS } from "../schema.js";
-import { defaultUndeclaredPolicy } from "../sections/contract.js";
+import { defaultUndeclaredPolicy } from "../sections/contract/module.js";
 import { sectionModule } from "../sections/registry.js";
 import type { UndeclaredPolicy } from "../types.js";
 

@@ -13,7 +13,7 @@ import {
   unsealSecretValue,
 } from "../../../test/e2e/mock/secrets.js";
 import { MockApi } from "../../../test/mock-api.js";
-import type { SectionContext } from "../contract.js";
+import type { SectionContext } from "../contract/module.js";
 import { agentsSecretsSection } from "./index.js";
 
 const LIST = "GET /repos/o/r/agents/secrets?per_page=100&page=1";

@@ -4,16 +4,10 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import {
-  beginRun,
-  call,
-  type EndpointDecl,
-  loosen,
-  probeAbsent,
-  type SectionModule,
-  type SectionPermission,
-  type SectionResult,
-} from "../contract.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import { beginRun, loosen, type SectionModule, type SectionResult } from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, probeAbsent } from "../contract/requests.js";
 import { type PagesConfig, PagesSlice } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["pages"] };

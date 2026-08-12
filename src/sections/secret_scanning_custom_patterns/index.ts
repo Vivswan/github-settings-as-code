@@ -20,21 +20,19 @@
  * optional and nullable) writes without the check, as the API allows.
  */
 
+import type { EndpointDecl } from "../contract/endpoints.js";
 import {
   beginRun,
-  call,
   defaultUndeclaredPolicy,
-  type EndpointDecl,
-  listAll,
   loosen,
-  rejectDuplicates,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, listAll, rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { SecretScanningPatternConfig } from "./schema.js";
 

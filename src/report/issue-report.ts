@@ -25,12 +25,8 @@ import type { ApiError, GithubClient } from "../github/api.js";
 import { isPermissionError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
 import type { SettingsFile } from "../schema.js";
-import {
-  type EndpointDecl,
-  expand,
-  grantFor,
-  type SectionPermission,
-} from "../sections/contract.js";
+import { type EndpointDecl, expand } from "../sections/contract/endpoints.js";
+import { grantFor, type SectionPermission } from "../sections/contract/permissions.js";
 import { nameKey } from "../sections/labels/index.js";
 import type { LabelConfig } from "../sections/labels/schema.js";
 import type { UndeclaredPolicyList } from "../types.js";

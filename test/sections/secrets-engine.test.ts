@@ -6,7 +6,11 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { beginRun, type SectionContext, type SectionMeta } from "../../src/sections/contract.js";
+import {
+  beginRun,
+  type SectionContext,
+  type SectionMeta,
+} from "../../src/sections/contract/module.js";
 import {
   reconcileSecrets,
   rejectDuplicateSecretNames,

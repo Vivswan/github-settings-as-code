@@ -22,9 +22,9 @@ import addFormats from "ajv-formats";
 import {
   endpointMethod,
   endpointPath,
-  GRAPHQL_ERROR_TYPES,
   matchesTemplate,
-} from "../../../src/sections/contract.js";
+} from "../../../src/sections/contract/endpoints.js";
+import { GRAPHQL_ERROR_TYPES } from "../../../src/sections/contract/graphql.js";
 import { allGraphqlOps } from "../../../src/sections/registry.js";
 import { VIOLATION_PREFIX } from "../constants.js";
 import type { LoggedRequest } from "../mock/contract.js";

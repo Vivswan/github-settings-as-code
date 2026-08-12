@@ -2,25 +2,27 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import {
-  call,
-  defaultUndeclaredPolicy,
   type EndpointDecl,
   endpointKind,
   endpointPath,
-  endpointPermission,
   expand,
-  type GraphqlOpDecl,
-  type GraphqlPaginatedReadDecl,
-  grantFor,
   matchesTemplate,
-  probeAbsent,
+  toleratedStatuses,
+} from "../../src/sections/contract/endpoints.js";
+import type {
+  GraphqlOpDecl,
+  GraphqlPaginatedReadDecl,
+} from "../../src/sections/contract/graphql.js";
+import {
+  defaultUndeclaredPolicy,
+  endpointPermission,
   type SectionContext,
   type SectionMeta,
-  type SectionPermission,
   sectionGrant,
   sectionOperations,
-  toleratedStatuses,
-} from "../../src/sections/contract.js";
+} from "../../src/sections/contract/module.js";
+import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
+import { call, probeAbsent } from "../../src/sections/contract/requests.js";
 import {
   allEndpoints,
   allGraphqlOps,

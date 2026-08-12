@@ -14,7 +14,7 @@ import {
   MARKER_LABEL,
   MARKER_LABEL_CONFIG,
 } from "../../../src/report/issue-report.js";
-import { matchesTemplate } from "../../../src/sections/contract.js";
+import { matchesTemplate } from "../../../src/sections/contract/endpoints.js";
 import { ADMIN_SLUG, TOKEN_USER_LOGIN } from "../constants.js";
 import type { MaskKey, Scenario } from "../schema.js";
 import type { CoreFaultKey } from "./chaos.js";

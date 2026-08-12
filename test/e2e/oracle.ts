@@ -8,7 +8,8 @@
  */
 
 import type { SectionKey } from "../../src/schema.js";
-import { type SectionPermission, sectionOperations } from "../../src/sections/contract.js";
+import { sectionOperations } from "../../src/sections/contract/module.js";
+import type { SectionPermission } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { DENIAL_SEMANTICS } from "./denial-semantics.js";
 import { displayKeyOf, type MultiScenarioMeta, type ScenarioMeta } from "./generators.js";

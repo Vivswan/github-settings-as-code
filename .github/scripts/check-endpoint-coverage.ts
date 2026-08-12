@@ -16,7 +16,11 @@
  * route was hit; exit 1 naming the cold routes otherwise.
  */
 
-import { endpointMethod, endpointPath, matchesTemplate } from "../../src/sections/contract.js";
+import {
+  endpointMethod,
+  endpointPath,
+  matchesTemplate,
+} from "../../src/sections/contract/endpoints.js";
 import { allEndpoints, allGraphqlOps } from "../../src/sections/registry.js";
 import type { LoggedRequest } from "../../test/e2e/mock/contract.js";
 import { runScenario } from "../../test/e2e/runner.js";

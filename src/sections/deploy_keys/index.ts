@@ -15,23 +15,21 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
-  call,
   defaultUndeclaredPolicy,
-  type EndpointDecl,
-  listAll,
   loosen,
-  parseLive,
-  rejectDuplicates,
   type SectionMeta,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, listAll, rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { DeployKeyConfig } from "./schema.js";
 

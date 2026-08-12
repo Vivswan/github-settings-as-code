@@ -1,15 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { actionsSection } from "../../src/sections/actions/index.js";
+import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
+import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.js";
+import type { GraphqlOpDecl } from "../../src/sections/contract/graphql.js";
 import {
-  type EndpointDecl,
-  type GraphqlOpDecl,
-  grantFor,
-  PermissionDenied,
   type SectionMeta,
   sectionGrant,
   sectionOperations,
-  throwFor,
-} from "../../src/sections/contract.js";
+} from "../../src/sections/contract/module.js";
+import { grantFor } from "../../src/sections/contract/permissions.js";
 import { environmentsSection } from "../../src/sections/environments/index.js";
 import { repositorySection } from "../../src/sections/repository/index.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";

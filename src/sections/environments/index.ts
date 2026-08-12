@@ -25,32 +25,32 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
+import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
+import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
+import { parseLive } from "../contract/live.js";
 import {
   beginRun,
-  call,
-  callGraphql,
   type DeclaredSecretValue,
-  type EndpointDecl,
   type EntryOf,
-  type GraphqlOpDecl,
-  graphqlOp,
-  listAllEnveloped,
-  listGraphqlConnection,
   loosen,
-  parseLive,
-  probeAbsent,
-  rejectDuplicates,
-  repoVariables,
   type SectionContext,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
   type SectionRun,
-  tryCallGraphql,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import {
+  call,
+  callGraphql,
+  listAllEnveloped,
+  listGraphqlConnection,
+  probeAbsent,
+  rejectDuplicates,
+  tryCallGraphql,
+} from "../contract/requests.js";
 import {
   LIVE_SECRET_NAMES,
   listSecretValues,

@@ -7,7 +7,7 @@
  */
 
 import type { SectionKey } from "../../../src/schema.js";
-import { endpointMethod, endpointPath } from "../../../src/sections/contract.js";
+import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
 import {
   allEndpoints,
   allGraphqlOps,

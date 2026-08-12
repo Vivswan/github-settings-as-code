@@ -9,12 +9,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  grantFor,
-  overrideAdviceLevel,
-  type SectionPermission,
-  sectionOperations,
-} from "../../src/sections/contract.js";
+import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
+import { sectionOperations } from "../../src/sections/contract/module.js";
+import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
 import { allEndpoints, SECTIONS, sectionModule } from "../../src/sections/registry.js";
 import { sectionLines, tableRows } from "./markdown.js";
 

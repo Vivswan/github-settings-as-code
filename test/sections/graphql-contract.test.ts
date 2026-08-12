@@ -7,21 +7,24 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { overrideAdviceLevel, PermissionDenied } from "../../src/sections/contract/errors.js";
 import {
-  callGraphql,
   type GraphqlOpDecl,
   type GraphqlPaginatedReadDecl,
-  grantFor,
   graphqlOp,
-  listGraphqlConnection,
-  overrideAdviceLevel,
-  PermissionDenied,
+  toleratedGraphqlErrors,
+} from "../../src/sections/contract/graphql.js";
+import {
   type SectionContext,
   type SectionMeta,
   sectionGrant,
-  toleratedGraphqlErrors,
+} from "../../src/sections/contract/module.js";
+import { grantFor } from "../../src/sections/contract/permissions.js";
+import {
+  callGraphql,
+  listGraphqlConnection,
   tryCallGraphql,
-} from "../../src/sections/contract.js";
+} from "../../src/sections/contract/requests.js";
 import { MockApi } from "../mock-api.js";
 
 const section: SectionMeta = {

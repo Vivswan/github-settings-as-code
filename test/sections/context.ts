@@ -1,6 +1,6 @@
 /** Shared SectionContext factory for the per-section handler tests. */
 
-import type { ApplySectionContext, SectionContext } from "../../src/sections/contract.js";
+import type { ApplySectionContext, SectionContext } from "../../src/sections/contract/module.js";
 import type { MockApi } from "../mock-api.js";
 
 /**

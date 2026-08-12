@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { SectionContext } from "../../../src/sections/contract.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
@@ -11,6 +10,7 @@ import {
 } from "../../../test/fixtures/environment-flag-pairing.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
+import type { SectionContext } from "../contract/module.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
 import type {
   DeploymentBranchPolicyConfig,

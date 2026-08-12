@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
-import { grantFor, PermissionDenied } from "../../../src/sections/contract.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
+import { PermissionDenied } from "../contract/errors.js";
+import { grantFor } from "../contract/permissions.js";
 import { actionsSection } from "./index.js";
 // The casts on some run() inputs below simulate FUTURE keys: the runtime
 // shape passes unknown keys through verbatim, which the static config type

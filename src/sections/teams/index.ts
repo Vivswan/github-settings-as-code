@@ -3,17 +3,10 @@
  * personal account the section no-ops with a note.
  */
 
-import {
-  beginRun,
-  call,
-  type EndpointDecl,
-  loosen,
-  probeAbsent,
-  rejectDuplicates,
-  type SectionModule,
-  type SectionPermission,
-  type SectionResult,
-} from "../contract.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import { beginRun, loosen, type SectionModule, type SectionResult } from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, probeAbsent, rejectDuplicates } from "../contract/requests.js";
 import { DEFAULT_ROLE, roleForPermission } from "../roles.js";
 import { TeamsSlice } from "./schema.js";
 

@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
 import { validateSectionShapes } from "../../engine/validate.js";
-import { PermissionDenied, toleratedStatuses } from "../contract.js";
+import { toleratedStatuses } from "../contract/endpoints.js";
+import { PermissionDenied } from "../contract/errors.js";
 import { FEATURE_TOGGLES, normalizeTopics, repositorySection } from "./index.js";
 
 describe("feature-toggle write tolerances", () => {

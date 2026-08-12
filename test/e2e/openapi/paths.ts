@@ -9,7 +9,7 @@
  */
 
 import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";
-import { endpointPath } from "../../../src/sections/contract.js";
+import { endpointPath } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 

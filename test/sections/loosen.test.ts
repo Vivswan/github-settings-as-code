@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { loosen } from "../../src/sections/contract.js";
+import { loosen } from "../../src/sections/contract/module.js";
 
 describe("loosen", () => {
   test("strip objects become passthrough, and their superRefines see unknown keys", () => {

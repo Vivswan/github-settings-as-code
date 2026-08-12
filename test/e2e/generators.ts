@@ -39,7 +39,7 @@ import {
   genCollaborators,
   genInvitationsState,
 } from "../../src/sections/collaborators/generators.js";
-import { endpointMethod } from "../../src/sections/contract.js";
+import { endpointMethod } from "../../src/sections/contract/endpoints.js";
 import { genCustomProperties } from "../../src/sections/custom_properties/generators.js";
 import { genDeployKeys } from "../../src/sections/deploy_keys/generators.js";
 import { genEnvironments } from "../../src/sections/environments/generators.js";

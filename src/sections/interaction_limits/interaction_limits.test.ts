@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
-import { PermissionDenied } from "../contract.js";
+import { PermissionDenied } from "../contract/errors.js";
 import { interactionLimitsSection } from "./index.js";
 import type { InteractionLimitsConfig } from "./schema.js";
 

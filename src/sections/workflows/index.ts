@@ -5,18 +5,11 @@
  */
 
 import { z } from "zod";
-import {
-  beginRun,
-  call,
-  type EndpointDecl,
-  listAllEnveloped,
-  loosen,
-  parseLive,
-  rejectDuplicates,
-  type SectionModule,
-  type SectionPermission,
-  type SectionResult,
-} from "../contract.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
+import { beginRun, loosen, type SectionModule, type SectionResult } from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, listAllEnveloped, rejectDuplicates } from "../contract/requests.js";
 import { WorkflowsSlice } from "./schema.js";
 
 /** The fields of a live workflow this section reads; extras ride along. */

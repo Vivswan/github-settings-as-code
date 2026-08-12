@@ -19,7 +19,7 @@
 
 import type { SettingsSource, SourcedSecretValue } from "../action/secret-refs.js";
 import type { SectionKey, SettingsFile } from "../schema.js";
-import type { SectionModule } from "../sections/contract.js";
+import type { SectionModule } from "../sections/contract/module.js";
 
 /** One declared secret value, tagged with the section that declared it. */
 export interface SectionSecretValue extends SourcedSecretValue {

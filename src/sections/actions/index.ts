@@ -8,18 +8,17 @@
 
 import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
 import {
   beginRun,
-  call,
-  type EndpointDecl,
   loosen,
-  probeAbsent,
   type SectionContext,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
   type SectionRun,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, probeAbsent } from "../contract/requests.js";
 import { ActionsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };

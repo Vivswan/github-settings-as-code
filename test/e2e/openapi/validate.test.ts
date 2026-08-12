@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { endpointMethod, endpointPath } from "../../../src/sections/contract.js";
+import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/contract.js";
 import { excludeUndocumented, UNDOCUMENTED_PATHS, USED_PATHS } from "./paths.js";

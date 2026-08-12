@@ -12,7 +12,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { GithubApi } from "../../../src/github/api.js";
-import { endpointPermission } from "../../../src/sections/contract.js";
+import { endpointPermission } from "../../../src/sections/contract/module.js";
 import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
 import { parseScenario, type Scenario } from "../schema.js";

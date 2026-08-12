@@ -6,24 +6,19 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
+import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
+import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import {
   beginRun,
-  call,
-  callGraphql,
-  type EndpointDecl,
-  type GraphqlOpDecl,
-  graphqlOp,
   loosen,
-  probeAbsent,
-  repoVariables,
   requirePlainMapping,
   type SectionContext,
   type SectionMeta,
   type SectionModule,
-  type SectionPermission,
   type SectionResult,
-  tryCall,
-} from "../contract.js";
+} from "../contract/module.js";
+import type { SectionPermission } from "../contract/permissions.js";
+import { call, callGraphql, probeAbsent, tryCall } from "../contract/requests.js";
 import { RepositoryConfig } from "./schema.js";
 
 /** Topics: accept a comma-separated string or an array; lowercase, dedupe. */
