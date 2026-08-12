@@ -14,7 +14,6 @@ import { variablesSection } from "../shared/repo-variables.js";
 
 export const agentsVariablesSection = variablesSection({
   key: "agents_variables",
-  pathSegment: "agents",
   resource: "agent_variables",
   noun: "Copilot agents variable",
 });

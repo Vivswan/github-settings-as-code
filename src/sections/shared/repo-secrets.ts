@@ -23,6 +23,7 @@ import {
   type PatResource,
   parseLive,
   type SectionContext,
+  type SectionModule,
   type SectionResult,
   undeclaredPolicy,
 } from "../contract.js";
@@ -43,8 +44,21 @@ type RepoSecretsKey =
   | "codespaces_secrets"
   | "agents_secrets";
 
-/** The path segment under /repos/{owner}/{repo} a secret family lives at. */
-type SecretsSegment = "actions" | "dependabot" | "codespaces" | "agents";
+/**
+ * Each family's path segment under /repos/{owner}/{repo}, keyed by section:
+ * the factory derives the routes from THIS map, so a key paired with another
+ * family's segment (which the mock would faithfully serve, hiding the swap)
+ * is unrepresentable rather than merely unreviewed.
+ */
+const SECRETS_SEGMENTS = {
+  actions_secrets: "actions",
+  dependabot_secrets: "dependabot",
+  codespaces_secrets: "codespaces",
+  agents_secrets: "agents",
+} as const;
+
+/** The path segment a secret family lives at, derived from its key. */
+type SecretsSegment<K extends RepoSecretsKey = RepoSecretsKey> = (typeof SECRETS_SEGMENTS)[K];
 
 /**
  * The four-endpoint dictionary of one family, its routes derived from the
@@ -79,19 +93,41 @@ type RepoSecretsEndpoints<P extends SecretsSegment> = {
 /** The declared value every family accepts: the entry list, plain or wrapped. */
 type RepoSecretsDeclared = SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
 
+/**
+ * The closed entry surface every family shares, checked HERE as a fresh
+ * object literal against the same mapped type SectionModule declares it
+ * with - once per family key, since a conditional type over a generic K
+ * cannot be checked inside the factory body. Freshness is the point: the
+ * factory hands the registry a module IDENTIFIER, where excess-property
+ * checking no longer runs, so a `known` key the entry type stops carrying
+ * would otherwise compile silently for all four sections. The
+ * missing-key direction is plain assignability and still bites at the
+ * registry line.
+ */
+const CLOSED_SURFACE = {
+  known: { name: true, value: true },
+  describe: (entry: SecretEntry) => entry.name,
+  // The PUT body is built from the sealed value alone, so an extra entry key
+  // never reaches GitHub: it would apply "successfully" forever while doing
+  // nothing, which is exactly what closed surfaces exist to reject.
+  consequence: "the API body carries only the sealed value, so the key would silently do nothing",
+} satisfies ClosedSurfaceOf<"actions_secrets"> &
+  ClosedSurfaceOf<"dependabot_secrets"> &
+  ClosedSurfaceOf<"codespaces_secrets"> &
+  ClosedSurfaceOf<"agents_secrets">;
+
+/** The closedSurface declaration one section key's SectionModule requires. */
+type ClosedSurfaceOf<K extends RepoSecretsKey> = NonNullable<SectionModule<K>["closedSurface"]>;
+
 /** The module shape repoSecretsSection() mints (SectionModule<K> at the registry). */
-export interface RepoSecretsSectionModule<K extends RepoSecretsKey, P extends SecretsSegment> {
+export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
   readonly key: K;
   readonly undeclaredDefault: "keep";
   readonly permission: { readonly repo: readonly [PatResource] };
-  readonly endpoints: RepoSecretsEndpoints<P>;
+  readonly endpoints: RepoSecretsEndpoints<SecretsSegment<K>>;
   readonly shape: z.ZodType;
   readonly secretValues: typeof listSecretValues;
-  readonly closedSurface: {
-    readonly known: { readonly name: true; readonly value: true };
-    readonly describe: (entry: SecretEntry) => string;
-    readonly consequence: string;
-  };
+  readonly closedSurface: typeof CLOSED_SURFACE;
   run(ctx: SectionContext, declared: RepoSecretsDeclared): Promise<SectionResult>;
 }
 
@@ -100,13 +136,12 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey, P extends Se
  * families share - the reconcile-by-existence run, the engine wiring, the
  * closed {name, value} entry surface, the keep-by-default posture (deleted
  * secret values are unrecoverable, so deletion is opt-in via the wrapped
- * `undeclared: delete` form) - lives here once; a family supplies only its
- * key, path segment, PAT resource, noun, and (Codespaces) read grade.
+ * `undeclared: delete` form) - lives here once, and the routes derive from
+ * the key through SECRETS_SEGMENTS; a family supplies only its key, PAT
+ * resource, noun, and (Codespaces) read grade.
  */
-export function repoSecretsSection<K extends RepoSecretsKey, P extends SecretsSegment>(family: {
+export function repoSecretsSection<K extends RepoSecretsKey>(family: {
   key: K;
-  /** The API path segment: /repos/{owner}/{repo}/<segment>/secrets. */
-  pathSegment: P;
   /** The fine-grained-PAT Repository permission gating the family. */
   resource: PatResource;
   /** The output noun for notes ("Actions secret", "Dependabot secret", ...). */
@@ -118,10 +153,11 @@ export function repoSecretsSection<K extends RepoSecretsKey, P extends SecretsSe
    * write-graded by method already, so the override applies to the GETs.
    */
   accessGrade?: "write";
-}): RepoSecretsSectionModule<K, P> {
-  const { key, pathSegment, resource, noun, accessGrade } = family;
+}): RepoSecretsSectionModule<K> {
+  const { key, resource, noun, accessGrade } = family;
+  const pathSegment: SecretsSegment<K> = SECRETS_SEGMENTS[key];
   const readGrade = accessGrade === undefined ? {} : { accessGrade };
-  const endpoints: RepoSecretsEndpoints<P> = {
+  const endpoints: RepoSecretsEndpoints<SecretsSegment<K>> = {
     list: {
       route: `GET /repos/{owner}/{repo}/${pathSegment}/secrets`,
       statuses: { 200: "the secrets list (names and timestamps; never values)" },
@@ -180,15 +216,7 @@ export function repoSecretsSection<K extends RepoSecretsKey, P extends SecretsSe
     // The engine's shared list extractor: the declared value of every entry,
     // for the up-front reference resolution.
     secretValues: listSecretValues,
-    // The PUT body is built from the sealed value alone, so an extra entry key
-    // never reaches GitHub: it would apply "successfully" forever while doing
-    // nothing, which is exactly what closed surfaces exist to reject.
-    closedSurface: {
-      known: { name: true, value: true },
-      describe: (entry) => entry.name,
-      consequence:
-        "the API body carries only the sealed value, so the key would silently do nothing",
-    },
+    closedSurface: CLOSED_SURFACE,
     async run(ctx, declared): Promise<SectionResult> {
       const defaultPolicy = defaultUndeclaredPolicy(this);
       const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
