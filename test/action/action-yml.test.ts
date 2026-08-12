@@ -108,7 +108,7 @@ describe("action.yml outputs", () => {
 describe("action.yml runtime", () => {
   test("runs.using is node24 and AGENTS.md documents the same runtime", () => {
     // The runtime is a conscious pin: bumping it changes what Node the
-    // committed bundle must run on, so the change has to land here too.
+    // built bundle must run on, so the change has to land here too.
     expect(actionYml.runs.using).toBe("node24");
     // AGENTS.md tells agents which runtime the bundle targets; it must name
     // the one action.yml declares.

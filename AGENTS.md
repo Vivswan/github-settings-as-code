@@ -64,7 +64,8 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   (node24), is NOT committed on main: every workflow that executes the
   action builds it first (`bun run build:bundle`), the e2e runner builds it
   to a temp path, and the runnable bundle a `uses:` ref resolves is built
-  and committed on the release tags. `lib/` is exempt from the typography
+  and committed on the release build tags (`build/vX.Y.Z`, where the
+  moving major also points); plain `vX.Y.Z` tags are source-only. `lib/` is exempt from the typography
   check (third-party unicode in the bundle; schema JSDoc is checked at
   source) and excluded from [biome](https://biomejs.dev).
 - The apply/check engine layout: `src/main.ts` is the thin bundled

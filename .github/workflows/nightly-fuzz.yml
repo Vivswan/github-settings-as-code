@@ -1,6 +1,6 @@
 # Nightly fuzzing for the e2e property fuzzer (test/e2e/fuzz.ts): each
 # iteration generates a random scenario, predicts its outcome class with the
-# oracle, and runs the committed bundle against the mock. Failing iterations
+# oracle, and runs the freshly built bundle against the mock. Failing iterations
 # dump artifact directories with contract-shaped report.md files (title +
 # replay block), which the fuzz-issue steps below turn into one deduplicated
 # tracking issue. Repo-owned: generated once by Vivswan/repo-platform and

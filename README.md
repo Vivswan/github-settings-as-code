@@ -61,7 +61,7 @@ silently.
 A JSON Schema describing every section and its structured fields is
 generated from the commented types in `src/schema.ts` and served at
 `https://raw.githubusercontent.com/Vivswan/github-settings-as-code/<ref>/lib/settings.schema.json`,
-where `<ref>` picks the version: `v2` (canonical, the moving major tag,
+where `<ref>` picks the version: `v2` (canonical, the moving major tag, <!-- x-release-please-major -->
 always the newest schema in the line) or `build/vX.Y.Z` (an exact
 release). The `main` ref still works but is deprecated and will be
 removed in a future major. Passthrough areas (the `repository` payload,

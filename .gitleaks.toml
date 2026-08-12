@@ -23,8 +23,9 @@ paths = ['''(^|/)(bun\.lock|bun\.lockb)$''']
 
 # Historical bundles. lib/index.js is no longer committed on main, but the
 # scheduled scan walks the default branch's FULL history, where every
-# previously committed bundle lives forever, and release (v*) tags carry
-# freshly built bundles that any full-repo scan reaches. Third-party strings
+# previously committed bundle lives forever, and the release build
+# (build/v*) and moving major tags carry freshly built bundles that any
+# full-repo scan reaches. Third-party strings
 # in those bundles (libsodium constant-name tables, the public Azurite
 # emulator AccountKey) trip the entropy-based generic rule at line numbers
 # that shift per build. Only that rule is exempted; specific credential

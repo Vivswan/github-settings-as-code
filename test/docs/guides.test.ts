@@ -499,8 +499,8 @@ describe("docs/ guide pages", () => {
       for (const [index, line] of markdown.split("\n").entries()) {
         if (line.includes("x-release-please-major")) {
           expect(
-            /^[^\d]*[@/]v\d/.test(line),
-            `docs/${page}:${index + 1} carries x-release-please-major but a digit precedes the @v pin or /v segment; release-please would rewrite that digit instead`,
+            /^[^\d]*[@/`]v\d/.test(line),
+            `docs/${page}:${index + 1} carries x-release-please-major but a digit precedes the version token (an @v pin, /v segment, or backtick-v prose); release-please would rewrite that digit instead`,
           ).toBe(true);
         }
       }
@@ -511,8 +511,8 @@ describe("docs/ guide pages", () => {
     for (const [index, line] of readme.split("\n").entries()) {
       if (line.includes("x-release-please-major")) {
         expect(
-          /^[^\d]*[@/]v\d/.test(line),
-          `README.md:${index + 1} carries x-release-please-major but a digit precedes the @v pin or /v segment; release-please would rewrite that digit instead`,
+          /^[^\d]*[@/`]v\d/.test(line),
+          `README.md:${index + 1} carries x-release-please-major but a digit precedes the version token (an @v pin, /v segment, or backtick-v prose); release-please would rewrite that digit instead`,
         ).toBe(true);
       }
     }

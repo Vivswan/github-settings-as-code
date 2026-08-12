@@ -156,8 +156,9 @@ for the trace when you need to see the requests that succeeded.
 
 When you run the action from a ref (`uses: your-fork/github-settings-as-code@your-branch`),
 what executes is `lib/index.js`, the bundle, not the TypeScript under
-`src/`. Release tags carry a freshly built bundle; other branches do not -
-the bundle is not committed on main. So on a fork or working branch, build
+`src/`. The release build tags (`build/vX.Y.Z`) and the moving major tag carry a
+freshly built bundle; plain `vX.Y.Z` tags and branches do not - the bundle
+is not committed on main. So on a fork or working branch, build
 it yourself: run `bun run build:bundle` and commit the result on your
 branch (and `bun run build:schema` if you changed the settings types). A
 ref without the bundle fails to start; a branch where you rebuilt `src/`

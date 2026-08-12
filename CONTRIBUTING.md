@@ -55,7 +55,8 @@ settings.yml schema. `bun run build:schema` regenerates it; CI's
 schema-check job fails on drift. The bundle the action executes,
 `lib/index.js`, is not committed: `bun run build:bundle` builds it where it
 is needed (the CI workflows that run the action build it first, and a
-release builds and ships it on the release tag).
+release builds and ships it on the `build/vX.Y.Z` tag, where the moving
+major also points).
 
 Runtime dependencies (such as @octokit/rest with the retry and throttling
 plugins, @actions/core, zod, and yaml) are compiled into that single bundle.
