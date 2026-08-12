@@ -124,6 +124,18 @@ export function camelCaseGapName(base: string): string {
   return base.replace(/-([a-z0-9])/g, (_, ch: string) => ch.toUpperCase());
 }
 
+/**
+ * A gap whose routes the published OpenAPI description does not document
+ * yet (documentedInSpec: false) rides two upstream lifecycles: deleting it
+ * on octokit's say-so alone would also drop its UNDOCUMENTED_ROUTES
+ * exemption while the pinned descriptor still lacks the paths, and
+ * trim-openapi would fail on the next fetch. That graduation needs a human
+ * (bump UPSTREAM_REF, flip the flag, regenerate the trimmed spec).
+ */
+export function isSpecPinned(gapSource: string): boolean {
+  return /documentedInSpec:\s*false/.test(gapSource);
+}
+
 /** Drop exactly one full-line occurrence of `target` from `lines`, loudly. */
 function removeExactLine(lines: string[], target: string, indexPath: string): string[] {
   const hits = lines.filter((line) => line === target).length;
@@ -205,6 +217,20 @@ function main(): number {
     );
   }
   const indexAbs = join(ROOT, INDEX_PATH);
+  // All-or-nothing: a spec-pinned gap in the set means tsc cannot go green
+  // by deleting only the others, so the whole run stops for a human.
+  const specPinned = plan.gapFiles.filter((gapFile) =>
+    isSpecPinned(readFileSync(join(ROOT, gapFile), "utf8")),
+  );
+  if (specPinned.length > 0) {
+    abort(
+      `octokit shipped routes of ${specPinned.join(", ")}, but the gap is marked documentedInSpec: false ` +
+        `(the pinned OpenAPI descriptor lacks its paths). Bump UPSTREAM_REF in .github/scripts/trim-openapi.ts, ` +
+        `flip documentedInSpec to true, regenerate the trimmed spec, then delete the gap file (or re-run this script)`,
+      first.stdout,
+      first.stderr,
+    );
+  }
   let index = readFileSync(indexAbs, "utf8");
   for (const gapFile of plan.gapFiles) {
     index = removeGapFromIndex(index, gapFile);

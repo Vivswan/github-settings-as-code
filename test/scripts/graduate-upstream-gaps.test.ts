@@ -2,7 +2,8 @@
  * Unit tests for the pure logic of the gap-graduation script: compiler-output
  * parsing, the graduate-vs-foreign split, the alias mapping, and the strict
  * index-line removal. Fixture strings stand in for the compiler and for
- * src/upstream-gaps/index.ts, so these tests need no gap files on disk. The
+ * src/upstream-gaps/index.ts for the pure-logic blocks; a final block runs
+ * the same functions against the real directory. The
  * loud-failure paths (foreign diagnostics, unparsable output, drifted index
  * layout) matter as much as the happy ones: the script must refuse to
  * half-fix.
@@ -14,6 +15,7 @@ import { join } from "node:path";
 import {
   camelCaseGapName,
   isGapFile,
+  isSpecPinned,
   parseDiagnostics,
   planGraduation,
   removeGapFromIndex,
@@ -291,8 +293,12 @@ describe("the real src/upstream-gaps/ satisfies the script's layout contract", (
     .map((f) => `src/upstream-gaps/${f}`)
     .filter((f) => isGapFile(f));
 
+  test("the index imports exactly the gap files on disk (empty set included)", () => {
+    const importedAliases = realIndex.match(/^import \{ GAP as /gm) ?? [];
+    expect(importedAliases.length).toBe(realGapFiles.length);
+  });
+
   test("every real gap file is selectable and removable from the real index", () => {
-    expect(realGapFiles.length).toBeGreaterThan(0);
     for (const gap of realGapFiles) {
       const result = removeGapFromIndex(realIndex, gap);
       expect(result).not.toBe(realIndex);
@@ -309,5 +315,13 @@ describe("the real src/upstream-gaps/ satisfies the script's layout contract", (
 
   test("the index pins its array layout against the formatter", () => {
     expect(realIndex).toContain("// biome-ignore format:");
+  });
+
+  test("spec-pinned detection agrees with each gap's actual flag", async () => {
+    for (const gap of realGapFiles) {
+      const abs = join(import.meta.dir, "..", "..", gap);
+      const { GAP } = (await import(abs)) as { GAP: { documentedInSpec: boolean } };
+      expect(isSpecPinned(readFileSync(abs, "utf8"))).toBe(!GAP.documentedInSpec);
+    }
   });
 });

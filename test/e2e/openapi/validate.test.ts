@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { endpointMethod, endpointPath } from "../../../src/sections/contract.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/routes.js";
-import { excludeUndocumented, USED_PATHS } from "./paths.js";
+import { excludeUndocumented, UNDOCUMENTED_PATHS, USED_PATHS } from "./paths.js";
 import {
   OpenApiValidator,
   pathMatches,
@@ -274,8 +274,10 @@ describe("undocumented-route exemption", () => {
     );
   });
 
-  test("USED_PATHS no longer carries the undocumented LFS path", () => {
-    expect(USED_PATHS).not.toContain("/repos/{owner}/{repo}/lfs");
+  test("USED_PATHS carries no undocumented path (empty set included)", () => {
+    for (const path of UNDOCUMENTED_PATHS) {
+      expect(USED_PATHS).not.toContain(path);
+    }
   });
 });
 
