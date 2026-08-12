@@ -8,6 +8,7 @@
  * notes.
  */
 
+import { z } from "zod";
 import { type CollaboratorConfig, type MustBeNever, SettingsFile } from "../../schema.js";
 import {
   beginRun,
@@ -16,6 +17,7 @@ import {
   type EndpointDecl,
   listAll,
   loosen,
+  parseLive,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
@@ -24,11 +26,12 @@ import {
 } from "../contract.js";
 import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "../roles.js";
 
-interface LiveCollaborator {
-  login: string;
-  permissions?: Record<string, boolean>;
-  role_name?: string;
-}
+/** The fields of a live collaborator this section reads; extras ride along. */
+const LiveCollaborator = z.looseObject({
+  login: z.string(),
+  permissions: z.record(z.string(), z.boolean()).optional(),
+  role_name: z.string().optional(),
+});
 
 /**
  * A pending repository invitation as the list endpoint returns it. Its
@@ -36,12 +39,13 @@ interface LiveCollaborator {
  * one roleForPermission maps declared permissions into. `invitee` is null on
  * invitations sent by email, which no username can declare.
  */
-interface LiveInvitation {
-  id: number;
-  invitee?: { login?: string } | null;
-  permissions?: string;
-  expired?: boolean;
-}
+const LiveInvitation = z.looseObject({
+  id: z.number(),
+  invitee: z.looseObject({ login: z.string().optional() }).nullable().optional(),
+  permissions: z.string().optional(),
+  expired: z.boolean().optional(),
+});
+type LiveInvitation = z.infer<typeof LiveInvitation>;
 
 /** An invitation PROVEN username-addressed: the type carries the login. */
 type NamedInvitation = LiveInvitation & { invitee: { login: string } };
@@ -112,20 +116,24 @@ export const collaboratorsSection = {
       (c) => c.username.toLowerCase(),
       (c) => c.username,
     );
-    const live = (await listAll(ctx, this, ENDPOINTS.list, {
-      query: { affiliation: "direct" },
-    })) as LiveCollaborator[];
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveCollaborator),
+      await listAll(ctx, this, ENDPOINTS.list, { query: { affiliation: "direct" } }),
+    );
     const liveByLogin = new Map(live.map((c) => [c.login.toLowerCase(), c]));
     // Both live pools are resolved BEFORE the declared walk, so a declared
     // user is never mistaken for undeclared in the other pool. The type
     // predicate PARTITIONS the invitations once: the username-addressed pool
     // carries its logins structurally, and email invitations (null invitee,
     // which no username can declare) split into their own pool.
-    const allInvitations = (await listAll(
-      ctx,
+    const allInvitations = parseLive(
       this,
       ENDPOINTS.listInvitations,
-    )) as LiveInvitation[];
+      z.array(LiveInvitation),
+      await listAll(ctx, this, ENDPOINTS.listInvitations),
+    );
     const invitations = allInvitations.filter(isNamedInvitation);
     const emailInvitations = allInvitations.filter((invitation) => !isNamedInvitation(invitation));
     const inviteByLogin = new Map(

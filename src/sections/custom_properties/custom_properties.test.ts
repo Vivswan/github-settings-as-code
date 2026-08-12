@@ -200,6 +200,6 @@ describe("custom_properties", () => {
     const api = new MockApi(orgRoutes([{ value: "x" } as never]));
     await expect(
       customPropertiesSection.run(ctx(api, true), [{ property_name: "team", value: "x" }]),
-    ).rejects.toThrow(/returned an entry without a string property_name/);
+    ).rejects.toThrow(/returned a body outside the documented shape - \[0\]\.property_name/);
   });
 });

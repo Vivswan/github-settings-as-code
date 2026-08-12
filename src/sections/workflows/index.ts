@@ -4,6 +4,7 @@
  * created (workflow files are code, not settings).
  */
 
+import { z } from "zod";
 import { type MustBeNever, SettingsFile, type WorkflowConfig } from "../../schema.js";
 import {
   beginRun,
@@ -11,18 +12,19 @@ import {
   type EndpointDecl,
   listAllEnveloped,
   loosen,
+  parseLive,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
 } from "../contract.js";
 
-interface LiveWorkflow {
-  id: number;
-  name: string;
-  path: string;
-  state: string;
-}
+/** The fields of a live workflow this section reads; extras ride along. */
+const LiveWorkflow = z.looseObject({
+  id: z.number(),
+  path: z.string(),
+  state: z.string(),
+});
 
 const permission: SectionPermission = { repo: ["actions"] };
 
@@ -68,7 +70,12 @@ export const workflowsSection = {
       (w) => (w.path.includes("/") ? w.path : `.github/workflows/${w.path}`),
       (w) => w.path,
     );
-    const live = (await listAllEnveloped(ctx, this, ENDPOINTS.list, "workflows")) as LiveWorkflow[];
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveWorkflow),
+      await listAllEnveloped(ctx, this, ENDPOINTS.list, "workflows"),
+    );
     // A "deleted" workflow has no file behind it anymore; treat as absent.
     const present = live.filter((w) => w.state !== "deleted");
 

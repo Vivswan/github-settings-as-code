@@ -5,6 +5,7 @@
  * the deletion to notes.
  */
 
+import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { SettingsFile } from "../../schema.js";
 import {
@@ -14,6 +15,7 @@ import {
   type EndpointDecl,
   listAll,
   loosen,
+  parseLive,
   type SectionModule,
   type SectionPermission,
   type SectionResult,
@@ -32,11 +34,13 @@ export function normalizeColor(color: unknown): string {
     .toLowerCase();
 }
 
-interface LiveLabel {
-  name: string;
-  color: string;
-  description: string | null;
-}
+/** The fields of a live label this section reads; extra fields ride along. */
+const LiveLabel = z.looseObject({
+  name: z.string(),
+  color: z.string(),
+  description: z.string().nullable(),
+});
+type LiveLabel = z.infer<typeof LiveLabel>;
 
 const permission: SectionPermission = { repo: ["issues"] };
 
@@ -93,7 +97,12 @@ export const labelsSection = {
           .join("; ")}. Keep exactly one entry per label`,
       );
     }
-    const live = (await listAll(ctx, this, ENDPOINTS.list)) as LiveLabel[];
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveLabel),
+      await listAll(ctx, this, ENDPOINTS.list),
+    );
     const liveByKey = new Map<string, LiveLabel>();
     for (const label of live) {
       liveByKey.set(nameKey(label.name), label);

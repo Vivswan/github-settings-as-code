@@ -5,6 +5,7 @@
  * action. The wrapped `undeclared: delete` form hardens that to deletion.
  */
 
+import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { type RulesetConfig, SettingsFile } from "../../schema.js";
 import {
@@ -14,6 +15,7 @@ import {
   type EndpointDecl,
   listAll,
   loosen,
+  parseLive,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
@@ -59,11 +61,12 @@ export function normalizeRuleset(ruleset: RulesetConfig): RulesetConfig {
   return copy;
 }
 
-interface LiveRulesetSummary {
-  id: number;
-  name: string;
-  source_type?: string;
-}
+/** The fields of a live ruleset summary this section reads; extras ride along. */
+const LiveRulesetSummary = z.looseObject({
+  id: z.number(),
+  name: z.string(),
+  source_type: z.string().optional(),
+});
 
 const permission: SectionPermission = { repo: ["administration"] };
 
@@ -119,7 +122,12 @@ export const rulesetsSection = {
       (r) => r.name,
       (r) => r.name,
     );
-    const summaries = (await listAll(ctx, this, ENDPOINTS.list)) as LiveRulesetSummary[];
+    const summaries = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveRulesetSummary),
+      await listAll(ctx, this, ENDPOINTS.list),
+    );
     // Match and update anything not explicitly owned by another source (the
     // pre-knob upsert semantics; source_type is optional in the API type).
     // Deletion is gated harder below: only a summary the API explicitly

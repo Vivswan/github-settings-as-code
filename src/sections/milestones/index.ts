@@ -5,6 +5,7 @@
  * `undeclared: delete` form hardens that to deletion, detachment included.
  */
 
+import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { SettingsFile } from "../../schema.js";
 import {
@@ -14,6 +15,7 @@ import {
   type EndpointDecl,
   listAll,
   loosen,
+  parseLive,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
@@ -21,12 +23,8 @@ import {
   undeclaredPolicy,
 } from "../contract.js";
 
-interface LiveMilestone {
-  number: number;
-  title: string;
-  description: string | null;
-  state: string;
-}
+/** The fields of a live milestone this section reads; extras ride along. */
+const LiveMilestone = z.looseObject({ number: z.number(), title: z.string() });
 
 const permission: SectionPermission = { repo: ["issues"] };
 
@@ -61,9 +59,12 @@ export const milestonesSection = {
       (m) => m.title,
       (m) => m.title,
     );
-    const live = (await listAll(ctx, this, ENDPOINTS.list, {
-      query: { state: "all" },
-    })) as LiveMilestone[];
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveMilestone),
+      await listAll(ctx, this, ENDPOINTS.list, { query: { state: "all" } }),
+    );
     const liveByTitle = new Map(live.map((m) => [m.title, m]));
     const declaredKeys = new Set<string>();
 

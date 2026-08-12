@@ -20,6 +20,7 @@
  * events/active drift, never with a config key.
  */
 
+import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { SettingsFile, type UndeclaredPolicyList, type WebhookConfig } from "../../schema.js";
 import {
@@ -31,6 +32,7 @@ import {
   type EndpointDecl,
   listAll,
   loosen,
+  parseLive,
   rejectDuplicates,
   type SectionModule,
   type SectionPermission,
@@ -38,13 +40,15 @@ import {
   undeclaredPolicy,
 } from "../contract.js";
 
-interface LiveHook {
-  id: number;
-  name?: string;
-  active?: boolean;
-  events?: string[];
-  config?: Record<string, unknown>;
-}
+/** The fields of a live hook this section reads; extras ride along. */
+const LiveHook = z.looseObject({
+  id: z.number(),
+  name: z.string().optional(),
+  active: z.boolean().optional(),
+  events: z.array(z.string()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
+});
+type LiveHook = z.infer<typeof LiveHook>;
 
 const permission: SectionPermission = { repo: ["webhooks"] };
 
@@ -170,7 +174,12 @@ export const webhooksSection = {
       (hook) => hook.config.url,
       (hook) => hook.config.url,
     );
-    const live = (await listAll(ctx, this, ENDPOINTS.list)) as LiveHook[];
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveHook),
+      await listAll(ctx, this, ENDPOINTS.list),
+    );
     const declaredUrls = new Set(desired.map((hook) => hook.config.url));
 
     // Ambiguity is rejected BEFORE any write: a hard error mid-loop would
