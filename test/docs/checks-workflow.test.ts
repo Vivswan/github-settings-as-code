@@ -1,12 +1,12 @@
 /**
- * Structural contract for the openapi-trimmed cache in checks.yml: the check,
- * e2e-smoke, and endpoint-coverage jobs each cache the fetched trimmed spec,
- * and a stale key
- * silently restores a spec slice that no longer matches USED_PATHS. So the
- * keys must stay byte-identical, and the hashFiles list must cover every
- * file test/e2e/openapi/paths.ts derives route data from - the trim script,
- * paths.ts itself, and each of its route-data imports - so adding an import
- * there without extending the key fails here instead of going stale in CI.
+ * Structural contract for the openapi-trimmed cache in checks.yml: the
+ * check, e2e-smoke, and endpoint-coverage jobs each cache the fetched
+ * trimmed spec, and a stale key silently restores a spec slice that no
+ * longer matches USED_PATHS. So the keys must stay byte-identical, and the
+ * hashFiles list must cover every file test/e2e/openapi/paths.ts derives
+ * route data from - the trim script, paths.ts itself, and each of its
+ * route-data imports - so adding an import there without extending the key
+ * fails here instead of going stale in CI.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -102,9 +102,12 @@ describe("checks.yml openapi-trimmed cache keys", () => {
   test("all consuming jobs cache the spec under byte-identical keys", () => {
     // The count is pinned on purpose: a new job consuming the spec is a
     // conscious edit here, and a removed cache step cannot go unnoticed.
-    expect(keys.length).toBe(3);
+    expect(
+      keys.length,
+      `checks.yml carries ${keys.length} openapi-trimmed cache keys, expected 3 (check, e2e-smoke, endpoint-coverage); update this pin when a consuming job is added or removed`,
+    ).toBe(3);
     for (const key of keys) {
-      expect(key).toBe(keys[0] as string);
+      expect(key, "the openapi-trimmed cache keys in checks.yml diverged").toBe(keys[0] as string);
     }
   });
 

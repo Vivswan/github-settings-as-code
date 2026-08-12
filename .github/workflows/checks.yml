@@ -162,12 +162,16 @@ jobs:
   # and allGraphqlOps() must be hit at least once by the curated corpus. The
   # nightly also runs this, but a PR that adds an endpoint without a scenario
   # reaching it must fail on that PR, not the next night. The checker runs
-  # the full corpus itself (the diff-aware smoke job may run a subset), and
-  # the action bundle runs under node24, so node is installed here too.
+  # the full corpus itself (the diff-aware smoke job may run a subset) - the
+  # ~10 minutes are skipped only when the section selector proves the PR
+  # touched no route-bearing code (docs-only). The action bundle runs under
+  # node24, so node is installed here too.
   endpoint-coverage:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -176,15 +180,34 @@ jobs:
           node-version: 24
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      # The same selector e2e-smoke uses, but only its "none" answer matters
+      # here: coldness is a whole-corpus property (deleting one scenario can
+      # chill any route), so any code change runs the full sweep, and only a
+      # provably docs-only PR skips it. Non-PR events run it always. It runs
+      # BEFORE the spec cache/fetch so a docs-only PR skips the download too.
+      - name: Check whether the diff can affect route coverage
+        id: select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            SECTIONS="$(bun .github/scripts/changed-sections.ts "$BASE_SHA")"
+          else
+            SECTIONS="all"
+          fi
+          echo "sections=$SECTIONS" >> "$GITHUB_OUTPUT"
+          echo "selected sections: $SECTIONS"
       # Same fetched, gitignored artifact and cache key as e2e-smoke above.
       - name: Cache the trimmed OpenAPI spec
+        if: steps.select.outputs.sections != 'none'
         id: openapi-cache
         uses: actions/cache@v6
         with:
           path: test/e2e/openapi/github-openapi.trimmed.json
           key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**', 'src/upstream-gaps/**', 'src/schema.ts', 'src/github/api.ts') }}
       - name: Fetch the trimmed OpenAPI spec (cache miss)
-        if: steps.openapi-cache.outputs.cache-hit != 'true'
+        if: steps.select.outputs.sections != 'none' && steps.openapi-cache.outputs.cache-hit != 'true'
         run: bun .github/scripts/trim-openapi.ts
       - name: Endpoint-coverage tripwire
+        if: steps.select.outputs.sections != 'none'
         run: bun .github/scripts/check-endpoint-coverage.ts

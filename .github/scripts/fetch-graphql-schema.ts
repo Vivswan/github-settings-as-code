@@ -20,7 +20,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { buildSchema } from "graphql";
-import { fetchWithRetry } from "./fetch-retry.js";
+import { fetchTextWithRetry } from "./lib/fetch-retry.js";
 
 /**
  * The github/docs commit the schema is fetched at. Bump this (and re-run) to
@@ -41,16 +41,17 @@ const FETCH_TIMEOUT_MS = 60_000;
 
 async function main(): Promise<number> {
   console.log(`fetching ${SCHEMA_URL}`);
-  // Per-attempt timeout plus bounded retry (fetch-retry.ts): a hung
-  // connection or a transient blip fails loudly with advice instead of the
-  // script stalling forever - or one blip failing the whole CI gate.
-  const response = await fetchWithRetry(SCHEMA_URL, FETCH_TIMEOUT_MS);
-  if (!response.ok) {
+  // Per-attempt timeout plus bounded retry (lib/fetch-retry.ts): a hung
+  // connection or a transient blip - even mid-download - fails loudly with
+  // advice instead of the script stalling forever, or one blip failing the
+  // whole CI gate.
+  const fetched = await fetchTextWithRetry("GraphQL schema", SCHEMA_URL, FETCH_TIMEOUT_MS);
+  if (!fetched.ok) {
     throw new Error(
-      `failed to fetch the GraphQL schema: ${response.status} ${response.statusText} for ${SCHEMA_URL}. Check UPSTREAM_REF and the schema path`,
+      `failed to fetch the GraphQL schema: ${fetched.status} ${fetched.statusText} for ${SCHEMA_URL}. Check UPSTREAM_REF and the schema path`,
     );
   }
-  const text = await response.text();
+  const text = fetched.text;
   // Integrity at generation, the assertRefFree analog: a truncated download
   // or a moved upstream file must fail HERE, not as an opaque parse error in
   // the disk-only consumer.

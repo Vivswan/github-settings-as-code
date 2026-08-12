@@ -25,7 +25,13 @@ import {
 import { type PatResource, sectionOperations } from "../../src/sections/contract.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
-import { CLAIM_FAMILY, CLAIM_STEMS, defaultClaimProblems, stemNegation } from "./claims.js";
+import {
+  CLAIM_FAMILY,
+  CLAIM_STEMS,
+  defaultClaimProblems,
+  deleteEnumerationProblems,
+  stemNegation,
+} from "./claims.js";
 import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -221,6 +227,27 @@ describe("README version pins", () => {
       versionPins,
       `README offers plain version pin(s) ${versionPins.join(", ")}; those tags are source-only, pin @build/vX.Y.Z instead`,
     ).toEqual([]);
+  });
+});
+
+describe("delete-by-default enumeration", () => {
+  // Both prose spots enumerate the sections whose undeclared entries an
+  // apply deletes; the set is derived from the registry so a new
+  // delete-by-default section fails here until the prose (and the display
+  // map in claims.ts) follows. This list drifted once already - the
+  // quick-start warning named three of five sections.
+  const deleteKeys = SECTIONS.filter((s) => s.undeclaredDefault === "delete").map((s) => s.key);
+
+  test("the quick-start first-run warning names every delete-by-default section", () => {
+    const step = readme.match(/\n4\. Add the workflow\.[\s\S]*?\n\n/)?.[0] ?? "";
+    expect(step, "README lost its '4. Add the workflow.' quick-start step").not.toBe("");
+    expect(deleteEnumerationProblems(step, deleteKeys)).toEqual([]);
+  });
+
+  test("the migration paragraph's implicit-deletion list names every delete-by-default section", () => {
+    const paragraph = readme.split("\n\n").find((p) => p.includes("nothing except"));
+    expect(paragraph, 'README lost its "nothing except ..." migration paragraph').toBeDefined();
+    expect(deleteEnumerationProblems(paragraph ?? "", deleteKeys)).toEqual([]);
   });
 });
 

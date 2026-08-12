@@ -15,6 +15,8 @@ export const OUTPUT_NAMES = ["result", "skipped-sections", "repos-result"] as co
 
 // @actions/core owns workflow-command escaping (%, CR, LF); the static map
 // keeps the namespace access tree-shakeable (biome noDynamicNamespaceImportAccess).
+// The references are captured at module load, so a test spying on core.warning
+// after import would not be observed here - none does today.
 const annotators = { notice: core.notice, warning: core.warning, error: core.error } as const;
 
 export function annotate(level: keyof typeof annotators, message: string): void {

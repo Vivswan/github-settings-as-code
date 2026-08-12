@@ -17,8 +17,10 @@ import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments/index.js";
+import { SECTIONS } from "../../src/sections/registry.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
+import { deleteEnumerationProblems } from "./claims.js";
 import { fencedBlocks } from "./markdown.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -285,20 +287,13 @@ describe("docs/ guide pages", () => {
     expect(offenders).toEqual([]);
   });
 
-  test("marker-bearing files equal the release-please extra-files set", () => {
-    // release-please's generic updater rewrites version pins only in files
-    // listed under extra-files; a page moved without updating
-    // release-please-config.json keeps its stale pin silently. A docs
-    // restructure is exactly when that happens, so pin the sets equal.
-    // Every root-level markdown file and issue template is scanned, not a
-    // named few, so a marker added to a new root page or template cannot
-    // escape the tripwire. An extra-files entry outside the scan set
-    // (action.yml, a workflow) fails this equality and means the scan set
-    // needs widening.
-    const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
-      packages: Record<string, { "extra-files": string[] }>;
-    };
-    const extraFiles = config.packages["."]?.["extra-files"] ?? [];
+  /**
+   * Every file the release-please generic updater may rewrite: root-level
+   * markdown, the guide pages, and the issue templates. The marker/extra-files
+   * equality test and the first-digit hazard guard both iterate this one
+   * list, so widening the scan set updates them together.
+   */
+  function markerScanFiles(): Array<{ label: string; path: string }> {
     const rootPages = readdirSync(ROOT)
       .filter((name) => name.endsWith(".md"))
       .map((name) => ({ label: name, path: join(ROOT, name) }));
@@ -309,9 +304,23 @@ describe("docs/ guide pages", () => {
         label: `.github/ISSUE_TEMPLATE/${name}`,
         path: join(templateDir, name),
       }));
-    const marked = rootPages
+    return rootPages
       .concat(guidePages().map((page) => ({ label: `docs/${page}`, path: join(DOCS, page) })))
-      .concat(templates)
+      .concat(templates);
+  }
+
+  test("marker-bearing files equal the release-please extra-files set", () => {
+    // release-please's generic updater rewrites version pins only in files
+    // listed under extra-files; a page moved without updating
+    // release-please-config.json keeps its stale pin silently. A docs
+    // restructure is exactly when that happens, so pin the sets equal.
+    // An extra-files entry outside markerScanFiles() (action.yml, a
+    // workflow) fails this equality and means the scan set needs widening.
+    const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
+      packages: Record<string, { "extra-files": string[] }>;
+    };
+    const extraFiles = config.packages["."]?.["extra-files"] ?? [];
+    const marked = markerScanFiles()
       .filter((file) => readFileSync(file.path, "utf8").includes("x-release-please-"))
       .map((file) => file.label);
     expect(marked.sort()).toEqual([...extraFiles].sort());
@@ -477,6 +486,46 @@ describe("docs/ guide pages", () => {
     }
   });
 
+  test("the guides enumerate every delete-by-default section", () => {
+    // The set is derived from the registry so a new delete-by-default
+    // section fails here until the prose follows; getting-started drifted
+    // to three of five sections once already.
+    const deleteKeys = SECTIONS.filter((s) => s.undeclaredDefault === "delete").map((s) => s.key);
+    // getting-started names section KEYS in backticks: the paragraph must
+    // name exactly the delete-by-default set - no more, no fewer.
+    const gettingStarted = readFileSync(join(DOCS, "start", "getting-started.md"), "utf8");
+    const paragraph = gettingStarted
+      .split("\n\n")
+      .find((p) => p.includes("declared list authoritative"));
+    expect(
+      paragraph,
+      'getting-started.md lost its "declared list authoritative" paragraph',
+    ).toBeDefined();
+    for (const key of deleteKeys) {
+      expect(
+        (paragraph ?? "").includes(`\`${key}\``),
+        `getting-started's exceptions paragraph omits \`${key}\`, which deletes undeclared entries by default`,
+      ).toBe(true);
+    }
+    for (const key of SECTION_KEYS) {
+      if (!deleteKeys.includes(key)) {
+        expect(
+          (paragraph ?? "").includes(`\`${key}\``),
+          `getting-started's exceptions paragraph names \`${key}\`, which does not delete undeclared entries by default`,
+        ).toBe(false);
+      }
+    }
+    // The migration guide's deletion paragraph uses display names, checked
+    // through the shared map in claims.ts.
+    const migration = readFileSync(join(DOCS, "start", "migrating-from-probot.md"), "utf8");
+    const deletions = migration.split("\n\n").find((p) => p.includes("Deletions still exist"));
+    expect(
+      deletions,
+      'migrating-from-probot.md lost its "Deletions still exist" paragraph',
+    ).toBeDefined();
+    expect(deleteEnumerationProblems(deletions ?? "", deleteKeys)).toEqual([]);
+  });
+
   test("workflow snippets reference the current major tag", () => {
     // README pins exact versions inside release-please markers; guides use
     // the moving major tag instead so they do not rot per patch release. This
@@ -503,30 +552,6 @@ describe("docs/ guide pages", () => {
           stale.push(`docs/${page}:${index + 1} pins @${m[1]}: ${line.trim()}`);
         }
       }
-      // release-please's generic updater rewrites the FIRST digit run on an
-      // annotated line (MAJOR_VERSION_REGEX with String.replace). Every
-      // annotated line must therefore keep its major-version digit first,
-      // reached as an @v pin or a /v path segment (the schema hint URLs), or
-      // a v2 release PR silently rewrites the wrong number.
-      for (const [index, line] of markdown.split("\n").entries()) {
-        if (line.includes("x-release-please-major")) {
-          expect(
-            /^[^\d]*[@/`]v\d+(?!\w)/.test(line),
-            `docs/${page}:${index + 1} carries x-release-please-major but a digit precedes the version token (an @v pin, /v segment, or backtick-v prose); release-please would rewrite that digit instead`,
-          ).toBe(true);
-        }
-      }
-    }
-    // README.md carries the same inline annotation on its moving-major
-    // prose line, subject to the identical first-digit hazard.
-    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
-    for (const [index, line] of readme.split("\n").entries()) {
-      if (line.includes("x-release-please-major")) {
-        expect(
-          /^[^\d]*[@/`]v\d+(?!\w)/.test(line),
-          `README.md:${index + 1} carries x-release-please-major but a digit precedes the version token (an @v pin, /v segment, or backtick-v prose); release-please would rewrite that digit instead`,
-        ).toBe(true);
-      }
     }
     // The guides carry workflow snippets, so zero matches means the pattern
     // rotted, not that the docs went snippet-free.
@@ -539,6 +564,27 @@ describe("docs/ guide pages", () => {
         `extra-files in release-please-config.json, so release PRs rewrite the tag; then\n` +
         `set the tag to the current major.`,
     ).toEqual([]);
+  });
+
+  test("every x-release-please-major line keeps its version digit first", () => {
+    // release-please's generic updater rewrites the FIRST digit run on an
+    // annotated line (MAJOR_VERSION_REGEX with String.replace). Every
+    // annotated line in every file the updater may rewrite - root markdown,
+    // guides, and issue templates alike (markerScanFiles) - must therefore
+    // keep its major-version digit first, reached as an @v pin, a /v path
+    // segment (the schema hint URLs), or backtick-v prose, or the next
+    // major's release PR silently rewrites the wrong number.
+    for (const file of markerScanFiles()) {
+      const content = readFileSync(file.path, "utf8");
+      for (const [index, line] of content.split("\n").entries()) {
+        if (line.includes("x-release-please-major")) {
+          expect(
+            /^[^\d]*[@/`]v\d+(?!\w)/.test(line),
+            `${file.label}:${index + 1} carries x-release-please-major but a digit precedes the version token (an @v pin, /v segment, or backtick-v prose); release-please would rewrite that digit instead`,
+          ).toBe(true);
+        }
+      }
+    }
   });
 });
 
