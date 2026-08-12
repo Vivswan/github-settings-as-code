@@ -20,6 +20,7 @@ import { agentsSecretsMockHandlers } from "../../../src/sections/agents_secrets/
 import { autolinksMockHandlers } from "../../../src/sections/autolinks/mock.js";
 import { codespacesSecretsMockHandlers } from "../../../src/sections/codespaces_secrets/mock.js";
 import { customPropertiesMockHandlers } from "../../../src/sections/custom_properties/mock.js";
+import { dependabotSecretsMockHandlers } from "../../../src/sections/dependabot_secrets/mock.js";
 import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
 import { milestonesMockHandlers } from "../../../src/sections/milestones/mock.js";
 import { pagesMockHandlers } from "../../../src/sections/pages/mock.js";
@@ -684,31 +685,6 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     state.fork_pr_workflows_private_repos = asObject(body);
     return noContent();
   },
-
-  // dependabot_secrets
-  //
-  // The repository-level secret families share one handler shape (see
-  // the sealedSecretPut/secretsList/secretRemove helpers): the list serves
-  // names and timestamps only (values are never part of the GET shape), and
-  // the PUT is the crypto proof - it UNSEALS the uploaded ciphertext with the
-  // fixed test keypair, verifying the client's key decode, sealed-box
-  // construction, and base64 round-trip in one step, and stores the name plus
-  // a deterministic digest of the unsealed value, never the plaintext. Every
-  // PUT bumps updated_at (as GitHub does), so the idempotence snapshot's
-  // volatile-field exclusion is exercised for real.
-  "dependabot_secrets.list": ({ state, query }) => secretsList(state.dependabot_secrets, query),
-  "dependabot_secrets.publicKey": () =>
-    ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "dependabot_secrets.put": ({ state, param, body }) =>
-    sealedSecretPut(
-      state,
-      state.dependabot_secrets,
-      state.dependabot_secret_digests,
-      param("secret_name"),
-      body,
-    ),
-  "dependabot_secrets.remove": ({ state, param }) =>
-    secretRemove(state.dependabot_secrets, state.dependabot_secret_digests, param("secret_name")),
 
   // workflows --------------------------------------------------------------
   "workflows.list": ({ state, query }) => {
@@ -1722,6 +1698,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: autolinksMockHandlers },
   { rest: codespacesSecretsMockHandlers },
   { rest: customPropertiesMockHandlers },
+  { rest: dependabotSecretsMockHandlers },
   { rest: labelsMockHandlers },
   { rest: milestonesMockHandlers },
   { rest: pagesMockHandlers },
