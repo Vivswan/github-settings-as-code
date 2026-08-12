@@ -117,9 +117,12 @@ const SKIPPED_SECTIONS_OUTPUT = "skipped-sections" satisfies (typeof OUTPUT_NAME
  * exceed 30 seconds when several suites run in parallel on one machine, and
  * a wrongly killed child fails its scenario with a misleading exit code.
  * killNote() marks every harness kill in the failure text, so the cap stays
- * a safety net rather than a diagnosis.
+ * a safety net rather than a diagnosis. The directed fuzz battery's
+ * multi/apply-idempotent leg legitimately needs ~200s at some seeds
+ * (~190 requests behind ~500ms injected latencies, applied twice), which
+ * 120s killed - a latent seed-dependent flake, reproduced on two trees.
  */
-const KILL_AFTER_MS = 120_000;
+const KILL_AFTER_MS = 300_000;
 
 /** Monotonic per-process counter so repeated same-name failures never collide. */
 let artifactCounter = 0;
