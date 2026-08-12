@@ -7,7 +7,7 @@
  * The mapping is EXPLICIT, not inferred: every section file maps to the
  * section key(s) it affects, shared code (roles.ts) fans out to its consumers,
  * and the cross-cutting files (contract.ts, registry.ts, the engine, the
- * schema, the bundle, the e2e harness) select every section. A unit test pins
+ * schema, the e2e harness) select every section. A unit test pins
  * the per-section entries against SECTION_KEYS so a new section cannot be added
  * without teaching this map about it.
  *
@@ -102,11 +102,12 @@ const SECTIONS_BY_FILE = buildSectionsByFile();
  * Path prefixes/files that select every section: the shared engine, transport,
  * action layer, discovery, reporting, the io seam, the entrypoint and schema,
  * and the e2e harness itself (a harness change can change every scenario).
- * `lib/` is deliberately NOT here: it regenerates on every `src/` change, so
- * treating it as all-selecting would make almost every PR run every section
- * and defeat the diff scoping. lib is handled as a special case below. A unit
- * test checks every top-level `src/` entry other than `sections/` is listed,
- * so a new top-level module cannot be silently skipped.
+ * `lib/` is deliberately NOT here: the only committed file under it is the
+ * generated settings.schema.json, which carries no runnable code and mirrors
+ * a `src/schema.ts` change when one exists; the schema-check job gates schema
+ * drift on its own. A unit test checks every top-level `src/` entry other
+ * than `sections/` is listed, so a new top-level module cannot be silently
+ * skipped.
  */
 export const ALL_SELECTING_PREFIXES = [
   "src/engine/",
@@ -127,11 +128,6 @@ export const ALL_SELECTING_PREFIXES = [
   ".github/workflows/checks.yml",
 ];
 
-/** True for a committed generated-bundle path, which every `src/` change touches. */
-function isLibFile(file: string): boolean {
-  return file.startsWith("lib/");
-}
-
 /** The decision for one changed-file set: every section, some, or none. */
 export type Selection =
   | { kind: "all" }
@@ -142,28 +138,20 @@ export type Selection =
  * Map a set of changed file paths (repo-relative, forward slashes) to the
  * sections the smoke job must run. Any cross-cutting path forces "all"; section
  * files contribute their key(s); files that touch nothing settings-related are
- * ignored, so a purely docs/config PR yields "none". `lib/` files are ignored
- * during the per-section pass because they mirror the `src/` change that
- * produced them; a diff that touches ONLY `lib/` (no `src/` at all, e.g. a
- * hand-edited or stale bundle) has no source to scope from, so it selects
- * "all".
+ * ignored, so a purely docs/config PR yields "none". `lib/` contributes no
+ * section either - the only committed file under it is the generated
+ * settings.schema.json, which the schema-check job gates on its own - so a
+ * lib-only diff selects "none".
  */
 export function sectionsForFiles(files: readonly string[]): Selection {
   const selected = new Set<SectionKey>();
-  let sawLib = false;
-  let sawNonLib = false;
   for (const file of files) {
-    if (isLibFile(file)) {
-      sawLib = true;
-      continue; // the src change that regenerated lib is what scopes the run
-    }
-    sawNonLib = true;
     if (ALL_SELECTING_PREFIXES.some((prefix) => file.startsWith(prefix))) {
       return { kind: "all" };
     }
     if (!file.startsWith("src/sections/")) {
-      // Everything else (README, COVERAGE, workflows, package.json, tests
-      // outside e2e) contributes no section.
+      // Everything else (README, COVERAGE, lib/, workflows, package.json,
+      // tests outside e2e) contributes no section.
       continue;
     }
     const name = file.slice("src/sections/".length);
@@ -181,9 +169,7 @@ export function sectionsForFiles(files: readonly string[]): Selection {
     // unmapped file can only be a non-section helper.
   }
   if (selected.size === 0) {
-    // A lib-only diff has no source to scope from, so run everything; a diff
-    // with no settings-related files at all runs nothing.
-    return sawLib && !sawNonLib ? { kind: "all" } : { kind: "none" };
+    return { kind: "none" };
   }
   // Emit in SECTION_KEYS order for a stable, readable list.
   return { kind: "some", sections: SECTION_KEYS.filter((key) => selected.has(key)) };

@@ -1,6 +1,8 @@
 /**
  * Post-processes the generated lib/settings.schema.json, run by build:schema
- * right after ts-json-schema-generator. The generator's --additional-properties
+ * right after ts-json-schema-generator. Two jobs: stamp the schema's stable
+ * $id, and close the wrapper definitions. The generator's
+ * --additional-properties
  * flag opens every object (the passthrough-first forward-compatibility tenet:
  * GitHub-bound bodies must accept future fields), but the {undeclared, entries}
  * wrapper is this action's OWN vocabulary and the runtime rejects unknown keys
@@ -17,8 +19,30 @@ import { UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 
 const schemaPath = join(import.meta.dir, "..", "..", "lib", "settings.schema.json");
 const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
+  $id?: string;
   definitions?: Record<string, Record<string, unknown>>;
 };
+
+/**
+ * The schema's stable identity: the raw copy of this file at the moving
+ * v<MAJOR> tag. One raw-URL template serves every ref - the canonical
+ * moving major, exact release tags, the legacy main copy - matching how the
+ * action itself is pinned. The major comes from
+ * .release-please-manifest.json, the version single source release-please
+ * bumps on every release (package.json deliberately carries no version), so
+ * a major release moves the $id automatically on the next schema build.
+ */
+const manifestPath = join(import.meta.dir, "..", "..", ".release-please-manifest.json");
+const manifestVersion = (JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, string>)[
+  "."
+];
+const major = manifestVersion?.match(/^(\d+)\./)?.[1];
+if (major === undefined) {
+  throw new Error(
+    `finalize-schema: cannot derive the major version from .release-please-manifest.json ("." is ${JSON.stringify(manifestVersion)})`,
+  );
+}
+const SCHEMA_ID = `https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v${major}/lib/settings.schema.json`;
 
 /**
  * The {undeclared, entries} knobs nested INSIDE a section entry rather than
@@ -110,5 +134,8 @@ environment.then = {
   },
 };
 
-writeFileSync(schemaPath, JSON.stringify(schema, null, 2));
+// $id goes first in the emitted file, and any $id the generator might emit
+// is dropped rather than allowed to shadow the stamped one.
+const { $id: _generatedId, ...schemaBody } = schema;
+writeFileSync(schemaPath, JSON.stringify({ $id: SCHEMA_ID, ...schemaBody }, null, 2));
 console.log(`finalize-schema: closed ${wrappers.length} wrapper definition(s)`);

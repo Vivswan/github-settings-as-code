@@ -15,8 +15,8 @@
     "fuzz": "bun test/e2e/fuzz.ts",
     "build": "bun run build:bundle && bun run build:schema",
     "build:bundle": "bun build src/main.ts --target=node --outfile lib/index.js",
-    "build:schema": "ts-json-schema-generator --path src/schema.ts --type SettingsFile --tsconfig tsconfig.json --additional-properties --id https://raw.githubusercontent.com/Vivswan/github-settings-as-code/main/lib/settings.schema.json --out lib/settings.schema.json && bun .github/scripts/finalize-schema.ts",
-    "build:check": "bun run build && git diff --exit-code lib/ && ! git ls-files --others --exclude-standard lib/ | grep .",
+    "build:schema": "ts-json-schema-generator --path src/schema.ts --type SettingsFile --tsconfig tsconfig.json --additional-properties --out lib/settings.schema.json && bun .github/scripts/finalize-schema.ts",
+    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep .",
     "prepare": "husky"
   },
   "dependencies": {

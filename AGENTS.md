@@ -56,14 +56,17 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
      updates via three-way merge. -->
 <!-- repo-platform:local-section -->
 
-- `lib/index.js` is the COMMITTED bundled entrypoint the action runs
-  (node24); `lib/settings.schema.json` is the COMMITTED JSON Schema for
-  settings.yml, generated from the `SettingsFile` types (JSDoc comments in
-  `src/schema.ts` become the schema descriptions). Regenerate both with
-  `bun run build` after any `src/` change. CI's bundle-check job fails
-  when either drifts. `lib/` is exempt from the typography check
-  (third-party unicode in the bundle; schema JSDoc is checked at source)
-  and excluded from [biome](https://biomejs.dev).
+- `lib/settings.schema.json` is the COMMITTED JSON Schema for settings.yml,
+  generated from the `SettingsFile` types (JSDoc comments in `src/schema.ts`
+  become the schema descriptions); regenerate it with `bun run build:schema`
+  after a schema-affecting `src/` change - CI's schema-check job fails when
+  it drifts. `lib/index.js`, the bundled entrypoint the action runs
+  (node24), is NOT committed on main: every workflow that executes the
+  action builds it first (`bun run build:bundle`), the e2e runner builds it
+  to a temp path, and the runnable bundle a `uses:` ref resolves is built
+  and committed on the release tags. `lib/` is exempt from the typography
+  check (third-party unicode in the bundle; schema JSDoc is checked at
+  source) and excluded from [biome](https://biomejs.dev).
 - The apply/check engine layout: `src/main.ts` is the thin bundled
   entrypoint; `src/action/` is the GitHub Actions layer (inputs, Io over
   @actions/core, settings reading, step summaries, the single- and
@@ -85,9 +88,10 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   (`on-missing-permission`, `required-sections`) works.
 - The end-to-end harness lives under `test/e2e/`: `run.ts` runs the curated
   scenarios in `test/e2e/scenarios/`, `fuzz.ts` runs seeded property fuzzing,
-  `runner.ts` spawns the committed bundle against the mock, `mock/` is the
-  in-process GitHub API (route table in `mock/routes.ts`, state in
-  `mock/state.ts`), and `oracle.ts` predicts outcome classes. On-contract mock
+  `runner.ts` builds the bundle to a temp path and spawns it against the
+  mock, `mock/` is the in-process GitHub API (route table in
+  `mock/routes.ts`, state in `mock/state.ts`), and `oracle.ts` predicts
+  outcome classes. On-contract mock
   responses are validated against a trimmed OpenAPI spec
   (`openapi/github-openapi.trimmed.json`, a fetched gitignored artifact -
   generate it with `bun .github/scripts/trim-openapi.ts`; CI caches or

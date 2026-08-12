@@ -52,10 +52,9 @@ jobs:
       - name: Test
         run: bun run test
 
-  # lib/ holds committed generated artifacts: the bundled entrypoint the
-  # node24 runtime executes and the settings.yml JSON Schema; fail if
-  # either drifts from src/.
-  bundle-check:
+  # lib/settings.schema.json is the committed settings.yml JSON Schema,
+  # generated from the SettingsFile types in src/; fail if it drifts.
+  schema-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -64,17 +63,25 @@ jobs:
           bun-version-file: .bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Rebuild and compare
+      - name: Regenerate the schema and compare
         run: bun run build:check
 
   # Self-test: run the action from this checkout in check mode against this
-  # repository. Drift or permission skips are fine (the default token cannot
-  # read admin surfaces); a CRASH is not - assert the action produced a
-  # result output, which an exception never does.
+  # repository. The bundle is not committed, so build it first. Drift or
+  # permission skips are fine (the default token cannot read admin
+  # surfaces); a CRASH is not - assert the action produced a result output,
+  # which an exception never does.
   self-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Build the action bundle
+        run: bun run build:bundle
       - name: Run settings-as-code (check mode)
         id: selfcheck
         uses: ./

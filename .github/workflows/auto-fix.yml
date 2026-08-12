@@ -1,23 +1,27 @@
-# Repo-owned auto-fix: the commit-back fixes a PR can need. lib/index.js and
-# lib/settings.schema.json are committed build artifacts, and CI fails when
-# they drift from src/ or the dependency tree (Dependabot bumps a package but
-# cannot run the build). src/upstream-gaps/ holds tripwire files that turn the
-# typecheck red with TS2344 the moment @octokit/types ships a route a gap file
-# declares as missing; graduate-upstream-gaps.ts deletes the shipped files and
-# unwires them from the gaps index. This workflow runs the graduation and the
-# rebuild on every same-repo PR that touches a fix input and pushes the result
-# back to the PR branch; an already-clean tree gets no commit. A PR with
-# unrelated type errors fails the build job here by design (the graduation
-# script refuses to half-fix a red build), just as it fails CI's typecheck.
+# Repo-owned auto-fix: the commit-back fixes a PR can need. Main carries no
+# bundle (lib/index.js is built where it runs), so no bundle rebuilds happen
+# here; two fixes remain. lib/settings.schema.json is a committed build
+# artifact, and CI fails when it drifts from src/ or the generator toolchain
+# (a Dependabot generator bump changes the schema bytes on a branch nobody
+# builds). src/upstream-gaps/ holds tripwire files that turn the typecheck
+# red with TS2344 the moment @octokit/types ships a route a gap file declares
+# as missing; graduate-upstream-gaps.ts deletes the shipped files and unwires
+# them from the gaps index. This workflow runs the graduation and the schema
+# regeneration on every same-repo PR that touches a fix input and pushes the
+# result back to the PR branch; an already-clean tree gets no commit. A PR
+# with unrelated type errors fails the build job here by design (the
+# graduation script refuses to half-fix a red build), just as it fails CI's
+# typecheck.
 #
-# Unlike dependabot-bun-lockfile.yml, rebuilding necessarily executes
-# PR-controlled code, so the fix is computed in an unprivileged job and handed
-# to the push job as a git patch staged from lib/ and src/upstream-gaps/ only:
-# no code from the PR runs on the runner that holds the write token, applying
-# a patch executes nothing, and the push job re-checks the applied paths
-# before committing. --ignore-scripts keeps husky (the prepare script) and
-# dependency lifecycle scripts out of the build job, and the push job never
-# installs anything, so no git hooks exist on either runner.
+# Unlike dependabot-bun-lockfile.yml, regenerating the schema necessarily
+# executes PR-controlled code, so the fix is computed in an unprivileged job
+# and handed to the push job as a git patch staged from
+# lib/settings.schema.json and src/upstream-gaps/ only: no code from the PR
+# runs on the runner that holds the write token, applying a patch executes
+# nothing, and the push job re-checks the applied paths before committing.
+# --ignore-scripts keeps husky (the prepare script) and dependency lifecycle
+# scripts out of the build job, and the push job never installs anything, so
+# no git hooks exist on either runner.
 #
 # Dependabot-triggered runs read the Dependabot secrets store, not the
 # Actions one. Register REPO_PLATFORM_TOKEN in both stores: a push made
@@ -34,13 +38,16 @@ on:
   pull_request:
     paths:
       - "src/**"
-      - "lib/**"
+      - "lib/settings.schema.json"
       - "package.json"
       - "bun.lock"
       - "tsconfig.json"
       - ".bun-version"
       - ".github/scripts/finalize-schema.ts"
       - ".github/scripts/graduate-upstream-gaps.ts"
+      # The schema's $id derives its v<MAJOR> from this manifest, so the
+      # release PR of a major bump needs the schema regenerated here.
+      - ".release-please-manifest.json"
 
 permissions:
   contents: read
@@ -78,23 +85,23 @@ jobs:
       - name: Graduate upstream gaps octokit now ships
         shell: bash
         # Old branches cut before the graduate script landed lack it; the
-        # bundle rebuild below still runs for them.
+        # schema regeneration below still runs for them.
         run: |
           if [ -f .github/scripts/graduate-upstream-gaps.ts ]; then
             bun .github/scripts/graduate-upstream-gaps.ts
           else
             echo "graduate script not on this branch; skipping"
           fi
-      - name: Rebuild the bundle and stage the fix patch
+      - name: Regenerate the schema and stage the fix patch
         id: rebuild
         shell: bash
         run: |
-          bun run build
+          bun run build:schema
           # Anything the earlier steps left staged is not this workflow's
           # fix: start from an empty index so the patch holds exactly the
           # allowed paths.
           git reset -q
-          git add -A -- lib/
+          git add -A -- lib/settings.schema.json
           # Old branches cut before the gaps directory landed lack it, and
           # an unmatched pathspec would fail the add.
           if [ -d src/upstream-gaps ]; then
@@ -102,14 +109,14 @@ jobs:
           fi
           git diff --cached --binary > "$RUNNER_TEMP/autofix.patch"
           if [ ! -s "$RUNNER_TEMP/autofix.patch" ]; then
-            echo "bundle and upstream gaps already fresh"
+            echo "schema and upstream gaps already fresh"
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "pruned=false" >> "$GITHUB_OUTPUT"
           else
             git diff --cached --stat
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            # A patch touching src/ means gap files graduated (a lib/-only
-            # patch is plain bundle drift); the push job picks the commit
+            # A patch touching src/ means gap files graduated (a schema-only
+            # patch is plain generator drift); the push job picks the commit
             # subject from this. --quiet exits 1 on a staged src/ change,
             # and unlike piping --name-only into grep -q it cannot trip
             # pipefail on an early-exiting reader.
@@ -177,9 +184,9 @@ jobs:
           # path cannot hide behind an allowed destination.
           while IFS= read -r -d '' path; do
             case "$path" in
-              lib/* | src/upstream-gaps/*) ;;
+              lib/settings.schema.json | src/upstream-gaps/*) ;;
               *)
-                echo "::error::the fix patch staged '$path', outside lib/ and src/upstream-gaps/; refusing to push"
+                echo "::error::the fix patch staged '$path', outside lib/settings.schema.json and src/upstream-gaps/; refusing to push"
                 exit 1
                 ;;
             esac
@@ -190,7 +197,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          subject="build: regenerate committed bundle"
+          subject="build: regenerate settings schema"
           if [ "$PRUNED" = "true" ]; then
             subject="fix: graduate upstream gaps octokit now ships"
           fi

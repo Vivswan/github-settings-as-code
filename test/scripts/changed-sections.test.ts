@@ -197,23 +197,21 @@ describe("changed-sections selection", () => {
     }
   });
 
-  test("a section change plus its regenerated lib scopes to the section, not all", () => {
-    // lib/ regenerates on every src change, so a labels change also touches
-    // lib/index.js; the lib file must not force "all" or diff-awareness is dead.
-    const selection = sectionsForFiles(["src/sections/labels.ts", "lib/index.js"]);
+  test("a section change plus a regenerated schema scopes to the section, not all", () => {
+    // lib/settings.schema.json regenerates alongside schema-affecting src
+    // changes; the lib file must not force "all" or diff-awareness is dead.
+    const selection = sectionsForFiles(["src/sections/labels.ts", "lib/settings.schema.json"]);
     expect(renderSelection(selection)).toBe("labels");
   });
 
-  test("a lib-only diff selects all (no source to scope from)", () => {
-    expect(sectionsForFiles(["lib/index.js"]).kind).toBe("all");
-    expect(sectionsForFiles(["lib/index.js", "lib/settings.schema.json"]).kind).toBe("all");
+  test("a lib-only diff selects none (the schema-check job gates schema drift)", () => {
+    // The only committed file under lib/ is the generated schema, which
+    // carries no runnable code; the smoke job has nothing to exercise.
+    expect(sectionsForFiles(["lib/settings.schema.json"]).kind).toBe("none");
   });
 
-  test("lib alongside a docs-only change stays scoped by the non-lib files", () => {
-    // README + lib (no src): the README contributes no section, lib is ignored,
-    // but lib was touched with a non-lib file present, so it is not the lib-only
-    // case; the result is none.
-    expect(sectionsForFiles(["README.md", "lib/index.js"]).kind).toBe("none");
+  test("lib alongside a docs-only change selects none", () => {
+    expect(sectionsForFiles(["README.md", "lib/settings.schema.json"]).kind).toBe("none");
   });
 
   test("a core-path change wins over a section change", () => {

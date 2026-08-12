@@ -21,11 +21,15 @@ paths = ['''(^|/)(bun\.lock|bun\.lockb)$''']
 # prefer an inline "gitleaks:allow" comment on the flagged line -
 # finding-level, so it never excuses future secrets in the same file.
 
-# The committed bundle: third-party strings (libsodium constant-name
-# tables, the public Azurite emulator AccountKey) trip the entropy-based
-# generic rule at line numbers that shift on every rebuild. Only that rule
-# is exempted; specific credential rules still scan the bundle, and the
-# src/ sources it is built from stay fully scanned.
+# Historical bundles. lib/index.js is no longer committed on main, but the
+# scheduled scan walks the default branch's FULL history, where every
+# previously committed bundle lives forever, and release (v*) tags carry
+# freshly built bundles that any full-repo scan reaches. Third-party strings
+# in those bundles (libsodium constant-name tables, the public Azurite
+# emulator AccountKey) trip the entropy-based generic rule at line numbers
+# that shift per build. Only that rule is exempted; specific credential
+# rules still scan the bundles, and the src/ sources they are built from
+# stay fully scanned.
 [[allowlists]]
 description = "committed bundle trips the generic entropy rule"
 paths = ['''^lib/index\.js$''']

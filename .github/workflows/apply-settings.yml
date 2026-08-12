@@ -45,6 +45,19 @@ jobs:
       - uses: actions/checkout@v7
         if: steps.token.outputs.proceed == 'true'
 
+      # The bundle the action runs is not committed; build it from this
+      # checkout so `uses: ./` executes the code at HEAD.
+      - uses: oven-sh/setup-bun@v2
+        if: steps.token.outputs.proceed == 'true'
+        with:
+          bun-version-file: .bun-version
+      - name: Install dependencies
+        if: steps.token.outputs.proceed == 'true'
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Build the action bundle
+        if: steps.token.outputs.proceed == 'true'
+        run: bun run build:bundle
+
       - name: Apply own settings with the action at HEAD
         if: steps.token.outputs.proceed == 'true'
         uses: ./

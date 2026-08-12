@@ -49,16 +49,19 @@ Participation in this project is governed by the
 
 ## Toolchain
 
-`src/` is TypeScript built with [bun](https://bun.com); `lib/` holds the two
-committed generated artifacts: `index.js`, the bundle the action executes,
-and `settings.schema.json`, the published settings.yml schema. `bun run
-build` regenerates both; CI's bundle-check job fails on drift.
+`src/` is TypeScript built with [bun](https://bun.com); `lib/` holds one
+committed generated artifact, `settings.schema.json`, the published
+settings.yml schema. `bun run build:schema` regenerates it; CI's
+schema-check job fails on drift. The bundle the action executes,
+`lib/index.js`, is not committed: `bun run build:bundle` builds it where it
+is needed (the CI workflows that run the action build it first, and a
+release builds and ships it on the release tag).
 
 Runtime dependencies (such as @octokit/rest with the retry and throttling
 plugins, @actions/core, zod, and yaml) are compiled into that single bundle.
 
-Run `bun run check` for lint + typecheck + tests + generated-artifact
-freshness.
+Run `bun run check` for lint + typecheck + tests + schema freshness. The
+pre-commit hook runs lint and typecheck only.
 
 [COVERAGE.md](COVERAGE.md) is the honest inventory of the supported API
 surface: what works today, the repo-scoped gaps, and what is out of scope
@@ -66,9 +69,10 @@ by design. A change that adds or extends a section should keep it in step.
 
 ## End-to-end tests
 
-The end-to-end tests run the committed bundle as a real subprocess against a
-mock GitHub API, so they exercise the same `lib/index.js` a user ships, not the
-TypeScript source. `bun run test:e2e` runs the curated scenario corpus, and
+The end-to-end tests build the bundle to a temp path and run it as a real
+subprocess against a mock GitHub API, so they exercise the same single-file
+bundle a release ships, not the TypeScript source directly. `bun run
+test:e2e` runs the curated scenario corpus, and
 `bun run fuzz` runs seeded property fuzzing: it generates random scenarios and
 checks each run's outcome against an oracle that predicts the outcome class from
 the token mask, policy, and mode.

@@ -56,13 +56,15 @@ the workflow into the target repository itself (the self carve-out gives
 full logs safely), or keep the admin repo private and set
 `private-repos: show`.
 
-The second is to reproduce locally. The action is a plain Node bundle, so
-the same PAT and the same inputs reproduce the run on your machine, where
-the logs stay local. Put the PAT in a `YOUR_PAT` variable; a shell
-variable name cannot contain a hyphen, so
+The second is to reproduce locally. The action is a plain Node bundle -
+build it first with `bun install && bun run build:bundle` (it is not
+committed) - so the same PAT and the same inputs reproduce the run on your
+machine, where the logs stay local. Put the PAT in a `YOUR_PAT` variable; a
+shell variable name cannot contain a hyphen, so
 pass the hyphenated inputs through `env`:
 
 ```bash
+bun install && bun run build:bundle
 env "INPUT_TOKEN=$YOUR_PAT" 'INPUT_REPOSITORY=owner/name' 'INPUT_PRIVATE-REPOS=show' \
   node lib/index.js
 ```

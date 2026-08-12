@@ -1,15 +1,17 @@
 /**
- * The e2e scenario runner: spawn the committed bundle (lib/index.js) as a
- * real subprocess against a fresh mock GitHub server, then assert the
- * scenario's expectations against the process exit code, its GITHUB_OUTPUT,
- * the step summary, and the mock's request log and violations.
+ * The e2e scenario runner: bundle src/main.ts, spawn that bundle as a real
+ * subprocess against a fresh mock GitHub server, then assert the scenario's
+ * expectations against the process exit code, its GITHUB_OUTPUT, the step
+ * summary, and the mock's request log and violations.
  *
  * Two tenets shape this file:
  * - Hermetic: the child environment is built FROM SCRATCH, never spread from
  *   process.env, so a developer's real token or GitHub URL can never leak into
  *   a run. The token is the inert string "e2e-token".
  * - Production parity: the child runs under `node` (the action's node24
- *   runtime), against the bundle a user would ship, not the TypeScript source.
+ *   runtime), against a bundle built once per process from src/main.ts - the
+ *   same single-file shape a release ships, freshly built so a run can never
+ *   test stale code.
  */
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -34,7 +36,47 @@ import { sharedValidator } from "./openapi/validate.js";
 import type { Expect, Scenario } from "./schema.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
-const BUNDLE = join(ROOT, "lib", "index.js");
+/**
+ * The CLI command production bundles are built with, pinned verbatim so the
+ * harness's Bun.build call below cannot silently drift from it: a flag added
+ * to build:bundle (minify, sourcemap, define) would make e2e exercise a
+ * different artifact than a release ships, with nothing failing. The two
+ * must stay equivalent - a build:bundle change updates this pin AND the
+ * Bun.build options together.
+ */
+const BUILD_BUNDLE_SCRIPT = "bun build src/main.ts --target=node --outfile lib/index.js";
+/**
+ * Build src/main.ts into a temp-directory bundle once per process, memoized
+ * as a promise so concurrent scenarios share the one build instead of racing
+ * their own. The bundle is not committed; this is where every e2e child gets
+ * the file it runs.
+ */
+let bundleBuild: Promise<string> | undefined;
+function builtBundle(): Promise<string> {
+  bundleBuild ??= (async () => {
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    if (pkg.scripts?.["build:bundle"] !== BUILD_BUNDLE_SCRIPT) {
+      throw new Error(
+        `package.json build:bundle is now "${pkg.scripts?.["build:bundle"]}"; mirror the change in the harness's Bun.build options and update BUILD_BUNDLE_SCRIPT (test/e2e/runner.ts) to keep production parity`,
+      );
+    }
+    const outdir = mkdtempSync(join(tmpdir(), "e2e-bundle-"));
+    process.on("exit", () => rmSync(outdir, { recursive: true, force: true }));
+    const build = await Bun.build({
+      entrypoints: [join(ROOT, "src", "main.ts")],
+      target: "node",
+      outdir,
+      naming: "index.js",
+    });
+    if (!build.success) {
+      throw new Error(`bundling src/main.ts failed:\n${build.logs.join("\n")}`);
+    }
+    return join(outdir, "index.js");
+  })();
+  return bundleBuild;
+}
 /**
  * The inert token every child run authenticates with (INPUT_TOKEN). Exported
  * as the single source for the token-leak invariant's needle: a consumer that
@@ -148,25 +190,6 @@ function captureRerun(label: string, run: Invocation): RerunCapture {
     summary: run.summary,
     outputs: run.outputs,
   };
-}
-
-/**
- * Compare the committed bundle against a fresh build of src/, the same check
- * test/bundle.test.ts makes. Running the stale bundle would test yesterday's
- * code, so fail loudly with the fix command. Cached across a run() batch.
- */
-let freshnessChecked = false;
-async function assertBundleFresh(): Promise<void> {
-  if (freshnessChecked) {
-    return;
-  }
-  const build = await Bun.build({ entrypoints: [join(ROOT, "src/main.ts")], target: "node" });
-  const fresh = build.success ? await build.outputs[0]?.text() : undefined;
-  const committed = readFileSync(BUNDLE, "utf8");
-  if (fresh !== committed) {
-    throw new Error("lib/index.js is stale; run: bun run build");
-  }
-  freshnessChecked = true;
 }
 
 /**
@@ -374,7 +397,7 @@ async function invoke(scenario: Scenario, dir: string, apiUrl: string): Promise<
   writeFileSync(outputFile, "");
   writeFileSync(summaryFile, "");
 
-  const proc = Bun.spawn(["node", BUNDLE], {
+  const proc = Bun.spawn(["node", await builtBundle()], {
     cwd: dir,
     env: childEnv(scenario, dir, apiUrl),
     stdout: "pipe",
@@ -984,7 +1007,6 @@ export async function runScenario(
   scenario: Scenario,
   opts?: { serverOptions?: ServerOptions },
 ): Promise<ScenarioReport> {
-  await assertBundleFresh();
   // Create the temp dir and the mock inside try/finally so a failure setting
   // up either one tears down whatever was already created. Both start
   // undefined and the finally cleans up only what exists.
