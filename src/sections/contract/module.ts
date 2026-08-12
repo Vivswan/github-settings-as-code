@@ -511,7 +511,7 @@ const LOOSEN_LEAF_TYPES: ReadonlySet<string> = new Set([
 
 /**
  * Recognize a knobbed-section union: exactly the entry array plus the strict
- * {undeclared, entries} wrapper (see knobbed() in src/schema.ts).
+ * {undeclared, entries} wrapper (see knobbed() in src/sections/shared/schema-helpers.ts).
  */
 function detectKnobUnion(
   options: readonly z.ZodType[],
