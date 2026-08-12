@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { actionsSection } from "../../src/sections/actions.js";
+import { actionsSection } from "../../src/sections/actions/index.js";
 import {
   type EndpointDecl,
   type GraphqlOpDecl,

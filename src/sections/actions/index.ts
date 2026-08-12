@@ -6,8 +6,8 @@
  * verbatim to the base permissions PUT.
  */
 
-import { subsetDiff } from "../engine/diff.js";
-import { type ActionsConfig, SettingsFile } from "../schema.js";
+import { subsetDiff } from "../../engine/diff.js";
+import { type ActionsConfig, SettingsFile } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -17,7 +17,7 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
-} from "./contract.js";
+} from "../contract.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
