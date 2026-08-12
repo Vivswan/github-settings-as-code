@@ -96,8 +96,9 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   `fuzz.ts` runs seeded property fuzzing,
   `runner.ts` builds the bundle to a temp path and spawns it against the
   mock, `mock/` is the in-process GitHub API (request pipeline in
-  `mock/routes.ts`, merged handler tables in `mock/handlers.ts`, per-section
-  handler fragments in `mock/sections.ts` over the shared helpers in
+  `mock/routes.ts`, merged handler tables in `mock/handlers.ts`, the
+  per-SectionKey fragment registration in `mock/sections.ts` over the shared
+  helpers in
   `mock/support.ts`, state in `mock/state.ts`), and
   `oracle.ts` predicts
   outcome classes. On-contract mock
@@ -109,8 +110,10 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   denials, and the mock's own contract-violation replies.
 - Adding a section endpoint: declare it in the section module's `ENDPOINTS`,
   then add a matching handler under its `section.role` key in the section's
-  mock fragment (`test/e2e/mock/sections.ts` for a not-yet-moved section, the
-  section's own `src/sections/<key>/mock.ts` once moved). The section route
+  mock fragment (`src/sections/<key>/mock.ts`; each fragment is registered
+  per SectionKey in `test/e2e/mock/sections.ts`, and its handler record is
+  typed over the section's exact key union, so a missing or phantom handler
+  fails to compile). The section route
   table, permission gate, and
   tolerated statuses derive from `allEndpoints()`, so `assertHandlerCompleteness()`
   fails at construction if a declared endpoint has no handler or a handler names

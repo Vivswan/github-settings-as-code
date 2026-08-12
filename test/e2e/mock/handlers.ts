@@ -2,8 +2,11 @@
  * The merged per-endpoint handler tables, one entry per "section.role" key in
  * allEndpoints() / allGraphqlOps(), and the construction-time assertions that
  * pin the merged tables against the declarations in both directions. The
- * entries themselves live in the section fragments (sections.ts, and each
- * moved section's src/sections/<key>/mock.ts).
+ * entries themselves live in each section's src/sections/<key>/mock.ts,
+ * registered per SectionKey in sections.ts. Since the fragment record is a
+ * mapped type over SectionKey and each fragment is a Record over its exact
+ * key union, both assertions below are unreachable by construction; they
+ * stay as runtime backstops behind that type-level claim.
  */
 
 import {
@@ -22,17 +25,12 @@ export const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = sectionGraphqlHa
 
 /**
  * Where a missing key's handler belongs, read from the declaration's own
- * section tag: the section's fragment (src/sections/<section>/mock.ts) once
- * the section has moved, or mock/sections.ts while it still lives there - so
- * the error names the exact file to edit instead of pointing every
- * contributor at the legacy fragment.
+ * section tag: the section's fragment in src/sections/<section>/mock.ts -
+ * so the error names the exact file to edit.
  */
 function missingHandlerPointer(missing: Array<[string, { section: string }]>): string {
   return missing
-    .map(
-      ([key, { section }]) =>
-        `${key} (add it in src/sections/${section}/mock.ts, or mock/sections.ts while the section lives there)`,
-    )
+    .map(([key, { section }]) => `${key} (add it in src/sections/${section}/mock.ts)`)
     .sort()
     .join(", ");
 }
