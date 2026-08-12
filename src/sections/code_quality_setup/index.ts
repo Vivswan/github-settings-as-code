@@ -46,9 +46,9 @@ export const codeQualitySetupSection: SectionModule<"code_quality_setup"> = {
     "a 403 on this endpoint can also mean code quality is unavailable on the repository, or the repository is archived",
   endpoints: ENDPOINTS,
   shape: requirePlainMapping(loosen(SettingsFile.shape.code_quality_setup)),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as Record<string, unknown>;
+    const desired: Record<string, unknown> = declared;
 
     if (ctx.check) {
       const live = await call(ctx, this, ENDPOINTS.get);

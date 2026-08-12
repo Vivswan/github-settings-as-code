@@ -161,12 +161,9 @@ export const webhooksSection: SectionModule<"webhooks"> = {
   // service hook this section does not manage.
   shape: loosen(SettingsFile.shape.webhooks),
   secretValues,
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries: desired } = undeclaredPolicy(
-      desiredRaw as WebhookConfig[] | UndeclaredPolicyList<WebhookConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
       desired,

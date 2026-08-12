@@ -4,6 +4,10 @@ import { grantFor, PermissionDenied } from "../../../src/sections/contract.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
 import { actionsSection } from "./index.js";
+// The casts on some run() inputs below simulate FUTURE keys: the runtime
+// shape passes unknown keys through verbatim, which the static config type
+// cannot spell without giving up typo-checking on the known keys.
+import type { ActionsConfig } from "./schema.js";
 
 const ACTIONS_WRITES = [
   "PUT /repos/o/r/actions/permissions",
@@ -48,14 +52,14 @@ describe("actions", () => {
     await actionsSection.run(ctx(api), { allowed_actions: "all" });
     expect(api.mutations()[0]?.payload).toEqual({ allowed_actions: "all", enabled: true });
     const future = new MockApi({}).allowMutations(...ACTIONS_WRITES);
-    await actionsSection.run(ctx(future), { some_future_key: "x" });
+    await actionsSection.run(ctx(future), { some_future_key: "x" } as ActionsConfig);
     const payload = future.mutations()[0]?.payload as Record<string, unknown>;
     expect(payload.enabled).toBe(true);
   });
 
   test("the unrecognized-key note reports the enabled value and matches the mode", async () => {
     const apply = new MockApi({}).allowMutations(...ACTIONS_WRITES);
-    const applied = await actionsSection.run(ctx(apply), { some_future_key: "x" });
+    const applied = await actionsSection.run(ctx(apply), { some_future_key: "x" } as ActionsConfig);
     expect(applied.notes).toHaveLength(1);
     expect(applied.notes[0]).toContain("enabled: true");
     expect(applied.notes[0]).toContain("were sent verbatim");
@@ -63,12 +67,14 @@ describe("actions", () => {
     const off = await actionsSection.run(ctx(explicitOff), {
       enabled: false,
       some_future_key: "x",
-    });
+    } as ActionsConfig);
     expect(off.notes[0]).toContain("enabled: false");
     const check = new MockApi({
       "GET /repos/o/r/actions/permissions": { data: { enabled: true } },
     });
-    const checked = await actionsSection.run(ctx(check, true), { some_future_key: "x" });
+    const checked = await actionsSection.run(ctx(check, true), {
+      some_future_key: "x",
+    } as ActionsConfig);
     expect(checked.notes).toHaveLength(1);
     expect(checked.notes[0]).toContain("enabled: true");
     expect(checked.notes[0]).toContain("would send");

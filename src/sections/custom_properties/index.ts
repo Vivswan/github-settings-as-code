@@ -6,12 +6,7 @@
  * `value: null` unsets a property, reverting to the org default, if any.
  */
 
-import {
-  type CustomPropertyConfig,
-  type MustBeNever,
-  SettingsFile,
-  type UndeclaredPolicyList,
-} from "../../schema.js";
+import { type CustomPropertyConfig, type MustBeNever, SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -152,12 +147,9 @@ export const customPropertiesSection: SectionModule<"custom_properties"> = {
     consequence:
       "the key would silently never reach GitHub and the misdeclared property would keep its live value",
   },
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries: desired } = undeclaredPolicy(
-      desiredRaw as CustomPropertyConfig[] | UndeclaredPolicyList<CustomPropertyConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // Exact-name matching: GitHub does not document case folding for custom
     // property names, so two declarations are duplicates only when they match
     // verbatim - the same names the live list reports.
@@ -209,13 +201,13 @@ export const customPropertiesSection: SectionModule<"custom_properties"> = {
     // property, and sending page params would not advance anything.
     const live = extractLive(await call(ctx, this, ENDPOINTS.list));
     const liveByName = new Map(live.map((p) => [p.property_name, p.value]));
-    const declared = new Set<string>();
+    const declaredKeys = new Set<string>();
 
     // The divergent declared values, accumulated into ONE bulk PATCH; a live
     // value of null and an absent live entry both mean "unset".
     const updates: Array<{ property_name: string; value: WireValue }> = [];
     for (const property of desired) {
-      declared.add(property.property_name);
+      declaredKeys.add(property.property_name);
       const wanted = normalizeValue(property.value);
       const current = liveByName.get(property.property_name) ?? null;
       if (sameValue(wanted, current)) {
@@ -237,7 +229,7 @@ export const customPropertiesSection: SectionModule<"custom_properties"> = {
     }
 
     for (const property of live) {
-      if (declared.has(property.property_name) || property.value === null) {
+      if (declaredKeys.has(property.property_name) || property.value === null) {
         continue;
       }
       if (policy === "keep") {
@@ -262,7 +254,7 @@ export const customPropertiesSection: SectionModule<"custom_properties"> = {
         describe: "updating custom property values",
       });
       for (const update of updates) {
-        if (!declared.has(update.property_name)) {
+        if (!declaredKeys.has(update.property_name)) {
           result.changes.push(`unset undeclared custom property "${update.property_name}"`);
         } else if (update.value === null) {
           result.changes.push(`unset custom property "${update.property_name}"`);

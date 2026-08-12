@@ -6,7 +6,7 @@
  */
 
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import { type MilestoneConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
+import { SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -52,12 +52,9 @@ export const milestonesSection: SectionModule<"milestones"> = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.milestones),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries: desired } = undeclaredPolicy(
-      desiredRaw as MilestoneConfig[] | UndeclaredPolicyList<MilestoneConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
       desired,
@@ -68,10 +65,10 @@ export const milestonesSection: SectionModule<"milestones"> = {
       query: { state: "all" },
     })) as LiveMilestone[];
     const liveByTitle = new Map(live.map((m) => [m.title, m]));
-    const declared = new Set<string>();
+    const declaredKeys = new Set<string>();
 
     for (const milestone of desired) {
-      declared.add(milestone.title);
+      declaredKeys.add(milestone.title);
       const existing = liveByTitle.get(milestone.title);
       // Declared-keys-only AND passthrough: every declared key (including
       // future ones like due_on) is sent verbatim; undeclared keys are
@@ -118,7 +115,7 @@ export const milestonesSection: SectionModule<"milestones"> = {
     // because deleting a milestone DETACHES it from every issue carrying it;
     // the wrapped `undeclared: delete` form opts into exactly that.
     for (const milestone of live) {
-      if (declared.has(milestone.title)) {
+      if (declaredKeys.has(milestone.title)) {
         continue;
       }
       if (policy === "delete") {

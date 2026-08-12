@@ -18,11 +18,7 @@
  * grant fails the list exactly like a missing one.
  */
 
-import {
-  type CodespacesSecretConfig,
-  SettingsFile,
-  type UndeclaredPolicyList,
-} from "../../schema.js";
+import { SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -104,11 +100,8 @@ export const codespacesSecretsSection: SectionModule<"codespaces_secrets"> = {
     describe: (entry) => entry.name,
     consequence: "the API body carries only the sealed value, so the key would silently do nothing",
   },
-  async run(ctx, desiredRaw): Promise<SectionResult> {
-    const { policy, entries } = undeclaredPolicy(
-      desiredRaw as CodespacesSecretConfig[] | UndeclaredPolicyList<CodespacesSecretConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+  async run(ctx, declared): Promise<SectionResult> {
+    const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicateSecretNames(this, entries);
     // The engine validated every $NAME reference in both modes and, in
     // apply mode, resolved and masked the plaintexts before any section

@@ -10,11 +10,7 @@
  */
 
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import {
-  type ActionsVariableConfig,
-  SettingsFile,
-  type UndeclaredPolicyList,
-} from "../../schema.js";
+import { SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -69,12 +65,9 @@ export const actionsVariablesSection: SectionModule<"actions_variables"> = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.actions_variables),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries: desired } = undeclaredPolicy(
-      desiredRaw as ActionsVariableConfig[] | UndeclaredPolicyList<ActionsVariableConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // Variable names are case-insensitive on GitHub, so two entries differing
     // only in case name the same variable and would fight on every run.
     rejectDuplicates(

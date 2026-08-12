@@ -5,7 +5,7 @@
  */
 
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import { type AutolinkConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
+import { SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -43,12 +43,9 @@ export const autolinksSection: SectionModule<"autolinks"> = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.autolinks),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries: desired } = undeclaredPolicy(
-      desiredRaw as AutolinkConfig[] | UndeclaredPolicyList<AutolinkConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
       desired,
@@ -59,10 +56,10 @@ export const autolinksSection: SectionModule<"autolinks"> = {
     // everything, and sending page params would not advance anything.
     const live = (await call(ctx, this, ENDPOINTS.list)) as LiveAutolink[];
     const liveByPrefix = new Map(live.map((a) => [a.key_prefix, a]));
-    const declared = new Set<string>();
+    const declaredKeys = new Set<string>();
 
     for (const autolink of desired) {
-      declared.add(autolink.key_prefix);
+      declaredKeys.add(autolink.key_prefix);
       const existing = liveByPrefix.get(autolink.key_prefix);
       const { key_prefix: _kp, ...declaredFields } = autolink;
       const matches =
@@ -112,7 +109,7 @@ export const autolinksSection: SectionModule<"autolinks"> = {
     }
 
     for (const autolink of live) {
-      if (declared.has(autolink.key_prefix)) {
+      if (declaredKeys.has(autolink.key_prefix)) {
         continue;
       }
       if (policy === "keep") {

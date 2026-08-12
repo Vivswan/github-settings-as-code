@@ -3,6 +3,7 @@ import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
 import { PermissionDenied } from "../contract.js";
 import { interactionLimitsSection } from "./index.js";
+import type { InteractionLimitsConfig } from "./schema.js";
 
 const GET = "GET /repos/o/r/interaction-limits";
 const CAP_GET = "GET /repos/o/r/interaction-limits/pulls/creation-cap";
@@ -183,8 +184,10 @@ describe("interaction_limits pull request creation cap", () => {
   test("apply notes a declared cap key absent from the live cap (phantom key)", async () => {
     const api = new MockApi({ [CAP_GET]: { data: CAP_LIVE } }).allowMutations(CAP_PATCH);
     const result = await interactionLimitsSection.run(ctx(api), {
+      // The cast simulates a future/mistyped cap key riding through the
+      // passthrough shape; the note under test is how run() surfaces it.
       pull_request_creation_cap: { enabled: true, max_open_prs: 5 },
-    });
+    } as InteractionLimitsConfig);
     expect(result.notes.some((n) => n.includes('"max_open_prs"'))).toBe(true);
     expect(result.notes.some((n) => n.includes("this PATCH will re-run"))).toBe(true);
   });

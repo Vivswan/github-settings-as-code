@@ -227,6 +227,18 @@ type _OperationDictionariesFlattened = MustBeNever<
 >;
 
 /**
+ * The declared value a section receives once its key is present: the
+ * section's slice of the validated settings document. The document was
+ * parsed once at the boundary (validateSettingsDoc runs every section's
+ * shape before any handler sees the value), so run() and secretValues()
+ * carry the proof in their parameter type instead of re-asserting it with
+ * a per-section cast. Only `undefined` (the absent-section marker the
+ * engine filters) is excluded; a nullable section (interaction_limits)
+ * keeps its `null`.
+ */
+type SectionInput<K extends SectionKey> = Exclude<SettingsFile[K], undefined>;
+
+/**
  * One settings section, self-contained: identity and grant advice
  * (SectionMeta), the loose shape validation accepts for its declared
  * value, and the handler. Modules register in ./registry.ts.
@@ -281,8 +293,8 @@ export interface SectionModule<K extends SectionKey = SectionKey> extends Sectio
    * plaintext - so ctx.resolveSecret never misses. Values are returned raw;
    * nothing here reads the environment.
    */
-  secretValues?(declared: unknown): DeclaredSecretValue[];
-  run(ctx: SectionContext, desired: unknown): Promise<SectionResult>;
+  secretValues?(declared: SectionInput<K>): DeclaredSecretValue[];
+  run(ctx: SectionContext, desired: SectionInput<K>): Promise<SectionResult>;
 }
 
 /**

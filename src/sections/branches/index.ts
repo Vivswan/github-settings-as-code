@@ -852,9 +852,8 @@ export const branchesSection: SectionModule<"branches"> = {
       }
     });
   }),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, desired): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as BranchConfig[];
     // Protection is keyed by exact branch name or pattern; two entries for
     // the same one would overwrite each other's write on every run.
     rejectDuplicates(

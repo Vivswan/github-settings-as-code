@@ -12,6 +12,11 @@ import {
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
+import type {
+  DeploymentBranchPolicyConfig,
+  EnvironmentConfig,
+  EnvironmentVariableConfig,
+} from "./schema.js";
 
 const VARIABLES_LIST = "GET /repos/o/r/environments/prod/variables?per_page=30&page=1";
 
@@ -271,13 +276,17 @@ describe("environments variables shape", () => {
       {
         name: "prod",
         variables: [
-          { name: "NEW", value: "v1", future_field: "x" },
-          { name: "UPD", value: "new", future_field: "y" },
+          { name: "NEW", value: "v1", future_field: "x" } as EnvironmentVariableConfig,
+          { name: "UPD", value: "new", future_field: "y" } as EnvironmentVariableConfig,
         ],
       },
     ]);
     const post = api.calls.find((c) => c.method === "POST");
-    expect(post?.payload).toEqual({ name: "NEW", value: "v1", future_field: "x" });
+    expect(post?.payload).toEqual({
+      name: "NEW",
+      value: "v1",
+      future_field: "x",
+    } as EnvironmentVariableConfig);
     const patch = api.calls.find((c) => c.method === "PATCH");
     expect(patch?.payload).toEqual({ value: "new", future_field: "y" });
     // The mock echoes no future_field back, so the update notes the
@@ -489,19 +498,23 @@ describe("environments nested secrets validation and shape", () => {
   });
 
   test("secretValues walks every entry's secrets list and survives malformed containers", () => {
+    // The double cast feeds secretValues a PRE-VALIDATION document slice on
+    // purpose: its contract is defensiveness against any merged value.
     const values = environmentsSection.secretValues?.([
       { name: "a", secrets: [{ name: "X", value: "$X" }] },
       { name: "b", secrets: { entries: [{ name: "Y", value: "$Y" }] } },
       { name: "c" },
       { name: "d", secrets: "garbage" },
       "not-an-entry",
-    ]);
+    ] as unknown as EnvironmentConfig[]);
     expect(values).toEqual([
       { label: 'the secret entry "X" of environment "a"', value: "$X" },
       { label: 'the secret entry "Y" of environment "b"', value: "$Y" },
     ]);
     // A non-list section value contributes nothing (validation reports it).
-    expect(environmentsSection.secretValues?.({ not: "a list" })).toEqual([]);
+    expect(
+      environmentsSection.secretValues?.({ not: "a list" } as unknown as EnvironmentConfig[]),
+    ).toEqual([]);
   });
 });
 
@@ -516,7 +529,9 @@ function policiesBody(policies: Array<{ id?: number; name?: string; type?: strin
 }
 
 /** A declared entry with the flag pairing validation requires. */
-function envWithPolicies(policies: unknown): Record<string, unknown> {
+function envWithPolicies(
+  policies: EnvironmentConfig["deployment_branch_policies"],
+): EnvironmentConfig {
   return {
     name: "prod",
     deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
@@ -715,11 +730,17 @@ describe("environments deployment branch policies validation and shape", () => {
       shape.safeParse([envWithPolicies({ undeclared: "keep", entries: [{ name: "v*" }] })]).success,
     ).toBe(true);
     // Loose entries: a field GitHub ships tomorrow rides the create verbatim.
-    expect(shape.safeParse([envWithPolicies([{ name: "release/*", future: "x" }])]).success).toBe(
-      true,
-    );
+    expect(
+      shape.safeParse([
+        envWithPolicies([{ name: "release/*", future: "x" } as DeploymentBranchPolicyConfig]),
+      ]).success,
+    ).toBe(true);
     // The wrapper stays strict: its keys are this action's own vocabulary.
-    expect(shape.safeParse([envWithPolicies({ entires: [], entries: [] })]).success).toBe(false);
+    expect(
+      shape.safeParse([
+        envWithPolicies({ entires: [], entries: [] } as unknown as DeploymentBranchPolicyConfig[]),
+      ]).success,
+    ).toBe(false);
   });
 });
 

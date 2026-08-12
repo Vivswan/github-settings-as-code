@@ -554,9 +554,8 @@ export const environmentsSection: SectionModule<"environments"> = {
       }));
     });
   },
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, desired): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as EnvironmentConfig[];
     rejectDuplicates(
       this,
       desired,

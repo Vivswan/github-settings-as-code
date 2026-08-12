@@ -8,12 +8,7 @@
  * notes.
  */
 
-import {
-  type CollaboratorConfig,
-  type MustBeNever,
-  SettingsFile,
-  type UndeclaredPolicyList,
-} from "../../schema.js";
+import { type CollaboratorConfig, type MustBeNever, SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -108,12 +103,9 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
     describe: (c) => c.username,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries: desired } = undeclaredPolicy(
-      desiredRaw as CollaboratorConfig[] | UndeclaredPolicyList<CollaboratorConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
       desired,
@@ -139,11 +131,11 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
     const inviteByLogin = new Map(
       invitations.map((invitation) => [invitation.invitee.login.toLowerCase(), invitation]),
     );
-    const declared = new Set<string>();
+    const declaredKeys = new Set<string>();
 
     for (const collaborator of desired) {
       const login = collaborator.username.toLowerCase();
-      declared.add(login);
+      declaredKeys.add(login);
       const wantPermission = collaborator.permission ?? DEFAULT_ROLE;
       const wantRole = roleForPermission(wantPermission);
       const existing = liveByLogin.get(login);
@@ -233,7 +225,7 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
 
     for (const collaborator of live) {
       const login = collaborator.login.toLowerCase();
-      if (login === ctx.repo.owner.toLowerCase() || declared.has(login)) {
+      if (login === ctx.repo.owner.toLowerCase() || declaredKeys.has(login)) {
         continue; // never remove the owner (under either policy)
       }
       if (policy === "keep") {
@@ -254,7 +246,7 @@ export const collaboratorsSection: SectionModule<"collaborators"> = {
 
     for (const invitation of invitations) {
       const invitee = invitation.invitee.login;
-      if (declared.has(invitee.toLowerCase())) {
+      if (declaredKeys.has(invitee.toLowerCase())) {
         continue;
       }
       if (policy === "keep") {

@@ -58,9 +58,8 @@ export const workflowsSection: SectionModule<"workflows"> = {
     describe: (w) => w.path,
     consequence: "the enable/disable calls send no payload, so the key would silently do nothing",
   },
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, desired): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as WorkflowConfig[];
     // Two entries naming the same file (e.g. "ci.yml" and
     // ".github/workflows/ci.yml") would fight each other on every run.
     rejectDuplicates(

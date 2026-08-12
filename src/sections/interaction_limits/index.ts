@@ -23,11 +23,7 @@
  */
 
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import {
-  INTERACTION_LIMITS_ROUTED_KEYS,
-  type InteractionLimitsConfig,
-  SettingsFile,
-} from "../../schema.js";
+import { INTERACTION_LIMITS_ROUTED_KEYS, SettingsFile } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -155,9 +151,8 @@ export const interactionLimitsSection: SectionModule<"interaction_limits"> = {
   permission,
   endpoints: ENDPOINTS,
   shape: requirePlainMapping(loosen(SettingsFile.shape.interaction_limits)),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, desired): Promise<SectionResult> {
     const result = emptyResult();
-    const desired = desiredRaw as InteractionLimitsConfig | null;
 
     if (desired === null) {
       // null clears the BASE limit only; the cap and bypass list are

@@ -14,7 +14,7 @@
  */
 
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import { type DeployKeyConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
+import { type DeployKeyConfig, SettingsFile } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -127,12 +127,9 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.deploy_keys),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, declared): Promise<SectionResult> {
     const result = emptyResult();
-    const { policy, entries: desired } = undeclaredPolicy(
-      desiredRaw as DeployKeyConfig[] | UndeclaredPolicyList<DeployKeyConfig>,
-      defaultUndeclaredPolicy(this),
-    );
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // Titles are matched EXACTLY: GitHub does not document any case folding
     // for deploy key titles, so two titles differing in case are two keys.
     rejectDuplicates(
@@ -199,7 +196,7 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
       );
     }
 
-    const declared = new Set(desired.map((entry) => entry.title));
+    const declaredKeys = new Set(desired.map((entry) => entry.title));
     for (const { entry, material } of parsed) {
       const existing = live.find((candidate) => candidate.title === entry.title);
       const { title: _title, key: _key, read_only, ...extraKeys } = entry;
@@ -276,7 +273,7 @@ export const deployKeysSection: SectionModule<"deploy_keys"> = {
     // Undeclared keys are kept by default: a live deploy key authenticates a
     // service somewhere, and deployment tooling installs its own keys.
     for (const key of live) {
-      if (declared.has(key.title)) {
+      if (declaredKeys.has(key.title)) {
         continue;
       }
       if (policy === "keep") {

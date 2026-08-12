@@ -4,7 +4,7 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import { type PagesConfig, SettingsFile } from "../../schema.js";
+import { SettingsFile } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -39,14 +39,14 @@ export const pagesSection: SectionModule<"pages"> = {
   // The handler dereferences source.path before the API sees it, so the
   // shape must catch source: null or a source without a branch.
   shape: loosen(SettingsFile.shape.pages),
-  async run(ctx, desiredRaw): Promise<SectionResult> {
+  async run(ctx, desired): Promise<SectionResult> {
     const result = emptyResult();
     const probe = await probeAbsent(ctx, this, ENDPOINTS.get);
     const exists = !("missing" in probe);
     const liveSite = "data" in probe ? probe.data : undefined;
 
     // pages: null declares Pages OFF, mirroring branches' protection: null.
-    if (desiredRaw === null) {
+    if (desired === null) {
       if (!exists) {
         // A 404 here is ambiguous: no Pages site, or a fine-grained token
         // without the Pages permission (which also answers 404). The
@@ -67,7 +67,6 @@ export const pagesSection: SectionModule<"pages"> = {
       result.changes.push("disabled GitHub Pages");
       return result;
     }
-    const desired = desiredRaw as PagesConfig;
     if (Object.keys(desired).length === 0) {
       result.notes.push(
         "pages: declared as an empty mapping, which configures nothing (the update endpoint rejects an empty body). Declare at least one field, use pages: null to disable the site, or remove the section",
