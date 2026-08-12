@@ -27,8 +27,9 @@ silently.
    # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
    ```
 
-4. Add the workflow. On a repository with existing labels, autolinks, or
-   collaborators, also set `mode: check` under `with:` for the first run:
+4. Add the workflow. On a repository with existing labels, autolinks,
+   collaborators, Actions variables, or Copilot agents variables, also set
+   `mode: check` under `with:` for the first run:
    the drift report lists everything an apply would delete, and nothing is
    written.
 
@@ -59,7 +60,9 @@ silently.
    touches `.github/settings.yml` applies it.
 
 A JSON Schema describing every section and its structured fields is
-generated from the commented types in `src/schema.ts` and served at
+generated from the zod schemas in `src/schema.ts` (the single source of
+the config types; their `.describe()` strings become the published
+descriptions) and served at
 `https://raw.githubusercontent.com/Vivswan/github-settings-as-code/<ref>/lib/settings.schema.json`,
 where `<ref>` picks the version: `v2` (canonical, the moving major tag, <!-- x-release-please-major -->
 always the newest schema in the line) or `build/vX.Y.Z` (an exact

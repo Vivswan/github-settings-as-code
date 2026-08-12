@@ -51,7 +51,8 @@ labels:
 Only declared keys are ever applied or compared, so everything this file
 does not mention stays as it is. The exceptions are the sections the
 [Sections table](../../README.md#sections) marks as deleting undeclared
-entries: declaring `labels`, `autolinks`, or `collaborators` makes the
+entries: declaring `labels`, `autolinks`, `collaborators`,
+`actions_variables`, or `agents_variables` makes the
 declared list authoritative, and live entries missing from it are deleted on
 apply. That is why the first run below is a check, not an apply.
 

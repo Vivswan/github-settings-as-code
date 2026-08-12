@@ -285,15 +285,16 @@ describe("docs/ guide pages", () => {
     expect(offenders).toEqual([]);
   });
 
-  test("marker-bearing markdown files equal the release-please extra-files set", () => {
+  test("marker-bearing files equal the release-please extra-files set", () => {
     // release-please's generic updater rewrites version pins only in files
     // listed under extra-files; a page moved without updating
     // release-please-config.json keeps its stale pin silently. A docs
     // restructure is exactly when that happens, so pin the sets equal.
-    // Every root-level markdown file is scanned, not a named few, so a
-    // marker added to a new root page cannot escape the tripwire. The scan
-    // covers markdown only: an extra-files entry outside it (action.yml, a
-    // workflow) fails this equality and means the scan set needs widening.
+    // Every root-level markdown file and issue template is scanned, not a
+    // named few, so a marker added to a new root page or template cannot
+    // escape the tripwire. An extra-files entry outside the scan set
+    // (action.yml, a workflow) fails this equality and means the scan set
+    // needs widening.
     const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
       packages: Record<string, { "extra-files": string[] }>;
     };
@@ -301,8 +302,16 @@ describe("docs/ guide pages", () => {
     const rootPages = readdirSync(ROOT)
       .filter((name) => name.endsWith(".md"))
       .map((name) => ({ label: name, path: join(ROOT, name) }));
+    const templateDir = join(ROOT, ".github", "ISSUE_TEMPLATE");
+    const templates = readdirSync(templateDir)
+      .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+      .map((name) => ({
+        label: `.github/ISSUE_TEMPLATE/${name}`,
+        path: join(templateDir, name),
+      }));
     const marked = rootPages
       .concat(guidePages().map((page) => ({ label: `docs/${page}`, path: join(DOCS, page) })))
+      .concat(templates)
       .filter((file) => readFileSync(file.path, "utf8").includes("x-release-please-"))
       .map((file) => file.label);
     expect(marked.sort()).toEqual([...extraFiles].sort());

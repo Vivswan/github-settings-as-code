@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { endpointMethod, endpointPath, matchesTemplate } from "../../src/sections/contract.js";
@@ -53,6 +53,20 @@ describe("COVERAGE Supported table", () => {
       expect(
         notes.includes(needle),
         `COVERAGE Supported row for "${endpoint.section}" never mentions "${needle}" from endpoint ${endpoint.route}`,
+      ).toBe(true);
+    }
+  });
+
+  test("every src/ or test/ path citation resolves on disk", () => {
+    // Section moves (flat src/sections/<key>.ts files becoming directories)
+    // silently rot the prose citations; existence on disk is the contract.
+    const cited = coverage.match(/\b(?:src|test)\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*/g) ?? [];
+    expect(cited.length, "COVERAGE.md cites no src/ or test/ path at all").toBeGreaterThan(0);
+    for (const citation of new Set(cited)) {
+      const path = citation.replace(/\.+$/, ""); // a citation can end a sentence
+      expect(
+        existsSync(join(ROOT, path)),
+        `COVERAGE.md cites "${path}" but nothing exists there; update the citation to the file's current location`,
       ).toBe(true);
     }
   });
