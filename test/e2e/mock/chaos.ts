@@ -81,10 +81,11 @@ export function assertFaultKeys(
 
 /**
  * Consume one firing of the fault registered for `key`, when one remains: each
- * fault fires on the first `times` (default 1) matching requests, counted in
- * `faultCounts` (which doubles as the fault-fired signal the server exposes).
- * Returns the fault kind plus the pre-increment fire index, which server_error
- * uses to rotate its status deterministically.
+ * fault fires on the first `times` (default 1; "always" = every match)
+ * matching requests, counted in `faultCounts` (which doubles as the
+ * fault-fired signal the server exposes). Returns the fault kind plus the
+ * pre-increment fire index, which server_error uses to rotate its status
+ * deterministically.
  */
 export function takeFault(
   key: string,
@@ -95,7 +96,8 @@ export function takeFault(
     return null;
   }
   const fired = options.faultCounts.get(key) ?? 0;
-  if (fired >= (fault.times ?? 1)) {
+  const limit = fault.times ?? 1;
+  if (limit !== "always" && fired >= limit) {
     return null;
   }
   options.faultCounts.set(key, fired + 1);

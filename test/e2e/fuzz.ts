@@ -74,14 +74,6 @@ import type { Scenario } from "./schema.js";
 
 const FAILURE_CAP = 5;
 
-/**
- * Multi-repo and discovery fuzz share the single-repo denial barrier, so they
- * stayed gated until the barrier became policy-aware (the rule-4 fix). That has
- * landed, so the mode selector reserves ~1/4 of the stream for the multi-repo
- * drive.
- */
-const MULTI_REPO_ENABLED = true;
-
 /** Mix the master seed and an iteration index into a stable per-iteration seed. */
 function iterationSeed(master: number, i: number): number {
   let h = (master ^ (i + 0x9e3779b9)) >>> 0;
@@ -1718,12 +1710,12 @@ async function preflightFaultRun(seed: number, surviving: boolean): Promise<Iter
  * forced-private one included) and require the degrade contract: the safe
  * "could not deliver the private report" warning, zero issue writes, and
  * target results exactly as the oracle predicted (a report failure never
- * fails the run). `times: 99` faults every lookup so no target's delivery
- * half-succeeds; the kind is pinned to server_error because the degrade
- * contract is the HTTP-status warning path - other kinds keep riding the
- * section and core iterations. Draws scenarios from deterministic forks until
- * one uses the issue channel (~1/6 per draw), falling back to a plain multi
- * iteration when none rolls within the attempt budget.
+ * fails the run). `times: "always"` faults every lookup so no target's
+ * delivery half-succeeds; the kind is pinned to server_error because the
+ * degrade contract is the HTTP-status warning path - other kinds keep riding
+ * the section and core iterations. Draws scenarios from deterministic forks
+ * until one uses the issue channel (~1/6 per draw), falling back to a plain
+ * multi iteration when none rolls within the attempt budget.
  */
 async function reportFaultIteration(seed: number): Promise<IterationResult> {
   const drawn = drawIssueChannelScenario(new Rng(seed), 12);
@@ -1752,7 +1744,7 @@ function injectedReportFaultRun(drawn: {
   scenario: Scenario;
   meta: MultiScenarioMeta;
 }): Promise<IterationResult> {
-  drawn.scenario.faults = [{ endpoint: "core.issuesList", kind: "server_error", times: 99 }];
+  drawn.scenario.faults = [{ endpoint: "core.issuesList", kind: "server_error", times: "always" }];
   return runMultiPredicted(drawn.scenario, drawn.meta, {
     fault: {
       key: "core.issuesList",
@@ -1938,14 +1930,13 @@ async function main(): Promise<number> {
 
   for (let i = 0; i < flags.iterations; i++) {
     const seed = replayOne ? master : iterationSeed(master, i);
-    // Mode selection over an 8-way roll: ~1/4 multi-repo (when enabled), 1/8
-    // input fuzz, 1/8 transport misbehavior (split 50/50 between response
-    // corruption and injected faults), 1/8 discovery, the rest standard
-    // single-repo.
+    // Mode selection over an 8-way roll: ~1/4 multi-repo, 1/8 input fuzz,
+    // 1/8 transport misbehavior (split 50/50 between response corruption and
+    // injected faults), 1/8 discovery, the rest standard single-repo.
     const roll = new Rng(seed ^ 0x5bd1e995).int(8);
     let result: IterationResult;
     let mode: string;
-    if (MULTI_REPO_ENABLED && roll < 2) {
+    if (roll < 2) {
       mode = "multi";
       result = await multiRepoFuzzIteration(seed);
     } else if (roll === 2) {
@@ -1996,44 +1987,69 @@ async function main(): Promise<number> {
     }
   }
 
-  // Directed witness battery: every (section, witness kind, mode) combination,
-  // deterministically derived from the master seed. The random stream reaches
-  // these only probabilistically, so the mutation-class guard below would be
-  // flaky without it. Skipped on a single-seed replay, which reproduces one
-  // random iteration and must not drag ten extra runs along.
+  // Directed batteries, each deterministically derived from the master seed:
+  // the random stream reaches their combinations only probabilistically, so
+  // each battery pins its guarantee once per soak. Skipped on a single-seed
+  // replay, which reproduces one random iteration and must not drag the
+  // battery runs along.
   let batteryFailures = 0;
   if (!replayOne) {
-    const combos: Array<[WitnessSection, LiveWitnessKind, "apply" | "check"]> = [];
+    // `--iterations 0` runs ZERO random iterations and then the batteries, so
+    // this one command reproduces exactly a failing battery (every battery
+    // derives from the master seed alone) without re-running the random
+    // stream.
+    const batteryReplay = `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`;
+    type BatteryEntry = [string, (seed: number) => Promise<IterationResult>];
+    // The one battery loop: a header line, then each entry at its
+    // deterministic seed (seedBase + index mixed with the master), with the
+    // shared coverage/fault-class recording and failure reporting the six
+    // batteries previously restated.
+    const runBattery = async (
+      header: string,
+      seedBase: number,
+      entries: readonly BatteryEntry[],
+    ): Promise<void> => {
+      console.log(`\n${header}:`);
+      for (const [index, [name, run]] of entries.entries()) {
+        const seed = iterationSeed(master, seedBase + index);
+        const result = await run(seed);
+        recordCoverage(result.coverage);
+        recordFaultClass(result.faultClass);
+        if (result.ok) {
+          console.log(`  ${name} ok`);
+          continue;
+        }
+        batteryFailures++;
+        console.log(`  ${name} seed ${seed} FAIL: ${result.failure}`);
+        console.log(`    replay: ${batteryReplay}`);
+        reportArtifacts(result, batteryReplay);
+      }
+    };
+
+    // Witness battery: every (section, witness kind, mode) combination, so
+    // the mutation-class guard below is deterministic instead of flaky.
+    const witnessEntries: BatteryEntry[] = [];
     for (const key of WITNESS_SECTIONS) {
       for (const kind of WITNESS_KINDS[key]) {
-        combos.push([key, kind, "apply"], [key, kind, "check"]);
+        for (const mode of ["apply", "check"] as const) {
+          witnessEntries.push([
+            `${key}/${kind}/${mode}`,
+            (seed) => witnessIteration(seed, key, kind, mode),
+          ]);
+        }
       }
     }
-    console.log("\nwitness battery (directed live-state witnesses):");
-    for (const [index, [key, kind, mode]] of combos.entries()) {
-      const seed = iterationSeed(master, 0x100000 + index);
-      const result = await witnessIteration(seed, key, kind, mode);
-      recordCoverage(result.coverage);
-      if (result.ok) {
-        console.log(`  ${key}/${kind}/${mode} ok`);
-        continue;
-      }
-      batteryFailures++;
-      console.log(`  ${key}/${kind}/${mode} seed ${seed} FAIL: ${result.failure}`);
-      // `--iterations 0` runs ZERO random iterations and then the battery, so
-      // this command reproduces exactly the failing battery (which derives
-      // from the master seed alone) without re-running the random stream.
-      console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-    }
+    await runBattery("witness battery (directed live-state witnesses)", 0x100000, witnessEntries);
 
-    // Directed input battery: every catalog case plus every raw pool entry,
-    // each run once per soak. Input mode holds 1/8 of the random stream, so a
-    // random draw covers a sparse subset of the ~15-case catalog per run;
-    // this pass exercises all of it deterministically, and pins that every
-    // raw pool string still fails the way its pool promises (a yaml-library
-    // upgrade changing parse behavior fails here, not in a nightly surprise).
-    console.log("\ninput battery (directed rejection catalog):");
+    // Input battery: every catalog case plus every raw pool entry, each run
+    // once per soak. Input mode holds 1/8 of the random stream, so a random
+    // draw covers a sparse subset of the ~15-case catalog per run; this pass
+    // exercises all of it deterministically, and pins that every raw pool
+    // string still fails the way its pool promises (a yaml-library upgrade
+    // changing parse behavior fails here, not in a nightly surprise). The run
+    // mode alternates by index parity - deterministic, so a mode-specific
+    // validation regression (e.g. an early exit only one mode takes) cannot
+    // escape the battery.
     const inputSpecs: Array<{ name: string; spec: (rng: Rng) => RejectionSpec }> = [
       ...INVALID_SETTINGS_CASES.map(({ name, build }) => ({
         name,
@@ -2059,117 +2075,69 @@ async function main(): Promise<number> {
         }),
       })),
     ];
-    for (const [index, { name, spec }] of inputSpecs.entries()) {
-      const seed = iterationSeed(master, 0x200000 + index);
-      // Alternate the run mode by index parity, so a mode-specific validation
-      // regression (e.g. an early exit only one mode takes) cannot escape the
-      // battery. Deterministic: a given entry always runs the same mode.
-      const mode = index % 2 === 0 ? ("apply" as const) : ("check" as const);
-      const result = await rejectionIteration(seed, { ...spec(new Rng(seed)), mode });
-      if (result.ok) {
-        console.log(`  ${name} [${mode}] ok`);
-        continue;
-      }
-      batteryFailures++;
-      console.log(`  ${name} [${mode}] seed ${seed} FAIL: ${result.failure}`);
-      console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-    }
+    await runBattery(
+      "input battery (directed rejection catalog)",
+      0x200000,
+      inputSpecs.map(({ name, spec }, index): BatteryEntry => {
+        const mode = index % 2 === 0 ? ("apply" as const) : ("check" as const);
+        return [
+          `${name} [${mode}]`,
+          (seed) => rejectionIteration(seed, { ...spec(new Rng(seed)), mode }),
+        ];
+      }),
+    );
 
-    // Directed fault battery: every SECTION_PRIMARY_READ section runs once
-    // per soak, paired with a fault kind x budget combo by rotating index so
-    // every combo also fires every soak (there are more sections than
-    // combos); the pairing and the mode rotate with the master seed, so soaks
-    // walk the full cross product over time, and assertFaultBatteryCoverage
-    // pins both per-soak guarantees. Labels/milestones entries get a matching
-    // witness (exact predictions); a transient combo must be
-    // indistinguishable from a healthy run, a fatal one must fail loudly
-    // naming its section.
-    console.log("\nfault battery (directed transport faults, every faultable section):");
-    for (const [index, plan] of faultBatteryPlan(master).entries()) {
-      const seed = iterationSeed(master, 0x300000 + index);
-      const label = `${plan.section}:${plan.kind}/x${plan.exhausting ? RETRY_BUDGET : 1}`;
-      const result = await faultedSectionRun(seed, plan);
-      recordCoverage(result.coverage);
-      recordFaultClass(result.faultClass);
-      if (result.ok) {
-        console.log(`  ${label} [${plan.mode}] ok`);
-        continue;
-      }
-      batteryFailures++;
-      console.log(`  ${label} [${plan.mode}] seed ${seed} FAIL: ${result.failure}`);
-      console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-    }
+    // Fault battery: every SECTION_PRIMARY_READ section runs once per soak,
+    // paired with a fault kind x budget combo by rotating index so every
+    // combo also fires every soak (there are more sections than combos); the
+    // pairing and the mode rotate with the master seed, so soaks walk the
+    // full cross product over time, and assertFaultBatteryCoverage pins both
+    // per-soak guarantees. Labels/milestones entries get a matching witness
+    // (exact predictions); a transient combo must be indistinguishable from a
+    // healthy run, a fatal one must fail loudly naming its section.
+    await runBattery(
+      "fault battery (directed transport faults, every faultable section)",
+      0x300000,
+      faultBatteryPlan(master).map(
+        (plan): BatteryEntry => [
+          `${plan.section}:${plan.kind}/x${plan.exhausting ? RETRY_BUDGET : 1} [${plan.mode}]`,
+          (seed) => faultedSectionRun(seed, plan),
+        ],
+      ),
+    );
 
     // Negative fault battery: each UNFAULTABLE_SECTIONS exemption must still
     // be earned - one-shot faults armed on EVERY GET endpoint the section
     // declares must all stay cold in a trigger-avoiding apply
     // (unfaultableSectionRun's doc has the full contract). Once per soak,
     // like the positive battery above.
-    console.log("\nunfaultable battery (declared reads stay cold in apply):");
-    for (const [index, section] of UNFAULTABLE_SECTIONS.entries()) {
-      const seed = iterationSeed(master, 0x310000 + index);
-      const result = await unfaultableSectionRun(seed, section);
-      recordCoverage(result.coverage);
-      if (result.ok) {
-        console.log(`  ${section} ok`);
-        continue;
-      }
-      batteryFailures++;
-      console.log(`  ${section} seed ${seed} FAIL: ${result.failure}`);
-      console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-    }
+    await runBattery(
+      "unfaultable battery (declared reads stay cold in apply)",
+      0x310000,
+      UNFAULTABLE_SECTIONS.map(
+        (section): BatteryEntry => [section, (seed) => unfaultableSectionRun(seed, section)],
+      ),
+    );
 
-    // Directed core-fault battery: the contentsGet victim rule and the
-    // issue-channel degrade contract, once per soak (see the helpers' doc for
-    // why the random stream alone leaves them near-vacuous at 30 iterations).
-    console.log("\ncore-fault battery (directed core-path faults):");
-    const coreEntries: Array<[string, (seed: number) => Promise<IterationResult>]> = [
+    // Core-fault battery: the contentsGet victim rule and the issue-channel
+    // degrade contract, once per soak (see the helpers' doc for why the
+    // random stream alone leaves them near-vacuous at 30 iterations).
+    await runBattery("core-fault battery (directed core-path faults)", 0x400000, [
       ["core.contentsGet/fatal", contentsFaultBatteryRun],
       ["core.discoveryList/fatal", discoveryFaultBatteryRun],
       ["core.issuesList/degrade", reportFaultBatteryRun],
       ["preflight/budget-consumed", (seed) => preflightFaultRun(seed, false)],
       ["preflight/budget-survives", (seed) => preflightFaultRun(seed, true)],
-    ];
-    for (const [index, [name, run]] of coreEntries.entries()) {
-      const seed = iterationSeed(master, 0x400000 + index);
-      const result = await run(seed);
-      recordCoverage(result.coverage);
-      recordFaultClass(result.faultClass);
-      if (result.ok) {
-        console.log(`  ${name} ok`);
-        continue;
-      }
-      batteryFailures++;
-      console.log(`  ${name} seed ${seed} FAIL: ${result.failure}`);
-      console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-    }
+    ]);
 
-    // Directed fixpoint battery: one multi apply-idempotence proof and one
-    // discovery convergence proof per soak. The standard-mode proof needs no
-    // entry - the witness battery's apply combos arm apply_idempotent
+    // Fixpoint battery: one multi apply-idempotence proof and one discovery
+    // convergence proof per soak. The standard-mode proof needs no entry -
+    // the witness battery's apply combos arm apply_idempotent
     // deterministically already.
-    console.log("\nfixpoint battery (directed apply-idempotence / convergence):");
-    const fixpointEntries: Array<[string, (seed: number) => Promise<IterationResult>]> = [
+    await runBattery("fixpoint battery (directed apply-idempotence / convergence)", 0x500000, [
       ["multi/apply-idempotent", multiIdempotenceBatteryRun],
       ["discovery/converges", discoveryConvergesBatteryRun],
-    ];
-    for (const [index, [name, run]] of fixpointEntries.entries()) {
-      const seed = iterationSeed(master, 0x500000 + index);
-      const result = await run(seed);
-      recordCoverage(result.coverage);
-      if (result.ok) {
-        console.log(`  ${name} ok`);
-        continue;
-      }
-      batteryFailures++;
-      console.log(`  ${name} seed ${seed} FAIL: ${result.failure}`);
-      console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-      reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
-    }
+    ]);
   }
 
   console.log("\ncoverage (sections exercised):");
