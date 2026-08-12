@@ -130,8 +130,12 @@ rulesets:
         bypass_mode: always
 
   # vX.Y.Z release tags are immutable: template-sync workflow pins and
-  # release artifacts reference them. The bare moving major tag (v1) is
-  # deliberately NOT matched; the release workflow force-moves it.
+  # release artifacts reference them. So are their build/vX.Y.Z packaging
+  # tags, the runnable refs exact pins name; the prefix puts them outside
+  # the v*.*.* pattern, and fnmatch's * does not cross "/", so no single
+  # pattern covers both. The bare moving major tag (v1) is deliberately
+  # NOT matched; the release workflow force-moves it to the latest build
+  # commit.
   - name: release-tags
     target: tag
     enforcement: active
@@ -139,6 +143,7 @@ rulesets:
       ref_name:
         include:
           - v*.*.*
+          - build/v*.*.*
         exclude: []
     rules:
       - type: deletion

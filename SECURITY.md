@@ -47,9 +47,12 @@ so the interesting surface is:
 - Settings escalation. A crafted settings file should never be able to
   touch a repository or setting it does not declare, nor bypass the
   preflight barrier or the required-sections policy.
-- Supply chain. lib/index.js is a committed bundle and CI fails unless it
-  byte-matches a fresh build of src/. A discrepancy CI accepts is a
-  vulnerability.
+- Supply chain. The runnable ref is a build commit parented on the audited
+  release commit, produced by the release workflow run named in its
+  provenance message, and published as a `build/vX.Y.Z` tag in a namespace
+  the release-tags ruleset freezes; main carries no executable bundle. A
+  build commit whose bundle a rebuild of its parent's src/ does not
+  reproduce is a vulnerability.
 
 Fixes ship in the next release and are not backported; upgrade the `uses:`
 pin to pick them up.

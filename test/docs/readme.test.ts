@@ -174,27 +174,45 @@ describe("README example settings.yml blocks", () => {
 });
 
 describe("README version pins", () => {
-  test("every uses: pin names the current release version", () => {
-    const manifest = JSON.parse(
-      readFileSync(join(ROOT, ".release-please-manifest.json"), "utf8"),
-    ) as Record<string, string>;
-    // The uses: pins sit inside x-release-please-start-version blocks, so
-    // every release PR rewrites them together with the manifest; this test is
-    // the tripwire for the markers rotting away. Before the first release no
-    // tag exists, so no pin can be right yet and there is nothing to enforce.
-    const version = manifest["."] ?? "";
+  const manifest = JSON.parse(
+    readFileSync(join(ROOT, ".release-please-manifest.json"), "utf8"),
+  ) as Record<string, string>;
+  // Before the first release no tag exists, so no pin can be right yet and
+  // there is nothing to enforce.
+  const version = manifest["."] ?? "";
+
+  test("every uses: pin names the current release's moving major tag", () => {
     if (version === "0.0.0") {
       return;
     }
+    // The uses: pins carry the inline x-release-please-major annotation, so
+    // every release PR that bumps the major rewrites them together with the
+    // manifest; this test is the tripwire for the annotations rotting away.
+    const major = `v${version.split(".")[0]}`;
     const pins = [...readme.matchAll(/uses: Vivswan\/github-settings-as-code@(\S+)/g)].map(
       (m) => m[1],
     );
     expect(pins.length).toBeGreaterThan(0);
     for (const pin of pins) {
-      expect(pin, `README pins @${pin}, but the current release is v${version}`).toBe(
-        `v${version}`,
-      );
+      expect(pin, `README pins @${pin}, but the current major tag is ${major}`).toBe(major);
     }
+  });
+
+  test("the exact-pin advice names the build/ tag namespace, not a plain version tag", () => {
+    // The runnable ref is the release pipeline's build/vX.Y.Z tag
+    // (.github/workflows/release.yml); plain vX.Y.Z tags point at
+    // source-only commits. A README that offers a bare version tag as the
+    // exact pin would send consumers to a ref that does not run, so the
+    // namespace must be named and no `@vX.Y.Z` pin may reappear.
+    expect(
+      readme.includes("`@build/vX.Y.Z`"),
+      "README's exact-pin advice must name the `@build/vX.Y.Z` tag namespace",
+    ).toBe(true);
+    const versionPins = [...readme.matchAll(/@v\d+\.\d+\.\d+/g)].map((m) => m[0]);
+    expect(
+      versionPins,
+      `README offers plain version pin(s) ${versionPins.join(", ")}; those tags are source-only, pin @build/vX.Y.Z instead`,
+    ).toEqual([]);
   });
 });
 
@@ -235,26 +253,25 @@ describe("schema $schema hints and $id", () => {
     }
   });
 
-  test("the $id points at this repository's raw default-branch copy of the build output", () => {
-    // The $id is minted by the build:schema script's --id flag, so the
-    // committed schema must carry exactly that value...
+  test("the $id points at this repository's raw major-tag copy of the build output", () => {
+    // The $id is stamped by finalize-schema.ts with the current release
+    // line's moving major tag - the ref the release pipeline points at
+    // every release's build commit, so the URL always serves the line's
+    // newest schema...
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
       name: string;
       scripts: Record<string, string>;
     };
     const buildSchema = pkg.scripts["build:schema"] ?? "";
-    const idFlag = buildSchema.match(/--id (\S+)/)?.[1];
     const outFlag = buildSchema.match(/--out (\S+)/)?.[1];
-    expect(idFlag, "package.json build:schema lost its --id flag").toBeDefined();
     expect(outFlag, "package.json build:schema lost its --out flag").toBeDefined();
-    expect(id).toBe(idFlag as string);
     // ...and the URL's parts must each match their own single source:
-    // https://raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>.
+    // https://raw.githubusercontent.com/<owner>/<repo>/<major tag>/<path>.
     const url = new URL(id);
     expect(url.protocol).toBe("https:");
     expect(url.hostname).toBe("raw.githubusercontent.com");
-    const [owner, repo, branch, ...rest] = url.pathname.split("/").filter(Boolean);
-    // <path> is the committed build output, exactly where --out writes it.
+    const [owner, repo, ref, ...rest] = url.pathname.split("/").filter(Boolean);
+    // <path> is the build output, exactly where --out writes it.
     expect(rest.join("/")).toBe(outFlag as string);
     // <repo> matching the package name is a convention witness, not an
     // authority - nothing forces a repository to be named after its package,
@@ -269,11 +286,12 @@ describe("schema $schema hints and $id", () => {
       readme.includes(`uses: ${owner}/${repo}@`),
       `the README never installs "uses: ${owner}/${repo}@...", so the $id's slug matches no workflow snippet`,
     ).toBe(true);
-    // <branch> is the repository's own declared default branch.
-    const settings = parseYaml(readFileSync(join(ROOT, ".github", "settings.yml"), "utf8")) as {
-      repository?: { default_branch?: string };
-    };
-    expect(branch).toBe(settings.repository?.default_branch);
+    // <major tag> is the current release line's, from the same manifest the
+    // version-pin tests read.
+    const manifest = JSON.parse(
+      readFileSync(join(ROOT, ".release-please-manifest.json"), "utf8"),
+    ) as Record<string, string>;
+    expect(ref).toBe(`v${(manifest["."] ?? "").split(".")[0]}`);
   });
 });
 

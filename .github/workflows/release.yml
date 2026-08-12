@@ -12,16 +12,37 @@
 #   3. publish-release flips the draft live. It stays the last job: list
 #      every job that mutates the release in its `needs`.
 # If the pipeline dies after the draft exists, a rerun cannot recreate it
-# (release-please sees the forced tag); finish by hand:
-#   gh release upload <tag> <assets> --clobber
+# (release-please sees the forced tag). Re-run FAILED jobs to finish the
+# remaining steps: update-release rebuilds, and when build/<tag> already
+# exists it verifies those bytes instead of pushing again. A full re-run
+# recomputes release_created=false and skips everything; finish by hand
+# instead, skipping any step already done (the build tag is immutable:
+# if it exists, verify it rather than recreating it) and keeping the
+# provenance body (SECURITY.md rests on it):
+#   git checkout <tag>
+#   bun install --frozen-lockfile --ignore-scripts && bun run build
+#   git add -f lib/index.js
+#   git commit --allow-empty -m "build: package <tag>" \
+#     -m "source: $(git rev-parse HEAD)" -m "workflow run: <run url>"
+#   git tag build/<tag> && git push origin refs/tags/build/<tag>
+#   git tag -f <major> build/<tag>^{} && git push --force origin <major>
+#   gh release upload <tag> lib/settings.schema.json lib/index.js --clobber
 #   gh release edit <tag> --draft=false
 # Everything runs in the same workflow run, so it works with the default
 # GITHUB_TOKEN too, which cannot trigger `on: release` workflows.
 #
-# This repository additionally moves the released line's moving major tag
-# (v1 for a v1.x release, v2 for v2.x, derived from the released tag) so
-# major-pinned consumers pick up every release in their line; see
-# retag-major below.
+# This repository packages each release in update-release: the source at
+# the release tag is built, the bundle is committed as a child of the
+# release commit and pushed as the immutable build/<tag> tag - the
+# runnable ref exact pins name - and bundle plus schema land on the
+# release as convenience assets. retag-major then moves the released
+# line's moving major tag (v1 for a v1.x release, v2 for v2.x, derived
+# from the released tag) to that build commit, so major-pinned consumers
+# pick up every release in their line and always run a packaged bundle.
+# The release tree already carries lib/settings.schema.json, so the raw
+# <ref>/lib/settings.schema.json URL serves the schema at the major tag
+# (canonical, newest in the line) and at build/<tag> (exact) with no
+# extra packaging.
 
 name: Release
 
@@ -33,9 +54,11 @@ jobs:
     uses: ./.github/workflows/release-please.yml
     secrets: inherit
 
-  # Step 2: mutate the draft here. Replace the placeholder command with this
-  # repository's release preparation; add sibling jobs freely, as long as
-  # every job that touches the release lands in publish-release's needs.
+  # Step 2: mutate the draft here: this repository builds the runnable
+  # bundle from the release tag, pushes it as build/<tag> (a commit
+  # parented on the release commit), and uploads bundle and schema to the
+  # release as assets. Add sibling jobs freely, as long as every job that
+  # touches the release lands in publish-release's needs.
   update-release:
     needs: [release-please]
     if: needs.release-please.outputs.release_created == 'true'
@@ -46,22 +69,93 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
-      - name: Update the draft release
+      # Reruns land here with the tag already pushed, and the ruleset
+      # freezes build tags, so a second push cannot succeed. Detect that
+      # here; the build below runs either way and verifies the existing
+      # tag rather than trusting it. depth=2 so the shallow graft does not
+      # hide the build commit's parent.
+      - name: Look for an existing build tag
+        id: guard
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          # A standalone assignment propagates a failing ls-remote (set -e),
+          # so a transport error cannot read as "the tag does not exist".
+          existing="$(git ls-remote origin "refs/tags/build/$RELEASE_TAG")"
+          if [ -n "$existing" ]; then
+            git fetch --quiet --depth=2 origin "refs/tags/build/$RELEASE_TAG:refs/tags/build/$RELEASE_TAG"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Build the bundle and the schema
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build
+      # Tag creation is not restricted, so an existing build tag is not
+      # evidence on its own: it must be this source's build, byte for
+      # byte, before retag-major points the major tag at it.
+      - name: Verify the existing build tag packages this source
+        if: steps.guard.outputs.exists == 'true'
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          release="$(git rev-parse HEAD)"
+          parent="$(git rev-parse "refs/tags/build/$RELEASE_TAG^{}^")"
+          if [ "$parent" != "$release" ]; then
+            echo "::error::refs/tags/build/$RELEASE_TAG exists but its parent is $parent, not the $RELEASE_TAG commit $release; the ruleset freezes build tags, so no rerun can replace it - inspect that tag by hand."
+            exit 1
+          fi
+          # The whole tree, not just the bundle: a planted commit that keeps
+          # the expected bundle but edits action.yml would otherwise pass.
+          changed="$(git diff --name-only "$parent" "refs/tags/build/$RELEASE_TAG^{}")"
+          if [ -n "$changed" ] && [ "$changed" != "lib/index.js" ]; then
+            echo "::error::refs/tags/build/$RELEASE_TAG changes more than lib/index.js relative to $RELEASE_TAG (changed: $(echo "$changed" | tr '\n' ' ')); the ruleset freezes build tags, so no rerun can replace it - inspect that tag by hand."
+            exit 1
+          fi
+          git show "refs/tags/build/$RELEASE_TAG:lib/index.js" > "$RUNNER_TEMP/packaged-index.js"
+          if ! cmp -s "$RUNNER_TEMP/packaged-index.js" lib/index.js; then
+            echo "::error::refs/tags/build/$RELEASE_TAG carries a lib/index.js that is not a build of $RELEASE_TAG's source; the ruleset freezes build tags, so no rerun can replace it - inspect that tag by hand."
+            exit 1
+          fi
+          echo "build/$RELEASE_TAG already packages $RELEASE_TAG at $release"
+      - name: Push the build tag
+        if: steps.guard.outputs.exists != 'true'
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          source="$(git rev-parse HEAD)"
+          git config user.name "settings-as-code-release"
+          git config user.email "settings-as-code-release@users.noreply.github.com"
+          # -f: main gitignores lib/index.js; the build tag is where the
+          # bundle lives. --allow-empty: while main still commits the
+          # bundle, a byte-identical rebuild stages nothing, and the build
+          # tag must exist either way.
+          git add -f lib/index.js
+          git commit --allow-empty -m "build: package $RELEASE_TAG" \
+            -m "source: $source" \
+            -m "workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          git tag "build/$RELEASE_TAG"
+          git push origin "refs/tags/build/$RELEASE_TAG"
+      # Both files come from the fresh build above (the rerun path byte-
+      # verified the bundle against the existing tag first), so the assets
+      # always match the build tag; --clobber makes repeats converge.
+      - name: Upload the packaged artifacts to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
-        # Repository-specific release preparation goes here, e.g.:
-        #   ./build.sh
-        #   gh release upload "$RELEASE_TAG" ./artifact --clobber
-        run: echo "nothing to add to $RELEASE_TAG yet"
+        run: gh release upload "$RELEASE_TAG" lib/settings.schema.json lib/index.js --clobber
 
-  # Move the moving major tag to the release this run just cut, but only
-  # when the released tag points at the commit this run tested: main can
+  # Move the moving major tag to the build commit of the release this run
+  # just cut, but only when the released tag points at the commit this run
+  # tested and build/<tag> is that commit's packaged child: main can
   # advance in the seconds between the gate and the release, and
-  # major-pinned consumers must never receive an untested commit. On a
-  # mismatch, fail loudly (the release stays draft) and repair by hand
-  # after verifying that commit's CI. Runs after update-release so the tag
-  # never moves to a commit whose draft could not be prepared.
+  # major-pinned consumers must never receive an untested or unpackaged
+  # commit. On a mismatch, fail loudly (the release stays draft) and
+  # repair by hand after verifying that commit's CI. Runs after
+  # update-release so the build tag exists before consumers are pointed
+  # at it.
   retag-major:
     needs: [release-please, update-release]
     if: needs.release-please.outputs.release_created == 'true'
@@ -72,17 +166,30 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Assert the release matches the tested commit
+      - name: Assert the release and its build match the tested commit
         env:
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
           git fetch --quiet origin "refs/tags/$TAG:refs/tags/$TAG"
           released="$(git rev-parse "refs/tags/$TAG^{}")"
           if [ "$released" != "$GITHUB_SHA" ]; then
-            echo "::error::released $TAG at $released, but this run tested $GITHUB_SHA (main moved during the release window). Verify that commit's CI, then move the major tag by hand: git tag -f <major> $TAG && git push --force origin <major> (e.g. major v1 for v1.2.3)."
+            echo "::error::released $TAG at $released, but this run tested $GITHUB_SHA (main moved during the release window). Verify that commit's CI, then move the major tag by hand: git tag -f <major> refs/tags/build/$TAG^{} && git push --force origin <major> (e.g. major v1 for v1.2.3)."
             exit 1
           fi
-      - name: Move the major tag
+          # Captured before the test, so a transport error fails the step
+          # instead of reading as "the tag does not exist".
+          built="$(git ls-remote origin "refs/tags/build/$TAG")"
+          if [ -z "$built" ]; then
+            echo "::error::refs/tags/build/$TAG does not exist, so there is no packaged commit to point $TAG's major tag at; re-run this run's failed jobs (update-release packages the release; it is safe to repeat)."
+            exit 1
+          fi
+          git fetch --quiet origin "refs/tags/build/$TAG:refs/tags/build/$TAG"
+          parent="$(git rev-parse "refs/tags/build/$TAG^{}^")"
+          if [ "$parent" != "$released" ]; then
+            echo "::error::refs/tags/build/$TAG's parent is $parent, not the $TAG commit $released; the major tag must not move to a package of the wrong source - inspect that tag by hand."
+            exit 1
+          fi
+      - name: Move the major tag to the build commit
         env:
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
@@ -90,9 +197,9 @@ jobs:
           major="v${major#v}"
           git config user.name "settings-as-code-release"
           git config user.email "settings-as-code-release@users.noreply.github.com"
-          git tag -f "$major" "refs/tags/$TAG^{}"
+          git tag -f "$major" "refs/tags/build/$TAG^{}"
           git push --force origin "refs/tags/$major"
-          echo "moved $major -> $TAG"
+          echo "moved $major -> build/$TAG"
 
   # Step 3: freeze the release. This job stays last.
   publish-release:

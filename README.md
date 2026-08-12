@@ -24,15 +24,13 @@ silently.
    editor autocomplete and hover docs (agents can fetch the same URL):
 
    ```yaml
-   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/main/lib/settings.schema.json
+   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json
    ```
 
 4. Add the workflow. On a repository with existing labels, autolinks, or
    collaborators, also set `mode: check` under `with:` for the first run:
    the drift report lists everything an apply would delete, and nothing is
    written.
-
-   <!-- x-release-please-start-version -->
 
    ```yaml
    # .github/workflows/settings.yml
@@ -51,22 +49,23 @@ silently.
        runs-on: ubuntu-latest
        steps:
          - uses: actions/checkout@v7
-         - uses: Vivswan/github-settings-as-code@v2.0.0
+         - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
            with:
              token: ${{ secrets.ADMIN_TOKEN }}
    ```
-
-   <!-- x-release-please-end -->
 
 5. Run it once from the Actions tab (workflow_dispatch), review the run,
    and drop `mode: check` if you set it. From then on every push that
    touches `.github/settings.yml` applies it.
 
 A JSON Schema describing every section and its structured fields is
-published at
-[`lib/settings.schema.json`](lib/settings.schema.json), generated from the
-commented types in `src/schema.ts`. Passthrough areas (the `repository`
-payload, branch protection, rule parameters) stay open objects on purpose.
+generated from the commented types in `src/schema.ts` and served at
+`https://raw.githubusercontent.com/Vivswan/github-settings-as-code/<ref>/lib/settings.schema.json`,
+where `<ref>` picks the version: `v2` (canonical, the moving major tag,
+always the newest schema in the line) or `build/vX.Y.Z` (an exact
+release). The `main` ref still works but is deprecated and will be
+removed in a future major. Passthrough areas (the `repository` payload,
+branch protection, rule parameters) stay open objects on purpose.
 
 The schema is documentation, not a gate: unknown fields validate on
 purpose, because payloads pass through to the API verbatim and declaring a
@@ -98,8 +97,10 @@ The guides live in [docs/](docs/README.md), in four groups:
 - `@v2` is a moving major tag: <!-- x-release-please-major -->
   every release in that major line moves it, so fixes arrive without
   changing your pin.
-- Pin an exact tag (`@v2.0.0`) when you need byte-stable behavior, and <!-- x-release-please-version -->
-  upgrade deliberately.
+- Pinning exactly: pin `@build/vX.Y.Z` (or a commit SHA) when you need
+  byte-stable behavior, and upgrade deliberately. `build/` tags carry the
+  packaged action and are frozen by a ruleset; the plain `vX.Y.Z` tags
+  after v2.0.0 point at source-only commits and do not run.
 - v2 activates settings keys that were inert on v1:
   `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`,
   `actions.fork_pr_workflows_private_repos`, and
@@ -167,7 +168,7 @@ repo-scoped gap and the user-scoped surface that is out of scope by design.
 ## Example settings.yml
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/main/lib/settings.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json
 
 repository:
   description: My project
