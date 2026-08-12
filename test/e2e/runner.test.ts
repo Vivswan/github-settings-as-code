@@ -10,7 +10,7 @@ import {
   COMPARE_BEFORE_WRITE,
 } from "./apply-idempotence.js";
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
-import type { LoggedRequest } from "./mock/routes.js";
+import type { LoggedRequest } from "./mock/contract.js";
 import {
   bundleBuildParityFailure,
   changedFamilies,

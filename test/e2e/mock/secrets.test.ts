@@ -11,7 +11,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { sealSecretValue } from "../../../src/sections/secrets-engine.js";
 import { parseScenario, type Scenario } from "../schema.js";
-import { newPipelineRunState, runPipeline } from "./routes.js";
+import { newPipelineRunState } from "./contract.js";
+import { runPipeline } from "./routes.js";
 import {
   MOCK_SECRETS_KEY_ID,
   MOCK_SECRETS_PUBLIC_KEY,

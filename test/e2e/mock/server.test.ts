@@ -16,12 +16,9 @@ import { endpointPermission } from "../../../src/sections/contract.js";
 import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
 import { parseScenario, type Scenario } from "../schema.js";
-import {
-  assertFaultKeys,
-  assertHandlerCompleteness,
-  declaredStatuses,
-  statusAllowed,
-} from "./routes.js";
+import { assertFaultKeys } from "./chaos.js";
+import { declaredStatuses, statusAllowed } from "./dispatch.js";
+import { assertHandlerCompleteness } from "./handlers.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./server.js";
 import type { MockState, MultiMockState } from "./state.js";
 import { slicePage } from "./support.js";

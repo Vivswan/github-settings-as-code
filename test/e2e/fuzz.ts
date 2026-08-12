@@ -50,7 +50,7 @@ import {
   WITNESS_SECTIONS,
   type WitnessSection,
 } from "./generators.js";
-import type { LoggedRequest } from "./mock/routes.js";
+import type { LoggedRequest } from "./mock/contract.js";
 import {
   foldRepoResults,
   foldSectionOutcomes,

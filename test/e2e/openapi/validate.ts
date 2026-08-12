@@ -27,7 +27,7 @@ import {
 } from "../../../src/sections/contract.js";
 import { allGraphqlOps } from "../../../src/sections/registry.js";
 import { VIOLATION_PREFIX } from "../constants.js";
-import type { LoggedRequest } from "../mock/routes.js";
+import type { LoggedRequest } from "../mock/contract.js";
 import { UNDOCUMENTED_ROUTES } from "./paths.js";
 
 /** A plain JSON object. */

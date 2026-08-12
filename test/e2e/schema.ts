@@ -339,7 +339,7 @@ const DiscoverySchema = z
 /**
  * A transport-level fault the mock injects on the first `times` (default 1)
  * requests that match `endpoint` - a "section.role" key, or a core-route key
- * from CORE_FAULT_KEYS in mock/routes.ts (e.g. "core.discoveryList" for the
+ * from CORE_FAULT_KEYS in mock/chaos.ts (e.g. "core.discoveryList" for the
  * /user/repos discovery listing, "core.contentsGet" for the settings-file
  * fetch, and the "core.issue*" / "core.reportLabelCreate" / "core.userGet"
  * report routes). These model failures the permission/handler layers cannot:

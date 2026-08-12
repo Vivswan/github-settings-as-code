@@ -95,9 +95,10 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   scenarios (`test/e2e/scenarios/` plus each `src/sections/<key>/scenarios/`),
   `fuzz.ts` runs seeded property fuzzing,
   `runner.ts` builds the bundle to a temp path and spawns it against the
-  mock, `mock/` is the in-process GitHub API (pipeline and route table in
-  `mock/routes.ts`, per-section handler fragments in `mock/sections.ts` over
-  the shared helpers in `mock/support.ts`, state in `mock/state.ts`), and
+  mock, `mock/` is the in-process GitHub API (request pipeline in
+  `mock/routes.ts`, merged handler tables in `mock/handlers.ts`, per-section
+  handler fragments in `mock/sections.ts` over the shared helpers in
+  `mock/support.ts`, state in `mock/state.ts`), and
   `oracle.ts` predicts
   outcome classes. On-contract mock
   responses are validated against a trimmed OpenAPI spec

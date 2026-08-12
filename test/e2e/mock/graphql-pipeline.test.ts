@@ -19,17 +19,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { allGraphqlOps, type TaggedGraphqlOp } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG, ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
 import { parseScenario, type Scenario } from "../schema.js";
-import {
-  assertGraphqlHandlerCompleteness,
-  graphqlDenialErrors,
-  handleGraphqlRequest,
-  isWriteRequest,
-  type LoggedRequest,
-  newPipelineRunState,
-  type PipelineOptions,
-  runPipeline,
-  sectionForRequest,
-} from "./routes.js";
+import { type LoggedRequest, newPipelineRunState, type PipelineOptions } from "./contract.js";
+import { isWriteRequest, sectionForRequest } from "./dispatch.js";
+import { graphqlDenialErrors } from "./grading.js";
+import { assertGraphqlHandlerCompleteness } from "./handlers.js";
+import { handleGraphqlRequest, runPipeline } from "./routes.js";
 import { type MockHandle, startMockServer } from "./server.js";
 import { buildMultiState, buildState, mintNodeId } from "./state.js";
 import type { GraphqlHandlerContext, GraphqlHandlerResult } from "./support.js";
@@ -432,7 +426,7 @@ describe("GraphQL response guard and chaos", () => {
 describe("assertGraphqlHandlerCompleteness", () => {
   test("both drift directions fail loudly", () => {
     expect(() => assertGraphqlHandlerCompleteness(OPS, {})).toThrow(
-      /GraphQL operations with no mock handler in the section fragments \(mock\/sections\.ts\)/,
+      /GraphQL operations with no mock handler: \[repository\.gProbe \(add it in src\/sections\/repository\/mock\.ts/,
     );
     expect(() => assertGraphqlHandlerCompleteness({}, HANDLERS)).toThrow(
       /GraphQL handlers naming no declared operation/,

@@ -10,7 +10,7 @@ import {
   recordHits,
   registeredRoutes,
 } from "../../.github/scripts/check-endpoint-coverage.js";
-import type { LoggedRequest } from "../../test/e2e/mock/routes.js";
+import type { LoggedRequest } from "../../test/e2e/mock/contract.js";
 
 const ROUTES = [
   { kind: "rest", key: "labels.list", method: "GET", path: "/repos/{owner}/{repo}/labels" },

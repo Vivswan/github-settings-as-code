@@ -24,12 +24,8 @@ import { MARKER_LABEL } from "../../src/report/issue-report.js";
 import type { SectionKey } from "../../src/schema.js";
 import { ALWAYS_REWRITE_STATE_FAMILIES, COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
 import { ADMIN_SLUG as REPO_SLUG } from "./constants.js";
-import {
-  endpointForRequest,
-  isWriteRequest,
-  type LoggedRequest,
-  sectionForRequest,
-} from "./mock/routes.js";
+import type { LoggedRequest } from "./mock/contract.js";
+import { endpointForRequest, isWriteRequest, sectionForRequest } from "./mock/dispatch.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./mock/server.js";
 import type { MockState } from "./mock/state.js";
 import { sharedValidator } from "./openapi/validate.js";

@@ -1,9 +1,10 @@
 /**
  * The mock GitHub API server: one fresh node:http server per scenario,
- * listening on an ephemeral port. All request logic lives in routes.ts (the
- * pure pipeline); this file is the transport shell that parses the incoming
- * request, hands it to the pipeline, records the log/violation, and serializes
- * the response.
+ * listening on an ephemeral port. All request logic lives in the pure
+ * pipeline (routes.ts and the modules it stitches: dispatch, grading, chaos,
+ * core-paths, handlers over contract.ts); this file is the transport shell
+ * that parses the incoming request, hands it to the pipeline, records the
+ * log/violation, and serializes the response.
  *
  * node:http (which bun implements) rather than Bun.serve, for one load-bearing
  * capability: the connection_drop fault needs the raw socket so it can destroy
@@ -21,17 +22,16 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { stringify as stringifyYaml } from "yaml";
 import type { MultiRepo, Scenario } from "../schema.js";
+import { assertFaultKeys } from "./chaos.js";
 import {
-  assertFaultKeys,
-  assertGraphqlHandlerCompleteness,
-  assertHandlerCompleteness,
   type CorruptOption,
   type FaultOption,
   type LoggedRequest,
   newPipelineRunState,
-  runPipeline,
   type WorkingState,
-} from "./routes.js";
+} from "./contract.js";
+import { assertGraphqlHandlerCompleteness, assertHandlerCompleteness } from "./handlers.js";
+import { runPipeline } from "./routes.js";
 import { mockSodiumReady } from "./secrets.js";
 import { buildMultiState, buildState, type MultiMockState, type MultiRepoSpec } from "./state.js";
 
