@@ -48,6 +48,7 @@ import { PagesConfig } from "./sections/pages/schema.js";
 import { RulesetConfig } from "./sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
 import { SEALED_SECRET_VALUE_DOC, SECRET_NAME_DOC } from "./sections/shared/schema-helpers.js";
+import { TeamConfig } from "./sections/teams/schema.js";
 import type { MustBeNever } from "./types.js";
 
 export { ActionsSecretConfig } from "./sections/actions_secrets/schema.js";
@@ -73,6 +74,7 @@ export { MilestoneConfig } from "./sections/milestones/schema.js";
 export { PagesConfig } from "./sections/pages/schema.js";
 export { RulesetConfig } from "./sections/rulesets/schema.js";
 export { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
+export { TeamConfig } from "./sections/teams/schema.js";
 export type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "./types.js";
 
 /**
@@ -617,20 +619,6 @@ export const CollaboratorConfig = z
   )
   .meta({ id: "CollaboratorConfig" });
 export type CollaboratorConfig = z.infer<typeof CollaboratorConfig>;
-
-export const TeamConfig = z
-  .object({
-    name: z.string().describe("The team slug, the natural key."),
-    permission: z
-      .string()
-      .optional()
-      .describe('Same vocabulary as collaborators; defaults to "push".'),
-  })
-  .describe(
-    'One org team\'s access to the repository, matched by team slug. Keys other than name and permission are rejected (a misspelled "permission" would otherwise silently grant the default role).',
-  )
-  .meta({ id: "TeamConfig" });
-export type TeamConfig = z.infer<typeof TeamConfig>;
 
 export const WebhookDeliveryConfig = z
   .looseObject({

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { teamsSection } from "../../src/sections/teams.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { teamsSection } from "./index.js";
 
 describe("teams", () => {
   test("a personal account no-ops with a note instead of failing", async () => {
