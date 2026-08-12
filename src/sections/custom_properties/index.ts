@@ -184,9 +184,16 @@ export const customPropertiesSection = {
     const liveByName = new Map(live.map((p) => [p.property_name, p.value]));
     const declaredKeys = new Set<string>();
 
-    // The divergent declared values, accumulated into ONE bulk PATCH; a live
-    // value of null and an absent live entry both mean "unset".
-    const updates: Array<{ property_name: string; value: WireValue }> = [];
+    // The divergent values, accumulated into ONE bulk PATCH; a live value of
+    // null and an absent live entry both mean "unset". Each entry carries
+    // its provenance from the branch that CREATED it - a declared value, or
+    // an undeclared live value the delete policy unsets - so the change
+    // lines below read the tag instead of re-deriving the split from set
+    // membership.
+    type PendingUpdate =
+      | { kind: "declared"; property_name: string; value: WireValue }
+      | { kind: "undeclared-unset"; property_name: string };
+    const updates: PendingUpdate[] = [];
     for (const property of desired) {
       declaredKeys.add(property.property_name);
       const wanted = normalizeValue(property.value);
@@ -206,7 +213,7 @@ export const customPropertiesSection = {
         }
         continue;
       }
-      updates.push({ property_name: property.property_name, value: wanted });
+      updates.push({ kind: "declared", property_name: property.property_name, value: wanted });
     }
 
     for (const property of live) {
@@ -229,7 +236,7 @@ export const customPropertiesSection = {
           }),
         );
       } else {
-        updates.push({ property_name: property.property_name, value: null });
+        updates.push({ kind: "undeclared-unset", property_name: property.property_name });
       }
     }
 
@@ -238,11 +245,17 @@ export const customPropertiesSection = {
     // after the write succeeded.
     if (!run.check && updates.length > 0) {
       await call(ctx, this, ENDPOINTS.update, {
-        payload: { properties: updates },
+        payload: {
+          // An undeclared-unset entry writes null - the documented unset.
+          properties: updates.map((update) => ({
+            property_name: update.property_name,
+            value: update.kind === "declared" ? update.value : null,
+          })),
+        },
         describe: "updating custom property values",
       });
       for (const update of updates) {
-        if (!declaredKeys.has(update.property_name)) {
+        if (update.kind === "undeclared-unset") {
           run.result.changes.push(`unset undeclared custom property "${update.property_name}"`);
         } else if (update.value === null) {
           run.result.changes.push(`unset custom property "${update.property_name}"`);

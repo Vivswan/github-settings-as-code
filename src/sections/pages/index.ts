@@ -4,7 +4,7 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import { SettingsFile } from "../../schema.js";
+import { type PagesConfig, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -31,6 +31,35 @@ const ENDPOINTS = {
   remove: { route: "DELETE /repos/{owner}/{repo}/pages", statuses: { 204: "Pages disabled" } },
 } as const satisfies Record<string, EndpointDecl>;
 
+/**
+ * A Pages source as the API takes it: `path` is REQUIRED on the wire (the
+ * update PUT rejects a source without it), where the config leaves it
+ * optional. wireSource() is the only mint, so a payload can never carry a
+ * pathless source.
+ */
+type PagesSourceWire = Omit<NonNullable<PagesConfig["source"]>, "path"> & { path: string };
+
+/**
+ * Normalize a declared source to the wire form. The update PUT requires
+ * path alongside branch when source is sent; the create POST defaults it,
+ * so default it everywhere.
+ */
+function wireSource(source: NonNullable<PagesConfig["source"]>): PagesSourceWire {
+  return { ...source, path: source.path ?? "/" };
+}
+
+/** The declared config with its source already in the wire form. */
+type PagesWirePayload = Omit<PagesConfig, "source"> & { source?: PagesSourceWire };
+
+/**
+ * The subset of the payload the create POST accepts; GitHub documents every
+ * other field (cname, https_enforced, public) as update-only, so enabling a
+ * site is create-then-update. A Pick over the wire payload, so a renamed
+ * config field breaks this split at compile time instead of silently
+ * rerouting through the wrong endpoint.
+ */
+type PagesCreateBody = Pick<PagesWirePayload, "build_type" | "source">;
+
 export const pagesSection = {
   key: "pages",
   undeclaredDefault: "untouched",
@@ -41,13 +70,14 @@ export const pagesSection = {
   shape: loosen(SettingsFile.shape.pages),
   async run(ctx, desired): Promise<SectionResult> {
     const run = beginRun(ctx);
+    // The probe stays the discriminated union probeAbsent returns; narrowing
+    // happens at each use, so "site exists but no body" (or the reverse) is
+    // not representable, unlike an exists-boolean beside an optional body.
     const probe = await probeAbsent(ctx, this, ENDPOINTS.get);
-    const exists = !("missing" in probe);
-    const liveSite = "data" in probe ? probe.data : undefined;
 
     // pages: null declares Pages OFF, mirroring branches' protection: null.
     if (desired === null) {
-      if (!exists) {
+      if ("missing" in probe) {
         // A 404 here is ambiguous: no Pages site, or a fine-grained token
         // without the Pages permission (which also answers 404). The
         // non-null path stays loud either way (the POST would fail); this
@@ -73,32 +103,29 @@ export const pagesSection = {
       );
       return run.result;
     }
-    // The update PUT requires path alongside branch when source is sent;
-    // the create POST defaults it, so default it everywhere.
-    const payload: Record<string, unknown> = { ...desired };
-    if (desired.source !== undefined && desired.source.path === undefined) {
-      payload.source = { ...desired.source, path: "/" };
-    }
+    // Split the source off so the no-source form never carries a source key
+    // at all (an own `source: undefined` would count as a remainder below).
+    const { source, ...restConfig } = desired;
+    const payload: PagesWirePayload =
+      source === undefined ? restConfig : { ...restConfig, source: wireSource(source) };
 
     if (run.check) {
-      if (!exists) {
+      if ("missing" in probe) {
         run.result.drift.push(
           "pages: declared in the settings file but GitHub Pages is not enabled on the repo; apply will enable it",
         );
       } else {
-        run.result.drift.push(...subsetDiff(payload, liveSite, "pages"));
+        run.result.drift.push(...subsetDiff(payload, probe.data, "pages"));
       }
       return run.result;
     }
 
-    if (exists) {
+    if (!("missing" in probe)) {
       await call(ctx, this, ENDPOINTS.update, { payload });
       run.result.changes.push("updated GitHub Pages configuration");
       return run.result;
     }
-    // The create endpoint accepts only build_type/source; cname and the
-    // rest are update-only, so create first, then PUT the remainder.
-    const create: Record<string, unknown> = {};
+    const create: PagesCreateBody = {};
     if (payload.build_type !== undefined) {
       create.build_type = payload.build_type;
     }
