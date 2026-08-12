@@ -139,6 +139,9 @@ export const customPropertiesSection: SectionModule<"custom_properties"> = {
   key: "custom_properties",
   undeclaredDefault: "keep",
   permission,
+  // Custom properties exist only under an organization owner; the org probe
+  // below implements the personal-account no-op this declares.
+  ownerSensitivity: "org",
   endpoints: ENDPOINTS,
   shape: loosen(SettingsFile.shape.custom_properties),
   // Closed surface: the bulk PATCH body is built from exactly property_name

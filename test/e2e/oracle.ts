@@ -44,6 +44,19 @@ const READS_REQUIRE_WRITE: ReadonlySet<SectionKey> = new Set(
 const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 2 };
 
 /**
+ * Sections whose resources exist only under an ORGANIZATION owner: on a
+ * personal account their handler's org probe 404s and the section no-ops
+ * with a note, so check reports clean and apply reports applied - never
+ * both in one mode. Derived from the sections' own ownerSensitivity
+ * declarations (the same source the registry pins to the org-probe
+ * endpoint), so a new org-only section joins the fold without a hand edit
+ * here.
+ */
+const ORG_ONLY_SECTIONS: ReadonlySet<SectionKey> = new Set(
+  SECTIONS.filter((section) => section.ownerSensitivity === "org").map((section) => section.key),
+);
+
+/**
  * Sections that declare NO read at all - REST or GraphQL
  * (check_suite_preferences today): check mode issues zero requests for them -
  * the cannot-verify note is not an outcome - so they are ALWAYS clean in
@@ -153,10 +166,10 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
   ) {
     return { key, grade, allowed: new Set(["excluded"]), mayWrite: false };
   }
-  // teams and custom_properties on a personal account no-op regardless of
-  // mask: their org probe 404s, the section returns with only a note, so
-  // check reports clean and apply reports applied - never both in one mode.
-  if ((key === "teams" || key === "custom_properties") && meta.ownerKind === "user") {
+  // An org-only section on a personal account no-ops regardless of mask:
+  // its org probe 404s, the section returns with only a note, so check
+  // reports clean and apply reports applied - never both in one mode.
+  if (ORG_ONLY_SECTIONS.has(key) && meta.ownerKind === "user") {
     return { key, grade, allowed: new Set([check ? "clean" : "applied"]), mayWrite: false };
   }
   // A section with no read endpoint makes NO request in check mode, so it is
