@@ -24,7 +24,11 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import { INTERACTION_LIMITS_ROUTED_KEYS, SettingsFile } from "../../schema.js";
+import {
+  INTERACTION_LIMITS_ROUTED_KEYS,
+  type InteractionLimitsConfig,
+  SettingsFile,
+} from "../../schema.js";
 import {
   beginRun,
   call,
@@ -103,12 +107,74 @@ const ENDPOINTS = {
 
 /** A GET body with no keys means "no limit is currently set". */
 function noLiveLimit(live: Record<string, unknown>): boolean {
-  return Object.keys(live).length === 0;
+  return Object.keys(live ?? {}).length === 0;
 }
 
-/** True when the live limit was set above the repository (org or user). */
-function overriddenFromAbove(live: Record<string, unknown>): boolean {
-  return live.origin !== undefined && String(live.origin).toLowerCase() !== "repository";
+/** The fields a NON-EMPTY live limit body must carry; extras ride along. */
+const LiveInteractionLimit = z.looseObject({
+  limit: z.string(),
+  origin: z.string().optional(),
+});
+
+/**
+ * The live base limit as the prose branches on it: no limit at all, a
+ * repository-level limit apply can manage, or a limit inherited from the
+ * organization or user level that apply cannot touch. `body` carries the
+ * raw GET object for subsetDiff. One parse at the boundary, so "origin says
+ * inherited but no limit to name" is unrepresentable downstream - every arm
+ * that has a limit carries it as a proven string.
+ */
+type LiveLimitState =
+  | { kind: "none" }
+  | { kind: "repository"; limit: string; body: Record<string, unknown> }
+  | { kind: "inherited"; limit: string; origin: string; body: Record<string, unknown> };
+
+async function liveBaseLimit(ctx: SectionContext, section: SectionMeta): Promise<LiveLimitState> {
+  const body = (await call(ctx, section, ENDPOINTS.get)) as Record<string, unknown>;
+  if (noLiveLimit(body)) {
+    return { kind: "none" };
+  }
+  const parsed = parseLive(section, ENDPOINTS.get, LiveInteractionLimit, body);
+  // An absent origin reads as the repository's own limit (the GET documents
+  // origin, but only a non-repository origin changes what apply can do).
+  return parsed.origin !== undefined && parsed.origin.toLowerCase() !== "repository"
+    ? { kind: "inherited", limit: parsed.limit, origin: parsed.origin, body }
+    : { kind: "repository", limit: parsed.limit, body };
+}
+
+/**
+ * The declared value split ONCE into its three destinations: the base PUT
+ * body, the creation-cap object, and the bypass login list. When `base` is
+ * present it carries `limit` as a non-optional string BY CONSTRUCTION - the
+ * shape's superRefine rejected base keys without a limit during upfront
+ * document validation - so the prose sites read base.limit instead of
+ * re-trusting an optional field, and the impossible state throws as the BUG
+ * it would be.
+ */
+interface DeclaredLimits {
+  base?: { limit: string } & Record<string, unknown>;
+  cap: InteractionLimitsConfig["pull_request_creation_cap"];
+  bypass: InteractionLimitsConfig["pull_request_creation_bypass"];
+}
+
+function splitDeclared(desired: InteractionLimitsConfig): DeclaredLimits {
+  const base = Object.fromEntries(
+    Object.entries(desired as Record<string, unknown>).filter(
+      ([key]) => !INTERACTION_LIMITS_ROUTED_KEYS.has(key),
+    ),
+  );
+  const cap = desired.pull_request_creation_cap;
+  const bypass = desired.pull_request_creation_bypass;
+  if (Object.keys(base).length === 0) {
+    return { cap, bypass };
+  }
+  const limit = base.limit;
+  if (typeof limit !== "string") {
+    throw new Error(
+      "BUG: interaction_limits base keys reached the handler without a limit; the shape's superRefine rejects that document upfront",
+    );
+  }
+  return { base: { ...base, limit }, cap, bypass };
 }
 
 /**
@@ -161,12 +227,12 @@ export const interactionLimitsSection = {
       // null clears the BASE limit only; the cap and bypass list are
       // separate resources a clear must not touch.
       if (run.check) {
-        const live = (await call(ctx, this, ENDPOINTS.get)) as Record<string, unknown>;
-        if (!noLiveLimit(live)) {
+        const live = await liveBaseLimit(ctx, this);
+        if (live.kind !== "none") {
           run.result.drift.push(
-            overriddenFromAbove(live)
-              ? `interaction_limits: declared null but a live "${String(live.limit)}" limit is set at the ${String(live.origin)} level; apply cannot remove it from the repository`
-              : `interaction_limits: declared null but a live "${String(live.limit)}" limit is set; apply will remove it`,
+            live.kind === "inherited"
+              ? `interaction_limits: declared null but a live "${live.limit}" limit is set at the ${live.origin} level; apply cannot remove it from the repository`
+              : `interaction_limits: declared null but a live "${live.limit}" limit is set; apply will remove it`,
           );
         }
         return run.result;
@@ -184,35 +250,28 @@ export const interactionLimitsSection = {
       return run.result;
     }
 
-    const cap = desired.pull_request_creation_cap;
-    const bypass = desired.pull_request_creation_bypass;
-    const base = Object.fromEntries(
-      Object.entries(desired as Record<string, unknown>).filter(
-        ([key]) => !INTERACTION_LIMITS_ROUTED_KEYS.has(key),
-      ),
-    );
-    const baseDeclared = Object.keys(base).length > 0;
+    const { base, cap, bypass } = splitDeclared(desired);
 
     if (run.check) {
-      if (baseDeclared) {
-        const live = (await call(ctx, this, ENDPOINTS.get)) as Record<string, unknown>;
+      if (base !== undefined) {
+        const live = await liveBaseLimit(ctx, this);
         // Declared != effective is drift REGARDLESS of who set the live limit;
         // when an org/user-level limit is the cause, the prose says apply
         // cannot fix it (the org is the place to), but check stays red rather
         // than reporting a repo that does not match its declaration as clean.
-        if (noLiveLimit(live)) {
+        if (live.kind === "none") {
           run.result.drift.push(
-            `interaction_limits: no live limit (never set, or it expired); apply will (re-)arm the declared "${desired.limit}" limit`,
+            `interaction_limits: no live limit (never set, or it expired); apply will (re-)arm the declared "${base.limit}" limit`,
           );
         } else {
           // The live body carries limit/origin/expires_at but never the
           // declared expiry duration, so diffing expiry would be permanent
           // false drift; compare everything else.
           const { expiry: _expiry, ...comparable } = base;
-          run.result.drift.push(...subsetDiff(comparable, live, "interaction_limits"));
-          if (overriddenFromAbove(live)) {
+          run.result.drift.push(...subsetDiff(comparable, live.body, "interaction_limits"));
+          if (live.kind === "inherited") {
             run.result.notes.push(
-              `interaction_limits: ${ORG_OVERRIDE} (origin: ${String(live.origin)}); apply cannot change it from the repository`,
+              `interaction_limits: ${ORG_OVERRIDE} (origin: ${live.origin}); apply cannot change it from the repository`,
             );
           }
         }
@@ -255,10 +314,10 @@ export const interactionLimitsSection = {
       return run.result;
     }
 
-    if (baseDeclared) {
+    if (base !== undefined) {
       const outcome = await tryCall(ctx, this, ENDPOINTS.put, {
         payload: base,
-        describe: `arming the "${desired.limit}" interaction limit`,
+        describe: `arming the "${base.limit}" interaction limit`,
       });
       if ("error" in outcome) {
         run.result.notes.push(
@@ -266,7 +325,7 @@ export const interactionLimitsSection = {
         );
       } else {
         run.result.changes.push(
-          `armed the "${desired.limit}" interaction limit (expiry: ${desired.expiry ?? "one_day (GitHub default)"})`,
+          `armed the "${base.limit}" interaction limit (expiry: ${desired.expiry ?? "one_day (GitHub default)"})`,
         );
       }
     }
