@@ -23,9 +23,10 @@ import { type LoggedRequest, newPipelineRunState, type PipelineOptions } from ".
 import { isWriteRequest, sectionForRequest } from "./dispatch.js";
 import { graphqlDenialErrors } from "./grading.js";
 import { assertGraphqlHandlerCompleteness } from "./handlers.js";
+import { mintNodeId } from "./node-id.js";
 import { handleGraphqlRequest, runPipeline } from "./routes.js";
 import { type MockHandle, startMockServer } from "./server.js";
-import { buildMultiState, buildState, mintNodeId } from "./state.js";
+import { buildMultiState, buildState } from "./state.js";
 import type { GraphqlHandlerContext, GraphqlHandlerResult } from "./support.js";
 
 type Json = Record<string, unknown>;

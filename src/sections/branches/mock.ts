@@ -4,6 +4,7 @@
  */
 
 import { ADMIN_SLUG } from "../../../test/e2e/constants.js";
+import { decodeNodeId, mintNodeId } from "../../../test/e2e/mock/node-id.js";
 import {
   allRuleNodes,
   applyRuleInput,
@@ -11,8 +12,6 @@ import {
   BYPASS_ACTOR_TEAMS,
   BYPASS_ACTOR_USERS,
   completeRule,
-  decodeNodeId,
-  mintNodeId,
   PROTECTION_RULE_APPS,
   protectionFromPut,
   ruleFromProtection,

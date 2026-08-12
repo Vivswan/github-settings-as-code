@@ -19,17 +19,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import type { OUTPUT_NAMES } from "../../src/action/io.js";
-import { isIssueChannel } from "../../src/action/redact.js";
-import { MARKER_LABEL } from "../../src/report/issue-report.js";
-import type { SectionKey } from "../../src/schema.js";
-import { ALWAYS_REWRITE_STATE_FAMILIES, COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
+import {
+  assertApplyIdempotent,
+  captureRerun,
+  type Invocation,
+  type RerunCapture,
+} from "./apply-idempotence-proof.js";
 import { ADMIN_SLUG as REPO_SLUG } from "./constants.js";
-import type { LoggedRequest } from "./mock/contract.js";
-import { endpointForRequest, isWriteRequest, sectionForRequest } from "./mock/dispatch.js";
-import { type MockHandle, type ServerOptions, startMockServer } from "./mock/server.js";
-import type { MockState } from "./mock/state.js";
+import { assertIssueReport } from "./issue-report-assert.js";
+import { type LoggedRequest, renderRequest } from "./mock/contract.js";
+import { isWriteRequest } from "./mock/dispatch.js";
+import { type ServerOptions, startMockServer } from "./mock/server.js";
 import { sharedValidator } from "./openapi/validate.js";
-import type { Expect, Scenario } from "./schema.js";
+import type { Scenario } from "./schema.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 /**
@@ -123,22 +125,6 @@ const KILL_AFTER_MS = 300_000;
 /** Monotonic per-process counter so repeated same-name failures never collide. */
 let artifactCounter = 0;
 
-/**
- * One INTERNAL re-run's captured output surfaces: the convergence check, or
- * apply_idempotent's second apply and its final check. Shape-compatible with
- * checkLeaks' observed argument, so an invariant sweeps a re-run exactly the
- * way it sweeps the primary invocation - a leak conditional on check mode or
- * on converged state only ever appears here.
- */
-interface RerunCapture {
-  /** Which re-run produced this (e.g. "converges check"). */
-  label: string;
-  stdout: string;
-  stderr: string;
-  summary: string;
-  outputs: Record<string, string>;
-}
-
 /** The outcome of running one scenario: pass/fail plus everything observed. */
 export interface ScenarioReport {
   scenario: string;
@@ -181,17 +167,6 @@ export interface ScenarioReport {
   reruns: RerunCapture[];
 }
 
-/** The result of one child process invocation against a running mock. */
-interface Invocation {
-  exitCode: number;
-  outputs: Record<string, string>;
-  summary: string;
-  stdout: string;
-  stderr: string;
-  /** True when the harness's KILL_AFTER_MS timer terminated the child. */
-  killedByHarness: boolean;
-}
-
 /**
  * The suffix every exit-code failure line carries when the harness itself
  * killed the child, so a timeout is never misread as the action exiting
@@ -199,17 +174,6 @@ interface Invocation {
  */
 function killNote(run: Invocation): string {
   return run.killedByHarness ? ` (the harness killed the child after ${KILL_AFTER_MS}ms)` : "";
-}
-
-/** Capture an internal re-run's surfaces for the report (see RerunCapture). */
-function captureRerun(label: string, run: Invocation): RerunCapture {
-  return {
-    label,
-    stdout: run.stdout,
-    stderr: run.stderr,
-    summary: run.summary,
-    outputs: run.outputs,
-  };
 }
 
 /**
@@ -516,159 +480,6 @@ export function checkLeaks(
   return failures;
 }
 
-/** The `body` field of a recorded request payload, when it is a string. */
-function stringBody(request: LoggedRequest | undefined): string | undefined {
-  const body = (request?.body as { body?: unknown } | undefined)?.body;
-  return typeof body === "string" ? body : undefined;
-}
-
-/**
- * The report body delivered for a slug: the create POST body when the issue was
- * created this run, else the last PATCH body (an existing issue updated in
- * place). Undefined when no issue write reached the mock for that slug (e.g. the
- * permission-denied path). Shared by the curated issue_report assertion and the
- * fuzz report-body check.
- */
-export function deliveredIssueBody(requests: LoggedRequest[], slug: string): string | undefined {
-  const base = `/repos/${slug}/issues`;
-  const create = requests.find((r) => r.method === "POST" && r.pathname === base);
-  const fromCreate = stringBody(create);
-  if (fromCreate !== undefined) {
-    return fromCreate;
-  }
-  const lastPatch = requests
-    .filter((r) => r.method === "PATCH" && r.pathname.startsWith(`${base}/`))
-    .at(-1);
-  return stringBody(lastPatch);
-}
-
-/**
- * Assert the private-report issue delivery for one slug against the recorded
- * requests: the report body carried the expected substrings (the full
- * unredacted detail), the issue's title/state matched, and the right number of
- * report issues were created. The report body is the POST /issues create body,
- * or - when the issue already existed and was updated - the PATCH body; state
- * is taken from the last create/patch that set it. `created_count` counts
- * POST /issues for the slug (0 proves no issue was created, e.g. the
- * permission-denied path).
- */
-function assertIssueReport(
-  spec: NonNullable<Expect["issue_report"]>,
-  requests: LoggedRequest[],
-): string[] {
-  const failures: string[] = [];
-  const issuesPath = `/repos/${spec.slug}/issues`;
-  const creates = requests.filter((r) => r.method === "POST" && r.pathname === issuesPath);
-  const patches = requests.filter(
-    (r) => r.method === "PATCH" && r.pathname.startsWith(`${issuesPath}/`),
-  );
-
-  if (spec.created_count !== undefined && creates.length !== spec.created_count) {
-    failures.push(
-      `issue_report: created ${creates.length} report issue(s) for ${spec.slug}, expected ${spec.created_count}`,
-    );
-  }
-
-  // The delivered body: the create body if the issue was created this run, else
-  // the last PATCH body (an existing issue updated in place).
-  const created = creates[0]?.body as { title?: unknown; labels?: unknown } | undefined;
-  const deliveredBody = deliveredIssueBody(requests, spec.slug);
-
-  if (spec.title !== undefined && created && created.title !== spec.title) {
-    failures.push(`issue_report: title "${String(created.title)}" != expected "${spec.title}"`);
-  }
-  // A created issue MUST carry the marker label - it is the lookup key that makes
-  // the one-issue-per-repo reuse work; without it every run would create a new
-  // issue. (Only checked on create; a reuse run PATCHes and adds no labels.)
-  if (created) {
-    const labels = Array.isArray(created.labels) ? created.labels.map(String) : [];
-    if (!labels.includes(MARKER_LABEL)) {
-      failures.push(
-        `issue_report: created issue for ${spec.slug} is missing the marker label "${MARKER_LABEL}"`,
-      );
-    }
-  }
-  // The lookup is by the marker LABEL (one indexed request), not a title/creator
-  // scan: assert the issues list GET carried labels=<marker>. This pins the
-  // load-bearing lookup mechanism the reuse path depends on.
-  if (spec.lookup_by_label) {
-    const listedByLabel = requests.some(
-      (r) =>
-        r.method === "GET" &&
-        r.pathname === issuesPath &&
-        (r.query ?? "").includes(`labels=${MARKER_LABEL}`),
-    );
-    if (!listedByLabel) {
-      failures.push(
-        `issue_report: no issues list GET for ${spec.slug} used the labels=${MARKER_LABEL} filter`,
-      );
-    }
-  }
-  // The exact label-name array the last labels-setting write carried: the
-  // marker-reattach witness. A fallback-scan hit must reattach the stripped
-  // marker without clobbering human-added labels, so order and content are
-  // both pinned.
-  if (spec.labels) {
-    const labelWrites = [...creates, ...patches]
-      .map((r) => (r.body as { labels?: unknown } | undefined)?.labels)
-      .filter((l): l is unknown[] => Array.isArray(l));
-    const written = labelWrites.at(-1)?.map(String);
-    if (written === undefined) {
-      failures.push(
-        `issue_report: no issue write for ${spec.slug} carried a labels array, expected [${spec.labels.join(", ")}]`,
-      );
-    } else if (
-      written.length !== spec.labels.length ||
-      spec.labels.some((name, i) => written[i] !== name)
-    ) {
-      failures.push(
-        `issue_report: issue labels written for ${spec.slug} were [${written.join(", ")}], expected [${spec.labels.join(", ")}]`,
-      );
-    }
-  }
-  for (const needle of spec.body_contains ?? []) {
-    if (deliveredBody === undefined) {
-      failures.push(
-        `issue_report: no report body delivered for ${spec.slug}, expected "${needle}"`,
-      );
-    } else if (!deliveredBody.includes(needle)) {
-      failures.push(`issue_report: report body for ${spec.slug} missing "${needle}"`);
-    }
-  }
-  if (spec.state !== undefined) {
-    // The final state is the last create/patch that set one.
-    const stateWrites = [...creates, ...patches]
-      .map((r) => (r.body as { state?: unknown } | undefined)?.state)
-      .filter((s): s is string => typeof s === "string");
-    // A create defaults the issue open; only an explicit state on a later write
-    // changes it, so the last explicit state wins (else "open" from the create).
-    const finalState = stateWrites.at(-1) ?? (creates.length > 0 ? "open" : undefined);
-    if (finalState !== spec.state) {
-      failures.push(
-        `issue_report: final issue state "${finalState ?? "(none)"}" != expected "${spec.state}"`,
-      );
-    }
-  }
-  return failures;
-}
-
-/**
- * Render a logged request to the string the expectations match against. The
- * mock logs pathname and query separately, so both match rules compose here:
- * mutations/never match a "METHOD /pathname" PREFIX (query omitted), and
- * requests_contain matches a substring of "METHOD /pathname?query". A
- * GraphQL request renders as "GRAPHQL <opName>" - every GraphQL call shares
- * POST /graphql, so the operation name is the only spelling that lets a
- * scenario pin one operation.
- */
-function renderRequest(request: LoggedRequest, includeQuery: boolean): string {
-  if (request.graphql) {
-    return `GRAPHQL ${request.graphql.operationName}`;
-  }
-  const base = `${request.method} ${request.pathname}`;
-  return includeQuery && request.query ? `${base}?${request.query}` : base;
-}
-
 /**
  * True when `patterns` appear as an in-order subsequence of `log`, each
  * matched as a prefix. This is the mutations rule: the declared writes must
@@ -690,326 +501,6 @@ export function isSubsequence(patterns: string[], log: string[]): boolean {
  */
 export function forbiddenPresent(patterns: string[], log: string[]): string[] {
   return patterns.filter((pattern) => log.some((entry) => entry.startsWith(pattern)));
-}
-
-/**
- * One labeled entry per mutable state the mock holds: the single-repo state,
- * or every per-slug repo state plus the shared org state in multi mode. The
- * multi settings/permissions maps and the discovery pool are run CONFIG the
- * pipeline never mutates, so they are not part of the stability snapshot.
- */
-function mutableStates(handle: MockHandle): Array<[string, MockState]> {
-  const working = handle.working;
-  switch (working.mode) {
-    case "single":
-      return [["state", working.state]];
-    case "multi":
-      return [...working.multi.repos, ["(org)", working.multi.orgState]];
-  }
-}
-
-/** An always-rewrite family entry with its server-managed updated_at dropped. */
-function dropUpdatedAt(entry: unknown): unknown {
-  return typeof entry === "object" && entry !== null
-    ? { ...(entry as Record<string, unknown>), updated_at: undefined }
-    : entry;
-}
-
-/**
- * Project one always-rewrite family for the stability snapshot: updated_at is
- * dropped from every item, since these sections legitimately move it on every
- * apply; created_at stays IN, so a delete-and-recreate on the second apply
- * still reads as churn. The repository-level families store a flat item list;
- * environment_secrets nests one list per environment name.
- */
-function projectAlwaysRewrite(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(dropUpdatedAt);
-  }
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
-        key,
-        Array.isArray(nested) ? nested.map(dropUpdatedAt) : nested,
-      ]),
-    );
-  }
-  return value;
-}
-
-/**
- * Serialize every mutable state family to a "label.family" -> JSON map, so a
- * before/after comparison can name exactly which repo and family moved instead
- * of reporting one opaque inequality. Underscore-prefixed families are mock
- * bookkeeping (e.g. the secret write counter), not repo state. The
- * always-rewrite families (ALWAYS_REWRITE_STATE_FAMILIES, the explicit list
- * in apply-idempotence.ts) drop updated_at via projectAlwaysRewrite.
- */
-function snapshotFamilies(handle: MockHandle): Map<string, string> {
-  const snapshot = new Map<string, string>();
-  for (const [label, state] of mutableStates(handle)) {
-    for (const [family, value] of Object.entries(state)) {
-      if (family.startsWith("_")) {
-        continue;
-      }
-      const projected = ALWAYS_REWRITE_STATE_FAMILIES.has(family)
-        ? projectAlwaysRewrite(value)
-        : value;
-      snapshot.set(`${label}.${family}`, JSON.stringify(projected));
-    }
-  }
-  return snapshot;
-}
-
-/**
- * The "label.family" keys whose serialized state differs between two
- * snapshots, including keys present on only one side. Exported for direct
- * testing, so the state-stability assertion is provably able to fire.
- */
-export function changedFamilies(before: Map<string, string>, after: Map<string, string>): string[] {
-  return [...new Set([...before.keys(), ...after.keys()])]
-    .filter((key) => before.get(key) !== after.get(key))
-    .sort();
-}
-
-/**
- * Classify the mutating requests a SECOND apply issued, one failure line per
- * offender: a write matching no section endpoint is report/core traffic that
- * has no business in an idempotence re-run, and a write to a
- * compare-before-write section (COMPARE_BEFORE_WRITE) proves the engine's
- * payload and its read-back no longer round-trip - that section diffs live
- * state first, and the live state already matched. Writes to unconditional-PUT
- * sections pass (their state stability is asserted separately). Exported for
- * direct testing, so the zero-write assertion is provably able to fire.
- */
-export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
-  const failures: string[] = [];
-  for (const write of writes) {
-    const section = sectionForRequest(write.method, write.pathname, write.body);
-    if (section === null) {
-      failures.push(
-        `apply-idempotence: second apply wrote outside any section endpoint: ${write.method} ${write.pathname}`,
-      );
-      continue;
-    }
-    if (COMPARE_BEFORE_WRITE[section]) {
-      failures.push(
-        `apply-idempotence: second apply wrote to "${section}" (${write.method} ${write.pathname}), but that section compares before writing and the live state already matched`,
-      );
-    }
-  }
-  return failures;
-}
-
-/**
- * The inverse leg of COMPARE_BEFORE_WRITE: a wrong `true` fails the first
- * idempotence run that touches the section, but a wrong `false` merely
- * weakens the proof (the zero-write assertion above stops binding) without
- * failing anything. So every idempotence re-run accumulates, per
- * false-listed section, how many first- and second-apply writes the CORPUS
- * issued, and the corpus-level verdict demands both a witness and the
- * re-issued writes. Corpus-level on purpose: one scenario can legitimately
- * go second-apply-quiet on a false section (a one-shot removal, a webhook
- * without a declared secret), but across the corpus the unconditional write
- * path must fire somewhere or the `false` is unwitnessed.
- */
-export type UnconditionalWriteWitness = Map<SectionKey, { first: number; second: number }>;
-
-/** The witness map THIS process's idempotence re-runs accumulate into. */
-const corpusWriteWitness: UnconditionalWriteWitness = new Map();
-
-/**
- * Accumulate one idempotence re-run's writes into a witness map. Pure over
- * its arguments (the corpus map is passed in), so the corpus verdict is
- * provably able to fire - the same testability contract the sibling
- * secondApplyWriteFailures/missingSecondApplyRewrites helpers keep.
- */
-export function recordUnconditionalWrites(
-  witness: UnconditionalWriteWitness,
-  firstWrites: LoggedRequest[],
-  secondWrites: LoggedRequest[],
-): void {
-  const bump = (writes: LoggedRequest[], side: "first" | "second"): void => {
-    for (const write of writes) {
-      const section = sectionForRequest(write.method, write.pathname, write.body);
-      if (section === null || COMPARE_BEFORE_WRITE[section]) {
-        continue;
-      }
-      const counts = witness.get(section) ?? { first: 0, second: 0 };
-      counts[side]++;
-      witness.set(section, counts);
-    }
-  };
-  bump(firstWrites, "first");
-  bump(secondWrites, "second");
-}
-
-/**
- * The corpus-level verdict over a witness map, demanded for EVERY
- * false-listed section - one failure line per section that is either
- * unwitnessed (no idempotence re-run wrote to it on a first apply, so
- * nothing contradicts a wrong `false`) or contradicted (its first applies
- * wrote but no second apply ever did). The two messages name opposite
- * remedies: an unwitnessed section needs corpus coverage, a contradicted
- * one needs its table entry flipped.
- */
-export function unwitnessedUnconditionalSections(witness: UnconditionalWriteWitness): string[] {
-  const failures: string[] = [];
-  for (const [section, compares] of Object.entries(COMPARE_BEFORE_WRITE) as Array<
-    [SectionKey, boolean]
-  >) {
-    if (compares) {
-      continue;
-    }
-    const counts = witness.get(section);
-    if (counts === undefined || counts.first === 0) {
-      failures.push(
-        `apply-idempotence corpus: "${section}" is listed as unconditional (COMPARE_BEFORE_WRITE false) but NO apply_idempotent scenario in the corpus writes to it, so a wrong \`false\` would go uncontradicted - declare the section in an apply_idempotent scenario (e.g. apply-idempotent-unconditional.yml)`,
-      );
-      continue;
-    }
-    if (counts.second === 0) {
-      failures.push(
-        `apply-idempotence corpus: "${section}" is listed as unconditional (COMPARE_BEFORE_WRITE false) but its ${counts.first} first-apply write(s) were never re-issued by any second apply - either the section now compares before writing (flip the table entry) or the corpus lost its unconditional-write witness`,
-      );
-    }
-  }
-  return failures.sort();
-}
-
-/**
- * The verdict over the writes this process recorded. run.ts consults it
- * after the FULL corpus only - a --sections or --scenario slice legitimately
- * starves sections.
- */
-export function corpusUnwitnessedUnconditionalSections(): string[] {
-  return unwitnessedUnconditionalSections(corpusWriteWitness);
-}
-
-/**
- * The always-rewrite half of the idempotence proof: every secret PUT the
- * first apply issued must be issued AGAIN by the second apply, path for path.
- * Which PUTs bind comes from the EndpointDecl `alwaysRewrite` flag (resolved
- * per logged request via endpointForRequest), so the obligation lives on the
- * declaration - per endpoint, not per section, since environments carries a
- * passthrough PUT and always-rewrite secret PUTs side by side. Derived from
- * OBSERVED first-run writes - not from the declared settings - so permission
- * masks, section allowlists, and the defaults merge need no re-modeling
- * here: whatever gating let the first PUT through applies identically to the
- * second run. Exported for direct testing, so the assertion is provably able
- * to fire.
- */
-export function missingSecondApplyRewrites(
-  firstWrites: LoggedRequest[],
-  secondWrites: LoggedRequest[],
-): string[] {
-  const isAlwaysRewritePut = (request: LoggedRequest): boolean =>
-    endpointForRequest(request.method, request.pathname)?.alwaysRewrite === true;
-  const secondPuts = new Set(secondWrites.filter(isAlwaysRewritePut).map((r) => r.pathname));
-  return [...new Set(firstWrites.filter(isAlwaysRewritePut).map((r) => r.pathname))]
-    .filter((pathname) => !secondPuts.has(pathname))
-    .sort()
-    .map(
-      (pathname) =>
-        `apply-idempotence: the first apply wrote PUT ${pathname} but the second did not; declared secrets are re-sealed and re-written on EVERY apply (rotation propagation)`,
-    );
-}
-
-/**
- * The apply-idempotence proof (expect.fixpoint: "apply_idempotent"): re-run
- * the scenario in apply mode against the SAME mutated mock and require apply
- * to be a fixpoint. Three properties, each its own regression class:
- *   - the second apply exits 0: a fresh apply over converged state must not
- *     trip over its own output;
- *   - no compare-before-write section writes (COMPARE_BEFORE_WRITE): those
- *     sections diff live state before writing, so a write here means the
- *     engine's payload and its read-back no longer round-trip;
- *   - the mock state is unchanged family by family: unconditional-PUT sections
- *     may write again, but a second apply must rewrite the SAME state.
- * A final check-mode run then converges (exit 0, zero writes) - the same proof
- * `fixpoint: "converges"` makes, which is why the two proofs are one enum
- * field rather than two booleans.
- *
- * The issue report channels are rejected, not neutralized: their delivery embeds
- * a fresh ISO timestamp (the report issue legitimately moves every run), and
- * both `issue` and `issue-on-failure` inject the marker label into the labels
- * section's declared set - so
- * flipping the channel off for the re-run would change what the labels section
- * deletes, which is a different scenario, not a second run of this one.
- */
-async function assertApplyIdempotent(
-  scenario: Scenario,
-  dir: string,
-  handle: MockHandle,
-): Promise<{ failures: string[]; reruns: RerunCapture[] }> {
-  if (scenario.inputs?.mode === "check") {
-    return { failures: ["apply_idempotent requires an apply-mode scenario"], reruns: [] };
-  }
-  const channel = scenario.inputs?.private_report;
-  if (channel !== undefined && isIssueChannel(channel)) {
-    return {
-      failures: [
-        `apply_idempotent cannot run under private_report: ${channel} - the report issue embeds a fresh timestamp (state moves every run) and the injected marker label ties the labels declaration to the channel; use private_report: none or artifact`,
-      ],
-      reruns: [],
-    };
-  }
-  const failures: string[] = [];
-  const reruns: RerunCapture[] = [];
-  const rerun: Scenario = { ...scenario, inputs: { ...scenario.inputs, mode: "apply" } };
-  const before = snapshotFamilies(handle);
-  const requestsBefore = handle.requests.length;
-  const violationsBefore = handle.violations.length;
-
-  const second = await invoke(rerun, dir, handle.url);
-  reruns.push(captureRerun("apply-idempotence second apply", second));
-  if (second.exitCode !== 0) {
-    failures.push(
-      `apply-idempotence: second apply exited ${second.exitCode}, expected 0${killNote(second)}`,
-    );
-  }
-  const secondViolations = handle.violations.slice(violationsBefore);
-  if (secondViolations.length > 0) {
-    failures.push(`apply-idempotence: mock violations:\n  ${secondViolations.join("\n  ")}`);
-  }
-  const writes = handle.requests.slice(requestsBefore).filter(isWriteRequest);
-  failures.push(...secondApplyWriteFailures(writes));
-  const firstWrites = handle.requests.slice(0, requestsBefore).filter(isWriteRequest);
-  failures.push(...missingSecondApplyRewrites(firstWrites, writes));
-  recordUnconditionalWrites(corpusWriteWitness, firstWrites, writes);
-  const changed = changedFamilies(before, snapshotFamilies(handle));
-  if (changed.length > 0) {
-    failures.push(`apply-idempotence: second apply changed mock state: ${changed.join(", ")}`);
-  }
-
-  // A converged apply must read back clean: check mode, exit 0, zero writes.
-  const checkRequestsBefore = handle.requests.length;
-  const checkViolationsBefore = handle.violations.length;
-  handle.enterCheckMode();
-  const check = await invoke(
-    { ...rerun, inputs: { ...rerun.inputs, mode: "check" } },
-    dir,
-    handle.url,
-  );
-  reruns.push(captureRerun("apply-idempotence check", check));
-  if (check.exitCode !== 0) {
-    failures.push(
-      `apply-idempotence: the check run after the second apply exited ${check.exitCode}, expected 0${killNote(check)}`,
-    );
-  }
-  const checkWrites = handle.requests.slice(checkRequestsBefore).filter(isWriteRequest);
-  if (checkWrites.length > 0) {
-    failures.push(
-      `apply-idempotence: the check run wrote ${checkWrites.length} time(s): ${checkWrites.map((r) => renderRequest(r, false)).join(", ")}`,
-    );
-  }
-  const checkViolations = handle.violations.slice(checkViolationsBefore);
-  if (checkViolations.length > 0) {
-    failures.push(
-      `apply-idempotence: check-run mock violations:\n  ${checkViolations.join("\n  ")}`,
-    );
-  }
-  return { failures, reruns };
 }
 
 /**
@@ -1213,9 +704,16 @@ export async function runScenario(
     // 7d. Apply-idempotence: a second apply against the same mutated mock must
     // be a fixpoint (see assertApplyIdempotent). Its own final step arms the
     // one-way check-mode barrier and proves convergence, which is why
-    // `fixpoint` is a single enum: only one of these blocks can ever run.
+    // `fixpoint` is a single enum: only one of these blocks can ever run. The
+    // proof engine drives its re-runs through this runner's own invoke, bound
+    // to the same temp dir and mock the primary invocation used.
     if (exp.fixpoint === "apply_idempotent") {
-      const idempotence = await assertApplyIdempotent(scenario, dir, handle);
+      const boundDir = dir;
+      const mockUrl = handle.url;
+      const idempotence = await assertApplyIdempotent(scenario, handle, {
+        invoke: (rerun) => invoke(rerun, boundDir, mockUrl),
+        killNote,
+      });
       failures.push(...idempotence.failures);
       reruns.push(...idempotence.reruns);
     }

@@ -10,12 +10,9 @@
  * and only the reorder mutation renormalizes the list to contiguous 1..N.
  */
 
+import { mintNodeId } from "../../../test/e2e/mock/node-id.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../../../test/e2e/mock/secrets.js";
-import {
-  environmentFromPut,
-  mintNodeId,
-  PROTECTION_RULE_APPS,
-} from "../../../test/e2e/mock/state.js";
+import { environmentFromPut, PROTECTION_RULE_APPS } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
   branchPoliciesEnabled,

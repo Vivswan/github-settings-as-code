@@ -10,8 +10,9 @@
 import type { GraphqlTolerableError } from "../../../src/sections/contract.js";
 import type { TaggedEndpoint, TaggedGraphqlOp } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG } from "../constants.js";
+import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import { MOCK_SECRETS_KEY_ID, secretDigest, unsealSecretValue } from "./secrets.js";
-import { decodeNodeId, type MockState, mintAppNodeId, mintNodeId } from "./state.js";
+import type { MockState } from "./state.js";
 
 /** A plain JSON object body. */
 export type Json = Record<string, unknown>;
