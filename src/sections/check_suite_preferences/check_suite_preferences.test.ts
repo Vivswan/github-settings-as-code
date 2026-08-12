@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { checkSuitePreferencesSection } from "../../src/sections/check-suite-preferences.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { checkSuitePreferencesSection } from "./index.js";
 
 describe("check_suite_preferences", () => {
   const path = "/repos/o/r/check-suites/preferences";

@@ -20,6 +20,7 @@ import { actionsVariablesMockHandlers } from "../../../src/sections/actions_vari
 import { agentsSecretsMockHandlers } from "../../../src/sections/agents_secrets/mock.js";
 import { agentsVariablesMockHandlers } from "../../../src/sections/agents_variables/mock.js";
 import { autolinksMockHandlers } from "../../../src/sections/autolinks/mock.js";
+import { checkSuitePreferencesMockHandlers } from "../../../src/sections/check_suite_preferences/mock.js";
 import { codeQualitySetupMockHandlers } from "../../../src/sections/code_quality_setup/mock.js";
 import { codeScanningDefaultSetupMockHandlers } from "../../../src/sections/code_scanning_default_setup/mock.js";
 import { codespacesSecretsMockHandlers } from "../../../src/sections/codespaces_secrets/mock.js";
@@ -713,18 +714,6 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
   },
 
   // pages: moved to src/sections/pages/mock.ts
-
-  // check_suite_preferences --------------------------------------------------
-  "check_suite_preferences.update": ({ state, body }) => {
-    // The one write-only endpoint: no GET exists, so the stored preferences
-    // are visible only through this PATCH's echo ({preferences, repository}
-    // per the spec's check-suite-preference schema).
-    Object.assign(state.check_suite_preferences, asObject(body));
-    return ok({
-      preferences: state.check_suite_preferences,
-      repository: restRepoSurface(state.repo),
-    });
-  },
 
   // collaborators ----------------------------------------------------------
   "collaborators.list": ({ state, query }) => ok(slicePage(state.collaborators, query)),
@@ -1512,6 +1501,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: agentsSecretsMockHandlers },
   { rest: agentsVariablesMockHandlers },
   { rest: autolinksMockHandlers },
+  { rest: checkSuitePreferencesMockHandlers },
   { rest: codeQualitySetupMockHandlers },
   { rest: codeScanningDefaultSetupMockHandlers },
   { rest: codespacesSecretsMockHandlers },
