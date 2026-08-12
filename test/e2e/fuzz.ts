@@ -62,12 +62,10 @@ import { Rng } from "./prng.js";
 import {
   checkLeaks,
   deliveredIssueBody,
-  E2E_TOKEN,
   insertReplay,
   markReportTitle,
   parseReposResult,
   parseSummaryOutcomes,
-  type RerunCapture,
   runScenario,
   stripDebugLines,
   stripMaskLines,
@@ -209,32 +207,6 @@ const CLASS_BY_METHOD: Record<string, MutationClass> = {
   PATCH: "update",
   DELETE: "delete",
 };
-
-/**
- * The token-leak invariant every iteration asserts: the runner's inert
- * INPUT_TOKEN (E2E_TOKEN, the same constant childEnv feeds the action) must
- * appear on NO public surface - summary, stdout, stderr (mask lines
- * stripped), or any output - of the PRIMARY invocation or any internal
- * re-run (second apply, convergence check, idempotence check; per-invocation
- * delta captures). The token is never add-mask'd, so any echo is a real
- * leak. The reruns sweep is unconditional: the array is empty when no re-run
- * was armed, and coverage holds if a future mode arms one.
- */
-function assertNoTokenLeak(
-  report: {
-    summary: string;
-    stdout: string;
-    stderr: string;
-    outputs: Record<string, string>;
-    reruns: RerunCapture[];
-  },
-  problems: string[],
-): void {
-  problems.push(...checkLeaks(report, [E2E_TOKEN]));
-  for (const rerun of report.reruns) {
-    problems.push(...checkLeaks(rerun, [E2E_TOKEN]).map((f) => `${rerun.label}: ${f}`));
-  }
-}
 
 /**
  * Structural validity of the summary's section table: a header row, a
@@ -439,10 +411,9 @@ async function runPredicted(
     // HOSTILE_NAMES a broken pipe escape breaks a row's cell count.
     problems.push(...summaryTableProblems(report.summary, prediction.sections.length));
   }
-  assertNoTokenLeak(report, problems);
-  // Planted scenario-env plaintexts are swept by the RUNNER itself (primary
-  // run and every rerun; see runScenario's centralized leak sweep), so no
-  // separate fuzz-side sweep exists - a duplicate here would double-report
+  // The token-leak and planted-plaintext sweeps run in the RUNNER itself
+  // (primary run and every rerun; see runScenario's centralized leak sweep),
+  // so no fuzz-side sweep exists - a duplicate here would double-report
   // every failure.
 
   return iterationResult(problems, {
@@ -571,7 +542,6 @@ async function rejectionIteration(seed: number, spec: RejectionSpec): Promise<It
       `input fuzz reached the API ${report.requests.length} time(s) before rejecting the doc: ${sample}`,
     );
   }
-  assertNoTokenLeak(report, problems);
   return iterationResult(
     problems,
     { artifactDir: report.artifactDir, sections: [] },
@@ -693,7 +663,6 @@ async function singleShotChaosIteration(
   } else if (observed.labels !== "applied") {
     problems.push(`labels observed "${observed.labels}" under ${mode}, expected applied`);
   }
-  assertNoTokenLeak(report, problems);
   return iterationResult(
     problems,
     {
@@ -746,7 +715,6 @@ async function persistentChaosIteration(
       `persistent ${mode}: ${writes.length} label write(s) after the corrupted read - must not mutate`,
     );
   }
-  assertNoTokenLeak(report, problems);
   return iterationResult(
     problems,
     { artifactDir: report.artifactDir, sections: ["labels"] },
@@ -1024,9 +992,9 @@ async function runMultiPredicted(
           "counterfactual: no canary surfaced in a rendered surface under private-repos: show, so the redacted leak check is vacuous",
         );
       }
-      // The counterfactual is a ScenarioReport of its own: the token-leak
-      // invariant covers it too.
-      assertNoTokenLeak(shown, problems);
+      // The counterfactual is a runScenario report of its own, so the
+      // runner's centralized leak sweep (token + planted plaintexts) already
+      // covered it; its failures propagated through shown.ok above.
     }
   }
 
@@ -1133,7 +1101,6 @@ async function runMultiPredicted(
       );
     }
   }
-  assertNoTokenLeak(report, problems);
 
   return iterationResult(problems, {
     artifactDir: report.artifactDir,
@@ -1264,7 +1231,6 @@ async function runDiscoveryPredicted(
       );
     }
   }
-  assertNoTokenLeak(report, problems);
   return iterationResult(
     problems,
     {
@@ -1553,7 +1519,6 @@ async function exhaustedSectionRun(
   if (/\n\s+at\s+\S+ \(/.test(report.stderr)) {
     problems.push("unhandled stack in stderr under an exhausted fault");
   }
-  assertNoTokenLeak(report, problems);
   return iterationResult(
     problems,
     {
@@ -1674,7 +1639,6 @@ async function fatalDiscoveryRun(
       `discovery-fatal: repos-result was emitted (${report.outputs["repos-result"]}), expected no output at all`,
     );
   }
-  assertNoTokenLeak(report, problems);
   return iterationResult(
     problems,
     {
@@ -1737,7 +1701,6 @@ async function preflightFaultRun(seed: number, surviving: boolean): Promise<Iter
       `preflight-consumed: labels observed "${observed.labels ?? "(absent)"}", expected applied - the probe should have eaten the budget and the apply read succeeded`,
     );
   }
-  assertNoTokenLeak(report, problems);
   return iterationResult(
     problems,
     {

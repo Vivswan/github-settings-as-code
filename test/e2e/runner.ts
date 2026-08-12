@@ -95,12 +95,12 @@ function builtBundle(): Promise<string> {
   return bundleBuild;
 }
 /**
- * The inert token every child run authenticates with (INPUT_TOKEN). Exported
- * as the single source for the token-leak invariant's needle: a consumer that
- * imported this constant stays correct if the literal ever changes, where a
- * duplicated string would silently make the invariant vacuous.
+ * The inert token every child run authenticates with (INPUT_TOKEN). The one
+ * constant is both what childEnv feeds the action and what the centralized
+ * leak sweep hunts on every public surface, so the token-leak invariant can
+ * never drift from the token actually in use.
  */
-export const E2E_TOKEN = "e2e-token";
+const E2E_TOKEN = "e2e-token";
 /**
  * The published output the skipped-sections assertion reads, pinned to the
  * action's own OUTPUT_NAMES declaration (src/action/io.ts): a rename there
@@ -130,7 +130,7 @@ let artifactCounter = 0;
  * way it sweeps the primary invocation - a leak conditional on check mode or
  * on converged state only ever appears here.
  */
-export interface RerunCapture {
+interface RerunCapture {
   /** Which re-run produced this (e.g. "converges check"). */
   label: string;
   stdout: string;
@@ -1176,19 +1176,23 @@ export async function runScenario(
       }
     }
     // 7b-ii. Whole-surface leak invariant, centralized: leaks_nowhere runs
-    // the SAME checkLeaks primitive the fuzzer uses, and every scenario env
-    // value joins the needle set automatically - a scenario env value is by
-    // definition a resolved secret plaintext, so it must never reach any
-    // public surface whether or not the author remembered to list it. The
-    // set dedupes an env value the author also listed explicitly, and an
-    // EMPTY env value is skipped (a set-but-empty variable is a scenario
-    // about the resolver's empty-value error, not a leakable secret). The
-    // sweep is deferred past the rerun blocks below so it covers the primary
-    // invocation AND every internal re-run (a converges check or idempotence
-    // re-apply must not leak what the first run masked).
+    // the SAME checkLeaks primitive on every scenario, and two needle
+    // families join the declared ones automatically. The runner's inert
+    // INPUT_TOKEN (E2E_TOKEN) is ALWAYS a needle: it is never add-mask'd, so
+    // any echo on a public surface is a real leak - centralizing it here
+    // covers the curated corpus and every fuzz mode with one sweep. Every
+    // scenario env value joins too - a scenario env value is by definition a
+    // resolved secret plaintext, so it must never reach any public surface
+    // whether or not the author remembered to list it. The set dedupes an
+    // env value the author also listed explicitly, and an EMPTY env value is
+    // skipped (a set-but-empty variable is a scenario about the resolver's
+    // empty-value error, not a leakable secret). The sweep is deferred past
+    // the rerun blocks below so it covers the primary invocation AND every
+    // internal re-run (a converges check or idempotence re-apply must not
+    // leak what the first run masked).
     const leakNeedles = [
       ...new Set(
-        [...(exp.leaks_nowhere ?? []), ...Object.values(scenario.env ?? {})].filter(
+        [E2E_TOKEN, ...(exp.leaks_nowhere ?? []), ...Object.values(scenario.env ?? {})].filter(
           (needle) => needle !== "",
         ),
       ),
@@ -1258,32 +1262,32 @@ export async function runScenario(
       failures.push(`OpenAPI contract violations:\n  ${lines.join("\n  ")}`);
     }
 
-    // The deferred leak sweep (see 7b-ii): primary run plus every rerun.
-    if (leakNeedles.length > 0) {
+    // The deferred leak sweep (see 7b-ii): primary run plus every rerun. The
+    // needle set is never empty (E2E_TOKEN is always in it), so the sweep is
+    // unconditional.
+    failures.push(
+      ...checkLeaks(
+        {
+          summary: first.summary,
+          stdout: first.stdout,
+          stderr: first.stderr,
+          outputs: first.outputs,
+        },
+        leakNeedles,
+      ),
+    );
+    for (const rerun of reruns) {
       failures.push(
         ...checkLeaks(
           {
-            summary: first.summary,
-            stdout: first.stdout,
-            stderr: first.stderr,
-            outputs: first.outputs,
+            summary: rerun.summary,
+            stdout: rerun.stdout,
+            stderr: rerun.stderr,
+            outputs: rerun.outputs,
           },
           leakNeedles,
-        ),
+        ).map((failure) => `${rerun.label}: ${failure}`),
       );
-      for (const rerun of reruns) {
-        failures.push(
-          ...checkLeaks(
-            {
-              summary: rerun.summary,
-              stdout: rerun.stdout,
-              stderr: rerun.stderr,
-              outputs: rerun.outputs,
-            },
-            leakNeedles,
-          ).map((failure) => `${rerun.label}: ${failure}`),
-        );
-      }
     }
 
     const report: ScenarioReport = {
