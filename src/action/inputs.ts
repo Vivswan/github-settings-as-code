@@ -265,6 +265,22 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   if (unknownSections.length > 0) {
     return { error: unknownSections.join("; ") };
   }
+  // required-sections is a proof obligation ("this section must not be
+  // skipped"), but a `sections` allowlist EXCLUDES sections from running at
+  // all - the engine reports them "excluded" without attempting them - so a
+  // required section outside a non-empty allowlist would let the run pass
+  // green having proven nothing about it. Reject the contradiction up front.
+  if (onlySections.size > 0) {
+    const excluded = [...requiredSections].filter((name) => !onlySections.has(name));
+    if (excluded.length > 0) {
+      const quoted = quoteList(excluded);
+      const [noun, pronoun] =
+        excluded.length === 1 ? (["entry", "it"] as const) : (["entries", "them"] as const);
+      return {
+        error: `the "required-sections" ${noun} ${quoted} ${excluded.length === 1 ? "is" : "are"} excluded by the "sections" allowlist, so the run would pass without ever attempting ${pronoun}. Add ${pronoun} to the "sections" input, or remove ${pronoun} from "required-sections"`,
+      };
+    }
+  }
   const apiVersion = input("api-version") || DEFAULT_API_VERSION;
   const privateRepos = readEnum(
     "private-repos",

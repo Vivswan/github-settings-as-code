@@ -564,6 +564,14 @@ describe("genScenario", () => {
           expect(declared.has(key)).toBe(true);
         }
         expect(scenario.inputs?.sections).toBe(meta.onlySections.join(","));
+        // Input validation rejects a required section the allowlist excludes,
+        // so the generator must never pair the two.
+        for (const key of meta.requiredSections) {
+          expect(
+            meta.onlySections.includes(key),
+            `seed ${i}: required section "${key}" is excluded by the generated allowlist`,
+          ).toBe(true);
+        }
       }
     }
   });
