@@ -132,6 +132,7 @@ describe("reconcileSecrets and the apply-arm resolver", () => {
     await reconcileSecrets(run, section, fabricatedScope([], puts), {
       entries: [],
       policy: "keep",
+      defaultPolicy: "keep",
     });
     expect(run.result.changes).toEqual([]);
     expect(puts).toEqual([]);
@@ -150,6 +151,7 @@ describe("reconcileSecrets and the apply-arm resolver", () => {
           { name: "SECOND", value: "$TWO" },
         ],
         policy: "keep",
+        defaultPolicy: "keep",
       },
     );
     expect(puts.map((put) => put.name)).toEqual(["FIRST", "SECOND"]);
@@ -165,6 +167,7 @@ describe("reconcileSecrets and the apply-arm resolver", () => {
       reconcileSecrets(beginRun(applyCtx({})), section, fabricatedScope([], puts), {
         entries: [{ name: "A", value: "$NEVER_RESOLVED" }],
         policy: "keep",
+        defaultPolicy: "keep",
       }),
     ).rejects.toThrow(/no value for \$NEVER_RESOLVED/);
     expect(puts).toEqual([]);

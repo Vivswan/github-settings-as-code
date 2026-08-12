@@ -615,3 +615,60 @@ export function defaultUndeclaredPolicy(
 ): UndeclaredPolicy {
   return section.undeclaredDefault;
 }
+
+/**
+ * The keep-note for one live resource the settings file does not declare,
+ * reported when the governing policy is "keep". Only the WORDS live here -
+ * which branch runs stays in each section's own control flow on purpose -
+ * so the sweep prose cannot drift between sections. `action` is what the
+ * opposite knob would make apply do ("DELETE it", "REMOVE them", "CANCEL
+ * the invitation"), including any consequence worth naming.
+ */
+export function undeclaredNote(opts: {
+  /** The subject naming the live resource: `label "stale"`, `autolink JIRA-`. */
+  subject: string;
+  /** How the resource presents; the common case is the default. */
+  state?: string;
+  /** The pronoun for "add ... to the settings file" ("it" unless plural). */
+  add?: string;
+  /** What adding it would manage ("it", or "their access" for people). */
+  manage?: string;
+  /** What `undeclared: delete` would make apply do, with any consequence. */
+  action: string;
+}): string {
+  const state = opts.state ?? "exists on the repo but is not declared";
+  const add = opts.add ?? "it";
+  const manage = opts.manage ?? "it";
+  return `${opts.subject} ${state} in the settings file; kept under "undeclared: keep" - add ${add} to the settings file to manage ${manage}, or set "undeclared: delete" to have apply ${opts.action}`;
+}
+
+/**
+ * The check-mode drift line for one live resource the settings file does not
+ * declare, reported when the governing policy is "delete" - the
+ * undeclaredNote sibling. The middle clause derives from the list's DEFAULT
+ * policy, so it can never contradict the section again: under a keep
+ * default this branch is only reachable because the file set
+ * `undeclared: delete`, so the line says so; under a delete default the
+ * deletion is the list's own posture and no knob was needed. Callers pass
+ * the same default they unwrapped the policy with (the section's
+ * undeclaredDefault via defaultUndeclaredPolicy, or a nested list's own
+ * fixed default).
+ */
+export function undeclaredDrift(
+  listDefault: UndeclaredPolicy,
+  opts: {
+    /** The drift-line prefix with the natural key: `labels[stale]`. */
+    label: string;
+    /** What apply will do, with any consequence worth naming. */
+    action: string;
+    /** The pronoun for "add ... to the settings file" ("it" unless plural). */
+    add?: string;
+    /** What adding it would keep ("it", or "their access" for people). */
+    keep?: string;
+  },
+): string {
+  const knob = listDefault === "keep" ? ' and "undeclared: delete" is set' : "";
+  const add = opts.add ?? "it";
+  const keep = opts.keep ?? "it";
+  return `${opts.label}: undeclared - not in the settings file${knob}, so apply will ${opts.action}; add ${add} to the settings file to keep ${keep}`;
+}

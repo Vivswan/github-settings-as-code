@@ -20,6 +20,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
 
@@ -122,7 +124,10 @@ export const milestonesSection = {
       if (policy === "delete") {
         if (run.check) {
           run.result.drift.push(
-            `milestones[${milestone.title}]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it, detaching it from every issue that carries it; add it to the settings file to keep it`,
+            undeclaredDrift(defaultUndeclaredPolicy(this), {
+              label: `milestones[${milestone.title}]`,
+              action: "DELETE it, detaching it from every issue that carries it",
+            }),
           );
         } else {
           await call(ctx, this, ENDPOINTS.remove, {
@@ -136,7 +141,11 @@ export const milestonesSection = {
         continue;
       }
       run.result.notes.push(
-        `milestone "${milestone.title}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it, detaching it from every issue that carries it (closing is not enough; closed milestones are still listed)`,
+        undeclaredNote({
+          subject: `milestone "${milestone.title}"`,
+          action:
+            "DELETE it, detaching it from every issue that carries it (closing is not enough; closed milestones are still listed)",
+        }),
       );
     }
     return run.result;

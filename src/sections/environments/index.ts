@@ -59,6 +59,8 @@ import {
   type SectionResult,
   type SectionRun,
   tryCallGraphql,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
 import {
@@ -735,6 +737,7 @@ async function reconcileVariables(
   await reconcileEngineVariables(run, section, environmentVariablesScope(envName), {
     entries,
     policy,
+    defaultPolicy: NESTED_RECONCILERS.variables.defaultPolicy,
   });
 }
 
@@ -831,6 +834,7 @@ async function reconcileEnvironmentSecrets(
   await reconcileSecrets(run, section, environmentSecretsScope(envName), {
     entries,
     policy,
+    defaultPolicy: NESTED_RECONCILERS.secrets.defaultPolicy,
   });
 }
 
@@ -1019,11 +1023,18 @@ async function reconcileBranchPolicies(
     }
     if (policy === "keep") {
       run.result.notes.push(
-        `deployment branch policy "${name}" exists on environment "${envName}" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+        undeclaredNote({
+          subject: `deployment branch policy "${name}"`,
+          state: `exists on environment "${envName}" but is not declared`,
+          action: "DELETE it",
+        }),
       );
     } else if (run.check) {
       run.result.drift.push(
-        `environments[${envName}].deployment_branch_policies[${name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
+        undeclaredDrift(NESTED_RECONCILERS.deployment_branch_policies.defaultPolicy, {
+          label: `environments[${envName}].deployment_branch_policies[${name}]`,
+          action: "DELETE it",
+        }),
       );
     } else {
       await call(ctx, section, ENDPOINTS.removePolicy, {
@@ -1248,11 +1259,18 @@ async function reconcileProtectionRules(
     }
     if (policy === "keep") {
       run.result.notes.push(
-        `deployment protection rule "${slug}" is enabled on environment "${envName}" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DISABLE it`,
+        undeclaredNote({
+          subject: `deployment protection rule "${slug}"`,
+          state: `is enabled on environment "${envName}" but is not declared`,
+          action: "DISABLE it",
+        }),
       );
     } else if (run.check) {
       run.result.drift.push(
-        `environments[${envName}].deployment_protection_rules[${slug}]: undeclared - not in the settings file, so apply will DISABLE it; add it to the settings file to keep it`,
+        undeclaredDrift(NESTED_RECONCILERS.deployment_protection_rules.defaultPolicy, {
+          label: `environments[${envName}].deployment_protection_rules[${slug}]`,
+          action: "DISABLE it",
+        }),
       );
     } else {
       await call(ctx, section, ENDPOINTS.removeProtectionRule, {

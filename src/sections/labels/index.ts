@@ -19,6 +19,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
 
@@ -203,11 +205,14 @@ export const labelsSection = {
       }
       if (policy === "keep") {
         run.result.notes.push(
-          `label "${label.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+          undeclaredNote({ subject: `label "${label.name}"`, action: "DELETE it" }),
         );
       } else if (run.check) {
         run.result.drift.push(
-          `labels[${label.name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
+          undeclaredDrift(defaultUndeclaredPolicy(this), {
+            label: `labels[${label.name}]`,
+            action: "DELETE it",
+          }),
         );
       } else {
         await call(ctx, this, ENDPOINTS.remove, { params: { name: label.name } });

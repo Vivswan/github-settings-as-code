@@ -159,7 +159,8 @@ export function variablesSection<K extends RepoVariablesKey, P extends Variables
     shape: loosen(SettingsFile.shape[key]),
     async run(ctx, declared): Promise<SectionResult> {
       const run = beginRun(ctx);
-      const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
+      const defaultPolicy = defaultUndeclaredPolicy(this);
+      const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
       // Variable names are case-insensitive on GitHub, so two entries differing
       // only in case name the same variable and would fight on every run.
       rejectDuplicates(
@@ -168,7 +169,7 @@ export function variablesSection<K extends RepoVariablesKey, P extends Variables
         (variable) => variableKey(variable.name),
         (variable) => variable.name,
       );
-      await reconcileVariables(run, this, scope, { entries, policy });
+      await reconcileVariables(run, this, scope, { entries, policy, defaultPolicy });
       return run.result;
     },
   };

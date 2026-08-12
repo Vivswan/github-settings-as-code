@@ -30,7 +30,13 @@
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../schema.js";
-import type { SectionContext, SectionMeta, SectionRun } from "../contract.js";
+import {
+  type SectionContext,
+  type SectionMeta,
+  type SectionRun,
+  undeclaredDrift,
+  undeclaredNote,
+} from "../contract.js";
 
 /** Case-insensitive key for variable names (GitHub stores them uppercased). */
 export function variableKey(name: string): string {
@@ -135,9 +141,15 @@ export async function reconcileVariables(
   opts: {
     entries: readonly VariableEntry[];
     policy: UndeclaredPolicy;
+    /**
+     * The DEFAULT the caller unwrapped `policy` against (the section's
+     * undeclaredDefault, or environments' fixed nested default), from which
+     * undeclaredDrift derives its explicit-knob clause.
+     */
+    defaultPolicy: UndeclaredPolicy;
   },
 ): Promise<void> {
-  const { entries, policy } = opts;
+  const { entries, policy, defaultPolicy } = opts;
   const home = scope.home ?? "the repo";
   const keepHome = scope.keepHome ?? "the repo";
   const changeSuffix = scope.changeSuffix ?? "";
@@ -209,11 +221,18 @@ export async function reconcileVariables(
     }
     if (policy === "keep") {
       run.result.notes.push(
-        `${scope.noun} "${variable.name}" exists on ${keepHome} but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it`,
+        undeclaredNote({
+          subject: `${scope.noun} "${variable.name}"`,
+          state: `exists on ${keepHome} but is not declared`,
+          action: "DELETE it",
+        }),
       );
     } else if (run.check) {
       run.result.drift.push(
-        `${scope.label}[${variable.name}]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it`,
+        undeclaredDrift(defaultPolicy, {
+          label: `${scope.label}[${variable.name}]`,
+          action: "DELETE it",
+        }),
       );
     } else {
       await scope.ops.remove(run.ctx, section, variable.name);

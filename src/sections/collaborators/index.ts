@@ -22,6 +22,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
 import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "../roles.js";
@@ -234,11 +236,22 @@ export const collaboratorsSection = {
       }
       if (policy === "keep") {
         run.result.notes.push(
-          `collaborator "${collaborator.login}" has access but is not declared in the settings file; kept under "undeclared: keep" - add them to the settings file to manage their access, or set "undeclared: delete" to have apply REMOVE them`,
+          undeclaredNote({
+            subject: `collaborator "${collaborator.login}"`,
+            state: "has access but is not declared",
+            add: "them",
+            manage: "their access",
+            action: "REMOVE them",
+          }),
         );
       } else if (run.check) {
         run.result.drift.push(
-          `collaborators[${collaborator.login}]: undeclared - not in the settings file, so apply will REMOVE them; add them to the settings file to keep their access`,
+          undeclaredDrift(defaultUndeclaredPolicy(this), {
+            label: `collaborators[${collaborator.login}]`,
+            action: "REMOVE them",
+            add: "them",
+            keep: "their access",
+          }),
         );
       } else {
         await call(ctx, this, ENDPOINTS.remove, {
@@ -255,7 +268,13 @@ export const collaboratorsSection = {
       }
       if (policy === "keep") {
         run.result.notes.push(
-          `invitation for "${invitee}" is pending but not declared in the settings file; kept under "undeclared: keep" - add them to the settings file to manage their access, or set "undeclared: delete" to have apply CANCEL the invitation`,
+          undeclaredNote({
+            subject: `invitation for "${invitee}"`,
+            state: "is pending but not declared",
+            add: "them",
+            manage: "their access",
+            action: "CANCEL the invitation",
+          }),
         );
       } else if (run.check) {
         run.result.drift.push(

@@ -1013,7 +1013,7 @@ describe("environments deployment protection rules check mode", () => {
       { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
     ]);
     expect(deleted.drift).toEqual([
-      "environments[prod].deployment_protection_rules[change-window]: undeclared - not in the settings file, so apply will DISABLE it; add it to the settings file to keep it",
+      'environments[prod].deployment_protection_rules[change-window]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DISABLE it; add it to the settings file to keep it',
     ]);
   });
 

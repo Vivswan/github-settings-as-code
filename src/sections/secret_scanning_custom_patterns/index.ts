@@ -32,6 +32,8 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract.js";
 
@@ -248,13 +250,19 @@ export const secretScanningPatternsSection = {
       }
       if (policy === "keep") {
         run.result.notes.push(
-          `secret scanning custom pattern "${pattern.name}" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it (its alerts are then resolved, not deleted)`,
+          undeclaredNote({
+            subject: `secret scanning custom pattern "${pattern.name}"`,
+            action: "DELETE it (its alerts are then resolved, not deleted)",
+          }),
         );
         continue;
       }
       if (run.check) {
         run.result.drift.push(
-          `secret_scanning_custom_patterns[${pattern.name}]: undeclared - not in the settings file, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it`,
+          undeclaredDrift(defaultUndeclaredPolicy(this), {
+            label: `secret_scanning_custom_patterns[${pattern.name}]`,
+            action: "DELETE it and resolve its alerts",
+          }),
         );
       } else {
         toDelete.push(pattern);
