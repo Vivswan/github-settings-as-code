@@ -4,7 +4,7 @@
  * created (workflow files are code, not settings).
  */
 
-import { type MustBeNever, SettingsFile, type WorkflowConfig } from "../schema.js";
+import { type MustBeNever, SettingsFile, type WorkflowConfig } from "../../schema.js";
 import {
   call,
   type EndpointDecl,
@@ -15,7 +15,7 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
-} from "./contract.js";
+} from "../contract.js";
 
 interface LiveWorkflow {
   id: number;

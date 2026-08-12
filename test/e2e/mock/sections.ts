@@ -43,6 +43,7 @@ import {
 import { rulesetsMockHandlers } from "../../../src/sections/rulesets/mock.js";
 import { secretScanningCustomPatternsMockHandlers } from "../../../src/sections/secret_scanning_custom_patterns/mock.js";
 import { teamsMockHandlers } from "../../../src/sections/teams/mock.js";
+import { workflowsMockHandlers } from "../../../src/sections/workflows/mock.js";
 import { ADMIN_SLUG } from "../constants.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "./secrets.js";
 import { completeHook, environmentFromPut, mintNodeId, PROTECTION_RULE_APPS } from "./state.js";
@@ -451,31 +452,9 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // workflows --------------------------------------------------------------
-  "workflows.list": ({ state, query }) => {
-    const page = slicePage(state.workflows, query);
-    return ok({ total_count: state.workflows.length, workflows: page });
-  },
-  "workflows.enable": ({ state, param }) => {
-    const id = param("workflow_id");
-    const workflow = state.workflows.find((w) => String(w.id) === id);
-    if (!workflow) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    workflow.state = "active";
-    return noContent();
-  },
-  "workflows.disable": ({ state, param }) => {
-    const id = param("workflow_id");
-    const workflow = state.workflows.find((w) => String(w.id) === id);
-    if (!workflow) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    workflow.state = "disabled_manually";
-    return noContent();
-  },
-
   // pages: moved to src/sections/pages/mock.ts
+
+  // workflows: moved to src/sections/workflows/mock.ts
 
   // interaction_limits: moved to src/sections/interaction_limits/mock.ts
 
@@ -752,6 +731,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: rulesetsMockHandlers },
   { rest: secretScanningCustomPatternsMockHandlers },
   { rest: teamsMockHandlers },
+  { rest: workflowsMockHandlers },
   { rest: UNMOVED_SECTION_HANDLERS, graphql: UNMOVED_SECTION_GRAPHQL_HANDLERS },
 ];
 
