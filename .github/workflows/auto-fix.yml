@@ -46,7 +46,12 @@ on:
       - ".github/scripts/finalize-schema.ts"
       - ".github/scripts/graduate-upstream-gaps.ts"
       # The schema's $id derives its v<MAJOR> from this manifest, so the
-      # release PR of a major bump needs the schema regenerated here.
+      # release PR of a major bump needs the schema regenerated here. On
+      # that PR the schema checks go red until this workflow's fix push
+      # lands and re-runs CI - both need REPO_PLATFORM_TOKEN (else
+      # close/reopen), and release-please's force-pushed refreshes drop
+      # the fix each time; this workflow re-fixes on every synchronize,
+      # so the PR converges.
       - ".release-please-manifest.json"
 
 permissions:

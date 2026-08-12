@@ -42,7 +42,7 @@ under management, and the rest are there when their topic comes up.
   that keeps private targets out of public logs, and the private-report
   channels.
 - [Troubleshooting](operate/troubleshooting.md): permission denials,
-  ambiguous 403s, rate limits, debug logging, and a stale bundle.
+  ambiguous 403s, rate limits, debug logging, and a missing or stale bundle.
 
 ## playbooks: complete workflows to adapt
 

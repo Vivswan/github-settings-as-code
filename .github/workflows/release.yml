@@ -22,7 +22,7 @@
 #   git checkout <tag>
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
 #   git add -f lib/index.js
-#   git commit --allow-empty -m "build: package <tag>" \
+#   git commit -m "build: package <tag>" \
 #     -m "source: $(git rev-parse HEAD)" -m "workflow run: <run url>"
 #   git tag build/<tag> && git push origin refs/tags/build/<tag>
 #   git tag -f <major> build/<tag>^{} && git push --force origin <major>
@@ -93,6 +93,11 @@ jobs:
         run: |
           bun install --frozen-lockfile --ignore-scripts
           bun run build
+          # The uploaded schema asset and the raw URLs at v<MAJOR> and
+          # build/<tag> must serve the bytes committed at the release tag;
+          # a divergent regeneration (generator drift, or a compromised
+          # generator - SECURITY.md leans on this) stops the release here.
+          git diff --exit-code lib/settings.schema.json
       # Tag creation is not restricted, so an existing build tag is not
       # evidence on its own: it must be this source's build, byte for
       # byte, before retag-major points the major tag at it.
@@ -129,11 +134,9 @@ jobs:
           git config user.name "settings-as-code-release"
           git config user.email "settings-as-code-release@users.noreply.github.com"
           # -f: main gitignores lib/index.js; the build tag is where the
-          # bundle lives. --allow-empty: while main still commits the
-          # bundle, a byte-identical rebuild stages nothing, and the build
-          # tag must exist either way.
+          # bundle lives.
           git add -f lib/index.js
-          git commit --allow-empty -m "build: package $RELEASE_TAG" \
+          git commit -m "build: package $RELEASE_TAG" \
             -m "source: $source" \
             -m "workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           git tag "build/$RELEASE_TAG"
