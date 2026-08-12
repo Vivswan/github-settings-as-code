@@ -22,7 +22,7 @@ import { codeScanningDefaultSetupSection } from "./code-scanning.js";
 import { codespacesSecretsSection } from "./codespaces-secrets.js";
 import { collaboratorsSection } from "./collaborators.js";
 import type { EndpointDecl, GraphqlOpDecl, SectionModule } from "./contract.js";
-import { customPropertiesSection } from "./custom-properties.js";
+import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot-secrets.js";
 import { deployKeysSection } from "./deploy-keys.js";
 import { environmentsSection } from "./environments.js";

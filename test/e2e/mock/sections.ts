@@ -16,6 +16,7 @@
 
 import { MAX_PINNED_ENVIRONMENTS } from "../../../src/schema.js";
 import { autolinksMockHandlers } from "../../../src/sections/autolinks/mock.js";
+import { customPropertiesMockHandlers } from "../../../src/sections/custom_properties/mock.js";
 import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
 import { milestonesMockHandlers } from "../../../src/sections/milestones/mock.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
@@ -28,7 +29,6 @@ import {
   BYPASS_ACTOR_TEAMS,
   BYPASS_ACTOR_USERS,
   bypassUser,
-  CUSTOM_PROPERTY_DEFINITIONS,
   collaboratorFromPut,
   completeHook,
   completeRule,
@@ -1231,54 +1231,9 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // custom_properties --------------------------------------------------------
-  "custom_properties.org": orgProbeHandler,
-  // Not paginated upstream: the single GET returns every value.
-  "custom_properties.list": ({ state }) => ok(state.custom_property_values),
-  "custom_properties.update": ({ state, body }) => {
-    const properties = asObject(body).properties;
-    if (!Array.isArray(properties)) {
-      return {
-        status: 422,
-        body: { message: 'Invalid request.\n\n"properties" wasn\'t supplied.' },
-      };
-    }
-    // GitHub rejects the whole PATCH when any named property is not DEFINED
-    // at the organization level; the fixture is the single source of defined
-    // names (the fuzz generator draws from the same list).
-    for (const entry of properties) {
-      const name = asObject(entry).property_name;
-      const defined = CUSTOM_PROPERTY_DEFINITIONS.some((d) => d.property_name === name);
-      if (!defined) {
-        return {
-          status: 422,
-          body: {
-            message: `Custom property '${String(name)}' is not defined for this organization`,
-            documentation_url:
-              "https://docs.github.com/rest/repos/custom-properties#create-or-update-custom-property-values-for-a-repository",
-          },
-        };
-      }
-    }
-    for (const entry of properties) {
-      const { property_name, value } = asObject(entry);
-      const index = state.custom_property_values.findIndex(
-        (p) => p.property_name === property_name,
-      );
-      if (value === null || value === undefined) {
-        if (index >= 0) {
-          state.custom_property_values.splice(index, 1);
-        }
-        continue;
-      }
-      if (index >= 0) {
-        (state.custom_property_values[index] as Json).value = value;
-      } else {
-        state.custom_property_values.push({ property_name, value });
-      }
-    }
-    return noContent();
-  },
+  // custom_properties: moved to src/sections/custom_properties/mock.ts
+  // (the shared orgProbeHandler stays bound under "teams.org" above until
+  // the teams section moves)
 
   // deploy_keys ---------------------------------------------------------------
   "deploy_keys.list": ({ state, query }) => ok(slicePage(state.deploy_keys, query)),
@@ -1827,6 +1782,7 @@ interface SectionMockFragment {
  */
 const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: autolinksMockHandlers },
+  { rest: customPropertiesMockHandlers },
   { rest: labelsMockHandlers },
   { rest: milestonesMockHandlers },
   { rest: UNMOVED_SECTION_HANDLERS, graphql: UNMOVED_SECTION_GRAPHQL_HANDLERS },
