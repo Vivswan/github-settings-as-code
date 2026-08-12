@@ -5,7 +5,7 @@ import { labelsSection, normalizeColor } from "./index.js";
 
 describe("normalizeColor", () => {
   test("strips hash, lowercases", () => {
-    expect(normalizeColor("#0366D6")).toBe("0366d6");
+    expect(String(normalizeColor("#0366D6"))).toBe("0366d6");
   });
 });
 

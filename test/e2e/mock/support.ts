@@ -11,6 +11,7 @@
 
 import type { SectionKey } from "../../../src/schema.js";
 import type { GraphqlTolerableError } from "../../../src/sections/contract.js";
+import { type NameKey, nameKey } from "../../../src/sections/labels/index.js";
 import type {
   SectionEndpointKey,
   SectionGraphqlKey,
@@ -299,8 +300,10 @@ export function booleanToggleGet(enabled: boolean): MockResponse {
   return enabled ? noContent() : { status: 404, body: null };
 }
 
-export function labelName(label: Json): string {
-  return String(label.name).toLowerCase();
+export function labelName(label: Json): NameKey {
+  // The section's own mint, so the mock's matching can never fold a name
+  // differently than the handler does.
+  return nameKey(String(label.name));
 }
 
 /** A variable's case-insensitive matching key (GitHub uppercases the match). */
@@ -324,7 +327,7 @@ export const LABEL_CANONICAL_KEYS = new Set([
 ]);
 
 export function findLabel(state: MockState, name: string): Json | undefined {
-  return state.labels.find((l) => labelName(l) === name.toLowerCase());
+  return state.labels.find((l) => labelName(l) === nameKey(name));
 }
 
 /** The uppercase stored name for a variables create payload. */

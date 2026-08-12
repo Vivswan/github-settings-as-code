@@ -12,7 +12,7 @@
  * proves the round trip.
  */
 
-import { parseBypassActor } from "../../../src/schema.js";
+import { type MustBeNever, parseBypassActor } from "../../../src/schema.js";
 import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
@@ -242,6 +242,69 @@ export interface LiveState {
    */
   secret_scanning_patterns?: Json[];
 }
+
+/**
+ * Every LiveState family key, as the runtime enum the scenario schema keys
+ * `live_state` records off (test/e2e/schema.ts): a typo'd family name then
+ * fails scenario LOAD instead of being accepted and silently unseeded.
+ * Pinned to the interface in both directions - the `satisfies` rejects a
+ * listed key the interface lacks, and the MustBeNever pin fails to compile
+ * when a new family is added to LiveState without being listed here.
+ */
+export const LIVE_STATE_KEYS = [
+  "repo",
+  "labels",
+  "rulesets",
+  "branch_protection",
+  "branch_protection_graphql",
+  "branch_protection_rules",
+  "branches",
+  "environments",
+  "environment_variables",
+  "environment_branch_policies",
+  "environment_protection_rules",
+  "pinned_environments",
+  "autolinks",
+  "actions_permissions",
+  "selected_actions",
+  "workflow_permissions",
+  "actions_access",
+  "actions_retention",
+  "cache_retention_limit",
+  "cache_storage_limit",
+  "oidc_customization_sub",
+  "fork_pr_contributor_approval",
+  "fork_pr_workflows_private_repos",
+  "actions_secrets",
+  "dependabot_secrets",
+  "codespaces_secrets",
+  "agents_secrets",
+  "environment_secrets",
+  "workflows",
+  "pages",
+  "code_scanning",
+  "code_quality",
+  "check_suite_preferences",
+  "collaborators",
+  "invitations",
+  "teams",
+  "milestones",
+  "interaction_limits",
+  "pull_creation_cap",
+  "pull_creation_cap_unavailable",
+  "pull_bypass_list",
+  "actions_variables",
+  "agents_variables",
+  "interaction_limits_org_override",
+  "hooks",
+  "deploy_keys",
+  "issues",
+  "custom_property_values",
+  "secret_scanning_patterns",
+] as const satisfies readonly (keyof LiveState)[];
+type _LiveStateKeysComplete = MustBeNever<
+  Exclude<keyof LiveState, (typeof LIVE_STATE_KEYS)[number]>
+>;
 
 /**
  * The materialized working state the mock server mutates in place: every

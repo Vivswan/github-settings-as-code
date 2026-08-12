@@ -17,6 +17,7 @@ import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report
 import type { MustBeNever } from "../../src/schema.js";
 import type { PatResource } from "../../src/sections/contract.js";
 import type { LiveState } from "./mock/state.js";
+import { LIVE_STATE_KEYS } from "./mock/state.js";
 
 /** The tiers a scenario can run against. Only "mock" exists today; "live" is
  * reserved for a future App-token tier so scenarios can opt in later. */
@@ -269,11 +270,14 @@ const ExpectSchema = z
 
 /**
  * The mock's starting state. The LiveState shape is owned by
- * ./mock/state.ts (it is the GET-side body space the mock serves); here it is
- * accepted as a loose object and typed as LiveState, so the two files share
- * one definition instead of restating it.
+ * ./mock/state.ts (it is the GET-side body space the mock serves); the keys
+ * here are its LIVE_STATE_KEYS enum, so a typo'd family name fails scenario
+ * load instead of being accepted and silently unseeded, and the parsed
+ * record types as LiveState without restating the shape.
  */
-const LiveStateSchema = z.record(z.string(), z.unknown()).transform((v) => v as LiveState);
+const LiveStateSchema = z
+  .partialRecord(z.enum(LIVE_STATE_KEYS), z.unknown())
+  .transform((v) => v as LiveState);
 
 /** A settings file body: any YAML mapping (validated for real by the action). */
 const SettingsSchema = z.record(z.string(), z.unknown());

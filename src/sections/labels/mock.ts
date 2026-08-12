@@ -17,6 +17,7 @@ import {
   type SectionRestHandlers,
   slicePage,
 } from "../../../test/e2e/mock/support.js";
+import { nameKey } from "./index.js";
 
 export const labelsMockHandlers: SectionRestHandlers<"labels"> = {
   "labels.list": ({ state, query }) => ok(slicePage(state.labels, query)),
@@ -78,7 +79,7 @@ export const labelsMockHandlers: SectionRestHandlers<"labels"> = {
   },
   "labels.remove": ({ state, param }) => {
     const name = param("name");
-    const index = state.labels.findIndex((l) => labelName(l) === name.toLowerCase());
+    const index = state.labels.findIndex((l) => labelName(l) === nameKey(name));
     if (index < 0) {
       return { status: 404, body: { message: "Not Found" } };
     }

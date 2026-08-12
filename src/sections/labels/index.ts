@@ -24,16 +24,33 @@ import {
   undeclaredPolicy,
 } from "../contract.js";
 
+/**
+ * The case-insensitive matching key of a label name, branded so only
+ * nameKey() can mint one: matching case-insensitively is this section's
+ * whole contract, and the brand makes a map or set keyed by a raw (unfolded)
+ * name a compile error instead of a silent case-sensitive lookup.
+ */
+declare const labelNameKey: unique symbol;
+export type NameKey = string & { readonly [labelNameKey]: true };
+
 /** Case-insensitive key for name-matched resources (labels). */
-export function nameKey(name: string): string {
-  return name.toLowerCase();
+export function nameKey(name: string): NameKey {
+  return name.toLowerCase() as NameKey;
 }
 
+/**
+ * A label color in GitHub's stored form (no leading '#', lowercase),
+ * branded so only normalizeColor() can mint one - a color compared or
+ * written unfolded would drift forever against the stored form.
+ */
+declare const labelHexColor: unique symbol;
+export type HexColor = string & { readonly [labelHexColor]: true };
+
 /** Label colors: GitHub stores them without the leading '#', lowercase. */
-export function normalizeColor(color: unknown): string {
+export function normalizeColor(color: unknown): HexColor {
   return String(color ?? "")
     .replace(/^#/, "")
-    .toLowerCase();
+    .toLowerCase() as HexColor;
 }
 
 /** The fields of a live label this section reads; extra fields ride along. */
@@ -76,10 +93,13 @@ export const labelsSection = {
     // fight each other on every run (or fail mid-rename). Every collision is
     // collected before the one throw, so N duplicate pairs cost one run to
     // discover, not N.
-    const claimed = new Map<string, string>();
-    const collisions: Array<{ first: string; second: string; key: string }> = [];
+    const claimed = new Map<NameKey, string>();
+    const collisions: Array<{ first: string; second: string; key: NameKey }> = [];
     for (const label of desired) {
-      const identities = new Set([nameKey(label.name), nameKey(label.new_name ?? label.name)]);
+      const identities = new Set<NameKey>([
+        nameKey(label.name),
+        nameKey(label.new_name ?? label.name),
+      ]);
       for (const key of identities) {
         const first = claimed.get(key);
         if (first !== undefined) {
@@ -105,12 +125,12 @@ export const labelsSection = {
       z.array(LiveLabel),
       await listAll(ctx, this, ENDPOINTS.list),
     );
-    const liveByKey = new Map<string, LiveLabel>();
+    const liveByKey = new Map<NameKey, LiveLabel>();
     for (const label of live) {
       liveByKey.set(nameKey(label.name), label);
     }
 
-    const declaredKeys = new Set<string>();
+    const declaredKeys = new Set<NameKey>();
     for (const label of desired) {
       const finalName = label.new_name ?? label.name;
       declaredKeys.add(nameKey(finalName));
@@ -124,7 +144,13 @@ export const labelsSection = {
       }
       const existing = bySource ?? byTarget;
       const wantColor = label.color === undefined ? undefined : normalizeColor(label.color);
-      const wantDescription = label.description ?? "";
+      // The declared description, tagged instead of folded to "": an absent
+      // declaration leaves the live description alone, which a bare "" (the
+      // same value an explicit empty declaration produces) cannot express.
+      const description: { declared: true; value: string } | { declared: false } =
+        label.description === undefined
+          ? { declared: false }
+          : { declared: true, value: label.description };
 
       const {
         new_name: _newName,
@@ -143,7 +169,9 @@ export const labelsSection = {
             payload: {
               name: finalName,
               ...(wantColor === undefined ? {} : { color: wantColor }),
-              description: wantDescription,
+              // The create POST always carries the field; undeclared means
+              // the empty default, which is also GitHub's.
+              description: description.declared ? description.value : "",
               ...extraKeys, // future label fields pass through verbatim
             },
           });
@@ -153,10 +181,10 @@ export const labelsSection = {
       }
 
       const colorDrift = wantColor !== undefined && normalizeColor(existing.color) !== wantColor;
-      const descriptionDrift =
-        label.description !== undefined && (existing.description ?? "") !== wantDescription;
       const renameDrift = existing.name !== finalName;
       const extraDrift = subsetDiff(extraKeys, existing, `labels[${finalName}]`);
+      const descriptionDrift =
+        description.declared && (existing.description ?? "") !== description.value;
       if (!colorDrift && !descriptionDrift && !renameDrift && extraDrift.length === 0) {
         continue;
       }
@@ -171,9 +199,9 @@ export const labelsSection = {
             `labels[${finalName}].color: declared "${wantColor}" != live "${normalizeColor(existing.color)}"; apply will set the declared value`,
           );
         }
-        if (descriptionDrift) {
+        if (description.declared && descriptionDrift) {
           run.result.drift.push(
-            `labels[${finalName}].description: declared ${JSON.stringify(wantDescription)} != live ${JSON.stringify(existing.description ?? "")}; apply will set the declared value`,
+            `labels[${finalName}].description: declared ${JSON.stringify(description.value)} != live ${JSON.stringify(existing.description ?? "")}; apply will set the declared value`,
           );
         }
         run.result.drift.push(...extraDrift);
@@ -189,7 +217,7 @@ export const labelsSection = {
           payload: {
             new_name: finalName,
             ...(wantColor === undefined ? {} : { color: wantColor }),
-            ...(label.description === undefined ? {} : { description: wantDescription }),
+            ...(description.declared ? { description: description.value } : {}),
             ...extraKeys, // future label fields pass through verbatim
           },
         });
