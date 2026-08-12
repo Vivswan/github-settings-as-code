@@ -33,6 +33,15 @@ import {
 } from "./support.js";
 
 /**
+ * The log-less violation pair the core-path handlers return (the pipeline
+ * attaches the log entry): one mint, so no handler hand-rolls a drifting
+ * copy - the core-path sibling of contract.ts's violationFor.
+ */
+function coreViolation(message: string): { response: MockResponse; violation: string } {
+  return { response: violationResponse(message), violation: message };
+}
+
+/**
  * Handle GET /user/repos - multi-repo discovery. In single-repo mode this path
  * is never called, so it answers a loud violation; in multi-repo mode it
  * enumerates the discovery pool, applying the SERVER-SIDE query params the
@@ -51,12 +60,12 @@ export function handleUserRepos(
     return null;
   }
   if (!multi) {
-    const message = "multi-repo discovery (/user/repos) is not implemented in single-repo mode";
-    return { response: violationResponse(message), violation: message };
+    return coreViolation(
+      "multi-repo discovery (/user/repos) is not implemented in single-repo mode",
+    );
   }
   if (method !== "GET") {
-    const message = `unexpected ${method} on /user/repos`;
-    return { response: violationResponse(message), violation: message };
+    return coreViolation(`unexpected ${method} on /user/repos`);
   }
   const filtered = applyServerSideDiscovery(multi.discoveryPool, query);
   return { response: ok(slicePage(filtered, query)) };
@@ -280,8 +289,7 @@ function resolveIssueTarget(
 ): { state: MockState } | { response: MockResponse; violation: string } {
   const repoState = multi ? multi.repos.get(slug) : singleState;
   if (!repoState) {
-    const message = `issue-report request ${method} ${pathname} names no known target slug`;
-    return { response: violationResponse(message), violation: message };
+    return coreViolation(`issue-report request ${method} ${pathname} names no known target slug`);
   }
   return { state: repoState };
 }
@@ -518,8 +526,7 @@ export function handleIssueReport(
     }
     return { response: ok(issue), coreKey: "core.issuePatch" };
   }
-  const message = `unexpected ${method} on ${pathname}`;
-  return { response: violationResponse(message), violation: message };
+  return coreViolation(`unexpected ${method} on ${pathname}`);
 }
 
 // The admin repo the e2e runner runs as (ADMIN_SLUG, its GITHUB_REPOSITORY)

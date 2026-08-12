@@ -164,13 +164,13 @@ export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
     const section = sectionForRequest(write.method, write.pathname, write.body);
     if (section === null) {
       failures.push(
-        `apply-idempotence: second apply wrote outside any section endpoint: ${write.method} ${write.pathname}`,
+        `apply-idempotence: second apply wrote outside any section endpoint: ${renderRequest(write, false)}`,
       );
       continue;
     }
     if (COMPARE_BEFORE_WRITE[section]) {
       failures.push(
-        `apply-idempotence: second apply wrote to "${section}" (${write.method} ${write.pathname}), but that section compares before writing and the live state already matched`,
+        `apply-idempotence: second apply wrote to "${section}" (${renderRequest(write, false)}), but that section compares before writing and the live state already matched`,
       );
     }
   }

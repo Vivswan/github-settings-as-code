@@ -16,6 +16,7 @@
  * guard.
  */
 
+import type { SectionKey } from "../../../src/schema.js";
 import { endpointPath, toleratedStatuses } from "../../../src/sections/contract/endpoints.js";
 import { toleratedGraphqlErrors } from "../../../src/sections/contract/graphql.js";
 import { endpointPermission } from "../../../src/sections/contract/module.js";
@@ -27,7 +28,8 @@ import {
   type LoggedRequest,
   type PipelineOptions,
   type PipelineResult,
-  violationResponse,
+  renderRequest,
+  violationFor,
 } from "./contract.js";
 import {
   contentsResponse,
@@ -132,6 +134,36 @@ function resolveMutationTarget(
 }
 
 /**
+ * The shared half of the denial barrier, REST and GraphQL alike: arm the
+ * per-target per-section set on a fatally denied READ (`arms`), and produce
+ * the ONE violation spelling for a WRITE that arrives after such a read -
+ * renderRequest supplies both request spellings ("METHOD /path" and
+ * "GRAPHQL <opName>"). What stays at each call site is deliberately NOT
+ * shared: the tolerated/exempt predicates differ by wire (status subsets vs
+ * error types, and the redaction visibility probe exemption is REST-only).
+ */
+function denialBarrier(
+  options: PipelineOptions,
+  log: LoggedRequest,
+  section: SectionKey,
+  targetSlug: string,
+  kind: "read" | "write",
+  arms: boolean,
+): string | undefined {
+  const barrierKey = `${targetSlug}:${section}`;
+  if (kind === "read") {
+    if (arms) {
+      options.deniedReadSections.add(barrierKey);
+    }
+    return undefined;
+  }
+  if (!options.deniedReadSections.has(barrierKey)) {
+    return undefined;
+  }
+  return `write to ${renderRequest(log, false)} reached the server after a fatal denied read in the same target+section; the engine's section loop should have aborted at that read (section "${section}" has "${DENIAL_SEMANTICS[section]}" denial semantics, style ${String(options.scenario.denial_style)})`;
+}
+
+/**
  * Serve one POST /graphql request: the GraphQL leg of the pipeline, mirroring
  * the REST order exactly - wire shape, dispatch, check-mode barrier, target
  * resolution, fault barrier, permission gate, denial barrier, handler,
@@ -156,11 +188,7 @@ export function handleGraphqlRequest(
   handlers: Record<string, GraphqlHandler> = GRAPHQL_HANDLERS,
 ): PipelineResult {
   const { scenario, working } = options;
-  const violation = (message: string): PipelineResult => ({
-    response: violationResponse(message),
-    log: { ...baseLog, status: 400 },
-    violation: message,
-  });
+  const violation = violationFor(baseLog);
 
   // 1. Wire shape: GraphQL is POST-only, and the client always sends the
   // query, the operationName (the dispatch key), and a variables object.
@@ -200,12 +228,7 @@ export function handleGraphqlRequest(
   // fault barrier for the same reason as REST - a synthetic fault must not
   // mask the one bug this barrier exists to catch.
   if (options.checkMode && op.kind !== "read") {
-    const message = `GraphQL write in check mode (${op.name})`;
-    return {
-      response: violationResponse(message),
-      log: { ...graphqlLog, status: 400 },
-      violation: message,
-    };
+    return violationFor(graphqlLog)(`GraphQL write in check mode (${op.name})`);
   }
 
   // 4. Target/state resolution, before the fault barrier so a fault can
@@ -276,25 +299,17 @@ export function handleGraphqlRequest(
     const errors = graphqlDenialErrors(scenario.denial_style, op.kind);
     const response: MockResponse = { status: 200, body: { data: null, errors } };
     const log: LoggedRequest = { ...graphqlLog, status: 200, deniedBy: grading.deniedBy };
-    // 6b. Denial barrier, SHARED with REST through the same per-target
-    // per-section sets: a GraphQL-read-denied section that then writes (REST
-    // or GraphQL) is a violation, and vice versa. A denied read whose error
-    // type the operation TOLERATES reads as "resource absent" and must not
-    // arm, mirroring toleratedStatuses; advisory reads are exempt for the
-    // same reason as REST.
-    const barrierKey = `${targetSlug}:${op.section}`;
-    let barrierViolation: string | undefined;
-    if (op.kind === "read") {
-      const deniedType = (errors[0] as GraphqlErrorReply).type;
-      const tolerated = toleratedGraphqlErrors(op).includes(deniedType);
-      if (op.advisory !== true && !tolerated) {
-        options.deniedReadSections.add(barrierKey);
-      }
-    }
-    if (op.kind === "write" && options.deniedReadSections.has(barrierKey)) {
-      const semantics = DENIAL_SEMANTICS[op.section];
-      barrierViolation = `write to GRAPHQL ${op.name} reached the server after a fatal denied read in the same target+section; the engine's section loop should have aborted at that read (section "${op.section}" has "${semantics}" denial semantics, style ${String(scenario.denial_style)})`;
-    }
+    // 6b. Denial barrier, SHARED with REST through denialBarrier and the same
+    // per-target per-section sets: a GraphQL-read-denied section that then
+    // writes (REST or GraphQL) is a violation, and vice versa. A denied read
+    // whose error type the operation TOLERATES reads as "resource absent"
+    // and must not arm, mirroring toleratedStatuses; advisory reads are
+    // exempt for the same reason as REST.
+    const arms =
+      op.kind === "read" &&
+      op.advisory !== true &&
+      !toleratedGraphqlErrors(op).includes((errors[0] as GraphqlErrorReply).type);
+    const barrierViolation = denialBarrier(options, log, op.section, targetSlug, op.kind, arms);
     return { response, log, violation: barrierViolation };
   }
 
@@ -373,35 +388,27 @@ export function runPipeline(
     body: request.body,
     status: 0,
   };
+  const violation = violationFor(baseLog);
 
   // 1. Wire-contract assertions on EVERY request.
   if (!request.headers.get("authorization")) {
-    const message = `request ${request.method} ${strippedForLog} is missing the Authorization header`;
-    return {
-      response: violationResponse(message),
-      log: { ...baseLog, status: 400 },
-      violation: message,
-    };
+    return violation(
+      `request ${request.method} ${strippedForLog} is missing the Authorization header`,
+    );
   }
   if (!request.headers.get("x-github-api-version")) {
-    const message = `request ${request.method} ${strippedForLog} is missing the x-github-api-version header`;
-    return {
-      response: violationResponse(message),
-      log: { ...baseLog, status: 400 },
-      violation: message,
-    };
+    return violation(
+      `request ${request.method} ${strippedForLog} is missing the x-github-api-version header`,
+    );
   }
 
   // 2. Optional GHES path prefix (e.g. /api/v3): strip before matching.
   let pathname = request.rawPath;
   if (options.basePrefix) {
     if (!pathname.startsWith(options.basePrefix)) {
-      const message = `request path "${pathname}" is missing the required base prefix "${options.basePrefix}"`;
-      return {
-        response: violationResponse(message),
-        log: { ...baseLog, status: 400 },
-        violation: message,
-      };
+      return violation(
+        `request path "${pathname}" is missing the required base prefix "${options.basePrefix}"`,
+      );
     }
     pathname = pathname.slice(options.basePrefix.length) || "/";
   }
@@ -445,28 +452,15 @@ export function runPipeline(
   const cSlug = contentsSlug(pathname);
   if (cSlug !== null) {
     if (!multi) {
-      const message = "settings-file fetch (contents) is not implemented in single-repo mode";
-      return {
-        response: violationResponse(message),
-        log: { ...baseLog, status: 400 },
-        violation: message,
-      };
+      return violation("settings-file fetch (contents) is not implemented in single-repo mode");
     }
     if (request.method !== "GET") {
-      const message = `contents fetch must be GET, got ${request.method}`;
-      return {
-        response: violationResponse(message),
-        log: { ...baseLog, status: 400 },
-        violation: message,
-      };
+      return violation(`contents fetch must be GET, got ${request.method}`);
     }
     if (request.headers.get("accept") !== RAW_CONTENTS_ACCEPT) {
-      const message = `contents fetch must send Accept: ${RAW_CONTENTS_ACCEPT}, got "${request.headers.get("accept") ?? ""}"`;
-      return {
-        response: violationResponse(message),
-        log: { ...baseLog, status: 400 },
-        violation: message,
-      };
+      return violation(
+        `contents fetch must send Accept: ${RAW_CONTENTS_ACCEPT}, got "${request.headers.get("accept") ?? ""}"`,
+      );
     }
     // Resolve the target BEFORE the fault hook, the same order the section
     // barrier and the issue-report routes use: a request addressing an unknown
@@ -548,12 +542,7 @@ export function runPipeline(
   // 3c. Section endpoints.
   const matched = matchEndpoint(request.method, pathname);
   if (!matched) {
-    const message = `no route in routes.ts for ${request.method} ${pathname}`;
-    return {
-      response: violationResponse(message),
-      log: { ...baseLog, status: 400 },
-      violation: message,
-    };
+    return violation(`no route in routes.ts for ${request.method} ${pathname}`);
   }
   const { key, endpoint } = matched;
 
@@ -564,12 +553,7 @@ export function runPipeline(
   // mask it. The flag is the scenario's mode ORed with the server's one-way
   // override, so a convergence re-run against the same server arms it too.
   if (options.checkMode && request.method !== "GET") {
-    const message = `write in check mode: ${request.method} ${pathname} (endpoint "${key}")`;
-    return {
-      response: violationResponse(message),
-      log: { ...baseLog, status: 400 },
-      violation: message,
-    };
+    return violation(`write in check mode: ${request.method} ${pathname} (endpoint "${key}")`);
   }
 
   // Resolve the working state and permission mask for this request. In
@@ -599,12 +583,9 @@ export function runPipeline(
       const repoState = slug ? working.multi.repos.get(slug) : undefined;
       if (repoScoped) {
         if (!slug || !repoState) {
-          const message = `multi-repo request ${request.method} ${pathname} names no known target slug`;
-          return {
-            response: violationResponse(message),
-            log: { ...baseLog, status: 400 },
-            violation: message,
-          };
+          return violation(
+            `multi-repo request ${request.method} ${pathname} names no known target slug`,
+          );
         }
         state = repoState;
         mask = effectiveMask(scenario.token_permissions ?? {}, working.multi.permissions.get(slug));
@@ -616,12 +597,9 @@ export function runPipeline(
         // buggy write silently mutate shared org state). Only the BARE org probe
         // (no slug in the path, e.g. GET /orgs/{org}) uses orgState.
         if (slug && !repoState) {
-          const message = `multi-repo request ${request.method} ${pathname} names no known target slug`;
-          return {
-            response: violationResponse(message),
-            log: { ...baseLog, status: 400 },
-            violation: message,
-          };
+          return violation(
+            `multi-repo request ${request.method} ${pathname} names no known target slug`,
+          );
         }
         state = repoState ?? working.multi.orgState;
         targetSlug = slug ?? "";
@@ -690,11 +668,12 @@ export function runPipeline(
   if (!grading.allowed) {
     const response = denialResponse(scenario.denial_style, requirement.kind);
     const log: LoggedRequest = { ...baseLog, status: response.status, deniedBy: grading.deniedBy };
-    // 5. Denial barrier. A denied write is a hard VIOLATION only when a fatal
-    // denied READ in the SAME target+section already happened this run: the
-    // engine reads a section before diffing/writing, so once its read is denied
-    // and classified as fatal, the section loop aborts - a later write reaching
-    // the server proves broken sequencing. This is the ONLY signal. Preflight is
+    // 5. Denial barrier (denialBarrier, shared with GraphQL). A denied write
+    // is a hard VIOLATION only when a fatal denied READ in the SAME
+    // target+section already happened this run: the engine reads a section
+    // before diffing/writing, so once its read is denied and classified as
+    // fatal, the section loop aborts - a later write reaching the server
+    // proves broken sequencing. This is the ONLY signal. Preflight is
     // deliberately NOT used as a separate guarantee: preflight (fail policy)
     // only proves READS work - the engine's probe wrapper stops writes
     // client-side - so a mask graded READ (write denied) on a "denied"-semantics
@@ -704,39 +683,35 @@ export function runPipeline(
     // case. When the read grade is `none` the denied read always precedes the
     // write and arms the set, so no coverage is lost by relying on it alone.
     //
-    // The set is keyed per TARGET (`${slug}:${section}`, empty slug single-repo)
-    // so one repo's denied read never arms the barrier for another repo's
-    // legitimate write.
-    const barrierKey = `${targetSlug}:${endpoint.section}`;
-    let violation: string | undefined;
-    if (requirement.kind === "read") {
-      // Track the denied read ONLY when the engine perceives it as a failure:
-      // a denial status the endpoint tolerates (a fine_grained 404 on a
-      // probeAbsent-tolerant endpoint) reads as "resource absent" and the
-      // section legitimately proceeds, so it must not arm the barrier.
-      //
-      // Two categories are EXEMPT because their denied read is not a
-      // section-abort read:
-      //   - the redaction visibility probe (isVisibilityProbe): the FIRST
-      //     repository.get for a repo, issued before the target loop to decide
-      //     redaction. A LATER repository.get (the section's check-mode read) is
-      //     not the probe and arms like any other section read.
-      //   - an ADVISORY read (endpoint.advisory, single-sourced from the endpoint
-      //     declaration, e.g. branches.branchProbe): the engine ignores any
-      //     non-404 status and proceeds to its write anyway, so a denied advisory
-      //     read does not mean the section should have aborted.
-      // Genuine denied-read-then-write coverage is preserved: every non-advisory
-      // section read still arms.
-      const exempt = isVisibilityProbe || endpoint.advisory === true;
-      if (!exempt && !toleratedStatuses(endpoint).includes(response.status)) {
-        options.deniedReadSections.add(barrierKey);
-      }
-    }
-    if (requirement.kind === "write" && options.deniedReadSections.has(barrierKey)) {
-      const semantics = DENIAL_SEMANTICS[endpoint.section];
-      violation = `write to ${request.method} ${pathname} reached the server after a fatal denied read in the same target+section; the engine's section loop should have aborted at that read (section "${endpoint.section}" has "${semantics}" denial semantics, style ${String(scenario.denial_style)})`;
-    }
-    return { response, log, violation };
+    // A denied read arms ONLY when the engine perceives it as a failure: a
+    // denial status the endpoint tolerates (a fine_grained 404 on a
+    // probeAbsent-tolerant endpoint) reads as "resource absent" and the
+    // section legitimately proceeds. Two categories are EXEMPT because their
+    // denied read is not a section-abort read:
+    //   - the redaction visibility probe (isVisibilityProbe): the FIRST
+    //     repository.get for a repo, issued before the target loop to decide
+    //     redaction. A LATER repository.get (the section's check-mode read) is
+    //     not the probe and arms like any other section read.
+    //   - an ADVISORY read (endpoint.advisory, single-sourced from the endpoint
+    //     declaration, e.g. branches.branchProbe): the engine ignores any
+    //     non-404 status and proceeds to its write anyway, so a denied advisory
+    //     read does not mean the section should have aborted.
+    // Genuine denied-read-then-write coverage is preserved: every non-advisory
+    // section read still arms.
+    const arms =
+      requirement.kind === "read" &&
+      !isVisibilityProbe &&
+      endpoint.advisory !== true &&
+      !toleratedStatuses(endpoint).includes(response.status);
+    const barrierViolation = denialBarrier(
+      options,
+      baseLog,
+      endpoint.section,
+      targetSlug,
+      requirement.kind,
+      arms,
+    );
+    return { response, log, violation: barrierViolation };
   }
 
   // 7. Handler runs.
@@ -744,12 +719,7 @@ export function runPipeline(
   if (!handler) {
     // assertHandlerCompleteness runs at construction, so this is unreachable;
     // keep it a loud violation rather than a silent undefined call.
-    const message = `no handler registered for matched endpoint "${key}"`;
-    return {
-      response: violationResponse(message),
-      log: { ...baseLog, status: 400 },
-      violation: message,
-    };
+    return violation(`no handler registered for matched endpoint "${key}"`);
   }
   const response = handler({
     state,
@@ -766,12 +736,9 @@ export function runPipeline(
   // responses) - makes the invariant hold on EVERY request, not just the ones a
   // curated test happens to drive.
   if (!statusAllowed(key, response.status)) {
-    const message = `handler "${key}" returned status ${response.status}, which is neither declared [${[...declaredStatuses(key)].join(", ")}] nor a >= 400 error`;
-    return {
-      response: violationResponse(message),
-      log: { ...baseLog, status: 400 },
-      violation: message,
-    };
+    return violation(
+      `handler "${key}" returned status ${response.status}, which is neither declared [${[...declaredStatuses(key)].join(", ")}] nor a >= 400 error`,
+    );
   }
 
   // 9. Chaos hook: corrupt the response of the named endpoint for its first

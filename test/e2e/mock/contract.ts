@@ -216,6 +216,19 @@ export function violationResponse(message: string): MockResponse {
 }
 
 /**
+ * The violation triple every pipeline stage returns - the 400 violation
+ * response, the log entry, and the violation note - closed over one base log
+ * so no stage hand-rolls a drifting copy.
+ */
+export function violationFor(baseLog: LoggedRequest): (message: string) => PipelineResult {
+  return (message) => ({
+    response: violationResponse(message),
+    log: { ...baseLog, status: 400 },
+    violation: message,
+  });
+}
+
+/**
  * Render a logged request to the string the runner's expectations match
  * against. The mock logs pathname and query separately, so both match rules
  * compose here: mutations/never match a "METHOD /pathname" PREFIX (query
