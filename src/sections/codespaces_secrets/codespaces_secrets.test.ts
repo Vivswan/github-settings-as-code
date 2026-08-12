@@ -2,9 +2,8 @@
  * codespaces_secrets section tests: the engine behavior (existence
  * reconciliation, sealing, the resolver contract) is pinned by
  * secrets-engine.test.ts and the actions_secrets section tests; these tests
- * pin what
- * is THIS section's own - its routes, its label/noun wording, and its
- * keep-by-default policy.
+ * pin what is THIS section's own - its routes, its label/noun wording, and
+ * its keep-by-default policy.
  */
 
 import { describe, expect, test } from "bun:test";
