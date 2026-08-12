@@ -1,8 +1,9 @@
 /**
- * Structural contract for the openapi-trimmed cache in checks.yml: the check
- * and e2e-smoke jobs each cache the fetched trimmed spec, and a stale key
+ * Structural contract for the openapi-trimmed cache in checks.yml: the check,
+ * e2e-smoke, and endpoint-coverage jobs each cache the fetched trimmed spec,
+ * and a stale key
  * silently restores a spec slice that no longer matches USED_PATHS. So the
- * two keys must stay byte-identical, and the hashFiles list must cover every
+ * keys must stay byte-identical, and the hashFiles list must cover every
  * file test/e2e/openapi/paths.ts derives route data from - the trim script,
  * paths.ts itself, and each of its route-data imports - so adding an import
  * there without extending the key fails here instead of going stale in CI.
@@ -98,9 +99,13 @@ describe("checks.yml openapi-trimmed cache keys", () => {
   ) as Workflow;
   const keys = openapiCacheKeys(wf);
 
-  test("both consuming jobs cache the spec under byte-identical keys", () => {
-    expect(keys.length).toBe(2);
-    expect(keys[0]).toBe(keys[1] as string);
+  test("all consuming jobs cache the spec under byte-identical keys", () => {
+    // The count is pinned on purpose: a new job consuming the spec is a
+    // conscious edit here, and a removed cache step cannot go unnoticed.
+    expect(keys.length).toBe(3);
+    for (const key of keys) {
+      expect(key).toBe(keys[0] as string);
+    }
   });
 
   test("the hashFiles list covers every route-data input of the spec", () => {

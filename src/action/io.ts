@@ -13,9 +13,12 @@ import type { Io } from "../io.js";
  */
 export const OUTPUT_NAMES = ["result", "skipped-sections", "repos-result"] as const;
 
-export function annotate(level: "notice" | "warning" | "error", message: string): void {
-  // @actions/core owns workflow-command escaping (%, CR, LF).
-  core[level](message);
+// @actions/core owns workflow-command escaping (%, CR, LF); the static map
+// keeps the namespace access tree-shakeable (biome noDynamicNamespaceImportAccess).
+const annotators = { notice: core.notice, warning: core.warning, error: core.error } as const;
+
+export function annotate(level: keyof typeof annotators, message: string): void {
+  annotators[level](message);
 }
 
 export function setOutput(name: (typeof OUTPUT_NAMES)[number], value: string): void {
