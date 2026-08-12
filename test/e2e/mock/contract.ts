@@ -214,3 +214,22 @@ export interface PipelineResult {
 export function violationResponse(message: string): MockResponse {
   return { status: 400, body: { message: `${VIOLATION_PREFIX} ${message}` } };
 }
+
+/**
+ * Render a logged request to the string the runner's expectations match
+ * against. The mock logs pathname and query separately, so both match rules
+ * compose here: mutations/never match a "METHOD /pathname" PREFIX (query
+ * omitted), and requests_contain matches a substring of
+ * "METHOD /pathname?query". A GraphQL request renders as "GRAPHQL <opName>" -
+ * every GraphQL call shares POST /graphql, so the operation name is the only
+ * spelling that lets a scenario pin one operation. Lives beside LoggedRequest
+ * so every consumer (the runner's assertions, the apply-idempotence proof)
+ * renders the log one way.
+ */
+export function renderRequest(request: LoggedRequest, includeQuery: boolean): string {
+  if (request.graphql) {
+    return `GRAPHQL ${request.graphql.operationName}`;
+  }
+  const base = `${request.method} ${request.pathname}`;
+  return includeQuery && request.query ? `${base}?${request.query}` : base;
+}

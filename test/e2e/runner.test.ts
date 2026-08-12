@@ -9,11 +9,18 @@ import {
   alwaysRewriteEndpointKeys,
   COMPARE_BEFORE_WRITE,
 } from "./apply-idempotence.js";
+import {
+  changedFamilies,
+  missingSecondApplyRewrites,
+  recordUnconditionalWrites,
+  secondApplyWriteFailures,
+  type UnconditionalWriteWitness,
+  unwitnessedUnconditionalSections,
+} from "./apply-idempotence-proof.js";
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
 import type { LoggedRequest } from "./mock/contract.js";
 import {
   bundleBuildParityFailure,
-  changedFamilies,
   checkLeaks,
   declaredBuildBundleScript,
   exitCodeFailure,
@@ -21,15 +28,10 @@ import {
   insertReplay,
   isSubsequence,
   markReportTitle,
-  missingSecondApplyRewrites,
   parseGithubOutput,
   parseSummaryOutcomes,
-  recordUnconditionalWrites,
-  secondApplyWriteFailures,
   stripDebugLines,
   stripMaskLines,
-  type UnconditionalWriteWitness,
-  unwitnessedUnconditionalSections,
 } from "./runner.js";
 
 describe("bundle build parity (harness vs production)", () => {

@@ -3,7 +3,8 @@
  * for the aggregation and the deliberate src -> test import direction).
  */
 
-import { decodeNodeId, restRepoSurface } from "../../../test/e2e/mock/state.js";
+import { decodeNodeId } from "../../../test/e2e/mock/node-id.js";
+import { restRepoSurface } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
   booleanToggleGet,

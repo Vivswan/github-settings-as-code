@@ -60,7 +60,8 @@ import {
   SECTION_BY_KEY,
 } from "./grading.js";
 import { GRAPHQL_HANDLERS, HANDLERS } from "./handlers.js";
-import { decodeNodeId, type MockState, type NodeFamily } from "./state.js";
+import { decodeNodeId, type NodeFamily } from "./node-id.js";
+import type { MockState } from "./state.js";
 import {
   asObject,
   type GraphqlErrorReply,

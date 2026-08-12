@@ -49,6 +49,7 @@ import {
   WITNESS_SECTIONS,
   type WitnessSection,
 } from "./generators.js";
+import { deliveredIssueBody } from "./issue-report-assert.js";
 import type { LoggedRequest } from "./mock/contract.js";
 import {
   foldRepoResults,
@@ -61,7 +62,6 @@ import {
 import { Rng } from "./prng.js";
 import {
   checkLeaks,
-  deliveredIssueBody,
   insertReplay,
   markReportTitle,
   parseReposResult,

@@ -13,7 +13,8 @@
  *   --scenario <name>    run only the scenario with this exact name
  */
 
-import { corpusUnwitnessedUnconditionalSections, runScenario } from "./runner.js";
+import { corpusUnwitnessedUnconditionalSections } from "./apply-idempotence-proof.js";
+import { runScenario } from "./runner.js";
 import { loadScenarios, type Scenario, scenarioRoots } from "./schema.js";
 
 interface Flags {
