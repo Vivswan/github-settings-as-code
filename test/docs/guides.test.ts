@@ -493,13 +493,14 @@ describe("docs/ guide pages", () => {
       }
       // release-please's generic updater rewrites the FIRST digit run on an
       // annotated line (MAJOR_VERSION_REGEX with String.replace). Every
-      // annotated line must therefore keep the @v pin's digit first, or a
-      // v2 release PR silently rewrites the wrong number.
+      // annotated line must therefore keep its major-version digit first,
+      // reached as an @v pin or a /v path segment (the schema hint URLs), or
+      // a v2 release PR silently rewrites the wrong number.
       for (const [index, line] of markdown.split("\n").entries()) {
         if (line.includes("x-release-please-major")) {
           expect(
-            /^[^\d]*@v\d/.test(line),
-            `docs/${page}:${index + 1} carries x-release-please-major but a digit precedes the @v pin; release-please would rewrite that digit instead`,
+            /^[^\d]*[@/]v\d/.test(line),
+            `docs/${page}:${index + 1} carries x-release-please-major but a digit precedes the @v pin or /v segment; release-please would rewrite that digit instead`,
           ).toBe(true);
         }
       }
@@ -510,8 +511,8 @@ describe("docs/ guide pages", () => {
     for (const [index, line] of readme.split("\n").entries()) {
       if (line.includes("x-release-please-major")) {
         expect(
-          /^[^\d]*@v\d/.test(line),
-          `README.md:${index + 1} carries x-release-please-major but a digit precedes the @v pin; release-please would rewrite that digit instead`,
+          /^[^\d]*[@/]v\d/.test(line),
+          `README.md:${index + 1} carries x-release-please-major but a digit precedes the @v pin or /v segment; release-please would rewrite that digit instead`,
         ).toBe(true);
       }
     }
@@ -560,7 +561,8 @@ describe("github heading slugger", () => {
   // slugging rule fails here, not as a false anchor break in the link test.
   const CASES: Record<string, string> = {
     "The `$NAME` pattern": "the-name-pattern",
-    "Behavior does not match src/ (stale bundle)": "behavior-does-not-match-src-stale-bundle",
+    "Behavior does not match src/ (missing or stale bundle)":
+      "behavior-does-not-match-src-missing-or-stale-bundle",
     "Example settings.yml": "example-settingsyml",
     'What a "cannot verify" note means': "what-a-cannot-verify-note-means",
     "Compared to the Probot Settings app": "compared-to-the-probot-settings-app",

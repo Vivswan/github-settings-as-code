@@ -10,3 +10,8 @@ paths:
       # it); actionlint's permission-scope list has not caught up yet
       # (rhysd/actionlint#666). Drop this once it knows the scope.
       - 'unknown permission scope "vulnerability-alerts"'
+      # lib/index.js (action.yml's runs.main) is not committed on main:
+      # the workflows that execute the action via `uses: ./` build it in a
+      # prior step, and the runnable refs are the release build tags, so
+      # the static existence check is a false positive here.
+      - 'file "lib/index\.js" does not exist'

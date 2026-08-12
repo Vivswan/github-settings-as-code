@@ -24,7 +24,7 @@ silently.
    editor autocomplete and hover docs (agents can fetch the same URL):
 
    ```yaml
-   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json
+   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
    ```
 
 4. Add the workflow. On a repository with existing labels, autolinks, or
@@ -168,7 +168,7 @@ repo-scoped gap and the user-scoped surface that is out of scope by design.
 ## Example settings.yml
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
 
 repository:
   description: My project
