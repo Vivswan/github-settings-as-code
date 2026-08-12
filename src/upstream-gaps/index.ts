@@ -15,6 +15,7 @@ import { GAP as interactionLimitPullCaps } from "./interaction-limit-pull-caps.j
 import { GAP as lfs } from "./lfs.js";
 import { GAP as secretScanningCustomPatterns } from "./secret-scanning-custom-patterns.js";
 
+// biome-ignore format: one element line per gap - the graduate script edits this array by exact line, so it must never collapse to one line
 const GAPS = [
   agentsSecrets,
   agentsVariables,
