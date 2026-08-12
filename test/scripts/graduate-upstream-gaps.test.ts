@@ -18,6 +18,7 @@ import {
 } from "../../.github/scripts/gen-gaps-index.js";
 import {
   isGapFile,
+  isSpecOnly,
   isSpecPinned,
   parseDiagnostics,
   planGraduation,
@@ -441,5 +442,14 @@ describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
         expect(rewritten).toContain(`"${route}"`);
       }
     }
+  });
+});
+
+describe("spec-only sources never reach the deletion branch", () => {
+  test("isSpecOnly distinguishes the two gap kinds", () => {
+    expect(isSpecOnly('export const GAP = defineSpecOnlyGap({\n  routes: ["GET /x"],\n});')).toBe(
+      true,
+    );
+    expect(isSpecOnly("export const GAP = defineGap({ documentedInSpec: false });")).toBe(false);
   });
 });

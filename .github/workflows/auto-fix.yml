@@ -5,8 +5,9 @@
 # (a Dependabot generator bump changes the schema bytes on a branch nobody
 # builds). src/upstream-gaps/ holds tripwire files that turn the typecheck
 # red with TS2344 the moment @octokit/types ships a route a gap file declares
-# as missing; graduate-upstream-gaps.ts deletes the shipped files and unwires
-# them from the gaps index. This workflow runs the graduation and the schema
+# as missing; graduate-upstream-gaps.ts retires the shipped files (deleting
+# spec-documented ones, rewriting spec-lagging ones to spec-only gaps) and
+# regenerates the gaps index. This workflow runs the graduation and the schema
 # regeneration on every same-repo PR that touches a fix input and pushes the
 # result back to the PR branch; an already-clean tree gets no commit. A PR
 # with unrelated type errors fails the build job here by design (the
@@ -45,6 +46,7 @@ on:
       - ".bun-version"
       - ".github/scripts/finalize-schema.ts"
       - ".github/scripts/graduate-upstream-gaps.ts"
+      - ".github/scripts/gen-gaps-index.ts"
       # The schema's $id derives its v<MAJOR> from this manifest, so the
       # release PR of a major bump needs the schema regenerated here. On
       # that PR the schema checks go red until this workflow's fix push

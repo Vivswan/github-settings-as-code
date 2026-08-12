@@ -32,14 +32,16 @@ export const CORE_PATHS: readonly string[] = [
  * Routes the action calls that GitHub's api.github.com OpenAPI descriptor
  * does not document (verified absent at the pinned UPSTREAM_REF; the
  * endpoints are real: https://docs.github.com/en/rest/repos/lfs), derived
- * from the gap files in src/upstream-gaps/ whose documentedInSpec is false.
+ * from the gap files in src/upstream-gaps/ the descriptor lacks (octokit-kind
+ * gaps with documentedInSpec: false, and every spec-only gap).
  * Their paths are excluded from USED_PATHS so trim-openapi does not
  * hard-error, and the e2e validator exempts exactly these METHOD+path pairs
  * from the unknown-route check - an unlisted method on the same path still
  * fails. Staleness is checked in both directions: excludeUndocumented()
  * below throws when an entry is no longer a declared endpoint path, and
  * trim-openapi.ts errors when the upstream descriptor starts documenting one
- * (flip the gap's documentedInSpec to true and re-run).
+ * (retire the gap: delete a spec-only file, or flip documentedInSpec on an
+ * octokit-kind one, then regenerate the index and re-run).
  */
 export { UNDOCUMENTED_ROUTES };
 

@@ -121,6 +121,11 @@ export function planGraduation(diagnostics: readonly Diagnostic[]): GraduationPl
  * spec-only lifecycle instead of deleted, so its UNDOCUMENTED_ROUTES
  * exemption survives until a bumped UPSTREAM_REF documents the paths.
  */
+/** True for a spec-only gap source: octokit ships its routes already. */
+export function isSpecOnly(gapSource: string): boolean {
+  return gapSource.includes("defineSpecOnlyGap(");
+}
+
 export function isSpecPinned(gapSource: string): boolean {
   return /documentedInSpec:\s*false/.test(gapSource);
 }
@@ -262,6 +267,16 @@ function main(): number {
   const rewrites: { gapFile: string; next: string }[] = [];
   for (const gapFile of plan.gapFiles) {
     const source = readFileSync(join(ROOT, gapFile), "utf8");
+    if (isSpecOnly(source)) {
+      // A spec-only gap carries no octokit tripwire, so a diagnostic inside
+      // one is not a graduation; deleting it would silently drop its
+      // UNDOCUMENTED_ROUTES exemption. Refuse instead of guessing.
+      abort(
+        `${gapFile} is a spec-only gap but the compiler flagged it; that is not a graduation - fix the file by hand`,
+        first.stdout,
+        first.stderr,
+      );
+    }
     if (isSpecPinned(source)) {
       rewrites.push({ gapFile, next: toSpecOnlyGapSource(source, gapFile) });
     } else {
