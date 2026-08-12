@@ -13,8 +13,8 @@
  * stripped comment as drift and delete-and-recreate the key on every apply.
  */
 
-import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import { type DeployKeyConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import { type DeployKeyConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -27,7 +27,7 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 
 interface LiveDeployKey {
   id: number;

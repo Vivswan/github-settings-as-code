@@ -31,6 +31,7 @@ import { codespacesSecretsMockHandlers } from "../../../src/sections/codespaces_
 import { collaboratorsMockHandlers } from "../../../src/sections/collaborators/mock.js";
 import { customPropertiesMockHandlers } from "../../../src/sections/custom_properties/mock.js";
 import { dependabotSecretsMockHandlers } from "../../../src/sections/dependabot_secrets/mock.js";
+import { deployKeysMockHandlers } from "../../../src/sections/deploy_keys/mock.js";
 import { interactionLimitsMockHandlers } from "../../../src/sections/interaction_limits/mock.js";
 import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
 import { milestonesMockHandlers } from "../../../src/sections/milestones/mock.js";
@@ -44,7 +45,6 @@ import { rulesetsMockHandlers } from "../../../src/sections/rulesets/mock.js";
 import { secretScanningCustomPatternsMockHandlers } from "../../../src/sections/secret_scanning_custom_patterns/mock.js";
 import { teamsMockHandlers } from "../../../src/sections/teams/mock.js";
 import { workflowsMockHandlers } from "../../../src/sections/workflows/mock.js";
-import { ADMIN_SLUG } from "../constants.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "./secrets.js";
 import { completeHook, environmentFromPut, mintNodeId, PROTECTION_RULE_APPS } from "./state.js";
 import {
@@ -65,7 +65,6 @@ import {
   secretsList,
   slicePage,
   storedHookConfig,
-  storedKeyMaterial,
 } from "./support.js";
 
 // --- Per-endpoint handlers ------------------------------------------------
@@ -530,57 +529,7 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
 
   // custom_properties: moved to src/sections/custom_properties/mock.ts
 
-  // deploy_keys ---------------------------------------------------------------
-  "deploy_keys.list": ({ state, query }) => ok(slicePage(state.deploy_keys, query)),
-  "deploy_keys.create": ({ state, body }) => {
-    const payload = asObject(body);
-    const stored = storedKeyMaterial(String(payload.key ?? ""));
-    // One repository per public key, account-wide on GitHub; this state is
-    // one repo, so a duplicate stored blob answers GitHub's 422. The section
-    // itself rejects duplicate declared material and cross-title conflicts
-    // upfront, so no section path reaches this branch anymore; it stays as
-    // defensive modeling of GitHub's real answer for any other mock client.
-    if (state.deploy_keys.some((k) => storedKeyMaterial(String(k.key)) === stored)) {
-      return {
-        status: 422,
-        body: {
-          message: "Validation Failed",
-          errors: [
-            {
-              resource: "PublicKey",
-              code: "custom",
-              field: "key",
-              message: "key is already in use",
-            },
-          ],
-          documentation_url:
-            "https://docs.github.com/rest/deploy-keys/deploy-keys#create-a-deploy-key",
-        },
-      };
-    }
-    const id = state.nextId++;
-    const key: Json = {
-      id,
-      key: stored,
-      url: `https://api.github.com/repos/${ADMIN_SLUG}/keys/${id}`,
-      title: String(payload.title ?? ""),
-      verified: true,
-      // Fixed so a repeat apply leaves the state byte-stable (idempotence).
-      created_at: "2026-07-01T00:00:00Z",
-      read_only: payload.read_only === true,
-    };
-    state.deploy_keys.push(key);
-    return { status: 201, body: key };
-  },
-  "deploy_keys.remove": ({ state, param }) => {
-    const id = param("key_id");
-    const index = state.deploy_keys.findIndex((k) => String(k.id) === id);
-    if (index < 0) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    state.deploy_keys.splice(index, 1);
-    return noContent();
-  },
+  // deploy_keys: moved to src/sections/deploy_keys/mock.ts
 };
 
 // --- GraphQL operations -----------------------------------------------------
@@ -723,6 +672,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: collaboratorsMockHandlers },
   { rest: customPropertiesMockHandlers },
   { rest: dependabotSecretsMockHandlers },
+  { rest: deployKeysMockHandlers },
   { rest: interactionLimitsMockHandlers },
   { rest: labelsMockHandlers },
   { rest: milestonesMockHandlers },
