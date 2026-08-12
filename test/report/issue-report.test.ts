@@ -10,7 +10,7 @@ import {
 import type { SettingsFile } from "../../src/schema.js";
 import { MockApi, type Route } from "../mock-api.js";
 
-const SLUG = "o/private-repo";
+const SLUG = { owner: "o", name: "private-repo", slug: "o/private-repo" };
 const LABEL_CREATE = "POST /repos/o/private-repo/labels";
 const LABEL_LOOKUP =
   "GET /repos/o/private-repo/issues?state=all&labels=settings-as-code-report&per_page=100";
@@ -197,7 +197,7 @@ describe("deliverIssueReport", () => {
     }
     expect(result.warning).toContain("HTTP 403");
     expect(result.warning).toContain('"Issues" (read and write)');
-    expect(result.warning).not.toContain(SLUG);
+    expect(result.warning).not.toContain(SLUG.slug);
     expect(api.calls).toHaveLength(1);
   });
 
@@ -216,7 +216,7 @@ describe("deliverIssueReport", () => {
     expect(result.warning).toContain("HTTP 500");
     expect(result.warning).toContain("Re-run the workflow");
     expect(result.warning).not.toContain("Issues");
-    expect(result.warning).not.toContain(SLUG);
+    expect(result.warning).not.toContain(SLUG.slug);
   });
 
   test("a throwing transport never escapes; the warning stays slug-free", async () => {
@@ -228,7 +228,7 @@ describe("deliverIssueReport", () => {
       throw new Error("expected a warning");
     }
     expect(result.warning).toContain("could not deliver the private report");
-    expect(result.warning).not.toContain(SLUG);
+    expect(result.warning).not.toContain(SLUG.slug);
   });
 
   test("a non-list lookup response is a warning, not a crash", async () => {
@@ -283,7 +283,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
       throw new Error("expected a warning");
     }
     expect(result.warning).toContain("HTTP 500");
-    expect(result.warning).not.toContain(SLUG);
+    expect(result.warning).not.toContain(SLUG.slug);
   });
 
   test("a failing close-PATCH is a safe warning too", async () => {
@@ -298,7 +298,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
       throw new Error("expected a warning");
     }
     expect(result.warning).toContain("HTTP 403");
-    expect(result.warning).not.toContain(SLUG);
+    expect(result.warning).not.toContain(SLUG.slug);
   });
 
   test("a non-list quiet-path response is a warning, not a crash", async () => {

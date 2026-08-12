@@ -2,24 +2,26 @@
  * The one place YAML settings documents are read and parsed. Callers
  * compose their own advice around the returned raw error string, because
  * the right fix differs per source (defaults file, central file, single
- * settings file, remote file).
+ * settings file, remote file). The parsed document comes back UNKNOWN on
+ * purpose: nothing has validated it yet, so only validateSettingsDoc (which
+ * returns the branded ValidatedSettings) can turn it into something the
+ * engine accepts.
  */
 
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import type { SettingsFile } from "../schema.js";
 
 /** Parse one YAML settings document; empty/null documents become {}. */
-export function parseSettingsDoc(raw: string): { settings: SettingsFile } | { error: string } {
+export function parseSettingsDoc(raw: string): { doc: unknown } | { error: string } {
   try {
-    return { settings: (parseYaml(raw) ?? {}) as SettingsFile };
+    return { doc: parseYaml(raw) ?? {} };
   } catch (error) {
     return { error: String(error) };
   }
 }
 
 /** Read and parse one settings file; the error covers both steps. */
-export function readSettingsFile(path: string): { settings: SettingsFile } | { error: string } {
+export function readSettingsFile(path: string): { doc: unknown } | { error: string } {
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");

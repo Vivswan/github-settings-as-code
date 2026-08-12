@@ -30,27 +30,38 @@ import { validateSectionShapes } from "./validate.js";
  */
 export type SectionOutcome =
   | {
-      key: string;
+      key: SectionKey;
       status: "applied" | "clean" | "drift" | "excluded";
       detail: string[];
       httpStatus?: never;
     }
   | {
-      key: string;
+      key: SectionKey;
       status: "failed" | "skipped";
       detail: string[];
       /** Optional: a generic (non-denial) failure legitimately carries none. */
       httpStatus?: number;
     };
 
+/**
+ * A settings document that passed validateSettingsDoc, and nothing else: the
+ * brand has exactly one construction site (the success return below), so a
+ * RepoRunOptions built from an unvalidated document is a compile error - the
+ * "validate before run" ordering is carried by the type, not by call-site
+ * discipline. The brand is compile-time only; at runtime the value is the
+ * same plain document.
+ */
+declare const validatedSettings: unique symbol;
+export type ValidatedSettings = SettingsFile & { readonly [validatedSettings]: true };
+
 export interface RepoRunOptions {
   /** The target repository, parsed at the caller's validated boundary. */
   repo: RepoRef;
-  settings: SettingsFile;
+  settings: ValidatedSettings;
   mode: "apply" | "check";
   onMissingPermission: "fail" | "warn";
-  requiredSections: Set<string>;
-  onlySections: Set<string>;
+  requiredSections: ReadonlySet<SectionKey>;
+  onlySections: ReadonlySet<SectionKey>;
   /**
    * Provenance of one section's secret-field values: which source DOCUMENT
    * contributed the section that survived the merge. Omitted, every value is
@@ -100,26 +111,34 @@ export interface RepoRunResult {
 /** The keys of the skipped outcomes, derived at the read site. */
 export function skippedSectionKeys(
   outcomes: ReadonlyArray<Pick<SectionOutcome, "key" | "status">>,
-): string[] {
+): SectionKey[] {
   return outcomes.filter((o) => o.status === "skipped").map((o) => o.key);
 }
 
 /**
  * Top-level shape validation for one settings document (the unknown-key
- * policy from run()). Returns an error message (caller fails the run or
- * the repo) or null; the sections-allowlist case downgrades to a warning.
- * `sourceLabel` names the file the message points at.
+ * policy from run()): the ONE boundary that turns a raw parsed document into
+ * a ValidatedSettings the engine will accept. Returns the branded document,
+ * or an error message (caller fails the run or the repo); the
+ * sections-allowlist case downgrades to a warning. `sourceLabel` names the
+ * file the message points at.
  */
 export function validateSettingsDoc(
   settings: unknown,
   sourceLabel: string,
-  onlySections: Set<string>,
+  onlySections: ReadonlySet<SectionKey>,
   io: Io,
-): string | null {
+): { settings: ValidatedSettings } | { error: string } {
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
-    return `${sourceLabel} must be a YAML mapping of section names to settings, but its top level parsed as ${Array.isArray(settings) ? "a list" : `a ${settings === null ? "null" : typeof settings}`}. Rewrite the top level as "section: ..." keys`;
+    return {
+      error: `${sourceLabel} must be a YAML mapping of section names to settings, but its top level parsed as ${Array.isArray(settings) ? "a list" : `a ${settings === null ? "null" : typeof settings}`}. Rewrite the top level as "section: ..." keys`,
+    };
   }
   const knownSections = new Set<string>(SECTION_KEYS);
+  // The allowlist holds SectionKeys, but the DOCUMENT's unknown keys are
+  // arbitrary strings; the widened view keeps the lookup honest without a
+  // cast per key.
+  const allowed: ReadonlySet<string> = onlySections;
   // A misspelled section silently doing nothing would violate the loud-
   // failure promise; unknown top-level keys are hard errors (prefix custom
   // keys with underscore to keep private notes in the file).
@@ -127,8 +146,10 @@ export function validateSettingsDoc(
     (key) => !knownSections.has(key) && !key.startsWith("_"),
   );
   if (unknownKeys.length > 0) {
-    if (onlySections.size === 0 || unknownKeys.some((key) => onlySections.has(key))) {
-      return `unknown top-level section(s) in ${sourceLabel}: ${unknownKeys.join(", ")} (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or prefix private keys with "_", or set the "sections" input to limit processing`;
+    if (onlySections.size === 0 || unknownKeys.some((key) => allowed.has(key))) {
+      return {
+        error: `unknown top-level section(s) in ${sourceLabel}: ${unknownKeys.join(", ")} (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or prefix private keys with "_", or set the "sections" input to limit processing`,
+      };
     }
     // A `sections` allowlist lets an older action version coexist with a
     // config written for a newer one: unknown keys OUTSIDE the allowlist
@@ -138,7 +159,14 @@ export function validateSettingsDoc(
       `ignoring unknown top-level section(s) outside the "sections" allowlist: ${unknownKeys.join(", ")}. Upgrade the action to a version that knows them, or remove them from ${sourceLabel}`,
     );
   }
-  return validateSectionShapes(settings as Record<string, unknown>, sourceLabel);
+  const malformed = validateSectionShapes(settings as Record<string, unknown>, sourceLabel);
+  if (malformed !== null) {
+    return { error: malformed };
+  }
+  // The one place the brand is minted: everything above proved the document
+  // is a mapping of known (or allowlist-tolerated/underscored) sections
+  // whose declared values pass their section shapes.
+  return { settings: settings as ValidatedSettings };
 }
 
 /**
@@ -234,12 +262,20 @@ export async function runForRepo(
   const repo = opts.repo;
   const settings = opts.settings;
 
-  const active = SECTIONS.filter((section) => {
-    if (settings[section.key] === undefined) {
-      return false;
+  // The ONE statement of what runs: a section is absent (not declared),
+  // excluded (declared but outside a non-empty `sections` allowlist), or
+  // active. The preflight filter and the section loop below both read this,
+  // so the two can never disagree about which sections are live.
+  const disposition = (key: SectionKey): "absent" | "excluded" | "active" => {
+    if (settings[key] === undefined) {
+      return "absent"; // declared-keys-only: absent section = untouched
     }
-    return opts.onlySections.size === 0 || opts.onlySections.has(section.key);
-  });
+    if (opts.onlySections.size > 0 && !opts.onlySections.has(key)) {
+      return "excluded";
+    }
+    return "active";
+  };
+  const active = SECTIONS.filter((section) => disposition(section.key) === "active");
 
   // Secret references, phase (a): collect every declared secret-field value
   // from the ACTIVE sections (a section excluded by `sections` never runs, so
@@ -251,7 +287,7 @@ export async function runForRepo(
     active,
     opts.secretSource ?? (() => "operator"),
   );
-  const secretFailure = (errorsBySection: Map<string, string[]>): RepoRunResult => {
+  const secretFailure = (errorsBySection: Map<SectionKey, string[]>): RepoRunResult => {
     const outcomes: SectionOutcome[] = [];
     for (const [key, errors] of errorsBySection) {
       for (const message of errors) {
@@ -266,12 +302,12 @@ export async function runForRepo(
       preflightDenied: [],
     };
   };
-  const pushError = (map: Map<string, string[]>, key: string, message: string): void => {
+  const pushError = (map: Map<SectionKey, string[]>, key: SectionKey, message: string): void => {
     const list = map.get(key) ?? [];
     list.push(message);
     map.set(key, list);
   };
-  const syntaxErrors = new Map<string, string[]>();
+  const syntaxErrors = new Map<SectionKey, string[]>();
   for (const { section, value, source, label } of secretValues) {
     const checked = validateSecretRef(value, source, label);
     if (!checked.ok) {
@@ -323,13 +359,13 @@ export async function runForRepo(
     const resolved: Record<string, string> = {};
     if (secretValues.length > 0) {
       const env = opts.secretEnv ?? process.env;
-      const bySection = new Map<string, SectionSecretValue[]>();
+      const bySection = new Map<SectionKey, SectionSecretValue[]>();
       for (const value of secretValues) {
         const list = bySection.get(value.section) ?? [];
         list.push(value);
         bySection.set(value.section, list);
       }
-      const resolutionErrors = new Map<string, string[]>();
+      const resolutionErrors = new Map<SectionKey, string[]>();
       const mask = new Set<string>();
       for (const [key, values] of bySection) {
         const resolution = resolveSecretRefs(values, env);
@@ -371,14 +407,16 @@ export async function runForRepo(
   let drifted = false;
 
   for (const section of SECTIONS) {
+    switch (disposition(section.key)) {
+      case "absent":
+        continue;
+      case "excluded":
+        outcomes.push({ key: section.key, status: "excluded", detail: ["excluded by `sections`"] });
+        continue;
+      case "active":
+        break;
+    }
     const desired = settings[section.key];
-    if (desired === undefined) {
-      continue; // declared-keys-only: absent section = untouched
-    }
-    if (opts.onlySections.size > 0 && !opts.onlySections.has(section.key)) {
-      outcomes.push({ key: section.key, status: "excluded", detail: ["excluded by `sections`"] });
-      continue;
-    }
     let result: SectionResult;
     try {
       result = await section.run(runCtx, desired);

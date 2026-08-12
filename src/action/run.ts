@@ -134,11 +134,11 @@ export async function run(overrides?: { api?: GithubClient; io?: Io }): Promise<
       `cannot read settings from ${cfg.settingsFile}: ${read.error}. Check that the file exists at that path (set the "settings-file" input if it lives elsewhere) and is valid YAML`,
     );
   }
-  const settings = read.settings;
-  const invalid = validateSettingsDoc(settings, cfg.settingsFile, cfg.onlySections, io);
-  if (invalid) {
-    return fail(invalid);
+  const validated = validateSettingsDoc(read.doc, cfg.settingsFile, cfg.onlySections, io);
+  if ("error" in validated) {
+    return fail(validated.error);
   }
+  const settings = validated.settings;
 
   // Decide redaction and whether the private report can be delivered (only when
   // the target is PROVEN private/internal), masking the slug when redacted.
@@ -200,7 +200,7 @@ export async function run(overrides?: { api?: GithubClient; io?: Io }): Promise<
       await deliverReport(
         api,
         meta,
-        cfg.repo.slug,
+        cfg.repo,
         "private repository",
         result.result,
         result.outcomes,

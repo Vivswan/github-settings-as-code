@@ -322,7 +322,10 @@ describe("docs/ guide pages", () => {
           throw new Error(`docs/${page} has an unparseable settings example: ${error}`);
         }
         const invalid = validateSettingsDoc(doc, `docs/${page} example`, new Set(), silentIo);
-        expect(invalid, `docs/${page} settings example failed validation: ${invalid}`).toBeNull();
+        expect(
+          "error" in invalid ? invalid.error : null,
+          `docs/${page} settings example failed validation: ${"error" in invalid ? invalid.error : ""}`,
+        ).toBeNull();
         const repository = (doc as Record<string, unknown>).repository;
         if (repository && typeof repository === "object") {
           for (const key of Object.keys(repository)) {

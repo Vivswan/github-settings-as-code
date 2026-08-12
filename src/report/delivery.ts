@@ -7,10 +7,10 @@
  */
 
 import type { IssueChannel } from "../action/redact.js";
-import type { RepoRunResult } from "../engine/orchestrate.js";
+import type { RepoRef } from "../discovery/targets.js";
+import type { RepoRunResult, ValidatedSettings } from "../engine/orchestrate.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
-import type { SettingsFile } from "../schema.js";
 import { type ArtifactUploader, deliverArtifactReport } from "./artifact-report.js";
 import { composeReport, type TranscriptLine } from "./composer.js";
 import {
@@ -42,13 +42,20 @@ export interface ReportRunMeta {
  * route it through the target's capturing sink (the private report).
  */
 export function applyMarkerInjection(
-  settings: SettingsFile,
+  settings: ValidatedSettings,
   on: boolean,
-): { settings: SettingsFile; notice?: string } {
+): { settings: ValidatedSettings; notice?: string } {
   if (!on) {
     return { settings };
   }
-  const injection = injectMarkerLabel(settings);
+  // The injection is validity-preserving - it appends MARKER_LABEL_CONFIG (a
+  // constant, schema-valid label entry) or strips a new_name, both of which
+  // keep every section shape satisfied - so the brand survives it. This is
+  // the one place that fact is asserted; the cast below is its whole cost.
+  const injection = injectMarkerLabel(settings) as {
+    settings: ValidatedSettings;
+    outcome: "unchanged" | "injected" | "rename-refused";
+  };
   switch (injection.outcome) {
     case "rename-refused":
       return {
@@ -106,7 +113,7 @@ export function composeTargetReport(
 export async function deliverReport(
   api: GithubClient,
   meta: ReportRunMeta,
-  slug: string,
+  repo: RepoRef,
   display: string,
   result: RepoRunResult["result"],
   outcomes: RepoRunResult["outcomes"],
@@ -117,7 +124,7 @@ export async function deliverReport(
 ): Promise<string | undefined> {
   const { body, needsAttention } = composeTargetReport(
     meta,
-    slug,
+    repo.slug,
     result,
     outcomes,
     transcript,
@@ -134,7 +141,7 @@ export async function deliverReport(
       mode = "on-failure";
       break;
   }
-  const delivery = await deliverIssueReport(api, slug, body, needsAttention, mode);
+  const delivery = await deliverIssueReport(api, repo, body, needsAttention, mode);
   if ("warning" in delivery) {
     io.annotate("warning", `${display}: ${delivery.warning}`);
     return delivery.warning;

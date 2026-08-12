@@ -14,6 +14,7 @@ import type { Target } from "../discovery/targets.js";
 import type { RepoRunResult } from "../engine/orchestrate.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
+import type { SectionKey } from "../schema.js";
 
 /** The `private-repos` input values; the single source its type derives from. */
 export const PRIVATE_REPOS_POLICIES = ["redact", "show"] as const;
@@ -87,7 +88,7 @@ export type TargetOutcome = Pick<Target, "slug" | "source" | "origin"> &
 
 /** A leak-free section outcome: key and status survive, detail is hidden. */
 export type RedactedOutcome = {
-  key: string;
+  key: SectionKey;
   status: RepoRunResult["outcomes"][number]["status"];
   detail: string[];
 };
@@ -124,7 +125,7 @@ export interface PublicTargetView {
   source: Target["source"];
   result: RepoRunResult["result"];
   outcomes: Array<{
-    key: string;
+    key: SectionKey;
     status: RepoRunResult["outcomes"][number]["status"];
     detail: string[];
   }>;

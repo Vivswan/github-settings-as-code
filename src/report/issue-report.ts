@@ -91,17 +91,6 @@ export type IssueReportMode = "always" | "on-failure";
 export type IssueDelivery = { url: string } | { skipped: true } | { warning: string };
 
 /**
- * The `{ repo }` context expand() needs, from an owner/name slug. Built with
- * the shared parse-once shape so the name half is derived exactly once here
- * (never re-sliced downstream); the slug is validated at the run flows'
- * boundaries before it can reach this module.
- */
-function repoRef(slug: string): { repo: RepoRef } {
-  const separator = slug.indexOf("/");
-  return { repo: { owner: slug.slice(0, separator), name: slug.slice(separator + 1), slug } };
-}
-
-/**
  * The one failure surface, and it must stay public-safe: the warning names
  * the HTTP status and generic advice only - never the slug, the request
  * path, or the API's message, all of which would leak into public logs.
@@ -237,12 +226,12 @@ async function closeIfOpen(
 
 async function deliver(
   api: GithubClient,
-  slug: string,
+  repo: RepoRef,
   body: string,
   needsAttention: boolean,
   mode: IssueReportMode,
 ): Promise<IssueDelivery> {
-  const ref = repoRef(slug);
+  const ref = { repo };
   if (mode === "on-failure" && !needsAttention) {
     return closeIfOpen(api, ref, body);
   }
@@ -335,17 +324,19 @@ async function deliver(
  * `on-failure` mode a healthy run only closes an already-open issue (or does
  * nothing); a needs-attention run behaves exactly like `always`. Never
  * throws: report delivery is auxiliary, so every failure comes back as a
- * safe warning and the run's result stays untouched.
+ * safe warning and the run's result stays untouched. `repo` is the parsed
+ * owner/name pair from the run flows' boundary, so this module never
+ * re-splits a slug.
  */
 export async function deliverIssueReport(
   api: GithubClient,
-  slug: string,
+  repo: RepoRef,
   body: string,
   needsAttention: boolean,
   mode: IssueReportMode,
 ): Promise<IssueDelivery> {
   try {
-    return await deliver(api, slug, body, needsAttention, mode);
+    return await deliver(api, repo, body, needsAttention, mode);
   } catch {
     // A throw is a network-level failure whose message embeds the request
     // path (the private slug), so nothing from it may escape.

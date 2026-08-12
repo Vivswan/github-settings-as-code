@@ -17,7 +17,7 @@ import {
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import { DEFAULT_API_VERSION } from "../github/api.js";
 import { parseRecipient } from "../report/artifact-report.js";
-import { type MustBeNever, SECTION_KEYS } from "../schema.js";
+import { type MustBeNever, SECTION_KEYS, type SectionKey } from "../schema.js";
 import {
   DEFAULT_PRIVATE_REPORT,
   DEFAULT_PRIVATE_REPOS,
@@ -163,8 +163,8 @@ interface CommonConfig {
   token: string;
   mode: "apply" | "check";
   onMissingPermission: "fail" | "warn";
-  requiredSections: Set<string>;
-  onlySections: Set<string>;
+  requiredSections: Set<SectionKey>;
+  onlySections: Set<SectionKey>;
   apiVersion: string;
   /** Whether to hide private/internal targets from the public view. */
   privateRepos: PrivateReposPolicy;
@@ -233,18 +233,15 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   if (typeof onMissingPermission !== "string") {
     return { error: onMissingPermission.error };
   }
-  const requiredSections = new Set(
-    input("required-sections")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
-  const onlySections = new Set(
-    input("sections")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
+  const readSectionNames = (name: "required-sections" | "sections"): Set<string> =>
+    new Set(
+      input(name)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+  const requiredNames = readSectionNames("required-sections");
+  const onlyNames = readSectionNames("sections");
   const knownSections = new Set<string>(SECTION_KEYS);
   // Each set is validated against ITS OWN input name (the file's header
   // contract), and every unknown name in a set is reported at once.
@@ -259,12 +256,17 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
       : `unknown sections ${quoted} in the "${inputName}" input; each matches none of: ${SECTION_KEYS.join(", ")}. Fix the names in the workflow's input list`;
   };
   const unknownSections = [
-    unknownIn(requiredSections, "required-sections"),
-    unknownIn(onlySections, "sections"),
+    unknownIn(requiredNames, "required-sections"),
+    unknownIn(onlyNames, "sections"),
   ].filter((problem): problem is string => problem !== null);
   if (unknownSections.length > 0) {
     return { error: unknownSections.join("; ") };
   }
+  // Past the rejection above every name is a known key, so the narrowed sets
+  // are honest - the guard is the proof, not a cast.
+  const isSectionKey = (name: string): name is SectionKey => knownSections.has(name);
+  const requiredSections = new Set([...requiredNames].filter(isSectionKey));
+  const onlySections = new Set([...onlyNames].filter(isSectionKey));
   // required-sections is a proof obligation ("this section must not be
   // skipped"), but a `sections` allowlist EXCLUDES sections from running at
   // all - the engine reports them "excluded" without attempting them - so a

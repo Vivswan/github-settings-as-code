@@ -6,6 +6,19 @@ import type { SettingsFile } from "../../src/schema.js";
 
 const silentIo: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
 
+/**
+ * applyDefaults hands back the merged document UNVALIDATED (unknown) - only
+ * validateSettingsDoc can bless it - so the shape assertions below funnel
+ * through this one test-local cast.
+ */
+function apply(
+  defaults: SettingsFile,
+  repo: unknown,
+): { settings: SettingsFile; disabled: string[] } {
+  const { settings, disabled } = applyDefaults(defaults, repo);
+  return { settings: settings as SettingsFile, disabled };
+}
+
 describe("deepMerge", () => {
   test("objects merge recursively, override keys win", () => {
     const base = { repository: { has_wiki: false, description: "base" } };
@@ -47,7 +60,7 @@ describe("applyDefaults", () => {
   test("top-level null section is stripped and reported as disabled", () => {
     const defaults = { labels: [{ name: "bug", color: "d73a4a" }] } as SettingsFile;
     const repo = { labels: null, repository: { has_wiki: false } } as unknown as SettingsFile;
-    const { settings, disabled } = applyDefaults(defaults, repo);
+    const { settings, disabled } = apply(defaults, repo);
     expect(disabled).toEqual(["labels"]);
     expect("labels" in settings).toBe(false);
     expect(settings.repository).toEqual({ has_wiki: false });
@@ -55,7 +68,7 @@ describe("applyDefaults", () => {
 
   test("empty defaults leave the repo settings untouched", () => {
     const repo = { repository: { has_wiki: false } } as SettingsFile;
-    const { settings, disabled } = applyDefaults({}, repo);
+    const { settings, disabled } = apply({}, repo);
     expect(settings).toEqual(repo);
     expect(disabled).toEqual([]);
   });
@@ -63,7 +76,7 @@ describe("applyDefaults", () => {
   test("a null section the defaults do not declare passes through", () => {
     const defaults = { repository: { has_wiki: false } } as SettingsFile;
     const repo = { pages: null } as SettingsFile;
-    const { settings, disabled } = applyDefaults(defaults, repo);
+    const { settings, disabled } = apply(defaults, repo);
     expect(settings.pages).toBeNull();
     expect(disabled).toEqual([]);
   });
@@ -71,14 +84,14 @@ describe("applyDefaults", () => {
   test("a null section the defaults declare non-null is still an opt-out", () => {
     const defaults = { pages: { build_type: "workflow" } } as SettingsFile;
     const repo = { pages: null } as SettingsFile;
-    const { settings, disabled } = applyDefaults(defaults, repo);
+    const { settings, disabled } = apply(defaults, repo);
     expect("pages" in settings).toBe(false);
     expect(disabled).toEqual(["pages"]);
   });
 
   test("a null section in the defaults themselves passes through to every target", () => {
     const defaults = { pages: null } as SettingsFile;
-    const { settings, disabled } = applyDefaults(defaults, {} as SettingsFile);
+    const { settings, disabled } = apply(defaults, {});
     expect(settings.pages).toBeNull();
     expect(disabled).toEqual([]);
   });
@@ -90,7 +103,7 @@ describe("applyDefaults undeclared-policy knob", () => {
       labels: { undeclared: "keep", entries: [{ name: "fleet" }] },
     } as SettingsFile;
     const repo = { labels: [{ name: "mine" }] } as SettingsFile;
-    const { settings } = applyDefaults(defaults, repo);
+    const { settings } = apply(defaults, repo);
     // Entries replace wholesale (arrays never concatenate); the policy the
     // target never spelled comes from the defaults.
     expect(settings.labels).toEqual({ undeclared: "keep", entries: [{ name: "mine" }] });
@@ -101,7 +114,7 @@ describe("applyDefaults undeclared-policy knob", () => {
     const repo = {
       rulesets: { undeclared: "delete", entries: [{ name: "mine" }] },
     } as SettingsFile;
-    const { settings } = applyDefaults(defaults, repo);
+    const { settings } = apply(defaults, repo);
     expect(settings.rulesets).toEqual({ undeclared: "delete", entries: [{ name: "mine" }] });
   });
 
@@ -113,7 +126,7 @@ describe("applyDefaults undeclared-policy knob", () => {
       rulesets: { undeclared: "delete", entries: [{ name: "fleet" }] },
     } as SettingsFile;
     const repo = { rulesets: { entries: [{ name: "mine" }] } } as SettingsFile;
-    const { settings } = applyDefaults(defaults, repo);
+    const { settings } = apply(defaults, repo);
     expect(settings.rulesets).toEqual({ undeclared: "delete", entries: [{ name: "mine" }] });
   });
 
@@ -127,11 +140,11 @@ describe("applyDefaults undeclared-policy knob", () => {
       labels: { undeclared: "keep", entries: [{ name: "fleet" }] },
     } as SettingsFile;
     const repo = { labels: { undeclared: "delete" } } as unknown as SettingsFile;
-    const { settings } = applyDefaults(defaults, repo);
+    const { settings } = apply(defaults, repo);
     expect(settings.labels as unknown).toEqual({ undeclared: "delete" });
     // ...and the merged document is rejected downstream, naming the section.
     const invalid = validateSettingsDoc(settings, "target", new Set(), silentIo);
-    expect(invalid).toContain("labels.entries");
+    expect("error" in invalid ? invalid.error : "").toContain("labels.entries");
   });
 
   test("an empty target wrapper never inherits the defaults' entries either", () => {
@@ -139,10 +152,10 @@ describe("applyDefaults undeclared-policy knob", () => {
       labels: { undeclared: "keep", entries: [{ name: "fleet" }] },
     } as SettingsFile;
     const repo = { labels: {} } as unknown as SettingsFile;
-    const { settings } = applyDefaults(defaults, repo);
+    const { settings } = apply(defaults, repo);
     expect(settings.labels as unknown).toEqual({});
     const invalid = validateSettingsDoc(settings, "target", new Set(), silentIo);
-    expect(invalid).toContain("labels.entries");
+    expect("error" in invalid ? invalid.error : "").toContain("labels.entries");
   });
 
   test("a defaults-only knobbed section materializes for a target that omits it", () => {
@@ -152,9 +165,9 @@ describe("applyDefaults undeclared-policy knob", () => {
     // fleet-wide, which the undeclared-policy guide documents as
     // destructive. This pins the materialization so that warning stays true.
     const defaults = { labels: { undeclared: "delete", entries: [] } } as SettingsFile;
-    const { settings } = applyDefaults(defaults, {} as SettingsFile);
+    const { settings } = apply(defaults, {});
     expect(settings.labels).toEqual({ undeclared: "delete", entries: [] });
-    expect(validateSettingsDoc(settings, "target", new Set(), silentIo)).toBeNull();
+    expect("error" in validateSettingsDoc(settings, "target", new Set(), silentIo)).toBe(false);
   });
 
   test("two plain arrays resolve to the section default, not each other's", () => {
@@ -168,7 +181,7 @@ describe("applyDefaults undeclared-policy knob", () => {
       labels: [{ name: "mine" }],
       milestones: [{ title: "v1" }],
     } as SettingsFile;
-    const { settings } = applyDefaults(defaults, repo);
+    const { settings } = apply(defaults, repo);
     expect(settings.labels).toEqual({ undeclared: "delete", entries: [{ name: "mine" }] });
     expect(settings.milestones).toEqual({ undeclared: "keep", entries: [{ title: "v1" }] });
   });
@@ -180,7 +193,7 @@ describe("applyDefaults undeclared-policy knob", () => {
     // entries, so only the policy rides the merge.
     const defaults = { collaborators: { undeclared: "keep", entries: [] } } as SettingsFile;
     const repo = { collaborators: [{ username: "octocat" }] } as SettingsFile;
-    const { settings } = applyDefaults(defaults, repo);
+    const { settings } = apply(defaults, repo);
     expect(settings.collaborators).toEqual({
       undeclared: "keep",
       entries: [{ username: "octocat" }],
@@ -192,14 +205,14 @@ describe("applyDefaults undeclared-policy knob", () => {
       labels: { undeclared: "keep", entries: [{ name: "fleet" }] },
     } as SettingsFile;
     const repo = { labels: null } as unknown as SettingsFile;
-    const { settings, disabled } = applyDefaults(defaults, repo);
+    const { settings, disabled } = apply(defaults, repo);
     expect("labels" in settings).toBe(false);
     expect(disabled).toEqual(["labels"]);
   });
 
   test("a knobbed section only the defaults declare reaches the target resolved", () => {
     const defaults = { autolinks: [{ key_prefix: "J-", url_template: "u<num>" }] } as SettingsFile;
-    const { settings } = applyDefaults(defaults, {} as SettingsFile);
+    const { settings } = apply(defaults, {});
     expect(settings.autolinks).toEqual({
       undeclared: "delete",
       entries: [{ key_prefix: "J-", url_template: "u<num>" }],
@@ -208,7 +221,7 @@ describe("applyDefaults undeclared-policy knob", () => {
 
   test("malformed knobbed values pass through untouched for validation to name", () => {
     const repo = { labels: "oops" } as unknown as SettingsFile;
-    const { settings } = applyDefaults({} as SettingsFile, repo);
+    const { settings } = apply({}, repo);
     expect(settings.labels).toBe("oops" as never);
   });
 
@@ -217,7 +230,7 @@ describe("applyDefaults undeclared-policy knob", () => {
     // must not turn it into {0: ..., 1: ...} or the "must be a YAML mapping"
     // validator would misreport it as unknown keys.
     const doc = ["a", "b"] as unknown as SettingsFile;
-    const { settings } = applyDefaults({ labels: [{ name: "fleet" }] } as SettingsFile, doc);
+    const { settings } = apply({ labels: [{ name: "fleet" }] } as SettingsFile, doc);
     expect(Array.isArray(settings)).toBe(true);
   });
 });

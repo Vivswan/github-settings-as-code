@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import {
   preflightProbe,
+  type RepoRunOptions,
   readOnlyClient,
   runForRepo,
   skippedSectionKeys,
+  type ValidatedSettings,
   validateSettingsDoc,
   worstOf,
 } from "../../src/engine/orchestrate.js";
@@ -31,14 +33,22 @@ function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: s
   };
 }
 
-function opts(overrides: Partial<Parameters<typeof runForRepo>[1]> = {}) {
+/**
+ * Test fixtures are schema-valid by construction; the brand normally comes
+ * from validateSettingsDoc, so this cast stands in for that boundary.
+ */
+function validated(doc: SettingsFile): ValidatedSettings {
+  return doc as ValidatedSettings;
+}
+
+function opts(overrides: Partial<RepoRunOptions> = {}): RepoRunOptions {
   return {
     repo: { owner: "o", name: "r", slug: "o/r" },
-    settings: { repository: { has_wiki: false } } as SettingsFile,
+    settings: validated({ repository: { has_wiki: false } }),
     mode: "apply" as const,
     onMissingPermission: "fail" as const,
-    requiredSections: new Set<string>(),
-    onlySections: new Set<string>(),
+    requiredSections: new Set(),
+    onlySections: new Set(),
     ...overrides,
   };
 }
@@ -84,7 +94,7 @@ describe("runForRepo", () => {
     const { io } = captureIo();
     const result = await runForRepo(
       api,
-      opts({ mode: "check", settings: { pages: null } as SettingsFile }),
+      opts({ mode: "check", settings: validated({ pages: null }) }),
       io,
     );
     expect(result.result).toBe("drift");
@@ -94,10 +104,10 @@ describe("runForRepo", () => {
 
 describe("runForRepo secret references", () => {
   const HOOKS_LIST = "GET /repos/o/r/hooks?per_page=100&page=1";
-  const webhookSettings = (secret: string): SettingsFile =>
-    ({
+  const webhookSettings = (secret: string): ValidatedSettings =>
+    validated({
       webhooks: [{ config: { url: "https://x.test/h", secret } }],
-    }) as SettingsFile;
+    });
 
   test("apply resolves up front, masks before the first mutation, and hands handlers plaintext", async () => {
     const api = new MockApi({ [HOOKS_LIST]: { data: [] } }).allowMutations("POST /repos/o/r/hooks");
@@ -193,10 +203,10 @@ describe("runForRepo secret references", () => {
     const result = await runForRepo(
       api,
       opts({
-        settings: {
+        settings: validated({
           ...webhookSettings("a-literal-that-would-fail"),
           repository: { has_wiki: false },
-        } as SettingsFile,
+        }),
         onlySections: new Set(["repository"]),
       }),
       io,
@@ -206,16 +216,30 @@ describe("runForRepo secret references", () => {
 });
 
 describe("validateSettingsDoc", () => {
+  const errorOf = (verdict: ReturnType<typeof validateSettingsDoc>): string =>
+    "error" in verdict ? verdict.error : "";
+
   test("unknown top-level keys are errors naming the source", () => {
     const { io } = captureIo();
-    const err = validateSettingsDoc({ labls: [] }, "repos/x.yml", new Set(), io);
+    const err = errorOf(validateSettingsDoc({ labls: [] }, "repos/x.yml", new Set(), io));
     expect(err).toContain("repos/x.yml");
     expect(err).toContain("labls");
   });
 
   test("non-mapping documents are rejected", () => {
     const { io } = captureIo();
-    expect(validateSettingsDoc([], "f.yml", new Set(), io)).toContain("a list");
+    expect(errorOf(validateSettingsDoc([], "f.yml", new Set(), io))).toContain("a list");
+  });
+
+  test("a valid document comes back branded, ready for runForRepo", () => {
+    const { io } = captureIo();
+    const doc = { repository: { has_wiki: false } };
+    const verdict = validateSettingsDoc(doc, "s.yml", new Set(), io);
+    if ("error" in verdict) {
+      throw new Error(`expected the document to validate: ${verdict.error}`);
+    }
+    // The brand is compile-time only: the value is the same document.
+    expect(verdict.settings).toBe(doc as unknown as typeof verdict.settings);
   });
 });
 
@@ -315,7 +339,7 @@ describe("readOnlyClient", () => {
     const { io } = captureIo();
     const result = await runForRepo(
       api,
-      opts({ mode: "check", settings: { repository: { description: "live" } } as SettingsFile }),
+      opts({ mode: "check", settings: validated({ repository: { description: "live" } }) }),
       io,
     );
     expect(result.result).toBe("clean");
