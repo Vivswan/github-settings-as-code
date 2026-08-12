@@ -7,7 +7,7 @@
  */
 
 import { z } from "zod";
-import { type CustomPropertyConfig, type MustBeNever, SettingsFile } from "../../schema.js";
+import { type CustomPropertyConfig, SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -24,10 +24,6 @@ import {
 } from "../contract.js";
 
 const permission: SectionPermission = { repo: ["custom_properties"] };
-
-const KNOWN_KEYS = ["property_name", "value"] as const;
-/** Compile-time lockstep: a CustomPropertyConfig field missing from KNOWN_KEYS fails here. */
-type _AllKeysKnown = MustBeNever<Exclude<keyof CustomPropertyConfig, (typeof KNOWN_KEYS)[number]>>;
 
 /** A value as GitHub stores and returns it: strings, string lists, or unset. */
 type WireValue = string | string[] | null;
@@ -120,7 +116,7 @@ export const customPropertiesSection = {
   // Closed surface: the bulk PATCH body is built from exactly property_name
   // and value, so an extra key has no destination and is always a typo.
   closedSurface: {
-    known: KNOWN_KEYS,
+    known: { property_name: true, value: true },
     describe: (p) => p.property_name,
     consequence:
       "the key would silently never reach GitHub and the misdeclared property would keep its live value",

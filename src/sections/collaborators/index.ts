@@ -9,7 +9,7 @@
  */
 
 import { z } from "zod";
-import { type CollaboratorConfig, type MustBeNever, SettingsFile } from "../../schema.js";
+import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -62,10 +62,6 @@ function isNamedInvitation(invitation: LiveInvitation): invitation is NamedInvit
 
 const permission: SectionPermission = { repo: ["administration"] };
 
-const KNOWN_KEYS = ["username", "permission"] as const;
-/** Compile-time lockstep: a CollaboratorConfig field missing from KNOWN_KEYS fails here. */
-type _AllKeysKnown = MustBeNever<Exclude<keyof CollaboratorConfig, (typeof KNOWN_KEYS)[number]>>;
-
 const ENDPOINTS = {
   list: {
     route: "GET /repos/{owner}/{repo}/collaborators",
@@ -103,7 +99,7 @@ export const collaboratorsSection = {
   // an extra key is always a typo - and a misspelled "permission" would
   // silently grant the default role and report clean forever.
   closedSurface: {
-    known: KNOWN_KEYS,
+    known: { username: true, permission: true },
     describe: (c) => c.username,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },

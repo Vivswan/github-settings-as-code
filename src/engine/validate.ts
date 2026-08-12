@@ -126,7 +126,7 @@ function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unk
   // erasure sectionShape accepts), so the declaration is re-widened here.
   const closed = sectionModule(key).closedSurface as
     | {
-        known: readonly string[];
+        known: Readonly<Record<string, true>>;
         describe: (entry: Record<string, unknown>) => string;
         consequence: string;
       }
@@ -144,7 +144,9 @@ function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unk
   if (entries === null) {
     return [];
   }
-  const known = new Set<string>(closed.known);
+  // The declaration's key order is the order the error prose lists.
+  const knownKeys = Object.keys(closed.known);
+  const known = new Set<string>(knownKeys);
   const problems: string[] = [];
   for (const entry of entries) {
     if (typeof entry !== "object" || entry === null) {
@@ -155,7 +157,7 @@ function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unk
     if (unknown.length > 0) {
       const list = unknown.map((k) => `"${k}"`).join(", ");
       problems.push(
-        `${key}[${closed.describe(record)}]: declares ${list}, which this section does not recognize (known keys: ${closed.known.join(", ")}) - ${closed.consequence}. Fix the key name, or remove it`,
+        `${key}[${closed.describe(record)}]: declares ${list}, which this section does not recognize (known keys: ${knownKeys.join(", ")}) - ${closed.consequence}. Fix the key name, or remove it`,
       );
     }
   }

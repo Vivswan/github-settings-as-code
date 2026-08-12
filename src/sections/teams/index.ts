@@ -3,7 +3,7 @@
  * personal account the section no-ops with a note.
  */
 
-import { type MustBeNever, SettingsFile, type TeamConfig } from "../../schema.js";
+import { SettingsFile } from "../../schema.js";
 import {
   beginRun,
   call,
@@ -18,10 +18,6 @@ import {
 import { DEFAULT_ROLE, roleForPermission } from "../roles.js";
 
 const permission: SectionPermission = { repo: ["administration"], org: "members" };
-
-const KNOWN_KEYS = ["name", "permission"] as const;
-/** Compile-time lockstep: a TeamConfig field missing from KNOWN_KEYS fails here. */
-type _AllKeysKnown = MustBeNever<Exclude<keyof TeamConfig, (typeof KNOWN_KEYS)[number]>>;
 
 const ENDPOINTS = {
   // GET /orgs/{org} is a public endpoint, so it needs no token permission.
@@ -53,7 +49,7 @@ export const teamsSection = {
   // so an extra key is always a typo - and a misspelled "permission" would
   // silently grant the default role and report clean.
   closedSurface: {
-    known: KNOWN_KEYS,
+    known: { name: true, permission: true },
     describe: (t) => t.name,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
