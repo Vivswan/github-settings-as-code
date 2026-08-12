@@ -19,7 +19,7 @@ import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_API_VERSION } from "../../src/github/api.js";
 import { UNDOCUMENTED_PATHS, USED_PATHS } from "../../test/e2e/openapi/paths.js";
-import { fetchWithRetry } from "./fetch-retry.js";
+import { fetchTextWithRetry } from "./lib/fetch-retry.js";
 
 /**
  * The github/rest-api-description commit the trimmed spec is cut from. Bump
@@ -82,20 +82,24 @@ interface OpenApiDoc {
 const FETCH_TIMEOUT_MS = 60_000;
 
 async function fetchSpec(url: string): Promise<OpenApiDoc> {
-  // Per-attempt timeout plus bounded retry (fetch-retry.ts): a hung
-  // connection or a transient blip fails loudly with advice instead of the
-  // script stalling forever - or one blip failing the whole CI gate.
-  const response = await fetchWithRetry(url, FETCH_TIMEOUT_MS);
-  if (!response.ok) {
+  // Per-attempt timeout plus bounded retry (lib/fetch-retry.ts): a hung
+  // connection or a transient blip - even mid-download - fails loudly with
+  // advice instead of the script stalling forever, or one blip failing the
+  // whole CI gate.
+  const fetched = await fetchTextWithRetry("OpenAPI descriptor", url, FETCH_TIMEOUT_MS);
+  if (!fetched.ok) {
     throw new Error(
-      `failed to fetch the OpenAPI descriptor: ${response.status} ${response.statusText} for ${url}. Check UPSTREAM_REF and the DEFAULT_API_VERSION file name`,
+      `failed to fetch the OpenAPI descriptor: ${fetched.status} ${fetched.statusText} for ${url}. Check UPSTREAM_REF and the DEFAULT_API_VERSION file name`,
     );
   }
-  const doc = (await response.json().catch((error) => {
+  let doc: OpenApiDoc;
+  try {
+    doc = JSON.parse(fetched.text) as OpenApiDoc;
+  } catch (error) {
     throw new Error(
       `the OpenAPI descriptor from ${url} is not valid JSON: ${error instanceof Error ? error.message : String(error)}. The download may be truncated; re-run`,
     );
-  })) as OpenApiDoc;
+  }
   if (!doc.paths || typeof doc.paths !== "object") {
     throw new Error(
       `the fetched descriptor has no "paths" object; got keys: ${Object.keys(doc).join(", ")}. Confirm SPEC_URL points at the dereferenced OpenAPI descriptor (.deref.json) for ${DEFAULT_API_VERSION}`,

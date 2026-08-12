@@ -60,10 +60,13 @@ describe("COVERAGE Supported table", () => {
   test("every src/ or test/ path citation resolves on disk", () => {
     // Section moves (flat src/sections/<key>.ts files becoming directories)
     // silently rot the prose citations; existence on disk is the contract.
-    const cited = coverage.match(/\b(?:src|test)\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*/g) ?? [];
+    // A citation must carry a file extension so prose slash-pairs
+    // ("test/lint jobs") do not read as paths; a directory citation is
+    // invisible to this test, so cite files.
+    const cited =
+      coverage.match(/\b(?:src|test)\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.[a-z]+\b/g) ?? [];
     expect(cited.length, "COVERAGE.md cites no src/ or test/ path at all").toBeGreaterThan(0);
-    for (const citation of new Set(cited)) {
-      const path = citation.replace(/\.+$/, ""); // a citation can end a sentence
+    for (const path of new Set(cited)) {
       expect(
         existsSync(join(ROOT, path)),
         `COVERAGE.md cites "${path}" but nothing exists there; update the citation to the file's current location`,

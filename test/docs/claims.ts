@@ -5,8 +5,57 @@
  * three matchers cannot drift apart on what counts as a claim.
  */
 
+import type { SectionKey } from "../../src/schema.js";
+
 const DELETE_STEMS = String.raw`delet\w*|remov\w*|drop\w*|clear\w*`;
 const KEEP_STEMS = String.raw`kept|keep\w*|retain\w*|preserv\w*`;
+
+/**
+ * The prose display name of each delete-by-default section, for the
+ * enumeration pins over the README quick-start warning and the migration
+ * paragraphs. A new delete-by-default section fails those tests through
+ * deleteEnumerationProblems until its display name is added here.
+ */
+const DELETE_DEFAULT_DISPLAY_NAMES: Partial<Record<SectionKey, string>> = {
+  labels: "labels",
+  autolinks: "autolinks",
+  collaborators: "collaborators",
+  actions_variables: "Actions variables",
+  agents_variables: "Copilot agents variables",
+};
+
+/**
+ * Every way `prose` under-enumerates the delete-by-default sections: a
+ * missing display name mapping (a new delete-default section), or a display
+ * name the prose omits. An empty return means the enumeration is complete.
+ * Omission-only on purpose: display names like "labels" are ordinary words,
+ * so a negative check over prose would false-positive; the one spot that
+ * names sections by backticked KEY (getting-started) gets its own exact
+ * positive-and-negative check instead.
+ */
+export function deleteEnumerationProblems(
+  prose: string,
+  deleteKeys: readonly SectionKey[],
+): string[] {
+  // Markdown wraps prose at will, so a display name can span a line break.
+  const flattened = prose.replace(/\s+/g, " ");
+  const problems: string[] = [];
+  for (const key of deleteKeys) {
+    const display = DELETE_DEFAULT_DISPLAY_NAMES[key];
+    if (display === undefined) {
+      problems.push(
+        `section "${key}" deletes undeclared entries but has no display name in DELETE_DEFAULT_DISPLAY_NAMES (test/docs/claims.ts)`,
+      );
+      continue;
+    }
+    if (!flattened.includes(display)) {
+      problems.push(
+        `the prose omits "${display}" ("${key}" deletes undeclared entries by default)`,
+      );
+    }
+  }
+  return problems;
+}
 
 /** Word-boundary claim families; "housekeeping" must not read as a keep claim. */
 export const CLAIM_FAMILY: Record<"delete" | "keep", RegExp> = {
