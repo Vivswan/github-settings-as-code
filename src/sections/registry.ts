@@ -14,7 +14,7 @@ import { actionsSecretsSection } from "./actions-secrets.js";
 import { actionsVariablesSection } from "./actions-variables.js";
 import { agentsSecretsSection } from "./agents-secrets.js";
 import { agentsVariablesSection } from "./agents-variables.js";
-import { autolinksSection } from "./autolinks.js";
+import { autolinksSection } from "./autolinks/index.js";
 import { branchesSection } from "./branches.js";
 import { checkSuitePreferencesSection } from "./check-suite-preferences.js";
 import { codeQualitySetupSection } from "./code-quality.js";

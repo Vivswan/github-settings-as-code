@@ -4,8 +4,8 @@
  * wrapped `undeclared: keep` form softens that to notes.
  */
 
-import { phantomKeys, phantomNote, subsetDiff } from "../engine/diff.js";
-import { type AutolinkConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import { type AutolinkConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -17,7 +17,7 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 
 interface LiveAutolink {
   id: number;
