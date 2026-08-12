@@ -52,6 +52,7 @@ import { RulesetConfig } from "./sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
 import { SEALED_SECRET_VALUE_DOC, SECRET_NAME_DOC } from "./sections/shared/schema-helpers.js";
 import { TeamConfig } from "./sections/teams/schema.js";
+import { WorkflowConfig } from "./sections/workflows/schema.js";
 import type { MustBeNever } from "./types.js";
 
 export { ActionsSecretConfig } from "./sections/actions_secrets/schema.js";
@@ -86,6 +87,7 @@ export { RepositoryConfig } from "./sections/repository/schema.js";
 export { RulesetConfig } from "./sections/rulesets/schema.js";
 export { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
 export { TeamConfig } from "./sections/teams/schema.js";
+export { WorkflowConfig } from "./sections/workflows/schema.js";
 export type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "./types.js";
 
 const UndeclaredPolicySchema = z
@@ -401,19 +403,6 @@ export const ActionsConfig = z
   .describe("GitHub Actions settings, routed to the right endpoint by key.")
   .meta({ id: "ActionsConfig" });
 export type ActionsConfig = z.infer<typeof ActionsConfig>;
-
-export const WorkflowConfig = z
-  .object({
-    path: z.string().describe('Full ".github/workflows/ci.yml" or the bare "ci.yml" file name.'),
-    state: z
-      .enum(["active", "disabled"])
-      .describe('Desired state; every live disabled_* variant counts as "disabled".'),
-  })
-  .describe(
-    "One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo).",
-  )
-  .meta({ id: "WorkflowConfig" });
-export type WorkflowConfig = z.infer<typeof WorkflowConfig>;
 
 export const WebhookDeliveryConfig = z
   .looseObject({

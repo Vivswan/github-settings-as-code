@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { workflowsSection } from "../../src/sections/workflows.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { workflowsSection } from "./index.js";
 
 describe("workflows", () => {
   const liveWorkflows = {
