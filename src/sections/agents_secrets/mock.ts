@@ -1,33 +1,15 @@
 /**
- * agents_secrets mock fragment: the section's e2e handlers, registered in
- * test/e2e/mock/sections.ts. Imports only the test-tree leaf seams
- * (support.ts, secrets.ts) - the src -> test inversion is deliberate; the
- * bundle entry is src/main.ts, so this file never reaches lib/index.js. The
- * sealed-secret semantics live on the shared helpers (sealedSecretPut/
- * secretsList/secretRemove in support.ts).
+ * agents_secrets mock fragment: the section's e2e handlers, minted by the
+ * shared secrets-family factory (support.ts, where the sealed-secret
+ * semantics live) and registered in test/e2e/mock/sections.ts. Imports only
+ * the test-tree leaf seams - the src -> test inversion is deliberate; the
+ * bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
-import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../../../test/e2e/mock/secrets.js";
 import {
-  ok,
+  repoSecretsRestHandlers,
   type SectionRestHandlers,
-  sealedSecretPut,
-  secretRemove,
-  secretsList,
 } from "../../../test/e2e/mock/support.js";
 
-export const agentsSecretsMockHandlers: SectionRestHandlers<"agents_secrets"> = {
-  "agents_secrets.list": ({ state, query }) => secretsList(state.agents_secrets, query),
-  "agents_secrets.publicKey": () =>
-    ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
-  "agents_secrets.put": ({ state, param, body }) =>
-    sealedSecretPut(
-      state,
-      state.agents_secrets,
-      state.agents_secret_digests,
-      param("secret_name"),
-      body,
-    ),
-  "agents_secrets.remove": ({ state, param }) =>
-    secretRemove(state.agents_secrets, state.agents_secret_digests, param("secret_name")),
-};
+export const agentsSecretsMockHandlers: SectionRestHandlers<"agents_secrets"> =
+  repoSecretsRestHandlers("agents_secrets");

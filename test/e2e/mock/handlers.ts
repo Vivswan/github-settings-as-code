@@ -36,6 +36,32 @@ function missingHandlerPointer(missing: Array<[string, { section: string }]>): s
 }
 
 /**
+ * The one completeness assertion both tables share: every declared key MUST
+ * have a handler and every handler key MUST name a declaration, both
+ * directions. Only the prose differs per table, so it arrives as arguments.
+ */
+function assertTableCompleteness(
+  declared: Readonly<Record<string, { section: string }>>,
+  handlers: Record<string, unknown>,
+  prose: { header: string; missing: string; extra: string },
+): void {
+  const declaredKeys = new Set(Object.keys(declared));
+  const handlerKeys = new Set(Object.keys(handlers));
+  const missing = Object.entries(declared).filter(([key]) => !handlerKeys.has(key));
+  const extra = [...handlerKeys].filter((key) => !declaredKeys.has(key));
+  if (missing.length > 0 || extra.length > 0) {
+    const lines: string[] = [];
+    if (missing.length > 0) {
+      lines.push(`${prose.missing}: [${missingHandlerPointer(missing)}]`);
+    }
+    if (extra.length > 0) {
+      lines.push(`${prose.extra}: [${extra.sort().join(", ")}]`);
+    }
+    throw new Error(`E2E MOCK: ${prose.header}\n  ${lines.join("\n  ")}`);
+  }
+}
+
+/**
  * Every allEndpoints() key MUST have a handler and every handler key MUST
  * exist in allEndpoints(), both directions. Adding a section endpoint without
  * a mock handler (or leaving a stale handler after a route is removed) fails
@@ -46,22 +72,11 @@ export function assertHandlerCompleteness(
   endpoints: Readonly<Record<string, TaggedEndpoint>> = allEndpoints(),
   handlers: Record<string, Handler> = HANDLERS,
 ): void {
-  const endpointKeys = new Set(Object.keys(endpoints));
-  const handlerKeys = new Set(Object.keys(handlers));
-  const missing = Object.entries(endpoints).filter(([key]) => !handlerKeys.has(key));
-  const extra = [...handlerKeys].filter((key) => !endpointKeys.has(key));
-  if (missing.length > 0 || extra.length > 0) {
-    const lines: string[] = [];
-    if (missing.length > 0) {
-      lines.push(`endpoints with no mock handler: [${missingHandlerPointer(missing)}]`);
-    }
-    if (extra.length > 0) {
-      lines.push(`handlers naming no known endpoint: [${extra.sort().join(", ")}]`);
-    }
-    throw new Error(
-      `E2E MOCK: handler table out of sync with allEndpoints()\n  ${lines.join("\n  ")}`,
-    );
-  }
+  assertTableCompleteness(endpoints, handlers, {
+    header: "handler table out of sync with allEndpoints()",
+    missing: "endpoints with no mock handler",
+    extra: "handlers naming no known endpoint",
+  });
 }
 
 /**
@@ -74,20 +89,9 @@ export function assertGraphqlHandlerCompleteness(
   ops: Readonly<Record<string, TaggedGraphqlOp>> = allGraphqlOps(),
   handlers: Record<string, GraphqlHandler> = GRAPHQL_HANDLERS,
 ): void {
-  const opKeys = new Set(Object.keys(ops));
-  const handlerKeys = new Set(Object.keys(handlers));
-  const missing = Object.entries(ops).filter(([key]) => !handlerKeys.has(key));
-  const extra = [...handlerKeys].filter((key) => !opKeys.has(key));
-  if (missing.length > 0 || extra.length > 0) {
-    const lines: string[] = [];
-    if (missing.length > 0) {
-      lines.push(`GraphQL operations with no mock handler: [${missingHandlerPointer(missing)}]`);
-    }
-    if (extra.length > 0) {
-      lines.push(`GraphQL handlers naming no declared operation: [${extra.sort().join(", ")}]`);
-    }
-    throw new Error(
-      `E2E MOCK: GraphQL handler table out of sync with allGraphqlOps()\n  ${lines.join("\n  ")}`,
-    );
-  }
+  assertTableCompleteness(ops, handlers, {
+    header: "GraphQL handler table out of sync with allGraphqlOps()",
+    missing: "GraphQL operations with no mock handler",
+    extra: "GraphQL handlers naming no declared operation",
+  });
 }

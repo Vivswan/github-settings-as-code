@@ -10,9 +10,9 @@
  * compare uppercased names.
  */
 
-import { variablesSection } from "../shared/repo-variables.js";
+import { repoVariablesSection } from "../shared/repo-variables.js";
 
-export const actionsVariablesSection = variablesSection({
+export const actionsVariablesSection = repoVariablesSection({
   key: "actions_variables",
   resource: "variables",
   noun: "Actions variable",

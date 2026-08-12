@@ -16,7 +16,6 @@ import { environmentFromPut, PROTECTION_RULE_APPS } from "../../../test/e2e/mock
 import {
   asObject,
   branchPoliciesEnabled,
-  environmentVariableName,
   type Json,
   noContent,
   ok,
@@ -27,7 +26,9 @@ import {
   secretRemove,
   secretsList,
   slicePage,
+  variableName,
 } from "../../../test/e2e/mock/support.js";
+import { variableKey } from "../shared/variables-engine.js";
 import { environmentsSection } from "./index.js";
 import { MAX_PINNED_ENVIRONMENTS } from "./schema.js";
 
@@ -96,7 +97,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     }
     // A duplicate (case-insensitive) name conflicts, matching GitHub; the
     // section never POSTs a duplicate (it PATCHes an existing variable).
-    if (list.some((v) => environmentVariableName(v) === String(payload.name).toUpperCase())) {
+    if (list.some((v) => variableName(v) === variableName(payload))) {
       return { status: 409, body: { message: "Variable already exists" } };
     }
     // Fixed timestamps keep repeat applies byte-stable for the idempotence
@@ -113,7 +114,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     const env = param("environment_name");
     const name = param("name");
     const variable = (state.environment_variables[env] ?? []).find(
-      (v) => environmentVariableName(v) === name.toUpperCase(),
+      (v) => variableName(v) === variableKey(name),
     );
     if (!state.environments[env] || !variable) {
       return { status: 404, body: { message: "Not Found" } };
@@ -131,7 +132,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     const env = param("environment_name");
     const name = param("name");
     const list = state.environment_variables[env] ?? [];
-    const index = list.findIndex((v) => environmentVariableName(v) === name.toUpperCase());
+    const index = list.findIndex((v) => variableName(v) === variableKey(name));
     if (!state.environments[env] || index < 0) {
       return { status: 404, body: { message: "Not Found" } };
     }

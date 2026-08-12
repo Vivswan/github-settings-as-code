@@ -20,7 +20,12 @@ import type {
 } from "../../../src/sections/registry.js";
 import { variableKey } from "../../../src/sections/shared/variables-engine.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
-import { MOCK_SECRETS_KEY_ID, secretDigest, unsealSecretValue } from "./secrets.js";
+import {
+  MOCK_SECRETS_KEY_ID,
+  MOCK_SECRETS_PUBLIC_KEY,
+  secretDigest,
+  unsealSecretValue,
+} from "./secrets.js";
 import type { MockState } from "./state.js";
 
 /** A plain JSON object body. */
@@ -240,6 +245,148 @@ export function secretRemove(
   return noContent();
 }
 
+// --- The secret/variable family factories -----------------------------------
+//
+// The repository secret and variable sections come in FAMILIES that differ
+// only in which MockState list they read (the section modules are the same
+// way: one repoSecretsSection()/repoVariablesSection() call each). Their mock
+// fragments are minted here from the section key. Compile-time completeness
+// survives the factoring in two halves: the annotated per-role record below
+// rejects a missing or typo'd role at the factory, and the fragment's
+// SectionRestHandlers<K> annotation rejects a declared endpoint the factory
+// does not serve; assertHandlerCompleteness() remains the construction-time
+// backstop.
+
+/**
+ * Build one "<key>.<role>" handler record from per-role handlers. The
+ * Object.fromEntries round-trip erases the key type, so the cast restores
+ * exactly what the construction just did.
+ */
+function keyedHandlers<K extends SectionKey, R extends string>(
+  key: K,
+  roles: Readonly<Record<R, Handler>>,
+): Record<`${K}.${R}`, Handler> {
+  return Object.fromEntries(
+    Object.entries<Handler>(roles).map(([role, handler]) => [`${key}.${role}`, handler]),
+  ) as Record<`${K}.${R}`, Handler>;
+}
+
+/** The sealed-secret families: a list plus its digest map, named in lockstep. */
+type SecretsFamilyKey =
+  | "actions_secrets"
+  | "dependabot_secrets"
+  | "codespaces_secrets"
+  | "agents_secrets";
+type SecretDigestsKey<K extends SecretsFamilyKey> = K extends `${infer F}_secrets`
+  ? `${F}_secret_digests`
+  : never;
+
+/** The endpoint roles every repository secret family declares. */
+type SecretsRole = "list" | "publicKey" | "put" | "remove";
+
+/**
+ * The four handlers every repository secret family serves, over the state
+ * family the section key names. The sealed-secret semantics live on the
+ * shared helpers above (sealedSecretPut/secretsList/secretRemove).
+ */
+export function repoSecretsRestHandlers<K extends SecretsFamilyKey>(
+  key: K,
+): Record<`${K}.${SecretsRole}`, Handler> {
+  // The digests family is the list family's "_secret_digests" sibling; the
+  // cast restates in the type what the string surgery just did.
+  const digestsKey = key.replace(/_secrets$/, "_secret_digests") as SecretDigestsKey<K>;
+  // Annotated, not inferred, so a missing or typo'd role fails to compile.
+  const roles: Readonly<Record<SecretsRole, Handler>> = {
+    list: ({ state, query }) => secretsList(state[key], query),
+    publicKey: () => ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY }),
+    put: ({ state, param, body }) =>
+      sealedSecretPut(state, state[key], state[digestsKey], param("secret_name"), body),
+    remove: ({ state, param }) => secretRemove(state[key], state[digestsKey], param("secret_name")),
+  };
+  return keyedHandlers(key, roles);
+}
+
+/** The repository-variables families (same GET shape, uppercase-stored names). */
+type VariablesFamilyKey = "actions_variables" | "agents_variables";
+
+/** The endpoint roles every repository variables family declares. */
+type VariablesRole = "list" | "create" | "update" | "remove";
+
+/**
+ * The four handlers every repository variables family serves, over the state
+ * family the section key names. The page cap comes from the endpoint
+ * DECLARATION, the same single source the client's page loop and the
+ * spec-derived pageSize sweep read - so the mock can never clamp at a stale
+ * number the section stopped using.
+ */
+export function repoVariablesRestHandlers<K extends VariablesFamilyKey>(section: {
+  key: K;
+  endpoints: { list: { pageSize?: number } };
+}): Record<`${K}.${VariablesRole}`, Handler> {
+  const key = section.key;
+  const list = (state: MockState): Json[] => state[key];
+  // Annotated, not inferred, so a missing or typo'd role fails to compile.
+  const roles: Readonly<Record<VariablesRole, Handler>> = {
+    list: ({ state, query }) =>
+      ok({
+        total_count: list(state).length,
+        variables: slicePage(list(state), query, section.endpoints.list.pageSize),
+      }),
+    create: ({ state, body }) => {
+      const payload = asObject(body);
+      // GitHub stores variable names uppercased regardless of how they are
+      // entered (the variables naming rules; the spec examples show uppercase
+      // names), so the stored GET shape carries the uppercase name. Payload
+      // spread FIRST so passthrough fields the section sends (and later
+      // subsetDiffs) are stored and read back; the canonical fields are then
+      // normalized over them.
+      const variable: Json = {
+        ...payload,
+        name: variableName(payload),
+        value: payload.value ?? "",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      };
+      list(state).push(variable);
+      // The documented 201 body is an empty object.
+      return { status: 201, body: {} };
+    },
+    update: ({ state, param, body }) => {
+      const name = variableKey(param("name"));
+      const variable = list(state).find((v) => variableName(v) === name);
+      if (!variable) {
+        return { status: 404, body: { message: "Not Found" } };
+      }
+      const payload = asObject(body);
+      if (typeof payload.name === "string") {
+        variable.name = variableKey(payload.name);
+      }
+      if (payload.value !== undefined) {
+        variable.value = payload.value;
+      }
+      // Passthrough fields update verbatim, mirroring the create path, so a
+      // second apply's subsetDiff over them reads back what was written.
+      for (const [field, value] of Object.entries(payload)) {
+        if (VARIABLE_CANONICAL_KEYS.has(field)) {
+          continue;
+        }
+        variable[field] = value;
+      }
+      return noContent();
+    },
+    remove: ({ state, param }) => {
+      const name = variableKey(param("name"));
+      const index = list(state).findIndex((v) => variableName(v) === name);
+      if (index < 0) {
+        return { status: 404, body: { message: "Not Found" } };
+      }
+      list(state).splice(index, 1);
+      return noContent();
+    },
+  };
+  return keyedHandlers(key, roles);
+}
+
 /** Deterministic expires_at per declared expiry (see interaction_limits.put). */
 export const INTERACTION_EXPIRES: Record<string, string> = {
   one_day: "2027-01-02T00:00:00Z",
@@ -308,10 +455,10 @@ export function labelName(label: Json): NameKey {
 }
 
 /** A variable's case-insensitive matching key (GitHub uppercases the match). */
-export function environmentVariableName(variable: Json): string {
+export function variableName(variable: Json): string {
   // The engine's own mint, so the mock's matching can never fold a name
   // differently than the handler does (the labelName precedent).
-  return variableKey(String(variable.name));
+  return variableKey(String(variable.name ?? ""));
 }
 
 /**
@@ -333,16 +480,11 @@ export function findLabel(state: MockState, name: string): Json | undefined {
   return state.labels.find((l) => labelName(l) === nameKey(name));
 }
 
-/** The uppercase stored name for a variables create payload. */
-export function variableName(payload: Json): string {
-  return variableKey(String(payload.name ?? ""));
-}
-
 /**
  * Variable fields the server owns (or the update handler maps explicitly);
  * the passthrough loop must never let a payload overwrite them.
  */
-export const VARIABLE_CANONICAL_KEYS = new Set(["name", "value", "created_at", "updated_at"]);
+const VARIABLE_CANONICAL_KEYS = new Set(["name", "value", "created_at", "updated_at"]);
 /**
  * Hook fields the update handler maps explicitly; anything else in a general
  * PATCH body is a passthrough field stored verbatim.

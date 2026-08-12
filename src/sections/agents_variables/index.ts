@@ -10,9 +10,9 @@
  * compare uppercased names.
  */
 
-import { variablesSection } from "../shared/repo-variables.js";
+import { repoVariablesSection } from "../shared/repo-variables.js";
 
-export const agentsVariablesSection = variablesSection({
+export const agentsVariablesSection = repoVariablesSection({
   key: "agents_variables",
   resource: "agent_variables",
   noun: "Copilot agents variable",

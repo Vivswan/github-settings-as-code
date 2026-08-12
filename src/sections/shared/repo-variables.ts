@@ -3,7 +3,7 @@
  * repo-secrets.ts: GitHub's two repo-scoped variable families (Actions,
  * Copilot agents) expose the same four endpoints under a different path
  * segment and differ only in PAT resource and output noun, so each section
- * module is ONE variablesSection() call carrying its family's facts. The
+ * module is ONE repoVariablesSection() call carrying its family's facts. The
  * factory sits above the shared variables engine (variables-engine.ts),
  * which owns the value-based reconciliation; the per-environment variables
  * family (environments) consumes the engine directly with its own nested
@@ -103,7 +103,7 @@ type RepoVariablesEndpoints<P extends VariablesSegment> = {
 /** The declared value every family accepts: the entry list, plain or wrapped. */
 type RepoVariablesDeclared = VariableEntry[] | UndeclaredPolicyList<VariableEntry>;
 
-/** The module shape variablesSection() mints (SectionModule<K> at the registry). */
+/** The module shape repoVariablesSection() mints (SectionModule<K> at the registry). */
 export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly key: K;
   readonly undeclaredDefault: "delete";
@@ -122,7 +122,7 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
  * through VARIABLES_SEGMENTS; a family supplies only its key, PAT resource,
  * and noun.
  */
-export function variablesSection<K extends RepoVariablesKey>(family: {
+export function repoVariablesSection<K extends RepoVariablesKey>(family: {
   key: K;
   /** The fine-grained-PAT Repository permission gating the family. */
   resource: PatResource;
