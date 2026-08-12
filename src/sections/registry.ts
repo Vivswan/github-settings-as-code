@@ -20,7 +20,7 @@ import { checkSuitePreferencesSection } from "./check_suite_preferences/index.js
 import { codeQualitySetupSection } from "./code_quality_setup/index.js";
 import { codeScanningDefaultSetupSection } from "./code_scanning_default_setup/index.js";
 import { codespacesSecretsSection } from "./codespaces_secrets/index.js";
-import { collaboratorsSection } from "./collaborators.js";
+import { collaboratorsSection } from "./collaborators/index.js";
 import type { EndpointDecl, GraphqlOpDecl, SectionModule } from "./contract.js";
 import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
