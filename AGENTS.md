@@ -60,7 +60,9 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   generated from the zod slices in `src/sections/<key>/schema.ts` as composed
   into the settings document by `src/schema.ts`. Each slice is ONE declaration
   that produces its config type (z.infer), the section's tolerant runtime
-  shape (the section module derives `loosen(<slice>)` itself), and its part of
+  shape (the section module derives `loosen(<slice>)` itself; the secret and
+  variable family modules are minted by the shared factories in
+  `src/sections/shared/`, which do that derivation once), and its part of
   the published schema (`.describe()` strings become its descriptions,
   `.meta({id})` its definition names); `src/schema.ts` adds only the
   document-level wrappers and pins each property to its slice with a lockstep
@@ -76,11 +78,14 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   descriptions are checked at source) and excluded from
   [biome](https://biomejs.dev).
 - The apply/check engine layout: `src/main.ts` is the thin bundled
-  entrypoint; `src/action/` is the GitHub Actions layer (inputs, Io over
-  @actions/core, settings reading, step summaries, the single- and
+  entrypoint; `src/io.ts` is the Io output port (action-layer-free; the
+  action implements it over @actions/core); `src/types.ts` holds the leaf
+  type vocabulary; `src/action/` is the GitHub Actions layer (inputs,
+  settings reading, step summaries, redaction, the single- and
   multi-repo run flows); `src/engine/` is the per-repo pipeline (orchestrate,
   validate, merge, diff); `src/github/` is the REST client, pagination, and
-  repo-file fetch; `src/discovery/` resolves multi-repo targets. Under
+  repo-file fetch; `src/discovery/` resolves multi-repo targets;
+  `src/report/` composes the private report. Under
   `src/sections/`, each settings section is one self-contained DIRECTORY
   `src/sections/<key>/`: `index.ts` (the `SectionModule` - key, PAT grant
   advice, the loose shape derived from the slice, handler), `schema.ts` (the
@@ -125,15 +130,16 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   contradiction test. Change one and its consumers follow.
 - The end-to-end harness lives under `test/e2e/`: `run.ts` runs the curated
   scenarios (each section's `scenarios/` plus `test/e2e/scenarios/` for
-  cross-cutting flows), `fuzz.ts` runs seeded property fuzzing (the
+  cross-cutting and multi-section flows), `fuzz.ts` runs seeded property
+  fuzzing (the
   per-section `generators.ts` fragments plus the factory families' shared
   ones, aggregated by `test/e2e/generators.ts` over the `gen-support.ts`
   seam), `runner.ts` builds the bundle to a temp
   path and spawns it against the mock, and `oracle.ts` predicts outcome
-  classes. `mock/` is the in-process GitHub API: the request pipeline in
-  `routes.ts`, merged handler tables in `handlers.ts`, the per-SectionKey
-  fragment registration in `sections.ts` over the shared helpers in
-  `support.ts`, state in `state.ts`, and the node-id codec in `node-id.ts`.
+  classes. `mock/` is the in-process GitHub API - the request pipeline, the
+  per-SectionKey fragment registration merged into the handler tables, the
+  shared handler helpers, and the seeded state (see the module headers under
+  `test/e2e/mock/`).
   On-contract mock responses are validated against a trimmed OpenAPI spec
   (`openapi/github-openapi.trimmed.json`, a fetched gitignored artifact -
   generate it with `bun .github/scripts/trim-openapi.ts`; CI caches or
@@ -168,6 +174,7 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   GENERATED (bun .github/scripts/gen-gaps-index.ts); mechanics in
   gap.ts.
 - The `release` job in ci.yml is deliberately NOT in all-green's `needs`:
-  it runs downstream of the gate (calling release-please.yml via
-  workflow_call), so releases and release-PR refreshes only happen on a
+  it runs downstream of the gate (ci.yml calls the repo-owned release.yml
+  via workflow_call, which wraps the managed release-please machinery), so
+  releases and release-PR refreshes only happen on a
   green main. Do not add it to the needs list.
