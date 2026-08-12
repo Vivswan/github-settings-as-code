@@ -10,9 +10,9 @@
  * consumers (SHARED_FAN_OUT), and the cross-cutting files (the contract
  * modules, the registry, the engine, the schema, the e2e harness) select
  * every section. A path under src/sections/ that none of the rules recognize
- * throws, so a new file cannot silently skip the smoke job - and neither can
- * a stale PR still touching a pre-migration flat file: rebase it onto the
- * per-section layout.
+ * throws, so a new file cannot silently skip the smoke job - src/sections/
+ * holds only registry.ts, the per-section directories, contract/, and
+ * shared/, and a file anywhere else must gain a rule before it can land.
  *
  * Usage (CI): `bun .github/scripts/changed-sections.ts [base-ref]` prints one
  * of: a comma-separated section list, the literal `all`, or the literal
@@ -129,9 +129,8 @@ export type Selection =
  * - src/sections/registry.ts, the one flat file, selects every section.
  * Anything else throws: a silently ignored section path would let a PR skip
  * the very scenarios its change needs, so an unrecognized file must either
- * get a mapping or move under a recognized directory. A pre-migration flat
- * path (src/sections/<key>.ts, long deleted from main) throws here too -
- * the loud signal a stale PR needs a rebase onto the per-section layout.
+ * get a mapping or move under a recognized directory - sections are
+ * directories, and registry.ts is the only flat file src/sections/ allows.
  */
 function sectionsForSectionsPath(file: string): SectionKey[] | "all" {
   const rest = file.slice("src/sections/".length);
@@ -141,7 +140,7 @@ function sectionsForSectionsPath(file: string): SectionKey[] | "all" {
       return "all";
     }
     throw new Error(
-      `changed-sections: ${file} matches no selector rule; src/sections/ holds only registry.ts, the per-section <key>/ directories, contract/, and shared/ - move the file under its section directory (a flat src/sections/ file is the pre-migration layout; rebase the PR)`,
+      `changed-sections: ${file} matches no selector rule; src/sections/ holds only registry.ts, the per-section <key>/ directories, contract/, and shared/ - move the file under its section directory`,
     );
   }
   const dir = rest.slice(0, slash);

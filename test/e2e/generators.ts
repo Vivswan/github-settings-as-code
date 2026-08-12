@@ -975,7 +975,7 @@ export const ORG_GATED_SECTIONS: ReadonlySet<SectionKey> = new Set(
 const MASK_KEYS: readonly MaskKey[] = SCHEMA_MASK_KEYS;
 
 /**
- * The generation facts the oracle (Phase 3b) needs to predict an outcome
+ * The generation facts the oracle needs to predict an outcome
  * class without re-parsing the scenario: which sections are declared, the
  * permission mask, the denial style, and the mode/policy/owner_kind.
  */
@@ -1168,8 +1168,8 @@ export function genScenario(
     // draw, so it comes from a fork (main-stream stability).
     ...(rng.fork("base-prefix").bool(0.15) ? { base_prefix: "/api/v3" } : {}),
     ...(liveState ? { live_state: liveState } : {}),
-    // The oracle predicts the outcome class in Phase 3b; a generated scenario
-    // carries a placeholder expect until the oracle fills it.
+    // The oracle predicts the outcome class after generation; a generated
+    // scenario carries a placeholder expect until the oracle fills it.
     expect: { exit_code: 0 },
   };
   const meta: ScenarioMeta = {

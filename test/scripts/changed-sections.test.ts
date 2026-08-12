@@ -1,8 +1,8 @@
 /**
  * Unit test for the diff-aware section selector: the golden fan-out map,
  * that every path on disk resolves through some rule, and the cross-cutting,
- * docs-only, and fail-loud branches - including the tripwire that a
- * pre-migration flat src/sections/ path (a stale PR) throws instead of
+ * docs-only, and fail-loud branches - including the tripwire that a flat
+ * src/sections/ file (registry.ts is the only one allowed) throws instead of
  * silently skipping the smoke job.
  */
 
@@ -155,10 +155,10 @@ describe("changed-sections selection", () => {
     );
   });
 
-  test("a pre-migration flat section path throws (the stale-PR tripwire)", () => {
-    // The flat src/sections/<file>.ts aliases served only the migration
-    // window and are retired; a PR whose diff still names one must fail
-    // loudly (rebase onto the per-section layout), never resolve quietly.
+  test("a flat src/sections file besides registry.ts throws", () => {
+    // Sections are directories; registry.ts is the only flat file the layout
+    // allows. A diff naming any other flat path (whatever its history) must
+    // fail loudly, never resolve quietly.
     for (const stale of [
       "src/sections/labels.ts",
       "src/sections/deploy-keys.ts",

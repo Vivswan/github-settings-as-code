@@ -428,10 +428,10 @@ describe("docs/ guide pages", () => {
   }
 
   test("the examples cookbook shows every section at least once", () => {
-    // Two landings established the convention that a new section adds its
-    // cookbook block; this derives it from SECTION_KEYS so the next section
-    // cannot skip the cookbook silently. Nested environment lists ride the
-    // same pin (they live inside the environments block).
+    // Every section shows at least one cookbook block, derived from
+    // SECTION_KEYS so a new section cannot skip the cookbook silently.
+    // Nested environment lists ride the same pin (they live inside the
+    // environments block).
     const markdown = readFileSync(join(DOCS, "start", "examples.md"), "utf8");
     const fences = fencedBlocks(markdown, "yaml settings").join("\n");
     for (const key of SECTION_KEYS) {
