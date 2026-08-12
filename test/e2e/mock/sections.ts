@@ -44,19 +44,17 @@ import {
 import { rulesetsMockHandlers } from "../../../src/sections/rulesets/mock.js";
 import { secretScanningCustomPatternsMockHandlers } from "../../../src/sections/secret_scanning_custom_patterns/mock.js";
 import { teamsMockHandlers } from "../../../src/sections/teams/mock.js";
+import { webhooksMockHandlers } from "../../../src/sections/webhooks/mock.js";
 import { workflowsMockHandlers } from "../../../src/sections/workflows/mock.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "./secrets.js";
-import { completeHook, environmentFromPut, mintNodeId, PROTECTION_RULE_APPS } from "./state.js";
+import { environmentFromPut, mintNodeId, PROTECTION_RULE_APPS } from "./state.js";
 import {
   asObject,
   branchPoliciesEnabled,
   environmentVariableName,
   type GraphqlHandler,
   type Handler,
-  HOOK_CANONICAL_KEYS,
   type Json,
-  maskedConfig,
-  maskHookSecret,
   noContent,
   ok,
   pinTargetName,
@@ -64,7 +62,6 @@ import {
   secretRemove,
   secretsList,
   slicePage,
-  storedHookConfig,
 } from "./support.js";
 
 // --- Per-endpoint handlers ------------------------------------------------
@@ -463,71 +460,9 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
 
   // milestones: moved to src/sections/milestones/mock.ts
 
-  // webhooks ------------------------------------------------------------------
-  //
-  // The stored hook keeps its REAL config.secret (so state comparisons see
-  // what was written), but every response echoes it as "********" - GitHub
-  // never reveals a webhook secret on any read or write echo.
-  "webhooks.list": ({ state, query }) => ok(slicePage(state.hooks.map(maskHookSecret), query)),
-  "webhooks.create": ({ state, body }) => {
-    const payload = asObject(body);
-    const hook = completeHook(
-      { ...payload, config: storedHookConfig(asObject(payload.config)) },
-      state.nextId++,
-    );
-    state.hooks.push(hook);
-    return { status: 201, body: maskHookSecret(hook) };
-  },
-  "webhooks.update": ({ state, param, body }) => {
-    const id = param("hook_id");
-    const hook = state.hooks.find((h) => String(h.id) === id);
-    if (!hook) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    const payload = asObject(body);
-    // GitHub's general PATCH REPLACES the whole config when the body carries
-    // one (removing undeclared keys, the secret included) - the exact
-    // semantics the section avoids by routing config drift through the
-    // config sub-endpoint. Modeled faithfully so a regression that sends
-    // config through this route shows up as lost state.
-    if (payload.config !== undefined) {
-      hook.config = storedHookConfig(asObject(payload.config));
-    }
-    if (payload.events !== undefined) {
-      hook.events = payload.events;
-    }
-    if (payload.active !== undefined) {
-      hook.active = payload.active;
-    }
-    for (const [key, value] of Object.entries(payload)) {
-      if (!HOOK_CANONICAL_KEYS.has(key)) {
-        hook[key] = value; // passthrough fields read back verbatim
-      }
-    }
-    return ok(maskHookSecret(hook));
-  },
-  "webhooks.updateConfig": ({ state, param, body }) => {
-    const id = param("hook_id");
-    const hook = state.hooks.find((h) => String(h.id) === id);
-    if (!hook) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    // The config sub-endpoint UPDATES the named fields and leaves the rest
-    // alone - it never removes an existing secret the payload omits.
-    hook.config = storedHookConfig({ ...asObject(hook.config), ...asObject(body) });
-    return ok(maskedConfig(asObject(hook.config)));
-  },
-  "webhooks.remove": ({ state, param }) => {
-    const id = param("hook_id");
-    const index = state.hooks.findIndex((h) => String(h.id) === id);
-    if (index < 0) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    state.hooks.splice(index, 1);
-    return noContent();
-  },
-
   // custom_properties: moved to src/sections/custom_properties/mock.ts
+
+  // webhooks: moved to src/sections/webhooks/mock.ts
 
   // deploy_keys: moved to src/sections/deploy_keys/mock.ts
 };
@@ -681,6 +616,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: rulesetsMockHandlers },
   { rest: secretScanningCustomPatternsMockHandlers },
   { rest: teamsMockHandlers },
+  { rest: webhooksMockHandlers },
   { rest: workflowsMockHandlers },
   { rest: UNMOVED_SECTION_HANDLERS, graphql: UNMOVED_SECTION_GRAPHQL_HANDLERS },
 ];

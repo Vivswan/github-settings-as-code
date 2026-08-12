@@ -34,7 +34,7 @@ import { repositorySection } from "./repository/index.js";
 import { rulesetsSection } from "./rulesets/index.js";
 import { secretScanningPatternsSection } from "./secret_scanning_custom_patterns/index.js";
 import { teamsSection } from "./teams/index.js";
-import { webhooksSection } from "./webhooks.js";
+import { webhooksSection } from "./webhooks/index.js";
 import { workflowsSection } from "./workflows/index.js";
 
 const byKey: { [K in SectionKey]: SectionModule<K> } = {

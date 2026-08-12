@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { validateSectionShapes } from "../../src/engine/validate.js";
-import { webhooksSection } from "../../src/sections/webhooks.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { validateSectionShapes } from "../../../src/engine/validate.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { webhooksSection } from "./index.js";
 
 const LIST = "GET /repos/o/r/hooks?per_page=100&page=1";
 
