@@ -1324,6 +1324,71 @@ interface SectionFaultPlan {
   mode: "apply" | "check";
 }
 
+/** Every (kind, budget) combination a section fault run can carry. */
+function allFaultCombos(): Array<[FaultKind, boolean]> {
+  const combos: Array<[FaultKind, boolean]> = [];
+  for (const kind of FAULT_KINDS) {
+    combos.push([kind, false], [kind, true]);
+  }
+  return combos;
+}
+
+/**
+ * The directed fault battery's plan: one entry per SECTION_PRIMARY_READ
+ * section, so EVERY faultable section runs every soak, each paired with a
+ * (kind, budget) combo by rotating index. There are more sections than
+ * combos, so every combo also fires every soak; the section-to-combo pairing
+ * and the run mode rotate with the master seed, so consecutive soaks walk the
+ * full section x kind x budget cross product without one soak paying for all
+ * of it. assertFaultBatteryCoverage makes both per-soak guarantees
+ * regression-proof.
+ */
+function faultBatteryPlan(master: number): SectionFaultPlan[] {
+  const sections = Object.keys(SECTION_PRIMARY_READ) as FaultableSection[];
+  const combos = allFaultCombos();
+  const offset = master % combos.length; // codeql[js/biased-cryptographic-random] -- fuzz seed rotation, not key material
+  const plans = sections.map((section, index): SectionFaultPlan => {
+    const [kind, exhausting] = combos[(index + offset) % combos.length] as [FaultKind, boolean];
+    return {
+      section,
+      key: SECTION_PRIMARY_READ[section],
+      kind,
+      exhausting,
+      mode: (index + master) % 2 === 0 ? ("apply" as const) : ("check" as const),
+    };
+  });
+  assertFaultBatteryCoverage(plans, sections, combos);
+  return plans;
+}
+
+/**
+ * The coverage tripwire on the fault battery plan: every faultable section
+ * AND every kind x budget combo must appear in EVERY soak's battery. Throws
+ * (failing the whole fuzz run) rather than returning a failure, because a
+ * hole here is a plan-construction bug no seed can route around - exactly the
+ * regression class that previously let 10 sections per soak go unexercised
+ * while the comments claimed full coverage.
+ */
+function assertFaultBatteryCoverage(
+  plans: readonly SectionFaultPlan[],
+  sections: readonly FaultableSection[],
+  combos: ReadonlyArray<[FaultKind, boolean]>,
+): void {
+  const plannedSections = new Set(plans.map((plan) => plan.section));
+  const missingSections = sections.filter((section) => !plannedSections.has(section));
+  const comboKey = (kind: FaultKind, exhausting: boolean): string =>
+    `${kind}/x${exhausting ? RETRY_BUDGET : 1}`;
+  const plannedCombos = new Set(plans.map((plan) => comboKey(plan.kind, plan.exhausting)));
+  const missingCombos = combos
+    .map(([kind, exhausting]) => comboKey(kind, exhausting))
+    .filter((combo) => !plannedCombos.has(combo));
+  if (missingSections.length > 0 || missingCombos.length > 0) {
+    throw new Error(
+      `fault battery plan lost per-soak coverage: missing section(s) [${missingSections.join(", ")}], missing kind/budget combo(s) [${missingCombos.join(", ")}]`,
+    );
+  }
+}
+
 /**
  * Section-read fault fuzz: aim one transport fault at a section's guaranteed
  * primary read (SECTION_PRIMARY_READ). A transient fault (times 1) must be
@@ -1856,9 +1921,9 @@ async function discoveryConvergesBatteryRun(seed: number): Promise<IterationResu
 }
 /**
  * The fault half of the transport-misbehavior slot: section reads get the
- * bulk of the stream (8 faultable reads x 4 kinds x 2 budgets), and the three
- * core paths - the contents fetch, the discovery listing, and the report
- * delivery - share the rest.
+ * bulk of the stream (every SECTION_PRIMARY_READ entry x 4 kinds x 2
+ * budgets), and the three core paths - the contents fetch, the discovery
+ * listing, and the report delivery - share the rest.
  */
 async function faultFuzzIteration(seed: number): Promise<IterationResult> {
   const roll = new Rng(seed ^ 0x7f4a7c15).int(5);
@@ -2048,43 +2113,28 @@ async function main(): Promise<number> {
       reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
     }
 
-    // Directed fault battery: every fault kind x budget, with the SECTION
-    // TARGET rotated across every SECTION_PRIMARY_READ entry by battery
-    // index (offset by the master seed, so the kind-to-section pairing varies
-    // across soaks while every soak still covers every kind/budget combo AND
-    // every faultable endpoint - no endpoint can starve behind a frozen CI
-    // seed). Labels/milestones entries get a matching witness (exact
-    // predictions); a transient combo must be indistinguishable from a
-    // healthy run, a fatal one must fail loudly naming its section. Mode
-    // alternates per kind so both modes appear across the battery.
-    console.log("\nfault battery (directed transport faults, section rotated):");
-    const faultableSections = Object.keys(SECTION_PRIMARY_READ) as FaultableSection[];
-    const faultCombos: Array<[FaultKind, boolean]> = [];
-    for (const kind of FAULT_KINDS) {
-      faultCombos.push([kind, false], [kind, true]);
-    }
-    for (const [index, [kind, exhausting]] of faultCombos.entries()) {
+    // Directed fault battery: every SECTION_PRIMARY_READ section runs once
+    // per soak, paired with a fault kind x budget combo by rotating index so
+    // every combo also fires every soak (there are more sections than
+    // combos); the pairing and the mode rotate with the master seed, so soaks
+    // walk the full cross product over time, and assertFaultBatteryCoverage
+    // pins both per-soak guarantees. Labels/milestones entries get a matching
+    // witness (exact predictions); a transient combo must be
+    // indistinguishable from a healthy run, a fatal one must fail loudly
+    // naming its section.
+    console.log("\nfault battery (directed transport faults, every faultable section):");
+    for (const [index, plan] of faultBatteryPlan(master).entries()) {
       const seed = iterationSeed(master, 0x300000 + index);
-      const mode = (index >> 1) % 2 === 0 ? ("apply" as const) : ("check" as const);
-      const section = faultableSections[
-        (index + (master % faultableSections.length)) % faultableSections.length // codeql[js/biased-cryptographic-random] -- fuzz seed rotation, not key material
-      ] as FaultableSection;
-      const label = `${section}:${kind}/x${exhausting ? RETRY_BUDGET : 1}`;
-      const result = await faultedSectionRun(seed, {
-        section,
-        key: SECTION_PRIMARY_READ[section],
-        kind,
-        exhausting,
-        mode,
-      });
+      const label = `${plan.section}:${plan.kind}/x${plan.exhausting ? RETRY_BUDGET : 1}`;
+      const result = await faultedSectionRun(seed, plan);
       recordCoverage(result.coverage);
       recordFaultClass(result.faultClass);
       if (result.ok) {
-        console.log(`  ${label} [${mode}] ok`);
+        console.log(`  ${label} [${plan.mode}] ok`);
         continue;
       }
       batteryFailures++;
-      console.log(`  ${label} [${mode}] seed ${seed} FAIL: ${result.failure}`);
+      console.log(`  ${label} [${plan.mode}] seed ${seed} FAIL: ${result.failure}`);
       console.log(`    replay: bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
       reportArtifacts(result, `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`);
     }
@@ -2196,7 +2246,9 @@ async function main(): Promise<number> {
   }
 
   // Fault classes fired across the run (random stream + battery). The battery
-  // guarantees every endpoint x kind x verdict each soak, so a missing class
+  // guarantees every faultable endpoint AND every kind x budget combo each
+  // soak (the full endpoint x kind x verdict cross product accrues across
+  // soaks as the pairing rotates with the master seed), so a missing class
   // here means a battery failure already counted above; this histogram is the
   // visibility.
   console.log("\nfault-class coverage (endpoint kind/verdict fired):");
