@@ -31,7 +31,7 @@ import {
   grantFor,
   type SectionPermission,
 } from "../sections/contract.js";
-import { nameKey } from "../sections/labels.js";
+import { nameKey } from "../sections/labels/index.js";
 
 /** The lookup key: one exact-titled report issue per repo, forever reused. */
 export const ISSUE_TITLE = "[automated] settings-as-code: private settings report";

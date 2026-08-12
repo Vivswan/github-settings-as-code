@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { labelsSection, normalizeColor } from "../../src/sections/labels.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { labelsSection, normalizeColor } from "./index.js";
 
 describe("normalizeColor", () => {
   test("strips hash, lowercases", () => {

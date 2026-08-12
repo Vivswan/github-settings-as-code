@@ -15,6 +15,7 @@
  */
 
 import { MAX_PINNED_ENVIRONMENTS } from "../../../src/schema.js";
+import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG } from "../constants.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "./secrets.js";
@@ -48,7 +49,6 @@ import {
   bypassLogins,
   CAP_UNAVAILABLE_405,
   environmentVariableName,
-  findLabel,
   type GraphqlHandler,
   type GraphqlHandlerResult,
   type Handler,
@@ -60,8 +60,6 @@ import {
   integrationBody,
   invalidRuleTypeResponse,
   type Json,
-  LABEL_CANONICAL_KEYS,
-  labelName,
   maskedConfig,
   maskHookSecret,
   mintSecretScanningVersion,
@@ -182,68 +180,7 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
   "repository.lfsPut": () => ({ status: 202, body: null }),
   "repository.lfsRemove": () => noContent(),
 
-  // labels -----------------------------------------------------------------
-  "labels.list": ({ state, query }) => ok(slicePage(state.labels, query)),
-  "labels.create": ({ state, body }) => {
-    const payload = asObject(body);
-    // A duplicate name answers 422, matching GitHub. The labels SECTION never
-    // POSTs a duplicate (it PATCHes an existing label), so this only fires for
-    // the private-report marker-label ensure-create, which tolerates the 422.
-    if (findLabel(state, String(payload.name))) {
-      return { status: 422, body: { message: "Validation Failed" } };
-    }
-    // Spread the payload FIRST so passthrough fields the labels section sends
-    // (and later subsetDiffs) are stored and read back; the known fields are
-    // then normalized over them.
-    const label: Json = {
-      ...payload,
-      id: state.nextId++,
-      node_id: `MDU6TGFiZWw${state.nextId}`,
-      url: `https://api.github.com/repos/${ADMIN_SLUG}/labels/${String(payload.name)}`,
-      name: payload.name,
-      color: payload.color ?? "ededed",
-      default: false,
-      description: payload.description ?? null,
-    };
-    state.labels.push(label);
-    return { status: 201, body: label };
-  },
-  "labels.update": ({ state, param, body }) => {
-    const name = param("name");
-    const label = findLabel(state, name);
-    if (!label) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    const payload = asObject(body);
-    if (typeof payload.new_name === "string") {
-      label.name = payload.new_name;
-    }
-    if (payload.color !== undefined) {
-      label.color = payload.color;
-    }
-    if (payload.description !== undefined) {
-      label.description = payload.description;
-    }
-    // Passthrough fields update verbatim, mirroring the create path, so a
-    // second apply's subsetDiff over them reads back what was written. The
-    // canonical server-owned fields stay canonical, exactly like create.
-    for (const [key, value] of Object.entries(payload)) {
-      if (LABEL_CANONICAL_KEYS.has(key)) {
-        continue;
-      }
-      label[key] = value;
-    }
-    return ok(label);
-  },
-  "labels.remove": ({ state, param }) => {
-    const name = param("name");
-    const index = state.labels.findIndex((l) => labelName(l) === name.toLowerCase());
-    if (index < 0) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    state.labels.splice(index, 1);
-    return noContent();
-  },
+  // labels: moved to src/sections/labels/mock.ts
 
   // rulesets ---------------------------------------------------------------
   "rulesets.list": ({ state, query }) => ok(slicePage(state.rulesets, query)),
@@ -1940,6 +1877,7 @@ interface SectionMockFragment {
  * tables carrying every section not yet migrated.
  */
 const FRAGMENTS: readonly SectionMockFragment[] = [
+  { rest: labelsMockHandlers },
   { rest: UNMOVED_SECTION_HANDLERS, graphql: UNMOVED_SECTION_GRAPHQL_HANDLERS },
 ];
 
