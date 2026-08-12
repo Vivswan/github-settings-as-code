@@ -3,14 +3,8 @@
 import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { GithubClient } from "../../github/api.js";
-import type {
-  MustBeNever,
-  SectionKey,
-  SettingsFile,
-  UndeclaredPolicy,
-  UndeclaredPolicyList,
-  UndeclaredPolicySection,
-} from "../../schema.js";
+import type { SectionKey, SettingsFile, UndeclaredPolicySection } from "../../schema.js";
+import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import { type EndpointDecl, endpointKind, endpointMethod } from "./endpoints.js";
 import type { GraphqlOpDecl } from "./graphql.js";
 import { grantFor, type SectionPermission } from "./permissions.js";

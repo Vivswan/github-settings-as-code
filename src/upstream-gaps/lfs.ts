@@ -1,5 +1,5 @@
 import type { Endpoints } from "@octokit/types";
-import type { MustBeNever } from "../schema.js";
+import type { MustBeNever } from "../types.js";
 import { defineGap } from "./gap.js";
 
 /** GitHub shipped the Git LFS repository toggle; @octokit/types does not carry these routes yet, nor does the published OpenAPI description. */

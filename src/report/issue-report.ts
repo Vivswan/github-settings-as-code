@@ -24,7 +24,7 @@ import type { RepoRef } from "../discovery/targets.js";
 import type { ApiError, GithubClient } from "../github/api.js";
 import { isPermissionError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
-import type { LabelConfig, SettingsFile, UndeclaredPolicyList } from "../schema.js";
+import type { SettingsFile } from "../schema.js";
 import {
   type EndpointDecl,
   expand,
@@ -32,6 +32,8 @@ import {
   type SectionPermission,
 } from "../sections/contract.js";
 import { nameKey } from "../sections/labels/index.js";
+import type { LabelConfig } from "../sections/labels/schema.js";
+import type { UndeclaredPolicyList } from "../types.js";
 
 /** The lookup key: one exact-titled report issue per repo, forever reused. */
 export const ISSUE_TITLE = "[automated] settings-as-code: private settings report";

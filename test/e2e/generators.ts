@@ -20,7 +20,6 @@ import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import settingsSchema from "../../lib/settings.schema.json" with { type: "json" };
 import {
-  type MustBeNever,
   SECTION_KEYS,
   type SectionKey,
   type SettingsFile,
@@ -55,6 +54,7 @@ import { genSecretScanningPatterns } from "../../src/sections/secret_scanning_cu
 import { genTeams } from "../../src/sections/teams/generators.js";
 import { genWebhooks } from "../../src/sections/webhooks/generators.js";
 import { genWorkflows } from "../../src/sections/workflows/generators.js";
+import type { MustBeNever } from "../../src/types.js";
 import { ADMIN_SLUG } from "./constants.js";
 import {
   E2E_SECRET_ENV,

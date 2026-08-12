@@ -34,7 +34,7 @@
 
 import sodium from "libsodium-wrappers";
 import { z } from "zod";
-import type { UndeclaredPolicy, UndeclaredPolicyList } from "../schema.js";
+import type { UndeclaredPolicy, UndeclaredPolicyList } from "../types.js";
 import {
   type DeclaredSecretValue,
   rejectDuplicates,

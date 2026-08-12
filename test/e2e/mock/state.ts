@@ -12,13 +12,14 @@
  * proves the round trip.
  */
 
-import { type MustBeNever, parseBypassActor } from "../../../src/schema.js";
 import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
 } from "../../../src/sections/branches/index.js";
+import { parseBypassActor } from "../../../src/sections/branches/schema.js";
 import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/roles.js";
+import type { MustBeNever } from "../../../src/types.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
 import type { OwnerKind, PermissionMask } from "../schema.js";

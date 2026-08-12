@@ -6,7 +6,7 @@
 
 import { z } from "zod";
 
-export const AutoTriggerCheckConfig = z
+const AutoTriggerCheckConfig = z
   .object({
     app_id: z.int().describe("The id of the GitHub App the preference applies to."),
     setting: z
@@ -17,7 +17,6 @@ export const AutoTriggerCheckConfig = z
   })
   .describe("One per-app auto-trigger toggle. Extra fields pass through verbatim.")
   .meta({ id: "AutoTriggerCheckConfig" });
-export type AutoTriggerCheckConfig = z.infer<typeof AutoTriggerCheckConfig>;
 
 export const CheckSuitePreferencesConfig = z
   .looseObject({

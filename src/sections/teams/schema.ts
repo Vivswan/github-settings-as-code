@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 
-export const TeamConfig = z
+const TeamConfig = z
   .object({
     name: z.string().describe("The team slug, the natural key."),
     permission: z
@@ -14,7 +14,6 @@ export const TeamConfig = z
     'One org team\'s access to the repository, matched by team slug. Keys other than name and permission are rejected (a misspelled "permission" would otherwise silently grant the default role).',
   )
   .meta({ id: "TeamConfig" });
-export type TeamConfig = z.infer<typeof TeamConfig>;
 
 /** The `teams:` document slice: the entry list the document composes from. */
 export const TeamsSlice = z.array(TeamConfig);

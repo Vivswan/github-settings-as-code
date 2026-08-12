@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod";
-import type { UndeclaredPolicyList } from "../../schema.js";
+import type { UndeclaredPolicyList } from "../../types.js";
 import {
   beginRun,
   call,

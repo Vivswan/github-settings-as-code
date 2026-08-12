@@ -64,55 +64,6 @@ import { WebhookConfig } from "./sections/webhooks/schema.js";
 import { WorkflowsSlice } from "./sections/workflows/schema.js";
 import type { MustBeNever } from "./types.js";
 
-export { ActionsConfig } from "./sections/actions/schema.js";
-export { ActionsSecretConfig } from "./sections/actions_secrets/schema.js";
-export { ActionsVariableConfig } from "./sections/actions_variables/schema.js";
-export { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
-export { AgentsVariableConfig } from "./sections/agents_variables/schema.js";
-export { AutolinkConfig } from "./sections/autolinks/schema.js";
-export {
-  BranchConfig,
-  BranchProtectionConfig,
-  type BypassActor,
-  parseBypassActor,
-} from "./sections/branches/schema.js";
-export {
-  AutoTriggerCheckConfig,
-  CheckSuitePreferencesConfig,
-} from "./sections/check_suite_preferences/schema.js";
-export { CodeQualitySetupConfig } from "./sections/code_quality_setup/schema.js";
-export { CodeScanningDefaultSetupConfig } from "./sections/code_scanning_default_setup/schema.js";
-export { CodespacesSecretConfig } from "./sections/codespaces_secrets/schema.js";
-export { CollaboratorConfig } from "./sections/collaborators/schema.js";
-export { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
-export { DependabotSecretConfig } from "./sections/dependabot_secrets/schema.js";
-export { DeployKeyConfig } from "./sections/deploy_keys/schema.js";
-export {
-  DeploymentBranchPolicyConfig,
-  DeploymentProtectionRuleConfig,
-  EnvironmentConfig,
-  type EnvironmentRoutedScalars,
-  EnvironmentSecretConfig,
-  EnvironmentVariableConfig,
-  MAX_PINNED_ENVIRONMENTS,
-} from "./sections/environments/schema.js";
-export {
-  INTERACTION_LIMITS_ROUTED_KEYS,
-  InteractionLimitsConfig,
-} from "./sections/interaction_limits/schema.js";
-export { LabelConfig } from "./sections/labels/schema.js";
-export { MilestoneConfig } from "./sections/milestones/schema.js";
-export { PagesConfig } from "./sections/pages/schema.js";
-export { RepositoryConfig } from "./sections/repository/schema.js";
-export { RulesetConfig } from "./sections/rulesets/schema.js";
-export { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
-export { TeamConfig } from "./sections/teams/schema.js";
-export { WebhookConfig, WebhookDeliveryConfig } from "./sections/webhooks/schema.js";
-export { WorkflowConfig } from "./sections/workflows/schema.js";
-export type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "./types.js";
-
-// --- Config schemas -----------------------------------------------------------
-
 // --- The settings document ----------------------------------------------------
 
 export const SettingsFile = z

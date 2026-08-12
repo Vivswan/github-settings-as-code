@@ -24,18 +24,7 @@
 
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
-import {
-  type DeploymentBranchPolicyConfig,
-  type DeploymentProtectionRuleConfig,
-  type EnvironmentConfig,
-  type EnvironmentRoutedScalars,
-  type EnvironmentSecretConfig,
-  type EnvironmentVariableConfig,
-  MAX_PINNED_ENVIRONMENTS,
-  type MustBeNever,
-  type UndeclaredPolicy,
-  type UndeclaredPolicyList,
-} from "../../schema.js";
+import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import {
   beginRun,
   call,
@@ -77,7 +66,16 @@ import {
   type VariablesScopeOps,
   variableKey,
 } from "../shared/variables-engine.js";
-import { EnvironmentsSlice } from "./schema.js";
+import {
+  type DeploymentBranchPolicyConfig,
+  type DeploymentProtectionRuleConfig,
+  type EnvironmentConfig,
+  type EnvironmentRoutedScalars,
+  type EnvironmentSecretConfig,
+  EnvironmentsSlice,
+  type EnvironmentVariableConfig,
+  MAX_PINNED_ENVIRONMENTS,
+} from "./schema.js";
 
 const permission: SectionPermission = { repo: ["environments"] };
 

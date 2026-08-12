@@ -17,7 +17,8 @@ import {
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import { DEFAULT_API_VERSION } from "../github/api.js";
 import { parseRecipient } from "../report/artifact-report.js";
-import { type MustBeNever, SECTION_KEYS, type SectionKey } from "../schema.js";
+import { SECTION_KEYS, type SectionKey } from "../schema.js";
+import type { MustBeNever } from "../types.js";
 import {
   DEFAULT_PRIVATE_REPORT,
   DEFAULT_PRIVATE_REPOS,

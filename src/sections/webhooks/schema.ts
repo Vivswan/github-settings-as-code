@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 
-export const WebhookDeliveryConfig = z
+const WebhookDeliveryConfig = z
   .looseObject({
     url: z
       .string()
@@ -28,7 +28,6 @@ export const WebhookDeliveryConfig = z
   .catchall(z.unknown().describe("Future config fields pass through verbatim."))
   .describe("A webhook's `config` mapping, sent to the config sub-endpoint on update.")
   .meta({ id: "WebhookDeliveryConfig" });
-export type WebhookDeliveryConfig = z.infer<typeof WebhookDeliveryConfig>;
 
 export const WebhookConfig = z
   .object({

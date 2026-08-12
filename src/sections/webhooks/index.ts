@@ -22,7 +22,7 @@
 
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
-import type { UndeclaredPolicyList } from "../../schema.js";
+import type { UndeclaredPolicyList } from "../../types.js";
 import {
   type ApplySectionContext,
   beginRun,

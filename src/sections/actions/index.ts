@@ -7,7 +7,7 @@
  */
 
 import { subsetDiff } from "../../engine/diff.js";
-import type { MustBeNever } from "../../schema.js";
+import type { MustBeNever } from "../../types.js";
 import {
   beginRun,
   call,

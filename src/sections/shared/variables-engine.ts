@@ -29,7 +29,7 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import type { UndeclaredPolicy } from "../../schema.js";
+import type { UndeclaredPolicy } from "../../types.js";
 import {
   type SectionContext,
   type SectionMeta,

@@ -6,10 +6,11 @@
  * document nobody declared. Inputs are never mutated.
  */
 
-import type { SettingsFile, UndeclaredPolicy } from "../schema.js";
+import type { SettingsFile } from "../schema.js";
 import { UNDECLARED_POLICY_SECTIONS } from "../schema.js";
 import { defaultUndeclaredPolicy } from "../sections/contract.js";
 import { sectionModule } from "../sections/registry.js";
+import type { UndeclaredPolicy } from "../types.js";
 
 /**
  * A PLAIN mapping only: the prototype must be Object.prototype or null. A

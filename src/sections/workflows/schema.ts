@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 
-export const WorkflowConfig = z
+const WorkflowConfig = z
   .object({
     path: z.string().describe('Full ".github/workflows/ci.yml" or the bare "ci.yml" file name.'),
     state: z
@@ -13,7 +13,6 @@ export const WorkflowConfig = z
     "One workflow's enable/disable state, keyed by its file path. Keys other than path and state are rejected (the enable/disable calls carry no payload, so an extra key could only be a typo).",
   )
   .meta({ id: "WorkflowConfig" });
-export type WorkflowConfig = z.infer<typeof WorkflowConfig>;
 
 /** The `workflows:` document slice: the entry list the document composes from. */
 export const WorkflowsSlice = z.array(WorkflowConfig);

@@ -14,9 +14,10 @@ import {
 import type { RepoRef } from "../discovery/targets.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
-import { type MustBeNever, SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
+import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
 import { PermissionDenied, type SectionContext, type SectionResult } from "../sections/contract.js";
 import { SECTIONS } from "../sections/registry.js";
+import type { MustBeNever } from "../types.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
 import { validateSectionShapes } from "./validate.js";
 
