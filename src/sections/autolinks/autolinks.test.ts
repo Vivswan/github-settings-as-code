@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { autolinksSection } from "../../src/sections/autolinks.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { autolinksSection } from "./index.js";
 
 describe("autolinks undeclared policy", () => {
   const liveAutolinks = [

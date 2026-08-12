@@ -30,10 +30,12 @@
  */
 
 import { z } from "zod";
+import { AutolinkConfig } from "./sections/autolinks/schema.js";
 import { LabelConfig } from "./sections/labels/schema.js";
 import { MilestoneConfig } from "./sections/milestones/schema.js";
 import type { MustBeNever } from "./types.js";
 
+export { AutolinkConfig } from "./sections/autolinks/schema.js";
 export { LabelConfig } from "./sections/labels/schema.js";
 export { MilestoneConfig } from "./sections/milestones/schema.js";
 export type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "./types.js";
@@ -505,21 +507,6 @@ export type EnvironmentConfig = z.infer<typeof EnvironmentConfig>;
  * verbatim and configure nothing.
  */
 export type EnvironmentRoutedScalars = Pick<EnvironmentConfig, "pinned">;
-
-export const AutolinkConfig = z
-  .object({
-    key_prefix: z
-      .string()
-      .describe('Text prefix that triggers the link (e.g. "TICKET-"), the natural key.'),
-    url_template: z.string().describe('Target URL template containing "<num>".'),
-    is_alphanumeric: z
-      .boolean()
-      .optional()
-      .describe("Whether <num> also matches letters; upstream default is true."),
-  })
-  .describe("One autolink reference, matched by key prefix.")
-  .meta({ id: "AutolinkConfig" });
-export type AutolinkConfig = z.infer<typeof AutolinkConfig>;
 
 export const ActionsConfig = z
   .object({

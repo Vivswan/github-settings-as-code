@@ -15,6 +15,7 @@
  */
 
 import { MAX_PINNED_ENVIRONMENTS } from "../../../src/schema.js";
+import { autolinksMockHandlers } from "../../../src/sections/autolinks/mock.js";
 import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
 import { milestonesMockHandlers } from "../../../src/sections/milestones/mock.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
@@ -596,27 +597,7 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
     return noContent();
   },
 
-  // autolinks --------------------------------------------------------------
-  "autolinks.list": ({ state }) => ok(state.autolinks), // section GETs unpaginated
-  "autolinks.create": ({ state, body }) => {
-    const payload = asObject(body);
-    const autolink: Json = {
-      id: state.nextId++,
-      is_alphanumeric: true,
-      ...payload,
-    };
-    state.autolinks.push(autolink);
-    return { status: 201, body: autolink };
-  },
-  "autolinks.remove": ({ state, param }) => {
-    const id = param("autolink_id");
-    const index = state.autolinks.findIndex((a) => String(a.id) === id);
-    if (index < 0) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    state.autolinks.splice(index, 1);
-    return noContent();
-  },
+  // autolinks: moved to src/sections/autolinks/mock.ts
 
   // actions ----------------------------------------------------------------
   "actions.getPermissions": ({ state }) => ok(state.actions_permissions),
@@ -1845,6 +1826,7 @@ interface SectionMockFragment {
  * tables carrying every section not yet migrated.
  */
 const FRAGMENTS: readonly SectionMockFragment[] = [
+  { rest: autolinksMockHandlers },
   { rest: labelsMockHandlers },
   { rest: milestonesMockHandlers },
   { rest: UNMOVED_SECTION_HANDLERS, graphql: UNMOVED_SECTION_GRAPHQL_HANDLERS },
