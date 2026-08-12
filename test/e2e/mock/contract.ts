@@ -88,12 +88,14 @@ export interface CorruptOption {
  * hooks) turn each kind into its wire behavior. Every kind is retried by the
  * client (throttled 403/429 via the throttling path, drops and 5xx via the retry
  * plugin), so `times: 1` is a transient the run recovers from and `times` >= 3
- * (1 + MAX_RETRIES) exhausts the retries and surfaces as a hard failure.
+ * (1 + MAX_RETRIES) exhausts the retries and surfaces as a hard failure;
+ * "always" faults every matching request (CorruptOption's counting), for a
+ * route that must fail however often the run retries or revisits it.
  */
 export interface FaultOption {
   key: string;
   kind: "rate_limit_403" | "429_then_200" | "connection_drop" | "server_error";
-  times?: number;
+  times?: number | "always";
 }
 
 /**

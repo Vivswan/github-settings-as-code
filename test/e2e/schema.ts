@@ -337,8 +337,9 @@ const DiscoverySchema = z
   .strict();
 
 /**
- * A transport-level fault the mock injects on the first `times` (default 1)
- * requests that match `endpoint` - a "section.role" key, or a core-route key
+ * A transport-level fault the mock injects on the first `times` (default 1;
+ * "always" = every match) requests that match `endpoint` - a "section.role"
+ * key, or a core-route key
  * from CORE_FAULT_KEYS in mock/chaos.ts (e.g. "core.discoveryList" for the
  * /user/repos discovery listing, "core.contentsGet" for the settings-file
  * fetch, and the "core.issue*" / "core.reportLabelCreate" / "core.userGet"
@@ -361,7 +362,7 @@ const FaultSchema = z
   .object({
     endpoint: z.string(),
     kind: z.enum(["rate_limit_403", "429_then_200", "connection_drop", "server_error"]),
-    times: z.number().int().positive().optional(),
+    times: z.union([z.number().int().positive(), z.literal("always")]).optional(),
   })
   .strict();
 

@@ -167,7 +167,8 @@ function probeCanProveVisibility(
     return false;
   }
   const probeFault = faults?.find((f) => f.key === "repository.get");
-  if (probeFault && (probeFault.times ?? 1) >= PROBE_RETRY_BUDGET) {
+  const probeTimes = probeFault?.times ?? 1;
+  if (probeFault && (probeTimes === "always" || probeTimes >= PROBE_RETRY_BUDGET)) {
     return false;
   }
   return true;
