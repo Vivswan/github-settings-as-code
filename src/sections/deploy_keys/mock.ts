@@ -6,7 +6,6 @@
  * sections.ts.
  */
 
-import { ADMIN_SLUG } from "../../../test/e2e/constants.js";
 import {
   asObject,
   type Handler,
@@ -49,7 +48,7 @@ export const deployKeysMockHandlers: Record<string, Handler> = {
     const key: Json = {
       id,
       key: stored,
-      url: `https://api.github.com/repos/${ADMIN_SLUG}/keys/${id}`,
+      url: `https://api.github.com/repos/${state.slug}/keys/${id}`,
       title: String(payload.title ?? ""),
       verified: true,
       // Fixed so a repeat apply leaves the state byte-stable (idempotence).

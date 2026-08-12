@@ -3,7 +3,6 @@
  * for the aggregation and the deliberate src -> test import direction).
  */
 
-import { ADMIN_SLUG } from "../../../test/e2e/constants.js";
 import { decodeNodeId, mintNodeId } from "../../../test/e2e/mock/node-id.js";
 import {
   allRuleNodes,
@@ -73,7 +72,7 @@ export const branchesMockHandlers: Record<string, Handler> = {
     // The documented 200 body carries {url, enabled}; the url stays out of
     // the stored state so the flattener sees the same shape a GET serves.
     return ok({
-      url: `https://api.github.com/repos/${ADMIN_SLUG}/branches/${branch}/protection/required_signatures`,
+      url: `https://api.github.com/repos/${state.slug}/branches/${branch}/protection/required_signatures`,
       enabled: true,
     });
   },

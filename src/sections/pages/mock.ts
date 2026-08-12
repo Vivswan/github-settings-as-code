@@ -1,7 +1,7 @@
 /**
  * The pages section's e2e mock fragment: one handler per "pages.<role>" key
  * in the section's ENDPOINTS, registered in test/e2e/mock/sections.ts.
- * Imports only the leaf seams (mock/support.ts, mock/state.ts) - never
+ * Imports only the leaf seam (mock/support.ts) - never
  * routes.ts or sections.ts; the bundle entry is src/main.ts, so this
  * fragment never reaches lib/index.js.
  */
@@ -23,11 +23,18 @@ export const pagesMockHandlers: Record<string, Handler> = {
       // will classify as a hard failure rather than fake a 201.
       return { status: 422, body: { message: "Pages is already enabled" } };
     }
-    state.pages = { url: pagesUrl(), ...asObject(body) };
+    state.pages = { url: pagesUrl(state.slug), ...asObject(body) };
     return { status: 201, body: state.pages };
   },
   "pages.update": ({ state, body }) => {
-    state.pages = { url: pagesUrl(), ...asObject(state.pages), ...asObject(body) };
+    // GitHub's PUT updates an EXISTING site only: with Pages disabled it
+    // answers 404 instead of creating one. Mirrored here so an engine
+    // regression that PUTs after a delete cannot silently resurrect the site
+    // in the mock's state.
+    if (state.pages === null) {
+      return { status: 404, body: { message: "Not Found" } };
+    }
+    state.pages = { url: pagesUrl(state.slug), ...state.pages, ...asObject(body) };
     return noContent();
   },
   "pages.remove": ({ state }) => {

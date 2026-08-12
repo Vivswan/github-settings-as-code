@@ -29,6 +29,7 @@ export const webhooksMockHandlers: Record<string, Handler> = {
     const hook = completeHook(
       { ...payload, config: storedHookConfig(asObject(payload.config)) },
       state.nextId++,
+      state.slug,
     );
     state.hooks.push(hook);
     return { status: 201, body: maskHookSecret(hook) };
