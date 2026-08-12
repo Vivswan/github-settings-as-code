@@ -83,6 +83,21 @@ export const SHARED_FAN_OUT: Record<string, SectionKey[]> = {
     "agents_secrets",
     "environments",
   ],
+  // repo-secrets.ts is the section factory over the engine: the four
+  // repository-level secret families are each one call into it.
+  "repo-secrets.ts": [
+    "actions_secrets",
+    "dependabot_secrets",
+    "codespaces_secrets",
+    "agents_secrets",
+  ],
+  // variables-engine.ts is the shared value-based reconciliation engine,
+  // consumed by the two repository-level variable sections and by
+  // environments (its nested per-environment variables key).
+  "variables-engine.ts": ["actions_variables", "agents_variables", "environments"],
+  // repo-variables.ts is the section factory over the variables engine: the
+  // two repository-level variable families are each one call into it.
+  "repo-variables.ts": ["actions_variables", "agents_variables"],
   // schema-helpers.ts holds the leaf zod helpers the per-section schema
   // files and root schema.ts share: knobbed() shapes the wrapped
   // {undeclared, entries} form of every UNDECLARED_POLICY_SECTIONS value

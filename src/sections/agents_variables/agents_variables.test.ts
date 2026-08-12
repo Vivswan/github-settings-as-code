@@ -1,13 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
-import { agentsVariablesSection, variableKey } from "./index.js";
-
-describe("variableKey", () => {
-  test("uppercases (GitHub stores variable names uppercased)", () => {
-    expect(variableKey("agent_model")).toBe("AGENT_MODEL");
-  });
-});
+import { agentsVariablesSection } from "./index.js";
 
 /** The enveloped list body the mock serves for a live variable set. */
 function listRoute(variables: Array<{ name: string; value: string }>) {

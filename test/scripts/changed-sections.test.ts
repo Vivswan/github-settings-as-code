@@ -95,6 +95,14 @@ describe("changed-sections file map", () => {
         "agents_secrets",
         "environments",
       ],
+      "repo-secrets.ts": [
+        "actions_secrets",
+        "dependabot_secrets",
+        "codespaces_secrets",
+        "agents_secrets",
+      ],
+      "variables-engine.ts": ["actions_variables", "agents_variables", "environments"],
+      "repo-variables.ts": ["actions_variables", "agents_variables"],
       // Derived on purpose, matching the selector's own expression: the
       // helpers shape every knobbed section's wrapped form plus
       // environments' nested lists, so hand-copying the keys here would
