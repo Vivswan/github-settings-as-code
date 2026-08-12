@@ -27,17 +27,18 @@ import { GithubApi, type GithubClient, registerRedactedSlug } from "../github/ap
 import { createVisibilityResolver } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import { deliverArtifactReport } from "../report/artifact-report.js";
+import { applyMarkerInjection, composeTargetReport, deliverReport } from "../report/delivery.js";
 import { parseConfig } from "./inputs.js";
 import { actionsIo, setOutput } from "./io.js";
+import { runMulti } from "./multi.js";
 import {
-  applyMarkerInjection,
-  composeTargetReport,
-  deliverReport,
+  capturingIo,
+  isIssueChannel,
   isPrivateVisibility,
-  runMulti,
+  REDACTED_NOTE,
   toPublicView,
-} from "./multi.js";
-import { capturingIo, isIssueChannel, REDACTED_NOTE } from "./redact.js";
+  WITHHELD_REPORT_NOTICE,
+} from "./redact.js";
 import { readSettingsFile } from "./settings-read.js";
 import { writeMultiSummary, writeRedactedSummary, writeSummary } from "./summary.js";
 
@@ -212,10 +213,7 @@ export async function run(overrides?: { api?: GithubClient; io?: Io }): Promise<
   } else if (redacted && cfg.privateReport !== "none" && !deliverable) {
     // Redacted but not proven private: the report is withheld, said once,
     // safely (the cause and fix are slug-free; the placeholder stays).
-    io.annotate(
-      "notice",
-      "private repository: visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the target repository), so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified",
-    );
+    io.annotate("notice", `private repository: ${WITHHELD_REPORT_NOTICE}`);
   }
 
   if (result.preflightDenied.length > 0) {

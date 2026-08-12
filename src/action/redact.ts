@@ -10,6 +10,9 @@
  * choke point that keeps private and internal targets out of the public view.
  */
 
+import type { Target } from "../discovery/targets.js";
+import type { RepoRunResult } from "../engine/orchestrate.js";
+import type { RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 
 /** The `private-repos` input values; the single source its type derives from. */
@@ -55,6 +58,132 @@ export const REDACTED_NOTE =
 
 /** The placeholder that replaces every hidden detail value in the public view. */
 export const REDACTED_DETAIL = "hidden (private repository)";
+
+/**
+ * The notice for a redacted target whose visibility could not be PROVEN
+ * private or internal, so the private report was withheld (delivery fails
+ * closed the opposite way from redaction). Shared verbatim by the single-
+ * and multi-repo run flows - the cause and the fix are slug-free, so one
+ * wording serves both without leaking anything.
+ */
+export const WITHHELD_REPORT_NOTICE =
+  "visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the target repository), so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified";
+
+/**
+ * One multi-repo target's full internal end state. `outcomes`, `note`, and
+ * `slug` hold the UNREDACTED detail; `display` and `redacted` drive the
+ * public view derived by toPublicView(). The summary and outputs render from
+ * that view, never from this record directly.
+ */
+export type TargetOutcome = Pick<Target, "slug" | "source" | "origin"> &
+  Pick<RepoRunResult, "result" | "outcomes"> & {
+    /** Human line for skips/failures that produced no section outcomes. */
+    note?: string;
+    /** The public label: the slug, or its "private repository #N" placeholder. */
+    display: string;
+    /** True when this target is hidden from the public view. */
+    redacted: boolean;
+  };
+
+/** A leak-free section outcome: key and status survive, detail is hidden. */
+export type RedactedOutcome = {
+  key: string;
+  status: RepoRunResult["outcomes"][number]["status"];
+  detail: string[];
+};
+
+/**
+ * Strip a redacted target's section outcomes to safe values: the key and
+ * status (closed enums, provably leak-free) survive, and every detail value is
+ * replaced with the placeholder - plus the HTTP code on failed/skipped
+ * sections, the one piece of error context that is a safe closed value. Shared
+ * by the multi-repo public view and the single-repo redacted summary so both
+ * render private targets through ONE definition of "hidden".
+ */
+export function redactOutcomes(outcomes: RepoRunResult["outcomes"]): RedactedOutcome[] {
+  return outcomes.map((o) => {
+    // The SectionOutcome union proves a code exists only on failed/skipped
+    // rows, so presence alone decides.
+    const withCode =
+      o.httpStatus !== undefined ? `${REDACTED_DETAIL}, HTTP ${o.httpStatus}` : REDACTED_DETAIL;
+    return { key: o.key, status: o.status, detail: [withCode] };
+  });
+}
+
+/**
+ * The leak-free projection of a TargetOutcome for the public view (summary,
+ * outputs, annotations). For a redacted target the slug becomes its
+ * placeholder, every detail value is replaced with the safe placeholder (plus
+ * the HTTP code when known), and the note becomes the generic redacted note;
+ * for a plain target it is byte-identical to the internal record. Deriving
+ * this with a pure function makes "no private data in the public view" a
+ * property of one testable function.
+ */
+export interface PublicTargetView {
+  display: string;
+  source: Target["source"];
+  result: RepoRunResult["result"];
+  outcomes: Array<{
+    key: string;
+    status: RepoRunResult["outcomes"][number]["status"];
+    detail: string[];
+  }>;
+  note?: string;
+}
+
+/** Derive the public view of a target; redacted targets are stripped to safe statuses. */
+export function toPublicView(target: TargetOutcome): PublicTargetView {
+  if (!target.redacted) {
+    return {
+      display: target.slug,
+      source: target.source,
+      result: target.result,
+      outcomes: target.outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
+      note: target.note,
+    };
+  }
+  return {
+    display: target.display,
+    source: target.source,
+    result: target.result,
+    outcomes: redactOutcomes(target.outcomes),
+    note: REDACTED_NOTE,
+  };
+}
+
+/** True when a resolved visibility PROVES the repo private or internal. */
+export function isPrivateVisibility(visibility: RepoVisibility): boolean {
+  return visibility === "private" || visibility === "internal";
+}
+
+/**
+ * The single generic annotation a redacted target gets, its level chosen by
+ * result: a failed run names the failed section keys and their HTTP codes (safe
+ * closed values only); a check-mode drift warns; a skipped run notices; a
+ * healthy run says nothing. The section lists are precomputed so no private
+ * detail reaches this public surface.
+ */
+export function emitRedactedResult(
+  io: Io,
+  display: string,
+  result: RepoRunResult["result"],
+  failedSections: string[],
+  driftSections: string[],
+): void {
+  if (result === "failed") {
+    const sections = failedSections.length > 0 ? ` - ${failedSections.join(", ")}` : "";
+    io.annotate("error", `${display}: failed${sections}. ${REDACTED_NOTE}`);
+    return;
+  }
+  if (result === "drift") {
+    const sections = driftSections.length > 0 ? ` - ${driftSections.join(", ")}` : "";
+    io.annotate("warning", `${display}: drift${sections}. ${REDACTED_NOTE}`);
+    return;
+  }
+  if (result === "skipped") {
+    io.annotate("notice", `${display}: skipped. ${REDACTED_NOTE}`);
+  }
+}
 
 /**
  * The redaction decision for one run: which slugs are hidden, the

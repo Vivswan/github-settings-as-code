@@ -5,8 +5,7 @@
 
 import { appendFileSync } from "node:fs";
 import type { RepoResult, SectionOutcome } from "../engine/orchestrate.js";
-import { type PublicTargetView, redactOutcomes } from "./multi.js";
-import { REDACTED_NOTE } from "./redact.js";
+import { type PublicTargetView, REDACTED_NOTE, redactOutcomes } from "./redact.js";
 
 // Typed over every status both summary writers can meet, so a new status
 // value fails compilation here instead of rendering ":undefined:".
