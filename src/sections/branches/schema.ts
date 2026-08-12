@@ -127,4 +127,4 @@ export const BranchConfig = z
 export type BranchConfig = z.infer<typeof BranchConfig>;
 
 /** The `branches:` document slice: the entry list the document composes from. */
-export const BranchesSlice = z.array(BranchConfig);
+export const BranchesConfig = z.array(BranchConfig);

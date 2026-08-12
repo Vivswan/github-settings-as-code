@@ -18,7 +18,7 @@ import { ActionsVariableConfig } from "../src/sections/actions_variables/schema.
 import { AgentsSecretConfig } from "../src/sections/agents_secrets/schema.js";
 import { AgentsVariableConfig } from "../src/sections/agents_variables/schema.js";
 import { AutolinkConfig } from "../src/sections/autolinks/schema.js";
-import { BranchesSlice } from "../src/sections/branches/schema.js";
+import { BranchesConfig } from "../src/sections/branches/schema.js";
 import { CheckSuitePreferencesConfig } from "../src/sections/check_suite_preferences/schema.js";
 import { CodeQualitySetupConfig } from "../src/sections/code_quality_setup/schema.js";
 import { CodeScanningDefaultSetupConfig } from "../src/sections/code_scanning_default_setup/schema.js";
@@ -27,17 +27,17 @@ import { CollaboratorConfig } from "../src/sections/collaborators/schema.js";
 import { CustomPropertyConfig } from "../src/sections/custom_properties/schema.js";
 import { DependabotSecretConfig } from "../src/sections/dependabot_secrets/schema.js";
 import { DeployKeyConfig } from "../src/sections/deploy_keys/schema.js";
-import { EnvironmentsSlice } from "../src/sections/environments/schema.js";
-import { InteractionLimitsSlice } from "../src/sections/interaction_limits/schema.js";
+import { EnvironmentsConfig } from "../src/sections/environments/schema.js";
+import { InteractionLimitsConfig } from "../src/sections/interaction_limits/schema.js";
 import { LabelConfig } from "../src/sections/labels/schema.js";
 import { MilestoneConfig } from "../src/sections/milestones/schema.js";
-import { PagesSlice } from "../src/sections/pages/schema.js";
+import { PagesConfig } from "../src/sections/pages/schema.js";
 import { RepositoryConfig } from "../src/sections/repository/schema.js";
 import { RulesetConfig } from "../src/sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "../src/sections/secret_scanning_custom_patterns/schema.js";
-import { TeamsSlice } from "../src/sections/teams/schema.js";
+import { TeamsConfig } from "../src/sections/teams/schema.js";
 import { WebhookConfig } from "../src/sections/webhooks/schema.js";
-import { WorkflowsSlice } from "../src/sections/workflows/schema.js";
+import { WorkflowsConfig } from "../src/sections/workflows/schema.js";
 
 /** The zod internals the unwrap below reads (the loosen() idiom). */
 interface ZodDefView {
@@ -64,23 +64,23 @@ const EXPECTED: Record<
   repository: { kind: "slice", slice: RepositoryConfig },
   labels: { kind: "knob", entry: LabelConfig },
   rulesets: { kind: "knob", entry: RulesetConfig },
-  environments: { kind: "slice", slice: EnvironmentsSlice },
-  branches: { kind: "slice", slice: BranchesSlice },
+  environments: { kind: "slice", slice: EnvironmentsConfig },
+  branches: { kind: "slice", slice: BranchesConfig },
   autolinks: { kind: "knob", entry: AutolinkConfig },
   actions: { kind: "slice", slice: ActionsConfig },
   actions_secrets: { kind: "knob", entry: ActionsSecretConfig },
   dependabot_secrets: { kind: "knob", entry: DependabotSecretConfig },
   codespaces_secrets: { kind: "knob", entry: CodespacesSecretConfig },
   agents_secrets: { kind: "knob", entry: AgentsSecretConfig },
-  workflows: { kind: "slice", slice: WorkflowsSlice },
+  workflows: { kind: "slice", slice: WorkflowsConfig },
   check_suite_preferences: { kind: "slice", slice: CheckSuitePreferencesConfig },
-  pages: { kind: "slice", slice: PagesSlice },
+  pages: { kind: "slice", slice: PagesConfig },
   code_scanning_default_setup: { kind: "slice", slice: CodeScanningDefaultSetupConfig },
   code_quality_setup: { kind: "slice", slice: CodeQualitySetupConfig },
   collaborators: { kind: "knob", entry: CollaboratorConfig },
-  teams: { kind: "slice", slice: TeamsSlice },
+  teams: { kind: "slice", slice: TeamsConfig },
   milestones: { kind: "knob", entry: MilestoneConfig },
-  interaction_limits: { kind: "slice", slice: InteractionLimitsSlice },
+  interaction_limits: { kind: "slice", slice: InteractionLimitsConfig },
   actions_variables: { kind: "knob", entry: ActionsVariableConfig },
   agents_variables: { kind: "knob", entry: AgentsVariableConfig },
   webhooks: { kind: "knob", entry: WebhookConfig },

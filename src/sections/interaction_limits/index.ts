@@ -37,13 +37,12 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { call, tryCall } from "../contract/requests.js";
-import {
-  INTERACTION_LIMITS_ROUTED_KEYS,
-  type InteractionLimitsConfig,
-  InteractionLimitsSlice,
-} from "./schema.js";
+import { INTERACTION_LIMITS_ROUTED_KEYS, InteractionLimitsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
+
+/** The declared limits object: the section config with its null (clear) arm stripped. */
+type DeclaredInteractionLimits = NonNullable<InteractionLimitsConfig>;
 
 const ORG_OVERRIDE = "an organization- or user-level interaction limit overrides this repository's";
 
@@ -152,11 +151,11 @@ async function liveBaseLimit(ctx: SectionContext, section: SectionMeta): Promise
  */
 interface DeclaredLimits {
   base?: { limit: string } & Record<string, unknown>;
-  cap: InteractionLimitsConfig["pull_request_creation_cap"];
-  bypass: InteractionLimitsConfig["pull_request_creation_bypass"];
+  cap: DeclaredInteractionLimits["pull_request_creation_cap"];
+  bypass: DeclaredInteractionLimits["pull_request_creation_bypass"];
 }
 
-function splitDeclared(desired: InteractionLimitsConfig): DeclaredLimits {
+function splitDeclared(desired: DeclaredInteractionLimits): DeclaredLimits {
   const base = Object.fromEntries(
     Object.entries(desired as Record<string, unknown>).filter(
       ([key]) => !INTERACTION_LIMITS_ROUTED_KEYS.has(key),
@@ -223,7 +222,7 @@ export const interactionLimitsSection = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
-  shape: requirePlainMapping(loosen(InteractionLimitsSlice)),
+  shape: requirePlainMapping(loosen(InteractionLimitsConfig)),
   async run(ctx, desired): Promise<SectionResult> {
     const run = beginRun(ctx);
 

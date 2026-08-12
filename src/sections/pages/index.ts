@@ -8,7 +8,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { beginRun, loosen, type SectionModule, type SectionResult } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { call, probeAbsent } from "../contract/requests.js";
-import { type PagesConfig, PagesSlice } from "./schema.js";
+import { PagesConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["pages"] };
 
@@ -25,25 +25,28 @@ const ENDPOINTS = {
   remove: { route: "DELETE /repos/{owner}/{repo}/pages", statuses: { 204: "Pages disabled" } },
 } as const satisfies Record<string, EndpointDecl>;
 
+/** The declared site object: the section config with its null (Pages OFF) arm stripped. */
+type PagesSite = NonNullable<PagesConfig>;
+
 /**
  * A Pages source as the API takes it: `path` is REQUIRED on the wire (the
  * update PUT rejects a source without it), where the config leaves it
  * optional. wireSource() is the only mint, so a payload can never carry a
  * pathless source.
  */
-type PagesSourceWire = Omit<NonNullable<PagesConfig["source"]>, "path"> & { path: string };
+type PagesSourceWire = Omit<NonNullable<PagesSite["source"]>, "path"> & { path: string };
 
 /**
  * Normalize a declared source to the wire form. The update PUT requires
  * path alongside branch when source is sent; the create POST defaults it,
  * so default it everywhere.
  */
-function wireSource(source: NonNullable<PagesConfig["source"]>): PagesSourceWire {
+function wireSource(source: NonNullable<PagesSite["source"]>): PagesSourceWire {
   return { ...source, path: source.path ?? "/" };
 }
 
 /** The declared config with its source already in the wire form. */
-type PagesWirePayload = Omit<PagesConfig, "source"> & { source?: PagesSourceWire };
+type PagesWirePayload = Omit<PagesSite, "source"> & { source?: PagesSourceWire };
 
 /**
  * The subset of the payload the create POST accepts; GitHub documents every
@@ -61,7 +64,7 @@ export const pagesSection = {
   endpoints: ENDPOINTS,
   // The handler dereferences source.path before the API sees it, so the
   // shape must catch source: null or a source without a branch.
-  shape: loosen(PagesSlice),
+  shape: loosen(PagesConfig),
   async run(ctx, desired): Promise<SectionResult> {
     const run = beginRun(ctx);
     // The probe stays the discriminated union probeAbsent returns; narrowing

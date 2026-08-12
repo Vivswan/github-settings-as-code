@@ -72,7 +72,7 @@ import {
   type EnvironmentConfig,
   type EnvironmentRoutedScalars,
   type EnvironmentSecretConfig,
-  EnvironmentsSlice,
+  EnvironmentsConfig,
   type EnvironmentVariableConfig,
   MAX_PINNED_ENVIRONMENTS,
 } from "./schema.js";
@@ -530,7 +530,7 @@ export const environmentsSection = {
   grantCaveat: NESTED_OVERRIDES_CAVEAT,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
-  shape: loosen(EnvironmentsSlice),
+  shape: loosen(EnvironmentsConfig),
   /**
    * The declared value of every entry's secrets list, across all declared
    * environments, for the engine's up-front reference resolution - each

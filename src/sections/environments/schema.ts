@@ -184,7 +184,7 @@ export type EnvironmentConfig = z.infer<typeof EnvironmentConfig>;
  * document validation rejects the document in BOTH modes before ANY section
  * writes, where a hook-level check would fire only mid-run.
  */
-export const EnvironmentsSlice = z.array(EnvironmentConfig).superRefine((entries, refineCtx) => {
+export const EnvironmentsConfig = z.array(EnvironmentConfig).superRefine((entries, refineCtx) => {
   const pinnedIndexes = entries.flatMap((entry, index) => (entry.pinned === true ? [index] : []));
   if (pinnedIndexes.length > MAX_PINNED_ENVIRONMENTS) {
     refineCtx.addIssue({

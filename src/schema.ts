@@ -41,7 +41,7 @@ import { ActionsVariableConfig } from "./sections/actions_variables/schema.js";
 import { AgentsSecretConfig } from "./sections/agents_secrets/schema.js";
 import { AgentsVariableConfig } from "./sections/agents_variables/schema.js";
 import { AutolinkConfig } from "./sections/autolinks/schema.js";
-import { BranchesSlice } from "./sections/branches/schema.js";
+import { BranchesConfig } from "./sections/branches/schema.js";
 import { CheckSuitePreferencesConfig } from "./sections/check_suite_preferences/schema.js";
 import { CodeQualitySetupConfig } from "./sections/code_quality_setup/schema.js";
 import { CodeScanningDefaultSetupConfig } from "./sections/code_scanning_default_setup/schema.js";
@@ -50,18 +50,18 @@ import { CollaboratorConfig } from "./sections/collaborators/schema.js";
 import { CustomPropertyConfig } from "./sections/custom_properties/schema.js";
 import { DependabotSecretConfig } from "./sections/dependabot_secrets/schema.js";
 import { DeployKeyConfig } from "./sections/deploy_keys/schema.js";
-import { EnvironmentsSlice } from "./sections/environments/schema.js";
-import { InteractionLimitsSlice } from "./sections/interaction_limits/schema.js";
+import { EnvironmentsConfig } from "./sections/environments/schema.js";
+import { InteractionLimitsConfig } from "./sections/interaction_limits/schema.js";
 import { LabelConfig } from "./sections/labels/schema.js";
 import { MilestoneConfig } from "./sections/milestones/schema.js";
-import { PagesSlice } from "./sections/pages/schema.js";
+import { PagesConfig } from "./sections/pages/schema.js";
 import { RepositoryConfig } from "./sections/repository/schema.js";
 import { RulesetConfig } from "./sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
 import { knobbed } from "./sections/shared/schema-helpers.js";
-import { TeamsSlice } from "./sections/teams/schema.js";
+import { TeamsConfig } from "./sections/teams/schema.js";
 import { WebhookConfig } from "./sections/webhooks/schema.js";
-import { WorkflowsSlice } from "./sections/workflows/schema.js";
+import { WorkflowsConfig } from "./sections/workflows/schema.js";
 import type { MustBeNever } from "./types.js";
 
 // --- The settings document ----------------------------------------------------
@@ -81,8 +81,8 @@ export const SettingsFile = z
       .describe(
         "Repository rulesets, upserted by name; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`).",
       ),
-    branches: BranchesSlice.optional().describe("Classic branch protection per branch."),
-    environments: EnvironmentsSlice.optional().describe(
+    branches: BranchesConfig.optional().describe("Classic branch protection per branch."),
+    environments: EnvironmentsConfig.optional().describe(
       "Deployment environments, upserted by name.",
     ),
     autolinks: knobbed(AutolinkConfig)
@@ -111,13 +111,13 @@ export const SettingsFile = z
       .describe(
         "Repository Copilot agents secrets (the secret store Copilot coding agents read), written by name with values sealed client-side; each value is a whole-value `$NAME` reference to the action step's environment, never a literal. Undeclared secrets are kept by default (the wrapped form can set `undeclared: delete`; a deleted secret's value is unrecoverable).",
       ),
-    workflows: WorkflowsSlice.optional().describe(
+    workflows: WorkflowsConfig.optional().describe(
       "Per-workflow enable/disable state; undeclared workflows are untouched.",
     ),
     check_suite_preferences: CheckSuitePreferencesConfig.optional().describe(
       "Check suite preferences: per-GitHub-App `auto_trigger_checks` toggles controlling whether pushes automatically create check suites. Write-only upstream (GitHub exposes no read endpoint), so check mode cannot verify them and apply re-asserts the declared preferences on every run. The token owner must be a repository administrator.",
     ),
-    pages: PagesSlice.optional().describe(
+    pages: PagesConfig.optional().describe(
       "GitHub Pages configuration; null disables Pages on the repository.",
     ),
     code_scanning_default_setup: CodeScanningDefaultSetupConfig.optional().describe(
@@ -129,7 +129,7 @@ export const SettingsFile = z
       .describe(
         "Direct collaborators, with pending invitations reconciled alongside; undeclared ones are REMOVED (pending invitations cancelled) by default (owner never touched; the wrapped form can set `undeclared: keep`).",
       ),
-    teams: TeamsSlice.optional().describe(
+    teams: TeamsConfig.optional().describe(
       "Org team access to the repo; skipped on personal accounts.",
     ),
     milestones: knobbed(MilestoneConfig)
@@ -137,7 +137,7 @@ export const SettingsFile = z
       .describe(
         "Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set `undeclared: delete`, which detaches deleted milestones from their issues).",
       ),
-    interaction_limits: InteractionLimitsSlice.optional().describe(
+    interaction_limits: InteractionLimitsConfig.optional().describe(
       "Temporary interaction limits; null clears an active repo-level limit, and an absent key leaves whatever is live untouched. Limits self-expire (GitHub's expiry tops out at six_months), so apply re-arms the declared limit on every run and check mode reports drift once it lapses. The pull_request_creation_cap and pull_request_creation_bypass keys manage the persistent pull request creation cap and its bypass list instead; `interaction_limits: null` clears the base limit only and never touches them.",
     ),
     actions_variables: knobbed(ActionsVariableConfig)
@@ -296,6 +296,8 @@ type _UnlistedSection = MustBeNever<Exclude<keyof SettingsFile, SectionKey>>;
  * composed FROM, before this file's document-level wrappers (.optional() and
  * the property .describe()). The knobbed sections derive as the undeclared
  * knob over their entry slice; everything else is its slice verbatim.
+ * Naming rule: a whole-section slice export is named <Key>Config, matching
+ * the singular <Entry>Config convention of the entry schemas.
  * Indexing below is total over SectionKey, so a new section fails to compile
  * until its derivation is declared here.
  */
@@ -303,23 +305,23 @@ type SliceDerivation = {
   repository: typeof RepositoryConfig;
   labels: ReturnType<typeof knobbed<typeof LabelConfig>>;
   rulesets: ReturnType<typeof knobbed<typeof RulesetConfig>>;
-  environments: typeof EnvironmentsSlice;
-  branches: typeof BranchesSlice;
+  environments: typeof EnvironmentsConfig;
+  branches: typeof BranchesConfig;
   autolinks: ReturnType<typeof knobbed<typeof AutolinkConfig>>;
   actions: typeof ActionsConfig;
   actions_secrets: ReturnType<typeof knobbed<typeof ActionsSecretConfig>>;
   dependabot_secrets: ReturnType<typeof knobbed<typeof DependabotSecretConfig>>;
   codespaces_secrets: ReturnType<typeof knobbed<typeof CodespacesSecretConfig>>;
   agents_secrets: ReturnType<typeof knobbed<typeof AgentsSecretConfig>>;
-  workflows: typeof WorkflowsSlice;
+  workflows: typeof WorkflowsConfig;
   check_suite_preferences: typeof CheckSuitePreferencesConfig;
-  pages: typeof PagesSlice;
+  pages: typeof PagesConfig;
   code_scanning_default_setup: typeof CodeScanningDefaultSetupConfig;
   code_quality_setup: typeof CodeQualitySetupConfig;
   collaborators: ReturnType<typeof knobbed<typeof CollaboratorConfig>>;
-  teams: typeof TeamsSlice;
+  teams: typeof TeamsConfig;
   milestones: ReturnType<typeof knobbed<typeof MilestoneConfig>>;
-  interaction_limits: typeof InteractionLimitsSlice;
+  interaction_limits: typeof InteractionLimitsConfig;
   actions_variables: ReturnType<typeof knobbed<typeof ActionsVariableConfig>>;
   agents_variables: ReturnType<typeof knobbed<typeof AgentsVariableConfig>>;
   webhooks: ReturnType<typeof knobbed<typeof WebhookConfig>>;

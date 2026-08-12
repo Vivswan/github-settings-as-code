@@ -17,7 +17,12 @@ import type { MustBeNever } from "../../types.js";
 const ROUTED_KEY_LIST = ["pull_request_creation_cap", "pull_request_creation_bypass"] as const;
 export const INTERACTION_LIMITS_ROUTED_KEYS: ReadonlySet<string> = new Set(ROUTED_KEY_LIST);
 
-export const InteractionLimitsConfig = z
+// The limits object behind the nullable section config below. Not exported:
+// consumers spell it NonNullable<InteractionLimitsConfig>. The published
+// definition id stays "InteractionLimitsConfig" - the id names the section's
+// schema definition, and moving it onto the nullable wrapper would change
+// the published schema.
+const InteractionLimits = z
   .object({
     limit: z
       .string()
@@ -122,12 +127,12 @@ export const InteractionLimitsConfig = z
     "The `interaction_limits:` section. The base object is sent verbatim to PUT /repos/{r}/interaction-limits minus the two routed keys below, which go to their own .../interaction-limits/pulls sub-endpoints instead. GitHub reads the base limit back as limit, origin, and the computed expires_at only. Declare at least one of `limit`, `pull_request_creation_cap`, or `pull_request_creation_bypass`.",
   )
   .meta({ id: "InteractionLimitsConfig" });
+
+/** The `interaction_limits:` whole-section config: the limits, or null to clear the base limit. */
+export const InteractionLimitsConfig = InteractionLimits.nullable();
 export type InteractionLimitsConfig = z.infer<typeof InteractionLimitsConfig>;
 
-/** Compile-time pin: every routed key names a real InteractionLimitsConfig field. */
+/** Compile-time pin: every routed key names a real declared-limits field. */
 type _RoutedKeysReal = MustBeNever<
-  Exclude<(typeof ROUTED_KEY_LIST)[number], keyof InteractionLimitsConfig>
+  Exclude<(typeof ROUTED_KEY_LIST)[number], keyof NonNullable<InteractionLimitsConfig>>
 >;
-
-/** The `interaction_limits:` document slice: the config, or null to clear the base limit. */
-export const InteractionLimitsSlice = InteractionLimitsConfig.nullable();
