@@ -171,9 +171,10 @@ function splitDeclared(desired: InteractionLimitsConfig): DeclaredLimits {
   const limit = base.limit;
   if (typeof limit !== "string") {
     // The shape's superRefine rejects this pairing upfront for any ordinary
-    // document; what still reaches here is the actions.cache blind spot -
-    // zod skips an own "__proto__" key while run() sees the ORIGINAL
-    // document - so this throws rather than PUTting a body with no limit.
+    // document; what still reaches here is zod's own "__proto__" blind spot
+    // - zod skips such an own key while run() sees the ORIGINAL document -
+    // so this throws rather than PUTting a body with no limit. (The
+    // actions.cache backstop guards the same blind spot.)
     throw new Error(
       `interaction_limits: base key(s) [${Object.keys(base).join(", ")}] ride the base interaction-limits PUT, which requires a limit, but none was declared; fix the key name, or declare limit alongside them`,
     );

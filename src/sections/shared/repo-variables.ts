@@ -42,12 +42,19 @@ type RepoVariablesKey = "actions_variables" | "agents_variables";
  * Each family's path segment under /repos/{owner}/{repo}, keyed by section:
  * the factory derives the routes from THIS map, so a key paired with the
  * other family's segment (which the mock would faithfully serve, hiding the
- * swap) is unrepresentable rather than merely unreviewed.
+ * swap) is unrepresentable. The `satisfies` pins every VALUE to the segment
+ * its own KEY spells, so the map cannot lie either - each section key is
+ * exactly `<segment>_variables`.
  */
 const VARIABLES_SEGMENTS = {
   actions_variables: "actions",
   agents_variables: "agents",
-} as const;
+} as const satisfies { [K in RepoVariablesKey]: SegmentOfVariablesKey<K> };
+
+/** The path segment a `<segment>_variables` section key spells. */
+type SegmentOfVariablesKey<K extends RepoVariablesKey> = K extends `${infer S}_variables`
+  ? S
+  : never;
 
 /** The path segment a variable family lives at, derived from its key. */
 type VariablesSegment<K extends RepoVariablesKey = RepoVariablesKey> =

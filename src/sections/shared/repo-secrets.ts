@@ -48,14 +48,20 @@ type RepoSecretsKey =
  * Each family's path segment under /repos/{owner}/{repo}, keyed by section:
  * the factory derives the routes from THIS map, so a key paired with another
  * family's segment (which the mock would faithfully serve, hiding the swap)
- * is unrepresentable rather than merely unreviewed.
+ * is unrepresentable. The `satisfies` pins every VALUE to the segment its
+ * own KEY spells, so the map cannot lie either - each section key is exactly
+ * `<segment>_secrets`, and a fifth family that broke that naming would have
+ * to say so here rather than silently mis-route.
  */
 const SECRETS_SEGMENTS = {
   actions_secrets: "actions",
   dependabot_secrets: "dependabot",
   codespaces_secrets: "codespaces",
   agents_secrets: "agents",
-} as const;
+} as const satisfies { [K in RepoSecretsKey]: SegmentOfSecretsKey<K> };
+
+/** The path segment a `<segment>_secrets` section key spells. */
+type SegmentOfSecretsKey<K extends RepoSecretsKey> = K extends `${infer S}_secrets` ? S : never;
 
 /** The path segment a secret family lives at, derived from its key. */
 type SecretsSegment<K extends RepoSecretsKey = RepoSecretsKey> = (typeof SECRETS_SEGMENTS)[K];
@@ -99,10 +105,12 @@ type RepoSecretsDeclared = SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
  * with - once per family key, since a conditional type over a generic K
  * cannot be checked inside the factory body. Freshness is the point: the
  * factory hands the registry a module IDENTIFIER, where excess-property
- * checking no longer runs, so a `known` key the entry type stops carrying
- * would otherwise compile silently for all four sections. The
- * missing-key direction is plain assignability and still bites at the
- * registry line.
+ * checking no longer runs, so a `known` key none of the four entry types
+ * carries any more would otherwise compile silently for all of them. (An
+ * intersection admits a property present in ANY constituent, so a key that
+ * only ONE family dropped would still pass - a divergence that would break
+ * SecretEntry and the shared run signature first.) The missing-key
+ * direction is plain assignability and still bites at the registry line.
  */
 const CLOSED_SURFACE = {
   known: { name: true, value: true },
