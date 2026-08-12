@@ -12,7 +12,7 @@ import {
 } from "../../src/sections/contract.js";
 import { environmentsSection } from "../../src/sections/environments.js";
 import { repositorySection } from "../../src/sections/repository.js";
-import { rulesetsSection } from "../../src/sections/rulesets.js";
+import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 
 const section: SectionMeta = rulesetsSection;
 

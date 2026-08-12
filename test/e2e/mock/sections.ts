@@ -31,6 +31,7 @@ import { labelsMockHandlers } from "../../../src/sections/labels/mock.js";
 import { milestonesMockHandlers } from "../../../src/sections/milestones/mock.js";
 import { pagesMockHandlers } from "../../../src/sections/pages/mock.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
+import { rulesetsMockHandlers } from "../../../src/sections/rulesets/mock.js";
 import { secretScanningCustomPatternsMockHandlers } from "../../../src/sections/secret_scanning_custom_patterns/mock.js";
 import { ADMIN_SLUG } from "../constants.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "./secrets.js";
@@ -66,7 +67,6 @@ import {
   HOOK_CANONICAL_KEYS,
   IMMUTABLE_OWNER_CONFLICT,
   integrationBody,
-  invalidRuleTypeResponse,
   type Json,
   maskedConfig,
   maskHookSecret,
@@ -180,51 +180,6 @@ const UNMOVED_SECTION_HANDLERS: Record<string, Handler> = {
   "repository.lfsRemove": () => noContent(),
 
   // labels: moved to src/sections/labels/mock.ts
-
-  // rulesets ---------------------------------------------------------------
-  "rulesets.list": ({ state, query }) => ok(slicePage(state.rulesets, query)),
-  "rulesets.create": ({ state, body }) => {
-    const invalid = invalidRuleTypeResponse(body, "create-a-repository-ruleset");
-    if (invalid) {
-      return invalid;
-    }
-    const ruleset: Json = { id: state.nextId++, source_type: "Repository", ...asObject(body) };
-    state.rulesets.push(ruleset);
-    return { status: 201, body: ruleset };
-  },
-  "rulesets.get": ({ state, param }) => {
-    const id = param("ruleset_id");
-    const ruleset = state.rulesets.find((r) => String(r.id) === id);
-    if (!ruleset) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    return ok(ruleset);
-  },
-  "rulesets.update": ({ state, param, body }) => {
-    const id = param("ruleset_id");
-    const index = state.rulesets.findIndex((r) => String(r.id) === id);
-    if (index < 0) {
-      // Existence first, like GitHub: an unknown ruleset 404s even when the
-      // payload also carries an invalid rule type.
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    const invalid = invalidRuleTypeResponse(body, "update-a-repository-ruleset");
-    if (invalid) {
-      return invalid;
-    }
-    const updated: Json = { id: Number(id), source_type: "Repository", ...asObject(body) };
-    state.rulesets[index] = updated;
-    return ok(updated);
-  },
-  "rulesets.remove": ({ state, param }) => {
-    const id = param("ruleset_id");
-    const index = state.rulesets.findIndex((r) => String(r.id) === id);
-    if (index < 0) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    state.rulesets.splice(index, 1);
-    return noContent();
-  },
 
   // branches ---------------------------------------------------------------
   "branches.getProtection": ({ state, param }) => {
@@ -1297,6 +1252,7 @@ const FRAGMENTS: readonly SectionMockFragment[] = [
   { rest: labelsMockHandlers },
   { rest: milestonesMockHandlers },
   { rest: pagesMockHandlers },
+  { rest: rulesetsMockHandlers },
   { rest: secretScanningCustomPatternsMockHandlers },
   { rest: UNMOVED_SECTION_HANDLERS, graphql: UNMOVED_SECTION_GRAPHQL_HANDLERS },
 ];

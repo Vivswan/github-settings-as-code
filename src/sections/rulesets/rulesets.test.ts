@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import {
-  normalizeRefName,
-  normalizeRuleset,
-  rulesetsSection,
-} from "../../src/sections/rulesets.js";
-import { MockApi } from "../mock-api.js";
-import { ctx } from "./context.js";
+import { MockApi } from "../../../test/mock-api.js";
+import { ctx } from "../../../test/sections/context.js";
+import { normalizeRefName, normalizeRuleset, rulesetsSection } from "./index.js";
 
 describe("normalizeRefName", () => {
   test("branch short name", () => {

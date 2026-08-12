@@ -5,8 +5,8 @@
  * action. The wrapped `undeclared: delete` form hardens that to deletion.
  */
 
-import { subsetDiff } from "../engine/diff.js";
-import { type RulesetConfig, SettingsFile, type UndeclaredPolicyList } from "../schema.js";
+import { subsetDiff } from "../../engine/diff.js";
+import { type RulesetConfig, SettingsFile, type UndeclaredPolicyList } from "../../schema.js";
 import {
   call,
   defaultUndeclaredPolicy,
@@ -19,7 +19,7 @@ import {
   type SectionPermission,
   type SectionResult,
   undeclaredPolicy,
-} from "./contract.js";
+} from "../contract.js";
 
 /**
  * Ruleset ref includes/excludes: the file may use short names ("staging",
