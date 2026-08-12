@@ -5,7 +5,7 @@
  * differ only in PAT resource, output noun, and - for Codespaces - the access
  * grade GitHub gates the reads at, so each section module is ONE
  * repoSecretsSection() call carrying its family's facts. The factory sits
- * above the shared secrets engine (../secrets-engine.ts), which owns the
+ * above the shared secrets engine (./secrets-engine.ts), which owns the
  * existence-based reconciliation and client-side sealing; the per-environment
  * secrets family (environments) consumes the engine directly with its own
  * nested scopes. Selector fan-out for this file is declared in
@@ -26,6 +26,7 @@ import {
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
 import { call, listAllEnveloped } from "../contract/requests.js";
+import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
   LIVE_SECRET_NAMES,
   listSecretValues,
@@ -34,8 +35,7 @@ import {
   type SecretEntry,
   type SecretsScope,
   type SecretsScopeOps,
-} from "../secrets-engine.js";
-import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
+} from "./secrets-engine.js";
 
 /** The section keys the factory may mint, each with its API path segment. */
 type RepoSecretsKey =

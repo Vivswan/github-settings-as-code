@@ -18,7 +18,7 @@ import {
   type SecretsScope,
   sealSecretValue,
   secretKey,
-} from "../../src/sections/secrets-engine.js";
+} from "../../src/sections/shared/secrets-engine.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,

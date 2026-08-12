@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_ROLE, roleForPermission } from "../../src/sections/roles.js";
+import { DEFAULT_ROLE, roleForPermission } from "../../src/sections/shared/roles.js";
 
 describe("roleForPermission", () => {
   test("maps the PUT vocabulary to the GET role_name vocabulary", () => {

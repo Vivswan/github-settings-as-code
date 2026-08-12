@@ -58,7 +58,7 @@ import {
   type SecretsScope,
   type SecretsScopeOps,
   secretKey,
-} from "../secrets-engine.js";
+} from "../shared/secrets-engine.js";
 import {
   LiveVariable,
   reconcileVariables as reconcileEngineVariables,

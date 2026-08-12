@@ -17,7 +17,7 @@ import {
   flattenProtection,
 } from "../../../src/sections/branches/index.js";
 import { flattenEnvironment } from "../../../src/sections/environments/index.js";
-import { roleForPermission } from "../../../src/sections/roles.js";
+import { roleForPermission } from "../../../src/sections/shared/roles.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import {
   applyRuleInput,

@@ -873,7 +873,7 @@ describe("invitation role vocabulary lockstep", () => {
     // widens (or narrows) the enum must land here too. Checked on BOTH sides
     // of the vocabulary: the GET's response enum (what a pending invitation
     // can report) and the PATCH's request enum (what an update may send).
-    const { INVITATION_ROLES } = await import("../../../src/sections/roles.js");
+    const { INVITATION_ROLES } = await import("../../../src/sections/shared/roles.js");
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const spec = JSON.parse(

@@ -9,7 +9,7 @@
  */
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { sealSecretValue } from "../../../src/sections/secrets-engine.js";
+import { sealSecretValue } from "../../../src/sections/shared/secrets-engine.js";
 import { parseScenario, type Scenario } from "../schema.js";
 import { newPipelineRunState } from "./contract.js";
 import { runPipeline } from "./routes.js";

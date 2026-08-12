@@ -23,7 +23,7 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { call, listAll, rejectDuplicates } from "../contract/requests.js";
-import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "../roles.js";
+import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "../shared/roles.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { CollaboratorConfig } from "./schema.js";
 

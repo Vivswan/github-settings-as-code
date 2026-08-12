@@ -9,7 +9,7 @@
 
 import { type EntriesForm, type Json, maybeWrapUndeclared } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
-import { DEFAULT_ROLE, roleForPermission } from "../roles.js";
+import { DEFAULT_ROLE, roleForPermission } from "../shared/roles.js";
 
 export function genCollaborators(rng: Rng): EntriesForm {
   const used = new Set<string>();

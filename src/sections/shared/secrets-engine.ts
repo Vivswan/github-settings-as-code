@@ -34,7 +34,7 @@
 
 import sodium from "libsodium-wrappers";
 import { z } from "zod";
-import type { UndeclaredPolicy, UndeclaredPolicyList } from "../types.js";
+import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import {
   type DeclaredSecretValue,
   type SectionContext,
@@ -43,8 +43,8 @@ import {
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-} from "./contract/module.js";
-import { rejectDuplicates } from "./contract/requests.js";
+} from "../contract/module.js";
+import { rejectDuplicates } from "../contract/requests.js";
 
 /** One declared secret entry, as every family's settings shape spells it. */
 export interface SecretEntry {
