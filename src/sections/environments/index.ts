@@ -62,6 +62,7 @@ import {
   undeclaredPolicy,
 } from "../contract.js";
 import {
+  LIVE_SECRET_NAMES,
   listSecretValues,
   reconcileSecrets,
   type SecretsScope,
@@ -805,10 +806,16 @@ function rejectDuplicateSecrets(
  */
 function environmentSecretsScope(envName: string): SecretsScope {
   const ops: SecretsScopeOps = {
-    list: (ctx, section) =>
-      listAllEnveloped(ctx, section, ENDPOINTS.listSecrets, "secrets", {
-        params: { environment_name: envName },
-      }),
+    list: async (ctx, section) =>
+      parseLive(
+        section,
+        ENDPOINTS.listSecrets,
+        LIVE_SECRET_NAMES,
+        await listAllEnveloped(ctx, section, ENDPOINTS.listSecrets, "secrets", {
+          params: { environment_name: envName },
+        }),
+        `environment "${envName}"`,
+      ),
     publicKey: (ctx, section, describe) =>
       call(ctx, section, ENDPOINTS.secretsPublicKey, {
         params: { environment_name: envName },

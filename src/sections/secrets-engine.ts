@@ -33,6 +33,7 @@
  */
 
 import sodium from "libsodium-wrappers";
+import { z } from "zod";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../schema.js";
 import {
   type DeclaredSecretValue,
@@ -49,6 +50,20 @@ export interface SecretEntry {
   value: string;
 }
 
+/**
+ * The identity of one live secret as a family's list endpoint reports it.
+ * Each section's list closure parses its enveloped body against
+ * LIVE_SECRET_NAMES (parseLive on its own EndpointDecl - the engine
+ * deliberately never sees a route), so the engine receives proven names
+ * instead of coercing unknowns.
+ */
+interface LiveSecretName {
+  name: string;
+}
+
+/** The list-body schema every family's list closure parses with. */
+export const LIVE_SECRET_NAMES = z.array(z.looseObject({ name: z.string() }));
+
 /** The {encrypted_value, key_id} body every family's sealed PUT takes. */
 export interface SealedSecretPayload {
   encrypted_value: string;
@@ -62,8 +77,8 @@ export interface SealedSecretPayload {
  * secrets) closes over its extra path params here.
  */
 export interface SecretsScopeOps {
-  /** GET the enveloped {total_count, secrets: [{name, ...}]} list, all pages. */
-  list(ctx: SectionContext, section: SectionMeta): Promise<unknown[]>;
+  /** The parsed {name} identities of the enveloped secrets list, all pages. */
+  list(ctx: SectionContext, section: SectionMeta): Promise<LiveSecretName[]>;
   /** GET the {key_id, key} sealing key for this scope. */
   publicKey(ctx: SectionContext, section: SectionMeta, describe: string): Promise<unknown>;
   /** PUT one sealed value: 201 created a new secret, 204 updated an existing one. */
@@ -280,13 +295,12 @@ export async function reconcileSecrets(
       ? entries.map((entry) => ({ entry, plaintext: run.ctx.resolveSecret(entry.value) }))
       : [];
 
-  const live = (await scope.ops.list(run.ctx, section)) as Array<{ name?: unknown }>;
+  const live = await scope.ops.list(run.ctx, section);
   // Uppercase key -> the name as the API listed it (already uppercase on real
   // GitHub; normalizing keeps a differently-cased mock or proxy harmless).
   const liveByKey = new Map<string, string>();
   for (const item of live) {
-    const name = String(item?.name ?? "");
-    liveByKey.set(secretKey(name), name);
+    liveByKey.set(secretKey(item.name), item.name);
   }
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
 

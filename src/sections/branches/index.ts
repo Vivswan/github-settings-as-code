@@ -43,6 +43,7 @@ import {
   type SectionModule,
   type SectionPermission,
   type SectionResult,
+  type SectionRun,
   tryCall,
 } from "../contract.js";
 
@@ -354,8 +355,8 @@ interface GraphqlRun {
  * constructed is unrepresentable - no cast, no predicate re-spelling.
  */
 type ClassifiedEntry =
-  | { kind: "wildcard"; branch: BranchConfig; run: GraphqlRun }
-  | { kind: "literal"; branch: BranchConfig; routed: { run: GraphqlRun } | null };
+  | { kind: "wildcard"; branch: BranchConfig; graphqlRun: GraphqlRun }
+  | { kind: "literal"; branch: BranchConfig; routed: { graphqlRun: GraphqlRun } | null };
 
 async function fetchRules(
   ctx: SectionContext,
@@ -650,11 +651,11 @@ function routedKeyDrift(
 async function resolveActorId(
   ctx: SectionContext,
   section: SectionMeta,
-  run: GraphqlRun,
+  graphqlRun: GraphqlRun,
   raw: string,
 ): Promise<string> {
   const cacheKey = raw.toLowerCase();
-  const cached = run.actorIds.get(cacheKey);
+  const cached = graphqlRun.actorIds.get(cacheKey);
   if (cached !== undefined) {
     return cached;
   }
@@ -671,7 +672,7 @@ async function resolveActorId(
       { ...repoVariables(ctx), login: actor.login },
       { describe: `resolving force-push bypass user "${raw}"` },
     );
-    adoptRepoId(run, data);
+    adoptRepoId(graphqlRun, data);
     id = (data.user as Record<string, unknown> | null)?.id;
   } else if (actor.kind === "team") {
     const data = await callGraphql(
@@ -681,7 +682,7 @@ async function resolveActorId(
       { ...repoVariables(ctx), org: actor.org, team: actor.team },
       { describe: `resolving force-push bypass team "${raw}"` },
     );
-    adoptRepoId(run, data);
+    adoptRepoId(graphqlRun, data);
     const team = (data.organization as Record<string, unknown> | null)?.team as Record<
       string,
       unknown
@@ -709,15 +710,15 @@ async function resolveActorId(
       `branches: force_push_bypassers actor "${raw}": the ${actor.kind === "app" ? "App lookup" : "GraphQL lookup"} succeeded but returned no node id, so the allowance cannot be applied; re-run the workflow, and report this if it persists`,
     );
   }
-  run.actorIds.set(cacheKey, id);
+  graphqlRun.actorIds.set(cacheKey, id);
   return id;
 }
 
 /** Keep the repository node id an actor read already carried. */
-function adoptRepoId(run: GraphqlRun, data: Record<string, unknown>): void {
+function adoptRepoId(graphqlRun: GraphqlRun, data: Record<string, unknown>): void {
   const id = (data.repository as Record<string, unknown> | null)?.id;
-  if (run.repoId === null && typeof id === "string" && id.length > 0) {
-    run.repoId = id;
+  if (graphqlRun.repoId === null && typeof id === "string" && id.length > 0) {
+    graphqlRun.repoId = id;
   }
 }
 
@@ -729,13 +730,13 @@ function adoptRepoId(run: GraphqlRun, data: Record<string, unknown>): void {
 async function ruleNodeFor(
   ctx: SectionContext,
   section: SectionMeta,
-  run: GraphqlRun,
+  graphqlRun: GraphqlRun,
   pattern: string,
 ): Promise<RuleNode> {
-  let node = run.byPattern.get(pattern);
+  let node = graphqlRun.byPattern.get(pattern);
   if (node === undefined) {
-    run.byPattern = await fetchRules(ctx, section);
-    node = run.byPattern.get(pattern);
+    graphqlRun.byPattern = await fetchRules(ctx, section);
+    node = graphqlRun.byPattern.get(pattern);
   }
   if (node === undefined) {
     throw new Error(
@@ -752,12 +753,12 @@ async function ruleNodeFor(
 async function resolveActorIds(
   ctx: SectionContext,
   section: SectionMeta,
-  run: GraphqlRun,
+  graphqlRun: GraphqlRun,
   actors: readonly string[],
 ): Promise<string[]> {
   const ids: string[] = [];
   for (const actor of actors) {
-    ids.push(await resolveActorId(ctx, section, run, actor));
+    ids.push(await resolveActorId(ctx, section, graphqlRun, actor));
   }
   return ids;
 }
@@ -766,7 +767,7 @@ async function resolveActorIds(
 async function wildcardInputFields(
   ctx: SectionContext,
   section: SectionMeta,
-  run: GraphqlRun,
+  graphqlRun: GraphqlRun,
   protection: BranchProtectionConfig,
 ): Promise<Record<string, unknown>> {
   const input = translateWildcardProtection(protection);
@@ -774,7 +775,7 @@ async function wildcardInputFields(
     input.bypassForcePushActorIds = await resolveActorIds(
       ctx,
       section,
-      run,
+      graphqlRun,
       protection.force_push_bypassers,
     );
   }
@@ -853,7 +854,7 @@ export const branchesSection = {
     });
   }),
   async run(ctx, desired): Promise<SectionResult> {
-    const result = beginRun(ctx).result;
+    const run = beginRun(ctx);
     // Protection is keyed by exact branch name or pattern; two entries for
     // the same one would overwrite each other's write on every run.
     rejectDuplicates(
@@ -870,26 +871,26 @@ export const branchesSection = {
       isWildcardPattern(branch.name) || hasRoutedGraphqlKeys(branch.protection);
     let entries: ClassifiedEntry[];
     if (desired.some(needsGraphql)) {
-      const run: GraphqlRun = {
+      const graphqlRun: GraphqlRun = {
         byPattern: await fetchRules(ctx, this),
         repoId: null,
         actorIds: new Map(),
       };
       const declaredPatterns = new Set(desired.map((branch) => branch.name));
-      for (const pattern of [...run.byPattern.keys()].sort()) {
+      for (const pattern of [...graphqlRun.byPattern.keys()].sort()) {
         if (isWildcardPattern(pattern) && !declaredPatterns.has(pattern)) {
-          result.notes.push(
+          run.result.notes.push(
             `undeclared classic protection rule "${pattern}" exists on the repo - declare it to manage it (this action never deletes undeclared rules)`,
           );
         }
       }
       entries = desired.map((branch) =>
         isWildcardPattern(branch.name)
-          ? { kind: "wildcard", branch, run }
+          ? { kind: "wildcard", branch, graphqlRun }
           : {
               kind: "literal",
               branch,
-              routed: hasRoutedGraphqlKeys(branch.protection) ? { run } : null,
+              routed: hasRoutedGraphqlKeys(branch.protection) ? { graphqlRun } : null,
             },
       );
     } else {
@@ -898,27 +899,30 @@ export const branchesSection = {
     }
     for (const entry of entries) {
       if (entry.kind === "wildcard") {
-        await runWildcardEntry(ctx, this, entry.run, entry.branch, result);
+        await runWildcardEntry(this, entry.graphqlRun, entry.branch, run);
         continue;
       }
-      await runLiteralEntry(ctx, this, entry.routed, entry.branch, result);
+      await runLiteralEntry(this, entry.routed, entry.branch, run);
     }
-    return result;
+    return run.result;
   },
 } satisfies SectionModule<"branches">;
 
 /**
  * Reconcile one literal-branch entry (the REST path plus routed keys).
  * `routed` is the classification-time proof: non-null exactly when the entry
- * declares a GraphQL-routed key, carrying the per-run GraphQL state.
+ * declares a GraphQL-routed key, carrying the per-run GraphQL state. The
+ * destructure below drops the pair's type-level link on purpose: this
+ * section never needs an apply-only ctx capability, so narrowing happens on
+ * `result.check` alone, and the pair still arrived correlated through `run`.
  */
 async function runLiteralEntry(
-  ctx: SectionContext,
   section: SectionModule<"branches">,
-  routed: { run: GraphqlRun } | null,
+  routed: { graphqlRun: GraphqlRun } | null,
   branch: BranchConfig,
-  result: SectionResult,
+  run: SectionRun,
 ): Promise<void> {
+  const { ctx, result } = run;
   if (branch.protection === null) {
     const probe = await probeAbsent(ctx, section, ENDPOINTS.getProtection, {
       params: { branch: branch.name },
@@ -1001,7 +1005,7 @@ async function runLiteralEntry(
         ...routedKeyDrift(
           `branches[${branch.name}].protection`,
           branch.protection,
-          routed?.run.byPattern.get(branch.name),
+          routed?.graphqlRun.byPattern.get(branch.name),
         ),
       );
       // Apply null-fills the four required keys, REMOVING live settings
@@ -1023,7 +1027,7 @@ async function runLiteralEntry(
   // the type checker.)
   const resolvedBypassIds =
     routed !== null && forcePushBypassers !== undefined
-      ? await resolveActorIds(ctx, section, routed.run, forcePushBypassers)
+      ? await resolveActorIds(ctx, section, routed.graphqlRun, forcePushBypassers)
       : undefined;
   await call(ctx, section, ENDPOINTS.putProtection, {
     params: { branch: branch.name },
@@ -1048,7 +1052,7 @@ async function runLiteralEntry(
     // The entry declared a routed key, so the classification attached the
     // run state; the rule node itself may be fresh (the PUT above just
     // created it), which the one-refetch lookup covers.
-    const node = await ruleNodeFor(ctx, section, routed.run, branch.name);
+    const node = await ruleNodeFor(ctx, section, routed.graphqlRun, branch.name);
     const input: Record<string, unknown> = { branchProtectionRuleId: node.id };
     if (resolvedBypassIds !== undefined) {
       input.bypassForcePushActorIds = resolvedBypassIds;
@@ -1070,14 +1074,14 @@ async function runLiteralEntry(
 
 /** Reconcile one wildcard entry, entirely through the GraphQL rule surface. */
 async function runWildcardEntry(
-  ctx: SectionContext,
   section: SectionModule<"branches">,
-  run: GraphqlRun,
+  graphqlRun: GraphqlRun,
   branch: BranchConfig,
-  result: SectionResult,
+  run: SectionRun,
 ): Promise<void> {
+  const { ctx, result } = run;
   const pattern = branch.name;
-  const node = run.byPattern.get(pattern);
+  const node = graphqlRun.byPattern.get(pattern);
   if (branch.protection === null) {
     if (node === undefined) {
       return;
@@ -1095,7 +1099,7 @@ async function runWildcardEntry(
       { input: { branchProtectionRuleId: node.id } },
       { describe: `deleting the protection rule "${pattern}"` },
     );
-    run.byPattern.delete(pattern);
+    graphqlRun.byPattern.delete(pattern);
     result.changes.push(`deleted protection rule "${pattern}"`);
     return;
   }
@@ -1117,7 +1121,7 @@ async function runWildcardEntry(
     );
     return;
   }
-  const fields = await wildcardInputFields(ctx, section, run, branch.protection);
+  const fields = await wildcardInputFields(ctx, section, graphqlRun, branch.protection);
   if (node !== undefined) {
     const data = await callGraphql(
       ctx,
@@ -1135,7 +1139,7 @@ async function runWildcardEntry(
     result.changes.push(`updated protection rule "${pattern}"`);
     return;
   }
-  if (run.repoId === null) {
+  if (graphqlRun.repoId === null) {
     const data = await callGraphql(ctx, section, REPO_LOOKUP, repoVariables(ctx), {
       describe: "resolving the repository's GraphQL node id",
     });
@@ -1145,13 +1149,13 @@ async function runWildcardEntry(
         "branches: the repository lookup returned no GraphQL node id, so no protection rule can be created; re-run the workflow, and retry later if it persists",
       );
     }
-    run.repoId = id;
+    graphqlRun.repoId = id;
   }
   const data = await callGraphql(
     ctx,
     section,
     CREATE_RULE,
-    { input: { repositoryId: run.repoId, pattern, ...fields } },
+    { input: { repositoryId: graphqlRun.repoId, pattern, ...fields } },
     { describe: `creating the protection rule "${pattern}"` },
   );
   verifyDeploymentReadback(
@@ -1160,7 +1164,7 @@ async function runWildcardEntry(
     data,
     "createBranchProtectionRule",
   );
-  // The mutation payload's rule is NOT cached into run.byPattern: it carries
+  // The mutation payload's rule is NOT cached into graphqlRun.byPattern: it carries
   // only the read-back fields, not a full rules-query node, and duplicate
   // rejection means no later entry can look this pattern up anyway.
   result.changes.push(`created protection rule "${pattern}"`);
