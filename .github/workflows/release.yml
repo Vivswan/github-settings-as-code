@@ -2,52 +2,77 @@
 # all-green gate. Generated once by Vivswan/repo-platform and
 # never overwritten by template sync.
 #
-# GitHub releases are immutable once published: the tag and assets freeze,
-# and a post-publication `gh release upload` gets HTTP 422. Every release
-# therefore moves through the same three steps, always draft-first:
-#   1. release-please cuts the release as a DRAFT with its tag already
-#      forced (`draft` + `force-tag-creation` in release-please-config.json).
-#   2. update-release mutates the draft: this repository's packaging,
-#      asset uploads, and note edits go there.
-#   3. publish-release flips the draft live. It stays the last job: list
-#      every job that mutates the release in its `needs`.
-# If the pipeline dies after the draft exists, a rerun cannot recreate it
-# (release-please sees the forced tag). Re-run FAILED jobs to finish the
-# remaining steps: update-release rebuilds, and when build/<tag> already
-# exists it verifies those bytes instead of pushing again. A full re-run
-# recomputes release_created=false and skips everything; finish by hand
-# instead, skipping any step already done (the build tag is immutable:
-# if it exists, verify it rather than recreating it) and keeping the
-# provenance body (SECURITY.md rests on it):
-#   git checkout <tag>
+# THE SINGLE-TAG SCHEME. main is source-only (lib/index.js is never
+# committed there), yet every ref a consumer can name - the vX.Y.Z release
+# tags and the moving major vX - must point at a packaged commit carrying
+# the built bundle. So this pipeline, not release-please, owns the tags:
+# release-please runs with skip-github-release (release-please-config.json)
+# and only does version math, the changelog, the manifest and version
+# pins, and the release PR. When that PR's squash merge lands on main -
+# detected from the .release-please-manifest.json version step,
+# cross-checked against the merge subject AND the merged PR's
+# release-please branch; anything ambiguous fails loudly and tags nothing
+# (detection reads the pushed head commit only, which is exactly where
+# release merges land as their own squash commit) - two independent chains
+# run off the detection:
+#
+# release-publish.yml (the release chain):
+#   1. rebuilds the bundle from the merge commit and verifies the
+#      committed schema byte-for-byte (a divergent regeneration stops the
+#      release),
+#   2. commits lib/index.js as a CHILD of the merge commit and creates
+#      vX.Y.Z once, directly on that child: the tag is born runnable and
+#      never moves (the release-tags ruleset freezes it; only deliberate
+#      repository-admin action can override, which SECURITY.md states),
+#   3. attests the bundle, creates the GitHub release as a DRAFT with the
+#      version's CHANGELOG.md section as notes, uploads bundle, schema,
+#      and sigstore bundle (draft-first because published releases freeze
+#      their assets), force-moves the major tag to the same packaged
+#      commit, and confirms origin's refs carry the bundle,
+#   4. publishes the release last.
+#
+# release-bookkeeping.yml (the release-please chain):
+#   5. proves the recorded release-please boundary is fresh
+#      (last-release-sha in release-please-config.json must be the newest
+#      release merge on main or its parent), parking release-please loudly
+#      on a stale one instead of letting it build garbage release PRs -
+#      version tags live on packaged children that are NOT on main, and
+#      release-please's commit walk only sees main, so the boundary is
+#      recorded config, not a tag lookup,
+#   6. runs release-please (version math, changelog, manifest, release PR;
+#      never tags or releases), then anchors the NEXT boundary INSIDE the
+#      release PR branch: last-release-sha becomes main's current head,
+#      the future merge commit's parent, so merging the release PR
+#      advances the boundary on main as part of the release itself. No
+#      push to main, no admin credential; the release-freshness gate keeps
+#      the recorded parent exact.
+#
+# A rerun of a failed run converges instead of failing: package verifies
+# an existing vX.Y.Z (parent, whole tree, bundle bytes) rather than
+# recreating it, re-attests the same bytes (the attestation log is
+# append-only), re-uploads assets with --clobber while the release is a
+# draft, and the boundary anchor re-applies on every release PR refresh.
+# Finish a dead run by re-running its FAILED jobs; a fresh dispatch only
+# detects the release while main's head is still the merge commit. The
+# same steps by hand:
+#   git checkout <merge sha>
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
-#   git add -f lib/index.js
-#   git commit -m "build: package <tag>" \
-#     -m "source: $(git rev-parse HEAD)" -m "workflow run: <run url>"
-#   git tag build/<tag> && git push origin refs/tags/build/<tag>
-#   git tag -f <major> build/<tag>^{} && git push --force origin <major>
-#   gh release upload <tag> lib/settings.schema.json lib/index.js --clobber
-#   gh release edit <tag> --draft=false
+#   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts package
+#   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts retag-major
+#   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts verify
+#   bun .github/scripts/release-pipeline.ts notes X.Y.Z > /tmp/notes.md
+#   gh release create vX.Y.Z --draft --verify-tag --title vX.Y.Z --notes-file /tmp/notes.md
+#   gh release upload vX.Y.Z lib/settings.schema.json lib/index.js --clobber
+#   gh release edit vX.Y.Z --draft=false
+#   gh pr edit <release PR> --remove-label "autorelease: pending" --add-label "autorelease: tagged"
 # The provenance attestation cannot be produced by hand: the sigstore
 # bundle needs the workflow's OIDC identity, so a hand-finished release
-# ships without the lib-index-js.sigstore.json asset unless a partial run
-# already uploaded it. Attesting the same bytes again in a later rerun is
-# safe: the attestation log is append-only, extra entries verify fine.
-# Everything runs in the same workflow run, so it works with the default
-# GITHUB_TOKEN too, which cannot trigger `on: release` workflows.
+# ships without the lib-index-js.sigstore.json asset.
 #
-# This repository packages each release in update-release: the source at
-# the release tag is built, the bundle is committed as a child of the
-# release commit and pushed as the immutable build/<tag> tag - the
-# runnable ref exact pins name - and bundle plus schema land on the
-# release as convenience assets. retag-major then moves the released
-# line's moving major tag (v1 for a v1.x release, v2 for v2.x, derived
-# from the released tag) to that build commit, so major-pinned consumers
-# pick up every release in their line and always run a packaged bundle.
-# The release tree already carries lib/settings.schema.json, so the raw
-# <ref>/lib/settings.schema.json URL serves the schema at the major tag
-# (canonical, newest in the line) and at build/<tag> (exact) with no
-# extra packaging.
+# The tag topology itself is unit-tested against fixture repositories
+# (test/scripts/release-pipeline.test.ts), so a change that could tag an
+# unpackaged commit or move a frozen tag fails on every push, not on
+# release day.
 
 name: Release
 
@@ -55,192 +80,62 @@ on:
   workflow_call:
 
 jobs:
-  release-please:
-    uses: ./.github/workflows/release-please.yml
-    secrets: inherit
-
-  # Step 2: mutate the draft here: this repository builds the runnable
-  # bundle from the release tag, pushes it as build/<tag> (a commit
-  # parented on the release commit), and uploads bundle and schema to the
-  # release as assets. Add sibling jobs freely, as long as every job that
-  # touches the release lands in publish-release's needs.
-  update-release:
-    needs: [release-please]
-    if: needs.release-please.outputs.release_created == 'true'
+  # Is this push the merge of a release-please PR? An empty tag output is
+  # an ordinary push: the release chain skips and release-please runs
+  # alone. A manifest edit outside a release-please merge fails this job,
+  # which parks the whole pipeline - deliberate.
+  detect-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
-      contents: write # also what makes the draft visible to gh
-      id-token: write # OIDC identity for the provenance attestation
-      attestations: write
+      contents: read
+      pull-requests: read # the provenance check reads the merged PR
+    outputs:
+      tag: ${{ steps.detect.outputs.tag }}
+      version: ${{ steps.detect.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
-      # Reruns land here with the tag already pushed, and the ruleset
-      # freezes build tags, so a second push cannot succeed. Detect that
-      # here; the build below runs either way and verifies the existing
-      # tag rather than trusting it. depth=2 so the shallow graft does not
-      # hide the build commit's parent.
-      - name: Look for an existing build tag
-        id: guard
-        env:
-          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          # A standalone assignment propagates a failing ls-remote (set -e),
-          # so a transport error cannot read as "the tag does not exist".
-          existing="$(git ls-remote origin "refs/tags/build/$RELEASE_TAG")"
-          if [ -n "$existing" ]; then
-            git fetch --quiet --depth=2 origin "refs/tags/build/$RELEASE_TAG:refs/tags/build/$RELEASE_TAG"
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          fi
+          # The detection diffs the manifest against the parent commit.
+          fetch-depth: 2
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
-      - name: Build the bundle and the schema
-        run: |
-          bun install --frozen-lockfile --ignore-scripts
-          bun run build
-          # The uploaded schema asset and the raw URLs at v<MAJOR> and
-          # build/<tag> must serve the bytes committed at the release tag;
-          # a divergent regeneration (generator drift, or a compromised
-          # generator - SECURITY.md leans on this) stops the release here.
-          git diff --exit-code lib/settings.schema.json
-      # Tag creation is not restricted, so an existing build tag is not
-      # evidence on its own: it must be this source's build, byte for
-      # byte, before retag-major points the major tag at it.
-      - name: Verify the existing build tag packages this source
-        if: steps.guard.outputs.exists == 'true'
-        env:
-          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          release="$(git rev-parse HEAD)"
-          parent="$(git rev-parse "refs/tags/build/$RELEASE_TAG^{}^")"
-          if [ "$parent" != "$release" ]; then
-            echo "::error::refs/tags/build/$RELEASE_TAG exists but its parent is $parent, not the $RELEASE_TAG commit $release; the ruleset freezes build tags, so no rerun can replace it - inspect that tag by hand."
-            exit 1
-          fi
-          # The whole tree, not just the bundle: a planted commit that keeps
-          # the expected bundle but edits action.yml would otherwise pass.
-          changed="$(git diff --name-only "$parent" "refs/tags/build/$RELEASE_TAG^{}")"
-          if [ -n "$changed" ] && [ "$changed" != "lib/index.js" ]; then
-            echo "::error::refs/tags/build/$RELEASE_TAG changes more than lib/index.js relative to $RELEASE_TAG (changed: $(echo "$changed" | tr '\n' ' ')); the ruleset freezes build tags, so no rerun can replace it - inspect that tag by hand."
-            exit 1
-          fi
-          git show "refs/tags/build/$RELEASE_TAG:lib/index.js" > "$RUNNER_TEMP/packaged-index.js"
-          if ! cmp -s "$RUNNER_TEMP/packaged-index.js" lib/index.js; then
-            echo "::error::refs/tags/build/$RELEASE_TAG carries a lib/index.js that is not a build of $RELEASE_TAG's source; the ruleset freezes build tags, so no rerun can replace it - inspect that tag by hand."
-            exit 1
-          fi
-          echo "build/$RELEASE_TAG already packages $RELEASE_TAG at $release"
-      - name: Push the build tag
-        if: steps.guard.outputs.exists != 'true'
-        env:
-          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          source="$(git rev-parse HEAD)"
-          git config user.name "settings-as-code-release"
-          git config user.email "settings-as-code-release@users.noreply.github.com"
-          # -f: main gitignores lib/index.js; the build tag is where the
-          # bundle lives.
-          git add -f lib/index.js
-          git commit -m "build: package $RELEASE_TAG" \
-            -m "source: $source" \
-            -m "workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          git tag "build/$RELEASE_TAG"
-          git push origin "refs/tags/build/$RELEASE_TAG"
-      # Attest the exact bytes the build tag carries: on the fresh path the
-      # push above just tagged this working tree's lib/index.js, and on the
-      # rerun path the byte-verify proved the working tree matches the
-      # existing tag. Reruns re-attest identical bytes, which is fine (the
-      # attestation log is append-only) and re-produces the bundle so the
-      # upload below always has one to attach.
-      - name: Attest build provenance for the bundle
-        id: attest
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: lib/index.js
-      # The bundle and schema are the build tag's bytes (the rerun path
-      # byte-verified the bundle against the existing tag first); the
-      # sigstore asset is not in the tag - it attests lib/index.js only.
-      # --clobber makes repeats converge. gh names assets after the file,
-      # so the attestation is copied to a stable, self-describing name
-      # for offline verification:
-      #   gh attestation verify lib/index.js --bundle <asset> -R <owner>/<repo>
-      - name: Upload the packaged artifacts to the draft release
+      - name: Detect a release-please merge on this push
+        id: detect
+        # The script prints only the output lines on stdout (diagnostics go
+        # to stderr), so the redirect is the whole contract.
+        run: bun .github/scripts/release-pipeline.ts detect >> "$GITHUB_OUTPUT"
+      # The manifest diff and merge subject prove the shape, not the origin:
+      # an ordinary PR could imitate both. Only a PR from release-please's
+      # own branch may mint a tag.
+      - name: Confirm the merge came from a release-please PR
+        if: steps.detect.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
-          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
-          cp "$ATTESTATION_BUNDLE" "$RUNNER_TEMP/lib-index-js.sigstore.json"
-          gh release upload "$RELEASE_TAG" lib/settings.schema.json lib/index.js \
-            "$RUNNER_TEMP/lib-index-js.sigstore.json" --clobber
+          head_ref="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].head.ref // empty')"
+          if [ "$head_ref" != "release-please--branches--main" ]; then
+            echo "::error::the manifest stepped, but this push's pull request head is '${head_ref:-none}', not release-please--branches--main; refusing to tag a version no release-please PR cut."
+            exit 1
+          fi
 
-  # Move the moving major tag to the build commit of the release this run
-  # just cut, but only when the released tag points at the commit this run
-  # tested and build/<tag> is that commit's packaged child: main can
-  # advance in the seconds between the gate and the release, and
-  # major-pinned consumers must never receive an untested or unpackaged
-  # commit. On a mismatch, fail loudly (the release stays draft) and
-  # repair by hand after verifying that commit's CI. Runs after
-  # update-release so the build tag exists before consumers are pointed
-  # at it.
-  retag-major:
-    needs: [release-please, update-release]
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Assert the release and its build match the tested commit
-        env:
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          git fetch --quiet origin "refs/tags/$TAG:refs/tags/$TAG"
-          released="$(git rev-parse "refs/tags/$TAG^{}")"
-          if [ "$released" != "$GITHUB_SHA" ]; then
-            echo "::error::released $TAG at $released, but this run tested $GITHUB_SHA (main moved during the release window). Verify that commit's CI, then move the major tag by hand: git tag -f <major> refs/tags/build/$TAG^{} && git push --force origin <major> (e.g. major v1 for v1.2.3)."
-            exit 1
-          fi
-          # Captured before the test, so a transport error fails the step
-          # instead of reading as "the tag does not exist".
-          built="$(git ls-remote origin "refs/tags/build/$TAG")"
-          if [ -z "$built" ]; then
-            echo "::error::refs/tags/build/$TAG does not exist, so there is no packaged commit to point $TAG's major tag at; re-run this run's failed jobs (update-release packages the release; it is safe to repeat)."
-            exit 1
-          fi
-          git fetch --quiet origin "refs/tags/build/$TAG:refs/tags/build/$TAG"
-          parent="$(git rev-parse "refs/tags/build/$TAG^{}^")"
-          if [ "$parent" != "$released" ]; then
-            echo "::error::refs/tags/build/$TAG's parent is $parent, not the $TAG commit $released; the major tag must not move to a package of the wrong source - inspect that tag by hand."
-            exit 1
-          fi
-      - name: Move the major tag to the build commit
-        env:
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          major="${TAG%%.*}"
-          major="v${major#v}"
-          git config user.name "settings-as-code-release"
-          git config user.email "settings-as-code-release@users.noreply.github.com"
-          git tag -f "$major" "refs/tags/build/$TAG^{}"
-          git push --force origin "refs/tags/$major"
-          echo "moved $major -> build/$TAG"
+  # The release chain: package, tag, attest, release, publish.
+  release-publish:
+    needs: [detect-release]
+    if: needs.detect-release.outputs.tag != ''
+    uses: ./.github/workflows/release-publish.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.detect-release.outputs.tag }}
+      version: ${{ needs.detect-release.outputs.version }}
 
-  # Step 3: freeze the release. This job stays last.
-  publish-release:
-    needs: [release-please, update-release, retag-major]
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Publish the GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: gh release edit "$TAG" --draft=false
+  # The release-please chain: boundary freshness gate, release PR
+  # build/refresh, and the boundary anchored into the release PR branch.
+  # Runs on EVERY push; only a failed detection stops it (an ambiguous
+  # manifest state parks the whole pipeline).
+  release-bookkeeping:
+    needs: [detect-release]
+    if: ${{ !cancelled() && needs.detect-release.result == 'success' }}
+    uses: ./.github/workflows/release-bookkeeping.yml
+    secrets: inherit
