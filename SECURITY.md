@@ -47,18 +47,23 @@ so the interesting surface is:
 - Settings escalation. A crafted settings file should never be able to
   touch a repository or setting it does not declare, nor bypass the
   preflight barrier or the required-sections policy.
-- Supply chain. The runnable ref is a build commit parented on the audited
-  release commit, produced by the release workflow run named in its
-  provenance message, and published as a `build/vX.Y.Z` tag in a namespace
-  the release-tags ruleset freezes; main carries no executable bundle. A
-  build commit whose bundle a rebuild of its parent's src/ does not
-  reproduce is a vulnerability. The release workflow also attests the
-  bundle's build provenance: fetch `lib/index.js` from the `build/vX.Y.Z`
-  tag or the release assets, then check it with `gh attestation verify
-  lib/index.js -R vivswan/github-settings-as-code` (add
-  `--signer-workflow vivswan/github-settings-as-code/.github/workflows/release.yml`
+- Supply chain. Every ref a `uses:` pin can name - the `vX.Y.Z` release
+  tags and the moving major - points at a packaged commit parented on the
+  audited release commit, produced by the release workflow run named in
+  its provenance message; main carries no executable bundle. The
+  release-tags ruleset freezes version tags for everything except
+  deliberate repository-admin action (the bypass exists for repair; the
+  release workflow itself never moves a version tag, reruns verify the
+  existing one byte-for-byte instead). A packaged commit whose bundle a
+  rebuild of its parent's src/ does not reproduce is a vulnerability. The
+  release workflow also attests both shipped artifacts (`lib/index.js`
+  and `lib/settings.schema.json`) in one build-provenance attestation:
+  fetch either from the `vX.Y.Z` tag
+  or the release assets, then check it with `gh attestation verify
+  <artifact> -R vivswan/github-settings-as-code` (add
+  `--signer-workflow vivswan/github-settings-as-code/.github/workflows/release-publish.yml`
   to also pin the producing workflow), or without the attestations API via
-  `--bundle` against the `lib-index-js.sigstore.json` release asset. A
+  `--bundle` against the `attestations.sigstore.json` release asset. A
   release finished by hand carries no attestation at all: producing one
   needs the workflow's OIDC identity.
 

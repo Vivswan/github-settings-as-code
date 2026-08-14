@@ -129,13 +129,15 @@ rulesets:
         actor_type: RepositoryRole
         bypass_mode: always
 
-  # vX.Y.Z release tags are immutable: template-sync workflow pins and
-  # release artifacts reference them. So are their build/vX.Y.Z packaging
-  # tags, the runnable refs exact pins name; the prefix puts them outside
-  # the v*.*.* pattern, and fnmatch's * does not cross "/", so no single
-  # pattern covers both. The bare moving major tag (v1) is deliberately
-  # NOT matched; the release workflow force-moves it to the latest build
-  # commit.
+  # vX.Y.Z release tags are immutable: each points at a packaged commit (a
+  # child of its release commit carrying the built bundle) that template-
+  # sync workflow pins and release artifacts reference. The release
+  # workflow creates each tag once and never moves it (reruns verify the
+  # existing tag instead); repository admins bypass for deliberate,
+  # auditable repair. The bare moving major tag (v2) is deliberately NOT
+  # matched here - the release workflow force-moves it to the newest
+  # packaged commit in its line - but major-release-tags below still
+  # blocks its deletion.
   - name: release-tags
     target: tag
     enforcement: active
@@ -143,9 +145,32 @@ rulesets:
       ref_name:
         include:
           - v*.*.*
-          - build/v*.*.*
         exclude: []
     rules:
       - type: deletion
       - type: non_fast_forward
       - type: update
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
+
+  # The moving major tags (v1, v2) move on purpose - every release in the
+  # line force-pushes them to its packaged commit - so no update rule, but
+  # they must never vanish: a deleted major bricks every @v2 consumer at
+  # once. fnmatch's * crosses dots, so v* also covers the vX.Y.Z tags;
+  # that overlap is a harmless union with release-tags above.
+  - name: major-release-tags
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - v*
+        exclude: []
+    rules:
+      - type: deletion
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
