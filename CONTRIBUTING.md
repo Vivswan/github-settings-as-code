@@ -55,8 +55,8 @@ settings.yml schema. `bun run build:schema` regenerates it; CI's
 schema-check job fails on drift. The bundle the action executes,
 `lib/index.js`, is not committed: `bun run build:bundle` builds it where it
 is needed (the CI workflows that run the action build it first, and a
-release builds and ships it on the `build/vX.Y.Z` tag, where the moving
-major also points).
+release builds and ships it on a packaged commit that every `vX.Y.Z` tag,
+and the moving major with them, points at).
 
 Runtime dependencies (such as @octokit/rest with the retry and throttling
 plugins, @actions/core, zod, and yaml) are compiled into that single bundle.
@@ -98,7 +98,11 @@ full fuzz and files under `fuzz-nightly`; both issues carry a replay command.
 ## Releases
 
 The release job runs downstream of the `all-green` gate, so releases and
-release-PR refreshes only happen from a green main. Releases are cut
-draft-first: release-please creates a draft with its tag already forced,
-the pipeline updates the draft and moves the moving major tag, and
-publishing is the last step.
+release-PR refreshes only happen from a green main. release-please only
+does version math, the changelog, the manifest and version pins, and the
+release PR; when that PR merges,
+the pipeline builds the bundle, commits it as a child of the merge commit,
+creates the `vX.Y.Z` tag once on that packaged commit, moves the moving
+major tag to it, and publishes the GitHub release (draft-first, with the
+assets attached) as the last step. The tag topology is unit-tested in
+test/scripts/release-pipeline.test.ts.
