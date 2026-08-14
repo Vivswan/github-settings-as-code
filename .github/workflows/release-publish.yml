@@ -1,0 +1,163 @@
+# The release chain of the repo-owned pipeline (called by release.yml with
+# the tag/version its detection proved; see release.yml's header for the
+# single-tag scheme). Packages the merge commit, creates the version tag on
+# the packaged child, attests, releases draft-first, moves the major, and
+# publishes last.
+
+name: Release publish
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The vX.Y.Z tag to create for this release
+        required: true
+        type: string
+      version:
+        description: The X.Y.Z version (names the CHANGELOG.md section)
+        required: true
+        type: string
+
+jobs:
+  package-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # tag pushes; also what makes the draft visible to gh
+      id-token: write # OIDC identity for the provenance attestation
+      attestations: write
+      # The release-health gate reads open issues, the release PR's
+      # override label, and Dependabot alerts; a permissions block zeroes
+      # everything it omits, so the gate's read scopes must be spelled out.
+      issues: read
+      pull-requests: read
+      vulnerability-alerts: read
+    steps:
+      - uses: actions/checkout@v7
+      # Authoritative release gating, the same action the managed
+      # release-please.yml runs: the release PR's own release-health check
+      # can be stale by merge time (a tracking or blocker issue opened
+      # after it went green re-runs no check), so re-check here before
+      # anything is tagged.
+      - uses: Vivswan/repo-platform/actions/release-health@main
+        with:
+          mode: release
+          tracking-labels: "fuzz-nightly,nightly-failure"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Build the bundle and the schema
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build
+          # The uploaded schema asset and the raw URLs at the version and
+          # major tags must serve the bytes committed at the merge commit;
+          # a divergent regeneration (generator drift, or a compromised
+          # generator - SECURITY.md leans on this) stops the release here.
+          git diff --exit-code lib/settings.schema.json
+      # Create the packaged child and its version tag exactly once; a rerun
+      # byte-verifies the existing tag instead (parent, whole tree, bundle
+      # bytes) and never moves it. Both paths end with the worktree bundle
+      # equal to the tagged bundle, which is what the attestation signs.
+      - name: Create or verify the packaged commit and its version tag
+        env:
+          TAG: ${{ inputs.tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bun .github/scripts/release-pipeline.ts package
+      - name: Attest build provenance for the bundle
+        id: attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: lib/index.js
+      # gh names assets after the file, so the attestation bundle is copied
+      # to a stable, self-describing name for offline verification:
+      #   gh attestation verify lib/index.js --bundle <asset> -R <owner>/<repo>
+      - name: Create the draft release and upload the packaged artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ inputs.version }}
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          # A missing release and a transport error both leave state empty;
+          # on a transport error the create below then fails loudly with
+          # "already exists" instead of silently skipping the upload.
+          state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [ -z "$state" ]; then
+            bun .github/scripts/release-pipeline.ts notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          elif [ "$state" = "false" ]; then
+            echo "::notice::release $TAG is already published; skipping the asset upload (published releases freeze their assets)"
+            exit 0
+          fi
+          cp "$ATTESTATION_BUNDLE" "$RUNNER_TEMP/lib-index-js.sigstore.json"
+          gh release upload "$TAG" lib/settings.schema.json lib/index.js \
+            "$RUNNER_TEMP/lib-index-js.sigstore.json" --clobber
+      # Move the moving major tag (v2 for a v2.x.y release) to the packaged
+      # commit, re-verified against origin from scratch: major-pinned
+      # consumers must never receive an unpackaged commit, a package of the
+      # wrong source, or (on a rerun of an old release's job) a step
+      # backward to an older release.
+      - name: Move the major tag to the packaged commit
+        env:
+          TAG: ${{ inputs.tag }}
+        run: bun .github/scripts/release-pipeline.ts retag-major
+
+  # The gate between packaging and publishing, against origin's ACTUAL
+  # state rather than anything the packaging run held locally: the version
+  # tag and the major must both point at the packaged child of this merge
+  # commit, and that commit's tree must carry a non-empty lib/index.js.
+  verify-release:
+    needs: [package-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Confirm the published refs carry the bundle
+        env:
+          TAG: ${{ inputs.tag }}
+        run: bun .github/scripts/release-pipeline.ts verify
+
+# Publish last: published releases freeze their assets, so every job that
+# mutates the release must sit in this needs list. Also flips the release
+# PR's autorelease label, which release-please no longer flips itself
+# under skip-github-release.
+#
+# COMMENTED OUT for the first single-tag release: the pipeline runs end
+# to end (tag, attest, draft, assets, major) but leaves the release a
+# DRAFT for inspection. After verifying, publish by hand
+# (gh release edit <tag> --draft=false) and uncomment this job.
+# publish-release:
+#   needs: [package-release, verify-release]
+#   runs-on: ubuntu-latest
+#   timeout-minutes: 5
+#   permissions:
+#     contents: write
+#     pull-requests: write
+#   steps:
+#     - name: Publish the GitHub release
+#       env:
+#         GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+#         GH_REPO: ${{ github.repository }}
+#         TAG: ${{ inputs.tag }}
+#       run: gh release edit "$TAG" --draft=false
+#     - name: Mark the release PR tagged
+#       env:
+#         GH_TOKEN: ${{ github.token }}
+#         GH_REPO: ${{ github.repository }}
+#       run: |
+#         number="$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty')"
+#         if [ -z "$number" ]; then
+#           echo "::notice::no pull request found for $GITHUB_SHA; leaving the autorelease labels alone"
+#           exit 0
+#         fi
+#         gh api -X DELETE "repos/$GH_REPO/issues/$number/labels/autorelease%3A%20pending" || true
+#         gh api "repos/$GH_REPO/issues/$number/labels" -f "labels[]=autorelease: tagged"

@@ -71,9 +71,9 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
   drifts. `lib/index.js`, the bundled entrypoint the action runs (node24), is
   NOT committed on main: every workflow that executes the action builds it
   first (`bun run build:bundle`), the e2e runner builds it to a temp path,
-  and the runnable bundle a `uses:` ref resolves is built and committed on
-  the release build tags (`build/vX.Y.Z`, where the moving major also
-  points); plain `vX.Y.Z` tags are source-only. `lib/` is exempt from the
+  and a release builds and commits it on a packaged child of the release
+  commit, which is what every `vX.Y.Z` tag and the moving major point at
+  (main itself stays source-only). `lib/` is exempt from the
   typography check (third-party unicode in the bundle; the schema
   descriptions are checked at source) and excluded from
   [biome](https://biomejs.dev).

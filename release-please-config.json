@@ -3,12 +3,13 @@
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": true,
   "include-component-in-tag": false,
+  "skip-github-release": true,
+  "last-release-sha": "046adf3b24454f26f569850630809bcf481f8b84",
   "packages": {
     ".": {
       "release-type": "simple",
       "initial-version": "1.0.0",
       "draft": true,
-      "force-tag-creation": true,
       "extra-files": [
         "README.md",
         "docs/start/getting-started.md",

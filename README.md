@@ -65,7 +65,7 @@ the config types; their `.describe()` strings become the published
 descriptions) and served at
 `https://raw.githubusercontent.com/Vivswan/github-settings-as-code/<ref>/lib/settings.schema.json`,
 where `<ref>` picks the version: `v2` (canonical, the moving major tag, <!-- x-release-please-major -->
-always the newest schema in the line) or `build/vX.Y.Z` (an exact
+always the newest schema in the line) or `vX.Y.Z` (an exact
 release). The `main` ref still works but is deprecated and will be
 removed in a future major. Passthrough areas (the `repository` payload,
 branch protection, rule parameters) stay open objects on purpose.
@@ -100,10 +100,10 @@ The guides live in [docs/](docs/README.md), in four groups:
 - `@v2` is a moving major tag: <!-- x-release-please-major -->
   every release in that major line moves it, so fixes arrive without
   changing your pin.
-- Pinning exactly: pin `@build/vX.Y.Z` (or a commit SHA) when you need
-  byte-stable behavior, and upgrade deliberately. `build/` tags carry the
-  packaged action and are frozen by a ruleset; the plain `vX.Y.Z` tags
-  after v2.0.0 point at source-only commits and do not run.
+- Pinning exactly: pin `@vX.Y.Z` (or a commit SHA) when you need
+  byte-stable behavior, and upgrade deliberately. Every version tag points
+  at a packaged commit carrying the built action - its parent is the
+  audited release commit on main - and is frozen by a ruleset.
 - v2 activates settings keys that were inert on v1:
   `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`,
   `actions.fork_pr_workflows_private_repos`, and

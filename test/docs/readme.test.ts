@@ -213,20 +213,26 @@ describe("README version pins", () => {
     }
   });
 
-  test("the exact-pin advice names the build/ tag namespace, not a plain version tag", () => {
-    // The runnable ref is the release pipeline's build/vX.Y.Z tag
-    // (.github/workflows/release.yml); plain vX.Y.Z tags point at
-    // source-only commits. A README that offers a bare version tag as the
-    // exact pin would send consumers to a ref that does not run, so the
-    // namespace must be named and no `@vX.Y.Z` pin may reappear.
+  test("the exact-pin advice names the version tag and the build/ namespace stays retired", () => {
+    // Under the single-tag scheme (.github/workflows/release.yml) every
+    // vX.Y.Z tag points at a packaged commit carrying the built action, so
+    // the exact pin README offers is the version tag itself; the retired
+    // build/ namespace must not reappear anywhere in the README.
     expect(
-      readme.includes("`@build/vX.Y.Z`"),
-      "README's exact-pin advice must name the `@build/vX.Y.Z` tag namespace",
+      readme.includes("`@vX.Y.Z`"),
+      "README's exact-pin advice must name the `@vX.Y.Z` tag form",
     ).toBe(true);
+    expect(
+      readme.includes("build/"),
+      "README references the retired build/ tag namespace; version tags are the packaged, runnable refs now",
+    ).toBe(false);
+    // Concrete version pins would rot on every release; the moving major
+    // (annotated for release-please) and the @vX.Y.Z placeholder are the
+    // only forms the README may offer.
     const versionPins = [...readme.matchAll(/@v\d+\.\d+\.\d+/g)].map((m) => m[0]);
     expect(
       versionPins,
-      `README offers plain version pin(s) ${versionPins.join(", ")}; those tags are source-only, pin @build/vX.Y.Z instead`,
+      `README pins concrete version tag(s) ${versionPins.join(", ")}; offer the moving major or the @vX.Y.Z placeholder instead`,
     ).toEqual([]);
   });
 });

@@ -1,0 +1,63 @@
+# The release-please chain of the repo-owned pipeline (called by
+# release.yml on every push; see release.yml's header for the single-tag
+# scheme). On a release push (tag input non-empty) it first anchors
+# release-please's boundary, then refreshes the release PR; on an ordinary
+# push the anchor skips and release-please runs directly.
+
+name: Release bookkeeping
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The detected release tag; empty on an ordinary push
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  # Advance release-please's boundary to this release's merge commit, on
+  # top of whatever main is by now. The version is burned the moment the
+  # release PR merges, so the boundary is correct even while packaging is
+  # still running or has failed. Deliberately not a dependency of the
+  # release chain: a missing REPO_PLATFORM_TOKEN must not hold the release
+  # hostage, only fail here with the by-hand recipe.
+  anchor-boundary:
+    if: inputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          # Full history: the monotonic-anchor check proves the recorded
+          # boundary is an ancestor of the merge commit, which a shallow
+          # clone cannot answer.
+          fetch-depth: 0
+          # main's ruleset (PRs + all-green required) only admits an
+          # admin-bypass credential for direct pushes; the default token
+          # falls back for the error message, not for success.
+          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Advance last-release-sha to the merge commit
+        env:
+          TAG: ${{ inputs.tag }}
+        run: bun .github/scripts/release-pipeline.ts anchor
+
+  # Version math, changelog, manifest, and the release PR - never tags or
+  # releases (skip-github-release). On a release push it must see the
+  # advanced last-release-sha, so it runs after the anchor and skips when
+  # the anchor failed; the anchor commit's own CI run refreshes the release
+  # PR instead (this run's head check would skip anyway once main moved).
+  # On an ordinary push the anchor is skipped and it runs directly.
+  release-please:
+    needs: [anchor-boundary]
+    if: >-
+      ${{ !cancelled() &&
+          (inputs.tag == '' || needs.anchor-boundary.result == 'success') }}
+    uses: ./.github/workflows/release-please.yml
+    secrets: inherit
