@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.1](https://github.com/Vivswan/github-settings-as-code/compare/v2.0.0...v2.0.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* apply review fixes to the docs and tooling sweep ([73b6b4a](https://github.com/Vivswan/github-settings-as-code/commit/73b6b4a4f2cbc2f0f3263fee3478ea0eb2b6eab8))
+* apply review fixes to the harness audit batch ([ceb9f46](https://github.com/Vivswan/github-settings-as-code/commit/ceb9f463d7e7bd24acf4bcb770eb6bee63a9219a))
+* apply review fixes to the src-side audit batch ([b9de617](https://github.com/Vivswan/github-settings-as-code/commit/b9de617bdd0e9cb2444f2b544f8c5c3ae8c754bb))
+* attest build provenance and attach the sigstore bundle to releases ([b5db672](https://github.com/Vivswan/github-settings-as-code/commit/b5db67242eabf3b2c380ba672bcd022c476ddfdf))
+* centralize the token-leak sweep in the runner ([7dcc225](https://github.com/Vivswan/github-settings-as-code/commit/7dcc2256e80f56248284b77b7ef1c17decd3c5c2))
+* classify rate limits structurally on every path ([65f97a2](https://github.com/Vivswan/github-settings-as-code/commit/65f97a2a86e85d60492889a85f28273996d48fd7))
+* correct mock identity minting and the pages resurrect bug ([9152a91](https://github.com/Vivswan/github-settings-as-code/commit/9152a91b6f1ef2dd8b5ef94223abb9d5dc72a663))
+* cover every faultable section in the fuzz fault battery ([e41aa99](https://github.com/Vivswan/github-settings-as-code/commit/e41aa9916c9673941b40365347c77692352a16e1))
+* derive owner-kind sensitivity from the section declaration ([0181f01](https://github.com/Vivswan/github-settings-as-code/commit/0181f01a752eb9675f48663d21e9ce70ef497b31))
+* discover schema-corpus scenarios across all scenario roots ([d34d031](https://github.com/Vivswan/github-settings-as-code/commit/d34d0316af107fccf5c910352eae608dff39e91c))
+* harden the CI tooling ([6fb2603](https://github.com/Vivswan/github-settings-as-code/commit/6fb2603a57cfa6ed2d6fc98041fbb60dd2d18f7a))
+* keep spec-pinned gaps out of automatic graduation ([ae278c9](https://github.com/Vivswan/github-settings-as-code/commit/ae278c9f3770a8580727db917124a0cea32e164b))
+* parse live bodies through parseLive in the seven asserting sections ([56ca3e4](https://github.com/Vivswan/github-settings-as-code/commit/56ca3e41dc90981580c4d45057594ad8f4b74369))
+* reject required-sections entries excluded by the sections allowlist ([c1fc169](https://github.com/Vivswan/github-settings-as-code/commit/c1fc1699adc8027919464bea8eceb65b53fc81f2))
+* single-tag releases - version tags live only on packaged commits ([2372661](https://github.com/Vivswan/github-settings-as-code/commit/2372661c712ca59614fb5e9364059830c10bde1a))
+* size the harness kill cap for the directed fuzz battery ([8543af8](https://github.com/Vivswan/github-settings-as-code/commit/8543af85d8178f736598e6565839df1c57b8334c))
+* strengthen the remaining per-section representations ([3fc0f85](https://github.com/Vivswan/github-settings-as-code/commit/3fc0f853f914d032e0bf5f746aee48357d062a03))
+
 ## [2.0.0](https://github.com/Vivswan/github-settings-as-code/compare/v1.0.1...v2.0.0) (2026-08-11)
 
 
