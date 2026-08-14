@@ -77,6 +77,27 @@ jobs:
           tracking-labels: "fuzz-nightly,nightly-failure"
         env:
           GH_TOKEN: ${{ github.token }}
+      # release-please silently ABORTS - green - when any merged release PR
+      # still wears "autorelease: pending" ("untagged, merged release PRs
+      # outstanding"): release PRs stop being proposed with no red anywhere.
+      # Gate the action on that state being clean. A fresh merge is exempt
+      # (its label is legitimately pending until the pipeline tags or
+      # publishes it, which can happen in a parallel job), so only a
+      # pending label older than 30 minutes fails.
+      - name: Fail when a stale pending release PR parks release-please
+        if: steps.head.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cutoff="$(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+          stale="$(gh pr list --state merged --label 'autorelease: pending' \
+            --json number,mergedAt \
+            --jq "[.[] | select(.mergedAt < \"$cutoff\") | .number] | join(\", \")")"
+          if [ -n "$stale" ]; then
+            echo "::error::merged release PR(s) #$stale have worn 'autorelease: pending' for over 30 minutes, so release-please refuses to propose any new release ('untagged, merged release PRs outstanding'). Finish or abandon that release, then move the label to 'autorelease: tagged'."
+            exit 1
+          fi
       - uses: googleapis/release-please-action@v5
         id: release
         if: steps.head.outputs.current == 'true'
