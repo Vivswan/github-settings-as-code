@@ -1,35 +1,12 @@
 # Examples
 
-A cookbook of settings.yml files. Every settings example on this page runs
-through the real document validation in CI, so the shapes stay current. What
-each section manages, which token permission it needs, and whether its
-undeclared entries are deleted or kept is specified in the
-[README Sections table](../../README.md#sections); the cross-section rules live
-under [Semantics](../reference/semantics.md). This page shows shapes, not
-behavior.
+A cookbook of settings.yml files. Every settings example on this page runs through the real document validation in CI, so the shapes stay current. What each section manages, which token permission it needs, and whether its undeclared entries are deleted or kept is specified in the [README Sections table](../../README.md#sections); the cross-section rules live under [Semantics](../reference/semantics.md). This page shows shapes, not behavior.
 
-One rule frames everything below: only declared keys are applied or
-compared. A section, or a field inside one, that the file does not mention
-is never touched. The rule has edges worth knowing. Some list entries are
-one full payload: a declared ruleset is applied with a full-payload PUT,
-so a partial ruleset entry silently narrows the live one; declare each
-ruleset completely. Labels and milestones work the other way: only the
-fields you declare are sent, so an omitted description or state is left
-alone. And two sections bend the rule where the API forces their hand, as
-the [Sections table](../../README.md#sections) notes: inside a declared
-`protection` object the classic API requires all four core keys, so apply
-fills the ones you omit with `null` (see
-[Classic branch protection](#classic-branch-protection) below), and in the
-`actions` section, declaring any base permissions key (or
-`selected_actions`, which infers `allowed_actions: selected`) makes the
-base PUT carry `enabled: true` unless the file says otherwise, while
-retention-, cache-, workflow-token-, or access-only declarations leave the
-base policy alone.
+One rule frames everything below: only declared keys are applied or compared. A section, or a field inside one, that the file does not mention is never touched. The rule has edges worth knowing. Some list entries are one full payload: a declared ruleset is applied with a full-payload PUT, so a partial ruleset entry silently narrows the live one; declare each ruleset completely. Labels and milestones work the other way: only the fields you declare are sent, so an omitted description or state is left alone. And two sections bend the rule where the API forces their hand, as the [Sections table](../../README.md#sections) notes: inside a declared `protection` object the classic API requires all four core keys, so apply fills the ones you omit with `null` (see [Classic branch protection](#classic-branch-protection) below), and in the `actions` section, declaring any base permissions key (or `selected_actions`, which infers `allowed_actions: selected`) makes the base PUT carry `enabled: true` unless the file says otherwise, while retention-, cache-, workflow-token-, or access-only declarations leave the base policy alone.
 
 ## A minimal file
 
-Enough to be useful on day one: a few repository fields and the labels you
-actually triage with.
+Enough to be useful on day one: a few repository fields and the labels you actually triage with.
 
 ```yaml settings
 repository:
@@ -48,10 +25,7 @@ labels:
 
 ## A full-featured file
 
-A single-repo file exercising most sections. `topics` accepts a
-comma-separated string or a YAML list, and `enable_*` keys are feature
-toggles the section routes to their own endpoints; everything else under
-`repository` goes to the API verbatim.
+A single-repo file exercising most sections. `topics` accepts a comma-separated string or a YAML list, and `enable_*` keys are feature toggles the section routes to their own endpoints; everything else under `repository` goes to the API verbatim.
 
 ```yaml settings
 repository:
@@ -239,26 +213,11 @@ secret_scanning_custom_patterns:
     start_delimiter: '\b'
 ```
 
-In `rulesets`, short ref names are auto-prefixed (`staging` becomes
-`refs/heads/staging`) and `~DEFAULT_BRANCH` passes through; rule parameters
-go to the API verbatim, so rule types GitHub ships tomorrow work unchanged
-(see [Forward compatibility](../reference/forward-compatibility.md)).
-`custom_properties` sets values for properties the organization has already
-defined (a `value: null` unsets one), so it applies to org-owned
-repositories only - on a personal account the section skips with a note.
+In `rulesets`, short ref names are auto-prefixed (`staging` becomes `refs/heads/staging`) and `~DEFAULT_BRANCH` passes through; rule parameters go to the API verbatim, so rule types GitHub ships tomorrow work unchanged (see [Forward compatibility](../reference/forward-compatibility.md)). `custom_properties` sets values for properties the organization has already defined (a `value: null` unsets one), so it applies to org-owned repositories only - on a personal account the section skips with a note.
 
 ## Classic branch protection
 
-`branches` is the classic per-branch protection API, kept for Probot
-compatibility; rulesets are the modern replacement. The declared
-`protection` object is the PUT payload, with one adjustment: the classic
-API rejects a payload missing any of its four core keys
-(`required_status_checks`, `enforce_admins`,
-`required_pull_request_reviews`, `restrictions`), so apply fills omitted
-core keys with `null`. A `null` there means "off", so an omitted
-`enforce_admins` is turned off, not left alone; declare every core key you
-want to keep, and check mode reports an omitted-but-live core key as drift
-before an apply would null it away.
+`branches` is the classic per-branch protection API, kept for Probot compatibility; rulesets are the modern replacement. The declared `protection` object is the PUT payload, with one adjustment: the classic API rejects a payload missing any of its four core keys (`required_status_checks`, `enforce_admins`, `required_pull_request_reviews`, `restrictions`), so apply fills omitted core keys with `null`. A `null` there means "off", so an omitted `enforce_admins` is turned off, not left alone; declare every core key you want to keep, and check mode reports an omitted-but-live core key as drift before an apply would null it away.
 
 ```yaml settings
 branches:
@@ -273,16 +232,7 @@ branches:
       restrictions: null
 ```
 
-Two protection surfaces the REST API cannot express ride GraphQL under the
-hood, declared as ordinary keys: `force_push_bypassers` lists who may force
-push (a bare login is a user, `org/team-slug` a team, `app/slug` a GitHub
-App), and `required_deployments` requires deployments to the named
-environments before merging (`null` turns the requirement off; declare the
-environments in the same file - the `environments` section applies first).
-An entry whose name is a wildcard pattern (`release/*`) is a classic RULE
-rather than a branch: it reconciles entirely through GraphQL and its
-protection accepts only the keys with exact GraphQL equivalents, so prefer
-rulesets for new pattern-based configuration.
+Two protection surfaces the REST API cannot express ride GraphQL under the hood, declared as ordinary keys: `force_push_bypassers` lists who may force push (a bare login is a user, `org/team-slug` a team, `app/slug` a GitHub App), and `required_deployments` requires deployments to the named environments before merging (`null` turns the requirement off; declare the environments in the same file - the `environments` section applies first). An entry whose name is a wildcard pattern (`release/*`) is a classic RULE rather than a branch: it reconciles entirely through GraphQL and its protection accepts only the keys with exact GraphQL equivalents, so prefer rulesets for new pattern-based configuration.
 
 ```yaml settings
 environments:
@@ -304,27 +254,21 @@ branches:
 
 ## What null means
 
-For most sections, leaving a key out means "do not touch it". Three
-resource-level declarations give an explicit `null` a meaning of its own.
+For most sections, leaving a key out means "do not touch it". Three resource-level declarations give an explicit `null` a meaning of its own.
 
-`pages: null` declares the Pages site off. Apply deletes an existing site;
-an absent `pages` key leaves the site alone.
+`pages: null` declares the Pages site off. Apply deletes an existing site; an absent `pages` key leaves the site alone.
 
 ```yaml settings
 pages: null
 ```
 
-`interaction_limits: null` clears an active repository-level interaction
-limit - the base limit only; the pull request creation cap and its bypass
-list are separate resources a `null` never touches. An absent key leaves
-whatever limit is live untouched.
+`interaction_limits: null` clears an active repository-level interaction limit - the base limit only; the pull request creation cap and its bypass list are separate resources a `null` never touches. An absent key leaves whatever limit is live untouched.
 
 ```yaml settings
 interaction_limits: null
 ```
 
-`protection: null` on a branch declares it unprotected, and apply removes
-existing classic protection.
+`protection: null` on a branch declares it unprotected, and apply removes existing classic protection.
 
 ```yaml settings
 branches:
@@ -332,21 +276,11 @@ branches:
     protection: null
 ```
 
-Under a multi-repo defaults file, a target's `null` section can instead mean
-"opt out of the defaults for this repository"; the rules for that merge are
-in the [multi-repo guide](../operate/multi-repo.md). A few individual fields
-accept `null` as a value of their own too, such as `pages.cname` to remove
-a custom domain; the [published schema](../../lib/settings.schema.json) marks
-those.
+Under a multi-repo defaults file, a target's `null` section can instead mean "opt out of the defaults for this repository"; the rules for that merge are in the [multi-repo guide](../operate/multi-repo.md). A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](../../lib/settings.schema.json) marks those.
 
 ## Private notes
 
-Unknown top-level sections are hard errors, so a typo cannot silently do
-nothing (the one exception: under a `sections` allowlist, unknown keys
-outside the allowlist warn instead of failing, which eases version skew;
-the [troubleshooting guide](../operate/troubleshooting.md) covers it). Keys starting
-with an underscore are the escape hatch: they are ignored, which makes
-them usable as private notes.
+Unknown top-level sections are hard errors, so a typo cannot silently do nothing (the one exception: under a `sections` allowlist, unknown keys outside the allowlist warn instead of failing, which eases version skew; the [troubleshooting guide](../operate/troubleshooting.md) covers it). Keys starting with an underscore are the escape hatch: they are ignored, which makes them usable as private notes.
 
 ```yaml settings
 _owner: platform-team, see runbook RB-112
@@ -358,9 +292,4 @@ labels:
 
 ## Where to go next
 
-[Check mode](../operate/check-mode.md) is the safe way to try any of these files
-against a real repository before applying. [Multi-repo mode](../operate/multi-repo.md)
-reuses the same documents across a fleet, and
-[the undeclared policy](../reference/undeclared-policy.md) explains what happens
-to live resources these files do not declare, and the `undeclared` knob
-that changes it.
+[Check mode](../operate/check-mode.md) is the safe way to try any of these files against a real repository before applying. [Multi-repo mode](../operate/multi-repo.md) reuses the same documents across a fleet, and [the undeclared policy](../reference/undeclared-policy.md) explains what happens to live resources these files do not declare, and the `undeclared` knob that changes it.

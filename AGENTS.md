@@ -1,8 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to AI coding agents working in this repository.
-`CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are
-symlinks to this file, so edit only here.
+This file provides guidance to AI coding agents working in this repository. `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are symlinks to this file, so edit only here.
 
 ## Project
 
@@ -15,40 +13,16 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
 
 ## Conventions
 
-- PR titles and commit subjects must be Conventional Commits (`feat:`, `fix:`,
-  `feat!:`, `chore:`, ...). PRs are squash-merged, so the PR title becomes the
-  commit subject and drives release-please versioning. CI validates both
-  (the ci.yml pr-title job + validate-commit-names).
-- CI gates on a single required check named `all-green` in the managed
-  `.github/workflows/ci.yml`. This repository's own test/lint jobs belong in
-  `.github/workflows/checks.yml` (repo-owned, called inside the gate); do not
-  edit ci.yml, template sync overwrites it. The `release` job runs on top
-  of the gate (`needs: all-green`); the release pipeline is repo-owned in
-  `.github/workflows/release.yml` (pre/post-release jobs go there, around the
-  managed release-please machinery).
-- No typographic look-alike characters (curly quotes, em-dashes, invisible
-  unicode). CI enforces this with the check-typography action; use plain ASCII
-  punctuation.
+- PR titles and commit subjects must be Conventional Commits (`feat:`, `fix:`, `feat!:`, `chore:`, ...). PRs are squash-merged, so the PR title becomes the commit subject and drives release-please versioning. CI validates both (the ci.yml pr-title job + validate-commit-names).
+- CI gates on a single required check named `all-green` in the managed `.github/workflows/ci.yml`. This repository's own test/lint jobs belong in `.github/workflows/checks.yml` (repo-owned, called inside the gate); do not edit ci.yml, template sync overwrites it. The `release` job runs on top of the gate (`needs: all-green`); the release pipeline is repo-owned in `.github/workflows/release.yml` (pre/post-release jobs go there, around the managed release-please machinery).
+- No typographic look-alike characters (curly quotes, em-dashes, invisible unicode). CI enforces this with the check-typography action; use plain ASCII punctuation.
 
 ## Managed by repo-platform
 
-- Files whose header says "managed by Vivswan/repo-platform"
-  arrive via sync PRs pushed by that repository. Do not edit them here;
-  change them in Vivswan/repo-platform and let the next sync
-  PR deliver the update.
-- Repository settings (description, topics, labels, rulesets, merge policy)
-  are applied from Vivswan/repo-platform: by the
-  `settings/repos/` file named after this repository over there when one
-  exists, otherwise by this repository's own `.github/settings.yml`. Do not
-  change settings by hand in the GitHub UI; edit the settings file.
-- Repo-owned escape hatches stay local:
-  `.github/workflows/checks.yml`,
-  `.github/workflows/release.yml`, `.gitleaks.toml`,
-  `.gitignore`'s marked LOCAL section, `.typography-allow.local`
-  (typography exemptions; the managed `.typography-allow` is overwritten
-  by sync), and the repository-specific section below.
-- Module selection is this repository's own: edit the `modules` list in
-  `.repo-platform.yml` and the next sync PR applies the change.
+- Files whose header says "managed by Vivswan/repo-platform" arrive via sync PRs pushed by that repository. Do not edit them here; change them in Vivswan/repo-platform and let the next sync PR deliver the update.
+- Repository settings (description, topics, labels, rulesets, merge policy) are applied from Vivswan/repo-platform: by the `settings/repos/` file named after this repository over there when one exists, otherwise by this repository's own `.github/settings.yml`. Do not change settings by hand in the GitHub UI; edit the settings file.
+- Repo-owned escape hatches stay local: `.github/workflows/checks.yml`, `.github/workflows/release.yml`, `.gitleaks.toml`, `.gitignore`'s marked LOCAL section, `.typography-allow.local` (typography exemptions; the managed `.typography-allow` is overwritten by sync), and the repository-specific section below.
+- Module selection is this repository's own: edit the `modules` list in `.repo-platform.yml` and the next sync PR applies the change.
 
 ## Repository-specific guidance
 
@@ -56,125 +30,13 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
      updates via three-way merge. -->
 <!-- repo-platform:local-section -->
 
-- `lib/settings.schema.json` is the COMMITTED JSON Schema for settings.yml,
-  generated from the zod slices in `src/sections/<key>/schema.ts` as composed
-  into the settings document by `src/schema.ts`. Each slice is ONE declaration
-  that produces its config type (z.infer), the section's tolerant runtime
-  shape (the section module derives `loosen(<slice>)` itself; the secret and
-  variable family modules are minted by the shared factories in
-  `src/sections/shared/`, which do that derivation once), and its part of
-  the published schema (`.describe()` strings become its descriptions,
-  `.meta({id})` its definition names); `src/schema.ts` adds only the
-  document-level wrappers and pins each property to its slice with a lockstep
-  type. Regenerate the schema with `bun run build:schema` after a
-  schema-affecting `src/` change - CI's schema-check job fails when it
-  drifts. `lib/index.js`, the bundled entrypoint the action runs (node24), is
-  NOT committed on main: every workflow that executes the action builds it
-  first (`bun run build:bundle`), the e2e runner builds it to a temp path,
-  and a release builds and commits it on a packaged child of the release
-  commit, which is what every `vX.Y.Z` tag and the moving major point at
-  (main itself stays source-only). `lib/` is exempt from the
-  typography check (third-party unicode in the bundle; the schema
-  descriptions are checked at source) and excluded from
-  [biome](https://biomejs.dev).
-- The apply/check engine layout: `src/main.ts` is the thin bundled
-  entrypoint; `src/io.ts` is the Io output port (action-layer-free; the
-  action implements it over @actions/core); `src/types.ts` holds the leaf
-  type vocabulary; `src/action/` is the GitHub Actions layer (inputs,
-  settings reading, step summaries, redaction, the single- and
-  multi-repo run flows); `src/engine/` is the per-repo pipeline (orchestrate,
-  validate, merge, diff); `src/github/` is the REST client, pagination, and
-  repo-file fetch; `src/discovery/` resolves multi-repo targets;
-  `src/report/` composes the private report. Under
-  `src/sections/`, each settings section is one self-contained DIRECTORY
-  `src/sections/<key>/`: `index.ts` (the `SectionModule` - key, PAT grant
-  advice, the loose shape derived from the slice, handler), `schema.ts` (the
-  zod slice), `mock.ts` (the e2e mock fragment), `generators.ts` (the fuzz
-  fragment; the secret and variable factory families share theirs in
-  `test/e2e/generators.ts` instead), `<key>.test.ts`, and `scenarios/`.
-  Beside the section
-  directories sit `contract/` (the layered section contract:
-  permissions/endpoints/graphql/module/errors/requests/live), `shared/` (the
-  cross-section engines and factories, plus the schema helpers), and
-  `registry.ts` (the single registration point). All GitHub API list calls
-  must go through `listAll()` (bare-array endpoints) or `listAllEnveloped()`
-  (endpoints that wrap the list in a `{total_count, <key>: []}` envelope),
-  both backed by the single page loop in `src/github/paginate.ts`; errors
-  through `call()`/`throwFor()` so the permission policy
-  (`on-missing-permission`, `required-sections`) works.
-- Adding a section: create `src/sections/<key>/` with the six pieces above,
-  compose the `SettingsFile` property from the slice and add the key to
-  `SECTION_KEYS` in `src/schema.ts`, and add one line in
-  `src/sections/registry.ts` - the compiler flags each forgotten step (the
-  registry's mapped type, the mock fragment registration, the slice
-  composition pin, and the generator aggregation are all keyed by
-  SectionKey).
-- Adding a section endpoint: declare it in the section module's `ENDPOINTS`,
-  add the matching handler under its `section.role` key in the section's
-  `mock.ts` (the fragment's handler record is typed over the section's exact
-  key union, so a missing or phantom handler fails to compile, and
-  `assertHandlerCompleteness()` backstops at construction), add a scenario
-  that reaches it (the coverage tripwire fails on a cold route), and
-  regenerate the trimmed spec (`bun .github/scripts/trim-openapi.ts`; the
-  artifact stays gitignored). `USED_PATHS` (in `test/e2e/openapi/paths.ts`)
-  picks the new path up automatically. Core routes the action calls outside
-  the sections (the repo fetch, the settings-file contents read,
-  `repos: "*"` discovery, and the private-report issue channel) are served
-  by a separate core-path handler, and a request that matches no registered
-  section or core route fails loudly.
-- Two declarations on each section are single sources the rest of the system
-  reads: `permission` (a `SectionPermission`) drives the PAT grant prose
-  (`grantFor`), the mock's permission gate, and the fuzz oracle; the
-  `ENDPOINTS` dictionary drives the paths, the mock routes, and `USED_PATHS`.
-  `undeclaredDefault` pins the README Sections table via the docs
-  contradiction test. Change one and its consumers follow.
-- The end-to-end harness lives under `test/e2e/`: `run.ts` runs the curated
-  scenarios (each section's `scenarios/` plus `test/e2e/scenarios/` for
-  cross-cutting and multi-section flows), `fuzz.ts` runs seeded property
-  fuzzing (the
-  per-section `generators.ts` fragments plus the factory families' shared
-  ones, aggregated by `test/e2e/generators.ts` over the `gen-support.ts`
-  seam), `runner.ts` builds the bundle to a temp
-  path and spawns it against the mock, and `oracle.ts` predicts outcome
-  classes. `mock/` is the in-process GitHub API - the request pipeline, the
-  per-SectionKey fragment registration merged into the handler tables, the
-  shared handler helpers, and the seeded state (see the module headers under
-  `test/e2e/mock/`).
-  On-contract mock responses are validated against a trimmed OpenAPI spec
-  (`openapi/github-openapi.trimmed.json`, a fetched gitignored artifact -
-  generate it with `bun .github/scripts/trim-openapi.ts`; CI caches or
-  re-fetches it); responses the spec cannot document are skipped, namely raw
-  media types, injected transport faults, chaos-corrupted bodies, permission
-  denials, and the mock's own contract-violation replies.
-- Scenarios must run green via `bun run test:e2e` before they land. The
-  diff-aware selector (`.github/scripts/changed-sections.ts`) maps a PR's
-  changed files to the sections its e2e smoke job runs: a path's first
-  segment under `src/sections/` selects its section (`src/sections/<key>/...`
-  selects `<key>`, whatever the file), `shared/` files fan out to their
-  consumers through `SHARED_FAN_OUT`, and `registry.ts` plus the
-  cross-cutting prefixes (`contract/`, the engine, the schema, the harness,
-  the CI scripts) select every section. An unrecognized `src/sections/` path
-  throws, so a new file cannot silently skip the smoke job.
-- SCOPE CONVENTION: a flat `src/sections/<key>/` directory means repository
-  scope, permanently. Org/user settings arrive as sibling scope directories
-  (`src/sections/org/<key>/`) with their own document/SECTION_KEYS/registry
-  triples, composed from their own slices the same way. Bare
-  `${section}.${role}` keys stay repo-scope and other scopes get
-  scope-prefixed keys - the ":" reservation assert in
-  `src/sections/registry.ts` documents this - and the future
-  `SectionPermission` union must keep today's `{repo: [...], org?: ...}`
-  object literal valid verbatim as its repo arm.
-- `src/upstream-gaps/` holds one file per GitHub feature an upstream
-  artifact lags: octokit-kind gaps (routes @octokit/types does not type
-  yet; a tripwire fails typecheck naming the file when octokit catches
-  up) and spec-only gaps (octokit has the types, the pinned OpenAPI
-  descriptor lacks the paths). The auto-fix workflow graduates
-  octokit-kind gaps automatically (delete or rewrite-to-spec-only);
-  spec-only gaps retire by hand when UPSTREAM_REF moves. index.ts is
-  GENERATED (bun .github/scripts/gen-gaps-index.ts); mechanics in
-  gap.ts.
-- The `release` job in ci.yml is deliberately NOT in all-green's `needs`:
-  it runs downstream of the gate (ci.yml calls the repo-owned release.yml
-  via workflow_call, which wraps the managed release-please machinery), so
-  releases and release-PR refreshes only happen on a
-  green main. Do not add it to the needs list.
+- `lib/settings.schema.json` is the COMMITTED JSON Schema for settings.yml, generated from the zod slices in `src/sections/<key>/schema.ts` as composed into the settings document by `src/schema.ts`. Each slice is ONE declaration that produces its config type (z.infer), the section's tolerant runtime shape (the section module derives `loosen(<slice>)` itself; the secret and variable family modules are minted by the shared factories in `src/sections/shared/`, which do that derivation once), and its part of the published schema (`.describe()` strings become its descriptions, `.meta({id})` its definition names); `src/schema.ts` adds only the document-level wrappers and pins each property to its slice with a lockstep type. Regenerate the schema with `bun run build:schema` after a schema-affecting `src/` change - CI's schema-check job fails when it drifts. `lib/index.js`, the bundled entrypoint the action runs (node24), is NOT committed on main: every workflow that executes the action builds it first (`bun run build:bundle`), the e2e runner builds it to a temp path, and a release builds and commits it on a packaged child of the release commit, which is what every `vX.Y.Z` tag and the moving major point at (main itself stays source-only). `lib/` is exempt from the typography check (third-party unicode in the bundle; the schema descriptions are checked at source) and excluded from [biome](https://biomejs.dev).
+- The apply/check engine layout: `src/main.ts` is the thin bundled entrypoint; `src/io.ts` is the Io output port (action-layer-free; the action implements it over @actions/core); `src/types.ts` holds the leaf type vocabulary; `src/action/` is the GitHub Actions layer (inputs, settings reading, step summaries, redaction, the single- and multi-repo run flows); `src/engine/` is the per-repo pipeline (orchestrate, validate, merge, diff); `src/github/` is the REST client, pagination, and repo-file fetch; `src/discovery/` resolves multi-repo targets; `src/report/` composes the private report. Under `src/sections/`, each settings section is one self-contained DIRECTORY `src/sections/<key>/`: `index.ts` (the `SectionModule` - key, PAT grant advice, the loose shape derived from the slice, handler), `schema.ts` (the zod slice), `mock.ts` (the e2e mock fragment), `generators.ts` (the fuzz fragment; the secret and variable factory families share theirs in `test/e2e/generators.ts` instead), `<key>.test.ts`, and `scenarios/`. Beside the section directories sit `contract/` (the layered section contract: permissions/endpoints/graphql/module/errors/requests/live), `shared/` (the cross-section engines and factories, plus the schema helpers), and `registry.ts` (the single registration point). All GitHub API list calls must go through `listAll()` (bare-array endpoints) or `listAllEnveloped()` (endpoints that wrap the list in a `{total_count, <key>: []}` envelope), both backed by the single page loop in `src/github/paginate.ts`; errors through `call()`/`throwFor()` so the permission policy (`on-missing-permission`, `required-sections`) works.
+- Adding a section: create `src/sections/<key>/` with the six pieces above, compose the `SettingsFile` property from the slice and add the key to `SECTION_KEYS` in `src/schema.ts`, and add one line in `src/sections/registry.ts` - the compiler flags each forgotten step (the registry's mapped type, the mock fragment registration, the slice composition pin, and the generator aggregation are all keyed by SectionKey).
+- Adding a section endpoint: declare it in the section module's `ENDPOINTS`, add the matching handler under its `section.role` key in the section's `mock.ts` (the fragment's handler record is typed over the section's exact key union, so a missing or phantom handler fails to compile, and `assertHandlerCompleteness()` backstops at construction), add a scenario that reaches it (the coverage tripwire fails on a cold route), and regenerate the trimmed spec (`bun .github/scripts/trim-openapi.ts`; the artifact stays gitignored). `USED_PATHS` (in `test/e2e/openapi/paths.ts`) picks the new path up automatically. Core routes the action calls outside the sections (the repo fetch, the settings-file contents read, `repos: "*"` discovery, and the private-report issue channel) are served by a separate core-path handler, and a request that matches no registered section or core route fails loudly.
+- Two declarations on each section are single sources the rest of the system reads: `permission` (a `SectionPermission`) drives the PAT grant prose (`grantFor`), the mock's permission gate, and the fuzz oracle; the `ENDPOINTS` dictionary drives the paths, the mock routes, and `USED_PATHS`. `undeclaredDefault` pins the README Sections table via the docs contradiction test. Change one and its consumers follow.
+- The end-to-end harness lives under `test/e2e/`: `run.ts` runs the curated scenarios (each section's `scenarios/` plus `test/e2e/scenarios/` for cross-cutting and multi-section flows), `fuzz.ts` runs seeded property fuzzing (the per-section `generators.ts` fragments plus the factory families' shared ones, aggregated by `test/e2e/generators.ts` over the `gen-support.ts` seam), `runner.ts` builds the bundle to a temp path and spawns it against the mock, and `oracle.ts` predicts outcome classes. `mock/` is the in-process GitHub API - the request pipeline, the per-SectionKey fragment registration merged into the handler tables, the shared handler helpers, and the seeded state (see the module headers under `test/e2e/mock/`). On-contract mock responses are validated against a trimmed OpenAPI spec (`openapi/github-openapi.trimmed.json`, a fetched gitignored artifact - generate it with `bun .github/scripts/trim-openapi.ts`; CI caches or re-fetches it); responses the spec cannot document are skipped, namely raw media types, injected transport faults, chaos-corrupted bodies, permission denials, and the mock's own contract-violation replies.
+- Scenarios must run green via `bun run test:e2e` before they land. The diff-aware selector (`.github/scripts/changed-sections.ts`) maps a PR's changed files to the sections its e2e smoke job runs: a path's first segment under `src/sections/` selects its section (`src/sections/<key>/...` selects `<key>`, whatever the file), `shared/` files fan out to their consumers through `SHARED_FAN_OUT`, and `registry.ts` plus the cross-cutting prefixes (`contract/`, the engine, the schema, the harness, the CI scripts) select every section. An unrecognized `src/sections/` path throws, so a new file cannot silently skip the smoke job.
+- SCOPE CONVENTION: a flat `src/sections/<key>/` directory means repository scope, permanently. Org/user settings arrive as sibling scope directories (`src/sections/org/<key>/`) with their own document/SECTION_KEYS/registry triples, composed from their own slices the same way. Bare `${section}.${role}` keys stay repo-scope and other scopes get scope-prefixed keys - the ":" reservation assert in `src/sections/registry.ts` documents this - and the future `SectionPermission` union must keep today's `{repo: [...], org?: ...}` object literal valid verbatim as its repo arm.
+- `src/upstream-gaps/` holds one file per GitHub feature an upstream artifact lags: octokit-kind gaps (routes @octokit/types does not type yet; a tripwire fails typecheck naming the file when octokit catches up) and spec-only gaps (octokit has the types, the pinned OpenAPI descriptor lacks the paths). The auto-fix workflow graduates octokit-kind gaps automatically (delete or rewrite-to-spec-only); spec-only gaps retire by hand when UPSTREAM_REF moves. index.ts is GENERATED (bun .github/scripts/gen-gaps-index.ts); mechanics in gap.ts.
+- The `release` job in ci.yml is deliberately NOT in all-green's `needs`: it runs downstream of the gate (ci.yml calls the repo-owned release.yml via workflow_call, which wraps the managed release-please machinery), so releases and release-PR refreshes only happen on a green main. Do not add it to the needs list.

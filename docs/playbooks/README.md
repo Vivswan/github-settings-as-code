@@ -1,11 +1,6 @@
 # Playbooks
 
-Operational playbooks for running this action as a platform team: rolling a
-baseline out in rings, previewing fleet changes, splitting trust between
-tokens, producing audit evidence, and handling incidents. Each playbook
-composes inputs and sections that the [README](../../README.md) documents
-individually; the [multi-repo guide](../operate/multi-repo.md) covers the
-underlying mechanics. All of these work with the action as it is today.
+Operational playbooks for running this action as a platform team: rolling a baseline out in rings, previewing fleet changes, splitting trust between tokens, producing audit evidence, and handling incidents. Each playbook composes inputs and sections that the [README](../../README.md) documents individually; the [multi-repo guide](../operate/multi-repo.md) covers the underlying mechanics. All of these work with the action as it is today.
 
 - [A fleet security baseline, rolled out in rings](fleet-baseline-rings.md)
 - [Preview the blast radius of a fleet change](preview-blast-radius.md)

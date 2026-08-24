@@ -1,37 +1,20 @@
 # GitHub Settings as Code
 
-Apply declarative repository settings from `.github/settings.yml`: a loud,
-stateless replacement for the [Probot Settings app](https://github.com/repository-settings/app)
-that also manages [rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets) (branch, tag, and push). Every apply is a visible
-workflow run that fails with the API's error message; nothing happens
-silently.
+Apply declarative repository settings from `.github/settings.yml`: a loud, stateless replacement for the [Probot Settings app](https://github.com/repository-settings/app) that also manages [rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets) (branch, tag, and push). Every apply is a visible workflow run that fails with the API's error message; nothing happens silently.
 
 ## Usage
 
-1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token):
-   the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=github-settings-as-code&description=Token+for+Vivswan%2Fgithub-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&checks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read)
-   starts you off with every repository permission the
-   [Sections](#sections) table can need. Pick the resource owner and
-   repositories, and add Members: read by hand when the owner is an
-   organization; the form only offers organization permissions once one
-   is selected. The default `GITHUB_TOKEN` can never hold these
-   permissions.
+1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token): the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=github-settings-as-code&description=Token+for+Vivswan%2Fgithub-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&checks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read) starts you off with every repository permission the [Sections](#sections) table can need. Pick the resource owner and repositories, and add Members: read by hand when the owner is an organization; the form only offers organization permissions once one is selected. The default `GITHUB_TOKEN` can never hold these permissions.
 
 2. Save the token as a repository secret; `ADMIN_TOKEN` below.
 
-3. Declare your settings in `.github/settings.yml` (see the
-   [example](#example-settingsyml) below). One line at the top gives
-   editor autocomplete and hover docs (agents can fetch the same URL):
+3. Declare your settings in `.github/settings.yml` (see the [example](#example-settingsyml) below). One line at the top gives editor autocomplete and hover docs (agents can fetch the same URL):
 
    ```yaml
    # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
    ```
 
-4. Add the workflow. On a repository with existing labels, autolinks,
-   collaborators, Actions variables, or Copilot agents variables, also set
-   `mode: check` under `with:` for the first run:
-   the drift report lists everything an apply would delete, and nothing is
-   written.
+4. Add the workflow. On a repository with existing labels, autolinks, collaborators, Actions variables, or Copilot agents variables, also set `mode: check` under `with:` for the first run: the drift report lists everything an apply would delete, and nothing is written.
 
    ```yaml
    # .github/workflows/settings.yml
@@ -55,64 +38,27 @@ silently.
              token: ${{ secrets.ADMIN_TOKEN }}
    ```
 
-5. Run it once from the Actions tab (workflow_dispatch), review the run,
-   and drop `mode: check` if you set it. From then on every push that
-   touches `.github/settings.yml` applies it.
+5. Run it once from the Actions tab (workflow_dispatch), review the run, and drop `mode: check` if you set it. From then on every push that touches `.github/settings.yml` applies it.
 
-A JSON Schema describing every section and its structured fields is
-generated from the zod schemas in `src/schema.ts` (the single source of
-the config types; their `.describe()` strings become the published
-descriptions) and served at
-`https://raw.githubusercontent.com/Vivswan/github-settings-as-code/<ref>/lib/settings.schema.json`,
-where `<ref>` picks the version: `v2` (canonical, the moving major tag, <!-- x-release-please-major -->
-always the newest schema in the line) or `vX.Y.Z` (an exact
-release). The `main` ref still works but is deprecated and will be
-removed in a future major. Passthrough areas (the `repository` payload,
-branch protection, rule parameters) stay open objects on purpose.
+A JSON Schema describing every section and its structured fields is generated from the zod schemas in `src/schema.ts` (the single source of the config types; their `.describe()` strings become the published descriptions) and served at `https://raw.githubusercontent.com/Vivswan/github-settings-as-code/<ref>/lib/settings.schema.json`, where `<ref>` picks the version: `v2` (canonical, the moving major tag, <!-- x-release-please-major --> always the newest schema in the line) or `vX.Y.Z` (an exact release). The `main` ref still works but is deprecated and will be removed in a future major. Passthrough areas (the `repository` payload, branch protection, rule parameters) stay open objects on purpose.
 
-The schema is documentation, not a gate: unknown fields validate on
-purpose, because payloads pass through to the API verbatim and declaring a
-field GitHub ships tomorrow must never read as an error (see
-[Forward compatibility](docs/reference/forward-compatibility.md)).
+The schema is documentation, not a gate: unknown fields validate on purpose, because payloads pass through to the API verbatim and declaring a field GitHub ships tomorrow must never read as an error (see [Forward compatibility](docs/reference/forward-compatibility.md)).
 
 ## Guides
 
 The guides live in [docs/](docs/README.md), in four groups:
 
-- Start: [getting started](docs/start/getting-started.md),
-  [migrating from Probot](docs/start/migrating-from-probot.md), and the
-  [examples cookbook](docs/start/examples.md).
-- Reference: [semantics](docs/reference/semantics.md),
-  [token permissions](docs/reference/permissions.md),
-  [the undeclared policy](docs/reference/undeclared-policy.md),
-  [forward compatibility](docs/reference/forward-compatibility.md), and
-  [secrets and vaults](docs/reference/secrets-and-vaults.md) (the `$NAME`
-  references secret fields take).
-- Operate: [check mode](docs/operate/check-mode.md),
-  [multi-repo mode](docs/operate/multi-repo.md),
-  [private repositories](docs/operate/private-repositories.md), and
-  [troubleshooting](docs/operate/troubleshooting.md), which also covers
-  per-call debug tracing.
+- Start: [getting started](docs/start/getting-started.md), [migrating from Probot](docs/start/migrating-from-probot.md), and the [examples cookbook](docs/start/examples.md).
+- Reference: [semantics](docs/reference/semantics.md), [token permissions](docs/reference/permissions.md), [the undeclared policy](docs/reference/undeclared-policy.md), [forward compatibility](docs/reference/forward-compatibility.md), and [secrets and vaults](docs/reference/secrets-and-vaults.md) (the `$NAME` references secret fields take).
+- Operate: [check mode](docs/operate/check-mode.md), [multi-repo mode](docs/operate/multi-repo.md), [private repositories](docs/operate/private-repositories.md), and [troubleshooting](docs/operate/troubleshooting.md), which also covers per-call debug tracing.
 - Playbooks: [complete workflows to adapt](docs/playbooks/README.md).
 
 ## Versioning
 
-- `@v2` is a moving major tag: <!-- x-release-please-major -->
-  every release in that major line moves it, so fixes arrive without
-  changing your pin.
-- Pinning exactly: pin `@vX.Y.Z` (or a commit SHA) when you need
-  byte-stable behavior, and upgrade deliberately. Every version tag points
-  at a packaged commit carrying the built action - its parent is the
-  audited release commit on main - and is frozen by a ruleset.
-- v2 activates settings keys that were inert on v1:
-  `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`,
-  `actions.fork_pr_workflows_private_repos`, and
-  `branches[].protection.required_signatures`. Before moving a `@v1` pin to
-  `@v2`, audit any of those keys already in your settings files for intent;
-  on v2 they act, and a stale `required_signatures: false` would remove a
-  hand-enabled requirement.
-- Only the latest release is supported; fixes are not backported (see
-  [SECURITY.md](SECURITY.md)).
+- `@v2` is a moving major tag: <!-- x-release-please-major --> every release in that major line moves it, so fixes arrive without changing your pin.
+- Pinning exactly: pin `@vX.Y.Z` (or a commit SHA) when you need byte-stable behavior, and upgrade deliberately. Every version tag points at a packaged commit carrying the built action - its parent is the audited release commit on main - and is frozen by a ruleset.
+- v2 activates settings keys that were inert on v1: `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos`, and `branches[].protection.required_signatures`. Before moving a `@v1` pin to `@v2`, audit any of those keys already in your settings files for intent; on v2 they act, and a stale `required_signatures: false` would remove a hand-enabled requirement.
+- Only the latest release is supported; fixes are not backported (see [SECURITY.md](SECURITY.md)).
 
 ## Sections
 
@@ -145,28 +91,13 @@ The guides live in [docs/](docs/README.md), in four groups:
 | `deploy_keys` | deploy keys list/create/delete | Administration: write | kept (settable) | matched by title; the declared material is a PUBLIC key; immutable upstream, so changed entries are replaced |
 | `secret_scanning_custom_patterns` | secret-scanning custom patterns: paginated list + bulk POST + PATCH by id + bulk DELETE | Secret scanning alerts: write | kept (settable) | matched by name (immutable upstream); `state` and `push_protection_enabled` are not declarable; deletes always resolve alerts |
 
-The Undeclared default column says what happens to live resources the
-settings file does not declare; `(settable)` means the wrapped
-`undeclared:` form can override it per file. [The undeclared policy](docs/reference/undeclared-policy.md)
-covers the knob and how it layers with a multi-repo defaults file.
+The Undeclared default column says what happens to live resources the settings file does not declare; `(settable)` means the wrapped `undeclared:` form can override it per file. [The undeclared policy](docs/reference/undeclared-policy.md) covers the knob and how it layers with a multi-repo defaults file.
 
-The model in three lines: the engine is stateless and declared-keys-only
-(a key you do not declare is never touched or compared), applies are
-convergent (a check right after an apply reports clean), and every failure
-is loud, carrying the API's message verbatim.
-[Semantics](docs/reference/semantics.md) is the full model: softenable
-errors, retries, and the preflight barrier.
+The model in three lines: the engine is stateless and declared-keys-only (a key you do not declare is never touched or compared), applies are convergent (a check right after an apply reports clean), and every failure is loud, carrying the API's message verbatim. [Semantics](docs/reference/semantics.md) is the full model: softenable errors, retries, and the preflight barrier.
 
-Payloads pass through to the API verbatim except for documented
-normalizations, so fields and rule types GitHub ships tomorrow work the
-day they exist; a handful of sections are instead closed to catch typos
-that would otherwise misconfigure silently.
-[Forward compatibility](docs/reference/forward-compatibility.md) draws
-that line section by section.
+Payloads pass through to the API verbatim except for documented normalizations, so fields and rule types GitHub ships tomorrow work the day they exist; a handful of sections are instead closed to catch typos that would otherwise misconfigure silently. [Forward compatibility](docs/reference/forward-compatibility.md) draws that line section by section.
 
-See [COVERAGE.md](COVERAGE.md) for the full per-section detail: every row
-above expanded with its exact endpoints, semantics, and caveats, plus every
-repo-scoped gap and the user-scoped surface that is out of scope by design.
+See [COVERAGE.md](COVERAGE.md) for the full per-section detail: every row above expanded with its exact endpoints, semantics, and caveats, plus every repo-scoped gap and the user-scoped surface that is out of scope by design.
 
 ## Example settings.yml
 
@@ -185,9 +116,7 @@ labels:
     description: Something isn't working
 ```
 
-The [examples cookbook](docs/start/examples.md) is the full tour: a
-full-featured file exercising every section, classic branch protection,
-and what `null` means where it is meaningful.
+The [examples cookbook](docs/start/examples.md) is the full tour: a full-featured file exercising every section, classic branch protection, and what `null` means where it is meaningful.
 
 ## Inputs
 
@@ -214,42 +143,19 @@ and what `null` means where it is meaningful.
 | `topics` | (empty) | Discovery-only: keep repositories carrying at least one listed topic |
 | `affiliation` | `owner` | Discovery-only: `owner`, `collaborator`, `organization_member` (comma list) |
 
-Outputs: `result` (`applied` / `partial` / `clean` / `drift` / `failed`;
-worst-of across targets in multi-repo mode, where `skipped` can also
-appear), `skipped-sections`, and `repos-result` (multi-repo mode: a JSON
-map of `owner/name` to `{result, source, skippedSections}`). A redacted
-private target is keyed by its `private repository #N` placeholder instead of
-its slug; see [Private repositories](#private-repositories).
+Outputs: `result` (`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear), `skipped-sections`, and `repos-result` (multi-repo mode: a JSON map of `owner/name` to `{result, source, skippedSections}`). A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](#private-repositories).
 
 ## Multi-repo mode
 
-One run in an admin repository can manage a whole fleet. Two sourcing
-modes are usable together: `repos-dir` names a directory of per-repo
-settings files in the admin repository, and `repos` lists targets applied
-from their own `.github/settings.yml` (`repos: "*"` discovers them). When
-both name the same repository, the central file wins. A `defaults-file`
-merges under every target, and a target's `null` section opts out of a
-section the defaults declare. Targets run independently and sequentially;
-one failure never stops the rest. The
-[multi-repo guide](docs/operate/multi-repo.md) owns the rules: sourcing
-precedence, the discovery filters, the merge, and the fleet patterns.
+One run in an admin repository can manage a whole fleet. Two sourcing modes are usable together: `repos-dir` names a directory of per-repo settings files in the admin repository, and `repos` lists targets applied from their own `.github/settings.yml` (`repos: "*"` discovers them). When both name the same repository, the central file wins. A `defaults-file` merges under every target, and a target's `null` section opts out of a section the defaults declare. Targets run independently and sequentially; one failure never stops the rest. The [multi-repo guide](docs/operate/multi-repo.md) owns the rules: sourcing precedence, the discovery filters, the merge, and the fleet patterns.
 
 ## Private repositories
 
-A public admin repository managing private targets would leak their
-slugs, live settings, and API error bodies into public logs.
-`private-repos: redact` (the default) hides every private or internal
-target behind a placeholder, and the `private-report` input can deliver
-each target's full report over a private channel. The
-[private repositories guide](docs/operate/private-repositories.md) covers
-what is hidden, what stays visible, and how to read the full detail.
+A public admin repository managing private targets would leak their slugs, live settings, and API error bodies into public logs. `private-repos: redact` (the default) hides every private or internal target behind a placeholder, and the `private-report` input can deliver each target's full report over a private channel. The [private repositories guide](docs/operate/private-repositories.md) covers what is hidden, what stays visible, and how to read the full detail.
 
 ## Migrating from the Probot Settings app
 
-This action started as a replacement for the Probot Settings app
-(repository-settings/app), so the schema is a superset of Probot's: an
-existing settings.yml keeps working, and migration is swapping the app
-installation for a workflow.
+This action started as a replacement for the Probot Settings app (repository-settings/app), so the schema is a superset of Probot's: an existing settings.yml keeps working, and migration is swapping the app installation for a workflow.
 
 ### Compared to the Probot Settings app
 
@@ -264,29 +170,12 @@ installation for a workflow.
 | Org-level shared config | Yes (org _settings repo with extends) | Yes, as multi-repo mode: an admin repo with a defaults-file plus per-repo files (repos-dir) or each repo's own settings.yml (repos input); no hosted app needed |
 | Call transparency | None | Every API call is traced as a debug line (method, path, payload, status, timing) when debug logging is on |
 
-The one Probot-family feature without a direct equivalent is suborg-level
-grouping (safe-settings' .github/suborgs layer); here the layers are the
-defaults-file and per-repo files. Everything else in Probot's schema is
-supported, plus the rows above.
+The one Probot-family feature without a direct equivalent is suborg-level grouping (safe-settings' .github/suborgs layer); here the layers are the defaults-file and per-repo files. Everything else in Probot's schema is supported, plus the rows above.
 
-Your existing `settings.yml` works as-is for `repository`, `labels`,
-`branches`, `collaborators`, `teams`, and `milestones` (for the list
-sections among them, the plain-array form remains Probot-compatible; the
-object-shaped sections keep their original Probot shapes).
-Uninstall the app, add the workflow above, and optionally move branch
-protection to `rulesets`. Differences: applies run visibly in Actions
-(loud failures instead of silent skips), rulesets are supported, and
-nothing except labels/autolinks/collaborators/Actions variables/Copilot
-agents variables - plus,
-WITHIN a declared per-environment key, that environment's variables and
-deployment branch-policy patterns, and WITHIN a declared
-`pull_request_creation_bypass` key, that list's undeclared logins - is
-ever deleted implicitly.
+Your existing `settings.yml` works as-is for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones` (for the list sections among them, the plain-array form remains Probot-compatible; the object-shaped sections keep their original Probot shapes). Uninstall the app, add the workflow above, and optionally move branch protection to `rulesets`. Differences: applies run visibly in Actions (loud failures instead of silent skips), rulesets are supported, and nothing except labels/autolinks/collaborators/Actions variables/Copilot agents variables - plus, WITHIN a declared per-environment key, that environment's variables and deployment branch-policy patterns, and WITHIN a declared `pull_request_creation_bypass` key, that list's undeclared logins - is ever deleted implicitly.
 
-The step-by-step move, including an org-scale shadow run alongside the
-app, is the [migration guide](docs/start/migrating-from-probot.md).
+The step-by-step move, including an org-scale shadow run alongside the app, is the [migration guide](docs/start/migrating-from-probot.md).
 
 ## Contributing
 
-The toolchain, the end-to-end harness, and the PR conventions are
-documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+The toolchain, the end-to-end harness, and the PR conventions are documented in [CONTRIBUTING.md](CONTRIBUTING.md).

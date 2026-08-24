@@ -1,7 +1,6 @@
 # Preview the blast radius of a fleet change
 
-One line in a defaults file can delete labels on three hundred
-repositories. Check mode on pull requests is the plan step:
+One line in a defaults file can delete labels on three hundred repositories. Check mode on pull requests is the plan step:
 
 ```yaml
 name: Preview fleet changes
@@ -38,12 +37,4 @@ jobs:
             --body "Settings check for this PR:"$'\n'"$body"
 ```
 
-`continue-on-error` is load-bearing: a pull request that changes settings
-is supposed to exit 1, so the verdict is the rendered `repos-result` map
-and the drift lines in the run log, not the step's color. Read the report
-as proposed-versus-live, not as a diff of the PR itself: the drift
-includes any divergence that existed before the PR, and it is exactly
-what an apply on merge would change. The read-only
-token keeps the write-capable credential out of `pull_request` jobs
-entirely (the [check mode guide](../operate/check-mode.md) explains why that
-matters).
+`continue-on-error` is load-bearing: a pull request that changes settings is supposed to exit 1, so the verdict is the rendered `repos-result` map and the drift lines in the run log, not the step's color. Read the report as proposed-versus-live, not as a diff of the PR itself: the drift includes any divergence that existed before the PR, and it is exactly what an apply on merge would change. The read-only token keeps the write-capable credential out of `pull_request` jobs entirely (the [check mode guide](../operate/check-mode.md) explains why that matters).
