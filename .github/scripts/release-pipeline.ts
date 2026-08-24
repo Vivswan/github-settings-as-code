@@ -1,20 +1,18 @@
 /**
  * The single-tag release pipeline's git topology, called step by step from
- * .github/workflows/release.yml and unit-tested against local fixture
- * repositories (test/scripts/release-pipeline.test.ts), so "the next release
- * tags the right commits" is proven on every push instead of on release day.
+ * the repo-owned workflows (update-release.yml for the release chain,
+ * checks.yml and release-anchor.yml for the bookkeeping) and unit-tested
+ * against local fixture repositories (test/scripts/release-pipeline.test.ts),
+ * so "the next release tags the right commits" is proven on every push
+ * instead of on release day.
  *
  * The scheme: main is source-only, and every ref a consumer can name - the
  * vX.Y.Z release tags and the moving major vX - points ONLY at a packaged
  * commit, a child of the release-please merge commit that adds the built
- * lib/index.js. Subcommands, one per workflow step:
+ * lib/index.js. release-please cuts the DRAFT release itself (no tag: the
+ * config sets `draft` without `force-tag-creation`), and only then do these
+ * subcommands run, one per workflow step:
  *
- *   detect       GITHUB_OUTPUT lines (tag=/version=) when this push merges a
- *                release-please PR - the .release-please-manifest.json diff
- *                cross-checked against the merge subject, throwing on any
- *                ambiguity so a hand-edited manifest can never mint a tag -
- *                and empty values on an ordinary push.
- *   notes <ver>  The CHANGELOG.md section for <ver> on stdout.
  *   package      Create the packaged child of GITHUB_SHA and tag it ONCE,
  *                or byte-verify an existing tag (idempotent rerun). No path
  *                moves a tag.
@@ -25,17 +23,24 @@
  *                both point at the packaged child of the merge commit, and
  *                that commit's tree carries a non-empty lib/index.js.
  *   anchor       Advance last-release-sha in release-please-config.json on
- *                main to the merge commit. Load-bearing: version tags live
- *                on packaged children that are NOT on main, and
- *                release-please's commit walk only sees main, so without the
- *                anchor the next release PR would count every commit since
- *                the previous boundary - stale changelog, wrong version.
+ *                the release PR branch to the merge parent, and retire a
+ *                release-as pin the branch's manifest proves spent.
+ *                Load-bearing: version tags live on packaged children that
+ *                are NOT on main, and release-please's commit walk only
+ *                sees main, so without the anchor the next release PR would
+ *                count every commit since the previous boundary - stale
+ *                changelog, wrong version.
  *   boundary-check
  *                Fail unless last-release-sha matches the newest release
  *                merge on the checked-out history: a failed anchor (or a
- *                release merge that slipped past detection) stays loud on
+ *                release merge that slipped past the pipeline) stays loud on
  *                EVERY push, and release-please stays gated, instead of
  *                quietly building garbage release PRs from a stale boundary.
+ *   anchor-check Fail unless the checked-out release PR carries the anchor
+ *                (last-release-sha equals origin's main tip): the managed
+ *                release-freshness gate proves ancestry only, so without
+ *                this PR-side half an unanchored release PR could merge and
+ *                land a stale boundary on main.
  *
  * Env: TAG and GITHUB_SHA (package/retag-major/anchor), RUN_URL (package,
  * optional provenance trailer). Node builtins only, so `bun` runs it before
@@ -49,7 +54,10 @@ import { join } from "node:path";
 const MANIFEST_FILE = ".release-please-manifest.json";
 const CONFIG_FILE = "release-please-config.json";
 const BUNDLE_FILE = "lib/index.js";
-/** What a squash-merged release-please PR's subject looks like on main. */
+/** What a squash-merged release-please PR's subject looks like on main.
+ * Matched EXACTLY wherever release merges are recognized: a prefix match
+ * would let "chore(main): release pipeline documentation" impersonate a
+ * release merge and park the boundary check. */
 const RELEASE_SUBJECT = /^chore\(main\): release (\d+\.\d+\.\d+)(?: \(#\d+\))?$/;
 
 /** Run git in cwd, returning trimmed stdout; rethrows with the command and
@@ -88,85 +96,17 @@ function configureIdentity(cwd: string): void {
   git(cwd, "config", "user.email", "settings-as-code-release@users.noreply.github.com");
 }
 
-export interface DetectedRelease {
-  version: string;
-  tag: string;
-}
-
-/**
- * Decide whether HEAD is the merge of a release-please PR. The manifest diff
- * alone is not proof (the file is repo-owned and hand-editable), so the
- * version step must agree with the merge subject; disagreement throws rather
- * than guessing, and nothing downstream tags anything.
- */
-export function detectRelease(cwd: string): DetectedRelease | null {
-  if (tryGit(cwd, "rev-parse", "--verify", "--quiet", "HEAD^") === null) {
-    return null; // root commit: nothing was merged onto anything
-  }
-  const changed = git(cwd, "diff", "--name-only", "HEAD^", "HEAD").split("\n");
-  if (!changed.includes(MANIFEST_FILE)) {
-    return null;
-  }
-  const manifest = JSON.parse(git(cwd, "show", `HEAD:${MANIFEST_FILE}`)) as Record<string, unknown>;
-  const keys = Object.keys(manifest);
-  if (keys.length !== 1 || keys[0] !== ".") {
+/** The one tag shape the scheme mints. Every ref derivation goes through
+ * this parse, so a malformed tag stops the pipeline instead of minting a
+ * wrong major (e.g. "v2" from "v2.1-rc.0"). */
+function releaseMajor(tag: string): string {
+  const match = tag.match(/^v(\d+)\.\d+\.\d+$/);
+  if (!match) {
     throw new Error(
-      `${MANIFEST_FILE} at HEAD tracks [${keys.join(", ")}], not exactly the root package "."; refusing to tag until the manifest shape is understood.`,
+      `tag ${JSON.stringify(tag)} is not a vX.Y.Z release tag; refusing to derive version refs from it.`,
     );
   }
-  const version = manifest["."];
-  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
-    throw new Error(
-      `${MANIFEST_FILE} at HEAD has version ${JSON.stringify(version)}, not an X.Y.Z release; refusing to tag.`,
-    );
-  }
-  const beforeRaw = tryGit(cwd, "show", `HEAD^:${MANIFEST_FILE}`);
-  const before = beforeRaw === null ? {} : (JSON.parse(beforeRaw) as Record<string, unknown>);
-  if (before["."] === version) {
-    console.error(
-      `${MANIFEST_FILE} changed without a version step (still ${version}); not a release.`,
-    );
-    return null;
-  }
-  const subject = git(cwd, "log", "-1", "--format=%s");
-  const merged = subject.match(RELEASE_SUBJECT);
-  if (merged === null) {
-    throw new Error(
-      `${MANIFEST_FILE} stepped to ${version} but the commit subject is "${subject}", not a release-please merge; refusing to tag. Revert the hand edit, or release through a release-please PR.`,
-    );
-  }
-  if (merged[1] !== version) {
-    throw new Error(
-      `the merge subject releases ${merged[1]} but ${MANIFEST_FILE} says ${version}; refusing to tag a version the release PR did not cut.`,
-    );
-  }
-  return { version, tag: `v${version}` };
-}
-
-/**
- * The CHANGELOG.md section for one version: from its "## " heading (linked
- * "## [X.Y.Z](...)" or bare "## X.Y.Z (date)") to the next version heading.
- */
-export function extractReleaseNotes(changelog: string, version: string): string {
-  const lines = changelog.split("\n");
-  // Full metacharacter escape: the version reaches this regex from the CLI,
-  // and only literal-match semantics are ever intended.
-  const literal = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const heading = new RegExp(`^## \\[?${literal}[\\]) ]`);
-  const start = lines.findIndex((line) => heading.test(line));
-  if (start === -1) {
-    throw new Error(
-      `CHANGELOG.md has no "## ${version}" section; the release PR should have written it.`,
-    );
-  }
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i++) {
-    if (lines[i]?.startsWith("## ")) {
-      end = i;
-      break;
-    }
-  }
-  return `${lines.slice(start, end).join("\n").trim()}\n`;
+  return `v${match[1]}`;
 }
 
 /**
@@ -206,9 +146,19 @@ export interface PackagedRelease {
  */
 export function packageRelease(options: PackageOptions): PackagedRelease {
   const { cwd, tag, sourceSha, runUrl } = options;
+  releaseMajor(tag); // shape gate: nothing downstream may mint a non-vX.Y.Z ref
   const head = git(cwd, "rev-parse", "HEAD");
   if (head !== sourceSha) {
     throw new Error(`the checkout is at ${head}, not the release merge commit ${sourceSha}.`);
+  }
+  // The tag must be the version THIS source released: a hand recovery with
+  // the wrong TAG, or a draft whose metadata points at the wrong commit,
+  // must stop here rather than mint an immutable tag from the wrong source.
+  const manifest = JSON.parse(git(cwd, "show", `HEAD:${MANIFEST_FILE}`)) as Record<string, unknown>;
+  if (tag !== `v${manifest["."]}`) {
+    throw new Error(
+      `tag ${tag} does not match the manifest version ${JSON.stringify(manifest["."])} at ${sourceSha}; refusing to package a version this source did not release.`,
+    );
   }
   if (!existsSync(join(cwd, BUNDLE_FILE))) {
     throw new Error(`${BUNDLE_FILE} is not built; run the build before packaging.`);
@@ -305,15 +255,11 @@ export function retagMajor(options: RetagMajorOptions): { major: string; package
   const { cwd, tag, sourceSha } = options;
   const ref = `refs/tags/${tag}`;
   git(cwd, "fetch", "--quiet", "--depth=2", "origin", `+${ref}:${ref}`);
-  const packagedSha = git(cwd, "rev-parse", `${ref}^{}`);
-  const parent = git(cwd, "rev-parse", `${packagedSha}^`);
-  if (parent !== sourceSha) {
-    throw new Error(
-      `refs/tags/${tag}'s parent is ${parent}, not this release's merge commit ${sourceSha}; the major tag must not move to a package of the wrong source - inspect that tag by hand.`,
-    );
-  }
-  assertCarriesBundle(cwd, packagedSha);
-  const major = `v${tag.slice(1).split(".")[0]}`;
+  // The full packaged-tag verification (parent, whole tree, bundle bytes),
+  // not a weaker parent-only probe: the major must never bless a child a
+  // fresh package run would refuse, however this command was reached.
+  const packagedSha = verifyPackagedTag(cwd, tag, sourceSha);
+  const major = releaseMajor(tag);
   configureIdentity(cwd);
   const attempts = 3;
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -390,7 +336,7 @@ export function verifyPublishedRefs(options: VerifyOptions): {
   packagedSha: string;
 } {
   const { cwd, tag, sourceSha } = options;
-  const major = `v${tag.slice(1).split(".")[0]}`;
+  const major = releaseMajor(tag);
   git(
     cwd,
     "fetch",
@@ -441,6 +387,13 @@ export interface AnchorResult {
  * merge, so the recorded parent cannot be stale at merge time). The parent
  * is as good a boundary as the merge commit: the walk then includes the
  * merge itself, a chore commit the changelog hides.
+ *
+ * The same commit retires a release-as pin the branch's manifest proves
+ * spent (the pin equals the version this PR releases): left in place, the
+ * merged config would trip boundary-check's release-as tripwire on the
+ * release push itself and park all-green. Resolved here, at the one point
+ * that builds the config the merge lands, instead of guarded at every
+ * consumer.
  */
 export function anchorReleasePr(options: AnchorOptions): AnchorResult {
   const { cwd, sourceSha, attempts = 3 } = options;
@@ -455,16 +408,45 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
     if (git(cwd, "ls-remote", "origin", branchRef) === "") {
       return { changed: false, reason: "no release PR branch to anchor" };
     }
-    git(cwd, "fetch", "--quiet", "--force", "origin", `+${branchRef}:${branchRef}`);
-    git(cwd, "checkout", "--quiet", "--force", RELEASE_PR_BRANCH);
-    const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as Record<
-      string,
-      unknown
-    >;
-    if (config["last-release-sha"] === sourceSha) {
+    // Detached on FETCH_HEAD, never a local branch: a retry after a lost
+    // push must re-fetch, and git refuses to fetch into a checked-out ref.
+    git(cwd, "fetch", "--quiet", "--force", "origin", branchRef);
+    git(cwd, "checkout", "--quiet", "--force", "--detach", "FETCH_HEAD");
+    // Anchor only a branch release-please built on this head: this
+    // workflow also runs for failed CI runs (whose refresh may never have
+    // happened), and their anchor must not stamp this head onto a branch
+    // still built from an older main. A shallow history that cannot prove
+    // ancestry no-ops the same way - the refresh that follows anchors.
+    if (tryGit(cwd, "merge-base", "--is-ancestor", sourceSha, "FETCH_HEAD") === null) {
+      return {
+        changed: false,
+        reason: "the release PR branch is not built on this head; its own refresh anchors",
+      };
+    }
+    const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as {
+      "last-release-sha"?: unknown;
+      packages?: Record<string, { "release-as"?: unknown }>;
+    };
+    const edits: string[] = [];
+    if (config["last-release-sha"] !== sourceSha) {
+      config["last-release-sha"] = sourceSha;
+      edits.push(`anchored at ${sourceSha}`);
+    }
+    const rootPackage = config.packages?.["."];
+    const releaseAs = rootPackage?.["release-as"];
+    if (rootPackage !== undefined && releaseAs !== undefined) {
+      const manifest = JSON.parse(readFileSync(join(cwd, MANIFEST_FILE), "utf8")) as Record<
+        string,
+        unknown
+      >;
+      if (releaseAs === manifest["."]) {
+        delete rootPackage["release-as"];
+        edits.push(`retired the spent release-as ${String(releaseAs)}`);
+      }
+    }
+    if (edits.length === 0) {
       return { changed: false, reason: "already anchored" };
     }
-    config["last-release-sha"] = sourceSha;
     writeFileSync(join(cwd, CONFIG_FILE), `${JSON.stringify(config, null, 2)}\n`);
     configureIdentity(cwd);
     git(cwd, "add", CONFIG_FILE);
@@ -474,11 +456,19 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
       "-m",
       "chore: anchor release-please to this release cycle's base",
       "-m",
-      "last-release-sha records the merge parent so the squash merge itself lands the next cycle's boundary on main: version tags live on packaged children that are not on main, so release-please cannot find the boundary by tag.",
+      "last-release-sha records the merge parent so the squash merge itself lands the next cycle's boundary on main: version tags live on packaged children that are not on main, so release-please cannot find the boundary by tag. A release-as pin this PR's own version proves spent is retired by the same commit, so the merge cannot land a pin that would park the pipeline.",
     );
+    // Recheck main immediately before pushing: the fetch above can lose a
+    // race where a newer push's run already refreshed and anchored the
+    // branch - this run's commit would descend from that anchor and push
+    // cleanly, regressing the boundary to the older head.
+    const headNow = git(cwd, "ls-remote", "origin", "refs/heads/main").split("\t")[0];
+    if (headNow !== sourceSha) {
+      return { changed: false, reason: `main moved to ${headNow ?? "?"}; the newer run anchors` };
+    }
     try {
       git(cwd, "push", "origin", `HEAD:${branchRef}`);
-      return { changed: true, reason: `anchored ${RELEASE_PR_BRANCH} at ${sourceSha}` };
+      return { changed: true, reason: `${RELEASE_PR_BRANCH}: ${edits.join("; ")}` };
     } catch (error) {
       // release-please force-pushed a refresh mid-anchor; reapply on it.
       console.error(`anchor push attempt ${attempt}/${attempts} lost: ${String(error)}`);
@@ -493,8 +483,8 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
  * The tripwire behind the anchor: on the checked-out history (main),
  * last-release-sha must be the newest release merge or its parent -
  * anything else means an anchor was lost (or a release merge slipped past
- * detection) and every release PR refresh would be computed from a stale
- * boundary. Loud and gating beats silently wrong changelogs.
+ * the pipeline) and every release PR refresh would be computed from a
+ * stale boundary. Loud and gating beats silently wrong changelogs.
  */
 export function boundaryCheck(cwd: string): { boundary: string } {
   const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as {
@@ -516,7 +506,19 @@ export function boundaryCheck(cwd: string): { boundary: string } {
       );
     }
   }
-  const latest = git(cwd, "log", "--grep", "^chore(main): release ", "-1", "--format=%H");
+  // The grep narrows candidates cheaply (it matches any message line with
+  // the prefix); the strict subject regex then decides, so an ordinary
+  // commit like "chore(main): release pipeline documentation" can neither
+  // become the boundary nor hide the real newest release merge.
+  const listed = git(cwd, "log", "--grep", "^chore(main): release ", "--format=%H%x09%s");
+  let latest = "";
+  for (const line of listed.split("\n")) {
+    const [sha, subject] = line.split("\t");
+    if (sha !== undefined && subject !== undefined && RELEASE_SUBJECT.test(subject)) {
+      latest = sha;
+      break;
+    }
+  }
   const recorded = config["last-release-sha"];
   if (latest === "") {
     return { boundary: "none (no release merge on this history yet)" };
@@ -530,9 +532,32 @@ export function boundaryCheck(cwd: string): { boundary: string } {
   );
 }
 
+/**
+ * The PR-side half of the boundary tripwire, run on the release PR's own
+ * checkout: the merge must land the anchor, and the managed
+ * release-freshness gate only proves the PR contains main's tip, not that
+ * the anchor commit survived (a release-please force-push wipes it until
+ * the anchor workflow re-applies it). Requiring last-release-sha to equal
+ * origin's CURRENT main tip makes an unanchored release PR unmergeable
+ * instead of parking the pipeline after its merge.
+ */
+export function anchorCheck(cwd: string): { boundary: string } {
+  const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as {
+    "last-release-sha"?: unknown;
+  };
+  const recorded = config["last-release-sha"];
+  const tip = git(cwd, "ls-remote", "origin", "refs/heads/main").split("\t")[0];
+  if (recorded !== tip) {
+    throw new Error(
+      `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but main's tip is ${tip ?? "?"}; the anchor is missing or stale, so merging would land a wrong boundary. The Release anchor workflow re-applies it after every main run - rerun it (or wait for the next refresh), then close/reopen the PR so its checks run on the anchored head (the anchor is pushed with the default token, which triggers no new checks).`,
+    );
+  }
+  return { boundary: String(recorded) };
+}
+
 if (import.meta.main) {
   const cwd = process.cwd();
-  const [command, argument] = process.argv.slice(2);
+  const [command] = process.argv.slice(2);
   const env = (name: string): string => {
     const value = process.env[name];
     if (value === undefined || value === "") {
@@ -542,28 +567,6 @@ if (import.meta.main) {
   };
   try {
     switch (command) {
-      case "detect": {
-        const release = detectRelease(cwd);
-        // Always both lines: the workflow's `tag != ''` guards need the
-        // output defined. Nothing else may print to stdout - the caller
-        // redirects it to GITHUB_OUTPUT.
-        process.stdout.write(`tag=${release?.tag ?? ""}\nversion=${release?.version ?? ""}\n`);
-        console.error(
-          release === null
-            ? "no release-please merge on this push"
-            : `this push merged the release PR for ${release.tag}`,
-        );
-        break;
-      }
-      case "notes": {
-        if (argument === undefined) {
-          throw new Error("usage: release-pipeline.ts notes <version>");
-        }
-        process.stdout.write(
-          extractReleaseNotes(readFileSync(join(cwd, "CHANGELOG.md"), "utf8"), argument),
-        );
-        break;
-      }
       case "package": {
         const result = packageRelease({
           cwd,
@@ -600,9 +603,14 @@ if (import.meta.main) {
         console.error(`boundary is fresh: ${result.boundary}`);
         break;
       }
+      case "anchor-check": {
+        const result = anchorCheck(cwd);
+        console.error(`the release PR carries this cycle's anchor: ${result.boundary}`);
+        break;
+      }
       default:
         throw new Error(
-          `unknown command ${JSON.stringify(command ?? null)}; expected detect | notes | package | retag-major | verify | anchor | boundary-check`,
+          `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | verify | anchor | boundary-check | anchor-check`,
         );
     }
   } catch (error) {
