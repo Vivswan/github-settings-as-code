@@ -1,9 +1,7 @@
 /**
  * The single-tag release pipeline's git topology, called step by step from
  * the repo-owned workflows (update-release.yml for the release chain,
- * checks.yml and the release-PR anchor workflows - update-release-pr.yml,
- * bridged by release-anchor.yml until the managed release.yml calls the
- * hook - for the bookkeeping) and unit-tested
+ * checks.yml and update-release-pr.yml for the bookkeeping) and unit-tested
  * against local fixture repositories (test/scripts/release-pipeline.test.ts),
  * so "the next release tags the right commits" is proven on every push
  * instead of on release day.
@@ -551,7 +549,7 @@ export function anchorCheck(cwd: string): { boundary: string } {
   const tip = git(cwd, "ls-remote", "origin", "refs/heads/main").split("\t")[0];
   if (recorded !== tip) {
     throw new Error(
-      `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but main's tip is ${tip ?? "?"}; the anchor is missing or stale, so merging would land a wrong boundary. The Release anchor workflow re-applies it after every main run - rerun it (or wait for the next refresh), then close/reopen the PR so its checks run on the anchored head (the anchor is pushed with the default token, which triggers no new checks).`,
+      `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but main's tip is ${tip ?? "?"}; the anchor is missing or stale, so merging would land a wrong boundary. The release pipeline's update-release-pr hook re-applies it on every release-PR refresh - wait for (or dispatch) the next green main run, then close/reopen the PR so its checks run on the anchored head (the anchor is pushed with the default token, which triggers no new checks).`,
     );
   }
   return { boundary: String(recorded) };

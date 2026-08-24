@@ -1,11 +1,7 @@
-# The release-PR hook of the release pipeline: repo-owned, seeded AHEAD of
-# the template sync that delivers the managed release.yml calling it on
-# every release-PR create or refresh (independently of any release cut).
-# Upstream this file is a generated-once starter, so an existing copy is
-# never overwritten by sync - seeding it now means the sync lands with this
-# repository's job already in place. Until that sync lands nothing calls
-# this workflow; release-anchor.yml carries the anchor via workflow_run in
-# the meantime and is deleted when the managed caller arrives.
+# The release-PR hook of the release pipeline: repo-owned (a generated-once
+# starter upstream, so template sync never overwrites it), called by the
+# managed release.yml whenever release-please creates or refreshes the
+# release PR, independently of any release cut.
 #
 # This repository's job here is the single-tag scheme's boundary anchor
 # (see .github/scripts/release-pipeline.ts): called in the same run that

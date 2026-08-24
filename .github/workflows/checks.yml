@@ -55,7 +55,7 @@ jobs:
         run: bun run test
 
   # The freshness tripwire behind the single-tag scheme's boundary (the
-  # anchor half lives in release-anchor.yml): last-release-sha in
+  # anchor half lives in update-release-pr.yml): last-release-sha in
   # release-please-config.json must be the newest release merge on main or
   # its parent - version tags live on packaged children that are NOT on
   # main, so release-please cannot find the boundary by tag, and a lost
