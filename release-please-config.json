@@ -4,7 +4,7 @@
   "bump-patch-for-minor-pre-major": true,
   "include-component-in-tag": false,
   "skip-github-release": true,
-  "last-release-sha": "046adf3b24454f26f569850630809bcf481f8b84",
+  "last-release-sha": "6292877263631169e5e945a394fcbd5229209759",
   "packages": {
     ".": {
       "release-type": "simple",
