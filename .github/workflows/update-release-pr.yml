@@ -1,0 +1,47 @@
+# The release-PR hook of the release pipeline: repo-owned, seeded AHEAD of
+# the template sync that delivers the managed release.yml calling it on
+# every release-PR create or refresh (independently of any release cut).
+# Upstream this file is a generated-once starter, so an existing copy is
+# never overwritten by sync - seeding it now means the sync lands with this
+# repository's job already in place. Until that sync lands nothing calls
+# this workflow; release-anchor.yml carries the anchor via workflow_run in
+# the meantime and is deleted when the managed caller arrives.
+#
+# This repository's job here is the single-tag scheme's boundary anchor
+# (see .github/scripts/release-pipeline.ts): called in the same run that
+# refreshed the release PR, GITHUB_SHA is exactly the main head the refresh
+# was built on, and the anchor commits it into the PR branch as
+# last-release-sha (retiring a spent release-as pin with it). The script
+# re-verifies against origin - main still at this head, the branch built on
+# it - before committing, and rechecks main before pushing.
+# Token caveat: pushes to the PR branch made with the default github.token
+# do NOT re-trigger the PR's CI checks (the close/reopen note in
+# release.yml); with REPO_PLATFORM_TOKEN they do.
+
+name: Update Release PR
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: The release PR's number
+        required: true
+        type: string
+      head_branch:
+        description: The release PR's head branch (push updates back to it)
+        required: true
+        type: string
+
+jobs:
+  anchor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Anchor the boundary inside the release PR branch
+        run: bun .github/scripts/release-pipeline.ts anchor

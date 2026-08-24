@@ -1,7 +1,9 @@
 /**
  * The single-tag release pipeline's git topology, called step by step from
  * the repo-owned workflows (update-release.yml for the release chain,
- * checks.yml and release-anchor.yml for the bookkeeping) and unit-tested
+ * checks.yml and the release-PR anchor workflows - update-release-pr.yml,
+ * bridged by release-anchor.yml until the managed release.yml calls the
+ * hook - for the bookkeeping) and unit-tested
  * against local fixture repositories (test/scripts/release-pipeline.test.ts),
  * so "the next release tags the right commits" is proven on every push
  * instead of on release day.
