@@ -1,78 +1,34 @@
-# Repo-owned release pipeline, called by the managed ci.yml on top of the
-# all-green gate. Generated once by Vivswan/repo-platform and
-# never overwritten by template sync.
+# This file is managed by Vivswan/repo-platform.
+# Local edits may be replaced during template updates.
 #
-# THE SINGLE-TAG SCHEME. main is source-only (lib/index.js is never
-# committed there), yet every ref a consumer can name - the vX.Y.Z release
-# tags and the moving major vX - must point at a packaged commit carrying
-# the built bundle. So this pipeline, not release-please, owns the tags:
-# release-please runs with skip-github-release (release-please-config.json)
-# and only does version math, the changelog, the manifest and version
-# pins, and the release PR. When that PR's squash merge lands on main -
-# detected from the .release-please-manifest.json version step,
-# cross-checked against the merge subject AND the merged PR's
-# release-please branch; anything ambiguous fails loudly and tags nothing
-# (detection reads the pushed head commit only, which is exactly where
-# release merges land as their own squash commit) - two independent chains
-# run off the detection:
-#
-# release-publish.yml (the release chain):
-#   1. rebuilds the bundle from the merge commit and verifies the
-#      committed schema byte-for-byte (a divergent regeneration stops the
-#      release),
-#   2. commits lib/index.js as a CHILD of the merge commit and creates
-#      vX.Y.Z once, directly on that child: the tag is born runnable and
-#      never moves (the release-tags ruleset freezes it; only deliberate
-#      repository-admin action can override, which SECURITY.md states),
-#   3. attests the bundle, creates the GitHub release as a DRAFT with the
-#      version's CHANGELOG.md section as notes, uploads bundle, schema,
-#      and sigstore bundle (draft-first because published releases freeze
-#      their assets), force-moves the major tag to the same packaged
-#      commit, and confirms origin's refs carry the bundle,
-#   4. publishes the release last.
-#
-# release-bookkeeping.yml (the release-please chain):
-#   5. proves the recorded release-please boundary is fresh
-#      (last-release-sha in release-please-config.json must be the newest
-#      release merge on main or its parent), parking release-please loudly
-#      on a stale one instead of letting it build garbage release PRs -
-#      version tags live on packaged children that are NOT on main, and
-#      release-please's commit walk only sees main, so the boundary is
-#      recorded config, not a tag lookup,
-#   6. runs release-please (version math, changelog, manifest, release PR;
-#      never tags or releases), then anchors the NEXT boundary INSIDE the
-#      release PR branch: last-release-sha becomes main's current head,
-#      the future merge commit's parent, so merging the release PR
-#      advances the boundary on main as part of the release itself. No
-#      push to main, no admin credential; the release-freshness gate keeps
-#      the recorded parent exact.
-#
-# A rerun of a failed run converges instead of failing: package verifies
-# an existing vX.Y.Z (parent, whole tree, bundle bytes) rather than
-# recreating it, re-attests the same bytes (the attestation log is
-# append-only), re-uploads assets with --clobber while the release is a
-# draft, and the boundary anchor re-applies on every release PR refresh.
-# Finish a dead run by re-running its FAILED jobs; a fresh dispatch only
-# detects the release while main's head is still the merge commit. The
-# same steps by hand:
-#   git checkout <merge sha>
-#   bun install --frozen-lockfile --ignore-scripts && bun run build
-#   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts package
-#   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts retag-major
-#   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts verify
-#   bun .github/scripts/release-pipeline.ts notes X.Y.Z > /tmp/notes.md
-#   gh release create vX.Y.Z --draft --verify-tag --title vX.Y.Z --notes-file /tmp/notes.md
-#   gh release upload vX.Y.Z lib/settings.schema.json lib/index.js --clobber
-#   gh release edit vX.Y.Z --draft=false
-#   gh pr edit <release PR> --remove-label "autorelease: pending" --add-label "autorelease: tagged"
-# The provenance attestation cannot be produced by hand: the sigstore
-# bundle needs the workflow's OIDC identity, so a hand-finished release
-# ships without the attestations.sigstore.json asset.
-#
-# The tag topology itself is unit-tested against fixture repositories
-# (test/scripts/release-pipeline.test.ts), so a change that could tag an
-# unpackaged commit or move a frozen tag fails on every push, not on
-# release day.
+# The release pipeline, called by the managed ci.yml on top of the
+# all-green gate, so releases and release-PR refreshes only happen on a
+# green main. release-please accumulates conventional commits on main into
+# a release PR; merging it cuts the release. GitHub releases are immutable
+# once published (the tag and assets freeze, a late upload gets HTTP 422),
+# so every release moves through the same three stages, always draft-first:
+#   1. release-please cuts the release as a DRAFT with its tag already
+#      forced at the merge SHA (`draft` + `force-tag-creation` in the
+#      repo-owned release-please-config.json).
+#   2. update-release calls the repo-owned update-release.yml with the
+#      tag: this repository's packaging, asset uploads, and note edits go
+#      there (add jobs to that file freely - publishing waits for all of
+#      them).
+#   3. publish-release attests build provenance for every asset on the
+#      draft - one Sigstore bundle attached as a single attestation.jsonl,
+#      one JSONL line per asset - and flips the draft live:
+#      `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.jsonl`
+#      The bundle rides on the frozen release itself, so verification
+#      never depends on GitHub's attestations API staying reachable.
+# Everything runs in the same workflow run, so it works with the default
+# GITHUB_TOKEN too, which cannot trigger `on: release` workflows. Without
+# the REPO_PLATFORM_TOKEN secret the release PR is created by the default
+# GITHUB_TOKEN and needs a close/reopen to run its checks.
+# If the pipeline dies after the draft exists, a rerun cannot recreate it
+# (release-please sees the forced tag); re-run this run's failed jobs, or
+# finish by hand (a hand-published release carries no attestation.jsonl):
+#   gh release upload <tag> <assets> --clobber
+#   gh release edit <tag> --draft=false
 
 name: Release
 
@@ -80,62 +36,159 @@ on:
   workflow_call:
 
 jobs:
-  # Is this push the merge of a release-please PR? An empty tag output is
-  # an ordinary push: the release chain skips and release-please runs
-  # alone. A manifest edit outside a release-please merge fails this job,
-  # which parks the whole pipeline - deliberate.
-  detect-release:
+  release-please:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
+    # The effective token comes from the calling job's ceiling; declaring
+    # the needs here documents them and caps a caller that grants more.
+    # The read keys feed the release-health pre-flight (open issues,
+    # Dependabot alerts).
     permissions:
-      contents: read
-      pull-requests: read # the provenance check reads the merged PR
+      contents: write
+      pull-requests: write
+      issues: read
+      vulnerability-alerts: read
     outputs:
-      tag: ${{ steps.detect.outputs.tag }}
-      version: ${{ steps.detect.outputs.version }}
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          # The detection diffs the manifest against the parent commit.
-          fetch-depth: 2
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - name: Detect a release-please merge on this push
-        id: detect
-        # The script prints only the output lines on stdout (diagnostics go
-        # to stderr), so the redirect is the whole contract.
-        run: bun .github/scripts/release-pipeline.ts detect >> "$GITHUB_OUTPUT"
-      # The manifest diff and merge subject prove the shape, not the origin:
-      # an ordinary PR could imitate both. Only a PR from release-please's
-      # own branch may mint a tag.
-      - name: Confirm the merge came from a release-please PR
-        if: steps.detect.outputs.tag != ''
+      # A green run releases only the head it tested: if main moved on, skip
+      # and let the newer push's own run release (after its CI passes).
+      # gh api (not anonymous ls-remote) so private repositories work too.
+      - name: Check this run tested the current head
+        id: head
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          head_ref="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].head.ref // empty')"
-          if [ "$head_ref" != "release-please--branches--main" ]; then
-            echo "::error::the manifest stepped, but this push's pull request head is '${head_ref:-none}', not release-please--branches--main; refusing to tag a version no release-please PR cut."
+          head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main moved to ${head:0:7} since this run started; the newer run releases"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+      # Authoritative release gating: the release PR's release-health CI job
+      # gives early visible feedback, but it can be stale by merge time (a
+      # tracking or blocker issue opened after that PR went green re-runs no
+      # check), so the same action runs again here before release-please
+      # acts. In release mode the gate self-scopes to release-cut pushes:
+      # it gates only a push that merges a release-please-- PR (reading the
+      # release-override label from that PR) and passes trivially on every
+      # other run, so ordinary main pushes and release-PR refreshes are
+      # never blocked.
+      - uses: Vivswan/repo-platform/actions/release-health@main
+        if: steps.head.outputs.current == 'true'
+        with:
+          mode: release
+          tracking-labels: "fuzz-nightly,nightly-failure"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: googleapis/release-please-action@v5
+        id: release
+        if: steps.head.outputs.current == 'true'
+        with:
+          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+      # release-please runs two phases: create releases for merged PRs still
+      # labeled "autorelease: pending" (relabeling them "autorelease:
+      # tagged"), then propose the next release PR. Phase 2 silently ABORTS
+      # - green - while any pending label remains ("untagged, merged release
+      # PRs outstanding"), so a pending label the action cannot clear parks
+      # release-please with no red anywhere. Check AFTER the action so its
+      # recovery phase always gets its turn first: a label still pending
+      # here survived a real attempt. The 30-minute grace covers labels
+      # legitimately still pending right after a merge (a parallel publish
+      # pipeline, API eventual consistency).
+      - name: Fail when a stale pending release PR parks release-please
+        if: steps.head.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cutoff="$(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+          stale="$(gh pr list --state merged --label 'autorelease: pending' \
+            --limit 100 --json number,mergedAt \
+            --jq "[.[] | select(.mergedAt < \"$cutoff\") | \"#\\(.number)\"] | join(\", \")")"
+          if [ -n "$stale" ]; then
+            echo "::error::merged release PR(s) $stale have worn 'autorelease: pending' for over 30 minutes, so release-please refuses to propose any new release ('untagged, merged release PRs outstanding'). Finish or abandon that release, then move the label to 'autorelease: tagged'."
             exit 1
           fi
 
-  # The release chain: package, tag, attest, release, publish.
-  release-publish:
-    needs: [detect-release]
-    if: needs.detect-release.outputs.tag != ''
-    uses: ./.github/workflows/release-publish.yml
-    secrets: inherit
+  # Stage 2: the repo-owned hook. No permissions block here, so the hook
+  # gets the calling job's full publishing ceiling (release assets, ghcr,
+  # npm/PyPI trusted publishing); its jobs narrow it themselves.
+  update-release:
+    needs: [release-please]
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/update-release.yml
     with:
-      tag: ${{ needs.detect-release.outputs.tag }}
-      version: ${{ needs.detect-release.outputs.version }}
-
-  # The release-please chain: boundary freshness gate, release PR
-  # build/refresh, and the boundary anchored into the release PR branch.
-  # Runs on EVERY push; only a failed detection stops it (an ambiguous
-  # manifest state parks the whole pipeline).
-  release-bookkeeping:
-    needs: [detect-release]
-    if: ${{ !cancelled() && needs.detect-release.result == 'success' }}
-    uses: ./.github/workflows/release-bookkeeping.yml
+      tag: ${{ needs.release-please.outputs.tag_name }}
     secrets: inherit
+
+  # Stage 3: attest the draft's assets and freeze the release. The gates
+  # are runtime, not render-time, on purpose: assets are only knowable at
+  # runtime, and a visibility flip between syncs must not block releasing
+  # (GitHub attestations need a public repository or Enterprise Cloud, so
+  # non-public releases publish unattested by fleet policy).
+  publish-release:
+    needs: [release-please, update-release]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      # One probe answers everything: which assets are attestable, and
+      # whether a prior attempt left a stale attestation.jsonl on the
+      # draft. The stale bundle is deleted from the RELEASE, not a local
+      # mirror, so no later skip path can ever publish it; a fresh one is
+      # attached below when attestation runs.
+      - name: Inspect the draft release's assets
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          names="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          if grep -qxF attestation.jsonl <<< "$names"; then
+            gh release delete-asset "$TAG" attestation.jsonl --yes
+          fi
+          if [ -n "$(grep -vxF attestation.jsonl <<< "$names" || true)" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::the release has no assets; nothing to attest"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download the assets for attestation
+        id: download
+        if: >-
+          steps.assets.outputs.present == 'true'
+          && github.event.repository.visibility == 'public'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir assets
+          gh release download "$TAG" --dir assets
+      - uses: actions/attest-build-provenance@v4
+        id: attest
+        if: steps.download.outcome == 'success'
+        with:
+          subject-path: assets/*
+      # Skipped along with the download and attest steps: bundle-path is
+      # empty then, and a no-asset or non-public release publishes without
+      # an attestation.jsonl (the probe above already removed any stale one).
+      - name: Attach the attestation bundle to the draft
+        if: steps.attest.outputs.bundle-path != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" attestation.jsonl
+          gh release upload "$TAG" attestation.jsonl --clobber
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+        run: gh release edit "$TAG" --draft=false

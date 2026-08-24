@@ -3,11 +3,9 @@
  * a bare "origin" plus clones playing the CI checkouts, so "the next release
  * puts vX.Y.Z and the major on a packaged child of the merge commit" is a
  * unit test, not something the first real release discovers. Covers the
- * detection asserts (a hand-edited manifest can never mint a tag), the
  * packaged-commit topology (parent, tree, bundle bytes, the
  * carries-a-bundle invariant), idempotent reruns that verify instead of
- * move, the tamper stops, the major move, the boundary anchor, and the
- * changelog extraction.
+ * move, the tamper stops, the major move, and the boundary anchor.
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
@@ -16,10 +14,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  anchorCheck,
   anchorReleasePr,
   boundaryCheck,
-  detectRelease,
-  extractReleaseNotes,
   packageRelease,
   retagMajor,
   verifyPublishedRefs,
@@ -106,9 +103,8 @@ function seedFixture(): Fixture {
     "release-please-config.json",
     `${JSON.stringify(
       {
-        "skip-github-release": true,
         "last-release-sha": "0000000000000000000000000000000000000000",
-        packages: { ".": { "release-type": "simple" } },
+        packages: { ".": { "release-type": "simple", draft: true } },
       },
       null,
       2,
@@ -124,78 +120,6 @@ function seedFixture(): Fixture {
   write(work, "lib/index.js", "packaged-bundle-bytes-1\n");
   return { root, origin, work, seedSha, mergeSha };
 }
-
-describe("detectRelease", () => {
-  const fx = seedFixture();
-
-  test("a squash-merged release PR is detected with its version and tag", () => {
-    expect(detectRelease(fx.work)).toEqual({ version: "2.1.0", tag: "v2.1.0" });
-  });
-
-  test("an ordinary commit is not a release", () => {
-    const dir = clone(fx.root, fx.origin, "detect-ordinary");
-    write(dir, "src/marker.ts", "export const marker = 2;\n");
-    commitAll(dir, "fix: an ordinary change");
-    expect(detectRelease(dir)).toBeNull();
-  });
-
-  test("a manifest hand edit outside a release-please merge refuses to tag", () => {
-    const dir = clone(fx.root, fx.origin, "detect-hand-edit");
-    write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": "9.9.9" }, null, 2)}\n`);
-    commitAll(dir, "chore: tweak the manifest by hand");
-    expect(() => detectRelease(dir)).toThrow(/refusing to tag/);
-  });
-
-  test("a subject/manifest version disagreement refuses to tag", () => {
-    const dir = clone(fx.root, fx.origin, "detect-mismatch");
-    write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.2.0" }, null, 2)}\n`);
-    commitAll(dir, "chore(main): release 2.3.0 (#43)");
-    expect(() => detectRelease(dir)).toThrow(/2\.3\.0.*2\.2\.0|2\.2\.0.*2\.3\.0/);
-  });
-
-  test("a manifest touch without a version step is not a release", () => {
-    const dir = clone(fx.root, fx.origin, "detect-reformat");
-    write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.1.0" })}\n`);
-    commitAll(dir, "chore: reformat the manifest");
-    expect(detectRelease(dir)).toBeNull();
-  });
-
-  test("a root commit is not a release", () => {
-    const dir = join(fx.root, "detect-root");
-    execFileSync("git", ["init", "--quiet", "-b", "main", dir]);
-    git(dir, "config", "user.name", "fixture");
-    git(dir, "config", "user.email", "fixture@example.invalid");
-    git(dir, "config", "commit.gpgsign", "false");
-    git(dir, "config", "core.hooksPath", join(fx.root, "no-hooks"));
-    write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": "1.0.0" }, null, 2)}\n`);
-    commitAll(dir, "chore(main): release 1.0.0 (#1)");
-    expect(detectRelease(dir)).toBeNull();
-  });
-});
-
-describe("extractReleaseNotes", () => {
-  test("a linked heading's section runs to the next version heading", () => {
-    const notes = extractReleaseNotes(CHANGELOG_21, "2.1.0");
-    expect(notes).toContain("## [2.1.0]");
-    expect(notes).toContain("single-tag scheme");
-    expect(notes).not.toContain("2.0.0]");
-    expect(notes).not.toContain("older fix");
-  });
-
-  test("a bare heading (the first release's format) extracts to EOF", () => {
-    const notes = extractReleaseNotes(CHANGELOG_21, "1.0.0");
-    expect(notes).toContain("## 1.0.0");
-    expect(notes).toContain("first release");
-  });
-
-  test("a version the changelog lacks throws", () => {
-    expect(() => extractReleaseNotes(CHANGELOG_21, "3.0.0")).toThrow(/no "## 3\.0\.0" section/);
-  });
-
-  test("a version is matched whole, not as a prefix of a longer version", () => {
-    expect(() => extractReleaseNotes(CHANGELOG_21, "2.1")).toThrow(/no "## 2\.1" section/);
-  });
-});
 
 describe("packageRelease", () => {
   test("a fresh release tags a packaged child of the merge commit, once", () => {
@@ -280,6 +204,14 @@ describe("packageRelease", () => {
     );
   });
 
+  test("a well-shaped tag for a version this source did not release mints nothing", () => {
+    const fx = seedFixture();
+    expect(() => packageRelease({ cwd: fx.work, tag: "v2.2.0", sourceSha: fx.mergeSha })).toThrow(
+      /did not release/,
+    );
+    expect(git(fx.work, "ls-remote", "origin", "refs/tags/v2.2.0")).toBe("");
+  });
+
   test("a missing bundle refuses to package", () => {
     const fx = seedFixture();
     rmSync(join(fx.work, "lib/index.js"));
@@ -334,12 +266,12 @@ describe("retagMajor", () => {
     const fx = seedFixture();
     packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
     expect(() => retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.seedSha })).toThrow(
-      /wrong source/,
+      /not this release's merge commit/,
     );
     expect(git(fx.origin, "ls-remote", fx.origin, "refs/tags/v2")).toBe("");
   });
 
-  test("the major never moves to a commit without the bundle", () => {
+  test("the major never moves to a commit that is not a pure package", () => {
     const fx = seedFixture();
     // Plant v2.1.0 as a bundle-less child of the merge commit.
     const planter = clone(fx.root, fx.origin, "planter-empty");
@@ -351,8 +283,30 @@ describe("retagMajor", () => {
     git(planter, "push", "--quiet", "origin", "refs/tags/v2.1.0");
     const mover = clone(fx.root, fx.origin, "mover-empty");
     expect(() => retagMajor({ cwd: mover, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /non-empty lib\/index\.js/,
+      /changes more than lib\/index\.js|not a build of/,
     );
+  });
+
+  test("the major never moves to a package whose bundle is not this source's build", () => {
+    const fx = seedFixture();
+    // Plant v2.1.0 as a well-shaped packaged child (parent and tree pass)
+    // carrying the WRONG bundle bytes; only the byte verification catches it.
+    const planter = clone(fx.root, fx.origin, "planter-wrong-bytes");
+    git(planter, "checkout", "--quiet", fx.mergeSha);
+    git(planter, "config", "user.name", "planter");
+    git(planter, "config", "user.email", "planter@example.invalid");
+    write(planter, "lib/index.js", "planted-wrong-bytes\n");
+    git(planter, "add", "-f", "lib/index.js");
+    git(planter, "commit", "--quiet", "-m", "build: package v2.1.0");
+    git(planter, "tag", "v2.1.0");
+    git(planter, "push", "--quiet", "origin", "refs/tags/v2.1.0");
+    const mover = clone(fx.root, fx.origin, "mover-wrong-bytes");
+    git(mover, "checkout", "--quiet", fx.mergeSha);
+    write(mover, "lib/index.js", "packaged-bundle-bytes-1\n");
+    expect(() => retagMajor({ cwd: mover, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
+      /not a build of/,
+    );
+    expect(git(fx.origin, "ls-remote", fx.origin, "refs/tags/v2")).toBe("");
   });
 
   test("a rerun of an old release's job never moves the major backward", () => {
@@ -499,6 +453,102 @@ describe("anchorReleasePr", () => {
     expect(result.changed).toBe(false);
     expect(result.reason).toContain("the newer run anchors");
   });
+
+  test("a branch built on an older head is left for its own refresh to anchor", () => {
+    const fx = seedFixture();
+    // The branch was refreshed from the SEED commit; main has since moved
+    // to the 2.1.0 merge. Anchoring mergeSha onto it would record a
+    // boundary the branch's content was not computed from.
+    createReleasePrBranch(fx, fx.seedSha, "2.2.0");
+    const worker = clone(fx.root, fx.origin, "anchor-stale-branch");
+    const result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
+    expect(result.changed).toBe(false);
+    expect(result.reason).toContain("not built on this head");
+  });
+
+  test("a release-please refresh between anchors re-anchors from the same checkout", () => {
+    const fx = seedFixture();
+    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
+    const worker = clone(fx.root, fx.origin, "anchor-twice");
+    expect(anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha }).changed).toBe(true);
+    // The refresh force-push wipes the anchor commit; the SAME clone must
+    // be able to fetch the rewritten branch and anchor again (a local
+    // checked-out branch would make git refuse the fetch).
+    createReleasePrBranch(fx, fx.mergeSha, "2.3.0");
+    expect(anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha }).changed).toBe(true);
+    const check = clone(fx.root, fx.origin, "anchor-twice-check");
+    git(check, "checkout", "--quiet", "release-please--branches--main");
+    const config = JSON.parse(readFileSync(join(check, "release-please-config.json"), "utf8")) as {
+      "last-release-sha": string;
+    };
+    expect(config["last-release-sha"]).toBe(fx.mergeSha);
+  });
+
+  test("a release-as pin the release PR proves spent is retired inside the PR", () => {
+    const fx = seedFixture();
+    const pinner = clone(fx.root, fx.origin, "anchor-pinner");
+    write(
+      pinner,
+      "release-please-config.json",
+      `${JSON.stringify(
+        {
+          "last-release-sha": fx.mergeSha,
+          packages: { ".": { "release-type": "simple", draft: true, "release-as": "2.2.0" } },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const mainHead = commitAll(pinner, "chore: pin the next release as 2.2.0");
+    git(pinner, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+    createReleasePrBranch(fx, mainHead, "2.2.0");
+    const worker = clone(fx.root, fx.origin, "anchor-retire");
+    const result = anchorReleasePr({ cwd: worker, sourceSha: mainHead });
+    expect(result.changed).toBe(true);
+    expect(result.reason).toContain("retired the spent release-as 2.2.0");
+    const check = clone(fx.root, fx.origin, "anchor-retire-check");
+    git(check, "checkout", "--quiet", "release-please--branches--main");
+    const config = JSON.parse(readFileSync(join(check, "release-please-config.json"), "utf8")) as {
+      "last-release-sha": string;
+      packages: Record<string, Record<string, unknown>>;
+    };
+    expect(config["last-release-sha"]).toBe(mainHead);
+    expect(config.packages["."]?.["release-as"]).toBeUndefined();
+    // Main's own config keeps the pin until the merge lands the retirement.
+    expect(readFileSync(join(check, "release-please-config.json"), "utf8")).not.toContain(
+      "release-as",
+    );
+    git(check, "checkout", "--quiet", "main");
+    expect(readFileSync(join(check, "release-please-config.json"), "utf8")).toContain("release-as");
+  });
+
+  test("a release PR without a spent pin anchors without touching release-as", () => {
+    const fx = seedFixture();
+    const pinner = clone(fx.root, fx.origin, "anchor-fresh-pin");
+    write(
+      pinner,
+      "release-please-config.json",
+      `${JSON.stringify(
+        {
+          "last-release-sha": fx.mergeSha,
+          packages: { ".": { "release-type": "simple", draft: true, "release-as": "3.0.0" } },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const mainHead = commitAll(pinner, "chore: pin a future release as 3.0.0");
+    git(pinner, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+    // The release PR cuts 2.2.0; the 3.0.0 pin is not spent by it.
+    createReleasePrBranch(fx, mainHead, "2.2.0");
+    const worker = clone(fx.root, fx.origin, "anchor-keep-pin");
+    const result = anchorReleasePr({ cwd: worker, sourceSha: mainHead });
+    expect(result.changed).toBe(true);
+    expect(result.reason).not.toContain("release-as");
+    const check = clone(fx.root, fx.origin, "anchor-keep-pin-check");
+    git(check, "checkout", "--quiet", "release-please--branches--main");
+    expect(readFileSync(join(check, "release-please-config.json"), "utf8")).toContain("3.0.0");
+  });
 });
 
 describe("boundaryCheck", () => {
@@ -510,9 +560,8 @@ describe("boundaryCheck", () => {
       "release-please-config.json",
       `${JSON.stringify(
         {
-          "skip-github-release": true,
           "last-release-sha": fx.mergeSha,
-          packages: { ".": { "release-type": "simple" } },
+          packages: { ".": { "release-type": "simple", draft: true } },
         },
         null,
         2,
@@ -535,6 +584,29 @@ describe("boundaryCheck", () => {
     expect(boundaryCheck(dir).boundary).toContain("no release merge");
   });
 
+  test("a subject that only shares the release prefix is not a release merge", () => {
+    const fx = seedFixture();
+    const dir = clone(fx.root, fx.origin, "boundary-decoy");
+    write(
+      dir,
+      "release-please-config.json",
+      `${JSON.stringify(
+        {
+          "last-release-sha": fx.mergeSha,
+          packages: { ".": { "release-type": "simple", draft: true } },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    commitAll(dir, "chore: align the fixture boundary");
+    // Newer than the release merge, matching its prefix but not its shape:
+    // must neither become the boundary nor park the check.
+    write(dir, "src/marker.ts", "export const marker = 7;\n");
+    commitAll(dir, "chore(main): release pipeline documentation");
+    expect(boundaryCheck(dir).boundary).toBe(fx.mergeSha);
+  });
+
   test("a release-as pin equal to the shipped version fails loudly", () => {
     const fx = seedFixture();
     const dir = clone(fx.root, fx.origin, "boundary-release-as");
@@ -543,9 +615,8 @@ describe("boundaryCheck", () => {
       "release-please-config.json",
       `${JSON.stringify(
         {
-          "skip-github-release": true,
           "last-release-sha": fx.mergeSha,
-          packages: { ".": { "release-type": "simple", "release-as": "2.1.0" } },
+          packages: { ".": { "release-type": "simple", draft: true, "release-as": "2.1.0" } },
         },
         null,
         2,
@@ -553,5 +624,60 @@ describe("boundaryCheck", () => {
     );
     commitAll(dir, "chore: forget to drop release-as after 2.1.0");
     expect(() => boundaryCheck(dir)).toThrow(/remove it/);
+  });
+});
+
+describe("anchorCheck", () => {
+  test("a release PR whose anchor is missing is unmergeable", () => {
+    const fx = seedFixture();
+    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
+    const pr = clone(fx.root, fx.origin, "anchor-check-missing");
+    git(pr, "checkout", "--quiet", "release-please--branches--main");
+    expect(() => anchorCheck(pr)).toThrow(/anchor is missing or stale/);
+  });
+
+  test("an anchored release PR passes", () => {
+    const fx = seedFixture();
+    createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
+    const worker = clone(fx.root, fx.origin, "anchor-check-worker");
+    expect(anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha }).changed).toBe(true);
+    const pr = clone(fx.root, fx.origin, "anchor-check-ok");
+    git(pr, "checkout", "--quiet", "release-please--branches--main");
+    expect(anchorCheck(pr).boundary).toBe(fx.mergeSha);
+  });
+});
+
+describe("release configuration contract", () => {
+  test("the committed config pins the tagless-draft knobs (shape only; the flow itself is not exercised here)", () => {
+    const config = JSON.parse(
+      readFileSync(join(import.meta.dir, "../../release-please-config.json"), "utf8"),
+    ) as {
+      "skip-github-release"?: unknown;
+      "include-component-in-tag"?: unknown;
+      "last-release-sha"?: unknown;
+      packages: Record<string, Record<string, unknown>>;
+    };
+    const root = config.packages["."];
+    // draft + force-tag-creation pinned FALSE (explicit, not the upstream
+    // default, which could change) is what keeps release-please from ever
+    // creating a tag on main; the hook mints the only tag, on the packaged
+    // child. include-component-in-tag: false keeps tags strictly vX.Y.Z,
+    // the one shape releaseMajor() accepts. skip-github-release would stop
+    // releases entirely (release_created never fires, the hook never runs).
+    expect(root?.draft).toBe(true);
+    expect(root?.["force-tag-creation"]).toBe(false);
+    expect(config["skip-github-release"]).toBeUndefined();
+    expect(config["include-component-in-tag"]).toBe(false);
+    expect(typeof config["last-release-sha"]).toBe("string");
+  });
+});
+
+describe("release tag shape", () => {
+  test("a non-vX.Y.Z tag mints nothing", () => {
+    const fx = seedFixture();
+    expect(() =>
+      packageRelease({ cwd: fx.work, tag: "v2.1-rc.0", sourceSha: fx.mergeSha }),
+    ).toThrow(/not a vX\.Y\.Z release tag/);
+    expect(git(fx.work, "ls-remote", "origin", "refs/tags/v2.1-rc.0")).toBe("");
   });
 });

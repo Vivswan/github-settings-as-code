@@ -54,6 +54,51 @@ jobs:
       - name: Test
         run: bun run test
 
+  # The freshness tripwire behind the single-tag scheme's boundary (the
+  # anchor half lives in release-anchor.yml): last-release-sha in
+  # release-please-config.json must be the newest release merge on main or
+  # its parent - version tags live on packaged children that are NOT on
+  # main, so release-please cannot find the boundary by tag, and a lost
+  # anchor would have every release PR refresh computed from a stale one.
+  # Gating here parks the release job (it needs all-green) BEFORE
+  # release-please can build a garbage release PR, loudly on every push.
+  # The skip lives on the STEPS, per side: the main-side check judges only
+  # main (a dispatch against another branch would judge that branch's
+  # config, and the release PR deliberately carries the anchored NEXT
+  # boundary, which the main-side check would call stale - the PR-side
+  # anchor-check below validates that instead), and all-green treats a
+  # skipped needed job as failure.
+  boundary-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          # The newest release merge can be arbitrarily far behind HEAD.
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          bun-version-file: .bun-version
+      - name: Confirm last-release-sha matches the newest release merge
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: bun .github/scripts/release-pipeline.ts boundary-check
+      # The PR-side half, on release PRs only: the merge must land the
+      # anchor, and the managed release-freshness gate proves only that the
+      # PR contains main's tip - not that the anchor commit survived the
+      # last release-please force-push. An unanchored release PR must be
+      # unmergeable here, not park the pipeline after its merge.
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+      - uses: oven-sh/setup-bun@v2
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+        with:
+          bun-version-file: .bun-version
+      - name: Require the release PR to carry this cycle's anchor
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+        run: bun .github/scripts/release-pipeline.ts anchor-check
+
   # lib/settings.schema.json is the committed settings.yml JSON Schema,
   # generated from the SettingsFile types in src/; fail if it drifts.
   schema-check:
