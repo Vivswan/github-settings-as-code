@@ -118,7 +118,7 @@ jobs:
       - name: File or update the nightly issue
         id: file-issue
         if: needs.checks.result == 'failure' || needs.checks.result == 'cancelled'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@main
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
         # This job checks nothing out (kept tight), so gh has no git
         # context; GH_REPO points it at this repository (run 31563375394
         # failed on exactly this).
@@ -147,7 +147,7 @@ jobs:
 
       - name: Close the nightly issue on a green night
         if: needs.checks.result == 'success'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@main
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
         env:
           GH_REPO: ${{ github.repository }}
         with:
