@@ -169,10 +169,11 @@ function splitDeclared(desired: DeclaredInteractionLimits): DeclaredLimits {
   const limit = base.limit;
   if (typeof limit !== "string") {
     // The shape's superRefine rejects this pairing upfront for any ordinary
-    // document; what still reaches here is zod's own "__proto__" blind spot
-    // - zod skips such an own key while run() sees the ORIGINAL document -
-    // so this throws rather than PUTting a body with no limit. (The
-    // actions.cache backstop guards the same blind spot.)
+    // document; this backstop covers run() seeing the ORIGINAL document
+    // (validate.ts applies the raw values, not zod's clone - zod < 4.5 let
+    // an own "__proto__" key through the shape), so it throws rather than
+    // PUTting a body with no limit. (The actions.cache backstop guards the
+    // same seam.)
     throw new Error(
       `interaction_limits: base key(s) [${Object.keys(base).join(", ")}] ride the base interaction-limits PUT, which requires a limit, but none was declared; fix the key name, or declare limit alongside them`,
     );

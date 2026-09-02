@@ -8,8 +8,9 @@
  *   false zod emits for them (the passthrough-first forward-compatibility
  *   tenet: GitHub-bound bodies must accept future fields; only strictObject
  *   declarations stay closed, exactly like the runtime);
- * - the root document is hoisted into definitions.SettingsFile behind a
- *   top-level $ref, the layout editors and the previous generator produced;
+ * - the root document sits in definitions.SettingsFile behind a top-level
+ *   $ref (zod >= 4.5 emits an id'd root that way natively; the script
+ *   verifies the layout loudly instead of hoisting by hand);
  * - the stable $id is stamped (see SCHEMA_ID below);
  * - definitions are sorted so the committed file diffs deterministically.
  */
@@ -104,25 +105,25 @@ function encodeRefs(node: unknown): void {
 }
 encodeRefs(generated);
 
-// Hoist the root into definitions.SettingsFile behind a top-level $ref. Two
-// loud guards on the assumption behind it: zod currently inlines the id'd
-// root instead of emitting it as a $ref plus definition. If a zod version
-// changes that, the hoist would produce a self-referential definition (and
-// the spread would overwrite a zod-emitted one) - fail instead.
+// zod >= 4.5 emits an id'd root as a top-level $ref plus its own
+// definitions.SettingsFile - exactly the published layout. Two loud guards
+// on that assumption: a zod that inlines the root again (the < 4.5
+// behavior) would need the old manual hoist back, and a root carrying more
+// than the $ref would silently lose those keys in the write below.
+const ROOT_REF = "#/definitions/SettingsFile";
 const { $schema, definitions, ...rootBody } = generated;
-if ("$ref" in rootBody) {
+if (rootBody.$ref !== ROOT_REF || Object.keys(rootBody).length !== 1) {
   throw new Error(
-    "gen-settings-schema: zod emitted the root as a $ref; the SettingsFile hoist would self-reference - update the hoist",
+    `gen-settings-schema: expected zod to emit the root as exactly {$ref: "${ROOT_REF}"} (zod >= 4.5), got ${JSON.stringify(rootBody)} - update the root handling`,
   );
 }
-if (definitions?.SettingsFile !== undefined) {
+if (definitions?.SettingsFile === undefined) {
   throw new Error(
-    "gen-settings-schema: zod emitted its own SettingsFile definition; the hoist would overwrite it - update the hoist",
+    "gen-settings-schema: zod emitted a root $ref without a SettingsFile definition - update the root handling",
   );
 }
-const allDefinitions: Record<string, unknown> = { ...definitions, SettingsFile: rootBody };
 const sortedDefinitions = Object.fromEntries(
-  Object.entries(allDefinitions).sort(([a], [b]) => (a < b ? -1 : 1)),
+  Object.entries(definitions).sort(([a], [b]) => (a < b ? -1 : 1)),
 );
 
 const schemaPath = join(ROOT, "lib", "settings.schema.json");
@@ -131,7 +132,7 @@ writeFileSync(
   JSON.stringify(
     {
       $id: SCHEMA_ID,
-      $ref: "#/definitions/SettingsFile",
+      $ref: ROOT_REF,
       $schema,
       definitions: sortedDefinitions,
     },
