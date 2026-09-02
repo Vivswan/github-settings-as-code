@@ -32,7 +32,7 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-    uses: Vivswan/repo-platform/.github/workflows/reusable-auto-assign.yml@main
+    uses: Vivswan/repo-platform/.github/workflows/reusable-auto-assign.yml@build
     with:
       issue: ${{ inputs.issue || '' }}
   # Separate job so security-events stays off the job above (a reusable
@@ -43,4 +43,4 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: Vivswan/repo-platform/.github/workflows/reusable-auto-assign-alerts.yml@main
+    uses: Vivswan/repo-platform/.github/workflows/reusable-auto-assign-alerts.yml@build
