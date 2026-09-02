@@ -355,13 +355,9 @@
         },
         "runner_label": {
           "description": "Runner label when runner_type is \"labeled\"; null clears it.",
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+          "type": [
+            "string",
+            "null"
           ]
         },
         "ai_findings_option": {
@@ -411,13 +407,9 @@
         },
         "runner_label": {
           "description": "Runner label when runner_type is \"labeled\"; null clears it.",
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+          "type": [
+            "string",
+            "null"
           ]
         },
         "threat_model": {
@@ -883,13 +875,9 @@
         },
         "cname": {
           "description": "Custom domain; null removes it.",
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+          "type": [
+            "string",
+            "null"
           ]
         },
         "https_enforced": {
@@ -1933,13 +1921,9 @@
         },
         "insecure_ssl": {
           "description": "Whether to skip TLS verification (\"0\" verify / \"1\" skip); GitHub stores it as a string.",
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
+          "type": [
+            "string",
+            "number"
           ]
         }
       },

@@ -471,10 +471,11 @@ export const actionsSection = {
       }
     }
     const cache = (desired.cache ?? {}) as Record<string, unknown>;
-    // Backstop for the shape's one blind spot: zod's strictObject ignores an
-    // own "__proto__" key, and run() sees the ORIGINAL document (validate.ts
-    // applies the raw values, not zod's clone). Unlike the shape rejection,
-    // this throws from run(), so earlier sections may already have applied.
+    // Backstop behind the shape: run() sees the ORIGINAL document
+    // (validate.ts applies the raw values, not zod's clone), so a key the
+    // shape never rejected - zod < 4.5 ignored an own "__proto__" key -
+    // must still be caught here. Unlike the shape rejection, this throws
+    // from run(), so earlier sections may already have applied.
     const unknownCacheKeys = Object.keys(cache).filter(
       (k) => !Object.hasOwn(CACHE_ENDPOINT_BY_KEY, k),
     );

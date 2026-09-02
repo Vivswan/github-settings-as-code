@@ -218,11 +218,13 @@ describe("actions", () => {
     ).toBe(true);
   });
 
-  test("the handler backstop catches an own __proto__ key the shape ignores", async () => {
-    // JSON.parse creates __proto__ as an OWN key; zod's strictObject skips
-    // it, so the shape passes and only the run()-level guard can reject it.
+  test("an own __proto__ key is rejected by the shape and by the run() backstop", async () => {
+    // JSON.parse creates __proto__ as an OWN key; zod >= 4.5 strictObject
+    // rejects it upfront. run() still sees the ORIGINAL document (validate.ts
+    // applies the raw values, not zod's clone), so its backstop is exercised
+    // directly too.
     const cache = JSON.parse('{"__proto__": 5}');
-    expect(actionsSection.shape.safeParse({ cache }).success).toBe(true);
+    expect(actionsSection.shape.safeParse({ cache }).success).toBe(false);
     await expect(actionsSection.run(ctx(new MockApi({})), { cache })).rejects.toThrow(
       /actions\.cache: unrecognized key\(s\) "__proto__"/,
     );
