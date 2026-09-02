@@ -110,7 +110,7 @@ encodeRefs(generated);
 // stable $id and sort the definitions so the committed file diffs
 // deterministically. No layout assumption to guard: a future zod's shape
 // change surfaces as schema-check drift, and a structurally broken emission
-// fails the published-schema ajv compile.
+// fails the published-schema tests (ajv compile plus fixture round-trips).
 const { definitions, ...rest } = generated;
 const sortedDefinitions = Object.fromEntries(
   Object.entries(definitions ?? {}).sort(([a], [b]) => (a < b ? -1 : 1)),
@@ -121,8 +121,9 @@ writeFileSync(
   schemaPath,
   JSON.stringify(
     {
-      $id: SCHEMA_ID,
+      // $id after the spread: the stamp must win over any $id zod emits.
       ...rest,
+      $id: SCHEMA_ID,
       definitions: sortedDefinitions,
     },
     null,
