@@ -6,21 +6,11 @@
  * empty gaps set, so this file survives an empty directory.
  */
 
-import { GAP as agentsSecrets } from "./agents-secrets.js";
-import { GAP as agentsVariables } from "./agents-variables.js";
-import { GAP as codeQualitySetup } from "./code-quality-setup.js";
 import { undocumentedRoutes } from "./gap.js";
-import { GAP as interactionLimitPullCaps } from "./interaction-limit-pull-caps.js";
 import { GAP as lfs } from "./lfs.js";
-import { GAP as secretScanningCustomPatterns } from "./secret-scanning-custom-patterns.js";
 
 const GAPS = [
-  agentsSecrets,
-  agentsVariables,
-  codeQualitySetup,
-  interactionLimitPullCaps,
   lfs,
-  secretScanningCustomPatterns,
 ] as const;
 
 type GapUnion = (typeof GAPS)[number];

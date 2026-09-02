@@ -2,9 +2,12 @@
 # starter and never overwritten by template sync. The checks job re-cuts the
 # trimmed OpenAPI spec from upstream HEAD (a path-level staleness check) and
 # typechecks against the latest @octokit/types, so pinned-dependency staleness
-# fails a night instead of surprising the next manual bump; the report job
-# below files or updates one label-deduplicated tracking issue on a red night
-# and closes it on a green one (see repo-platform's docs/nightly.md).
+# fails a night instead of surprising the next manual bump; the float-canary
+# job re-resolves the lockfile from scratch the way the Dependabot lockfile
+# workflow does, so a breaking upstream release fails a night instead of
+# reddening every open Dependabot PR; the report job below files or updates
+# one label-deduplicated tracking issue on a red night and closes it on a
+# green one (see repo-platform's docs/nightly.md).
 name: Nightly
 
 on:
@@ -99,11 +102,36 @@ jobs:
             exit 1
           fi
 
-  # Runs whatever happened to the checks job, and treats a CANCELLED checks
-  # job as red: a job that hits its timeout is cancelled, not failed, and a
+  # Predicts what the dependabot-bun-lockfile workflow's from-scratch resolve
+  # will hand the next Dependabot PR: package.json is pinned exactly (the
+  # package-pins test guards that), so only transitive ranges can float, and
+  # a float that breaks the gate fails here first. Its own job because the
+  # checks job's @octokit/types probe leaves node_modules upgraded, and this
+  # probe needs a clean tree to re-resolve from.
+  float-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # Delete before resolving, exactly like the Dependabot workflow: bun
+      # keeps a stale lockfile as a valid resolution, and only a
+      # from-scratch resolve floats what that workflow would float.
+      - name: Re-resolve from scratch and run the gate
+        run: |
+          rm bun.lock
+          bun install --ignore-scripts
+          git --no-pager diff --stat -- bun.lock
+          git checkout -- bun.lock
+          bun run check
+
+  # Runs whatever happened to the probe jobs, and treats a CANCELLED probe
+  # as red: a job that hits its timeout is cancelled, not failed, and a
   # hang is exactly what a nightly run exists to catch.
   report:
-    needs: [checks]
+    needs: [checks, float-canary]
     if: always()
     runs-on: ubuntu-latest
     # A few gh calls behind a bun setup; a hung reporter is the residual
@@ -117,7 +145,7 @@ jobs:
     steps:
       - name: File or update the nightly issue
         id: file-issue
-        if: needs.checks.result == 'failure' || needs.checks.result == 'cancelled'
+        if: needs.checks.result != 'success' || needs.float-canary.result != 'success'
         uses: Vivswan/repo-platform/actions/fuzz-issue@build
         # This job checks nothing out (kept tight), so gh has no git
         # context; GH_REPO points it at this repository (run 31563375394
@@ -146,7 +174,7 @@ jobs:
         run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
 
       - name: Close the nightly issue on a green night
-        if: needs.checks.result == 'success'
+        if: needs.checks.result == 'success' && needs.float-canary.result == 'success'
         uses: Vivswan/repo-platform/actions/fuzz-issue@build
         env:
           GH_REPO: ${{ github.repository }}
