@@ -1,6 +1,3 @@
-
-# BEGIN REPOSITORY LOCAL
-# Add repository-specific ignore patterns in this section only.
 test/e2e/.artifacts/
 # The trimmed GitHub OpenAPI spec is a FETCHED artifact, not committed: it is a
 # ~2MB generated blob that would bloat history on every ref bump. Generate it
@@ -22,8 +19,6 @@ test/e2e/graphql/schema.docs.graphql
 # must stage it with `git add -f` - a plain `git add lib/` silently skips
 # the ignored file.
 lib/index.js
-
-# END REPOSITORY LOCAL
 
 # BEGIN REPO-PLATFORM MANAGED
 # Generated from github/gitignore - do not edit between the BEGIN/END
