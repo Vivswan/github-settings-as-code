@@ -8,9 +8,9 @@
  *   false zod emits for them (the passthrough-first forward-compatibility
  *   tenet: GitHub-bound bodies must accept future fields; only strictObject
  *   declarations stay closed, exactly like the runtime);
- * - the root document sits in definitions.SettingsFile behind a top-level
- *   $ref (zod >= 4.5 emits an id'd root that way natively; the script
- *   verifies the layout loudly instead of hoisting by hand);
+ * - the root layout is zod's own (zod >= 4.5 emits an id'd root as a
+ *   top-level $ref plus its definitions.SettingsFile), passed through
+ *   verbatim;
  * - the stable $id is stamped (see SCHEMA_ID below);
  * - definitions are sorted so the committed file diffs deterministically.
  */
@@ -105,25 +105,15 @@ function encodeRefs(node: unknown): void {
 }
 encodeRefs(generated);
 
-// zod >= 4.5 emits an id'd root as a top-level $ref plus its own
-// definitions.SettingsFile - exactly the published layout. Two loud guards
-// on that assumption: a zod that inlines the root again (the < 4.5
-// behavior) would need the old manual hoist back, and a root carrying more
-// than the $ref would silently lose those keys in the write below.
-const ROOT_REF = "#/definitions/SettingsFile";
-const { $schema, definitions, ...rootBody } = generated;
-if (rootBody.$ref !== ROOT_REF || Object.keys(rootBody).length !== 1) {
-  throw new Error(
-    `gen-settings-schema: expected zod to emit the root as exactly {$ref: "${ROOT_REF}"} (zod >= 4.5), got ${JSON.stringify(rootBody)} - update the root handling`,
-  );
-}
-if (definitions?.SettingsFile === undefined) {
-  throw new Error(
-    "gen-settings-schema: zod emitted a root $ref without a SettingsFile definition - update the root handling",
-  );
-}
+// Pass zod's emitted layout through verbatim (zod >= 4.5 emits an id'd root
+// as a top-level $ref plus its own definitions.SettingsFile); only stamp the
+// stable $id and sort the definitions so the committed file diffs
+// deterministically. No layout assumption to guard: a future zod's shape
+// change surfaces as schema-check drift, and a structurally broken emission
+// fails the published-schema tests (ajv compile plus fixture round-trips).
+const { definitions, ...rest } = generated;
 const sortedDefinitions = Object.fromEntries(
-  Object.entries(definitions).sort(([a], [b]) => (a < b ? -1 : 1)),
+  Object.entries(definitions ?? {}).sort(([a], [b]) => (a < b ? -1 : 1)),
 );
 
 const schemaPath = join(ROOT, "lib", "settings.schema.json");
@@ -131,9 +121,9 @@ writeFileSync(
   schemaPath,
   JSON.stringify(
     {
+      // $id after the spread: the stamp must win over any $id zod emits.
+      ...rest,
       $id: SCHEMA_ID,
-      $ref: ROOT_REF,
-      $schema,
       definitions: sortedDefinitions,
     },
     null,
