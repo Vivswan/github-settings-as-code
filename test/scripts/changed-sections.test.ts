@@ -122,6 +122,8 @@ describe("changed-sections derived fan-out", () => {
         "codespaces_secrets",
         "agents_secrets",
       ),
+      // The list-section factory: every list section on it adds itself here.
+      "list-section.ts": inKeyOrder("labels"),
       // The value-based engine: the two variable families through the
       // repo-variables factory, environments through its nested variables key.
       "variables-engine.ts": inKeyOrder("environments", "actions_variables", "agents_variables"),

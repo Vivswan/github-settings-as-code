@@ -796,6 +796,7 @@ describe("writes mutate state", () => {
     const patched = await call(h, "PATCH", `${labelsPath}/feature`, {
       body: {
         new_name: "feature",
+        name: "spoofed",
         tone: "cool",
         id: 999,
         node_id: "FAKE",
@@ -806,7 +807,9 @@ describe("writes mutate state", () => {
     expect(patched.status).toBe(200);
     list = await jsonArray(await call(h, "GET", labelsPath));
     expect(list[0]?.tone).toBe("cool");
-    // The server-owned fields survive a PATCH payload that tries to set them.
+    // The server-owned fields survive a PATCH payload that tries to set them,
+    // and only new_name (not a bare name) can move the identity.
+    expect(list[0]?.name).toBe("feature");
     expect(list[0]?.id).not.toBe(999);
     expect(list[0]?.node_id).not.toBe("FAKE");
     expect(list[0]?.url).not.toBe("u");
@@ -831,6 +834,8 @@ describe("writes mutate state", () => {
     await call(h, "PATCH", `${labelsPath}/old`, { body: { new_name: "new" } });
     const list = await jsonArray(await call(h, "GET", labelsPath));
     expect(list[0]?.name).toBe("new");
+    // The server-owned url is re-minted from the renamed identity.
+    expect(list[0]?.url).toBe(`https://api.github.com/repos/${OWNER}/${REPO}/labels/new`);
   });
 });
 

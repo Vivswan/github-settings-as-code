@@ -497,7 +497,7 @@ export function booleanToggleGet(enabled: boolean): MockResponse {
   return enabled ? noContent() : { status: 404, body: null };
 }
 
-export function labelName(label: Json): NameKey {
+function labelName(label: Json): NameKey {
   // The section's own mint, so the mock's matching can never fold a name
   // differently than the handler does.
   return nameKey(String(label.name));
@@ -509,21 +509,6 @@ export function variableName(variable: Json): string {
   // differently than the handler does (the labelName precedent).
   return variableKey(String(variable.name ?? ""));
 }
-
-/**
- * Label fields the server owns (or the update handler maps explicitly); the
- * passthrough loop must never let a payload overwrite them.
- */
-export const LABEL_CANONICAL_KEYS = new Set([
-  "new_name",
-  "name",
-  "color",
-  "description",
-  "id",
-  "node_id",
-  "url",
-  "default",
-]);
 
 export function findLabel(state: MockState, name: string): Json | undefined {
   return state.labels.find((l) => labelName(l) === nameKey(name));

@@ -7,7 +7,13 @@
  * fragments can depend on it without an import cycle.
  */
 
+import type { z } from "zod";
 import { undeclaredPolicy } from "../../src/sections/contract/module.js";
+import type {
+  ListEndpoints,
+  ListSectionKey,
+  ListSectionModule,
+} from "../../src/sections/shared/list-section.js";
 import type { LiveState } from "./mock/state.js";
 import type { Rng } from "./prng.js";
 
@@ -138,4 +144,197 @@ export function assertSentinelDisjoint(condition: boolean, detail: string): void
   if (!condition) {
     throw new Error(`witness sentinel collision: ${detail}`);
   }
+}
+
+// --- Generators from slices --------------------------------------------------
+
+/** The zod internals the def walk reads: the type discriminator and its children. */
+interface SliceDef {
+  type: string;
+  shape?: Record<string, z.ZodType>;
+  element?: z.ZodType;
+  innerType?: z.ZodType;
+  options?: readonly z.ZodType[];
+  entries?: Record<string, string | number>;
+  values?: readonly unknown[];
+}
+
+function defOf(schema: z.ZodType): SliceDef {
+  return (schema as unknown as { _zod: { def: SliceDef } })._zod.def;
+}
+
+export interface SliceSeed {
+  /** Per field, the pool to draw its value from; a field not named here draws a type-derived value. */
+  readonly fields?: Readonly<Record<string, (rng: Rng) => unknown>>;
+  /** Per OPTIONAL field, the probability it is present; 0.5 when not named. */
+  readonly present?: Readonly<Record<string, number>>;
+}
+
+/**
+ * An entry generator walked off the slice, so a new schema field is fuzzed without a generator edit:
+ * required fields always, optional ones by seeded presence, values from the pool or the field's type.
+ * Every entry is parsed back through the slice, so a draw a refinement rejects throws naming the field.
+ */
+export function generatorFromSlice(slice: z.ZodType, seed: SliceSeed = {}): (rng: Rng) => Json {
+  if (defOf(slice).shape === undefined) {
+    throw new Error(
+      `generatorFromSlice: the slice is a ${defOf(slice).type}, not an object schema`,
+    );
+  }
+  return (rng) => {
+    const entry = drawObject(slice, seed, rng);
+    // Parsed once at the outer boundary, so a nested issue names its full path.
+    const parsed = slice.safeParse(entry);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const at = issue?.path.map(String).join(".") || "(entry)";
+      throw new Error(
+        `generatorFromSlice: the drawn value at "${at}" fails the slice (${issue?.message ?? "invalid"}) - seed the field with a pool`,
+      );
+    }
+    return entry;
+  };
+}
+
+/** One object drawn field by field; validation belongs to the caller holding the root slice. */
+function drawObject(schema: z.ZodType, seed: SliceSeed, rng: Rng): Json {
+  const entry: Json = {};
+  for (const [field, child] of Object.entries(defOf(schema).shape ?? {})) {
+    const optional = defOf(child).type === "optional";
+    if (optional && !rng.bool(seed.present?.[field] ?? 0.5)) {
+      continue;
+    }
+    const pool = seed.fields?.[field];
+    entry[field] = pool === undefined ? drawFrom(child, rng, field) : pool(rng);
+  }
+  return entry;
+}
+
+/** A value of one schema, drawn from its type alone. */
+function drawFrom(schema: z.ZodType, rng: Rng, path: string): unknown {
+  const def = defOf(schema);
+  switch (def.type) {
+    case "optional":
+    case "nullable":
+    case "default":
+    case "prefault":
+    case "catch":
+    case "nonoptional":
+    case "readonly":
+      return drawFrom(def.innerType as z.ZodType, rng, path);
+    case "string":
+      return genName(rng);
+    case "number":
+      return rng.int(100);
+    case "boolean":
+      return rng.bool();
+    case "enum":
+      return rng.pick(Object.values(def.entries ?? {}));
+    case "literal":
+      return rng.pick(def.values ?? []);
+    case "array":
+      return Array.from({ length: rng.int(3) }, () =>
+        drawFrom(def.element as z.ZodType, rng, `${path}[]`),
+      );
+    case "union":
+      return drawFrom(rng.pick(def.options ?? []), rng, path);
+    case "object":
+      return drawObject(schema, {}, rng);
+    default:
+      throw new Error(
+        `generatorFromSlice: no draw for the ${def.type} at "${path}" - seed the field with a pool`,
+      );
+  }
+}
+
+// --- Witnesses from lenses ---------------------------------------------------
+
+export interface LensWitnessSpec<
+  K extends ListSectionKey,
+  Ends extends ListEndpoints,
+  Live extends object,
+  F extends string,
+> {
+  readonly section: ListSectionModule<K, Ends, Live, F>;
+  /** The GET-shape fields the server fills when a create omits them: the mock's own defaults. */
+  readonly defaults: Json;
+  /** Per write field, the value a drift-update witness stores instead; each disjoint from every generator pool. */
+  readonly sentinels: Readonly<Record<string, unknown>>;
+  /** The live item an extra-undeclared witness adds; absent when the section models no such kind. */
+  readonly undeclared?: Json;
+}
+
+/**
+ * A live-state witness derived from the section's lens: matching = the write over the server
+ * defaults (what the derived mock stores), drift-update = ONE declared field set to its sentinel (or
+ * a case-flipped name, read as a rename), extra-undeclared = the sentinel item appended.
+ */
+export function lensWitness<
+  K extends ListSectionKey,
+  Ends extends ListEndpoints,
+  Live extends object,
+  F extends string,
+>(
+  spec: LensWitnessSpec<K, Ends, Live, F>,
+  rng: Rng,
+  declared: Json[],
+  kind: LiveWitnessKind,
+  collection: keyof LiveState,
+): LiveWitness {
+  const { identity, lens } = spec.section.decl;
+  type Entry = Parameters<typeof lens.toWrite>[0];
+  const fold = identity.fold ?? ((name: string) => name);
+  const writes = declared.map((entry) => lens.toWrite(entry as unknown as Entry));
+  const items: Json[] = writes.map((write) => ({ ...spec.defaults, ...write }));
+  const state = { [collection]: items } as LiveState;
+  if (kind === "matching") {
+    return { kind, state };
+  }
+  if (kind === "extra-undeclared") {
+    if (spec.undeclared === undefined) {
+      throw new Error(
+        `${spec.section.key}: no undeclared sentinel item is declared for the witness`,
+      );
+    }
+    const sentinelKey = fold(String(spec.undeclared[identity.field]));
+    for (const [index, write] of writes.entries()) {
+      const claims = [
+        String(write[identity.field]),
+        ...(identity.aliases?.(declared[index] as unknown as Entry) ?? []),
+      ];
+      assertSentinelDisjoint(
+        claims.every((claim) => fold(claim) !== sentinelKey),
+        `a declared ${spec.section.key} entry resolves to the undeclared sentinel "${sentinelKey}"`,
+      );
+    }
+    items.push({ ...spec.undeclared });
+    return { kind, state };
+  }
+  const eligible = writes.flatMap((write, index) => {
+    const name = String(write[identity.field]);
+    const flipped = name.toUpperCase();
+    const fields = Object.keys(write).filter(
+      (field) => field !== identity.field && Object.hasOwn(spec.sentinels, field),
+    );
+    if (flipped !== name && fold(flipped) === fold(name)) {
+      fields.push(identity.field);
+    }
+    return fields.map((field) => ({ index, field }));
+  });
+  if (eligible.length === 0) {
+    return { kind: "matching", state };
+  }
+  const { index, field } = rng.pick(eligible);
+  const live = items[index] as Json;
+  if (field === identity.field) {
+    live[field] = String(live[field]).toUpperCase();
+  } else {
+    const sentinel = spec.sentinels[field];
+    assertSentinelDisjoint(
+      (writes[index] as Json)[field] !== sentinel,
+      `the ${spec.section.key} ${field} pool contains ${JSON.stringify(sentinel)}`,
+    );
+    live[field] = sentinel;
+  }
+  return { kind: "drift-update", state };
 }

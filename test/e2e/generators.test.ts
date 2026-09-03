@@ -305,11 +305,12 @@ describe("genLiveWitness", () => {
       let drifted = 0;
       declared.forEach((label, j) => {
         const entry = live[j] as Label;
-        const renamed = entry.name !== label.name;
+        const finalName = label.new_name ?? label.name;
+        const renamed = entry.name !== finalName;
         if (renamed) {
           // The flipped name must keep its case-insensitive key, so the handler
           // still matches the label and reads the divergence as rename drift.
-          expect(entry.name.toLowerCase()).toBe(label.name.toLowerCase());
+          expect(entry.name.toLowerCase()).toBe(finalName.toLowerCase());
         }
         const colorDrift = label.color !== undefined && entry.color !== label.color;
         const descriptionDrift =
