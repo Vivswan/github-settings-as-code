@@ -36,26 +36,29 @@ describe("sectionOperations", () => {
       undeclaredDefault: "untouched",
     };
     expect(sectionOperations(graphqlOnly)).toEqual([
-      { wire: "read", grade: "read", permission: { repo: ["administration"] } },
+      { role: "read", wire: "read", grade: "read", permission: { repo: ["administration"] } },
     ]);
   });
 
   test("every REST endpoint and GraphQL operation of a real section appears exactly once", () => {
     // repositorySection carries BOTH dictionaries, so the GraphQL half of
     // the flattening binds (a section without `graphql` would prove only the
-    // REST half). Content equality over the mapped dictionaries is the
-    // exactly-once claim: a duplicated entry canceling an omitted one would
-    // keep the length but not the list. No repository endpoint overrides
-    // accessGrade, so wire and grade coincide here; the override split is
-    // pinned by the overrides test below.
+    // REST half). Content equality over the role-keyed dictionaries is the
+    // exactly-once claim: `role` carries each operation's identity, so a
+    // duplicated entry canceling an omitted one with the SAME
+    // {wire, grade, permission} tuple still fails on content. No repository
+    // endpoint overrides accessGrade, so wire and grade coincide here; the
+    // override split is pinned by the overrides test below.
     expect(Object.keys(repositorySection.graphql ?? {}).length).toBeGreaterThan(0);
     expect(sectionOperations(repositorySection)).toEqual([
-      ...Object.values(repositorySection.endpoints).map((op) => ({
+      ...Object.entries(repositorySection.endpoints).map(([role, op]) => ({
+        role,
         wire: endpointKind(op),
         grade: endpointKind(op),
         permission: endpointPermission(repositorySection, op),
       })),
-      ...Object.values(repositorySection.graphql ?? {}).map((op) => ({
+      ...Object.entries(repositorySection.graphql ?? {}).map(([role, op]) => ({
+        role,
         wire: op.kind,
         grade: op.kind,
         permission: endpointPermission(repositorySection, op),
@@ -78,8 +81,8 @@ describe("sectionOperations", () => {
       undeclaredDefault: "untouched",
     };
     expect(sectionOperations(overridden)).toEqual([
-      { wire: "read", grade: "write", permission: { repo: ["administration"] } },
-      { wire: "read", grade: "read", permission: "none" },
+      { role: "gatedList", wire: "read", grade: "write", permission: { repo: ["administration"] } },
+      { role: "read", wire: "read", grade: "read", permission: "none" },
     ]);
   });
 });

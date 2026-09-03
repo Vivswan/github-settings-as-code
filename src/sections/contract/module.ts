@@ -223,13 +223,15 @@ export function endpointPermission(
 
 /**
  * One entry in the flattened REST + GraphQL view of sectionOperations():
- * `wire` says whether the request READS or WRITES on the wire (a GET or a
- * query vs a mutating method or a mutation), `grade` the access level GitHub
- * gates it at (endpointKind, so an accessGrade override write-gates a wire
- * read; a GraphQL operation's kind is both), and `permission` the effective
- * permission (endpointPermission).
+ * `role` is the operation's key in its declaring dictionary (its identity
+ * within the section), `wire` says whether the request READS or WRITES on
+ * the wire (a GET or a query vs a mutating method or a mutation), `grade`
+ * the access level GitHub gates it at (endpointKind, so an accessGrade
+ * override write-gates a wire read; a GraphQL operation's kind is both),
+ * and `permission` the effective permission (endpointPermission).
  */
 export interface SectionOperation {
+  readonly role: string;
   readonly wire: "read" | "write";
   readonly grade: "read" | "write";
   readonly permission: SectionPermission | "none";
@@ -248,12 +250,14 @@ export interface SectionOperation {
  */
 export function sectionOperations(section: SectionMeta): SectionOperation[] {
   return [
-    ...Object.values(section.endpoints).map((endpoint) => ({
+    ...Object.entries(section.endpoints).map(([role, endpoint]) => ({
+      role,
       wire: endpointMethod(endpoint.route) === "GET" ? ("read" as const) : ("write" as const),
       grade: endpointKind(endpoint),
       permission: endpointPermission(section, endpoint),
     })),
-    ...Object.values(section.graphql ?? {}).map((op) => ({
+    ...Object.entries(section.graphql ?? {}).map(([role, op]) => ({
+      role,
       wire: op.kind,
       grade: op.kind,
       permission: endpointPermission(section, op),
