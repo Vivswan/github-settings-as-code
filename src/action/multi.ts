@@ -28,12 +28,7 @@ import {
 import { applyDefaults } from "../engine/merge.js";
 import { type RepoRunResult, runForRepo, validateSettingsDoc } from "../engine/orchestrate.js";
 import { targetSecretSource } from "../engine/secrets.js";
-import {
-  type GithubClient,
-  isPermissionError,
-  RERUN_ADVICE,
-  registerRedactedSlug,
-} from "../github/api.js";
+import { type GithubClient, isPermissionError, RERUN_ADVICE } from "../github/api.js";
 import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
@@ -454,10 +449,10 @@ export async function runMulti(
       )
     : { isRedacted: () => false, display: (slug) => slug, maskedSlugs: [] };
 
-  // Mask and register every hidden slug BEFORE the first annotate/log/output.
+  // Mask every hidden slug BEFORE the first annotate/log/output; the API
+  // trace reads the same registry.
   for (const slug of plan.maskedSlugs) {
     io.mask(slug);
-    registerRedactedSlug(slug);
   }
 
   // Now safe to emit: buffered central warnings (flushed exactly once here on

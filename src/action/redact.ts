@@ -268,7 +268,11 @@ export function capturingIo(io: Io): { io: Io; drain(): CapturedLine[] } {
     io: {
       annotate: (level, message) => captured.push({ level, line: message }),
       log: (line) => captured.push({ line }),
+      debug: (line) => io.debug(line),
+      summary: (markdown) => io.summary(markdown),
+      output: (name, value) => io.output(name, value),
       mask: (value) => io.mask(value),
+      masked: () => io.masked(),
     },
     drain: () => captured,
   };

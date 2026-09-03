@@ -452,7 +452,15 @@ describe("injectMarkerLabel", () => {
     // rejects. The rename-refused arm is the risky one - it writes an
     // explicit `new_name: undefined` key - so all three outcomes are pinned
     // here, in the plain-array and wrapped forms alike.
-    const silentIo: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+    const silentIo: Io = {
+      annotate: () => {},
+      log: () => {},
+      debug: () => {},
+      summary: () => {},
+      output: () => {},
+      mask: () => {},
+      masked: () => new Set(),
+    };
     const cases: Array<{ doc: SettingsFile; expected: string }> = [
       { doc: { labels: [{ name: "bug", color: "d73a4a" }] }, expected: "injected" },
       {

@@ -8,11 +8,11 @@
  * never an endpoint typing that could drop an unknown field.
  */
 
-import * as core from "@actions/core";
 import { retry } from "@octokit/plugin-retry";
 import { throttling } from "@octokit/plugin-throttling";
 import { Octokit } from "@octokit/rest";
 import Bottleneck from "bottleneck/light.js";
+import type { Io } from "../io.js";
 import { redactSecretPayloadSafe } from "./secret-scan.js";
 
 export interface ApiError {
@@ -86,13 +86,17 @@ export interface GraphqlOp {
  * names the owner/repo the operation addresses: GraphQL carries the target in
  * the request BODY, invisible to the URL-based trace redaction, so the client
  * needs it to keep a redacted repository's traces closed.
+ *
+ * `redactTrace` holds the request's `/repos/<owner>/<repo>` slug redacted for
+ * the request's duration, for a caller that must not leak the slug before it
+ * knows whether the repository is private (the visibility probe).
  */
 export interface GithubClient {
   tryRequest(
     method: string,
     path: string,
     payload?: unknown,
-    options?: { accept?: string; raw?: boolean },
+    options?: { accept?: string; raw?: boolean; redactTrace?: boolean },
   ): Promise<{ data: unknown } | { error: ApiError }>;
   tryGraphql(
     op: GraphqlOp,
@@ -102,109 +106,95 @@ export interface GithubClient {
 }
 
 /**
- * Trace line for every API call. Debug output appears only when the run
- * has step debug logging enabled (re-run with debug logging, or set the
- * ACTIONS_STEP_DEBUG secret to true), so normal runs stay quiet while a
- * debugging user sees every request, its payload, status, and timing.
+ * The output-port facet the client traces through: the debug channel and
+ * the mask registry its redaction reads.
  */
-function debugLog(message: string): void {
-  core.debug(message);
+export type TraceIo = Pick<Io, "debug" | "masked">;
+
+// The slug charset ([\w.-]) stops the match at the segment boundary so an
+// octokit line's trailing " - 204 with id ..." is never folded into the name;
+// the `i` flag keeps a mixed-case path from slipping the redaction.
+const REPO_SLUG = /\/repos\/([\w.-]+\/[\w.-]+)/i;
+
+function repoSlugOf(path: string): string | undefined {
+  return path.match(REPO_SLUG)?.[1];
 }
 
 /**
- * Slugs whose requests must not appear verbatim in debug traces. The URL
- * mask (`core.setSecret`) covers the slug wherever it renders, but the
- * traced request PAYLOAD is the private repository's settings content, which
- * no mask covers - so a registered slug's trace collapses the whole path to
- * `<redacted>` and drops the payload entirely. Populated alongside `io.mask`
- * by the run flows once redaction is planned, and pre-populated for the
- * duration of the visibility probe (see repo-visibility.ts) so the probe's own
- * trace - and any throttle-callback trace it triggers - fails closed before the
- * slug's visibility is even known.
+ * The client's debug trace with slug redaction: a slug is redacted while it is
+ * masked through the Io port or held by an in-flight request (the visibility
+ * probe). A traced payload is private content no mask covers, so it is dropped.
  */
-const redactedSlugs = new Map<string, number>();
+export class TraceRedaction {
+  // One token per hold, so concurrent holds on the same slug release
+  // independently and releasing a token twice is inert.
+  private readonly holds = new Set<{ readonly slug: string }>();
 
-/**
- * Register a hold on a slug so its debug traces are path-redacted and
- * payload-free. Holds are counted: the probe's temporary hold and the run
- * flow's permanent one coexist, and releasing one never clears the other.
- */
-export function registerRedactedSlug(slug: string): void {
-  const key = slug.toLowerCase();
-  redactedSlugs.set(key, (redactedSlugs.get(key) ?? 0) + 1);
-}
+  constructor(private readonly io: TraceIo) {}
 
-/** Release one hold on a slug; tracing turns legible when none remain. */
-export function unregisterRedactedSlug(slug: string): void {
-  const key = slug.toLowerCase();
-  const holds = redactedSlugs.get(key) ?? 0;
-  if (holds <= 1) {
-    redactedSlugs.delete(key);
-  } else {
-    redactedSlugs.set(key, holds - 1);
+  debug(line: string): void {
+    this.io.debug(line);
   }
-}
 
-/**
- * Drop every hold at once. The run flows' registrations are deliberately
- * permanent for the life of the process - an error surfaced AFTER a failed
- * run still traces redacted - so production never calls this. It exists for
- * tests, which share one process: without a reset, one test file's run-flow
- * holds silently redact another file's traces.
- */
-export function clearRedactedSlugs(): void {
-  redactedSlugs.clear();
-}
-
-/**
- * If `path` targets a registered redacted slug, collapse the ENTIRE path to the
- * constant `<redacted>` and flag the payload to be dropped; otherwise return
- * the path unchanged. The whole path is replaced, not just the slug segment:
- * the prefix can itself carry a private name (a team-repo route
- * `/orgs/acme/teams/secret-team/repos/acme/private` leaks the team slug), and
- * the tail and query string carry the private repo's live state (label names,
- * branches, ruleset titles) - so anything but a constant would leak exactly
- * what redaction hides. Matches a `/repos/<owner>/<name>` segment
- * case-insensitively anywhere in the string (full URLs from the throttle
- * callbacks included).
- */
-function redactTracePath(path: string): { path: string; redacted: boolean } {
-  // The owner/name are constrained to the slug charset (letters, digits, dots,
-  // underscores, dashes) so the match stops at the segment boundary and does
-  // not swallow trailing text - octokit's own log lines put status and timing
-  // after the path ("PATCH /repos/o/r - 204 with id ..."), and a greedy name
-  // class would fold that into the "slug" and miss the registry lookup. The `i`
-  // flag matches `/REPOS/` too: a mixed-case path must not slip the redaction.
-  const match = path.match(/\/repos\/([\w.-]+\/[\w.-]+)/i);
-  const slug = match?.[1];
-  if (slug && redactedSlugs.has(slug.toLowerCase())) {
-    return { path: "<redacted>", redacted: true };
+  /** Hold `slug` redacted until the returned release runs. */
+  hold(slug: string): () => void {
+    const token = { slug: slug.toLowerCase() };
+    this.holds.add(token);
+    return () => {
+      this.holds.delete(token);
+    };
   }
-  return { path, redacted: false };
-}
 
-/**
- * Message-level redactor for octokit's free-text log LINES (as opposed to the
- * bare request paths redactTracePath handles). Octokit does not hand the logger
- * a clean path - it logs sentences like
- * `GET /repos/e2e-owner/svc-private - 200 with id undefined in 3ms` or
- * `retrying request to e2e-owner/svc-private after 429`, where a registered
- * slug can sit anywhere, not just in `/repos/<slug>` position. So this scans
- * the WHOLE message for any registered slug as a case-insensitive substring and,
- * on a hit, collapses the entire line to `<redacted>` (consistent with the path
- * policy: the text around the slug can carry live-state segments like a branch
- * name, so nothing after a hit is safe to keep). Kept separate from
- * redactTracePath on purpose - teaching the path regex to parse arbitrary log
- * prose is the fragile path.
- */
-function redactMessage(message: string): string {
-  const lower = message.toLowerCase();
-  for (const slug of redactedSlugs.keys()) {
-    if (lower.includes(slug)) {
-      return "<redacted>";
+  isRedacted(slug: string): boolean {
+    const key = slug.toLowerCase();
+    for (const needle of this.needles()) {
+      if (needle === key) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Collapse the ENTIRE path of a redacted slug to `<redacted>`: the prefix can
+   * carry a team slug and the tail carries live state (branches, labels), so
+   * anything but a constant leaks what redaction hides. Full URLs match too.
+   */
+  path(path: string): { path: string; redacted: boolean } {
+    const slug = repoSlugOf(path);
+    if (slug && this.isRedacted(slug)) {
+      return { path: "<redacted>", redacted: true };
+    }
+    return { path, redacted: false };
+  }
+
+  /**
+   * Whole-line redactor for octokit's free-text log lines, where a slug can sit
+   * anywhere ("retrying request to o/private after 429"): any held slug or masked
+   * value as a case-insensitive substring collapses the line to `<redacted>`.
+   */
+  message(message: string): string {
+    const lower = message.toLowerCase();
+    for (const needle of this.needles()) {
+      if (lower.includes(needle)) {
+        return "<redacted>";
+      }
+    }
+    return message;
+  }
+
+  /** Every redacted needle, lowercased: held slugs plus every masked value. */
+  private *needles(): Iterable<string> {
+    for (const token of this.holds) {
+      yield token.slug;
+    }
+    for (const value of this.io.masked()) {
+      // An empty mask would match every line.
+      if (value !== "") {
+        yield value.toLowerCase();
+      }
     }
   }
-  return message;
 }
 
 /**
@@ -238,6 +228,7 @@ export const REDACTED_RESPONSE_WITHHELD =
  */
 function throttleCallback(
   label: string,
+  trace: TraceRedaction,
 ): (
   retryAfter: number,
   options: { method: string; url: string },
@@ -245,8 +236,8 @@ function throttleCallback(
   retryCount: number,
 ) => boolean {
   return (retryAfter, options, _octokit, retryCount) => {
-    debugLog(
-      `${label} on ${options.method} ${redactTracePath(options.url).path}; retry ${retryCount + 1}/${MAX_RETRIES} after ${retryAfter}s`,
+    trace.debug(
+      `${label} on ${options.method} ${trace.path(options.url).path}; retry ${retryCount + 1}/${MAX_RETRIES} after ${retryAfter}s`,
     );
     return retryAfter <= MAX_RETRY_WAIT_S && retryCount < MAX_RETRIES;
   };
@@ -258,23 +249,28 @@ function throttleCallback(
  * this sink; the default sink is `console`, which writes those lines (carrying
  * private slugs and live-state segments like branch names and collaborator
  * logins) to stdout/stderr with no redaction. Each line is free-text prose, not
- * a bare path, so it goes through `redactMessage` (a whole-message slug scan),
- * NOT `redactTracePath` (which only finds a `/repos/<slug>` segment and would
- * miss a slug sitting elsewhere in the sentence). Every level is demoted to the
- * debug channel so octokit's chatter stays off normal runs, matching the rest
- * of the client's tracing. Exported so the redaction is unit-testable without
+ * a bare path, so it goes through the whole-message scan, NOT the path
+ * redactor (which only finds a `/repos/<slug>` segment and would miss a slug
+ * sitting elsewhere in the sentence). Every level is demoted to the debug
+ * channel so octokit's chatter stays off normal runs, matching the rest of the
+ * client's tracing. Exported so the redaction is unit-testable without
  * constructing the whole client.
  */
 type Log = (message: string, ...rest: unknown[]) => void;
 
-export const redactingOctokitLog: { debug: Log; info: Log; warn: Log; error: Log } = (() => {
+export function redactingOctokitLog(trace: TraceRedaction): {
+  debug: Log;
+  info: Log;
+  warn: Log;
+  error: Log;
+} {
   const redact: Log = (message) => {
     // Octokit passes a string message; any extra args are ignored rather than
     // risk logging an object that embeds an unredacted URL.
-    debugLog(redactMessage(String(message)));
+    trace.debug(trace.message(String(message)));
   };
   return { debug: redact, info: redact, warn: redact, error: redact };
-})();
+}
 
 // Never wait out a rate-limit reset longer than this: failing loudly with
 // the API message beats stalling a workflow for an hour. Exported so the
@@ -443,8 +439,10 @@ const REDACTED_TRANSPORT_WITHHELD =
 
 export class GithubApi implements GithubClient {
   private readonly octokit: InstanceType<typeof ActionOctokit>;
+  private readonly trace: TraceRedaction;
   constructor(
     token: string,
+    io: TraceIo,
     private readonly baseUrl = process.env.GITHUB_API_URL ?? "https://api.github.com",
     private readonly apiVersion = DEFAULT_API_VERSION,
     // Test knob override: an explicit value forces the RETRY_BASE_MS scale
@@ -452,6 +450,7 @@ export class GithubApi implements GithubClient {
     // the knob is read once from the environment below.
     retryBaseMsOverride?: number,
   ) {
+    this.trace = new TraceRedaction(io);
     // Read the test knob ONCE. `retryBaseMs` scales the plugin waits (1000 =
     // real seconds in production, small under RETRY_BASE_MS). `underTestKnob`
     // is true when the environment sets the knob - the two derive from the one
@@ -488,7 +487,7 @@ export class GithubApi implements GithubClient {
       // like branch names) to stdout/stderr with no redaction, bypassing our
       // trace hardening. Route them through the same collapse-to-<redacted>
       // sink; see redactingOctokitLog.
-      log: redactingOctokitLog,
+      log: redactingOctokitLog(this.trace),
       // Scales plugin waits (Retry-After units, backoff steps) so tests
       // can run in milliseconds; 1000 = real seconds in production. Each
       // plugin reads the value from its own options section.
@@ -515,8 +514,8 @@ export class GithubApi implements GithubClient {
         // Both rate-limit callbacks are identical but for the log label; one
         // factory keeps them in lockstep. The traced URL is redacted so a
         // rate-limited private-repo request cannot leak its slug.
-        onRateLimit: throttleCallback("rate limit"),
-        onSecondaryRateLimit: throttleCallback("secondary rate limit"),
+        onRateLimit: throttleCallback("rate limit", this.trace),
+        onSecondaryRateLimit: throttleCallback("secondary rate limit", this.trace),
       },
     });
   }
@@ -526,7 +525,28 @@ export class GithubApi implements GithubClient {
     method: string,
     path: string,
     payload?: unknown,
-    options?: { accept?: string; raw?: boolean },
+    options?: { accept?: string; raw?: boolean; redactTrace?: boolean },
+  ): Promise<{ data: unknown } | { error: ApiError }> {
+    if (!options?.redactTrace) {
+      return this.request(method, path, payload, options);
+    }
+    const slug = repoSlugOf(path);
+    if (slug === undefined) {
+      throw new Error(`internal: redactTrace needs a /repos/<owner>/<repo> path, got ${path}`);
+    }
+    const release = this.trace.hold(slug);
+    try {
+      return await this.request(method, path, payload, options);
+    } finally {
+      release();
+    }
+  }
+
+  private async request(
+    method: string,
+    path: string,
+    payload: unknown,
+    options: { accept?: string; raw?: boolean } | undefined,
   ): Promise<{ data: unknown } | { error: ApiError }> {
     const started = Date.now();
     // One serialization, one truth: the scan normalizes the payload and the
@@ -544,8 +564,8 @@ export class GithubApi implements GithubClient {
       );
     }
     const trace = (status: number): void => {
-      const safe = redactTracePath(path);
-      debugLog(
+      const safe = this.trace.path(path);
+      this.trace.debug(
         `${method} ${safe.path} -> ${status} (${Date.now() - started}ms)` +
           (safe.redacted || payload === undefined
             ? ""
@@ -605,12 +625,12 @@ export class GithubApi implements GithubClient {
    * errors.
    *
    * Tracing: the operation addresses its repository in the BODY, which the
-   * URL-based redactTracePath can never see - that is what the `slug`
-   * parameter is for. When the slug is registered redacted the ENTIRE line
-   * collapses to `<redacted>` (the variables carry the private repository's
-   * live state); otherwise the rendered line still passes through
-   * redactMessage, so a registered slug appearing anywhere in it fails
-   * closed like every octokit log line.
+   * URL-based path redactor can never see - that is what the `slug`
+   * parameter is for. When the slug is redacted the ENTIRE line collapses to
+   * `<redacted>` (the variables carry the private repository's live state);
+   * otherwise the rendered line still passes through the whole-message scan,
+   * so a redacted slug appearing anywhere in it fails closed like every
+   * octokit log line.
    */
   async tryGraphql(
     op: GraphqlOp,
@@ -631,29 +651,24 @@ export class GithubApi implements GithubClient {
         `GRAPHQL ${op.name} was not sent: ${reason}, so they could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
       );
     }
-    const redacted = redactedSlugs.has(slug.toLowerCase());
+    // Read live at every emission, never snapshotted at request start: a mask
+    // registered while the request is in flight must redact what follows it.
+    const redacted = (): boolean => this.trace.isRedacted(slug);
     const trace = (status: number, suffix = ""): void => {
-      debugLog(
-        redacted
+      this.trace.debug(
+        redacted()
           ? "<redacted>"
-          : redactMessage(
+          : this.trace.message(
               `GRAPHQL ${op.name} -> ${status} (${Date.now() - started}ms) variables: ${JSON.stringify(scan.traced)}${suffix}`,
             ),
       );
     };
-    // A redacted repository's GraphQL error content is withheld wholesale at
-    // this transport, like a secret-carrying request's: GraphQL error
-    // messages quote the slug and live state verbatim where REST denials say
-    // "Not Found", and the exact-literal output mask cannot catch a re-cased
-    // or name-only mention. The mappers below already classify with
-    // withholding on (so the content-free rateLimited flag is computed from
-    // structural signals, never the destroyed message); this wrapper then
-    // REBUILDS the error from a whitelist - status plus the structural
-    // classification fields - swapping in the redaction prose, so no field a
-    // mapper may add later can leak by default.
-    const withholdContent = scan.carriesSecret || redacted;
+    // A redacted repository's GraphQL error is rebuilt from an allowlist (status
+    // plus the structural classification fields): its messages quote the slug
+    // and live state verbatim, which the exact-literal output mask cannot catch.
+    const withholdContent = (): boolean => scan.carriesSecret || redacted();
     const withheld = (error: ApiError): ApiError =>
-      redacted
+      redacted()
         ? {
             status: error.status,
             message: REDACTED_RESPONSE_WITHHELD,
@@ -681,7 +696,7 @@ export class GithubApi implements GithubClient {
     } catch (error) {
       if (isHttpError(error)) {
         trace(error.status);
-        return { error: withheld(apiErrorFromHttp(error, withholdContent)) };
+        return { error: withheld(apiErrorFromHttp(error, withholdContent())) };
       }
       // The throttling plugin inspects GraphQL bodies itself: it retries a
       // RATE_LIMITED errors[] response like any rate limit and, once the
@@ -692,14 +707,14 @@ export class GithubApi implements GithubClient {
         ?.response?.data?.errors;
       if (Array.isArray(rethrownErrors) && rethrownErrors.length > 0) {
         trace(200);
-        return { error: withheld(apiErrorFromGraphqlErrors(rethrownErrors, withholdContent)) };
+        return { error: withheld(apiErrorFromGraphqlErrors(rethrownErrors, withholdContent())) };
       }
       throw transportFailure(
         `GRAPHQL ${op.name}`,
         error,
         scan.carriesSecret
           ? SECRET_TRANSPORT_WITHHELD
-          : redacted
+          : redacted()
             ? REDACTED_TRANSPORT_WITHHELD
             : undefined,
         this.baseUrl,
@@ -732,7 +747,7 @@ export class GithubApi implements GithubClient {
     }
     const errors = Array.isArray(body.errors) ? body.errors : [];
     if (errors.length > 0) {
-      return { error: withheld(apiErrorFromGraphqlErrors(errors, withholdContent)) };
+      return { error: withheld(apiErrorFromGraphqlErrors(errors, withholdContent())) };
     }
     const data = body.data;
     if (typeof data !== "object" || data === null || Array.isArray(data)) {

@@ -4,7 +4,15 @@ import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import type { SettingsFile } from "../../src/schema.js";
 
-const silentIo: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+const silentIo: Io = {
+  annotate: () => {},
+  log: () => {},
+  debug: () => {},
+  summary: () => {},
+  output: () => {},
+  mask: () => {},
+  masked: () => new Set(),
+};
 
 /**
  * applyDefaults hands back the merged document UNVALIDATED (unknown) - only

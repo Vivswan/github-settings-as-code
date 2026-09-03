@@ -5,19 +5,16 @@
  * HTTP-level error classification.
  */
 
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import * as core from "@actions/core";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { GraphqlOp } from "../../src/github/api.js";
 import {
   GithubApi,
   isPermissionError,
   isRateLimitError,
   REDACTED_RESPONSE_WITHHELD,
-  registerRedactedSlug,
   SECRET_RESPONSE_WITHHELD,
-  unregisterRedactedSlug,
 } from "../../src/github/api.js";
-import { api, restoreFetch, stubFetch } from "./stub.js";
+import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
 
@@ -40,15 +37,6 @@ function graphql(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     headers: { "content-type": "application/json" },
   });
-}
-
-/** The core.debug capture from api.test.ts, for the trace assertions. */
-function captureDebug(): { lines: string[]; restore: () => void } {
-  const lines: string[] = [];
-  const spy = spyOn(core, "debug").mockImplementation((message?: string) => {
-    lines.push(String(message));
-  });
-  return { lines, restore: () => spy.mockRestore() };
 }
 
 describe("tryGraphql success and envelope", () => {
@@ -178,7 +166,7 @@ describe("tryGraphql errors[] mapping", () => {
     );
     process.env.RETRY_BASE_MS = "1";
     try {
-      const knobApi = new GithubApi("t", "https://api.test", "2022-11-28");
+      const knobApi = new GithubApi("t", traceIo().io, "https://api.test", "2022-11-28");
       stubFetch([
         () => graphql({ data: { repository: { id: "R_1" } }, errors: { type: "NOT_FOUND" } }),
       ]);
@@ -252,31 +240,22 @@ describe("tryGraphql errors[] mapping", () => {
 describe("tryGraphql tracing and redaction", () => {
   test("the trace names the operation and its variables", async () => {
     stubFetch([() => graphql({ data: {} })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryGraphql(READ_OP, { owner: "o", repo: "publicrepo" }, "o/publicrepo");
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    await api(dbg.io).tryGraphql(READ_OP, { owner: "o", repo: "publicrepo" }, "o/publicrepo");
     const trace = dbg.lines.join("\n");
     expect(trace).toContain("GRAPHQL RepoToggles -> 200");
     expect(trace).toContain('variables: {"owner":"o","repo":"publicrepo"}');
   });
 
-  test("a registered slug collapses the WHOLE line (variables carry live state)", async () => {
-    registerRedactedSlug("o/secretrepo");
+  test("a masked slug collapses the WHOLE line (variables carry live state)", async () => {
+    const dbg = traceIo();
+    dbg.io.mask("o/secretrepo");
     stubFetch([() => graphql({ data: {} })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryGraphql(
-        READ_OP,
-        { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
-        "o/secretrepo",
-      );
-    } finally {
-      dbg.restore();
-      unregisterRedactedSlug("o/secretrepo");
-    }
+    await api(dbg.io).tryGraphql(
+      READ_OP,
+      { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
+      "o/secretrepo",
+    );
     const trace = dbg.lines.join("\n");
     expect(trace).toContain("<redacted>");
     expect(trace).not.toContain("RepoToggles");
@@ -284,19 +263,14 @@ describe("tryGraphql tracing and redaction", () => {
     expect(trace).not.toContain("CANARY-live");
   });
 
-  test("a registered slug inside the rendered line fails closed even when the slug param differs", async () => {
-    // The redactMessage backstop: the op addresses one repo but a DIFFERENT
-    // registered slug appears in the variables (a cross-repo value). The
+  test("a masked slug inside the rendered line fails closed even when the slug param differs", async () => {
+    // The whole-message backstop: the op addresses one repo but a DIFFERENT
+    // masked slug appears in the variables (a cross-repo value). The
     // whole-line scan must still collapse it.
-    registerRedactedSlug("acme/private");
+    const dbg = traceIo();
+    dbg.io.mask("acme/private");
     stubFetch([() => graphql({ data: {} })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryGraphql(READ_OP, { owner: "o", repo: "r", source: "acme/private" }, "o/r");
-    } finally {
-      dbg.restore();
-      unregisterRedactedSlug("acme/private");
-    }
+    await api(dbg.io).tryGraphql(READ_OP, { owner: "o", repo: "r", source: "acme/private" }, "o/r");
     const trace = dbg.lines.join("\n");
     expect(trace).not.toContain("acme/private");
   });
@@ -309,23 +283,19 @@ describe("tryGraphql tracing and redaction", () => {
           extensions: { warnings: [{ type: "DEPRECATION", message: "legacy node id" }] },
         }),
     ]);
-    const dbg = captureDebug();
-    let result: Awaited<ReturnType<ReturnType<typeof api>["tryGraphql"]>>;
-    try {
-      result = await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r");
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    const result = await api(dbg.io).tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r");
     expect("data" in result).toBe(true);
     expect(dbg.lines.join("\n")).toContain("warnings:");
     expect(dbg.lines.join("\n")).toContain("legacy node id");
   });
 
-  test("a registered slug's error content is withheld, keeping the structural fields", async () => {
+  test("a masked slug's error content is withheld, keeping the structural fields", async () => {
     // GraphQL error messages quote the slug verbatim ("Could not resolve to a
     // Repository with the name 'o/secretrepo'"), so a redacted repository's
     // error body is replaced wholesale; the classification fields survive.
-    registerRedactedSlug("o/secretrepo");
+    const dbg = traceIo();
+    dbg.io.mask("o/secretrepo");
     stubFetch([
       () =>
         graphql({
@@ -338,12 +308,11 @@ describe("tryGraphql tracing and redaction", () => {
           ],
         }),
     ]);
-    let result: Awaited<ReturnType<ReturnType<typeof api>["tryGraphql"]>>;
-    try {
-      result = await api().tryGraphql(READ_OP, { owner: "o", repo: "secretrepo" }, "o/secretrepo");
-    } finally {
-      unregisterRedactedSlug("o/secretrepo");
-    }
+    const result = await api(dbg.io).tryGraphql(
+      READ_OP,
+      { owner: "o", repo: "secretrepo" },
+      "o/secretrepo",
+    );
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
@@ -357,8 +326,9 @@ describe("tryGraphql tracing and redaction", () => {
     // The withholding must not destroy rate-limit classification: with the
     // message gone, only the structurally computed flag can distinguish a
     // 403 rate limit from a permission denial. The docs URL is rebuilt away
-    // with everything else outside the whitelist.
-    registerRedactedSlug("o/secretrepo");
+    // with everything else outside the allowlist.
+    const dbg = traceIo();
+    dbg.io.mask("o/secretrepo");
     stubFetch([
       () =>
         new Response(
@@ -375,12 +345,11 @@ describe("tryGraphql tracing and redaction", () => {
           },
         ),
     ]);
-    let result: Awaited<ReturnType<ReturnType<typeof api>["tryGraphql"]>>;
-    try {
-      result = await api().tryGraphql(READ_OP, { owner: "o", repo: "secretrepo" }, "o/secretrepo");
-    } finally {
-      unregisterRedactedSlug("o/secretrepo");
-    }
+    const result = await api(dbg.io).tryGraphql(
+      READ_OP,
+      { owner: "o", repo: "secretrepo" },
+      "o/secretrepo",
+    );
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
@@ -390,31 +359,84 @@ describe("tryGraphql tracing and redaction", () => {
     expect(result.error.documentationUrl).toBeUndefined();
   });
 
-  test("a redacted slug's transport failure withholds the reason too", async () => {
-    registerRedactedSlug("o/secretrepo");
+  test("a masked slug's transport failure withholds the reason too", async () => {
+    const dbg = traceIo();
+    dbg.io.mask("o/secretrepo");
     globalThis.fetch = (async () => {
       throw new Error("socket hang up talking to o/secretrepo");
     }) as unknown as typeof fetch;
-    try {
-      await expect(
-        api().tryGraphql(READ_OP, { owner: "o", repo: "secretrepo" }, "o/secretrepo"),
-      ).rejects.toThrow(/details withheld: the repository is redacted/);
-    } finally {
-      unregisterRedactedSlug("o/secretrepo");
-    }
+    await expect(
+      api(dbg.io).tryGraphql(READ_OP, { owner: "o", repo: "secretrepo" }, "o/secretrepo"),
+    ).rejects.toThrow(/details withheld: the repository is redacted/);
+  });
+
+  test.each([
+    ["success trace", () => graphql({ data: {} }), undefined],
+    [
+      "errors[] content",
+      () =>
+        graphql({
+          data: null,
+          errors: [{ type: "NOT_FOUND", message: "no repository named 'o/secretrepo'" }],
+        }),
+      REDACTED_RESPONSE_WITHHELD,
+    ],
+  ])(
+    "a mask registered while the request is in flight redacts the %s",
+    async (_case, respond, withheldMessage) => {
+      // Redaction is read at emission, never snapshotted at request start: the
+      // fetch stub masks the slug after the request went out, before any trace.
+      const t = traceIo();
+      stubFetch([
+        () => {
+          t.io.mask("o/secretrepo");
+          return respond();
+        },
+      ]);
+      const result = await api(t.io).tryGraphql(
+        READ_OP,
+        { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
+        "o/secretrepo",
+      );
+      expect(t.lines).toContain("<redacted>");
+      const trace = t.lines.join("\n");
+      expect(trace).not.toContain("secretrepo");
+      expect(trace).not.toContain("CANARY-live");
+      expect(trace).not.toContain("RepoToggles");
+      expect("error" in result ? result.error.message : undefined).toBe(withheldMessage);
+      expect(JSON.stringify(result)).not.toContain("secretrepo");
+    },
+  );
+
+  test("a mask registered while the request is in flight withholds the transport-failure reason", async () => {
+    const t = traceIo();
+    const rawReason = "socket hang up talking to o/secretrepo";
+    globalThis.fetch = (async () => {
+      t.io.mask("o/secretrepo");
+      throw new Error(rawReason);
+    }) as unknown as typeof fetch;
+    const thrown = await api(t.io)
+      .tryGraphql(READ_OP, { owner: "o", repo: "secretrepo" }, "o/secretrepo")
+      .then(
+        () => {
+          throw new Error("expected tryGraphql to throw");
+        },
+        (error: unknown) => String(error),
+      );
+    // The withholding marker replaces the reason wholesale: neither the raw
+    // transport text nor the slug survives into the thrown message.
+    expect(thrown).toContain("details withheld: the repository is redacted");
+    expect(thrown).not.toContain(rawReason);
+    expect(thrown).not.toContain("socket hang up");
+    expect(thrown).not.toContain("secretrepo");
   });
 
   test("a secret-named variable is masked in the trace and its error body withheld", async () => {
     stubFetch([
       () => graphql({ data: null, errors: [{ type: "UNPROCESSABLE", message: "echo: hunter2" }] }),
     ]);
-    const dbg = captureDebug();
-    let result: Awaited<ReturnType<ReturnType<typeof api>["tryGraphql"]>>;
-    try {
-      result = await api().tryGraphql(WRITE_OP, { id: "X", secret: "hunter2" }, "o/r");
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    const result = await api(dbg.io).tryGraphql(WRITE_OP, { id: "X", secret: "hunter2" }, "o/r");
     expect(dbg.lines.join("\n")).not.toContain("hunter2");
     if (!("error" in result)) {
       throw new Error("expected an error result");
@@ -431,12 +453,8 @@ describe("tryGraphql tracing and redaction", () => {
           extensions: { warnings: [{ type: "DEPRECATION", message: "echo: hunter2" }] },
         }),
     ]);
-    const dbg = captureDebug();
-    try {
-      await api().tryGraphql(WRITE_OP, { id: "X", secret: "hunter2" }, "o/r");
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    await api(dbg.io).tryGraphql(WRITE_OP, { id: "X", secret: "hunter2" }, "o/r");
     const trace = dbg.lines.join("\n");
     expect(trace).toContain("warnings: 1 (details withheld");
     expect(trace).not.toContain("hunter2");

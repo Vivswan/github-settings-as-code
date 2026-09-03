@@ -1,10 +1,11 @@
 /**
- * The Io implementation over @actions/core: workflow annotations, action
- * outputs, and plain log lines.
+ * The Io implementation over @actions/core - the only module outside the
+ * runner that may import it, so every channel has one production path.
  */
 
+import { appendFileSync } from "node:fs";
 import * as core from "@actions/core";
-import type { Io } from "../io.js";
+import { type Io, maskRegistry } from "../io.js";
 
 /**
  * Every action output run() writes, with the description the action.yml
@@ -39,16 +40,31 @@ export function annotate(level: keyof typeof annotators, message: string): void 
   annotators[level](message);
 }
 
-export function setOutput(name: (typeof OUTPUT_NAMES)[number], value: string): void {
+// The root port types `name` as a plain string (it cannot see this layer);
+// the declared-name union applies here, at the implementation the port's
+// method signature accepts.
+function setOutput(name: OutputName, value: string): void {
   // Guarded: the runner always sets GITHUB_OUTPUT; local/test runs may not.
   if (process.env.GITHUB_OUTPUT) {
     core.setOutput(name, value);
   }
 }
 
-/** The production Io sink: annotations via the runner, logs to stdout. */
+/** Append one summary block; skipped when GITHUB_STEP_SUMMARY is unset (local/test runs). */
+function appendSummary(markdown: string): void {
+  const file = process.env.GITHUB_STEP_SUMMARY;
+  if (!file) {
+    return;
+  }
+  appendFileSync(file, `${markdown}\n`);
+}
+
+/** The production Io sink: annotations and the trace via the runner, logs to stdout. */
 export const actionsIo: Io = {
   annotate,
   log: (line) => console.log(line),
-  mask: (value) => core.setSecret(value),
+  debug: (line) => core.debug(line),
+  summary: appendSummary,
+  output: setOutput,
+  ...maskRegistry(core.setSecret),
 };

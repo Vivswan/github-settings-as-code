@@ -25,7 +25,11 @@ function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: s
     io: {
       annotate: (level, message) => annotations.push(`${level}: ${message}`),
       log: (line) => logs.push(line),
+      debug: () => {},
+      summary: () => {},
+      output: () => {},
       mask: (value) => masked.push(value),
+      masked: () => new Set(masked),
     },
     annotations,
     logs,
@@ -38,7 +42,15 @@ function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: s
  * here instead of riding a cast into runForRepo.
  */
 function validated(doc: SettingsFile): ValidatedSettings {
-  const silent: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+  const silent: Io = {
+    annotate: () => {},
+    log: () => {},
+    debug: () => {},
+    summary: () => {},
+    output: () => {},
+    mask: () => {},
+    masked: () => new Set(),
+  };
   const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silent);
   if ("error" in verdict) {
     throw new Error(`test fixture failed validation: ${verdict.error}`);

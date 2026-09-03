@@ -1,11 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { runMulti } from "../../src/action/multi.js";
 import { redactOutcomes, toPublicView } from "../../src/action/redact.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { type ValidatedSettings, validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import { clearRedactedSlugs } from "../../src/github/api.js";
-import type { Io } from "../../src/io.js";
+import { type Io, maskRegistry } from "../../src/io.js";
 import {
   ARTIFACT_FILE,
   ARTIFACT_NAME,
@@ -14,14 +13,6 @@ import {
 import { applyMarkerInjection } from "../../src/report/delivery.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
-
-// runMulti() registers every slug its redaction plan hides, permanently for
-// the process by design - so every test file sharing this process would
-// inherit the holds and trace `<redacted>` for those slugs. Drop them after
-// each test.
-afterEach(() => {
-  clearRedactedSlugs();
-});
 
 function captureIo(): {
   io: Io;
@@ -44,10 +35,13 @@ function captureIo(): {
         logs.push(line);
         events.push(`log: ${line}`);
       },
-      mask: (value) => {
+      debug: () => {},
+      summary: () => {},
+      output: () => {},
+      ...maskRegistry((value) => {
         masks.push(value);
         events.push(`mask: ${value}`);
-      },
+      }),
     },
     annotations,
     logs,
@@ -1094,7 +1088,15 @@ describe("applyMarkerInjection", () => {
   // Fixtures are branded through the REAL boundary, so an invalid one fails
   // here instead of riding a cast into the injection.
   const validated = (doc: SettingsFile): ValidatedSettings => {
-    const silent: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+    const silent: Io = {
+      annotate: () => {},
+      log: () => {},
+      debug: () => {},
+      summary: () => {},
+      output: () => {},
+      mask: () => {},
+      masked: () => new Set(),
+    };
     const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silent);
     if ("error" in verdict) {
       throw new Error(`test fixture failed validation: ${verdict.error}`);

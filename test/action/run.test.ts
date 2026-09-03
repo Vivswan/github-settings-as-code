@@ -1,41 +1,36 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
 import { run } from "../../src/action/run.js";
-import { clearRedactedSlugs } from "../../src/github/api.js";
-import type { Io } from "../../src/io.js";
+import { type Io, maskRegistry } from "../../src/io.js";
 import { MockApi } from "../mock-api.js";
 
 // Every run() below injects this capturing Io in place of the @actions/core
 // sink, so a green suite prints no raw ::error::/::warning:: workflow
 // commands - and the failure-path tests assert the exact captured text
-// (annotations as "<level>: <message>", log lines verbatim).
+// (annotations as "<level>: <message>", log lines verbatim). The step summary
+// and the action outputs are captured the same way, so the assertions read
+// exactly what run() handed the port.
 let captured: string[] = [];
+let summaries: string[] = [];
+let outputs: Record<string, string> = {};
 const testIo: Io = {
   annotate: (level, message) => captured.push(`${level}: ${message}`),
   log: (line) => captured.push(line),
-  mask: (value) => captured.push(`mask: ${value}`),
+  debug: () => {},
+  summary: (markdown) => summaries.push(markdown),
+  output: (name, value) => {
+    outputs[name] = value;
+  },
+  ...maskRegistry((value) => captured.push(`mask: ${value}`)),
 };
 beforeEach(() => {
   captured = [];
-});
-
-// run() registers a non-self private target for trace redaction, permanently
-// for the process by design - so every test file sharing this process would
-// inherit the holds and trace `<redacted>` for those slugs. Drop them after
-// each test.
-afterEach(() => {
-  clearRedactedSlugs();
+  summaries = [];
+  outputs = {};
 });
 
 describe("run (legacy single-repo regression)", () => {
-  const ENV_KEYS = [
-    "INPUT_TOKEN",
-    "INPUT_MODE",
-    "INPUT_REPOSITORY",
-    "INPUT_SETTINGS-FILE",
-    "GITHUB_OUTPUT",
-    "GITHUB_STEP_SUMMARY",
-  ];
+  const ENV_KEYS = ["INPUT_TOKEN", "INPUT_MODE", "INPUT_REPOSITORY", "INPUT_SETTINGS-FILE"];
   const saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
 
   afterEach(() => {
@@ -52,8 +47,6 @@ describe("run (legacy single-repo regression)", () => {
     process.env.INPUT_TOKEN = "t";
     process.env.INPUT_REPOSITORY = "o/r";
     process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    delete process.env.GITHUB_OUTPUT;
-    delete process.env.GITHUB_STEP_SUMMARY;
   }
 
   test("check mode: clean exits 0, drift exits 1", async () => {
@@ -90,8 +83,6 @@ describe("run in multi-repo mode (env glue)", () => {
     "INPUT_EXCLUDE",
     "INPUT_TOPICS",
     "INPUT_AFFILIATION",
-    "GITHUB_OUTPUT",
-    "GITHUB_STEP_SUMMARY",
     "GITHUB_REPOSITORY",
     "INPUT_PRIVATE-REPOS",
     "INPUT_PRIVATE-REPORT",
@@ -110,15 +101,11 @@ describe("run in multi-repo mode (env glue)", () => {
     }
   });
 
-  test("writes repos-result to GITHUB_OUTPUT and exits by worst-of", async () => {
+  test("writes repos-result and result outputs and exits by worst-of", async () => {
     process.env.INPUT_TOKEN = "t";
     process.env.INPUT_MODE = "check";
     process.env.INPUT_REPOS = "o/a";
     delete process.env.INPUT_REPOSITORY;
-    delete process.env.GITHUB_STEP_SUMMARY;
-    const outputFile = `${process.env.TMPDIR ?? "/tmp"}/sac-test-output-${process.pid}.txt`;
-    await Bun.write(outputFile, "");
-    process.env.GITHUB_OUTPUT = outputFile;
     const api = new MockApi({
       "GET /repos/o/a": { data: { has_wiki: false, private: false } },
       "GET /repos/o/a/contents/.github/settings.yml": {
@@ -126,11 +113,9 @@ describe("run in multi-repo mode (env glue)", () => {
       },
     });
     expect(await run({ api: api, io: testIo })).toBe(0);
-    const output = await Bun.file(outputFile).text();
-    // @actions/core writes outputs in heredoc form: name<<DELIM / value / DELIM
-    expect(output).toContain("repos-result<<");
+    const output = outputs["repos-result"] ?? "";
+    expect(outputs.result).toBe("clean");
     expect(output).toContain('"o/a":{"result":"clean","source":"remote"');
-    expect(output).toContain("result<<");
   });
 
   test("repository input combined with repos is a hard error", async () => {
@@ -138,8 +123,6 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env.INPUT_MODE = "check";
     process.env.INPUT_REPOS = "o/a";
     process.env.INPUT_REPOSITORY = "o/r";
-    delete process.env.GITHUB_OUTPUT;
-    delete process.env.GITHUB_STEP_SUMMARY;
     const api = new MockApi({});
     expect(await run({ api: api, io: testIo })).toBe(1);
     expect(api.calls).toHaveLength(0);
@@ -153,8 +136,6 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env.INPUT_MODE = "check";
     delete process.env.INPUT_REPOS;
     delete process.env.INPUT_REPOSITORY;
-    delete process.env.GITHUB_OUTPUT;
-    delete process.env.GITHUB_STEP_SUMMARY;
     delete process.env.GITHUB_REPOSITORY;
   }
 
@@ -257,9 +238,6 @@ describe("run in multi-repo mode (env glue)", () => {
   test("the step summary escapes pipes and marks drift rows", async () => {
     setDiscoveryEnv();
     process.env.INPUT_REPOS = "o/a";
-    const summaryFile = `${process.env.TMPDIR ?? "/tmp"}/sac-test-summary-${process.pid}.md`;
-    await Bun.write(summaryFile, "");
-    process.env.GITHUB_STEP_SUMMARY = summaryFile;
     const api = new MockApi({
       "GET /repos/o/a": { data: { description: "live | desc", private: false } },
       "GET /repos/o/a/contents/.github/settings.yml": {
@@ -267,7 +245,7 @@ describe("run in multi-repo mode (env glue)", () => {
       },
     });
     expect(await run({ api: api, io: testIo })).toBe(1);
-    const summary = await Bun.file(summaryFile).text();
+    const summary = summaries.join("\n");
     expect(summary).toContain(":warning: drift");
     expect(summary).toContain("want \\| desc");
   });
@@ -277,12 +255,6 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env.INPUT_REPOS = "o/priv";
     process.env["INPUT_PRIVATE-REPOS"] = "redact";
     process.env.INPUT_MODE = "check";
-    const outputFile = `${process.env.TMPDIR ?? "/tmp"}/sac-test-redact-out-${process.pid}.txt`;
-    const summaryFile = `${process.env.TMPDIR ?? "/tmp"}/sac-test-redact-sum-${process.pid}.md`;
-    await Bun.write(outputFile, "");
-    await Bun.write(summaryFile, "");
-    process.env.GITHUB_OUTPUT = outputFile;
-    process.env.GITHUB_STEP_SUMMARY = summaryFile;
     const api = new MockApi({
       "GET /repos/o/priv": { data: { description: "SECRET-live", private: true } },
       "GET /repos/o/priv/contents/.github/settings.yml": {
@@ -290,8 +262,8 @@ describe("run in multi-repo mode (env glue)", () => {
       },
     });
     expect(await run({ api: api, io: testIo })).toBe(1);
-    const output = await Bun.file(outputFile).text();
-    const summary = await Bun.file(summaryFile).text();
+    const output = outputs["repos-result"] ?? "";
+    const summary = summaries.join("\n");
     // neither the output nor the summary carries the private slug or values
     for (const text of [output, summary]) {
       expect(text).not.toContain("o/priv");
@@ -311,9 +283,6 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
     process.env["INPUT_PRIVATE-REPOS"] = "redact";
     process.env.INPUT_MODE = "check";
-    const summaryFile = `${process.env.TMPDIR ?? "/tmp"}/sac-test-single-redact-${process.pid}.md`;
-    await Bun.write(summaryFile, "");
-    process.env.GITHUB_STEP_SUMMARY = summaryFile;
     // has_wiki drifts; the live value is a boolean but the slug must not leak.
     const api = new MockApi({
       "GET /repos/o/priv": { data: { has_wiki: true, private: true } },
@@ -321,7 +290,7 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(await run({ api: api, io: testIo })).toBe(1);
     // the single-repo redaction path registered the slug for masking
     expect(captured).toContain("mask: o/priv");
-    const summary = await Bun.file(summaryFile).text();
+    const summary = summaries.join("\n");
     expect(summary).not.toContain("o/priv");
     expect(summary).toContain("details hidden");
     // Finding F: the redacted single-repo summary renders the SAME per-section
@@ -344,12 +313,9 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
     process.env["INPUT_PRIVATE-REPOS"] = "redact";
     process.env.INPUT_MODE = "check";
-    const summaryFile = `${process.env.TMPDIR ?? "/tmp"}/sac-test-self-${process.pid}.md`;
-    await Bun.write(summaryFile, "");
-    process.env.GITHUB_STEP_SUMMARY = summaryFile;
     const api = new MockApi({ "GET /repos/o/self": { data: { has_wiki: false, private: true } } });
     expect(await run({ api: api, io: testIo })).toBe(0);
-    const summary = await Bun.file(summaryFile).text();
+    const summary = summaries.join("\n");
     // full detail: the section table renders normally, no redaction note
     expect(summary).not.toContain("details hidden");
     expect(summary).toContain("repository");
@@ -453,9 +419,6 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env["INPUT_PRIVATE-REPOS"] = "redact";
     process.env["INPUT_PRIVATE-REPORT"] = "issue";
     process.env.INPUT_MODE = "check";
-    const summaryFile = `${process.env.TMPDIR ?? "/tmp"}/sac-test-single-report-${process.pid}.md`;
-    await Bun.write(summaryFile, "");
-    process.env.GITHUB_STEP_SUMMARY = summaryFile;
     const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
     // has_wiki drifts (single.yml wants false); the report captures that.
     const api = new MockApi({
@@ -476,7 +439,7 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(body).toContain("## Transcript");
     expect(payload.state).toBe("open"); // drift needs attention
     // the public summary stays redacted
-    const summary = await Bun.file(summaryFile).text();
+    const summary = summaries.join("\n");
     expect(summary).not.toContain("o/priv");
     expect(summary).toContain("details hidden");
   });
@@ -490,7 +453,6 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env["INPUT_PRIVATE-REPOS"] = "redact";
     process.env["INPUT_PRIVATE-REPORT"] = "issue";
     process.env.INPUT_MODE = "check";
-    delete process.env.GITHUB_STEP_SUMMARY;
     // repo GET body has neither private nor visibility -> unknown -> redact, no deliver
     const api = new MockApi({ "GET /repos/o/maybe": { data: { has_wiki: true } } });
     expect(await run({ api: api, io: testIo })).toBe(1); // drift exits 1
@@ -508,7 +470,6 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env["INPUT_PRIVATE-REPOS"] = "redact";
     process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
     process.env.INPUT_MODE = "check";
-    delete process.env.GITHUB_STEP_SUMMARY;
     const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
     // has_wiki drifts (single.yml wants false): check-mode drift needs
     // attention, so on-failure takes the same upsert path as issue.
@@ -538,7 +499,6 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env["INPUT_PRIVATE-REPOS"] = "redact";
     process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
     process.env.INPUT_MODE = "check";
-    delete process.env.GITHUB_STEP_SUMMARY;
     // has_wiki matches single.yml: healthy, and no open issue to close.
     const api = new MockApi({
       "GET /repos/o/priv": { data: { has_wiki: false, private: true } },
@@ -573,9 +533,6 @@ describe("run in multi-repo mode (env glue)", () => {
     // Pin the no-runtime-token precondition: the exact-warning assertion below
     // depends on the default uploader failing this way.
     delete process.env.ACTIONS_RUNTIME_TOKEN;
-    const summaryFile = `${process.env.TMPDIR ?? "/tmp"}/sac-test-single-artifact-${process.pid}.md`;
-    await Bun.write(summaryFile, "");
-    process.env.GITHUB_STEP_SUMMARY = summaryFile;
     // has_wiki drifts (single.yml wants false); the target is proven private.
     const api = new MockApi({ "GET /repos/o/priv": { data: { has_wiki: true, private: true } } });
     expect(await run({ api: api, io: testIo })).toBe(1); // check-mode drift exits 1, unchanged by delivery
@@ -585,7 +542,7 @@ describe("run in multi-repo mode (env glue)", () => {
     // no issue traffic on the artifact channel
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     // the public summary stays redacted
-    const summary = await Bun.file(summaryFile).text();
+    const summary = summaries.join("\n");
     expect(summary).not.toContain("o/priv");
     expect(summary).toContain("details hidden");
   });

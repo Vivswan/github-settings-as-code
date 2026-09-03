@@ -6,7 +6,15 @@ import type { Io } from "../../io.js";
 import { secretScanningPatternsSection } from "./index.js";
 
 /** A no-op Io so validateSettingsDoc can run without @actions/core. */
-const silentIo: Io = { annotate() {}, log() {}, mask() {} };
+const silentIo: Io = {
+  annotate() {},
+  log() {},
+  debug() {},
+  summary() {},
+  output() {},
+  mask() {},
+  masked: () => new Set(),
+};
 
 /** The bare-array list body the mock serves for a live pattern set. */
 function listRoute(patterns: Array<Record<string, unknown>>) {

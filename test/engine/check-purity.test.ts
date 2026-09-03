@@ -221,7 +221,15 @@ const ROUTES = {
 };
 
 function silentIo(): Io {
-  return { annotate: () => {}, log: () => {}, mask: () => {} };
+  return {
+    annotate: () => {},
+    log: () => {},
+    debug: () => {},
+    summary: () => {},
+    output: () => {},
+    mask: () => {},
+    masked: () => new Set(),
+  };
 }
 
 describe("check-mode purity", () => {

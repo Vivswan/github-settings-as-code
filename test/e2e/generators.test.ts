@@ -26,7 +26,15 @@ import { Rng } from "./prng.js";
 import { parseScenario } from "./schema.js";
 
 /** A no-op Io so validateSettingsDoc can run without @actions/core. */
-const silentIo: Io = { annotate() {}, log() {}, mask() {} };
+const silentIo: Io = {
+  annotate() {},
+  log() {},
+  debug() {},
+  summary() {},
+  output() {},
+  mask() {},
+  masked: () => new Set(),
+};
 
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {

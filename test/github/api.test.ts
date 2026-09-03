@@ -1,20 +1,15 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import * as core from "@actions/core";
 import { parse as parseYaml } from "yaml";
 import {
-  clearRedactedSlugs,
   GithubApi,
   isPermissionError,
   isRateLimitError,
   MAX_RETRIES,
   redactingOctokitLog,
-  registerRedactedSlug,
   SECRET_RESPONSE_WITHHELD,
-  unregisterRedactedSlug,
+  TraceRedaction,
 } from "../../src/github/api.js";
-import { api, restoreFetch, stubFetch } from "./stub.js";
+import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
 
@@ -113,7 +108,7 @@ describe("throttle plugin honors the test knob", () => {
     // exactly as the spawned bundle does.
     process.env.RETRY_BASE_MS = "1";
     stubFetch([() => new Response(null, { status: 204 })]);
-    const client = new GithubApi("t", "https://api.test", "2022-11-28");
+    const client = new GithubApi("t", traceIo().io, "https://api.test", "2022-11-28");
     const started = Date.now();
     for (let i = 0; i < 12; i++) {
       await client.tryRequest("PATCH", `/repos/o/r${i}`, { i });
@@ -129,7 +124,7 @@ describe("throttle plugin honors the test knob", () => {
     // No env, explicit retryBaseMs=1 arg keeps waits short. A 429 that resolves
     // on retry proves the throttle plugin is active.
     const state = stubFetch([rateLimited, okJson]);
-    const client = new GithubApi("t", "https://api.test", "2022-11-28", 1);
+    const client = new GithubApi("t", traceIo().io, "https://api.test", "2022-11-28", 1);
     const result = await client.tryRequest("GET", "/rl");
     expect(state.calls).toBe(2);
     expect("data" in result && result.data).toEqual({ ok: true });
@@ -152,7 +147,7 @@ describe("throttle plugin honors the test knob", () => {
         headers: { "retry-after": "30", "x-ratelimit-remaining": "0" },
       });
     const state = stubFetch([rateLimitedSlowHeader, okJson]);
-    const client = new GithubApi("t", "https://api.test", "2022-11-28");
+    const client = new GithubApi("t", traceIo().io, "https://api.test", "2022-11-28");
     const started = Date.now();
     const result = await client.tryRequest("GET", "/rl");
     expect(state.calls).toBe(2);
@@ -301,33 +296,36 @@ describe("error body shaping", () => {
 });
 
 describe("debug-trace hardening for redacted slugs", () => {
-  /**
-   * Observe what the client hands to core.debug - the single sink every trace
-   * and the octokit `log` route through. Spying the sink directly (rather than
-   * intercepting the global process.stdout/stderr streams) keeps the assertion
-   * immune to any other test writing concurrently under the parallel runner:
-   * we read exactly the messages this client produced, nothing else.
-   */
-  function captureDebug(): { lines: string[]; restore: () => void } {
-    const lines: string[] = [];
-    const spy = spyOn(core, "debug").mockImplementation((message?: string) => {
-      lines.push(String(message));
-    });
-    // `lines` is a plain array the mock pushes into, so the recorded messages
-    // survive restore() (callers read them after restoring the spy).
-    return { lines, restore: () => spy.mockRestore() };
-  }
+  // Every test reads the debug lines its OWN trace facet received, so a
+  // concurrent test's output can never pollute the observation.
 
-  test("a registered slug's trace collapses the whole path and drops the payload", async () => {
-    registerRedactedSlug("o/secretrepo");
+  test("a slug masked through the Io port is redacted from the trace with no second registration", async () => {
+    const dbg = traceIo();
+    dbg.io.mask("o/priv");
     stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("PATCH", "/repos/o/secretrepo", { description: "CANARY-live" });
-    } finally {
-      dbg.restore();
-      unregisterRedactedSlug("o/secretrepo");
-    }
+    await api(dbg.io).tryRequest("PATCH", "/repos/o/priv", { description: "CANARY" });
+    const trace = dbg.lines.join("");
+    expect(trace).toContain("PATCH <redacted> ->");
+    expect(trace).not.toContain("o/priv");
+    expect(trace).not.toContain("CANARY");
+    expect(trace).not.toContain("payload:");
+  });
+
+  test("a masked non-slug value collapses an octokit line; an empty mask matches nothing", () => {
+    const dbg = traceIo();
+    dbg.io.mask("s3cret-plaintext");
+    dbg.io.mask("");
+    const log = redactingOctokitLog(new TraceRedaction(dbg.io));
+    log.info("retrying s3cret-plaintext after 429");
+    log.info("GET /repos/o/publicrepo - 200 in 1ms");
+    expect(dbg.lines).toEqual(["<redacted>", "GET /repos/o/publicrepo - 200 in 1ms"]);
+  });
+
+  test("a masked slug's trace collapses the whole path and drops the payload", async () => {
+    const dbg = traceIo();
+    dbg.io.mask("o/secretrepo");
+    stubFetch([() => new Response(null, { status: 204 })]);
+    await api(dbg.io).tryRequest("PATCH", "/repos/o/secretrepo", { description: "CANARY-live" });
     const trace = dbg.lines.join("");
     // whole path collapses to the constant, no /repos/ prefix, no tail
     expect(trace).toContain("PATCH <redacted> ->");
@@ -340,17 +338,12 @@ describe("debug-trace hardening for redacted slugs", () => {
     // /orgs/{org}/teams/{team}/repos/{owner}/{repo} - the team slug rides in the
     // prefix before /repos/, so truncating to /repos/<redacted> would leak it.
     // The whole path must collapse to the constant.
-    registerRedactedSlug("acme/private");
+    const dbg = traceIo();
+    dbg.io.mask("acme/private");
     stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("PUT", "/orgs/acme/teams/secret-team/repos/acme/private", {
-        permission: "push",
-      });
-    } finally {
-      dbg.restore();
-      unregisterRedactedSlug("acme/private");
-    }
+    await api(dbg.io).tryRequest("PUT", "/orgs/acme/teams/secret-team/repos/acme/private", {
+      permission: "push",
+    });
     const trace = dbg.lines.join("");
     expect(trace).toContain("PUT <redacted> ->");
     expect(trace).not.toContain("secret-team");
@@ -359,140 +352,45 @@ describe("debug-trace hardening for redacted slugs", () => {
 
   test("an unregistered slug traces normally, with its payload", async () => {
     stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("PATCH", "/repos/o/publicrepo", { description: "open" });
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    await api(dbg.io).tryRequest("PATCH", "/repos/o/publicrepo", { description: "open" });
     const trace = dbg.lines.join("");
     expect(trace).toContain("/repos/o/publicrepo");
     expect(trace).toContain("payload:");
   });
 
-  test("unregisterRedactedSlug restores a slug to legible tracing (probe-public undo)", async () => {
-    registerRedactedSlug("o/wasprobed");
-    unregisterRedactedSlug("o/wasprobed");
-    stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("GET", "/repos/o/wasprobed");
-    } finally {
-      dbg.restore();
-    }
-    const trace = dbg.lines.join("");
-    expect(trace).toContain("/repos/o/wasprobed");
-  });
-
-  test("holds are counted: releasing the probe's hold never clears a permanent one", async () => {
-    registerRedactedSlug("o/held-twice"); // probe pre-registration
-    registerRedactedSlug("o/held-twice"); // run flow's permanent registration
-    unregisterRedactedSlug("o/held-twice"); // probe releases only its own hold
-    stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("GET", "/repos/o/held-twice");
-    } finally {
-      dbg.restore();
-    }
-    const trace = dbg.lines.join("");
-    expect(trace).not.toContain("o/held-twice");
-    expect(trace).toContain("<redacted>");
-    unregisterRedactedSlug("o/held-twice");
-  });
-
-  test("clearRedactedSlugs drops every hold, counted ones included (test isolation)", async () => {
-    // The run flows register permanently for the process, so a test file that
-    // exercises them must be able to reset the module state, or its slugs
-    // stay redacted for every later test file in the same process.
-    registerRedactedSlug("o/leftover");
-    registerRedactedSlug("o/leftover"); // a second hold, as probe + run flow would leave
-    clearRedactedSlugs();
-    stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("GET", "/repos/o/leftover");
-    } finally {
-      dbg.restore();
-    }
-    const trace = dbg.lines.join("");
-    expect(trace).toContain("/repos/o/leftover");
-  });
-
-  test("clearRedactedSlugs is never referenced by production code", () => {
-    // The reset is a production-unsafe capability living in a production
-    // module (dropping every hold mid-run would trace private paths and
-    // payloads legibly). The docstring says production never calls it; this
-    // makes the rule mechanical: only its own definition in api.ts may name
-    // the identifier anywhere under src/.
-    const srcDir = join(import.meta.dir, "..", "..", "src");
-    const offenders: string[] = [];
-    for (const file of readdirSync(srcDir, { recursive: true }) as string[]) {
-      if (!file.endsWith(".ts")) {
-        continue;
-      }
-      const hits = readFileSync(join(srcDir, file), "utf8").split("clearRedactedSlugs").length - 1;
-      const allowed = file === join("github", "api.ts") ? 1 : 0;
-      if (hits > allowed) {
-        offenders.push(`src/${file} (${hits} reference(s))`);
-      }
-    }
-    expect(offenders).toEqual([]);
-  });
-
-  test("redactingOctokitLog routes redacted content to core.debug and never to stderr", () => {
+  test("redactingOctokitLog routes redacted content to the debug channel and never to stderr", () => {
     // The exact leak class from the fuzz stderr scan: octokit's plugins log a
     // request line like "GET /repos/owner/repo - 404 ..." (and worse, live-state
     // segments like branch names) to stderr via the default console logger.
-    // redactingOctokitLog must collapse any registered slug's line to <redacted>
-    // and hand it to core.debug ONLY. Both facts are asserted by spying the two
-    // sinks directly - no global stream interception, so a concurrent test's
-    // write cannot pollute this observation.
-    registerRedactedSlug("e2e-owner/repo-1");
-    const debugged: string[] = [];
+    const dbg = traceIo();
+    dbg.io.mask("e2e-owner/repo-1");
+    const log = redactingOctokitLog(new TraceRedaction(dbg.io));
     let stderrWrites = 0;
-    const debugSpy = spyOn(core, "debug").mockImplementation((m?: string) => {
-      debugged.push(String(m));
-    });
     const stderrSpy = spyOn(process.stderr, "write").mockImplementation(() => {
       stderrWrites += 1;
       return true;
     });
     try {
       for (const level of ["debug", "info", "warn", "error"] as const) {
-        redactingOctokitLog[level](
-          "PUT /repos/e2e-owner/repo-1/branches/dev-secret/protection - 403 in 3ms",
-        );
+        log[level]("PUT /repos/e2e-owner/repo-1/branches/dev-secret/protection - 403 in 3ms");
       }
       // The gap a path-only redactor misses: the slug NOT in /repos/ position.
       // Octokit's retry/throttle plugins emit free-text prose like this.
-      redactingOctokitLog.warn("retrying request to e2e-owner/repo-1 after 429");
+      log.warn("retrying request to e2e-owner/repo-1 after 429");
       // And octokit's own request-tracking format, slug followed by prose.
-      redactingOctokitLog.debug("GET /repos/e2e-owner/repo-1 - 200 with id undefined in 3ms");
+      log.debug("GET /repos/e2e-owner/repo-1 - 200 with id undefined in 3ms");
     } finally {
-      debugSpy.mockRestore();
       stderrSpy.mockRestore();
-      unregisterRedactedSlug("e2e-owner/repo-1");
     }
-    // Every routed message went to core.debug, redacted; none of the six calls
-    // reached stderr.
-    expect(debugged).toHaveLength(6);
     expect(stderrWrites).toBe(0);
-    const joined = debugged.join("\n");
-    for (const secret of ["e2e-owner/repo-1", "dev-secret", "after 429"]) {
-      expect(joined).not.toContain(secret);
-    }
-    expect(debugged.every((line) => line === "<redacted>")).toBe(true);
+    expect(dbg.lines).toEqual(Array(6).fill("<redacted>"));
   });
 
-  test("redactingOctokitLog leaves an unregistered slug's line intact", () => {
-    const dbg = captureDebug();
-    try {
-      redactingOctokitLog.warn("GET /repos/o/publicrepo - 200 in 1ms");
-    } finally {
-      dbg.restore();
-    }
-    expect(dbg.lines.join("")).toContain("/repos/o/publicrepo");
+  test("redactingOctokitLog leaves an unmasked slug's line intact", () => {
+    const dbg = traceIo();
+    redactingOctokitLog(new TraceRedaction(dbg.io)).warn("GET /repos/o/publicrepo - 200 in 1ms");
+    expect(dbg.lines).toEqual(["GET /repos/o/publicrepo - 200 in 1ms"]);
   });
 
   test("redactingOctokitLog redacts a MIXED-CASE octokit line, slug outside /repos/ position", () => {
@@ -500,79 +398,48 @@ describe("debug-trace hardening for redacted slugs", () => {
     // scan is case-insensitive and position-independent, so a slug written in a
     // different case, and sitting mid-sentence rather than in a /repos/ path,
     // still collapses the whole line.
-    registerRedactedSlug("e2e-owner/svc-private");
-    const dbg = captureDebug();
-    try {
-      redactingOctokitLog.warn("retrying E2E-Owner/SVC-Private after 429 (attempt 2)");
-      redactingOctokitLog.debug("GET /REPOS/E2E-OWNER/SVC-PRIVATE - 200 with id undefined in 3ms");
-    } finally {
-      dbg.restore();
-      unregisterRedactedSlug("e2e-owner/svc-private");
-    }
-    const trace = dbg.lines.join("");
-    // no casing of the slug survives, and neither does the surrounding prose
-    expect(trace.toLowerCase()).not.toContain("svc-private");
-    expect(trace).not.toContain("after 429");
-    expect(trace).toContain("<redacted>");
+    const dbg = traceIo();
+    dbg.io.mask("e2e-owner/svc-private");
+    const log = redactingOctokitLog(new TraceRedaction(dbg.io));
+    log.warn("retrying E2E-Owner/SVC-Private after 429 (attempt 2)");
+    log.debug("GET /REPOS/E2E-OWNER/SVC-PRIVATE - 200 with id undefined in 3ms");
+    expect(dbg.lines).toEqual(["<redacted>", "<redacted>"]);
   });
 
-  test("during the probe window an octokit line is redacted; after unregister-on-public it is legible", async () => {
-    // The probe pre-registers its slug BEFORE the request, so any octokit line
-    // emitted while the probe holds the slug is redacted. When the probe
-    // resolves PUBLIC it releases its hold, and a later octokit line for the
-    // same slug is legible again. The two observable end states are asserted.
-    const { createVisibilityResolver } = await import("../../src/github/repo-visibility.js");
-    // 1) A slug the probe leaves registered (private) redacts an octokit line.
-    stubFetch([
-      () => new Response('{"private":true}', { headers: { "content-type": "application/json" } }),
-    ]);
-    expect(await createVisibilityResolver(api())("owner/still-private")).toBe("private");
-    let dbg = captureDebug();
-    try {
-      redactingOctokitLog.warn("retrying owner/still-private after 429");
-    } finally {
-      dbg.restore();
-    }
-    expect(dbg.lines.join("")).toContain("<redacted>");
-    expect(dbg.lines.join("")).not.toContain("still-private");
-    unregisterRedactedSlug("owner/still-private"); // release the probe's hold
-
-    // 2) A slug the probe resolves PUBLIC is unregistered, so its line is legible.
-    stubFetch([
-      () => new Response('{"private":false}', { headers: { "content-type": "application/json" } }),
-    ]);
-    expect(await createVisibilityResolver(api())("owner/went-public")).toBe("public");
-    dbg = captureDebug();
-    try {
-      redactingOctokitLog.warn("GET /repos/owner/went-public - 200 in 1ms");
-    } finally {
-      dbg.restore();
-    }
-    expect(dbg.lines.join("")).toContain("owner/went-public");
+  test("redactTrace holds the slug for the request only; the same client traces it legibly afterwards", async () => {
+    // The visibility probe must not leak its target before the answer is
+    // known, so its request holds the slug redacted; a plain request to the
+    // same slug afterwards (once the flow decided it is public) is legible again.
+    stubFetch([() => new Response(null, { status: 204 })]);
+    const dbg = traceIo();
+    const client = api(dbg.io);
+    await client.tryRequest("GET", "/repos/owner/probed", undefined, { redactTrace: true });
+    // Octokit's own request lines ride the same channel, so the whole window
+    // (client trace plus octokit chatter) must stay free of the slug.
+    const held = dbg.lines.join("\n");
+    expect(held).toContain("GET <redacted> -> 204");
+    expect(held).not.toContain("owner/probed");
+    dbg.lines.length = 0;
+    await client.tryRequest("GET", "/repos/owner/probed");
+    expect(dbg.lines.join("\n")).toContain("GET /repos/owner/probed -> 204");
+    // A hold needs a slug to hold: a slug-free path cannot be traced redacted.
+    await expect(
+      client.tryRequest("GET", "/user", undefined, { redactTrace: true }),
+    ).rejects.toThrow(/redactTrace needs a/);
   });
 
   test("a rate-limited visibility probe leaks no raw slug in any trace", async () => {
-    // Finding A: the probe pre-registers its slug as redacted, so even the
-    // throttle-callback trace fired on the 429 retry - which runs before the
-    // probe result would otherwise register the slug - must be redacted. The
-    // probe resolves private, so the slug stays registered afterward.
+    // The throttle-callback trace fires on the 429 retry, before the probe
+    // result exists - so the probe's request-window hold is what redacts it.
     const { createVisibilityResolver } = await import("../../src/github/repo-visibility.js");
     stubFetch([
       rateLimited,
       () => new Response('{"private":true}', { headers: { "content-type": "application/json" } }),
     ]);
-    const dbg = captureDebug();
-    let visibility: string;
-    try {
-      visibility = await createVisibilityResolver(api())("secret-owner/secret-repo");
-    } finally {
-      dbg.restore();
-      unregisterRedactedSlug("secret-owner/secret-repo");
-    }
-    expect(visibility).toBe("private");
+    const dbg = traceIo();
+    expect(await createVisibilityResolver(api(dbg.io))("secret-owner/secret-repo")).toBe("private");
     const trace = dbg.lines.join("");
     // neither the direct trace nor the throttle "rate limit on ..." line names it
-    expect(trace).not.toContain("secret-owner/secret-repo");
     expect(trace).not.toContain("secret-repo");
     expect(trace).toContain("rate limit on GET <redacted>");
   });
@@ -583,15 +450,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   // suites use, so these traces stay independent of slug redaction: this
   // suite is about FIELD redaction, and a slug hit would collapse the whole
   // line before the field-level assertions could see anything.
-
-  /** Same core.debug spy as the slug-redaction suite: read only this client's lines. */
-  function captureDebug(): { lines: string[]; restore: () => void } {
-    const lines: string[] = [];
-    const spy = spyOn(core, "debug").mockImplementation((message?: string) => {
-      lines.push(String(message));
-    });
-    return { lines, restore: () => spy.mockRestore() };
-  }
 
   /** Fetch stub that also records every outgoing request body. */
   function stubFetchCapturingBodies(response: () => Response): { bodies: string[] } {
@@ -610,15 +468,11 @@ describe("secret-field request redaction and fail-closed error responses", () =>
 
   test("config.secret is masked in the trace; the outgoing request is untouched", async () => {
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("POST", "/repos/hookco/hookrepo/hooks", {
-        name: "web",
-        config: { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
-      });
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/hooks", {
+      name: "web",
+      config: { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
+    });
     const trace = dbg.lines.join("");
     expect(trace).toContain('"secret":"***"');
     expect(trace).not.toContain("he said");
@@ -631,15 +485,11 @@ describe("secret-field request redaction and fail-closed error responses", () =>
 
   test("encrypted_value is masked in the trace", async () => {
     stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("PUT", "/repos/hookco/hookrepo/actions/secrets/DEPLOY_KEY", {
-        encrypted_value: "base64-SECRET-material",
-        key_id: "568250167242549743",
-      });
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    await api(dbg.io).tryRequest("PUT", "/repos/hookco/hookrepo/actions/secrets/DEPLOY_KEY", {
+      encrypted_value: "base64-SECRET-material",
+      key_id: "568250167242549743",
+    });
     const trace = dbg.lines.join("");
     expect(trace).toContain('"encrypted_value":"***"');
     expect(trace).not.toContain("base64-SECRET-material");
@@ -658,16 +508,11 @@ describe("secret-field request redaction and fail-closed error responses", () =>
           { status: 422, headers: { "content-type": "application/json" } },
         ),
     ]);
-    const dbg = captureDebug();
-    let result: Awaited<ReturnType<ReturnType<typeof api>["tryRequest"]>>;
-    try {
-      result = await api().tryRequest("POST", "/repos/hookco/hookrepo/hooks", {
-        name: "web",
-        config: { url: "https://example.test/hook", secret: hostileSecret },
-      });
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    const result = await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/hooks", {
+      name: "web",
+      config: { url: "https://example.test/hook", secret: hostileSecret },
+    });
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
@@ -714,17 +559,12 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     const sent = stubFetchCapturingBodies(
       () => new Response(`nope: ${hostileSecret}`, { status: 400 }),
     );
-    const dbg = captureDebug();
-    let result: Awaited<ReturnType<ReturnType<typeof api>["tryRequest"]>>;
-    try {
-      result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
-        url: "https://example.test/hook",
-        content_type: "json",
-        secret: hostileSecret,
-      });
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    const result = await api(dbg.io).tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      content_type: "json",
+      secret: hostileSecret,
+    });
     const trace = dbg.lines.join("");
     expect(trace).toContain('"secret":"***"');
     expect(trace).not.toContain("he said");
@@ -738,14 +578,10 @@ describe("secret-field request redaction and fail-closed error responses", () =>
 
   test("a secret field at any depth is found - the scan is recursive, not shape-listed", async () => {
     stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", {
-        outer: { hooks: [{ config: { secret: hostileSecret } }, { note: "clean" }] },
-      });
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/anything", {
+      outer: { hooks: [{ config: { secret: hostileSecret } }, { note: "clean" }] },
+    });
     const trace = dbg.lines.join("");
     expect(trace).toContain('"secret":"***"');
     expect(trace).toContain('"note":"clean"');
@@ -754,14 +590,10 @@ describe("secret-field request redaction and fail-closed error responses", () =>
 
   test("config.encrypted_value nested under config is masked too", async () => {
     stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("PUT", "/repos/hookco/hookrepo/anything", {
-        config: { encrypted_value: "base64-SECRET", key_id: "1" },
-      });
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    await api(dbg.io).tryRequest("PUT", "/repos/hookco/hookrepo/anything", {
+      config: { encrypted_value: "base64-SECRET", key_id: "1" },
+    });
     const trace = dbg.lines.join("");
     expect(trace).toContain('"encrypted_value":"***"');
     expect(trace).not.toContain("base64-SECRET");
@@ -1008,14 +840,12 @@ describe("secret-field request redaction and fail-closed error responses", () =>
         calls++;
       });
       const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-      const dbg = captureDebug();
+      const dbg = traceIo();
       let thrown: Error | undefined;
       try {
-        await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", payload);
+        await api(dbg.io).tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", payload);
       } catch (error) {
         thrown = error as Error;
-      } finally {
-        dbg.restore();
       }
       expect(thrown?.message).toContain("was not sent");
       expect(thrown?.message).not.toContain("he said");
@@ -1180,14 +1010,12 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       },
     };
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    const dbg = captureDebug();
+    const dbg = traceIo();
     let thrown: Error | undefined;
     try {
-      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", boobyTrapped);
+      await api(dbg.io).tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", boobyTrapped);
     } catch (error) {
       thrown = error as Error;
-    } finally {
-      dbg.restore();
     }
     if (thrown === undefined) {
       throw new Error("expected a thrown abort");
@@ -1202,14 +1030,12 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     const cyclic: Record<string, unknown> = { url: "https://example.test", secret: hostileSecret };
     cyclic.self = cyclic;
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    const dbg = captureDebug();
+    const dbg = traceIo();
     let thrown: Error | undefined;
     try {
-      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", cyclic);
+      await api(dbg.io).tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", cyclic);
     } catch (error) {
       thrown = error as Error;
-    } finally {
-      dbg.restore();
     }
     expect(thrown?.message).toContain("was not sent");
     expect(thrown?.message).not.toContain("he said");
@@ -1222,15 +1048,11 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     // payload can carry arbitrary user keys; a `Secret:` spelling must not
     // slip the scan.
     stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", {
-        Secret: hostileSecret,
-        config: { ENCRYPTED_VALUE: hostileSecret },
-      });
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/anything", {
+      Secret: hostileSecret,
+      config: { ENCRYPTED_VALUE: hostileSecret },
+    });
     const trace = dbg.lines.join("");
     expect(trace).toContain('"Secret":"***"');
     expect(trace).toContain('"ENCRYPTED_VALUE":"***"');
@@ -1242,16 +1064,12 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     // must keep the branch (a plain {} target would hit the prototype
     // setter and drop it, breaking trace fidelity).
     stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    try {
-      await api().tryRequest(
-        "POST",
-        "/repos/hookco/hookrepo/anything",
-        JSON.parse(`{"__proto__": {"note": "kept"}, "config": {"secret": "s3cret-here"}}`),
-      );
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    await api(dbg.io).tryRequest(
+      "POST",
+      "/repos/hookco/hookrepo/anything",
+      JSON.parse(`{"__proto__": {"note": "kept"}, "config": {"secret": "s3cret-here"}}`),
+    );
     const trace = dbg.lines.join("");
     expect(trace).toContain('"__proto__":{"note":"kept"}');
     expect(trace).toContain('"secret":"***"');
@@ -1308,13 +1126,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
           { status: 422, headers: { "content-type": "application/json" } },
         ),
     ]);
-    const dbg = captureDebug();
-    let result: Awaited<ReturnType<ReturnType<typeof api>["tryRequest"]>>;
-    try {
-      result = await api().tryRequest("POST", "/repos/hookco/hookrepo/hooks", payload);
-    } finally {
-      dbg.restore();
-    }
+    const dbg = traceIo();
+    const result = await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/hooks", payload);
     // The traced payload is the original object, byte-identical JSON.
     expect(dbg.lines.join("")).toContain(` payload: ${JSON.stringify(payload)}`);
     if (!("error" in result)) {
@@ -1346,7 +1159,13 @@ describe("DELETE request bodies reach the wire", () => {
       },
     });
     try {
-      const client = new GithubApi("t", `http://localhost:${server.port}`, "2022-11-28", 1);
+      const client = new GithubApi(
+        "t",
+        traceIo().io,
+        `http://localhost:${server.port}`,
+        "2022-11-28",
+        1,
+      );
       const result = await client.tryRequest(
         "DELETE",
         "/repos/o/r/secret-scanning/custom-patterns",
@@ -1365,5 +1184,24 @@ describe("DELETE request bodies reach the wire", () => {
     } finally {
       await server.stop(true);
     }
+  });
+});
+
+describe("TraceRedaction holds", () => {
+  test("overlapping holds on one slug are independent: releasing one, even twice, keeps the other's redaction", () => {
+    const trace = new TraceRedaction(traceIo().io);
+    const releaseFirst = trace.hold("o/probed");
+    const releaseSecond = trace.hold("O/Probed");
+    releaseFirst();
+    releaseFirst(); // a repeated release must not consume the other hold
+    expect(trace.path("/repos/o/probed/labels")).toEqual({ path: "<redacted>", redacted: true });
+    expect(trace.message("retrying o/probed after 429")).toBe("<redacted>");
+    releaseSecond();
+    expect(trace.path("/repos/o/probed/labels")).toEqual({
+      path: "/repos/o/probed/labels",
+      redacted: false,
+    });
+    expect(trace.message("retrying o/probed after 429")).toBe("retrying o/probed after 429");
+    expect(trace.isRedacted("o/probed")).toBe(false);
   });
 });

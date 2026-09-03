@@ -23,13 +23,13 @@ import {
   validateSettingsDoc,
   worstOf,
 } from "../engine/orchestrate.js";
-import { GithubApi, type GithubClient, registerRedactedSlug } from "../github/api.js";
+import { GithubApi, type GithubClient } from "../github/api.js";
 import { createVisibilityResolver } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import { deliverArtifactReport } from "../report/artifact-report.js";
 import { applyMarkerInjection, composeTargetReport, deliverReport } from "../report/delivery.js";
 import { parseConfig } from "./inputs.js";
-import { actionsIo, setOutput } from "./io.js";
+import { actionsIo } from "./io.js";
 import { runMulti } from "./multi.js";
 import {
   capturingIo,
@@ -68,7 +68,6 @@ async function resolveSingleRepoRedaction(
     return { redacted: false, deliverable: false };
   }
   io.mask(cfg.repo.slug);
-  registerRedactedSlug(cfg.repo.slug);
   return { redacted: true, deliverable: isPrivateVisibility(visibility) };
 }
 
@@ -81,7 +80,7 @@ export async function run(overrides?: { api?: GithubClient; io?: Io }): Promise<
   const io = overrides?.io ?? actionsIo;
   const fail = (message: string): number => {
     io.annotate("error", message);
-    setOutput("result", "failed");
+    io.output("result", "failed");
     return 1;
   };
 
@@ -90,7 +89,7 @@ export async function run(overrides?: { api?: GithubClient; io?: Io }): Promise<
     return fail(parsed.error);
   }
   const cfg = parsed.config;
-  const api = overrides?.api ?? new GithubApi(cfg.token, undefined, cfg.apiVersion);
+  const api = overrides?.api ?? new GithubApi(cfg.token, io, undefined, cfg.apiVersion);
 
   if (cfg.kind === "multi") {
     const { fatal, targets } = await runMulti(api, cfg, io);
@@ -100,8 +99,8 @@ export async function run(overrides?: { api?: GithubClient; io?: Io }): Promise<
     // The public view strips private detail and keys by the display label,
     // so nothing written past this point can carry a redacted slug.
     const views = targets.map(toPublicView);
-    writeMultiSummary(views, cfg.mode);
-    setOutput(
+    writeMultiSummary(io, views, cfg.mode);
+    io.output(
       "repos-result",
       JSON.stringify(
         Object.fromEntries(
@@ -112,12 +111,12 @@ export async function run(overrides?: { api?: GithubClient; io?: Io }): Promise<
         ),
       ),
     );
-    setOutput(
+    io.output(
       "skipped-sections",
       [...new Set(views.flatMap((v) => skippedSectionKeys(v.outcomes)))].join(","),
     );
     const overall = worstOf(views, cfg.mode === "check");
-    setOutput("result", overall);
+    io.output("result", overall);
     io.log(`result: ${overall}`);
     // The exit code follows the same worst-of ranking the output reports.
     return overall === "failed" || (cfg.mode === "check" && overall === "drift") ? 1 : 0;
@@ -225,20 +224,20 @@ export async function run(overrides?: { api?: GithubClient; io?: Io }): Promise<
   }
 
   if (redacted) {
-    writeRedactedSummary(result.outcomes, cfg.mode, result.result);
+    writeRedactedSummary(io, result.outcomes, cfg.mode, result.result);
   } else {
-    writeSummary(result.outcomes, cfg.mode);
+    writeSummary(io, result.outcomes, cfg.mode);
   }
-  setOutput("skipped-sections", skippedSectionKeys(result.outcomes).join(","));
+  io.output("skipped-sections", skippedSectionKeys(result.outcomes).join(","));
 
   if (result.result === "failed") {
     if (redacted) {
       io.annotate("error", `failed. ${REDACTED_NOTE}`);
     }
-    setOutput("result", "failed");
+    io.output("result", "failed");
     return 1;
   }
-  setOutput("result", result.result);
+  io.output("result", result.result);
   io.log(`result: ${result.result}`);
   return result.result === "drift" ? 1 : 0;
 }

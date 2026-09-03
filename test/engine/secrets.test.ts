@@ -31,7 +31,11 @@ function captureIo(): { io: Io; annotations: string[] } {
     io: {
       annotate: (level, message) => annotations.push(`${level}: ${message}`),
       log: () => {},
+      debug: () => {},
+      summary: () => {},
+      output: () => {},
       mask: () => {},
+      masked: () => new Set(),
     },
     annotations,
   };
@@ -198,7 +202,15 @@ describe("runForRepo with merged provenance", () => {
   // The merged doc is branded through the REAL boundary, exactly like the
   // run flows; an invalid merge output fails here instead of riding a cast.
   const validated = (doc: unknown): ValidatedSettings => {
-    const silent: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+    const silent: Io = {
+      annotate: () => {},
+      log: () => {},
+      debug: () => {},
+      summary: () => {},
+      output: () => {},
+      mask: () => {},
+      masked: () => new Set(),
+    };
     const verdict = validateSettingsDoc(doc, "merged fixture", new Set(), silent);
     if ("error" in verdict) {
       throw new Error(`merged fixture failed validation: ${verdict.error}`);

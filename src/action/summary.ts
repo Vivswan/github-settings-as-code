@@ -1,12 +1,15 @@
 /**
  * Step-summary rendering: the per-section table (single-repo) and the
- * per-repository overview plus per-target tables (multi-repo).
+ * per-repository overview plus per-target tables (multi-repo). Each writer
+ * renders one block and hands it to the Io port's summary channel.
  */
 
-import { appendFileSync } from "node:fs";
 import type { RepoResult, SectionOutcome } from "../engine/orchestrate.js";
+import type { Io } from "../io.js";
 import { markdownCell } from "../report/markdown.js";
 import { type PublicTargetView, REDACTED_NOTE, redactOutcomes } from "./redact.js";
+
+type SummaryIo = Pick<Io, "summary">;
 
 // Typed over every status both summary writers can meet, so a new status
 // value fails compilation here instead of rendering ":undefined:".
@@ -34,21 +37,8 @@ function outcomeRows(outcomes: OutcomeRow[]): string[] {
   return rows;
 }
 
-/**
- * The shared write frame: resolve GITHUB_STEP_SUMMARY, skip when it is unset
- * (local/test runs), and append the built lines. `build` runs only when there
- * is a file to write, so a caller never assembles a summary that is discarded.
- */
-function writeSummaryFile(build: () => string[]): void {
-  const file = process.env.GITHUB_STEP_SUMMARY;
-  if (!file) {
-    return;
-  }
-  appendFileSync(file, `${build().join("\n")}\n`);
-}
-
-export function writeSummary(outcomes: SectionOutcome[], mode: string): void {
-  writeSummaryFile(() => [`## github-settings-as-code (${mode})`, "", ...outcomeRows(outcomes)]);
+export function writeSummary(io: SummaryIo, outcomes: SectionOutcome[], mode: string): void {
+  io.summary([`## github-settings-as-code (${mode})`, "", ...outcomeRows(outcomes)].join("\n"));
 }
 
 /**
@@ -60,41 +50,42 @@ export function writeSummary(outcomes: SectionOutcome[], mode: string): void {
  * non-public repo.
  */
 export function writeRedactedSummary(
+  io: SummaryIo,
   outcomes: SectionOutcome[],
   mode: string,
   result: RepoResult,
 ): void {
-  writeSummaryFile(() => [
-    `## github-settings-as-code (${mode})`,
-    "",
-    `:${STATUS_ICON[result]}: ${result} - ${REDACTED_NOTE}`,
-    "",
-    ...outcomeRows(redactOutcomes(outcomes)),
-  ]);
+  io.summary(
+    [
+      `## github-settings-as-code (${mode})`,
+      "",
+      `:${STATUS_ICON[result]}: ${result} - ${REDACTED_NOTE}`,
+      "",
+      ...outcomeRows(redactOutcomes(outcomes)),
+    ].join("\n"),
+  );
 }
 
-export function writeMultiSummary(views: PublicTargetView[], mode: string): void {
-  writeSummaryFile(() => {
-    const lines = [
-      `## github-settings-as-code (${mode}, ${views.length} repositories)`,
-      "",
-      "| Repository | Source | Result |",
-      "|---|---|---|",
-    ];
-    for (const view of views) {
-      lines.push(
-        `| ${markdownCell(view.display)} | ${view.source} | :${STATUS_ICON[view.result]}: ${view.result} |`,
-      );
+export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode: string): void {
+  const lines = [
+    `## github-settings-as-code (${mode}, ${views.length} repositories)`,
+    "",
+    "| Repository | Source | Result |",
+    "|---|---|---|",
+  ];
+  for (const view of views) {
+    lines.push(
+      `| ${markdownCell(view.display)} | ${view.source} | :${STATUS_ICON[view.result]}: ${view.result} |`,
+    );
+  }
+  for (const view of views) {
+    lines.push("", `### ${markdownCell(view.display)} (${view.result})`, "");
+    if (view.note) {
+      lines.push(markdownCell(view.note), "");
     }
-    for (const view of views) {
-      lines.push("", `### ${markdownCell(view.display)} (${view.result})`, "");
-      if (view.note) {
-        lines.push(markdownCell(view.note), "");
-      }
-      if (view.outcomes.length > 0) {
-        lines.push(...outcomeRows(view.outcomes));
-      }
+    if (view.outcomes.length > 0) {
+      lines.push(...outcomeRows(view.outcomes));
     }
-    return lines;
-  });
+  }
+  io.summary(lines.join("\n"));
 }

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { capturingIo, planRedaction } from "../../src/action/redact.js";
-import type { Io } from "../../src/io.js";
-import { prefixedIo } from "../../src/io.js";
+import { type Io, maskRegistry, prefixedIo } from "../../src/io.js";
 
 /** A private-set predicate from a lowercase-keyed slug list. */
 function privateSet(...slugs: string[]): (slug: string) => boolean {
@@ -77,13 +76,21 @@ describe("planRedaction", () => {
   });
 });
 
+/** The channels a test does not observe, spread into each fake sink. */
+const idle: Pick<Io, "debug" | "summary" | "output"> = {
+  debug: () => {},
+  summary: () => {},
+  output: () => {},
+};
+
 describe("capturingIo", () => {
   test("suppresses public annotate/log but records them in order", () => {
     const emitted: string[] = [];
     const base: Io = {
+      ...idle,
+      ...maskRegistry(() => {}),
       annotate: (level, message) => emitted.push(`annotate ${level}: ${message}`),
       log: (line) => emitted.push(`log: ${line}`),
-      mask: () => {},
     };
     const { io, drain } = capturingIo(base);
     io.log("first");
@@ -97,12 +104,32 @@ describe("capturingIo", () => {
     ]);
   });
 
-  test("mask passes through to the base sink", () => {
-    const masks: string[] = [];
-    const base: Io = { annotate: () => {}, log: () => {}, mask: (v) => masks.push(v) };
-    const { io } = capturingIo(base);
+  test("every other channel passes through to the base sink untouched", () => {
+    // Only the public annotate/log lines are captured; the mask registry, the
+    // debug trace, the summary, and the outputs are the run's, not the target's.
+    const through: string[] = [];
+    const base: Io = {
+      annotate: () => {},
+      log: () => {},
+      debug: (line) => through.push(`debug ${line}`),
+      summary: (markdown) => through.push(`summary ${markdown}`),
+      output: (name, value) => through.push(`output ${name}=${value}`),
+      ...maskRegistry((v) => through.push(`mask ${v}`)),
+    };
+    const { io, drain } = capturingIo(base);
     io.mask("o/secret");
-    expect(masks).toEqual(["o/secret"]);
+    io.debug("GET /x -> 200");
+    io.summary("## s");
+    io.output("result", "clean");
+    expect(through).toEqual([
+      "mask o/secret",
+      "debug GET /x -> 200",
+      "summary ## s",
+      "output result=clean",
+    ]);
+    expect(io.masked()).toBe(base.masked());
+    expect([...io.masked()]).toEqual(["o/secret"]);
+    expect(drain()).toEqual([]);
   });
 
   test("composes as capturingIo(prefixedIo(io, display)): capture is per-target, mask stays raw", () => {
@@ -113,9 +140,10 @@ describe("capturingIo", () => {
     const masks: string[] = [];
     const emitted: string[] = [];
     const base: Io = {
+      ...idle,
+      ...maskRegistry((v) => masks.push(v)),
       annotate: (l, m) => emitted.push(`${l}: ${m}`),
       log: (line) => emitted.push(line),
-      mask: (v) => masks.push(v),
     };
     const { io, drain } = capturingIo(prefixedIo(base, "private repository #1: "));
     io.log("changed a label");
@@ -126,16 +154,38 @@ describe("capturingIo", () => {
   });
 });
 
-describe("prefixedIo mask", () => {
-  test("empty prefix returns the sink unchanged, mask included", () => {
-    const base: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+describe("prefixedIo", () => {
+  test("empty prefix returns the sink unchanged", () => {
+    const base: Io = { ...idle, ...maskRegistry(() => {}), annotate: () => {}, log: () => {} };
     expect(prefixedIo(base, "")).toBe(base);
   });
 
-  test("non-empty prefix leaves mask values unprefixed", () => {
-    const masks: string[] = [];
-    const base: Io = { annotate: () => {}, log: () => {}, mask: (v) => masks.push(v) };
-    prefixedIo(base, "x/y: ").mask("o/secret");
-    expect(masks).toEqual(["o/secret"]);
+  test("prefixes annotate and log only; the other channels pass through raw", () => {
+    const through: string[] = [];
+    const base: Io = {
+      annotate: (l, m) => through.push(`${l}: ${m}`),
+      log: (line) => through.push(line),
+      debug: (line) => through.push(`debug ${line}`),
+      summary: (markdown) => through.push(`summary ${markdown}`),
+      output: (name, value) => through.push(`output ${name}=${value}`),
+      ...maskRegistry((v) => through.push(`mask ${v}`)),
+    };
+    const io = prefixedIo(base, "x/y: ");
+    io.annotate("warning", "drift");
+    io.log("changed");
+    io.debug("GET /x -> 200");
+    io.summary("## s");
+    io.output("result", "drift");
+    io.mask("o/secret");
+    expect(through).toEqual([
+      "warning: x/y: drift",
+      "x/y: changed",
+      "debug GET /x -> 200",
+      "summary ## s",
+      "output result=drift",
+      "mask o/secret",
+    ]);
+    expect(io.masked()).toBe(base.masked());
+    expect([...io.masked()]).toEqual(["o/secret"]);
   });
 });

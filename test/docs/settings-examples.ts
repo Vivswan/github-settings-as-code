@@ -9,7 +9,15 @@ import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
 
-const silentIo: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
+const silentIo: Io = {
+  annotate: () => {},
+  log: () => {},
+  debug: () => {},
+  summary: () => {},
+  output: () => {},
+  mask: () => {},
+  masked: () => new Set(),
+};
 
 /** Assert `doc` validates and its repository special-looking keys are real. */
 export function assertValidSettingsExample(doc: unknown, label: string): void {

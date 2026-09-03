@@ -12,6 +12,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { GithubApi } from "../../../src/github/api.js";
+import { maskRegistry } from "../../../src/io.js";
 import { endpointPermission } from "../../../src/sections/contract/module.js";
 import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
@@ -22,6 +23,9 @@ import { assertHandlerCompleteness } from "./handlers.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./server.js";
 import type { MockState, MultiMockState } from "./state.js";
 import { slicePage } from "./support.js";
+
+/** A client trace facet that drops debug lines and masks nothing. */
+const silentTrace = { debug: () => {}, ...maskRegistry(() => {}) };
 
 const AUTH = { authorization: "Bearer test-token", "x-github-api-version": "2022-11-28" };
 
@@ -1113,7 +1117,7 @@ describe("429 fault production parity", () => {
     const h = await start(scenario({ live_state: { labels: [{ id: 1, name: "bug" }] } }), {
       faults: [{ key: "labels.list", kind: "429_then_200" }],
     });
-    const api = new GithubApi("e2e-token", h.url, undefined, 1);
+    const api = new GithubApi("e2e-token", silentTrace, h.url, undefined, 1);
     const result = await api.tryRequest("GET", `/repos/${OWNER}/${REPO}/labels`);
     expect("error" in result).toBe(false);
     // The fault FIRED (the absorption was not vacuous) and the retried
