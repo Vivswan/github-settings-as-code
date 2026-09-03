@@ -64,12 +64,13 @@ describe("secondApplyWriteFailures (apply-idempotence zero-write subset)", () =>
     expect(failures[0]).toContain("compares before writing");
   });
 
-  test("a write to an unconditional-PUT section passes", () => {
-    // Rulesets and environments PUT existing resources on every apply, so a
-    // second-apply write there is legitimate; only state stability binds them.
+  test("a write to an unconditional-write section passes", () => {
+    // teams (a section still on the legacy run() contract) and environments
+    // write on every apply, so a second-apply write there is legitimate;
+    // only state stability binds them.
     expect(
       secondApplyWriteFailures([
-        write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000"),
+        write("PUT", "/orgs/e2e-owner/teams/platform/repos/e2e-owner/e2e-repo"),
         write("PUT", "/repos/e2e-owner/e2e-repo/environments/production"),
       ]),
     ).toEqual([]);
@@ -105,8 +106,9 @@ describe("secondApplyWriteFailures (apply-idempotence zero-write subset)", () =>
       write("DELETE", "/repos/e2e-owner/e2e-repo/autolinks/1"),
       write("PUT", "/repos/e2e-owner/e2e-repo/collaborators/alice"),
       write("PUT", "/repos/e2e-owner/e2e-repo/actions/workflows/7/enable"),
+      write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000"),
     ]);
-    expect(failures).toHaveLength(5);
+    expect(failures).toHaveLength(6);
   });
 });
 
@@ -251,12 +253,12 @@ describe("unwitnessedUnconditionalSections (apply-idempotence corpus witness)", 
         // report traffic matches no section endpoint and is skipped too.
         write("POST", "/repos/e2e-owner/e2e-repo/labels"),
         write("POST", "/repos/e2e-owner/svc-private/issues"),
-        write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000"),
+        write("PUT", "/orgs/e2e-owner/teams/platform/repos/e2e-owner/e2e-repo"),
       ],
-      [write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000")],
+      [write("PUT", "/orgs/e2e-owner/teams/platform/repos/e2e-owner/e2e-repo")],
     );
-    expect([...witness.keys()]).toEqual(["rulesets"]);
-    expect(witness.get("rulesets")).toEqual({ first: 1, second: 1 });
+    expect([...witness.keys()]).toEqual(["teams"]);
+    expect(witness.get("teams")).toEqual({ first: 1, second: 1 });
   });
 });
 

@@ -2,8 +2,8 @@
 # witness per false-listed section: run.ts fails (unwitnessedUnconditionalSections)
 # when a false-listed section has no apply_idempotent scenario writing to it,
 # because a wrong `false` merely weakens the zero-write proof and nothing else
-# would contradict it. apply-idempotent-mixed carries the compare-before-write
-# sections plus rulesets and environments; the secrets *-apply-converges
+# would contradict it. apply-idempotent-mixed carries environments beside
+# several compare-before-write sections; the secrets *-apply-converges
 # scenarios carry the four secret sections and webhooks. This scenario covers
 # the rest: every false-listed section here must be written again by the
 # second apply with byte-identical mock state (repository and interaction_limits

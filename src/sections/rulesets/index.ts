@@ -6,21 +6,20 @@
  */
 
 import { z } from "zod";
-import { subsetDiff } from "../../engine/diff.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import {
-  beginRun,
   defaultUndeclaredPolicy,
   loosen,
   type SectionModule,
-  type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { call, listAll, rejectDuplicates } from "../contract/requests.js";
+import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
+import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { RulesetConfig } from "./schema.js";
 
@@ -84,6 +83,7 @@ const ENDPOINTS = {
   list: {
     route: "GET /repos/{owner}/{repo}/rulesets",
     statuses: { 200: "the repository ruleset list" },
+    primaryRead: { notFound: "denied" },
   },
   create: {
     route: "POST /repos/{owner}/{repo}/rulesets",
@@ -111,8 +111,7 @@ export const rulesetsSection = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(RulesetConfig)),
-  async run(ctx, declared): Promise<SectionResult> {
-    const run = beginRun(ctx);
+  async plan(ctx, declared) {
     const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     const desired = entries.map(normalizeRuleset);
     // Upsert matches by exact name, so two entries with the same name would
@@ -127,7 +126,7 @@ export const rulesetsSection = {
       this,
       ENDPOINTS.list,
       z.array(LiveRulesetSummary),
-      await listAll(ctx, this, ENDPOINTS.list),
+      await ctx.read.list.listAll(),
     );
     // Match and update anything not explicitly owned by another source (the
     // pre-knob upsert semantics; source_type is optional in the API type).
@@ -137,33 +136,42 @@ export const rulesetsSection = {
     const repoRulesets = summaries.filter((r) => (r.source_type ?? "Repository") === "Repository");
     const idByName = new Map(repoRulesets.map((r) => [r.name, r.id]));
 
+    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     for (const ruleset of desired) {
+      // The full ruleset is the wire body (a partial PUT narrows a ruleset).
+      const payload = plainData(ruleset);
       const id = idByName.get(ruleset.name);
       if (id === undefined) {
-        if (run.check) {
-          run.result.drift.push(
+        plan.ops.push({
+          role: "create",
+          payload,
+          describe: `creating ruleset "${ruleset.name}"`,
+          drift: [
             `rulesets[${ruleset.name}]: missing - declared in the settings file but not on the repo; apply will create it`,
-          );
-        } else {
-          await call(ctx, this, ENDPOINTS.create, {
-            payload: ruleset,
-            describe: `creating ruleset "${ruleset.name}"`,
-          });
-          run.result.changes.push(`created ruleset "${ruleset.name}"`);
-        }
+          ],
+          change: `created ruleset "${ruleset.name}"`,
+        });
         continue;
       }
-      if (run.check) {
-        const live = await call(ctx, this, ENDPOINTS.get, { params: { ruleset_id: String(id) } });
-        run.result.drift.push(...subsetDiff(ruleset, live, `rulesets[${ruleset.name}]`));
-      } else {
-        await call(ctx, this, ENDPOINTS.update, {
-          params: { ruleset_id: String(id) },
-          payload: ruleset,
-          describe: `updating ruleset "${ruleset.name}"`,
-        });
-        run.result.changes.push(`updated ruleset "${ruleset.name}" (id ${id})`);
+      const live = await ctx.read.get.call({ params: { ruleset_id: String(id) } });
+      const drift = subsetDiff(ruleset, live, `rulesets[${ruleset.name}]`);
+      if (!hasDrift(drift)) {
+        continue;
       }
+      const phantom = phantomKeys(ruleset, live);
+      if (phantom.length > 0) {
+        plan.notes.push(
+          phantomNote(`rulesets[${ruleset.name}]`, phantom, "ruleset", "this update will re-run"),
+        );
+      }
+      plan.ops.push({
+        role: "update",
+        params: { ruleset_id: String(id) },
+        payload,
+        describe: `updating ruleset "${ruleset.name}"`,
+        drift,
+        change: `updated ruleset "${ruleset.name}" (id ${id})`,
+      });
     }
 
     const declaredNames = new Set(desired.map((r) => r.name));
@@ -173,31 +181,27 @@ export const rulesetsSection = {
       }
       if (policy === "delete") {
         if (live.source_type !== "Repository") {
-          run.result.notes.push(
+          plan.notes.push(
             `ruleset "${live.name}" is undeclared, but the list response does not mark it source_type "Repository"; NOT deleting - only rulesets the API explicitly marks repository-owned are deleted; add it to the settings file to manage it, or delete it in GitHub if it should not exist`,
           );
           continue;
         }
-        if (run.check) {
-          run.result.drift.push(
+        plan.ops.push({
+          role: "remove",
+          params: { ruleset_id: String(live.id) },
+          describe: `deleting undeclared ruleset "${live.name}"`,
+          drift: [
             undeclaredDrift(defaultUndeclaredPolicy(this), {
               label: `rulesets[${live.name}]`,
               action: "DELETE it",
             }),
-          );
-        } else {
-          await call(ctx, this, ENDPOINTS.remove, {
-            params: { ruleset_id: String(live.id) },
-            describe: `deleting undeclared ruleset "${live.name}"`,
-          });
-          run.result.changes.push(`DELETED undeclared ruleset "${live.name}"`);
-        }
+          ],
+          change: `DELETED undeclared ruleset "${live.name}"`,
+        });
         continue;
       }
-      run.result.notes.push(
-        undeclaredNote({ subject: `ruleset "${live.name}"`, action: "DELETE it" }),
-      );
+      plan.notes.push(undeclaredNote({ subject: `ruleset "${live.name}"`, action: "DELETE it" }));
     }
-    return run.result;
+    return plan;
   },
-} satisfies SectionModule<"rulesets">;
+} satisfies SectionModule<"rulesets", typeof ENDPOINTS>;

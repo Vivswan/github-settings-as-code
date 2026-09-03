@@ -31,8 +31,9 @@
  * - repository (false): every write is planned on drift except the Git LFS
  *   PUT/DELETE, which is alwaysRewrite by declaration (no read endpoint), so
  *   a second apply re-asserts it and the section stays false.
- * - rulesets (false): an existing ruleset is PUT unconditionally (the GET +
- *   diff runs only in check mode).
+ * - rulesets (true): an existing ruleset is read back and subsetDiff'd at
+ *   plan time in both modes; the full-payload PUT is planned only on
+ *   divergence, and a converged ruleset plans nothing.
  * - branches (true): the protection PUT, the signature sub-endpoint, and the
  *   rule mutations are all drift-gated, so a converged repo plans nothing.
  * - environments (false): every declared environment is PUT unconditionally.
@@ -84,7 +85,7 @@ import { allEndpoints } from "../../src/sections/registry.js";
 export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   repository: false,
   labels: true,
-  rulesets: false,
+  rulesets: true,
   branches: true,
   environments: false,
   autolinks: true,
