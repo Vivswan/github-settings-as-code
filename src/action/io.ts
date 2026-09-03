@@ -5,12 +5,12 @@
 
 import { appendFileSync } from "node:fs";
 import * as core from "@actions/core";
-import { type Io, maskRegistry } from "../io.js";
+import { type Io, maskRegistry, type OutputName } from "../io.js";
 
 /**
- * Every action output run() writes, with the description the action.yml
- * `outputs` block is generated from (bun run build:action-docs). OutputName
- * types only this layer's setOutput; Io.output callers pass a plain string.
+ * The description of every action output, generated into the action.yml
+ * `outputs` block (bun run build:action-docs). The satisfies clause locks the
+ * keys to OutputName: a missing or phantom output fails to compile here.
  */
 export const OUTPUT_DECLS = {
   result: {
@@ -25,9 +25,7 @@ export const OUTPUT_DECLS = {
     description:
       'Multi-repo mode only: JSON map of owner/name to {result, source, skippedSections}. A redacted private target is keyed by its "private repository #N" placeholder instead of its slug. Empty in single-repo mode.',
   },
-} as const satisfies Record<string, { readonly description: string }>;
-
-export type OutputName = keyof typeof OUTPUT_DECLS;
+} as const satisfies Record<OutputName, { readonly description: string }>;
 
 // @actions/core owns workflow-command escaping (%, CR, LF); the static map
 // keeps the namespace access tree-shakeable (biome noDynamicNamespaceImportAccess).
@@ -39,9 +37,6 @@ export function annotate(level: keyof typeof annotators, message: string): void 
   annotators[level](message);
 }
 
-// The root port types `name` as a plain string (it cannot see this layer);
-// the declared-name union applies here, at the implementation the port's
-// method signature accepts.
 function setOutput(name: OutputName, value: string): void {
   // Guarded: the runner always sets GITHUB_OUTPUT; local/test runs may not.
   if (process.env.GITHUB_OUTPUT) {

@@ -110,6 +110,8 @@ describe("actionsIo", () => {
     writeFileSync(file, "");
     delete process.env.GITHUB_OUTPUT;
     actionsIo.output("result", "dropped");
+    // @ts-expect-error a misspelled output name fails to compile at the port
+    actionsIo.output("reslut", "dropped");
     process.env.GITHUB_OUTPUT = file;
     actionsIo.output("result", "clean");
     // @actions/core writes outputs in heredoc form: name<<DELIM / value / DELIM

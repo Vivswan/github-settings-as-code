@@ -42,12 +42,7 @@ const OPENER_IMPORTERS: Record<string, string[]> = {
     "formatSkipNotice",
   ],
   "src/private.ts": ["isPrivate", "markPrivate"],
-  "src/report/delivery.ts": [
-    "applyMarkerInjection",
-    "composeTargetReport",
-    "deliverReport",
-    "uploadArtifactReport",
-  ],
+  "src/report/delivery.ts": ["applyMarkerInjection", "openReportChannel"],
   "test/private.test.ts": [],
 };
 const OPENER_MODULE = resolve("src/private-open");

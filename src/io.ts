@@ -7,6 +7,12 @@
 /** The level of one workflow annotation, as the Io port (and its captures) spell it. */
 export type AnnotationLevel = "notice" | "warning" | "error";
 
+/**
+ * The action outputs, the one list every Io.output call is typed over; the
+ * action layer pins a description to each (OUTPUT_DECLS in src/action/io.ts).
+ */
+export type OutputName = "result" | "skipped-sections" | "repos-result";
+
 // Module-private, so other modules cannot name the member brand.
 const MASK_PAIR: unique symbol = Symbol("Io.maskPair");
 type Minted<F> = F & { readonly [MASK_PAIR]: true };
@@ -39,8 +45,8 @@ export interface Io extends MaskPair {
   debug(line: string): void;
   /** Append a markdown block to the step summary. */
   summary(markdown: string): void;
-  /** Set an action output; the action layer pins `name` to its declared outputs. */
-  output(name: string, value: string): void;
+  /** Set one of the declared action outputs. */
+  output(name: OutputName, value: string): void;
 }
 
 function mint<F extends (...args: never[]) => unknown>(member: F): Minted<F> {

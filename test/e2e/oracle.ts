@@ -324,14 +324,25 @@ export interface RunPrediction {
 export type PreflightAbort = "no" | "yes" | "possible";
 
 /**
- * Whether a run DID abort at the barrier, from the abort path's witnesses (run.ts):
- * the "preflight failed" error annotation decides, and the empty summary and
- * "failed" result must agree with it; a disagreement or a wrong prediction contradicts.
+ * Whether a run DID abort at the barrier: the "preflight failed" annotation
+ * decides, and a row-less summary table plus the "failed" result must agree with it.
  */
 export type AbortVerdict =
   | { kind: "aborted" }
   | { kind: "ran" }
   | { kind: "contradiction"; problem: string };
+
+/**
+ * Every table body row the summary rendered, well-formed or not: any pipe
+ * line that is neither a header (`| Section |`, `| Repository |`) nor the
+ * `|---|` separator. Counted raw so a malformed row cannot pass as "no rows".
+ */
+function renderedSummaryRows(summary: string): string[] {
+  return summary
+    .split("\n")
+    .filter((line) => /^\|/.test(line) && !/^\|\s*(Section|Repository)\s*\|/.test(line))
+    .filter((line) => !/^\|(-+\|)+$/.test(line));
+}
 
 export function judgePreflightAbort(
   predicted: PreflightAbort,
@@ -345,9 +356,10 @@ export function judgePreflightAbort(
         )
       : { kind: "ran" };
   }
-  if (observed.summary.trim() !== "" || observed.result !== "failed") {
+  const rendered = renderedSummaryRows(observed.summary);
+  if (rendered.length > 0 || observed.result !== "failed") {
     return contradiction(
-      `the run annotated "preflight failed" yet wrote ${observed.summary.length} summary characters and result "${observed.result}"`,
+      `the run annotated "preflight failed" yet rendered ${rendered.length} summary row(s) and result "${observed.result}"`,
     );
   }
   return predicted === "no"

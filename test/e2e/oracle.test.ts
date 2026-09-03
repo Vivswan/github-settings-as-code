@@ -176,10 +176,16 @@ describe("read gating fold", () => {
 });
 
 describe("judgePreflightAbort", () => {
-  const rows = "## github-settings-as-code (apply)\n\n| labels | :x: failed |";
+  const head = "## github-settings-as-code (apply)\n\n| Section | Status | Detail |\n|---|---|---|";
+  const rows = `${head}\n| labels | :x: failed | - |`;
   const barrier = "::error::preflight failed: the token cannot access 1 section(s)";
   const other = "::error::settings.yml: unknown section";
-  const aborted = { summary: "  \n", result: "failed", stdout: barrier };
+  // A barrier abort renders the headed summary (note, header, separator) and no body rows.
+  const aborted = {
+    summary: `## github-settings-as-code (apply)\n\n:x: failed - preflight denied 1 section(s)\n\n| Section | Status | Detail |\n|---|---|---|`,
+    result: "failed",
+    stdout: barrier,
+  };
   const ran = { summary: rows, result: "applied", stdout: other };
   const cases: Array<
     [string, PreflightAbort, Parameters<typeof judgePreflightAbort>[1], AbortVerdict["kind"]]
@@ -192,7 +198,7 @@ describe("judgePreflightAbort", () => {
     ["possible without the annotation ran", "possible", ran, "ran"],
     ["possible with every witness aborted", "possible", aborted, "aborted"],
     [
-      "possible, empty summary and failed, but no barrier annotation: ran, so the section checks report the absences",
+      "possible, no rows and failed, but no barrier annotation: ran, so the section checks report the absences",
       "possible",
       { ...aborted, stdout: other },
       "ran",
@@ -204,6 +210,21 @@ describe("judgePreflightAbort", () => {
       "ran",
     ],
     ["annotated but sections rendered", "possible", { ...aborted, summary: rows }, "contradiction"],
+    [
+      "annotated but a malformed row rendered: still a rendered row, not an abort",
+      "possible",
+      { ...aborted, summary: `${head}\n| labels | failed |` },
+      "contradiction",
+    ],
+    [
+      "annotated with the multi-repo overview rendered: its rows count too",
+      "possible",
+      {
+        ...aborted,
+        summary: "| Repository | Source | Result |\n|---|---|---|\n| o/r | remote | :x: failed |",
+      },
+      "contradiction",
+    ],
     [
       "annotated but the result is not failed",
       "yes",

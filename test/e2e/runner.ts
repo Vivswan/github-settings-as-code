@@ -18,7 +18,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
-import type { OutputName } from "../../src/action/io.js";
+import type { OutputName } from "../../src/io.js";
 import {
   assertApplyIdempotent,
   captureRerun,

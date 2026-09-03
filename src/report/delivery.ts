@@ -1,14 +1,12 @@
 /**
- * Private-report delivery, shared by the single- and multi-repo run flows:
- * compose the full unredacted report for a redacted target and hand it to
- * the chosen channel (the target repo's report issue, or the age-encrypted
- * workflow artifact), plus the marker-label injection the issue channel
- * needs so an apply cannot delete the label the report module creates.
+ * The private-report channel of one run: the full unredacted report per redacted
+ * target, delivered to the target's report issue or the age-encrypted artifact,
+ * plus the marker-label injection that keeps an apply from deleting the issue's label.
  */
 
-import type { IssueChannel, PrivateReportChannel, RedactedDetail } from "../action/redact.js";
+import type { PrivateReportChannel, RedactedDetail } from "../action/redact.js";
 import type { RepoRef } from "../discovery/targets.js";
-import type { RepoRunResult, ValidatedSettings } from "../engine/orchestrate.js";
+import type { RepoResult, ValidatedSettings } from "../engine/orchestrate.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { Private } from "../private.js";
@@ -74,103 +72,145 @@ export function applyMarkerInjection(
   }
 }
 
+declare const CONCLUDED: unique symbol;
+
+/**
+ * How a run, or one target on its own, concluded: the `result` output and the
+ * exit code it earns. The brand makes runOutcome() the only constructor, so
+ * the report cannot be told a result and a verdict that disagree.
+ */
+export interface RunConclusion {
+  readonly result: RepoResult;
+  readonly exitCode: 0 | 1;
+  readonly [CONCLUDED]: true;
+}
+
+/** One redacted target as the report channel receives it. */
+interface ReportTarget {
+  /** The owner/name pair the issue channel posts into; null when the slug did not parse. */
+  repo: RepoRef | null;
+  /** The public placeholder, the only name a delivery warning may carry. */
+  display: string;
+  /** The target's own conclusion; an exit of 1 opens the report issue, 0 closes it. */
+  conclusion: RunConclusion;
+  detail: Private<RedactedDetail>;
+}
+
+/**
+ * `deliver` per redacted target, `flush` once after the last. A delivery failure
+ * is one safe warning (placeholder and HTTP status, or the artifact service;
+ * never a slug or report content) and never changes any target's result.
+ */
+export interface ReportChannel {
+  deliver(target: ReportTarget): Promise<void>;
+  flush(): Promise<void>;
+}
+
+/**
+ * The run's report channel from the `private-report` input, null for `none`.
+ * Issue channels post per target as it closes; the artifact channel uploads ONE
+ * encrypted document on flush. `uploader` is the test port (production: undefined).
+ */
+export function openReportChannel(
+  api: GithubClient,
+  channel: PrivateReportChannel,
+  meta: ReportRunMeta,
+  reportPublicKey: string,
+  io: Io,
+  uploader?: ArtifactUploader,
+): ReportChannel | null {
+  switch (channel) {
+    case "none":
+      return null;
+    case "issue":
+      return issueChannel(api, meta, "always", io);
+    case "issue-on-failure":
+      return issueChannel(api, meta, "on-failure", io);
+    case "artifact":
+      return artifactChannel(meta, reportPublicKey, io, uploader);
+  }
+}
+
 /**
  * Compose the full unredacted report for one target; the seal opens in full
- * here because the readers are the target repository's own. Shared by both
- * channels; `check` decides needsAttention (check-mode drift counts).
+ * here because the readers are the target repository's own.
  */
-export function composeTargetReport(
-  meta: ReportRunMeta,
-  result: RepoRunResult["result"],
-  detail: Private<RedactedDetail>,
-  check: boolean,
-): { body: string; needsAttention: boolean } {
-  const { slug, outcomes, transcript } = revealPrivate(detail);
-  const body = composeReport({
+function composeTargetReport(meta: ReportRunMeta, target: ReportTarget): string {
+  const { slug, outcomes, transcript } = revealPrivate(target.detail);
+  return composeReport({
     target: slug,
     adminRepo: meta.adminRepo,
     runUrl: meta.runUrl,
     mode: meta.mode,
-    result,
+    result: target.conclusion.result,
     timestamp: meta.timestamp,
     outcomes: outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
     transcript,
   });
-  const needsAttention = result === "failed" || (check && result === "drift");
-  return { body, needsAttention };
 }
 
 /**
- * Compose the full unredacted report for a redacted target and deliver it to
- * the issue channel. Under `always` this runs on EVERY result (the report is
- * the private mirror of the run log); under `on-failure` a healthy run at
- * most closes a leftover open issue and its no-op skip is silent. A delivery
- * failure emits one public-safe warning naming only the placeholder and the
- * HTTP status; the target's result is never changed either way.
+ * Under `always` the report is the private mirror of the run log, delivered on
+ * EVERY result; under `on-failure` a healthy run at most closes a leftover open
+ * issue and its no-op skip is silent.
  */
-export async function deliverReport(
+function issueChannel(
   api: GithubClient,
   meta: ReportRunMeta,
-  repo: RepoRef,
-  display: string,
-  result: RepoRunResult["result"],
-  detail: Private<RedactedDetail>,
-  check: boolean,
-  channel: IssueChannel,
+  mode: IssueReportMode,
   io: Io,
-): Promise<void> {
-  const { body, needsAttention } = composeTargetReport(meta, result, detail, check);
-  // The one channel-to-mode conversion, exhaustive over IssueChannel: a future
-  // issue channel fails to compile here instead of inheriting a default.
-  let mode: IssueReportMode;
-  switch (channel) {
-    case "issue":
-      mode = "always";
-      break;
-    case "issue-on-failure":
-      mode = "on-failure";
-      break;
-  }
-  const delivery = await deliverIssueReport(api, repo, body, needsAttention, mode);
-  if ("warning" in delivery) {
-    io.annotate("warning", `${display}: ${delivery.warning}`);
-  }
+): ReportChannel {
+  return {
+    async deliver(target) {
+      if (target.repo === null) {
+        // The issue channel posts INTO the target repository, and an
+        // unparseable slug names none; the loss must not be silent.
+        io.annotate(
+          "warning",
+          `${target.display}: could not deliver the private report: the target name is not an owner/name repository slug, so there is no repository to hold the report issue`,
+        );
+        return;
+      }
+      const body = composeTargetReport(meta, target);
+      const delivery = await deliverIssueReport(
+        api,
+        target.repo,
+        body,
+        target.conclusion.exitCode === 1,
+        mode,
+      );
+      if ("warning" in delivery) {
+        io.annotate("warning", `${target.display}: ${delivery.warning}`);
+      }
+    },
+    flush: async () => {},
+  };
 }
 
 /**
- * Concatenate every accumulated per-target report into one document, encrypt it
- * to the operator's recipient, and upload it as the single workflow artifact.
- * A no-op when the channel is not `artifact` or no report was accumulated -
- * the guard lives HERE, not on caller discipline, so a non-artifact channel
- * can never upload whatever a caller accumulated by mistake. Delivery failure
- * warns safely (the artifact service or missing runtime token, never a slug
- * or report content) and leaves the run result untouched. `uploader` is the
- * injectable test port; production passes undefined and the real
- * @actions/artifact uploader applies.
+ * Reports accumulate under their placeholder headings and leave as one document
+ * on flush (nothing uploads when none delivered). The channel never addresses
+ * the target repository, so it mirrors even a target whose slug failed to parse.
  */
-export async function uploadArtifactReport(
-  channel: PrivateReportChannel,
-  reports: Array<{ display: string; body: string }>,
+function artifactChannel(
+  meta: ReportRunMeta,
   reportPublicKey: string,
   io: Io,
   uploader?: ArtifactUploader,
-): Promise<void> {
-  if (channel !== "artifact" || reports.length === 0) {
-    return;
-  }
-  const document = concatArtifactReports(reports);
-  const delivery = await deliverArtifactReport(document, reportPublicKey, uploader);
-  if ("warning" in delivery) {
-    io.annotate("warning", delivery.warning);
-  }
-}
-
-/**
- * Join accumulated per-target reports into one document, each under a heading
- * carrying its public placeholder (the document itself is private, but the
- * heading is the only added text and stays placeholder-keyed for consistency
- * with the public surfaces).
- */
-function concatArtifactReports(reports: Array<{ display: string; body: string }>): string {
-  return reports.map((report) => `<!-- ${report.display} -->\n\n${report.body}`).join("\n\n");
+): ReportChannel {
+  const reports: string[] = [];
+  return {
+    async deliver(target) {
+      reports.push(`<!-- ${target.display} -->\n\n${composeTargetReport(meta, target)}`);
+    },
+    async flush() {
+      if (reports.length === 0) {
+        return;
+      }
+      const delivery = await deliverArtifactReport(reports.join("\n\n"), reportPublicKey, uploader);
+      if ("warning" in delivery) {
+        io.annotate("warning", delivery.warning);
+      }
+    },
+  };
 }

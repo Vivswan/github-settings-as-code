@@ -27,35 +27,34 @@ import {
   type Target,
 } from "../discovery/targets.js";
 import { applyDefaults } from "../engine/merge.js";
-import { type RepoRunResult, runForRepo, validateSettingsDoc } from "../engine/orchestrate.js";
+import { runForRepo, validateSettingsDoc } from "../engine/orchestrate.js";
 import { targetSecretSource } from "../engine/secrets.js";
 import { type GithubClient, isPermissionError, RERUN_ADVICE } from "../github/api.js";
 import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
-import { isPrivate, type Private } from "../private.js";
+import type { Private } from "../private.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
-import {
-  applyMarkerInjection,
-  composeTargetReport,
-  deliverReport,
-  type ReportRunMeta,
-  uploadArtifactReport,
-} from "../report/delivery.js";
+import { applyMarkerInjection } from "../report/delivery.js";
 import type { SectionKey, SettingsFile } from "../schema.js";
+import {
+  engineOutcome,
+  failedTarget,
+  type OpenedTarget,
+  type TargetResult,
+  targetFailure,
+  withDelivery,
+} from "./deliver.js";
 import { DEFAULT_SETTINGS_FILE, quoteList } from "./inputs.js";
 import {
   attempt,
-  emitRedactedResult,
-  isIssueChannel,
-  isPrivateVisibility,
   openTargetChannel,
   type PrivateReportChannel,
   type PrivateReposPolicy,
   planRedaction,
+  type RedactionPlan,
   type TargetChannel,
   type TargetOutcome,
-  WITHHELD_REPORT_NOTICE,
 } from "./redact.js";
 import { parseSettingsDoc, readSettingsFile } from "./settings-read.js";
 
@@ -81,23 +80,6 @@ export interface MultiConfig {
   selfSlug: string;
   /** Link to the workflow run, for the private report metadata (may be empty). */
   runUrl: string;
-}
-
-/** One target's end state before it closes its channel: the engine result and the rich detail. */
-interface TargetResult {
-  result: RepoRunResult["result"];
-  outcomes: RepoRunResult["outcomes"];
-  /** Human line for skips/failures that produced no section outcomes. */
-  note?: string;
-}
-
-/**
- * Record a failure that happened before the engine ran; the rich message goes
- * to the target's channel (public in the clear, captured when redacted).
- */
-function targetFailure(channelIo: Io, richMessage: string): TargetResult {
-  channelIo.annotate("error", richMessage);
-  return { result: "failed", outcomes: [], note: richMessage };
 }
 
 /**
@@ -192,15 +174,27 @@ async function processTarget(ctx: {
     },
     channel.io,
   );
-  let note: string | undefined;
-  if (run.preflightDenied.length > 0) {
-    note = `preflight denied ${run.preflightDenied.length} section(s); nothing was applied to this repository`;
-    channel.io.annotate(
-      "error",
-      `preflight failed: the token cannot access ${run.preflightDenied.length} section(s), so nothing was applied to this repository. Grant the permissions named above, or set on-missing-permission: warn`,
-    );
-  }
-  return { result: run.result, outcomes: run.outcomes, note };
+  return engineOutcome(run, channel.io);
+}
+
+/**
+ * Channel and exposure come from ONE redaction decision, so a redacted channel
+ * never travels with a shown exposure. Discovery's full_name is API data, so
+ * parseRepoSlug is the boundary proving every delivered target is an owner/name pair.
+ */
+function openTarget(
+  plan: RedactionPlan,
+  io: Io,
+  slug: string,
+  visibilityOf: (slug: string) => RepoVisibility,
+): OpenedTarget {
+  return {
+    repo: parseRepoSlug(slug),
+    channel: openTargetChannel(plan, io, slug),
+    exposure: plan.isRedacted(slug)
+      ? { kind: "redacted", visibility: visibilityOf(slug) }
+      : { kind: "shown" },
+  };
 }
 
 /**
@@ -252,10 +246,6 @@ export async function runMulti(
   // uploader applies.
   uploader?: ArtifactUploader,
 ): Promise<{ fatal: string | null; targets: TargetOutcome[] }> {
-  // One timestamp for the whole run, so every target's report shares it and the
-  // pure composer never reaches for Date.now itself.
-  const timestamp = new Date().toISOString();
-
   // Central-resolution warnings are buffered so nothing emits before the
   // redaction mask is registered. Every exit path - fatal or not - flushes
   // them through this one helper, so a fatal config error later in setup can
@@ -426,114 +416,32 @@ export async function runMulti(
     );
   }
 
-  const results: TargetOutcome[] = [];
-  // The artifact channel accumulates every deliverable target's composed report
-  // and encrypts/uploads them as ONE artifact after the loop; the issue channel
-  // delivers per target inside the loop. `{ display }` travels alongside the
-  // body only for the section heading in the concatenated document.
-  const artifactReports: Array<{ display: string; body: string }> = [];
-  const meta: ReportRunMeta = {
-    adminRepo: cfg.selfSlug,
-    runUrl: cfg.runUrl,
-    mode: cfg.mode,
-    timestamp,
-  };
-  for (const target of targets) {
-    // The channel is opened BEFORE any processing so a read/parse/validation
-    // failure lands in a redacted target's transcript too; it is the only sink
-    // processing sees.
-    const channel = openTargetChannel(plan, io, target.slug);
-    // Deliver a report ONLY when the target is PROVEN private or internal.
-    // Redaction fails closed (redact on unknown), but delivery fails closed the
-    // other way: posting or archiving the full private report for a repo that
-    // might actually be public would leak it, so an unknown visibility redacts
-    // publicly yet skips delivery. The gate is the same for both channels.
-    const deliverable =
-      cfg.privateReport !== "none" && isPrivateVisibility(visibilityOf(target.slug));
-
-    // Central files and the repos input validated their slugs at parse time;
-    // discovery's full_name is API data, so the shared constructor is the
-    // boundary that proves every engine- and delivery-bound target is an
-    // owner/name pair (report delivery consumes the same RepoRef below).
-    const repo = parseRepoSlug(target.slug);
-
-    // A crash mid-processing never stops the rest of the fleet; it becomes
-    // this target's failure and still flows through the one finalizer below.
-    const outcome =
-      repo === null
-        ? targetFailure(
-            channel.io,
-            `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be targeted`,
-          )
-        : await attempt(
-            channel,
-            () =>
-              processTarget({
-                api,
-                target,
-                repo,
-                defaults,
-                cfg,
-                // The marker label is an issue-channel mechanism (its report
-                // reuses the labelled issue); inject it only when one delivers.
-                injectMarker: deliverable && isIssueChannel(cfg.privateReport),
-                channel,
-              }),
-            (message): TargetResult => ({ result: "failed", outcomes: [], note: message }),
-          );
-
-    // ONE finalization path however the target exited: close the channel,
-    // and for a redacted target deliver its report and its one public line.
-    const detail = channel.close(outcome.outcomes, outcome.note);
-    if (isPrivate(detail)) {
-      if (cfg.privateReport !== "none" && !deliverable) {
-        // Redacted but not proven private: the report is withheld, said once,
-        // safely (placeholder only; the cause and fix are slug-free).
-        io.annotate("notice", `${channel.display}: ${WITHHELD_REPORT_NOTICE}`);
-      } else if (cfg.privateReport === "artifact") {
-        // Accumulate now; the single encrypt+upload happens after the loop.
-        // The artifact channel never addresses the target repository, so it
-        // mirrors even a target whose slug failed to parse.
-        const { body } = composeTargetReport(meta, outcome.result, detail, cfg.mode === "check");
-        artifactReports.push({ display: channel.display, body });
-      } else if (isIssueChannel(cfg.privateReport)) {
-        if (repo === null) {
-          // The issue channel posts INTO the target repository, and an
-          // unparseable slug names none - delivery is impossible, but the
-          // loss must not be silent (the slug itself stays out of the
-          // public warning; only the placeholder renders).
-          io.annotate(
-            "warning",
-            `${channel.display}: could not deliver the private report: the target name is not an owner/name repository slug, so there is no repository to hold the report issue`,
-          );
-        } else {
-          await deliverReport(
-            api,
-            meta,
-            repo,
-            channel.display,
-            outcome.result,
-            detail,
-            cfg.mode === "check",
-            cfg.privateReport,
-            io,
-          );
-        }
-      }
-      emitRedactedResult(io, channel.display, outcome.result, detail);
+  const results = await withDelivery({ api, cfg, io, uploader }, async (delivery) => {
+    const delivered: TargetOutcome[] = [];
+    for (const target of targets) {
+      // The channel is opened BEFORE any processing so a read/parse/validation
+      // failure lands in a redacted target's transcript too; it is the only sink
+      // processing sees.
+      const opened = openTarget(plan, io, target.slug, visibilityOf);
+      const { channel, repo } = opened;
+      // A crash mid-processing never stops the rest of the fleet; it becomes
+      // this target's failure and still closes through the same delivery.
+      const closed = await delivery.target(opened, async (injectMarker) =>
+        repo === null
+          ? targetFailure(
+              channel.io,
+              `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be targeted`,
+            )
+          : attempt(
+              channel,
+              () => processTarget({ api, target, repo, defaults, cfg, injectMarker, channel }),
+              failedTarget,
+            ),
+      );
+      delivered.push({ source: target.source, ...closed });
     }
-    results.push({
-      source: target.source,
-      result: outcome.result,
-      display: channel.display,
-      detail,
-    });
-  }
-
-  // The artifact channel uploads every accumulated report as one encrypted
-  // document after the loop. A failure is one safe warning (naming the artifact
-  // service, never a slug) and never changes any target's result.
-  await uploadArtifactReport(cfg.privateReport, artifactReports, cfg.reportPublicKey, io, uploader);
+    return delivered;
+  });
 
   return { fatal: null, targets: results };
 }

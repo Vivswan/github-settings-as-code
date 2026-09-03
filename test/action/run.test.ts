@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { generateX25519Identity, identityToRecipient } from "age-encryption";
+import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { run } from "../../src/action/run.js";
 import { type Io, maskRegistry } from "../../src/io.js";
+import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import { MockApi } from "../mock-api.js";
 
 // Every run() below injects this capturing Io in place of the @actions/core
@@ -87,7 +88,6 @@ describe("run in multi-repo mode (env glue)", () => {
     "INPUT_PRIVATE-REPOS",
     "INPUT_PRIVATE-REPORT",
     "INPUT_REPORT-PUBLIC-KEY",
-    "ACTIONS_RUNTIME_TOKEN",
   ];
   const saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
 
@@ -410,39 +410,110 @@ describe("run in multi-repo mode (env glue)", () => {
     },
   );
 
-  test("single-repo cross-repo redacted target delivers a report to its own issue", async () => {
-    setDiscoveryEnv();
-    delete process.env.INPUT_REPOS;
-    process.env.INPUT_REPOSITORY = "o/priv";
-    process.env.GITHUB_REPOSITORY = "admin/repo";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env["INPUT_PRIVATE-REPORT"] = "issue";
-    process.env.INPUT_MODE = "check";
-    const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
-    // has_wiki drifts (single.yml wants false); the report captures that.
-    const api = new MockApi({
-      "GET /repos/o/priv": { data: { has_wiki: true, private: true } },
-      "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
-      "GET /repos/o/priv/issues?state=all&labels=settings-as-code-report&per_page=100": {
-        data: [{ number: 3, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/3" }],
+  // Check mode; a drifting row has has_wiki: true against single.yml's false.
+  const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
+  const listPath = (state: string) =>
+    `GET /repos/o/priv/issues?state=${state}&labels=settings-as-code-report&per_page=100`;
+  const issue3 = { number: 3, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/3" };
+  test.each<
+    [
+      string,
+      string,
+      boolean,
+      Record<string, { data?: unknown; error?: { status: number; message: string; body: string } }>,
+      number,
+      string[],
+    ]
+  >([
+    [
+      "issue",
+      "issue",
+      true,
+      {
+        "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
+        [listPath("all")]: { data: [issue3] },
+        "PATCH /repos/o/priv/issues/3": { data: { number: 3 } },
       },
-      "PATCH /repos/o/priv/issues/3": { data: { number: 3 } },
-    });
-    expect(await run({ api: api, io: testIo })).toBe(1); // check-mode drift exits 1
-    const patch = api.calls.find(
-      (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/3",
-    );
-    const payload = (patch?.payload ?? {}) as { body?: unknown; state?: unknown };
-    const body = String(payload.body ?? "");
-    expect(body).toContain("o/priv"); // the report is unredacted (it is private)
-    expect(body).toContain("## Transcript");
-    expect(payload.state).toBe("open"); // drift needs attention
-    // the public summary stays redacted
-    const summary = summaries.join("\n");
-    expect(summary).not.toContain("o/priv");
-    expect(summary).toContain("details hidden");
-  });
+      1,
+      ["POST /repos/o/priv/labels", "PATCH /repos/o/priv/issues/3"],
+    ],
+    [
+      "issue-on-failure on a drifting target",
+      "issue-on-failure",
+      true,
+      {
+        "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
+        [listPath("all")]: { data: [issue3] },
+        "PATCH /repos/o/priv/issues/3": { data: { number: 3 } },
+      },
+      1,
+      ["POST /repos/o/priv/labels", "PATCH /repos/o/priv/issues/3"],
+    ],
+    [
+      "issue-on-failure on a healthy target",
+      "issue-on-failure",
+      false,
+      { [listPath("open")]: { data: [] } },
+      0,
+      [],
+    ],
+    ["artifact", "artifact", true, {}, 1, []],
+  ])(
+    "single-repo proven-private target under %s: report delivered through that channel, result untouched, public summary redacted",
+    async (_name, channel, drifts, routes, exitCode, writes) => {
+      const identity = await generateX25519Identity();
+      const uploads: Uint8Array[] = [];
+      const uploader: ArtifactUploader = {
+        async upload(_name, file) {
+          uploads.push(file.data);
+        },
+      };
+      setDiscoveryEnv();
+      delete process.env.INPUT_REPOS;
+      process.env.INPUT_REPOSITORY = "o/priv";
+      process.env.GITHUB_REPOSITORY = "admin/repo";
+      process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
+      process.env["INPUT_PRIVATE-REPOS"] = "redact";
+      process.env["INPUT_PRIVATE-REPORT"] = channel;
+      if (channel === "artifact") {
+        process.env["INPUT_REPORT-PUBLIC-KEY"] = await identityToRecipient(identity);
+      } else {
+        delete process.env["INPUT_REPORT-PUBLIC-KEY"];
+      }
+      process.env.INPUT_MODE = "check";
+      const api = new MockApi({
+        "GET /repos/o/priv": { data: { has_wiki: drifts, private: true } },
+        ...routes,
+      });
+      expect(await run({ api, io: testIo, uploader })).toBe(exitCode);
+      expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(writes);
+      expect(outputs.result).toBe(drifts ? "drift" : "clean");
+      // The report body, wherever it went, is the unredacted mirror of the run.
+      let body: string;
+      if (channel === "artifact") {
+        expect(uploads).toHaveLength(1);
+        const decrypter = new Decrypter();
+        decrypter.addIdentity(identity);
+        body = await decrypter.decrypt(uploads[0] as Uint8Array, "text");
+        expect(body).toStartWith("<!-- private repository -->");
+      } else {
+        expect(uploads).toEqual([]);
+        const patch = api.calls.find((c) => c.method === "PATCH");
+        const payload = (patch?.payload ?? {}) as { body?: string; state?: string };
+        expect(payload.state).toBe(writes.length > 0 ? "open" : undefined);
+        body = payload.body ?? "";
+      }
+      if (writes.length > 0 || channel === "artifact") {
+        expect(body).toContain("# settings-as-code private report: o/priv");
+        expect(body).toContain("## Transcript");
+      }
+      // The public surfaces stay redacted throughout; only the mask registration names the slug.
+      expect(captured).toContain("mask: o/priv");
+      const publicText = [...captured.filter((line) => !line.startsWith("mask: ")), ...summaries];
+      expect(publicText.join("\n")).not.toContain("o/priv");
+      expect(summaries.join("\n")).toContain("details hidden");
+    },
+  );
 
   test("single-repo unknown visibility redacts but does NOT deliver the report", async () => {
     setDiscoveryEnv();
@@ -456,94 +527,11 @@ describe("run in multi-repo mode (env glue)", () => {
     // repo GET body has neither private nor visibility -> unknown -> redact, no deliver
     const api = new MockApi({ "GET /repos/o/maybe": { data: { has_wiki: true } } });
     expect(await run({ api: api, io: testIo })).toBe(1); // drift exits 1
-    // no issue/label traffic: the report was withheld
+    // no issue/label traffic: the report was withheld, and the withholding is said once, safely
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
-  });
-
-  test("single-repo drifting redacted target under issue-on-failure delivers and opens", async () => {
-    setDiscoveryEnv();
-    delete process.env.INPUT_REPOS;
-    process.env.INPUT_REPOSITORY = "o/priv";
-    process.env.GITHUB_REPOSITORY = "admin/repo";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
-    process.env.INPUT_MODE = "check";
-    const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
-    // has_wiki drifts (single.yml wants false): check-mode drift needs
-    // attention, so on-failure takes the same upsert path as issue.
-    const api = new MockApi({
-      "GET /repos/o/priv": { data: { has_wiki: true, private: true } },
-      "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
-      "GET /repos/o/priv/issues?state=all&labels=settings-as-code-report&per_page=100": {
-        data: [{ number: 3, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/3" }],
-      },
-      "PATCH /repos/o/priv/issues/3": { data: { number: 3 } },
-    });
-    expect(await run({ api: api, io: testIo })).toBe(1); // check-mode drift exits 1
-    const patch = api.calls.find(
-      (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/3",
-    );
-    const payload = (patch?.payload ?? {}) as { body?: unknown; state?: unknown };
-    expect(String(payload.body ?? "")).toContain("o/priv");
-    expect(payload.state).toBe("open");
-  });
-
-  test("single-repo clean redacted target under issue-on-failure writes nothing", async () => {
-    setDiscoveryEnv();
-    delete process.env.INPUT_REPOS;
-    process.env.INPUT_REPOSITORY = "o/priv";
-    process.env.GITHUB_REPOSITORY = "admin/repo";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
-    process.env.INPUT_MODE = "check";
-    // has_wiki matches single.yml: healthy, and no open issue to close.
-    const api = new MockApi({
-      "GET /repos/o/priv": { data: { has_wiki: false, private: true } },
-      "GET /repos/o/priv/issues?state=open&labels=settings-as-code-report&per_page=100": {
-        data: [],
-      },
-    });
-    expect(await run({ api: api, io: testIo })).toBe(0);
-    // the quiet path: one open-issue lookup, zero writes, no label traffic
-    expect(api.mutations()).toEqual([]);
-    const issueCalls = api.calls.filter((c) => c.path.includes("/issues"));
-    expect(issueCalls.map((c) => `${c.method} ${c.path}`)).toEqual([
-      "GET /repos/o/priv/issues?state=open&labels=settings-as-code-report&per_page=100",
-    ]);
-    expect(api.calls.some((c) => c.path.includes("/labels"))).toBe(false);
-  });
-
-  test("single-repo artifact channel redacts and attempts delivery without changing the result", async () => {
-    // The production uploader has no ACTIONS_RUNTIME_TOKEN under test, so the
-    // upload attempt fails - which must degrade to a safe warning, never a crash
-    // and never a changed result. The public summary stays redacted throughout.
-    const recipient = await identityToRecipient(await generateX25519Identity());
-    setDiscoveryEnv();
-    delete process.env.INPUT_REPOS;
-    process.env.INPUT_REPOSITORY = "o/priv";
-    process.env.GITHUB_REPOSITORY = "admin/repo";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env["INPUT_PRIVATE-REPORT"] = "artifact";
-    process.env["INPUT_REPORT-PUBLIC-KEY"] = recipient;
-    process.env.INPUT_MODE = "check";
-    // Pin the no-runtime-token precondition: the exact-warning assertion below
-    // depends on the default uploader failing this way.
-    delete process.env.ACTIONS_RUNTIME_TOKEN;
-    // has_wiki drifts (single.yml wants false); the target is proven private.
-    const api = new MockApi({ "GET /repos/o/priv": { data: { has_wiki: true, private: true } } });
-    expect(await run({ api: api, io: testIo })).toBe(1); // check-mode drift exits 1, unchanged by delivery
-    expect(captured).toContain(
-      "warning: could not upload the private report artifact: the artifact service is unavailable: no ACTIONS_RUNTIME_TOKEN in the environment. Artifact upload needs a GitHub-hosted or self-hosted Actions runner (it is not available on GitHub Enterprise Server or outside Actions). Re-run the workflow, or set private-report: none if it persists",
-    );
-    // no issue traffic on the artifact channel
-    expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
-    // the public summary stays redacted
-    const summary = summaries.join("\n");
-    expect(summary).not.toContain("o/priv");
-    expect(summary).toContain("details hidden");
+    const withheld = captured.find((line) => line.includes("visibility could not be verified"));
+    expect(withheld).toStartWith("notice: private repository: ");
+    expect(captured.join("\n").replace("mask: o/maybe", "")).not.toContain("o/maybe");
   });
 });

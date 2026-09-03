@@ -3,7 +3,6 @@ import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encr
 import { runMulti } from "../../src/action/multi.js";
 import type { TargetOutcome } from "../../src/action/redact.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
-import { type ValidatedSettings, validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
 import {
@@ -11,9 +10,7 @@ import {
   ARTIFACT_NAME,
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
-import { applyMarkerInjection } from "../../src/report/delivery.js";
-import type { SectionKey, SettingsFile } from "../../src/schema.js";
-import { silentIo } from "../io-fake.js";
+import type { SectionKey } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 
 function captureIo(): {
@@ -1030,61 +1027,5 @@ describe("runMulti private-report: artifact wiring", () => {
     expect(warning).toContain("ACTIONS_RUNTIME_TOKEN");
     expect(annotations.join("\n")).not.toContain("o/priv");
     expect(annotations.join("\n")).not.toContain("CANARY");
-  });
-});
-
-describe("applyMarkerInjection", () => {
-  const MARKER = "settings-as-code-report";
-  // Fixtures are branded through the REAL boundary, so an invalid one fails
-  // here instead of riding a cast into the injection.
-  const validated = (doc: SettingsFile): ValidatedSettings => {
-    const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silentIo());
-    if ("error" in verdict) {
-      throw new Error(`test fixture failed validation: ${verdict.error}`);
-    }
-    return verdict.settings;
-  };
-
-  test("off: settings pass through untouched with no notice", () => {
-    const settings = validated({ labels: [{ name: "bug", color: "d73a4a" }] });
-    const result = applyMarkerInjection(settings, false);
-    expect(result.settings).toBe(settings);
-    expect(result.notice).toBeUndefined();
-  });
-
-  test("on but no labels section: no injection, no notice", () => {
-    const settings = validated({ repository: { has_wiki: false } });
-    const result = applyMarkerInjection(settings, true);
-    expect(result.settings).toEqual(settings);
-    expect(result.notice).toBeUndefined();
-  });
-
-  test("on with a labels section lacking the marker: appends it and returns a notice", () => {
-    const settings = validated({ labels: [{ name: "bug", color: "d73a4a" }] });
-    const result = applyMarkerInjection(settings, true);
-    expect(result.notice).toContain(MARKER);
-    const names = ((result.settings.labels ?? []) as Array<{ name: string }>).map((l) => l.name);
-    expect(names).toContain(MARKER);
-    expect(names).toContain("bug");
-  });
-
-  test("on with the marker already declared: no duplicate, no notice", () => {
-    const settings = validated({ labels: [{ name: MARKER, color: "0e2a47" }] });
-    const result = applyMarkerInjection(settings, true);
-    expect(result.notice).toBeUndefined();
-    expect(result.settings.labels).toHaveLength(1);
-  });
-
-  test("on with a rename moving the marker away: the rename-refused notice, not the injected one", () => {
-    const settings = validated({
-      labels: [{ name: MARKER, new_name: "something-else", color: "0e2a47" }],
-    });
-    const result = applyMarkerInjection(settings, true);
-    expect(result.notice).toBe(
-      `refused to rename the "${MARKER}" marker label: private reporting reuses its issue by that exact name, so the rename was dropped`,
-    );
-    expect(result.settings.labels).toEqual([
-      { name: MARKER, new_name: undefined, color: "0e2a47" },
-    ]);
   });
 });
