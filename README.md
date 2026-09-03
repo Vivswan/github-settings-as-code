@@ -4,7 +4,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 
 ## Usage
 
-1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token): the [pre-filled token form](https://github.com/settings/personal-access-tokens/new?name=github-settings-as-code&description=Token+for+Vivswan%2Fgithub-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&checks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read) starts you off with every repository permission the [Sections](#sections) table can need. Pick the resource owner and repositories, and add Members: read by hand when the owner is an organization; the form only offers organization permissions once one is selected. The default `GITHUB_TOKEN` can never hold these permissions.
+1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token): the [pre-filled token form][pat-form] starts you off with every repository permission the [Sections](#sections) table can need. Pick the resource owner and repositories, and add Members: read by hand when the owner is an organization; the form only offers organization permissions once one is selected. The default `GITHUB_TOKEN` can never hold these permissions.
 
 2. Save the token as a repository secret; `ADMIN_TOKEN` below.
 
@@ -62,15 +62,16 @@ The guides live in [docs/](docs/README.md), in four groups:
 
 ## Sections
 
+<!-- BEGIN GENERATED: readme-sections-table (bun run build:docs; edit src/sections/<key>/docs.ts) -->
 | Section | Endpoints | PAT permission | Undeclared default | Notes |
 |---|---|---|---|---|
 | `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs, immutable-releases, GraphQL RepositoryFeatures + UpdateRepositoryFeatures | Administration: write | untouched | Probot repository payload plus `enable_*` feature toggles; `topics` as string or list; `enable_sponsorships` and `issue_creation_policy` (`all`/`collaborators_only`) route through GraphQL - REST has no surface for them; declared fields only, undeclared siblings untouched |
 | `labels` | labels CRUD | Issues: write | deleted (settable) | upsert by name (rename via `new_name`); the delete-by-default is Probot parity |
 | `rulesets` | repo rulesets CRUD | Administration: write | kept (settable) | branch, tag, and push targets; short ref names auto-prefixed (`staging` -> `refs/heads/staging`); deletion stays an explicit opt-in |
-| `environments` | PUT environments + per-environment variables, secrets, deployment branch policies, deployment protection rules, and pins (GraphQL EnvironmentPins + PinEnvironment + ReorderEnvironment) | Environments: write; `deployment_branch_policies` and `deployment_protection_rules` additionally need Actions: read and Administration: write | untouched | reviewers, wait timer, branch-policy flags; nested `variables`, `secrets`, `deployment_branch_policies`, and `deployment_protection_rules` keys reconcile per environment, each with its own `undeclared:` knob (within a declared key, undeclared variables and branch-policy patterns are deleted; secrets and protection rules are kept); a `pinned` key pins the environment on the home page's deployments sidebar over GraphQL (declaration order sets the pin order, max 10 pins; environments without the key are never unpinned) |
+| `environments` | PUT environments + per-environment variables, secrets, deployment branch policies, deployment protection rules, and pins (GraphQL EnvironmentPins + PinEnvironment + ReorderEnvironment) | Environments: write; declared `deployment_branch_policies` and `deployment_protection_rules` keys additionally need Actions: read and Administration: write | untouched | reviewers, wait timer, branch-policy flags; nested `variables`, `secrets`, `deployment_branch_policies`, and `deployment_protection_rules` keys reconcile per environment, each with its own `undeclared:` knob (within a declared key, undeclared variables and branch-policy patterns are deleted; secrets and protection rules are kept); a `pinned` key pins the environment on the home page's deployments sidebar over GraphQL (declaration order sets the pin order, max 10 pins; environments without the key are never unpinned) |
 | `branches` | classic branch protection + required-signatures sub-endpoint + app-by-slug actor lookup + GraphQL BranchProtectionRules + BranchProtectionRepository + BranchProtectionActorUser + BranchProtectionActorTeam + CreateBranchProtectionRule + UpdateBranchProtectionRule + DeleteBranchProtectionRule | Administration: write | untouched | `protection: null` removes protection; the protection PUT drops `required_signatures`, so declare it on any branch already carrying it; `force_push_bypassers` (users, `org/team`, `app/slug`) and `required_deployments` ride the GraphQL rule mutation; wildcard entries (`release/*`) reconcile entirely through GraphQL with a fixed key set; add Contents: read so check mode can tell a missing branch from an unprotected one |
 | `autolinks` | autolinks CRUD | Administration: write | deleted (settable) | immutable upstream, so changed entries are replaced |
-| `actions` | actions permissions + selected-actions + workflow token + access level + artifact/log retention + cache limits + OIDC subject claim + fork PR policies | Administration: write; `oidc_customization_sub` alone needs Actions: write | untouched | keys with their own sub-endpoint route there; everything else rides the base permissions PUT verbatim |
+| `actions` | actions permissions + selected-actions + workflow token + access level + artifact/log retention + cache limits + OIDC subject claim + fork PR policies | Administration: write; the `oidc_customization_sub` key alone instead needs Actions: write | untouched | keys with their own sub-endpoint route there; everything else rides the base permissions PUT verbatim |
 | `actions_secrets` | actions secrets list + public-key + sealed PUT + delete | Secrets: write | kept (settable) | `{name, value: $NAME}` sealed writes, re-sent every apply; existence-only checks, values unrecoverable |
 | `dependabot_secrets` | dependabot secrets list + public-key + sealed PUT + delete | Dependabot secrets: write | kept (settable) | as `actions_secrets`, over the Dependabot secret store |
 | `codespaces_secrets` | codespaces secrets list + public-key + sealed PUT + delete | Codespaces secrets: write | kept (settable) | as `actions_secrets`, over the Codespaces secret store |
@@ -90,6 +91,7 @@ The guides live in [docs/](docs/README.md), in four groups:
 | `custom_properties` | GET/PATCH properties/values; probes GET /orgs/{owner} | Custom properties: write | kept (settable) | values of org-defined properties (definitions are org-scoped); org repos only, skipped with a notice on personal accounts; `value: null` unsets |
 | `deploy_keys` | deploy keys list/create/delete | Administration: write | kept (settable) | matched by title; the declared material is a PUBLIC key; immutable upstream, so changed entries are replaced |
 | `secret_scanning_custom_patterns` | secret-scanning custom patterns: paginated list + bulk POST + PATCH by id + bulk DELETE | Secret scanning alerts: write | kept (settable) | matched by name (immutable upstream); `state` and `push_protection_enabled` are not declarable; deletes always resolve alerts |
+<!-- END GENERATED: readme-sections-table -->
 
 The Undeclared default column says what happens to live resources the settings file does not declare; `(settable)` means the wrapped `undeclared:` form can override it per file. [The undeclared policy](docs/reference/undeclared-policy.md) covers the knob and how it layers with a multi-repo defaults file.
 
@@ -143,7 +145,7 @@ The [examples cookbook](docs/start/examples.md) is the full tour: a full-feature
 | `topics` | (empty) | Discovery-only: keep repositories carrying at least one listed topic |
 | `affiliation` | `owner` | Discovery-only: `owner`, `collaborator`, `organization_member` (comma list) |
 
-Outputs: `result` (`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear), `skipped-sections`, and `repos-result` (multi-repo mode: a JSON map of `owner/name` to `{result, source, skippedSections}`). A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](#private-repositories).
+Outputs: `result` (<!-- BEGIN GENERATED: readme-outputs (bun run build:docs; derived from REPO_RESULTS in src/engine/orchestrate.ts) -->`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear<!-- END GENERATED: readme-outputs -->), `skipped-sections`, and `repos-result` (multi-repo mode: a JSON map of `owner/name` to `{result, source, skippedSections}`). A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](#private-repositories).
 
 ## Multi-repo mode
 
@@ -179,3 +181,7 @@ The step-by-step move, including an org-scale shadow run alongside the app, is t
 ## Contributing
 
 The toolchain, the end-to-end harness, and the PR conventions are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+<!-- BEGIN GENERATED: readme-pat-url (bun run build:docs; derived from RESOURCE_SLUGS in src/sections/contract/permissions.ts) -->
+[pat-form]: https://github.com/settings/personal-access-tokens/new?name=github-settings-as-code&description=Token+for+Vivswan%2Fgithub-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&checks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read
+<!-- END GENERATED: readme-pat-url -->

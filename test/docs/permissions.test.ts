@@ -12,8 +12,8 @@ import { join } from "node:path";
 import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
 import { sectionOperations } from "../../src/sections/contract/module.js";
 import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
+import { DOCS } from "../../src/sections/docs-registry.js";
 import { allEndpoints, SECTIONS, sectionModule } from "../../src/sections/registry.js";
-import { sectionLines, tableRows } from "./markdown.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 // Flattened for matching: the pages wrap sentences across lines.
@@ -146,25 +146,24 @@ describe("write-gated section reads", () => {
 });
 
 describe("branches Contents advice", () => {
-  test("the README row and permissions.md advise the branch probe's override grant", () => {
+  test("the branches Notes cell and permissions.md advise the branch probe's override grant", () => {
     // The advisory branch-existence probe carries a Contents permission
     // override (src/sections/branches/index.ts), advised at the level the section
-    // needs on that permission - the source both prose mentions restate.
+    // needs on that permission - the source both prose mentions restate. The
+    // README row renders from the section's authored docs, pinned here at
+    // their source.
     const probe = allEndpoints()["branches.branchProbe"];
     const override = probe?.permission;
     expect(override !== undefined && override !== "none").toBe(true);
     const label = repoLabels(override as SectionPermission).join(" or ");
     const level = overrideAdviceLevel(sectionModule("branches"), override as SectionPermission);
     const advice = `${label}: ${level}`;
-    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
-    const row = tableRows(sectionLines(readme, "Sections", "README.md")).find(
-      (cells) => (cells[0] ?? "").replace(/`/g, "") === "branches",
-    );
+    const notes = DOCS.branches.readme.notes;
     expect(
-      row?.[4]?.includes(`add ${advice}`),
-      `the README branches row must advise "add ${advice}" for the probe`,
+      notes.includes(`add ${advice}`),
+      `the branches Notes cell (src/sections/branches/docs.ts) must advise "add ${advice}" for the probe`,
     ).toBe(true);
-    expect(row?.[4]).toContain("missing branch");
+    expect(notes).toContain("missing branch");
     // permissions.md restates the same advice as the Contents grant's second
     // job; the grant name, the section, and what the probe buys must match.
     expect(permissions).toContain(`The ${label} grant earns its keep twice`);

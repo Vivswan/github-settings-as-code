@@ -1,7 +1,9 @@
 /**
- * README contract tests: pin the Sections table, the schema link, the example
- * settings.yml blocks, the migration paragraph, and the version pins to their
- * single sources, so a prose claim cannot drift from what the code does.
+ * README contract tests: pin the schema link, the example settings.yml
+ * blocks, the migration paragraph, and the version pins to their single
+ * sources, so a prose claim cannot drift from what the code does. The
+ * Sections table, the outputs list, and the token-form link are generated
+ * (.github/scripts/gen-docs.ts) and pinned by that generator's tests.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -21,30 +23,14 @@ import {
   SettingsFile as SettingsFileSchema,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
-import { sectionOperations } from "../../src/sections/contract/module.js";
-import type { PatResource } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import {
-  CLAIM_FAMILY,
-  CLAIM_STEMS,
-  countWord,
-  defaultClaimProblems,
-  deleteEnumerationProblems,
-  stemNegation,
-} from "./claims.js";
+import { countWord, defaultClaimProblems, deleteEnumerationProblems } from "./claims.js";
 import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
-
-/** The Undeclared default column's display form of each undeclaredDefault. */
-const UNDECLARED_DEFAULT_DISPLAY: Record<string, string> = {
-  delete: "deleted (settable)",
-  keep: "kept (settable)",
-  untouched: "untouched",
-};
 
 /**
  * Assert the parenthesized enumeration `leadRe` captures from `text` carries
@@ -63,99 +49,6 @@ function assertBacktickedEnumeration(
   const listed = [...(parenthesized ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
   expect(listed.sort()).toEqual([...expected].sort());
 }
-
-describe("README Sections table", () => {
-  const rows = tableRows(sectionLines(readme, "Sections", "README.md"));
-
-  test("one row per section, in SECTION_KEYS order", () => {
-    const names = rows.map((cells) => (cells[0] ?? "").replace(/`/g, ""));
-    expect(names).toEqual([...SECTION_KEYS]);
-  });
-
-  test("each row's Undeclared default column derives from the section's undeclaredDefault", () => {
-    const byKey = new Map(SECTIONS.map((section) => [section.key, section]));
-    for (const cells of rows) {
-      const key = (cells[0] ?? "").replace(/`/g, "");
-      // Section | Endpoints | PAT permission | Undeclared default | Notes
-      const cell = cells[3] ?? "";
-      const section = byKey.get(key as (typeof SECTION_KEYS)[number]);
-      if (!section) {
-        throw new Error(`README Sections row "${key}" is not a section key`);
-      }
-      expect(
-        cell,
-        `README Sections row "${key}" must state "${UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault]}" in its Undeclared default column (its undeclaredDefault is "${section.undeclaredDefault}")`,
-      ).toBe(UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault] as string);
-    }
-  });
-
-  test("a knobbed row's Notes cell never claims the opposite of its undeclaredDefault", () => {
-    // The Notes column restates the default in passing ("the
-    // delete-by-default is Probot parity", "keep is the default"). Wherever a
-    // Notes cell makes such a claim - a claim-family word joined to "default"
-    // by "by" or "is/are/stays/remains the" - the effective family (negation
-    // resolved by the shared stemNegation rule from ./claims.ts, so "No
-    // labels are deleted by default" reads as keep) must be the section's
-    // own; prose that merely mentions deletion elsewhere (opt-ins, upstream
-    // behavior) carries no such joint and stays free. A cell that TALKS
-    // about the section default ("by default", "the default") without a
-    // parseable claim fails loudly, so a reworded claim cannot silently drop
-    // out of the sweep - phrases about OTHER defaults ("the org default")
-    // carry neither trigger.
-    const claimRe = new RegExp(
-      String.raw`\b(${CLAIM_STEMS})\b(?:[\s-]by[\s-]|\s+(?:is|are|stays?|remains?)\s+the\s+)default`,
-      "gi",
-    );
-    const trigger = /by[\s-]default|\bthe default\b/i;
-    const byKey = new Map(SECTIONS.map((section) => [section.key, section]));
-    for (const cells of rows) {
-      const key = (cells[0] ?? "").replace(/`/g, "");
-      const section = byKey.get(key as (typeof SECTION_KEYS)[number]);
-      if (!section || section.undeclaredDefault === "untouched") {
-        continue;
-      }
-      const cell = cells[4] ?? "";
-      const claims = [...cell.matchAll(claimRe)];
-      if (trigger.test(cell)) {
-        // Per-row tripwire: THIS row mentions its default, so at least one
-        // claim must parse here - a global counter would let one row's
-        // unrecognized grammar hide behind another row's claims.
-        expect(
-          claims.length,
-          `README Sections row "${key}" mentions a default in its Notes cell but no claim parses; reword the cell or extend the claim grammar`,
-        ).toBeGreaterThan(0);
-      }
-      for (const claim of claims) {
-        const family = CLAIM_FAMILY.delete.test(claim[1] ?? "") ? "delete" : "keep";
-        const negation = stemNegation(cell.slice(0, claim.index));
-        if ("doubleNegation" in negation) {
-          throw new Error(
-            `README Sections row "${key}": a double negation governs "${negation.doubleNegation} ${claim[1]}" in its Notes cell; reword it - double negatives are not resolved`,
-          );
-        }
-        const flipped = family === "delete" ? "keep" : "delete";
-        const effective = negation.negated ? flipped : family;
-        expect(
-          effective,
-          `README Sections row "${key}" claims "${claim[0]}"${negation.negated ? " (negated)" : ""} in its Notes cell, contradicting its "${section.undeclaredDefault}" undeclaredDefault`,
-        ).toBe(section.undeclaredDefault);
-      }
-    }
-  });
-});
-
-describe("README Outputs paragraph", () => {
-  test("the result value list names exactly the REPO_RESULTS members", () => {
-    // REPO_RESULTS (src/engine/orchestrate.ts) is the canonical value list,
-    // same as the action-yml contract test's output-description pin.
-    assertBacktickedEnumeration(
-      readme,
-      /Outputs: `result` \(([^)]*)\)/,
-      REPO_RESULTS,
-      'README must enumerate the result values in "Outputs: `result` (...)"',
-    );
-  });
-});
 
 describe("README example settings.yml blocks", () => {
   test("every settings.yml example validates and its repository keys are known", () => {
@@ -558,109 +451,6 @@ describe("forward-compatibility closed-sections claim", () => {
       if (!closed.includes(key)) {
         expect(sentence).not.toContain(`\`${key}\``);
       }
-    }
-  });
-});
-
-describe("pre-filled PAT form URL", () => {
-  /**
-   * The form URL in Usage step 1 is hand-edited and nothing else checks it,
-   * so a new PatResource could land with its query parameter forgotten and
-   * every test would stay green. The slug map is total over PatResource
-   * (satisfies enforces it), so adding a resource forces a choice here:
-   * name the form parameter, or record a null exemption with its reason.
-   * The parameter names follow the App-permissions schema where they differ
-   * from ours (webhooks -> repository_hooks, custom_properties ->
-   * repository_custom_properties, variables -> actions_variables); every
-   * non-null slug below was verified against the live token form on
-   * 2026-07-28 (each pre-selects its permission; the form drops unknown
-   * parameters silently, which is how the old variables= spelling failed).
-   */
-  const RESOURCE_SLUGS = {
-    administration: "administration",
-    issues: "issues",
-    environments: "environments",
-    actions: "actions",
-    pages: "pages",
-    // Rides the repo PATCH's security_and_analysis passthrough for setup;
-    // the alerts grant has no verified form parameter today.
-    code_scanning_alerts: null,
-    contents: "contents",
-    variables: "actions_variables",
-    webhooks: "repository_hooks",
-    secrets: "secrets",
-    dependabot_secrets: "dependabot_secrets",
-    codespaces_secrets: "codespaces_secrets",
-    custom_properties: "repository_custom_properties",
-    secret_scanning_alerts: "secret_scanning_alerts",
-    // The Copilot agents stores. Verified 2026-08-10 against GitHub's
-    // machine-readable fine-grained-PAT permission data (github/docs,
-    // src/github-apps/data/fpt-2022-11-28/fine-grained-pat-permissions.json),
-    // which keys the repository permissions for the /agents/secrets and
-    // /agents/variables endpoints as "agent_secrets"/"agent_variables" - the
-    // same vocabulary file that carries every form-verified slug above,
-    // including the three that differ from our resource names.
-    agent_secrets: "agent_secrets",
-    agent_variables: "agent_variables",
-    checks: "checks",
-  } satisfies Record<PatResource, string | null>;
-
-  test("every PAT resource's form parameter appears in the URL", () => {
-    const url = readme.match(/personal-access-tokens\/new\?[^)\s]+/)?.[0] ?? "";
-    expect(url.length).toBeGreaterThan(0);
-    for (const [resource, slug] of Object.entries(RESOURCE_SLUGS)) {
-      if (slug !== null) {
-        // Boundary-anchored: "secrets=" is a substring of
-        // "dependabot_secrets=", so a bare includes() cannot miss it.
-        expect(
-          new RegExp(`[?&]${slug}=`).test(url),
-          `the pre-filled PAT form URL lacks "${slug}=" (the ${resource} resource)`,
-        ).toBe(true);
-      }
-    }
-  });
-
-  /**
-   * Resources a section consumes whose form parameter is knowingly absent.
-   * The one source the tripwire below exempts from, asserted null in
-   * RESOURCE_SLUGS so the two cannot disagree; the WHY lives on the map
-   * entry itself.
-   */
-  const CONSUMED_WITHOUT_FORM_PARAMETER: ReadonlySet<PatResource> = new Set([
-    "code_scanning_alerts",
-  ]);
-
-  test("every resource a section permission consumes has a non-null slug", () => {
-    // A null exemption is only for resources NO section needs yet: once an
-    // operation's effective permission names the resource, real tokens need
-    // the grant and the form URL must pre-select it. sectionOperations is
-    // the flattened REST + GraphQL view with overrides resolved exactly the
-    // way the engine resolves them (endpointPermission), so neither a
-    // per-endpoint override nor a GraphQL operation's permission can slip
-    // past the sweep.
-    const consumed = new Set<PatResource>();
-    for (const section of SECTIONS) {
-      for (const operation of sectionOperations(section)) {
-        if (operation.permission === "none") {
-          continue;
-        }
-        for (const resource of operation.permission.repo) {
-          consumed.add(resource);
-        }
-      }
-    }
-    for (const resource of consumed) {
-      if (CONSUMED_WITHOUT_FORM_PARAMETER.has(resource)) {
-        expect(
-          RESOURCE_SLUGS[resource],
-          `"${resource}" is exempted by CONSUMED_WITHOUT_FORM_PARAMETER, so its RESOURCE_SLUGS entry must stay null`,
-        ).toBeNull();
-        continue;
-      }
-      expect(
-        RESOURCE_SLUGS[resource],
-        `the "${resource}" resource is consumed by a section but RESOURCE_SLUGS exempts it; verify its form parameter and name it`,
-      ).not.toBeNull();
     }
   });
 });

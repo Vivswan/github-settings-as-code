@@ -58,6 +58,40 @@ const RESOURCE_LABEL_ORG: Record<NonNullable<SectionPermission["org"]>, string> 
   members: "Members",
 };
 
+// Each PAT resource's query parameter on GitHub's pre-filled token form (the README link, in this
+// order); total over PatResource, so a new resource names its parameter or records a null exemption.
+export const RESOURCE_SLUGS: Record<PatResource, string | null> = {
+  // The parameter names follow the App-permissions schema where they differ from ours; every
+  // non-null slug below was verified against the live token form on 2026-07-28 (each pre-selects
+  // its permission; the form drops unknown parameters silently, which is how the old variables= spelling failed).
+  administration: "administration",
+  issues: "issues",
+  environments: "environments",
+  pages: "pages",
+  actions: "actions",
+  variables: "actions_variables",
+  webhooks: "repository_hooks",
+  checks: "checks",
+  secrets: "secrets",
+  dependabot_secrets: "dependabot_secrets",
+  codespaces_secrets: "codespaces_secrets",
+  // The Copilot agents stores. Verified 2026-08-10 against GitHub's
+  // machine-readable fine-grained-PAT permission data (github/docs,
+  // src/github-apps/data/fpt-2022-11-28/fine-grained-pat-permissions.json),
+  // which keys the repository permissions for the /agents/secrets and
+  // /agents/variables endpoints as "agent_secrets"/"agent_variables" - the
+  // same vocabulary file that carries every form-verified slug above,
+  // including the three that differ from our resource names.
+  agent_secrets: "agent_secrets",
+  agent_variables: "agent_variables",
+  custom_properties: "repository_custom_properties",
+  secret_scanning_alerts: "secret_scanning_alerts",
+  contents: "contents",
+  // Rides the repo PATCH's security_and_analysis passthrough for setup;
+  // the alerts grant has no verified form parameter today.
+  code_scanning_alerts: null,
+};
+
 /**
  * Render a SectionPermission into the grant prose used verbatim in
  * permission errors. `caveat`, when given, is appended after "; ". `access`

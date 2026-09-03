@@ -14,10 +14,11 @@
     "test": "bun test",
     "test:e2e": "bun test/e2e/run.ts",
     "fuzz": "bun test/e2e/fuzz.ts",
-    "build": "bun run build:bundle && bun run build:schema",
+    "build": "bun run build:bundle && bun run build:schema && bun run build:docs",
     "build:bundle": "bun build src/main.ts --target=node --outfile lib/index.js",
     "build:schema": "bun .github/scripts/gen-settings-schema.ts",
-    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep .",
+    "build:docs": "bun .github/scripts/gen-docs.ts",
+    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep . && bun run build:docs && git diff --exit-code README.md && ! git ls-files --others --exclude-standard README.md | grep .",
     "prepare": "lefthook install"
   },
   "dependencies": {

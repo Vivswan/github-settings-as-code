@@ -1,14 +1,16 @@
 # Repo-owned auto-fix: the commit-back fixes a PR can need. Main carries no
 # bundle (lib/index.js is built where it runs), so no bundle rebuilds happen
-# here; two fixes remain. lib/settings.schema.json is a committed build
+# here; three fixes remain. lib/settings.schema.json is a committed build
 # artifact, and CI fails when it drifts from src/ or the generator toolchain
 # (a Dependabot generator bump changes the schema bytes on a branch nobody
-# builds). src/upstream-gaps/ holds tripwire files that turn the typecheck
+# builds). README.md carries generated regions (the Sections table, the
+# outputs list, the token-form link) that build:docs renders from the section
+# declarations, and CI fails when they drift. src/upstream-gaps/ holds tripwire files that turn the typecheck
 # red with TS2344 the moment @octokit/types ships a route a gap file declares
 # as missing; graduate-upstream-gaps.ts retires the shipped files (deleting
 # spec-documented ones, rewriting spec-lagging ones to spec-only gaps) and
 # regenerates the gaps index. This workflow runs the graduation and the schema
-# regeneration on every same-repo PR that touches a fix input and pushes the
+# and docs regeneration on every same-repo PR that touches a fix input and pushes the
 # result back to the PR branch; an already-clean tree gets no commit. A PR
 # with unrelated type errors fails the build job here by design (the
 # graduation script refuses to half-fix a red build), just as it fails CI's
@@ -17,7 +19,7 @@
 # Unlike dependabot-bun-lockfile.yml, regenerating the schema necessarily
 # executes PR-controlled code, so the fix is computed in an unprivileged job
 # and handed to the push job as a git patch staged from
-# lib/settings.schema.json and src/upstream-gaps/ only: no code from the PR
+# lib/settings.schema.json, README.md, and src/upstream-gaps/ only: no code from the PR
 # runs on the runner that holds the write token, applying a patch executes
 # nothing, and the push job re-checks the applied paths before committing.
 # --ignore-scripts keeps lefthook (the prepare script) and dependency lifecycle
@@ -40,6 +42,7 @@ on:
     paths:
       - "src/**"
       - "lib/settings.schema.json"
+      - "README.md"
       - "package.json"
       - "bun.lock"
       - "tsconfig.json"
@@ -47,6 +50,7 @@ on:
       - ".github/scripts/gen-settings-schema.ts"
       - ".github/scripts/graduate-upstream-gaps.ts"
       - ".github/scripts/gen-gaps-index.ts"
+      - ".github/scripts/gen-docs.ts"
 
 permissions:
   contents: read
@@ -91,16 +95,21 @@ jobs:
           else
             echo "graduate script not on this branch; skipping"
           fi
-      - name: Regenerate the schema and stage the fix patch
+      - name: Regenerate the schema and docs and stage the fix patch
         id: rebuild
         shell: bash
         run: |
           bun run build:schema
+          # Old branches cut before the docs generator landed lack the
+          # script; the schema regeneration above still runs for them.
+          if [ -f .github/scripts/gen-docs.ts ]; then
+            bun run build:docs
+          fi
           # Anything the earlier steps left staged is not this workflow's
           # fix: start from an empty index so the patch holds exactly the
           # allowed paths.
           git reset -q
-          git add -A -- lib/settings.schema.json
+          git add -A -- lib/settings.schema.json README.md
           # Old branches cut before the gaps directory landed lack it, and
           # an unmatched pathspec would fail the add.
           if [ -d src/upstream-gaps ]; then
@@ -178,14 +187,14 @@ jobs:
           git apply --index --binary "$RUNNER_TEMP/autofix/autofix.patch"
           # The patch was cut on a runner PR code had run on, so treat it
           # as untrusted: refuse to commit anything it staged outside the
-          # two fix-owned paths. --no-renames keeps a staged rename listed
+          # three fix-owned paths. --no-renames keeps a staged rename listed
           # as its delete and add halves, so a rename OUT of a protected
           # path cannot hide behind an allowed destination.
           while IFS= read -r -d '' path; do
             case "$path" in
-              lib/settings.schema.json | src/upstream-gaps/*) ;;
+              lib/settings.schema.json | README.md | src/upstream-gaps/*) ;;
               *)
-                echo "::error::the fix patch staged '$path', outside lib/settings.schema.json and src/upstream-gaps/; refusing to push"
+                echo "::error::the fix patch staged '$path', outside lib/settings.schema.json, README.md, and src/upstream-gaps/; refusing to push"
                 exit 1
                 ;;
             esac
@@ -197,6 +206,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           subject="build: regenerate settings schema"
+          # A patch that stages nothing but README.md is docs drift alone.
+          if git diff --cached --quiet -- lib/settings.schema.json src/upstream-gaps/; then
+            subject="docs: regenerate generated docs"
+          fi
           if [ "$PRUNED" = "true" ]; then
             subject="fix: graduate upstream gaps octokit now ships"
           fi
