@@ -8,7 +8,7 @@
  * move, the tamper stops, the major move, and the boundary anchor.
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +21,10 @@ import {
   retagMajor,
   verifyPublishedRefs,
 } from "../../.github/scripts/release-pipeline.js";
+
+// Nearly every test here shells out to git dozens of times; bun's 5s default
+// times out under parallel machine load (setDefaultTimeout is file-scoped).
+setDefaultTimeout(30_000);
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();

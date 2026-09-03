@@ -118,10 +118,11 @@ describe("throttle plugin honors the test knob", () => {
     for (let i = 0; i < 12; i++) {
       await client.tryRequest("PATCH", `/repos/o/r${i}`, { i });
     }
-    // 12 production-spaced writes would take ~12s; the knob must keep it well
-    // under a second (generous bound to stay non-flaky on a loaded CI box).
-    expect(Date.now() - started).toBeLessThan(2000);
-  });
+    // Production spacing floors at ~11s (eleven 1000ms gaps), so 8s still
+    // discriminates; the band is wide because a loaded machine can starve
+    // even stubbed awaits for seconds (2s flaked under parallel gate runs).
+    expect(Date.now() - started).toBeLessThan(8000);
+  }, 30_000); // Lets a broken (production-spaced, ~11s) run reach the elapsed assertion.
 
   test("without the knob the throttle plugin stays enabled (429s are retried)", async () => {
     delete process.env.RETRY_BASE_MS;
@@ -156,9 +157,11 @@ describe("throttle plugin honors the test knob", () => {
     const result = await client.tryRequest("GET", "/rl");
     expect(state.calls).toBe(2);
     expect("data" in result && result.data).toEqual({ ok: true });
-    // The 30s header did not pace recovery; the quadratic backoff kept it fast.
-    expect(Date.now() - started).toBeLessThan(2000);
-  });
+    // Honoring the 30s header would floor recovery at 30s, so 10s still
+    // discriminates; the band is wide because a loaded machine can starve
+    // even stubbed awaits for seconds (2s flaked under parallel gate runs).
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 60_000); // Lets a broken (header-honoring, ~30s) run reach the elapsed assertion.
 });
 
 describe("response shaping", () => {
