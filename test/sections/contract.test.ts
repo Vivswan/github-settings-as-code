@@ -177,14 +177,19 @@ describe("readGating", () => {
     expect(writeGatedReads(withEndpoints({ get: plainGet, put }))).toEqual([]);
   });
 
-  test("the registered sections agree: Codespaces secrets is the write-gated one", () => {
+  test("the registered sections agree on which reads GitHub gates at write", () => {
     // The fuzz oracle and the permissions docs both read this classification;
-    // the README's PAT-form and check-mode prose pin the human side.
+    // interaction_limits mixes its plain base-limit GET with the gated cap
+    // and bypass-list GETs (GitHub's fine-grained permission table).
     const gated = SECTIONS.filter((s) => readGating(s) !== "plain").map((s) => [
       s.key,
       readGating(s),
     ]);
-    expect(gated).toEqual([["codespaces_secrets", "write-gated"]]);
+    expect(gated).toEqual([
+      ["codespaces_secrets", "write-gated"],
+      ["code_quality_setup", "write-gated"],
+      ["interaction_limits", "mixed"],
+    ]);
   });
 });
 

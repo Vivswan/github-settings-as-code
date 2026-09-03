@@ -41,6 +41,9 @@ describe("always-rewrite lockstep (endpoint flag <-> mock state families)", () =
       "codespaces_secrets.put": "codespaces_secrets",
       "agents_secrets.put": "agents_secrets",
       "environments.putSecret": "environment_secrets",
+      "interaction_limits.put": "interaction_limits",
+      "repository.lfsPut": null,
+      "repository.lfsRemove": null,
     });
   });
 });
@@ -119,7 +122,32 @@ describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)",
     const failures = missingSecondApplyRewrites([secretPut], []);
     expect(failures).toHaveLength(1);
     expect(failures[0]).toContain("actions/secrets/DEPLOY_TOKEN");
-    expect(failures[0]).toContain("re-written on EVERY apply");
+    expect(failures[0]).toContain("re-issued on EVERY apply");
+  });
+
+  test("a same-path write in the other direction is not a re-issue", () => {
+    // The Git LFS toggle's PUT and DELETE share one path: a second apply
+    // that disabled what the first enabled must fire, not pass.
+    const lfs = "/repos/e2e-owner/e2e-repo/lfs";
+    const failures = missingSecondApplyRewrites([write("PUT", lfs)], [write("DELETE", lfs)]);
+    // Both directions fire: the PUT was dropped and the DELETE is new work.
+    expect(failures).toHaveLength(2);
+    expect(failures[0]).toContain(`DELETE ${lfs} 0 time(s) and the second 1`);
+    expect(failures[1]).toContain(`PUT ${lfs} 1 time(s) and the second 0`);
+    expect(missingSecondApplyRewrites([write("PUT", lfs)], [write("PUT", lfs)])).toEqual([]);
+    // Counted, not set-compared: a write the first apply issued twice must
+    // recur exactly twice - one fewer dropped a write, one more did new work.
+    expect(
+      missingSecondApplyRewrites([write("PUT", lfs), write("PUT", lfs)], [write("PUT", lfs)]),
+    ).toHaveLength(1);
+    expect(
+      missingSecondApplyRewrites([write("PUT", lfs)], [write("PUT", lfs), write("PUT", lfs)]),
+    ).toHaveLength(1);
+    // The query string is part of the identity: a differing one is a
+    // different request, a matching one is the re-issue.
+    const withQuery = (query: string): LoggedRequest => ({ ...write("PUT", lfs), query });
+    expect(missingSecondApplyRewrites([withQuery("a=1")], [withQuery("a=2")])).toHaveLength(2);
+    expect(missingSecondApplyRewrites([withQuery("a=1")], [withQuery("a=1")])).toEqual([]);
   });
 
   test("a re-issued secret PUT passes; other sections' writes never bind", () => {

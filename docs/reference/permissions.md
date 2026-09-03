@@ -26,6 +26,8 @@ The exceptions to check mode's read-only rule:
 
 <!-- BEGIN GENERATED: permissions-gated-reads (bun run build:action-docs; derived from the section endpoints' accessGrade overrides) -->
 - GitHub gates even the Codespaces secrets reads at write, so `codespaces_secrets` needs its write grant in check mode too.
+- GitHub gates even the Administration reads at write, so `code_quality_setup` needs its write grant in check mode too.
+- GitHub gates the `GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap` and `GET /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list` reads at write, so `interaction_limits` needs its Administration write grant in check mode to verify what they return.
 <!-- END GENERATED: permissions-gated-reads -->
 - The `private-report` issue channels can write even in check mode (`issue` writes its report issue on every run; `issue-on-failure` opens it on drift and closes it on recovery), which takes the Issues grant.
 

@@ -10,23 +10,21 @@ import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { type EndpointDecl, expand } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
-import {
-  beginRun,
-  loosen,
-  requirePlainMapping,
-  type SectionModule,
-  type SectionResult,
-} from "../contract/module.js";
+import { loosen, requirePlainMapping, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { call, tryCall } from "../contract/requests.js";
+import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
 import { CodeQualitySetupConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
 const ENDPOINTS = {
+  // GitHub gates this READ at write (the Codespaces secrets precedent), so a
+  // read-only token is denied it.
   get: {
     route: "GET /repos/{owner}/{repo}/code-quality/setup",
     statuses: { 200: "the current code quality setup configuration" },
+    primaryRead: { notFound: "denied" },
+    accessGrade: "write",
   },
   update: {
     route: "PATCH /repos/{owner}/{repo}/code-quality/setup",
@@ -55,34 +53,39 @@ export const codeQualitySetupSection = {
     "a 403 on this endpoint can also mean code quality is unavailable on the repository, or the repository is archived",
   endpoints: ENDPOINTS,
   shape: requirePlainMapping(loosen(CodeQualitySetupConfig)),
-  async run(ctx, declared): Promise<SectionResult> {
-    const run = beginRun(ctx);
+  async plan(ctx, declared) {
     const desired: Record<string, unknown> = declared;
-
-    if (run.check) {
-      const live = await call(ctx, this, ENDPOINTS.get);
-      run.result.drift.push(...subsetDiff(desired, live, "code_quality_setup"));
-      return run.result;
+    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
+    const drift = subsetDiff(desired, await ctx.read.get.call(), "code_quality_setup");
+    if (hasDrift(drift)) {
+      plan.ops.push({
+        role: "update",
+        payload: plainData(desired),
+        drift,
+        // A 409 (a configuration run is already in progress) gets accurate
+        // advice instead of throwFor's generic fix-the-file text; it is a
+        // declared status of this endpoint, so the tolerance can name it.
+        tolerate: {
+          statuses: [409],
+          outcome: (error) => ({
+            failure: `code_quality_setup: PATCH ${expand(ENDPOINTS.update, ctx)}: ${error.status} ${error.message}. A code quality configuration run is already in progress on the repository; re-run the workflow after it finishes`,
+          }),
+        },
+        change: (response) => {
+          const configurationRun = parseLive(
+            this,
+            ENDPOINTS.update,
+            LiveConfigurationRun,
+            response,
+          );
+          if (configurationRun?.run_id === undefined) {
+            return "applied code quality setup";
+          }
+          const url = configurationRun.run_url ? ` (${configurationRun.run_url})` : "";
+          return `applied code quality setup; GitHub started configuration run ${configurationRun.run_id}${url} to roll it out, and the settings take effect when it finishes`;
+        },
+      });
     }
-
-    // Tolerate a 409 (a configuration run is already in progress) so it
-    // gets accurate advice instead of throwFor's generic fix-the-file text;
-    // 409 is a declared status of this endpoint, so it is tolerated by default.
-    const patch = await tryCall(ctx, this, ENDPOINTS.update, { payload: desired });
-    if ("error" in patch) {
-      throw new Error(
-        `code_quality_setup: PATCH ${expand(ENDPOINTS.update, ctx)}: ${patch.error.status} ${patch.error.message}. A code quality configuration run is already in progress on the repository; re-run the workflow after it finishes`,
-      );
-    }
-    const configurationRun = parseLive(this, ENDPOINTS.update, LiveConfigurationRun, patch.data);
-    if (configurationRun?.run_id !== undefined) {
-      const url = configurationRun.run_url ? ` (${configurationRun.run_url})` : "";
-      run.result.changes.push(
-        `applied code quality setup; GitHub started configuration run ${configurationRun.run_id}${url} to roll it out, and the settings take effect when it finishes`,
-      );
-    } else {
-      run.result.changes.push("applied code quality setup");
-    }
-    return run.result;
+    return plan;
   },
-} satisfies SectionModule<"code_quality_setup">;
+} satisfies SectionModule<"code_quality_setup", typeof ENDPOINTS>;

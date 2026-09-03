@@ -1,10 +1,10 @@
 name: repository-pvr-disable
 description: >
   Declaring enable_private_vulnerability_reporting false against a repo where it
-  is live enabled issues the disabling DELETE and reports the change. The plan's
-  404/422 "not applicable" variant is not expressible today: the mock always
-  answers this endpoint 200, so a 404/422 response needs mock fault injection
-  (tracked separately). This covers the disable path that is expressible now.
+  is live enabled issues the disabling DELETE and reports the change. The
+  DELETE's tolerated 404/422 ("not applicable, so already off") is not
+  reachable through this mock, which answers the DELETE 204 on an enabled
+  feature; the section's unit test pins that tolerance instead.
 settings:
   repository:
     enable_private_vulnerability_reporting: false

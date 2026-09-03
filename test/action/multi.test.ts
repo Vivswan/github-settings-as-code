@@ -144,7 +144,12 @@ describe("runMulti", () => {
   });
 
   test("defaults-file merges under a central per-repo file", async () => {
-    const api = new MockApi({}).allowMutations("PATCH /repos/viv/api", "PATCH /repos/octo/web");
+    // Both live repos diverge from every declared field, so the merged
+    // document's PATCH carries the per-repo key and the defaults key alike.
+    const api = new MockApi({
+      "GET /repos/viv/api": { data: { has_wiki: true, has_projects: true } },
+      "GET /repos/octo/web": { data: { has_wiki: true, has_projects: true } },
+    }).allowMutations("PATCH /repos/viv/api", "PATCH /repos/octo/web");
     const { io } = captureIo();
     const { fatal, targets } = await runMulti(
       api,
@@ -159,8 +164,16 @@ describe("runMulti", () => {
     expect(fatal).toBeNull();
     expect(targets.map((t) => t.display).sort()).toEqual(["octo/web", "viv/api"]);
     // viv/api declares has_wiki; defaults add has_projects; both PATCHed.
-    const patch = api.calls.find((c) => c.method === "PATCH" && c.path === "/repos/viv/api");
-    expect(patch?.payload).toEqual({ has_wiki: false, has_projects: false });
+    // octo/web declares nothing of its own, so it gets the defaults alone.
+    const patches = api
+      .mutations()
+      .filter((m) => m.method === "PATCH")
+      .map((m) => [m.path, m.payload])
+      .sort();
+    expect(patches).toEqual([
+      ["/repos/octo/web", { has_projects: false }],
+      ["/repos/viv/api", { has_wiki: false, has_projects: false }],
+    ]);
   });
 
   test("no targets at all is a fatal config error", async () => {

@@ -37,6 +37,7 @@ import {
   presenceLiveState,
   redactionPlaceholder,
   type ScenarioMeta,
+  SECTION_FAULT_FIXTURE,
   SECTION_PRIMARY_READ,
   scenarioSecretEnv,
   UNFAULTABLE_APPLY_SETTINGS,
@@ -1379,8 +1380,11 @@ async function sectionFaultIteration(seed: number): Promise<IterationResult> {
 /** Build and run one section-fault scenario per the plan. */
 async function faultedSectionRun(seed: number, plan: SectionFaultPlan): Promise<IterationResult> {
   const rng = new Rng(seed).fork("fault-scenario");
+  // A key-gated section declares the fixture that makes its primary read
+  // fire; every other section's document is drawn like any iteration's.
   const settings: Record<string, unknown> = {
-    [plan.section]: genSettings(rng.fork("settings"), plan.section),
+    [plan.section]:
+      SECTION_FAULT_FIXTURE[plan.section] ?? genSettings(rng.fork("settings"), plan.section),
   };
   const liveKinds: NonNullable<ScenarioMeta["liveKinds"]> = {};
   // Presence live state first (a declared workflow whose file is absent would

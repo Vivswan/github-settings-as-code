@@ -72,6 +72,8 @@ One token note for this workflow. Repository secrets are readable from any workf
 The read-only rule has exceptions, each a section to drop from the preview or grant at write:
 
 - GitHub gates even the Codespaces secrets reads at write, so `codespaces_secrets` needs its write grant in check mode too.
+- GitHub gates even the Administration reads at write, so `code_quality_setup` needs its write grant in check mode too.
+- GitHub gates the `GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap` and `GET /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list` reads at write, so `interaction_limits` needs its Administration write grant in check mode to verify what they return.
 <!-- END GENERATED: check-mode-gated-reads -->
 
 ## What a "cannot verify" note means

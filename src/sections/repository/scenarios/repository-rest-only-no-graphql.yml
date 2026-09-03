@@ -3,11 +3,12 @@
 # passthrough PATCH and the endpoint-backed toggle do the whole job, and
 # the never list pins zero GraphQL requests of any kind (every resolved
 # operation renders "GRAPHQL <opName>", so the bare "GRAPHQL " prefix
-# forbids them all; an unresolved request renders "POST /graphql").
+# forbids them all; an unresolved request renders "POST /graphql"). The
+# declared has_issues diverges from the mock's default so the PATCH is due.
 name: repository-rest-only-no-graphql
 settings:
   repository:
-    has_issues: true
+    has_issues: false
     enable_vulnerability_alerts: true
 token_permissions:
   administration: write

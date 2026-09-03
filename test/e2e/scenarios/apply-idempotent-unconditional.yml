@@ -5,13 +5,14 @@
 # would contradict it. apply-idempotent-mixed carries the compare-before-write
 # sections plus rulesets and environments; the secrets *-apply-converges
 # scenarios carry the four secret sections and webhooks. This scenario covers
-# the rest: each section here writes unconditionally, so the second apply must
-# write to every one of them again while leaving the mock state byte-identical,
-# and the final check run reads back clean.
+# the rest: every false-listed section here must be written again by the
+# second apply with byte-identical mock state (repository and interaction_limits
+# through their alwaysRewrite writes), and the true-listed ones stay write-quiet.
 name: apply-idempotent-unconditional
 settings:
   repository:
     description: unconditional PATCH witness
+    enable_git_lfs: true
   branches:
     - name: main
       protection:
@@ -41,8 +42,8 @@ settings:
     expiry: one_week
 owner_kind: org
 live_state:
-  # A live Pages site, so both applies take the unconditional update PUT (a
-  # create would be a POST whose body needs source and build_type instead).
+  # A live Pages site, so the first apply takes the update PUT (a create
+  # would be a POST whose body needs source and build_type instead).
   pages:
     url: https://api.github.com/repos/e2e-owner/e2e-repo/pages
     build_type: workflow

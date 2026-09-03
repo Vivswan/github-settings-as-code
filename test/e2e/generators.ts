@@ -729,25 +729,15 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
 // --- Fault-target catalog (fault-mode fuzz) ---------------------------------
 
 /**
- * The one read each section issues UNCONDITIONALLY - in BOTH modes - whenever
- * the section is declared, as the "section.role" fault key the mock accepts.
- * A fault aimed here is guaranteed to fire, which the fuzz iteration's
- * faultsFired assertion turns into a non-vacuity proof. Sections whose first
- * read is conditional or check-mode-only are deliberately absent: repository,
- * environments, code_scanning_default_setup, and code_quality_setup read
- * only under check (apply
- * writes unconditionally; environments' variables list additionally fires
- * only when an entry declares the nested key, and its GraphQL pins read
- * only when an entry declares pinned), branches/actions/
- * interaction_limits gate their reads on the
- * declared keys (interaction_limits' base read is also check-mode-only; its
- * cap and bypass reads fire only when those keys are declared), and
- * check_suite_preferences declares no read endpoint at all - a fault
- * aimed at a read that never happens would fail the
- * non-vacuity assertion instead of testing anything.
+ * The one read each section issues in BOTH modes under the fault batteries'
+ * document (SECTION_FAULT_FIXTURE for the key-gated ones), so a fault aimed
+ * there is guaranteed to fire; the sections in UNFAULTABLE_SECTIONS have none.
  */
 export const SECTION_PRIMARY_READ = {
+  repository: "repository.get",
   labels: "labels.list",
+  actions: "actions.getWorkflow",
+  interaction_limits: "interaction_limits.get",
   rulesets: "rulesets.list",
   autolinks: "autolinks.list",
   workflows: "workflows.list",
@@ -755,6 +745,8 @@ export const SECTION_PRIMARY_READ = {
   teams: "teams.org",
   milestones: "milestones.list",
   pages: "pages.get",
+  code_scanning_default_setup: "code_scanning_default_setup.get",
+  code_quality_setup: "code_quality_setup.get",
   actions_variables: "actions_variables.list",
   actions_secrets: "actions_secrets.list",
   dependabot_secrets: "dependabot_secrets.list",
@@ -773,24 +765,35 @@ export const SECTION_PRIMARY_READ = {
 export type FaultableSection = keyof typeof SECTION_PRIMARY_READ;
 
 /**
- * The sections deliberately absent from SECTION_PRIMARY_READ (the reasons are
- * in its doc). Together the two lists must cover every SectionKey: a NEW
- * section that lands unclassified fails this exhaustiveness check instead of
- * silently escaping fault fuzzing.
+ * The fault batteries' document for a section whose reads are each gated on
+ * a declared key, so its SECTION_PRIMARY_READ fires for certain; sections
+ * absent here read unconditionally, so their document stays random.
+ */
+export const SECTION_FAULT_FIXTURE: {
+  // The real section config types, so a typo'd key here fails typecheck
+  // instead of silently leaving the primary read cold.
+  readonly [K in FaultableSection]?: NonNullable<SettingsFile[K]>;
+} = {
+  actions: { default_workflow_permissions: "read" },
+  interaction_limits: { limit: "collaborators_only", expiry: "one_week" },
+};
+
+/**
+ * The sections whose reads all stay COLD in a trigger-avoiding apply (their
+ * reads run only under check or under keys the battery omits); the negative
+ * battery proves it. With SECTION_PRIMARY_READ this must cover every SectionKey.
  */
 export const UNFAULTABLE_SECTIONS = [
-  "repository",
   "branches",
   "environments",
-  "actions",
   "check_suite_preferences",
-  "code_scanning_default_setup",
-  "code_quality_setup",
-  "interaction_limits",
 ] as const satisfies readonly SectionKey[];
 export type UnfaultableSection = (typeof UNFAULTABLE_SECTIONS)[number];
+
 type FaultClassified = FaultableSection | UnfaultableSection;
 type _UnclassifiedFaultSection = MustBeNever<Exclude<SectionKey, FaultClassified>>;
+// And disjoint: a section cannot both carry a guaranteed read and be exempt.
+type _DoublyClassifiedFaultSection = MustBeNever<Extract<FaultableSection, UnfaultableSection>>;
 
 /**
  * Trigger-avoiding apply settings, one entry per UNFAULTABLE_SECTIONS member
@@ -811,18 +814,6 @@ export const UNFAULTABLE_APPLY_SETTINGS: {
   // instead of silently shrinking the battery's declared width.
   [K in UnfaultableSection]: NonNullable<SettingsFile[K]>;
 } = {
-  // Apply PATCHes the base fields, PUTs topics, and toggles every declared
-  // feature unconditionally; the section GET and each toggle's GET run only
-  // in check mode, so every readable toggle is declared here.
-  repository: {
-    description: "unfaultable battery",
-    topics: ["fuzz-topic"],
-    enable_vulnerability_alerts: true,
-    enable_automated_security_fixes: true,
-    enable_private_vulnerability_reporting: true,
-    enable_immutable_releases: true,
-    enable_git_lfs: true,
-  },
   // getProtection probes only for a `protection: null` removal, and the
   // advisory branchProbe runs only inside that check-mode probe; a declared
   // (non-null) protection is PUT unconditionally and the signatures toggle
@@ -833,52 +824,11 @@ export const UNFAULTABLE_APPLY_SETTINGS: {
   // protection rules), and the GraphQL pins read only when an entry declares
   // pinned - so those all stay deliberately undeclared.
   environments: [{ name: "prod", wait_timer: 30 }],
-  // Every endpoint group PUTs unconditionally in apply mode and its GET runs
-  // only under check, so every group with a GET is declared.
-  actions: {
-    enabled: true,
-    allowed_actions: "selected",
-    selected_actions: { github_owned_allowed: true, verified_allowed: true },
-    default_workflow_permissions: "read",
-    can_approve_pull_request_reviews: false,
-    access_level: "none",
-    artifact_and_log_retention: { days: 90 },
-    cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
-    oidc_customization_sub: { use_default: true },
-    fork_pr_contributor_approval: { approval_policy: "first_time_contributors" },
-    fork_pr_workflows_private_repos: {
-      run_workflows_from_fork_pull_requests: false,
-      send_write_tokens_to_workflows: false,
-      send_secrets_and_variables: false,
-      require_approval_for_fork_pr_workflows: true,
-    },
-  },
-  // The default-setup GET runs only in check mode; apply PATCHes directly.
-  code_scanning_default_setup: {
-    state: "configured",
-    query_suite: "default",
-    languages: ["javascript-typescript"],
-    threat_model: "remote",
-  },
-  // The setup GET runs only in check mode; apply PATCHes directly,
-  // mirroring code_scanning_default_setup.
-  code_quality_setup: {
-    state: "configured",
-    languages: ["javascript-typescript"],
-    runner_type: "standard",
-    ai_findings_option: "disabled",
-  },
   // The strongest member: the section declares NO read endpoint at all, so
   // the battery has nothing to arm and the exemption holds by construction.
   check_suite_preferences: {
     auto_trigger_checks: [{ app_id: 15368, setting: false }],
   },
-  // The base-limit GET runs only in check mode; apply re-arms via PUT. The
-  // pull_request_creation_cap and pull_request_creation_bypass keys are
-  // deliberately omitted: each triggers its own GET in apply mode too
-  // (compare-before-write within the key), the environments precedent of
-  // read-triggering keys left out of the battery.
-  interaction_limits: { limit: "collaborators_only", expiry: "one_week" },
 };
 
 /**

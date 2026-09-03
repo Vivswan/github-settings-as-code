@@ -1,7 +1,6 @@
-# Git LFS has no read endpoint, so apply asserts the declared state blindly:
-# true issues the PUT (202, GitHub processes it asynchronously). The
-# convergence rerun can only emit the cannot-verify note - no drift - so the
-# run converges by construction.
+# Git LFS has no read endpoint, so true issues the PUT (202) on EVERY apply
+# (alwaysRewrite). The check-mode convergence rerun renders only the
+# cannot-verify note, no drift, so the run converges by construction.
 name: repository-lfs-enable-apply
 settings:
   repository:

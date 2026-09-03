@@ -262,31 +262,35 @@ export function corpusUnwitnessedUnconditionalSections(): string[] {
 }
 
 /**
- * The always-rewrite half of the idempotence proof: every secret PUT the
- * first apply issued must be issued AGAIN by the second apply, path for path.
- * Which PUTs bind comes from the EndpointDecl `alwaysRewrite` flag (resolved
- * per logged request via endpointForRequest), so the obligation lives on the
- * declaration - per endpoint, not per section, since environments carries a
- * passthrough PUT and always-rewrite secret PUTs side by side. Derived from
- * OBSERVED first-run writes - not from the declared settings - so permission
- * masks, section allowlists, and the defaults merge need no re-modeling
- * here: whatever gating let the first PUT through applies identically to the
- * second run. Exported for direct testing, so the assertion is provably able
- * to fire.
+ * The always-rewrite half of the idempotence proof: every write the first
+ * apply issued on an `alwaysRewrite` endpoint (resolved per logged request)
+ * must recur on the second, request line for request line and count for count.
  */
 export function missingSecondApplyRewrites(
   firstWrites: LoggedRequest[],
   secondWrites: LoggedRequest[],
 ): string[] {
-  const isAlwaysRewritePut = (request: LoggedRequest): boolean =>
+  // The request line (method, path, query) and its count are the identity:
+  // a same-path DELETE is not a re-issued PUT, and N writes must recur N
+  // times. The body is excluded: a sealed ciphertext differs per seal.
+  const isAlwaysRewrite = (request: LoggedRequest): boolean =>
     endpointForRequest(request.method, request.pathname)?.alwaysRewrite === true;
-  const secondPuts = new Set(secondWrites.filter(isAlwaysRewritePut).map((r) => r.pathname));
-  return [...new Set(firstWrites.filter(isAlwaysRewritePut).map((r) => r.pathname))]
-    .filter((pathname) => !secondPuts.has(pathname))
+  const counts = (writes: LoggedRequest[]): Map<string, number> => {
+    const tally = new Map<string, number>();
+    for (const request of writes.filter(isAlwaysRewrite)) {
+      const key = renderRequest(request, true);
+      tally.set(key, (tally.get(key) ?? 0) + 1);
+    }
+    return tally;
+  };
+  const first = counts(firstWrites);
+  const second = counts(secondWrites);
+  return [...new Set([...first.keys(), ...second.keys()])]
+    .filter((request) => (first.get(request) ?? 0) !== (second.get(request) ?? 0))
     .sort()
     .map(
-      (pathname) =>
-        `apply-idempotence: the first apply wrote PUT ${pathname} but the second did not; declared secrets are re-sealed and re-written on EVERY apply (rotation propagation)`,
+      (request) =>
+        `apply-idempotence: the first apply wrote ${request} ${first.get(request) ?? 0} time(s) and the second ${second.get(request) ?? 0}; an alwaysRewrite endpoint is re-issued on EVERY apply by declaration (a sealed secret cannot be read back, a self-expiring limit is re-armed, an unreadable toggle is re-asserted)`,
     );
 }
 

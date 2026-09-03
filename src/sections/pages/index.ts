@@ -5,9 +5,9 @@
 
 import { subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { beginRun, loosen, type SectionModule, type SectionResult } from "../contract/module.js";
+import { loosen, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { call, probeAbsent } from "../contract/requests.js";
+import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
 import { PagesConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["pages"] };
@@ -16,6 +16,7 @@ const ENDPOINTS = {
   get: {
     route: "GET /repos/{owner}/{repo}/pages",
     statuses: { 200: "the Pages site", 404: "Pages is not enabled on the repository" },
+    primaryRead: { notFound: "absent" },
   },
   create: { route: "POST /repos/{owner}/{repo}/pages", statuses: { 201: "Pages enabled" } },
   update: {
@@ -65,12 +66,12 @@ export const pagesSection = {
   // The handler dereferences source.path before the API sees it, so the
   // shape must catch source: null or a source without a branch.
   shape: loosen(PagesConfig),
-  async run(ctx, desired): Promise<SectionResult> {
-    const run = beginRun(ctx);
+  async plan(ctx, desired) {
+    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     // The probe stays the discriminated union probeAbsent returns; narrowing
     // happens at each use, so "site exists but no body" (or the reverse) is
     // not representable, unlike an exists-boolean beside an optional body.
-    const probe = await probeAbsent(ctx, this, ENDPOINTS.get);
+    const probe = await ctx.read.get.probeAbsent();
 
     // pages: null declares Pages OFF, mirroring branches' protection: null.
     if (desired === null) {
@@ -79,26 +80,25 @@ export const pagesSection = {
         // without the Pages permission (which also answers 404). The
         // non-null path stays loud either way (the POST would fail); this
         // no-op path must say so instead of silently succeeding.
-        run.result.notes.push(
+        plan.notes.push(
           "pages: declared null and GitHub reports no Pages site, so there is nothing to disable. A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write",
         );
-        return run.result;
+        return plan;
       }
-      if (run.check) {
-        run.result.drift.push(
+      plan.ops.push({
+        role: "remove",
+        drift: [
           "pages: enabled live but the settings file declares pages: null; apply will disable GitHub Pages",
-        );
-        return run.result;
-      }
-      await call(ctx, this, ENDPOINTS.remove);
-      run.result.changes.push("disabled GitHub Pages");
-      return run.result;
+        ],
+        change: "disabled GitHub Pages",
+      });
+      return plan;
     }
     if (Object.keys(desired).length === 0) {
-      run.result.notes.push(
+      plan.notes.push(
         "pages: declared as an empty mapping, which configures nothing (the update endpoint rejects an empty body). Declare at least one field, use pages: null to disable the site, or remove the section",
       );
-      return run.result;
+      return plan;
     }
     // Split the source off so the no-source form never carries a source key
     // at all (an own `source: undefined` would count as a remainder below).
@@ -106,21 +106,17 @@ export const pagesSection = {
     const payload: PagesWirePayload =
       source === undefined ? restConfig : { ...restConfig, source: wireSource(source) };
 
-    if (run.check) {
-      if ("missing" in probe) {
-        run.result.drift.push(
-          "pages: declared in the settings file but GitHub Pages is not enabled on the repo; apply will enable it",
-        );
-      } else {
-        run.result.drift.push(...subsetDiff(payload, probe.data, "pages"));
-      }
-      return run.result;
-    }
-
     if (!("missing" in probe)) {
-      await call(ctx, this, ENDPOINTS.update, { payload });
-      run.result.changes.push("updated GitHub Pages configuration");
-      return run.result;
+      const drift = subsetDiff(payload, probe.data, "pages");
+      if (hasDrift(drift)) {
+        plan.ops.push({
+          role: "update",
+          payload: plainData(payload),
+          drift,
+          change: "updated GitHub Pages configuration",
+        });
+      }
+      return plan;
     }
     const create: PagesCreateBody = {};
     if (payload.build_type !== undefined) {
@@ -129,13 +125,25 @@ export const pagesSection = {
     if (payload.source !== undefined) {
       create.source = payload.source;
     }
-    await call(ctx, this, ENDPOINTS.create, { payload: create });
-    run.result.changes.push("enabled GitHub Pages");
-    const rest = Object.keys(payload).filter((k) => !(k in create));
+    plan.ops.push({
+      role: "create",
+      payload: plainData(create),
+      drift: [
+        "pages: declared in the settings file but GitHub Pages is not enabled on the repo; apply will enable it",
+      ],
+      change: "enabled GitHub Pages",
+    });
+    const rest = Object.keys(payload).filter((k) => !Object.hasOwn(create, k));
     if (rest.length > 0) {
-      await call(ctx, this, ENDPOINTS.update, { payload });
-      run.result.changes.push("applied remaining Pages configuration");
+      plan.ops.push({
+        role: "update",
+        payload: plainData(payload),
+        drift: [
+          `pages: the create call takes only build_type and source, so apply will then set the remaining configuration (${rest.join(", ")})`,
+        ],
+        change: "applied remaining Pages configuration",
+      });
     }
-    return run.result;
+    return plan;
   },
-} satisfies SectionModule<"pages">;
+} satisfies SectionModule<"pages", typeof ENDPOINTS>;

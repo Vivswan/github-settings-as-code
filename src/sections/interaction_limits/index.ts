@@ -27,16 +27,19 @@ import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import {
-  beginRun,
   loosen,
   requirePlainMapping,
-  type SectionContext,
   type SectionMeta,
   type SectionModule,
-  type SectionResult,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { call, tryCall } from "../contract/requests.js";
+import {
+  hasDrift,
+  type PlanContext,
+  type PlannedOp,
+  plainData,
+  type SectionPlan,
+} from "../contract/plan.js";
 import { INTERACTION_LIMITS_ROUTED_KEYS, InteractionLimitsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -57,6 +60,7 @@ const ENDPOINTS = {
   get: {
     route: "GET /repos/{owner}/{repo}/interaction-limits",
     statuses: { 200: "the active interaction limit, or an empty object when none is set" },
+    primaryRead: { notFound: "denied" },
   },
   put: {
     route: "PUT /repos/{owner}/{repo}/interaction-limits",
@@ -64,14 +68,20 @@ const ENDPOINTS = {
     hints: {
       422: "the declared limit or expiry is not a value GitHub accepts; see the repository interactions documentation",
     },
+    // The limit self-expires and its declared expiry cannot be read back,
+    // so the re-arm on every apply IS the desired behavior.
+    alwaysRewrite: true,
   },
   remove: {
     route: "DELETE /repos/{owner}/{repo}/interaction-limits",
     statuses: { 204: "interaction limit cleared", 409: ORG_OVERRIDE },
   },
+  // GitHub gates the cap and bypass-list READS at write (the Codespaces
+  // secrets precedent), so a read-only token is denied them.
   capGet: {
     route: "GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap",
     statuses: { 200: "the pull request creation cap", 405: CAP_UNAVAILABLE },
+    accessGrade: "write",
   },
   capPatch: {
     route: "PATCH /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap",
@@ -84,6 +94,7 @@ const ENDPOINTS = {
     route: "GET /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list",
     statuses: { 200: "the pull request creation cap bypass list" },
     denialHint: BYPASS_DENIAL,
+    accessGrade: "write",
   },
   bypassAdd: {
     route: "PUT /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list",
@@ -103,9 +114,22 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/** A GET body with no keys means "no limit is currently set". */
-function noLiveLimit(live: Record<string, unknown>): boolean {
-  return Object.keys(live ?? {}).length === 0;
+/** This section's plan context and plan, over its literal endpoints. */
+type InteractionLimitsContext = PlanContext<typeof ENDPOINTS>;
+type InteractionLimitsPlan = SectionPlan<PlannedOp<typeof ENDPOINTS>>;
+
+/**
+ * An EMPTY plain object means "no limit is currently set"; anything else
+ * (a limit body, a malformed null or list) falls through to the limit
+ * parse, which fails loudly instead of reading malformed bodies as absence.
+ */
+function noLiveLimit(live: unknown): boolean {
+  return (
+    typeof live === "object" &&
+    live !== null &&
+    !Array.isArray(live) &&
+    Object.keys(live).length === 0
+  );
 }
 
 /** The fields a NON-EMPTY live limit body must carry; extras ride along. */
@@ -127,8 +151,11 @@ type LiveLimitState =
   | { kind: "repository"; limit: string; body: Record<string, unknown> }
   | { kind: "inherited"; limit: string; origin: string; body: Record<string, unknown> };
 
-async function liveBaseLimit(ctx: SectionContext, section: SectionMeta): Promise<LiveLimitState> {
-  const body = (await call(ctx, section, ENDPOINTS.get)) as Record<string, unknown>;
+async function liveBaseLimit(
+  ctx: InteractionLimitsContext,
+  section: SectionMeta,
+): Promise<LiveLimitState> {
+  const body = await ctx.read.get.call();
   if (noLiveLimit(body)) {
     return { kind: "none" };
   }
@@ -136,8 +163,8 @@ async function liveBaseLimit(ctx: SectionContext, section: SectionMeta): Promise
   // An absent origin reads as the repository's own limit (the GET documents
   // origin, but only a non-repository origin changes what apply can do).
   return parsed.origin !== undefined && parsed.origin.toLowerCase() !== "repository"
-    ? { kind: "inherited", limit: parsed.limit, origin: parsed.origin, body }
-    : { kind: "repository", limit: parsed.limit, body };
+    ? { kind: "inherited", limit: parsed.limit, origin: parsed.origin, body: parsed }
+    : { kind: "repository", limit: parsed.limit, body: parsed };
 }
 
 /**
@@ -169,10 +196,10 @@ function splitDeclared(desired: DeclaredInteractionLimits): DeclaredLimits {
   const limit = base.limit;
   if (typeof limit !== "string") {
     // The shape's superRefine rejects this pairing upfront for any ordinary
-    // document; this backstop covers run() seeing the ORIGINAL document
+    // document; this backstop covers plan() seeing the ORIGINAL document
     // (validate.ts applies the raw values, not zod's clone - zod < 4.5 let
     // an own "__proto__" key through the shape), so it throws rather than
-    // PUTting a body with no limit. (The actions.cache backstop guards the
+    // planning a PUT with no limit. (The actions.cache backstop guards the
     // same seam.)
     throw new Error(
       `interaction_limits: base key(s) [${Object.keys(base).join(", ")}] ride the base interaction-limits PUT, which requires a limit, but none was declared; fix the key name, or declare limit alongside them`,
@@ -208,12 +235,15 @@ function bypassDelta(
  * a page loop would re-request the same full body forever on a
  * page-ignoring endpoint.
  */
-async function liveBypassLogins(ctx: SectionContext, section: SectionMeta): Promise<string[]> {
+async function liveBypassLogins(
+  ctx: InteractionLimitsContext,
+  section: SectionMeta,
+): Promise<string[]> {
   const live = parseLive(
     section,
     ENDPOINTS.bypassList,
     z.array(z.looseObject({ login: z.string() })),
-    await call(ctx, section, ENDPOINTS.bypassList),
+    await ctx.read.bypassList.call(),
   );
   return live.map((user) => user.login);
 }
@@ -224,132 +254,97 @@ export const interactionLimitsSection = {
   permission,
   endpoints: ENDPOINTS,
   shape: requirePlainMapping(loosen(InteractionLimitsConfig)),
-  async run(ctx, desired): Promise<SectionResult> {
-    const run = beginRun(ctx);
+  async plan(ctx, desired) {
+    const plan: InteractionLimitsPlan = { ops: [], notes: [], drift: [] };
 
     if (desired === null) {
       // null clears the BASE limit only; the cap and bypass list are
       // separate resources a clear must not touch.
-      if (run.check) {
-        const live = await liveBaseLimit(ctx, this);
-        if (live.kind !== "none") {
-          run.result.drift.push(
-            live.kind === "inherited"
-              ? `interaction_limits: declared null but a live "${live.limit}" limit is set at the ${live.origin} level; apply cannot remove it from the repository`
-              : `interaction_limits: declared null but a live "${live.limit}" limit is set; apply will remove it`,
-          );
-        }
-        return run.result;
+      const live = await liveBaseLimit(ctx, this);
+      if (live.kind === "none") {
+        return plan;
       }
-      const outcome = await tryCall(ctx, this, ENDPOINTS.remove, {
+      plan.ops.push({
+        role: "remove",
         describe: "clearing the interaction limit",
+        drift: [
+          live.kind === "inherited"
+            ? `interaction_limits: declared null but a live "${live.limit}" limit is set at the ${live.origin} level; apply cannot remove it from the repository`
+            : `interaction_limits: declared null but a live "${live.limit}" limit is set; apply will remove it`,
+        ],
+        tolerate: {
+          statuses: [409],
+          outcome: (error) => ({
+            note: `interaction_limits: ${ORG_OVERRIDE}, so the repository-level clear was not applied (${error.status})`,
+          }),
+        },
+        change: "cleared the interaction limit",
       });
-      if ("error" in outcome) {
-        run.result.notes.push(
-          `interaction_limits: ${ORG_OVERRIDE}, so the repository-level clear was not applied (${outcome.error.status})`,
-        );
-        return run.result;
-      }
-      run.result.changes.push("cleared the interaction limit");
-      return run.result;
+      return plan;
     }
 
     const { base, cap, bypass } = splitDeclared(desired);
 
-    if (run.check) {
-      if (base !== undefined) {
-        const live = await liveBaseLimit(ctx, this);
-        // Declared != effective is drift REGARDLESS of who set the live limit;
-        // when an org/user-level limit is the cause, the prose says apply
-        // cannot fix it (the org is the place to), but check stays red rather
-        // than reporting a repo that does not match its declaration as clean.
-        if (live.kind === "none") {
-          run.result.drift.push(
-            `interaction_limits: no live limit (never set, or it expired); apply will (re-)arm the declared "${base.limit}" limit`,
-          );
-        } else {
-          // The live body carries limit/origin/expires_at but never the
-          // declared expiry duration, so diffing expiry would be permanent
-          // false drift; compare everything else.
-          const { expiry: _expiry, ...comparable } = base;
-          run.result.drift.push(...subsetDiff(comparable, live.body, "interaction_limits"));
-          if (live.kind === "inherited") {
-            run.result.notes.push(
-              `interaction_limits: ${ORG_OVERRIDE} (origin: ${live.origin}); apply cannot change it from the repository`,
-            );
-          }
-        }
-        if (desired.expiry !== undefined) {
-          run.result.notes.push(
-            `interaction_limits.expiry: GitHub reports only the computed expires_at, so the declared duration cannot be verified; apply re-arms it on every run`,
-          );
-        }
-      }
-      if (cap !== undefined) {
-        const outcome = await tryCall(ctx, this, ENDPOINTS.capGet, {
-          describe: "reading the pull request creation cap",
-        });
-        if ("error" in outcome) {
-          // A tolerated 405: the declared cap cannot exist live, and apply
-          // could not set it either - honest drift, not silence.
-          run.result.drift.push(
-            `interaction_limits.pull_request_creation_cap: declared but ${CAP_UNAVAILABLE} (405); apply cannot set it`,
-          );
-        } else {
-          run.result.drift.push(
-            ...subsetDiff(cap, outcome.data, "interaction_limits.pull_request_creation_cap"),
-          );
-        }
-      }
-      if (bypass !== undefined) {
-        const liveLogins = await liveBypassLogins(ctx, this);
-        const { add, remove } = bypassDelta(bypass, liveLogins);
-        if (remove.length > 0) {
-          run.result.drift.push(
-            `interaction_limits.pull_request_creation_bypass: live login(s) [${remove.join(", ")}] are not declared; apply will remove them`,
-          );
-        }
-        if (add.length > 0) {
-          run.result.drift.push(
-            `interaction_limits.pull_request_creation_bypass: declared login(s) [${add.join(", ")}] are not on the live bypass list; apply will add them`,
-          );
-        }
-      }
-      return run.result;
-    }
-
     if (base !== undefined) {
-      const outcome = await tryCall(ctx, this, ENDPOINTS.put, {
-        payload: base,
-        describe: `arming the "${base.limit}" interaction limit`,
-      });
-      if ("error" in outcome) {
-        run.result.notes.push(
-          `interaction_limits: ${ORG_OVERRIDE}, so the repository-level limit was not applied (${outcome.error.status})`,
+      const live = await liveBaseLimit(ctx, this);
+      // Declared != effective is drift REGARDLESS of who set the live limit:
+      // an inherited limit adds the cannot-fix note, but check stays red
+      // rather than reporting a non-matching repository as clean.
+      const drift: string[] = [];
+      if (live.kind === "none") {
+        drift.push(
+          `interaction_limits: no live limit (never set, or it expired); apply will (re-)arm the declared "${base.limit}" limit`,
         );
       } else {
-        run.result.changes.push(
-          `armed the "${base.limit}" interaction limit (expiry: ${desired.expiry ?? "one_day (GitHub default)"})`,
+        // The live body carries limit/origin/expires_at but never the
+        // declared expiry duration, so diffing expiry would be permanent
+        // false drift; compare everything else.
+        const { expiry: _expiry, ...comparable } = base;
+        drift.push(...subsetDiff(comparable, live.body, "interaction_limits"));
+        if (live.kind === "inherited") {
+          plan.notes.push(
+            `interaction_limits: ${ORG_OVERRIDE} (origin: ${live.origin}); apply cannot change it from the repository`,
+          );
+        }
+      }
+      if (desired.expiry !== undefined) {
+        plan.notes.push(
+          `interaction_limits.expiry: GitHub reports only the computed expires_at, so the declared duration cannot be verified; apply re-arms it on every run`,
         );
       }
+      // The PUT is alwaysRewrite: a matching live limit still re-arms (its
+      // expiry is ticking), so the drift may legitimately be empty here.
+      plan.ops.push({
+        role: "put",
+        payload: plainData(base),
+        describe: `arming the "${base.limit}" interaction limit`,
+        drift,
+        tolerate: {
+          statuses: [409],
+          outcome: (error) => ({
+            note: `interaction_limits: ${ORG_OVERRIDE}, so the repository-level limit was not applied (${error.status})`,
+          }),
+        },
+        change: `armed the "${base.limit}" interaction limit (expiry: ${desired.expiry ?? "one_day (GitHub default)"})`,
+      });
     }
     if (cap !== undefined) {
-      // Unlike the self-expiring base limit there is nothing to re-arm, so
-      // the cap is compare-before-write: PATCH only on divergence.
-      const outcome = await tryCall(ctx, this, ENDPOINTS.capGet, {
+      const outcome = await ctx.read.capGet.tryCall({
         describe: "reading the pull request creation cap",
       });
       if ("error" in outcome) {
-        run.result.notes.push(
-          `interaction_limits.pull_request_creation_cap: ${CAP_UNAVAILABLE}, so the declared cap was not applied (${outcome.error.status})`,
+        // A tolerated 405: the declared cap cannot exist live, and apply
+        // could not set it either - honest drift no operation fixes.
+        plan.drift.push(
+          `interaction_limits.pull_request_creation_cap: declared but ${CAP_UNAVAILABLE} (405); apply cannot set it`,
         );
       } else {
         // The cap object is loose passthrough and the PATCH is diff-gated, so
         // a declared key GitHub ignores would re-PATCH on every apply without
         // converging; say so (the labels/milestones phantom-key idiom).
-        const phantom = phantomKeys(cap as Record<string, unknown>, outcome.data);
+        const phantom = phantomKeys(cap, outcome.data);
         if (phantom.length > 0) {
-          run.result.notes.push(
+          plan.notes.push(
             phantomNote(
               "interaction_limits.pull_request_creation_cap",
               phantom,
@@ -358,22 +353,23 @@ export const interactionLimitsSection = {
             ),
           );
         }
-        if (
-          subsetDiff(cap, outcome.data, "interaction_limits.pull_request_creation_cap").length > 0
-        ) {
-          const patched = await tryCall(ctx, this, ENDPOINTS.capPatch, {
-            payload: cap,
+        // Unlike the self-expiring base limit there is nothing to re-arm, so
+        // the cap is compare-before-write: PATCH only on divergence.
+        const drift = subsetDiff(cap, outcome.data, "interaction_limits.pull_request_creation_cap");
+        if (hasDrift(drift)) {
+          plan.ops.push({
+            role: "capPatch",
+            payload: plainData(cap),
             describe: "setting the pull request creation cap",
+            drift,
+            tolerate: {
+              statuses: [405],
+              outcome: (error) => ({
+                note: `interaction_limits.pull_request_creation_cap: ${CAP_UNAVAILABLE}, so the declared cap was not applied (${error.status})`,
+              }),
+            },
+            change: `set the pull request creation cap (enabled: ${cap.enabled}${cap.max_open_pull_requests !== undefined ? `, max_open_pull_requests: ${cap.max_open_pull_requests}` : ""})`,
           });
-          if ("error" in patched) {
-            run.result.notes.push(
-              `interaction_limits.pull_request_creation_cap: ${CAP_UNAVAILABLE}, so the declared cap was not applied (${patched.error.status})`,
-            );
-          } else {
-            run.result.changes.push(
-              `set the pull request creation cap (enabled: ${cap.enabled}${cap.max_open_pull_requests !== undefined ? `, max_open_pull_requests: ${cap.max_open_pull_requests}` : ""})`,
-            );
-          }
         }
       }
     }
@@ -381,24 +377,28 @@ export const interactionLimitsSection = {
       const liveLogins = await liveBypassLogins(ctx, this);
       const { add, remove } = bypassDelta(bypass, liveLogins);
       if (remove.length > 0) {
-        await call(ctx, this, ENDPOINTS.bypassRemove, {
+        plan.ops.push({
+          role: "bypassRemove",
           payload: { users: remove },
           describe: "removing users from the pull request creation cap bypass list",
+          drift: [
+            `interaction_limits.pull_request_creation_bypass: live login(s) [${remove.join(", ")}] are not declared; apply will remove them`,
+          ],
+          change: `removed [${remove.join(", ")}] from the pull request creation cap bypass list`,
         });
-        run.result.changes.push(
-          `removed [${remove.join(", ")}] from the pull request creation cap bypass list`,
-        );
       }
       if (add.length > 0) {
-        await call(ctx, this, ENDPOINTS.bypassAdd, {
+        plan.ops.push({
+          role: "bypassAdd",
           payload: { users: add },
           describe: "adding users to the pull request creation cap bypass list",
+          drift: [
+            `interaction_limits.pull_request_creation_bypass: declared login(s) [${add.join(", ")}] are not on the live bypass list; apply will add them`,
+          ],
+          change: `added [${add.join(", ")}] to the pull request creation cap bypass list`,
         });
-        run.result.changes.push(
-          `added [${add.join(", ")}] to the pull request creation cap bypass list`,
-        );
       }
     }
-    return run.result;
+    return plan;
   },
-} satisfies SectionModule<"interaction_limits">;
+} satisfies SectionModule<"interaction_limits", typeof ENDPOINTS>;

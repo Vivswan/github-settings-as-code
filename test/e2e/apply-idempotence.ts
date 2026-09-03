@@ -28,13 +28,9 @@
  *   missing patterns, each PATCH only the divergent declared fields, and the
  *   bulk DELETE only undeclared patterns under `undeclared: delete` - a
  *   converged repo produces none of the three.
- * - repository (false): the base PATCH, the topics PUT, and each feature
- *   toggle's PUT/DELETE run unconditionally (enable_git_lfs necessarily so:
- *   no read endpoint exists to compare against). The GraphQL-routed pair
- *   (enable_sponsorships, issue_creation_policy) DOES compare before
- *   writing - the features read already supplies the mutation's node id, and
- *   a converged repo skips the mutation - but the unconditional PATCH keeps
- *   the whole section false (the environments precedent).
+ * - repository (false): every write is planned on drift except the Git LFS
+ *   PUT/DELETE, which is alwaysRewrite by declaration (no read endpoint), so
+ *   a second apply re-asserts it and the section stays false.
  * - rulesets (false): an existing ruleset is PUT unconditionally (the GET +
  *   diff runs only in check mode).
  * - branches (false): declared protection is PUT unconditionally (only the
@@ -45,25 +41,22 @@
  *   the unconditional PUT keeps the whole section false; the state-stability
  *   half of the proof covers the variables family, and the nested `secrets`
  *   PUTs are always-rewrite by contract (see ALWAYS_REWRITE_STATE_FAMILIES).
- * - actions (false): every declared endpoint group is PUT unconditionally.
+ * - actions (true): every endpoint group's PUT is planned only when its own
+ *   GET diverges from the declared body.
  * - actions_secrets, dependabot_secrets, codespaces_secrets, agents_secrets
  *   (true): every write is gated on the listing except the sealed PUT, which
  *   recurs by declaration (alwaysRewrite: no value to compare against) and
  *   is exempt on that flag; the mock stores a digest, so state stays stable.
- * - pages (false): an existing site is PUT unconditionally.
- * - code_scanning_default_setup (false): the PATCH runs unconditionally.
- * - code_quality_setup (false): the PATCH runs unconditionally, mirroring
- *   code_scanning_default_setup (the GET runs only in check mode).
+ * - pages (true): the site is PUT only when the declared fields diverge.
+ * - code_scanning_default_setup, code_quality_setup (true): the PATCH is
+ *   planned only when the declared keys diverge from the live setup.
  * - check_suite_preferences (false): no read endpoint exists to compare
  *   against, so the PATCH re-asserts the declared preferences on every
  *   apply by design.
  * - teams (false): team access is granted (PUT) unconditionally.
- * - interaction_limits (false): the PUT re-arms the self-expiring limit
- *   unconditionally on every apply - the re-arm IS the desired behavior. The
- *   pull_request_creation_cap PATCH and the bypass-list PUT/DELETE do
- *   compare before writing (a second apply issues none of them), but the
- *   unconditional base PUT keeps the whole section false, the environments
- *   precedent.
+ * - interaction_limits (false): the base PUT is alwaysRewrite by declaration
+ *   (it re-arms the self-expiring limit; the expiry cannot be read back); the
+ *   cap PATCH and bypass writes are drift-gated, but the base PUT keeps it false.
  * - webhooks (false): a DECLARED config.secret rides the config PATCH on
  *   every apply run (GitHub echoes a live secret as "********", so there is
  *   nothing to compare against and re-sending is how rotations propagate);
@@ -96,16 +89,16 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   branches: false,
   environments: false,
   autolinks: true,
-  actions: false,
+  actions: true,
   actions_secrets: true,
   dependabot_secrets: true,
   codespaces_secrets: true,
   agents_secrets: true,
   workflows: true,
   check_suite_preferences: false,
-  pages: false,
-  code_scanning_default_setup: false,
-  code_quality_setup: false,
+  pages: true,
+  code_scanning_default_setup: true,
+  code_quality_setup: true,
   collaborators: true,
   teams: false,
   milestones: true,
@@ -122,32 +115,28 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
  * The ALWAYS-REWRITE half of the idempotence proof reads two declarations:
  *
  * - Which WRITES must recur on a second apply comes from the EndpointDecl
- *   `alwaysRewrite` flag the sealed secret PUTs declare (see
- *   missingSecondApplyRewrites in apply-idempotence-proof.ts, which resolves each logged PUT
- *   to its endpoint). The property is per ENDPOINT, not per section, because
- *   environments carries a passthrough PUT and always-rewrite secret PUTs
- *   side by side.
+ *   `alwaysRewrite` flag (missingSecondApplyRewrites resolves each logged
+ *   write to its endpoint): per ENDPOINT, since environments mixes both kinds.
  *
  * - Which MOCK STATE FAMILIES may move their updated_at between applies
- *   comes from this mapping: every flagged endpoint (by its "section.role"
- *   key) names the state family its writes land in. State families are the
- *   mock's own storage layout, so they cannot be derived from the
- *   declarations - but deriving the FAMILY SET from this mapping and pinning
- *   the KEY SET against the flags (the lockstep test in runner.test.ts)
- *   means a NEW flagged endpoint fails the suite until it declares its
- *   family here, even inside a section that already carries one.
+ *   comes from this mapping: each flagged endpoint names its state family,
+ *   or null when the mock stores nothing (Git LFS). The lockstep test pins
+ *   the KEY SET against the flags, so a new flag must declare its family here.
  */
-export const ALWAYS_REWRITE_ENDPOINT_FAMILIES: Readonly<Record<string, string>> = {
+export const ALWAYS_REWRITE_ENDPOINT_FAMILIES: Readonly<Record<string, string | null>> = {
   "actions_secrets.put": "actions_secrets",
   "dependabot_secrets.put": "dependabot_secrets",
   "codespaces_secrets.put": "codespaces_secrets",
   "agents_secrets.put": "agents_secrets",
   "environments.putSecret": "environment_secrets",
+  "interaction_limits.put": "interaction_limits",
+  "repository.lfsPut": null,
+  "repository.lfsRemove": null,
 };
 
 /** The snapshot exclusion set snapshotFamilies consumes, from the mapping. */
 export const ALWAYS_REWRITE_STATE_FAMILIES: ReadonlySet<string> = new Set(
-  Object.values(ALWAYS_REWRITE_ENDPOINT_FAMILIES),
+  Object.values(ALWAYS_REWRITE_ENDPOINT_FAMILIES).filter((family) => family !== null),
 );
 
 /**
