@@ -77,11 +77,12 @@ export const ALL_SELECTING_PREFIXES = [
   "src/schema.ts",
   "src/types.ts",
   "test/e2e/",
-  // The selection machinery itself: a PR touching only this selector, a
-  // sibling CI script, or the smoke job's own workflow would otherwise
-  // select "none" and skip the very job it configures.
+  // The selection machinery itself (this selector, sibling CI scripts, the smoke
+  // job's workflow, the local composite actions it runs): a PR touching only these
+  // must not select "none" and skip the very job they configure.
   ".github/scripts/",
   ".github/workflows/checks.yml",
+  ".github/actions/",
 ];
 
 /** The decision for one changed-file set: every section, some, or none. */
@@ -177,21 +178,22 @@ export function scanImports(text: string, file: string): string[] {
 }
 
 /**
- * Resolve a relative specifier against its importer to the .ts source on
- * disk. The source spells `.js` (Node ESM resolution of the emitted output),
- * so the extension comes off and `<spec>.ts` then `<spec>/index.ts` are
- * tried. Nothing found throws: a dangling edge would silently drop a
- * dependency from the fan-out.
+ * Resolve a relative specifier against its importer to the source on disk: `.js` maps to
+ * `<spec>.ts` then `<spec>/index.ts` (source spells the emitted extension); `.json` is data
+ * and resolves to itself. Nothing found throws: a dangling edge would silently drop an edge.
  */
 export function resolveImport(importer: string, specifier: string): string {
-  const base = resolve(dirname(importer), specifier.replace(/\.[jt]s$/, ""));
-  for (const candidate of [`${base}.ts`, join(base, "index.ts")]) {
+  const target = resolve(dirname(importer), specifier);
+  const candidates = specifier.endsWith(".json")
+    ? [target]
+    : [`${target.replace(/\.[jt]s$/, "")}.ts`, join(target.replace(/\.[jt]s$/, ""), "index.ts")];
+  for (const candidate of candidates) {
     if (existsSync(candidate)) {
       return candidate;
     }
   }
   throw new Error(
-    `changed-sections: ${importer} imports "${specifier}", which resolves to no .ts file (tried ${base}.ts and ${base}/index.ts)`,
+    `changed-sections: ${importer} imports "${specifier}", which resolves to no file (tried ${candidates.join(" and ")})`,
   );
 }
 
@@ -201,7 +203,7 @@ export function resolveImport(importer: string, specifier: string): string {
  * that import the engine would otherwise pull the registry - and through it
  * every section - into every shared file's fan-out.
  */
-function sourceFilesUnder(root: string): string[] {
+export function sourceFilesUnder(root: string): string[] {
   return readdirSync(root, { recursive: true, encoding: "utf8" })
     .filter((entry) => entry.endsWith(".ts") && !entry.endsWith(".test.ts"))
     .map((entry) => join(root, entry));

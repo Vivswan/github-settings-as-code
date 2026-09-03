@@ -21,30 +21,9 @@ jobs:
           bun-version-file: .bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      # bun test includes the OpenAPI validator tests, which load the fetched,
-      # gitignored trimmed spec; restore it from cache or fetch on a miss.
-      - name: Cache the trimmed OpenAPI spec
-        id: openapi-cache
-        uses: actions/cache@v6
-        with:
-          path: test/e2e/openapi/github-openapi.trimmed.json
-          key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**', 'src/upstream-gaps/**', 'src/schema.ts', 'src/github/api.ts') }}
-      - name: Fetch the trimmed OpenAPI spec (cache miss)
-        if: steps.openapi-cache.outputs.cache-hit != 'true'
-        run: bun .github/scripts/trim-openapi.ts
-      # bun test also validates every declared GraphQL query against GitHub's
-      # published schema, another fetched, gitignored artifact. The key hashes
-      # only the fetch script: it carries the pinned UPSTREAM_REF, the sole
-      # input that changes the output.
-      - name: Cache the GraphQL schema
-        id: graphql-schema-cache
-        uses: actions/cache@v6
-        with:
-          path: test/e2e/graphql/schema.docs.graphql
-          key: graphql-schema-${{ hashFiles('.github/scripts/fetch-graphql-schema.ts') }}
-      - name: Fetch the GraphQL schema (cache miss)
-        if: steps.graphql-schema-cache.outputs.cache-hit != 'true'
-        run: bun .github/scripts/fetch-graphql-schema.ts
+      # bun test loads the fetched, gitignored OpenAPI spec and GraphQL
+      # schema; the composite restores each from cache or fetches on a miss.
+      - uses: ./.github/actions/fetch-test-artifacts
       - name: Lint (biome)
         run: bun run lint
       - name: Typecheck
@@ -164,20 +143,6 @@ jobs:
           node-version: 24
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      # The trimmed OpenAPI spec is a fetched, gitignored artifact. Restore it
-      # from cache or fetch on a miss. The key hashes every input that changes
-      # the output - the trim script (which carries UPSTREAM_REF), USED_PATHS,
-      # and the DEFAULT_API_VERSION source - so any of them changing busts the
-      # cache and re-fetches, never restoring a stale slice.
-      - name: Cache the trimmed OpenAPI spec
-        id: openapi-cache
-        uses: actions/cache@v6
-        with:
-          path: test/e2e/openapi/github-openapi.trimmed.json
-          key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**', 'src/upstream-gaps/**', 'src/schema.ts', 'src/github/api.ts') }}
-      - name: Fetch the trimmed OpenAPI spec (cache miss)
-        if: steps.openapi-cache.outputs.cache-hit != 'true'
-        run: bun .github/scripts/trim-openapi.ts
       - name: Select sections from the diff
         id: select
         env:
@@ -190,6 +155,10 @@ jobs:
           fi
           echo "sections=$SECTIONS" >> "$GITHUB_OUTPUT"
           echo "selected sections: $SECTIONS"
+      # The harness validates mock responses against the fetched, gitignored spec;
+      # the composite restores or fetches it, skipped with the run on a docs-only PR.
+      - uses: ./.github/actions/fetch-test-artifacts
+        if: steps.select.outputs.sections != 'none'
       - name: Run scenarios and fuzz
         if: steps.select.outputs.sections != 'none'
         env:
@@ -242,17 +211,9 @@ jobs:
           fi
           echo "sections=$SECTIONS" >> "$GITHUB_OUTPUT"
           echo "selected sections: $SECTIONS"
-      # Same fetched, gitignored artifact and cache key as e2e-smoke above.
-      - name: Cache the trimmed OpenAPI spec
+      # The same fetched artifacts as e2e-smoke above, skipped with the sweep.
+      - uses: ./.github/actions/fetch-test-artifacts
         if: steps.select.outputs.sections != 'none'
-        id: openapi-cache
-        uses: actions/cache@v6
-        with:
-          path: test/e2e/openapi/github-openapi.trimmed.json
-          key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**', 'src/upstream-gaps/**', 'src/schema.ts', 'src/github/api.ts') }}
-      - name: Fetch the trimmed OpenAPI spec (cache miss)
-        if: steps.select.outputs.sections != 'none' && steps.openapi-cache.outputs.cache-hit != 'true'
-        run: bun .github/scripts/trim-openapi.ts
       - name: Endpoint-coverage tripwire
         if: steps.select.outputs.sections != 'none'
         run: bun .github/scripts/check-endpoint-coverage.ts

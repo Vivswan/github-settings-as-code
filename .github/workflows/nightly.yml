@@ -125,27 +125,9 @@ jobs:
           bun install --ignore-scripts
           git --no-pager diff --stat -- bun.lock
           git checkout -- bun.lock
-      # The gate's suite loads two fetched, gitignored artifacts; restore or
-      # fetch each under checks.yml's keys (a test pins them identical). On a
-      # miss the fetch script runs on the floated graph, so a float that breaks it fails here.
-      - name: Cache the trimmed OpenAPI spec
-        id: openapi-cache
-        uses: actions/cache@v6
-        with:
-          path: test/e2e/openapi/github-openapi.trimmed.json
-          key: openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**', 'src/upstream-gaps/**', 'src/schema.ts', 'src/github/api.ts') }}
-      - name: Fetch the trimmed OpenAPI spec (cache miss)
-        if: steps.openapi-cache.outputs.cache-hit != 'true'
-        run: bun .github/scripts/trim-openapi.ts
-      - name: Cache the GraphQL schema
-        id: graphql-schema-cache
-        uses: actions/cache@v6
-        with:
-          path: test/e2e/graphql/schema.docs.graphql
-          key: graphql-schema-${{ hashFiles('.github/scripts/fetch-graphql-schema.ts') }}
-      - name: Fetch the GraphQL schema (cache miss)
-        if: steps.graphql-schema-cache.outputs.cache-hit != 'true'
-        run: bun .github/scripts/fetch-graphql-schema.ts
+      # The gate's suite loads two fetched artifacts; the composite restores or fetches
+      # each. It runs AFTER the floated install so a miss runs the fetch on the floated graph.
+      - uses: ./.github/actions/fetch-test-artifacts
       - name: Run the gate on the floated resolution
         run: bun run check
 

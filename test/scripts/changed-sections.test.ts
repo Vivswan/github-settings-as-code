@@ -188,11 +188,12 @@ describe("changed-sections derived fan-out", () => {
     expect(scanImports("const t = await import(`./lit.js`);\n", "probe.ts")).toEqual(["./lit.js"]);
   });
 
-  test("resolveImport maps .js to .ts and a directory to its index, and throws on a dangling one", () => {
+  test("resolveImport maps .js to .ts, a directory to its index, and .json to itself, and throws on a dangling one", () => {
     const root = syntheticRepo({
       "src/sections/shared/engine.ts": "",
       "src/sections/shared/util/index.ts": "",
       "src/sections/labels/index.ts": "",
+      "lib/settings.schema.json": "{}",
     });
     const importer = join(root, "src/sections/labels/index.ts");
     expect(resolveImport(importer, "../shared/engine.js")).toBe(
@@ -204,8 +205,14 @@ describe("changed-sections derived fan-out", () => {
     expect(resolveImport(importer, "../shared/util")).toBe(
       join(root, "src/sections/shared/util/index.ts"),
     );
+    expect(resolveImport(importer, "../../../lib/settings.schema.json")).toBe(
+      join(root, "lib/settings.schema.json"),
+    );
     expect(() => resolveImport(importer, "../shared/missing.js")).toThrow(
-      /imports "\.\.\/shared\/missing\.js", which resolves to no \.ts file/,
+      /imports "\.\.\/shared\/missing\.js", which resolves to no file/,
+    );
+    expect(() => resolveImport(importer, "../../../lib/missing.json")).toThrow(
+      /imports "\.\.\/\.\.\/\.\.\/lib\/missing\.json", which resolves to no file/,
     );
   });
 
@@ -256,7 +263,7 @@ describe("changed-sections derived fan-out", () => {
       "src/sections/labels/index.ts":
         'import { gone } from "../shared/gone.js";\nexport default gone;\n',
     });
-    expect(() => deriveSharedFanOut(root)).toThrow(/resolves to no \.ts file/);
+    expect(() => deriveSharedFanOut(root)).toThrow(/resolves to no file/);
   });
 
   test("a computed import anywhere under src fails the whole derivation, naming the file", () => {
@@ -497,10 +504,12 @@ describe("changed-sections selection", () => {
       "src/main.ts",
       "src/schema.ts",
       "test/e2e/runner.ts",
-      // The selection machinery itself and the repo-owned checks workflow: a
-      // selector-only or checks.yml-only PR must not skip the smoke job.
+      // The selection machinery itself, the repo-owned checks workflow, and
+      // the local composite actions it runs: a PR touching only one of them
+      // must not skip the smoke job.
       ".github/scripts/changed-sections.ts",
       ".github/workflows/checks.yml",
+      ".github/actions/fetch-test-artifacts/action.yml",
       // src/sections/contract/ holds the cross-cutting contract modules (the
       // barrel split); a contract-module-only PR must select every section.
       "src/sections/contract/requests.ts",

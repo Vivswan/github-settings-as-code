@@ -1,37 +1,60 @@
 /**
- * Workflow contract for the fetched, gitignored test artifacts: one cache key per artifact
- * across every workflow, hashing every input, and restored plus fetched before any unit-suite run.
+ * Workflow contract for the fetched, gitignored test artifacts: one composite owns both caches
+ * and miss-gated fetches, no workflow caches one inline, every loading job runs the composite
+ * first, and the drift-tripwire nightlies fetch the spec fresh instead.
  */
 
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import {
+  reverseImportGraph,
+  sourceFilesUnder,
+  transitiveDependents,
+} from "../../.github/scripts/changed-sections.js";
 import { RELEASE_PR_BRANCH_PREFIX } from "../../.github/scripts/release-pipeline.js";
 import { headRefPrefixes, headRefPrefixesIn } from "./head-ref.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
+const COMPOSITE_DIR = ".github/actions/fetch-test-artifacts";
+const COMPOSITE_USES = `./${COMPOSITE_DIR}`;
 const PATHS_TS = "test/e2e/openapi/paths.ts";
 
 interface FetchedArtifact {
   label: string;
   path: string;
   fetchScript: string;
+  /** The complete cache key, byte for byte: the cache identity, so a reworded key is a cold cache. */
+  key: string;
+  /** Every source the fetched output depends on; the cache key must hash each. */
+  hashInputs: () => string[];
 }
 const FETCHED_ARTIFACTS: readonly FetchedArtifact[] = [
   {
     label: "trimmed OpenAPI spec",
     path: "test/e2e/openapi/github-openapi.trimmed.json",
     fetchScript: ".github/scripts/trim-openapi.ts",
+    key: `openapi-trimmed-\${{ hashFiles('.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**', 'src/upstream-gaps/**', 'src/schema.ts', 'src/github/api.ts') }}`,
+    hashInputs: () => [".github/scripts/trim-openapi.ts", PATHS_TS, ...routeDataImports()],
   },
   {
+    // The fetch script carries the pinned UPSTREAM_REF, the sole input that changes the output.
     label: "GraphQL schema",
     path: "test/e2e/graphql/schema.docs.graphql",
     fetchScript: ".github/scripts/fetch-graphql-schema.ts",
+    key: `graphql-schema-\${{ hashFiles('.github/scripts/fetch-graphql-schema.ts') }}`,
+    hashInputs: () => [".github/scripts/fetch-graphql-schema.ts"],
   },
 ];
 const [OPENAPI, GRAPHQL] = FETCHED_ARTIFACTS as [FetchedArtifact, FetchedArtifact];
+
+/** Jobs whose spec fetch IS the upstream-drift tripwire: they call the script directly and never restore a cache; every other loading job uses the composite. */
+const UNCACHED_FETCH_JOBS: ReadonlySet<string> = new Set([
+  "e2e-nightly.yml#nightly",
+  "nightly-fuzz.yml#fuzz",
+]);
 
 const PACKAGE_SCRIPTS = (
   JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
@@ -39,9 +62,9 @@ const PACKAGE_SCRIPTS = (
   }
 ).scripts;
 
-/** Ends a `bun ...` token: the e2e runner (`bun test/e2e/run.ts`) and `test:e2e` continue past it. */
+/** Ends a `bun ...` token: `bun test/e2e/run.ts` and `test:e2e` continue past `bun test`. */
 const TOKEN_END = "(?![\\w/:.-])";
-/** The runner itself, anywhere in the step; a file filter after it still loads what it names. */
+/** The unit-suite runner itself, anywhere in the step; a file filter after it still loads what it names. */
 const BUN_TEST = new RegExp(`\\bbun test${TOKEN_END}`);
 /** Never matches: the alternative for an empty script set. */
 const NOTHING = /(?!)/;
@@ -49,6 +72,18 @@ const NOTHING = /(?!)/;
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+/** The scripts that spawn the bundle against the spec-validating mock: every non-test file that imports the e2e runner, directly or through another. */
+function harnessEntrypoints(): string[] {
+  const files = ["test/e2e", ".github/scripts"].flatMap((dir) => sourceFilesUnder(join(ROOT, dir)));
+  return [...transitiveDependents(reverseImportGraph(files), join(ROOT, "test/e2e/runner.ts"))]
+    .map((file) => relative(ROOT, file))
+    .sort();
+}
+
+const BUN_HARNESS = new RegExp(
+  `\\bbun (?:${harnessEntrypoints().map(escapeRegExp).join("|")})${TOKEN_END}`,
+);
 
 function runsScript(names: readonly string[]): RegExp {
   if (names.length === 0) {
@@ -62,16 +97,16 @@ function isFetchCommand(run: string | undefined, fetchScript: string): boolean {
   return (run ?? "").trim() === `bun ${fetchScript}`;
 }
 
-/** package.json scripts running `bun test`, directly or via `bun run <such script>`; a new alias needs no edit here. */
-function suiteScripts(): string[] {
+/** package.json scripts matching `command`, directly or via `bun run <such script>`; a new alias needs no edit here. */
+function scriptsRunning(command: RegExp): string[] {
   const names: string[] = [];
   for (let grew = true; grew; ) {
     grew = false;
-    for (const [name, command] of Object.entries(PACKAGE_SCRIPTS)) {
+    for (const [name, script] of Object.entries(PACKAGE_SCRIPTS)) {
       if (names.includes(name)) {
         continue;
       }
-      if (BUN_TEST.test(command) || runsScript(names).test(command)) {
+      if (command.test(script) || runsScript(names).test(script)) {
         names.push(name);
         grew = true;
       }
@@ -80,13 +115,28 @@ function suiteScripts(): string[] {
   return names;
 }
 
-/** A run step that executes the unit suite, directly or through a package script. */
-const SUITE_RUN = new RegExp(`${BUN_TEST.source}|${runsScript(suiteScripts()).source}`);
+/** A run step executing `command`, directly or through a package script. */
+function runStep(command: RegExp): RegExp {
+  return new RegExp(`${command.source}|${runsScript(scriptsRunning(command)).source}`);
+}
+
+/** A kind of step that loads fetched artifacts, and which ones it needs on disk. */
+interface Loader {
+  label: string;
+  runs: RegExp;
+  needs: readonly FetchedArtifact[];
+}
+const LOADERS: readonly Loader[] = [
+  { label: "unit suite", runs: runStep(BUN_TEST), needs: FETCHED_ARTIFACTS },
+  { label: "e2e harness", runs: runStep(BUN_HARNESS), needs: [OPENAPI] },
+];
+const [SUITE, HARNESS] = LOADERS as [Loader, Loader];
 
 interface Step {
   id?: string;
   uses?: string;
   run?: string;
+  shell?: string;
   if?: string;
   "continue-on-error"?: boolean;
   with?: Record<string, unknown>;
@@ -94,13 +144,31 @@ interface Step {
 interface Workflow {
   jobs: Record<string, { if?: string; steps?: Step[] }>;
 }
+interface CompositeAction {
+  runs: { using?: string; steps?: Step[] };
+}
 
-/** An actions/cache step whose `path` (one path per line) lists the artifact; found by path, so a renamed key stays visible. */
+/** True when a cache `path` entry (a file, a directory, or a glob) takes in `file`. */
+function pathEntryCovers(entry: string, file: string): boolean {
+  return (
+    entry === file ||
+    file.startsWith(`${entry.replace(/\/$/, "")}/`) ||
+    new Bun.Glob(entry).match(file)
+  );
+}
+
+/** An actions/cache step whose `path` (one entry per line, `!` negating) takes in the artifact; found by path, so a renamed key stays visible. */
 function cachesArtifact(step: Step, path: string): boolean {
-  const paths = String(step.with?.path ?? "")
+  const entries = String(step.with?.path ?? "")
     .split("\n")
-    .map((line) => line.trim());
-  return (step.uses ?? "").startsWith("actions/cache") && paths.includes(path);
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const covering = (negated: boolean) =>
+    entries.some(
+      (entry) =>
+        entry.startsWith("!") === negated && pathEntryCovers(entry.replace(/^!/, ""), path),
+    );
+  return (step.uses ?? "").startsWith("actions/cache@") && covering(false) && !covering(true);
 }
 
 /** The key of an artifact cache step; anything but a string key is a broken cache, never a skip. */
@@ -113,16 +181,14 @@ function cacheKeyOf(step: Step, path: string): string {
   return key as string;
 }
 
-/** Every actions/cache key in the workflow for the artifact path. */
-function cacheKeys(wf: Workflow, path: string): string[] {
-  return Object.values(wf.jobs)
-    .flatMap((job) => job.steps ?? [])
-    .filter((step) => cachesArtifact(step, path))
-    .map((step) => cacheKeyOf(step, path));
-}
-
 function readWorkflow(file: string): Workflow {
   return parseYaml(readFileSync(join(WORKFLOWS_DIR, file), "utf8")) as Workflow;
+}
+
+function readComposite(): CompositeAction {
+  return parseYaml(
+    readFileSync(join(ROOT, COMPOSITE_DIR, "action.yml"), "utf8"),
+  ) as CompositeAction;
 }
 
 /** The quoted file patterns inside the key's hashFiles(...) call. */
@@ -136,12 +202,9 @@ function hashFilesPatterns(key: string): string[] {
 }
 
 /**
- * The repo-relative .ts files paths.ts imports route data from (its relative
- * imports, with the compiled .js specifiers mapped back to source). Only
- * single-line static `import ... from "..."` statements are recognized; any
- * other import-ish line (dynamic import(), require, a reformatted multi-line
- * import) fails the assertion below, so an unsupported form extends this
- * parser instead of being silently skipped.
+ * The repo-relative .ts files paths.ts imports route data from (compiled .js specifiers mapped
+ * back to source). Only single-line static imports are recognized; any other import-ish line
+ * fails the assertion below, so an unsupported form extends this parser instead of being skipped.
  */
 function routeDataImports(): string[] {
   const source = readFileSync(join(ROOT, PATHS_TS), "utf8");
@@ -177,262 +240,672 @@ function covered(patterns: string[], file: string): boolean {
   );
 }
 
-describe("checks.yml openapi-trimmed cache keys", () => {
-  const wf = readWorkflow("checks.yml");
-  const keys = cacheKeys(wf, OPENAPI.path);
-
-  test("all consuming jobs cache the spec under byte-identical keys", () => {
-    // The count is pinned on purpose: a new job consuming the spec is a
-    // conscious edit here, and a removed cache step cannot go unnoticed.
-    expect(
-      keys.length,
-      `checks.yml carries ${keys.length} openapi-trimmed cache keys, expected 3 (check, e2e-smoke, endpoint-coverage); update this pin when a consuming job is added or removed`,
-    ).toBe(3);
-    for (const key of keys) {
-      expect(key, "the openapi-trimmed cache keys in checks.yml diverged").toBe(keys[0] as string);
-    }
-  });
-
-  test("the hashFiles list covers every route-data input of the spec", () => {
-    const patterns = hashFilesPatterns(keys[0] ?? "");
-    const inputs = [".github/scripts/trim-openapi.ts", PATHS_TS, ...routeDataImports()];
-    expect(inputs).toContain("src/report/issue-report.ts");
-    expect(patterns).toContain("src/sections/**");
-    for (const file of inputs) {
-      expect(
-        covered(patterns, file),
-        `${file} feeds USED_PATHS but the cache key does not hash it`,
-      ).toBe(true);
-    }
-  });
-
-  test("every hashFiles pattern matches at least one file on disk", () => {
-    // hashFiles() silently skips a pattern that matches nothing (a moved or
-    // renamed input), so the key would stop changing with that input while
-    // the coverage test above still sees the stale pattern string.
-    for (const pattern of hashFilesPatterns(keys[0] ?? "")) {
-      // dot: true because the trim script lives under .github/, which the
-      // glob scanner skips by default (hashFiles itself does not).
-      const matches = [...new Bun.Glob(pattern).scanSync({ cwd: ROOT, dot: true })];
-      expect(
-        matches.length,
-        `hashFiles pattern '${pattern}' matches no file on disk, so it contributes nothing to the cache key`,
-      ).toBeGreaterThan(0);
-    }
-  });
-});
-
-/** `<workflow file>#<job id>` for every job whose steps run the unit suite. */
-function suiteRunningJobs(file: string, wf: Workflow): string[] {
-  return Object.entries(wf.jobs)
-    .filter(([, job]) => (job.steps ?? []).some((step) => SUITE_RUN.test(step.run ?? "")))
-    .map(([id]) => `${file}#${id}`);
+/** The one step of `steps` satisfying `matches`; zero or several is the failure `what` names. */
+function theOne(steps: Step[], matches: (step: Step) => boolean, what: string): number {
+  const found = steps.flatMap((step, index) => (matches(step) ? [index] : []));
+  expect(
+    found.length,
+    `${COMPOSITE_DIR} must have exactly one ${what}, found ${found.length}`,
+  ).toBe(1);
+  return found[0] as number;
 }
 
-/** Per artifact: cache of its path under checks.yml's key, then its fetch gated on that cache's miss, then the suite. */
-function expectArtifactsBeforeSuite(
-  where: string,
-  steps: Step[],
-  referenceKeys: ReadonlyMap<string, string>,
-): void {
-  const suiteIdx = steps.findIndex((step) => SUITE_RUN.test(step.run ?? ""));
+/** Per artifact: exactly one cache of its path under a string key, then exactly one fetch gated on that cache's miss, failure-propagating, under the shell a composite run step must declare. */
+function expectCompositeShape(action: CompositeAction): void {
+  expect(action.runs.using, `${COMPOSITE_DIR} must be a composite action`).toBe("composite");
+  const steps = action.runs.steps ?? [];
+  const ids = steps.map((step) => step.id).filter((id) => id !== undefined);
+  expect(new Set(ids).size, `${COMPOSITE_DIR} has duplicate step ids: ${ids.join(", ")}`).toBe(
+    ids.length,
+  );
   for (const { label, path, fetchScript } of FETCHED_ARTIFACTS) {
-    const cacheIdx = steps.findIndex((step) => cachesArtifact(step, path));
-    const fetchIdx = steps.findIndex((step) => isFetchCommand(step.run, fetchScript));
-    expect(
-      cacheIdx,
-      `${where} runs the test suite without an actions/cache step for the ${label} (path ${path})`,
-    ).toBeGreaterThanOrEqual(0);
+    const cacheIdx = theOne(
+      steps,
+      (step) => cachesArtifact(step, path),
+      `actions/cache step for the ${label} (path ${path})`,
+    );
+    const fetchIdx = theOne(
+      steps,
+      (step) => isFetchCommand(step.run, fetchScript),
+      `plain, failure-propagating fetch of the ${label} (bun ${fetchScript})`,
+    );
     expect(
       fetchIdx,
-      `${where} runs the test suite without a plain, failure-propagating fetch of the ${label} first (bun ${fetchScript})`,
-    ).toBeGreaterThanOrEqual(0);
-    expect(fetchIdx, `${where}: the ${label} fetch must follow its cache restore`).toBeGreaterThan(
-      cacheIdx,
-    );
-    expect(suiteIdx, `${where}: the ${label} fetch must precede the test suite`).toBeGreaterThan(
-      fetchIdx,
-    );
+      `${COMPOSITE_DIR}: the ${label} fetch must follow its cache restore`,
+    ).toBeGreaterThan(cacheIdx);
     const cache = steps[cacheIdx] as Step;
-    const reference = referenceKeys.get(path);
-    expect(reference, `no reference key for ${path}`).toBeDefined();
+    const fetch = steps[fetchIdx] as Step;
+    cacheKeyOf(cache, path);
     expect(
-      cacheKeyOf(cache, path),
-      `${where}: the ${label} cache key diverged from checks.yml's`,
-    ).toBe(reference as string);
+      cache.with?.path,
+      `${COMPOSITE_DIR}: the ${label} cache must restore exactly ${path}, not a directory or glob`,
+    ).toBe(path);
     expect(
-      steps[fetchIdx]?.if,
-      `${where}: the ${label} fetch must run exactly on a miss of its cache step`,
+      cache["continue-on-error"],
+      `${COMPOSITE_DIR}: a failed ${label} cache restore must fail the job`,
+    ).toBeUndefined();
+    for (const option of ["lookup-only", "fail-on-cache-miss"]) {
+      // Either turns a miss into something other than "restore nothing, then fetch".
+      expect(
+        cache.with?.[option],
+        `${COMPOSITE_DIR}: the ${label} cache must not set ${option}; a miss has to fall through to the fetch`,
+      ).toBeUndefined();
+    }
+    expect(
+      typeof cache.id === "string" && /\S/.test(cache.id),
+      `${COMPOSITE_DIR}: the ${label} cache step needs an id`,
+    ).toBe(true);
+    expect(
+      fetch.if,
+      `${COMPOSITE_DIR}: the ${label} fetch must run exactly on a miss of its cache step`,
     ).toBe(`steps.${cache.id}.outputs.cache-hit != 'true'`);
     expect(
-      steps[fetchIdx]?.["continue-on-error"],
-      `${where}: a failed ${label} fetch must fail the job`,
+      fetch["continue-on-error"],
+      `${COMPOSITE_DIR}: a failed ${label} fetch must fail the job`,
     ).toBeUndefined();
+    // A composite run step without shell: is rejected by the runner at job start.
+    expect(fetch.shell, `${COMPOSITE_DIR}: the ${label} fetch needs shell: bash`).toBe("bash");
   }
 }
 
-describe("fetched test artifacts across workflows", () => {
-  const files = readdirSync(WORKFLOWS_DIR).filter((f) => /\.ya?ml$/.test(f));
-  const workflows = files.map((file) => ({ file, wf: readWorkflow(file) }));
-  // checks.yml's check job is the reference spelling of both keys.
-  const checks = readWorkflow("checks.yml");
-  const referenceKeys = new Map(
-    FETCHED_ARTIFACTS.map(({ path }) => {
-      const key = cacheKeys(checks, path)[0];
-      expect(key, `checks.yml no longer caches ${path}`).toBeDefined();
-      return [path, key as string];
-    }),
+/** A step the provider relies on: it cannot be allowed to fail, and it cannot be skipped when the provider runs. */
+function supports(step: Step, provider: Step): boolean {
+  return (
+    step["continue-on-error"] === undefined && (step.if === undefined || step.if === provider.if)
   );
+}
 
-  test("the suite scripts are test and check", () => {
-    expect(suiteScripts().sort()).toEqual(["check", "test"]);
-  });
-
-  test.each([
-    ["bun test", true],
-    ["bun run test", true],
-    ["bun run check", true],
-    ["bun test test/docs/checks-workflow.test.ts", true],
-    ["bun test/e2e/run.ts", false],
-    ["bun run test:e2e", false],
-    ["bun run typecheck --pretty false", false],
-    ["bun run build:check", false],
-    ["timeout 50m bun test/e2e/fuzz.ts --seed 1", false],
-  ])("SUITE_RUN on %j is %p", (command, matches) => {
-    expect(SUITE_RUN.test(command)).toBe(matches);
-  });
-
-  test("exactly the pinned jobs run the unit suite", () => {
-    // Pinned: a pattern that silently stops matching would pass the guard vacuously.
-    const found = workflows.flatMap(({ file, wf }) => suiteRunningJobs(file, wf));
-    expect(found.sort()).toEqual(["checks.yml#check", "nightly.yml#float-canary"]);
-  });
-
-  test("every suite-running job caches and fetches both artifacts first, under checks.yml's keys", () => {
-    for (const { file, wf } of workflows) {
-      for (const [id, job] of Object.entries(wf.jobs)) {
-        if ((job.steps ?? []).some((step) => SUITE_RUN.test(step.run ?? ""))) {
-          expectArtifactsBeforeSuite(`${file}#${id}`, job.steps ?? [], referenceKeys);
-        }
+/** The run scalar's lines with every heredoc body (`<<TAG` through its terminator) removed: what the shell executes. */
+function executedLines(run: string): string[] {
+  const lines: string[] = [];
+  let terminator: string | undefined;
+  for (const line of run.split("\n")) {
+    if (terminator !== undefined) {
+      if (line.trim() === terminator) {
+        terminator = undefined;
       }
+      continue;
     }
-  });
+    lines.push(line);
+    terminator = line
+      .match(/<<-?\s*(?:'([^']+)'|"([^"]+)"|(\w+))/)
+      ?.slice(1)
+      .find(Boolean);
+  }
+  return lines;
+}
 
-  test("every cache of an artifact path, in any workflow, spells checks.yml's key", () => {
-    // The e2e jobs cache the spec without running the suite; a second spelling is a second cache.
-    for (const { file, wf } of workflows) {
-      for (const { path } of FETCHED_ARTIFACTS) {
-        for (const key of cacheKeys(wf, path)) {
-          expect(key, `${file}: the cache key for ${path} diverged from checks.yml's`).toBe(
-            referenceKeys.get(path) as string,
-          );
-        }
-      }
+/** A run scalar executing a `bun install` command: at the start of a line, outside heredocs, not commented out, echoed, or quoted. */
+function installs(run: string | undefined): boolean {
+  return executedLines(run ?? "").some(
+    (line) => /^\s*bun install(?:\s|$)/.test(line) && !line.includes("||"),
+  );
+}
+
+/** A run scalar executing `bun <script>` anywhere the shell would run it: as a command token on an executed line, however wrapped, but not quoted or commented. */
+function runsFetch(run: string | undefined, fetchScript: string): boolean {
+  const token = new RegExp(`(?:^|[\\s!(;&|])bun ${escapeRegExp(fetchScript)}(?=[\\s;)&|]|$)`);
+  return executedLines(run ?? "").some((line) => !line.trim().startsWith("#") && token.test(line));
+}
+
+/** Every artifact the job's loaders need is put on disk earlier by the job's one sanctioned provider, after setup-bun and an install, and skipped only when the loader is too. */
+function expectArtifactsProvided(where: string, steps: Step[]): void {
+  const uncached = UNCACHED_FETCH_JOBS.has(where);
+  const provides = (step: Step, artifact: FetchedArtifact) =>
+    step["continue-on-error"] === undefined &&
+    (uncached ? isFetchCommand(step.run, artifact.fetchScript) : step.uses === COMPOSITE_USES);
+  if (uncached) {
+    expect(
+      steps.some((step) => step.uses === COMPOSITE_USES),
+      `${where} is a drift tripwire: it must fetch the spec fresh, not restore it through ${COMPOSITE_USES}`,
+    ).toBe(false);
+  }
+  /** [loader, index of a step running it], every occurrence. */
+  const loaderSteps = LOADERS.flatMap((loader) =>
+    steps.flatMap(
+      (step, index): Array<[Loader, number]> =>
+        loader.runs.test(step.run ?? "") ? [[loader, index]] : [],
+    ),
+  );
+  if (!uncached && loaderSteps.length > 0) {
+    for (const { label, fetchScript } of FETCHED_ARTIFACTS) {
+      expect(
+        steps.some((step) => runsFetch(step.run, fetchScript)),
+        `${where} fetches the ${label} directly; a cached loading job restores it through ${COMPOSITE_USES} only`,
+      ).toBe(false);
     }
-  });
+  }
+  for (const artifact of FETCHED_ARTIFACTS) {
+    const consumers = loaderSteps.filter(([loader]) => loader.needs.includes(artifact));
+    if (consumers.length === 0) {
+      continue;
+    }
+    const providerIdxs = steps.flatMap((step, index) => (provides(step, artifact) ? [index] : []));
+    const loaders = [...new Set(consumers.map(([loader]) => loader.label))].join(" and ");
+    expect(
+      providerIdxs.length,
+      providerIdxs.length === 0
+        ? uncached
+          ? `${where} runs the ${loaders} without a plain, failure-propagating fetch of the ${artifact.label} (bun ${artifact.fetchScript})`
+          : `${where} runs the ${loaders} without ${COMPOSITE_USES}, which every cached loading job must go through`
+        : `${where} provides the ${artifact.label} ${providerIdxs.length} times; once is the whole job`,
+    ).toBe(1);
+    const providerIdx = providerIdxs[0] as number;
+    const provider = steps[providerIdx] as Step;
+    const before = steps.slice(0, providerIdx);
+    expect(
+      before.some(
+        (step) => (step.uses ?? "").startsWith("oven-sh/setup-bun@") && supports(step, provider),
+      ),
+      `${where}: a reliable oven-sh/setup-bun must precede the ${artifact.label} provider (its fetch runs under bun)`,
+    ).toBe(true);
+    expect(
+      before.some((step) => installs(step.run) && supports(step, provider)),
+      `${where}: a reliable bun install must precede the ${artifact.label} provider (its fetch imports installed packages)`,
+    ).toBe(true);
+    for (const [loader, loaderIdx] of consumers) {
+      expect(
+        providerIdx,
+        `${where}: the ${artifact.label} must be provided before the ${loader.label}`,
+      ).toBeLessThan(loaderIdx);
+      expect(
+        provider.if,
+        `${where}: the ${artifact.label} provider and the ${loader.label} must run under one condition (${provider.if ?? "none"} vs ${steps[loaderIdx]?.if ?? "none"})`,
+      ).toBe(steps[loaderIdx]?.if);
+    }
+  }
+}
 
-  const canary = () => readWorkflow("nightly.yml").jobs["float-canary"]?.steps ?? [];
-  const fetches = (step: Step, { fetchScript }: FetchedArtifact) =>
-    isFetchCommand(step.run, fetchScript);
+/** `<workflow file>#<job id>` for every job with a step matching `loader`. */
+function jobsRunning(file: string, wf: Workflow, loader: Loader): string[] {
+  return Object.entries(wf.jobs)
+    .filter(([, job]) => (job.steps ?? []).some((step) => loader.runs.test(step.run ?? "")))
+    .map(([id]) => `${file}#${id}`);
+}
+
+/** `<workflow file>#<job id>` for every job caching an artifact path itself instead of through the composite. */
+function inlineArtifactCaches(workflows: ReadonlyArray<{ file: string; wf: Workflow }>): string[] {
+  return workflows.flatMap(({ file, wf }) =>
+    Object.entries(wf.jobs)
+      .filter(([, job]) =>
+        (job.steps ?? []).some((step) =>
+          FETCHED_ARTIFACTS.some(({ path }) => cachesArtifact(step, path)),
+        ),
+      )
+      .map(([id]) => `${file}#${id}`),
+  );
+}
+
+/** The key's hashFiles list names at least one pattern and covers every input the artifact depends on. */
+function expectKeyHashesInputs(key: string, artifact: FetchedArtifact): void {
+  const patterns = hashFilesPatterns(key);
+  expect(patterns.length, `the ${artifact.label} cache key hashes nothing: ${key}`).toBeGreaterThan(
+    0,
+  );
+  for (const file of artifact.hashInputs()) {
+    expect(
+      covered(patterns, file),
+      `${file} changes the ${artifact.label} but its cache key does not hash it`,
+    ).toBe(true);
+  }
+}
+
+/** The key is the pinned literal: any rewording, reordering, or added input is a different cache. */
+function expectKeyPinned(key: string, artifact: FetchedArtifact): void {
+  expect(
+    key,
+    `the ${artifact.label} cache key changed; update the pin only with the cache identity`,
+  ).toBe(artifact.key);
+}
+
+describe("the fetch-test-artifacts composite", () => {
+  const action = readComposite();
+  const steps = () => readComposite().runs.steps ?? [];
+  const cacheOf = (artifact: FetchedArtifact) =>
+    steps().find((step) => cachesArtifact(step, artifact.path)) as Step;
+  const keyOf = (artifact: FetchedArtifact) => cacheKeyOf(cacheOf(artifact), artifact.path);
   const onCache = (steps: Step[], { path }: FetchedArtifact, patch: (step: Step) => Step) =>
     steps.map((step) => (cachesArtifact(step, path) ? patch(step) : step));
-  const onFetch = (steps: Step[], artifact: FetchedArtifact, patch: (step: Step) => Step) =>
-    steps.map((step) => (fetches(step, artifact) ? patch(step) : step));
-  /** Rewrites of a fetch step's run text that keep the command but stop it running or mask its failure. */
-  const INVALID_FETCH_RUNS: Array<[string, (run: string) => string]> = [
-    ["a fetch commented out", (run) => `# ${run}`],
-    ["a fetch short-circuited behind a separator", (run) => `true || ${run}`],
-    ["a fetch quoted in an echo", (run) => `echo "; ${run}"`],
-    ["a fetch inside a heredoc body", (run) => `cat <<'EOF'\n${run}\nEOF`],
-    ["a fetch with its failure masked", (run) => `${run} || true`],
-  ];
+  const onFetch = (steps: Step[], { fetchScript }: FetchedArtifact, patch: (step: Step) => Step) =>
+    steps.map((step) => (isFetchCommand(step.run, fetchScript) ? patch(step) : step));
+  const withSteps = (steps: Step[]): CompositeAction => ({ runs: { ...action.runs, steps } });
 
-  test("a multiline path list naming the artifact is still its cache step (positive control)", () => {
-    const steps = onCache(canary(), OPENAPI, (step) => ({
-      ...step,
-      with: { ...step.with, path: `other/file.json\n${OPENAPI.path}\n` },
-    }));
-    expect(() =>
-      expectArtifactsBeforeSuite("nightly.yml#float-canary", steps, referenceKeys),
-    ).not.toThrow();
+  test("caches each artifact once and fetches it exactly on a miss, in that order", () => {
+    expectCompositeShape(action);
   });
 
-  test.each<[string, (steps: Step[]) => Step[], RegExp]>([
+  test.each<[string, (steps: Step[]) => CompositeAction, RegExp]>([
+    [
+      "an action that is not a composite",
+      (steps) => ({ runs: { using: "node24", steps } }),
+      /must be a composite action/,
+    ],
     [
       "a dropped fetch step",
-      (steps) => steps.filter((step) => !fetches(step, GRAPHQL)),
-      /nightly\.yml#float-canary runs the test suite without a plain, failure-propagating fetch of the GraphQL schema/,
+      (steps) => withSteps(steps.filter((step) => !isFetchCommand(step.run, GRAPHQL.fetchScript))),
+      /exactly one plain, failure-propagating fetch of the GraphQL schema \(bun \.github\/scripts\/fetch-graphql-schema\.ts\), found 0/,
+    ],
+    [
+      "a duplicated fetch step",
+      (steps) =>
+        withSteps([
+          ...steps,
+          steps.find((step) => isFetchCommand(step.run, GRAPHQL.fetchScript)) as Step,
+        ]),
+      /exactly one plain, failure-propagating fetch of the GraphQL schema .*, found 2/,
     ],
     [
       "a dropped cache step",
-      (steps) => steps.filter((step) => !cachesArtifact(step, OPENAPI.path)),
-      /without an actions\/cache step for the trimmed OpenAPI spec/,
+      (steps) => withSteps(steps.filter((step) => !cachesArtifact(step, OPENAPI.path))),
+      /exactly one actions\/cache step for the trimmed OpenAPI spec .*, found 0/,
     ],
     [
-      "a cache of the wrong path",
+      "a duplicated cache step",
       (steps) =>
-        onCache(steps, OPENAPI, (step) => ({
-          ...step,
-          with: { ...step.with, path: "test/e2e/openapi/other.json" },
-        })),
-      /without an actions\/cache step for the trimmed OpenAPI spec/,
+        withSteps([
+          { ...(steps.find((step) => cachesArtifact(step, OPENAPI.path)) as Step), id: "twin" },
+          ...steps,
+        ]),
+      /exactly one actions\/cache step for the trimmed OpenAPI spec .*, found 2/,
     ],
     [
-      "a fetch moved after the suite",
+      "a fetch moved before its cache",
       (steps) => {
         const [fetch] = steps.splice(
-          steps.findIndex((step) => fetches(step, OPENAPI)),
+          steps.findIndex((step) => isFetchCommand(step.run, OPENAPI.fetchScript)),
           1,
         );
-        return [...steps, fetch as Step];
+        return withSteps([fetch as Step, ...steps]);
       },
-      /fetch must precede the test suite/,
-    ],
-    [
-      "a drifted key",
-      (steps) =>
-        onCache(steps, GRAPHQL, (step) => ({
-          ...step,
-          with: { ...step.with, key: `${step.with?.key}-v2` },
-        })),
-      /GraphQL schema cache key diverged/,
+      /fetch must follow its cache restore/,
     ],
     [
       "a non-string key under the right path",
-      (steps) => onCache(steps, GRAPHQL, (step) => ({ ...step, with: { ...step.with, key: 42 } })),
+      (steps) =>
+        withSteps(
+          onCache(steps, GRAPHQL, (step) => ({ ...step, with: { ...step.with, key: 42 } })),
+        ),
       /cache step for test\/e2e\/graphql\/schema\.docs\.graphql has a non-string key: 42/,
     ],
+    ...["lookup-only", "fail-on-cache-miss"].map(
+      (option): [string, (steps: Step[]) => CompositeAction, RegExp] => [
+        `a cache with ${option}`,
+        (steps) =>
+          withSteps(
+            onCache(steps, OPENAPI, (step) => ({
+              ...step,
+              with: { ...step.with, [option]: true },
+            })),
+          ),
+        new RegExp(`trimmed OpenAPI spec cache must not set ${option}`),
+      ],
+    ),
     [
-      "a renamed key under the right path",
+      "a cache of the artifact's directory",
       (steps) =>
-        onCache(steps, OPENAPI, (step) => ({
-          ...step,
-          with: {
-            ...step.with,
-            key: String(step.with?.key).replace("openapi-trimmed-", "openapi-spec-"),
-          },
-        })),
-      /trimmed OpenAPI spec cache key diverged/,
+        withSteps(
+          onCache(steps, OPENAPI, (step) => ({
+            ...step,
+            with: { ...step.with, path: "test/e2e/openapi" },
+          })),
+        ),
+      /trimmed OpenAPI spec cache must restore exactly test\/e2e\/openapi\/github-openapi\.trimmed\.json/,
     ],
-    ...INVALID_FETCH_RUNS.map(([name, rewrite]): [string, (steps: Step[]) => Step[], RegExp] => [
-      name,
-      (steps) => onFetch(steps, OPENAPI, (step) => ({ ...step, run: rewrite(step.run ?? "") })),
-      /without a plain, failure-propagating fetch of the trimmed OpenAPI spec first/,
-    ]),
+    [
+      "a cache allowed to fail",
+      (steps) =>
+        withSteps(onCache(steps, OPENAPI, (step) => ({ ...step, "continue-on-error": true }))),
+      /a failed trimmed OpenAPI spec cache restore must fail the job/,
+    ],
+    [
+      "a cache step without an id",
+      (steps) => withSteps(onCache(steps, GRAPHQL, ({ id: _, ...step }) => step)),
+      /GraphQL schema cache step needs an id/,
+    ],
+    [
+      "two cache steps sharing an id (the fetch gate following it)",
+      (steps) =>
+        withSteps(
+          onFetch(
+            onCache(steps, GRAPHQL, (step) => ({ ...step, id: "openapi-cache" })),
+            GRAPHQL,
+            (step) => ({ ...step, if: "steps.openapi-cache.outputs.cache-hit != 'true'" }),
+          ),
+        ),
+      /duplicate step ids/,
+    ],
     [
       "a fetch switched off",
-      (steps) => onFetch(steps, OPENAPI, (step) => ({ ...step, if: "false" })),
+      (steps) => withSteps(onFetch(steps, OPENAPI, (step) => ({ ...step, if: "false" }))),
       /fetch must run exactly on a miss of its cache step/,
     ],
     [
       "a fetch allowed to fail",
-      (steps) => onFetch(steps, GRAPHQL, (step) => ({ ...step, "continue-on-error": true })),
+      (steps) =>
+        withSteps(onFetch(steps, GRAPHQL, (step) => ({ ...step, "continue-on-error": true }))),
       /a failed GraphQL schema fetch must fail the job/,
     ],
-  ])("%s fails the guard naming the job (negative control)", (_, mutate, message) => {
-    expect(() =>
-      expectArtifactsBeforeSuite("nightly.yml#float-canary", mutate(canary()), referenceKeys),
-    ).toThrow(message);
+    [
+      "a fetch without a shell",
+      (steps) => withSteps(onFetch(steps, GRAPHQL, ({ shell: _, ...step }) => step)),
+      /GraphQL schema fetch needs shell: bash/,
+    ],
+  ])("%s fails the guard (negative control)", (_, mutate, message) => {
+    expect(() => expectCompositeShape(mutate(steps()))).toThrow(message);
+  });
+
+  test("each cache key is the pinned literal and hashes every input its artifact depends on", () => {
+    expect(OPENAPI.hashInputs()).toContain("src/report/issue-report.ts");
+    expect(hashFilesPatterns(keyOf(OPENAPI))).toContain("src/sections/**");
+    for (const artifact of FETCHED_ARTIFACTS) {
+      expectKeyPinned(keyOf(artifact), artifact);
+      expectKeyHashesInputs(keyOf(artifact), artifact);
+    }
+  });
+
+  test.each([
+    [
+      "an added input",
+      OPENAPI.key.replace("'src/github/api.ts'", "'src/github/api.ts', 'package.json'"),
+    ],
+    ["a changed prefix", OPENAPI.key.replace("openapi-trimmed-", "openapi-spec-")],
+    [
+      "reordered inputs",
+      OPENAPI.key.replace(
+        "'.github/scripts/trim-openapi.ts', 'test/e2e/openapi/paths.ts'",
+        "'test/e2e/openapi/paths.ts', '.github/scripts/trim-openapi.ts'",
+      ),
+    ],
+  ])("a key with %s fails the pin (negative control)", (_, key) => {
+    expect(key).not.toBe(OPENAPI.key);
+    expect(() => expectKeyPinned(key, OPENAPI)).toThrow(/trimmed OpenAPI spec cache key changed/);
+  });
+
+  /** A GraphQL schema key whose expression is `call`. */
+  const keyed = (call: string) => `graphql-schema-\${{ ${call} }}`;
+
+  test.each<[string, string, RegExp]>([
+    ["a key hashing nothing", keyed("hashFiles()"), /GraphQL schema cache key hashes nothing/],
+    [
+      "a key hashing an unrelated file",
+      keyed("hashFiles('package.json')"),
+      /fetch-graphql-schema\.ts changes the GraphQL schema but its cache key does not hash it/,
+    ],
+    ["a key without hashFiles", "graphql-schema-v1", /cache key has no hashFiles call/],
+  ])("%s fails the guard (negative control)", (_, key, message) => {
+    expect(() => expectKeyHashesInputs(key, GRAPHQL)).toThrow(message);
+  });
+
+  test("every hashFiles pattern of every key matches at least one file on disk", () => {
+    // hashFiles() silently skips a pattern that matches nothing (a moved or
+    // renamed input), so the key would stop changing with that input while
+    // the coverage test above still sees the stale pattern string.
+    for (const artifact of FETCHED_ARTIFACTS) {
+      for (const pattern of hashFilesPatterns(keyOf(artifact))) {
+        // dot: true because the scripts live under .github/, which the glob
+        // scanner skips by default (hashFiles itself does not).
+        const matches = [...new Bun.Glob(pattern).scanSync({ cwd: ROOT, dot: true })];
+        expect(
+          matches.length,
+          `hashFiles pattern '${pattern}' matches no file on disk, so it contributes nothing to the cache key`,
+        ).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+describe("fetched test artifacts across workflows", () => {
+  const files = readdirSync(WORKFLOWS_DIR).filter((f) => /\.ya?ml$/.test(f));
+  const workflows = files.map((file) => ({ file, wf: readWorkflow(file) }));
+
+  // Pinned: a derivation that silently found nothing would pass every guard below vacuously.
+  test.each<[string, () => string[], string[]]>([
+    ["the unit-suite scripts", () => scriptsRunning(BUN_TEST).sort(), ["check", "test"]],
+    ["the harness scripts", () => scriptsRunning(BUN_HARNESS).sort(), ["fuzz", "test:e2e"]],
+    [
+      "the harness entrypoints",
+      harnessEntrypoints,
+      [".github/scripts/check-endpoint-coverage.ts", "test/e2e/fuzz.ts", "test/e2e/run.ts"],
+    ],
+  ])("%s derive to exactly %p", (_, derive, expected) => {
+    expect(derive()).toEqual(expected);
+  });
+
+  test.each<[string, Loader | undefined]>([
+    ["bun test", SUITE],
+    ["bun run test", SUITE],
+    ["bun run check", SUITE],
+    ["bun test test/docs/checks-workflow.test.ts", SUITE],
+    ["bun test/e2e/run.ts", HARNESS],
+    ["bun test/e2e/run.ts --sections labels", HARNESS],
+    ["bun run test:e2e", HARNESS],
+    ["timeout 50m bun test/e2e/fuzz.ts --seed 1", HARNESS],
+    ["bun .github/scripts/check-endpoint-coverage.ts", HARNESS],
+    ["bun run typecheck --pretty false", undefined],
+    ["bun run build:check", undefined],
+    ["bun .github/scripts/trim-openapi.ts", undefined],
+  ])("%j loads through %p", (command, loader) => {
+    expect(LOADERS.filter((candidate) => candidate.runs.test(command))).toEqual(
+      loader ? [loader] : [],
+    );
+  });
+
+  test("exactly the pinned jobs run the unit suite and the e2e harness", () => {
+    const found = (loader: Loader) =>
+      workflows.flatMap(({ file, wf }) => jobsRunning(file, wf, loader)).sort();
+    expect(found(SUITE)).toEqual(["checks.yml#check", "nightly.yml#float-canary"]);
+    expect(found(HARNESS)).toEqual(
+      ["checks.yml#e2e-smoke", "checks.yml#endpoint-coverage", ...UNCACHED_FETCH_JOBS].sort(),
+    );
+  });
+
+  test("every loading job is handed its artifacts first, and none caches one inline", () => {
+    for (const { file, wf } of workflows) {
+      for (const [id, job] of Object.entries(wf.jobs)) {
+        expectArtifactsProvided(`${file}#${id}`, job.steps ?? []);
+      }
+    }
+    const inline = inlineArtifactCaches(workflows);
+    expect(
+      inline,
+      `these jobs cache an artifact inline instead of through ${COMPOSITE_USES}: ${inline.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  const CANARY = "nightly.yml#float-canary";
+  const E2E_NIGHTLY = "e2e-nightly.yml#nightly";
+  const COVERAGE = "checks.yml#endpoint-coverage";
+  const canary = () => readWorkflow("nightly.yml").jobs["float-canary"]?.steps ?? [];
+  const coverage = () => readWorkflow("checks.yml").jobs["endpoint-coverage"]?.steps ?? [];
+  const ungated = ({ if: _, ...step }: Step): Step => step;
+  const e2eNightly = () => readWorkflow("e2e-nightly.yml").jobs.nightly?.steps ?? [];
+  const isComposite = (step: Step) => step.uses === COMPOSITE_USES;
+  const isPlainFetch = (step: Step) => isFetchCommand(step.run, OPENAPI.fetchScript);
+  const onComposite = (steps: Step[], patch: (step: Step) => Step) =>
+    steps.map((step) => (isComposite(step) ? patch(step) : step));
+  const onPlainFetch = (steps: Step[], patch: (step: Step) => Step) =>
+    steps.map((step) => (isPlainFetch(step) ? patch(step) : step));
+  const isInstall = (step: Step) => installs(step.run);
+  const onInstall = (steps: Step[], patch: (step: Step) => Step) =>
+    steps.map((step) => (isInstall(step) ? patch(step) : step));
+  const onSetupBun = (steps: Step[], patch: (step: Step) => Step) =>
+    steps.map((step) => ((step.uses ?? "").startsWith("oven-sh/setup-bun@") ? patch(step) : step));
+  const moved = (steps: Step[], matches: (step: Step) => boolean, to: "first" | "last") => {
+    const [step] = steps.splice(steps.findIndex(matches), 1);
+    return to === "first" ? [step as Step, ...steps] : [...steps, step as Step];
+  };
+
+  test("an inline artifact cache is reported by job (negative control)", () => {
+    const wf = readWorkflow("checks.yml");
+    wf.jobs.check?.steps?.push({
+      uses: "actions/cache@v6",
+      with: { path: GRAPHQL.path, key: "anything" },
+    });
+    expect(inlineArtifactCaches([{ file: "checks.yml", wf }])).toEqual(["checks.yml#check"]);
+  });
+
+  test.each<[string, string, () => Step[], RegExp]>([
+    [
+      "a dropped composite step",
+      CANARY,
+      () => canary().filter((step) => !isComposite(step)),
+      /nightly\.yml#float-canary runs the unit suite without \.\/\.github\/actions\/fetch-test-artifacts, which every cached loading job must go through/,
+    ],
+    [
+      "a composite step moved after the suite",
+      CANARY,
+      () => moved(canary(), isComposite, "last"),
+      /trimmed OpenAPI spec must be provided before the unit suite/,
+    ],
+    [
+      "a composite step allowed to fail",
+      CANARY,
+      () => onComposite(canary(), (step) => ({ ...step, "continue-on-error": true })),
+      /runs the unit suite without/,
+    ],
+    [
+      "a second suite step outside the composite's condition",
+      CANARY,
+      () => [
+        ...canary().map((step) =>
+          isComposite(step) || SUITE.runs.test(step.run ?? "")
+            ? { ...step, if: "github.event_name == 'schedule'" }
+            : step,
+        ),
+        { run: "bun test test/docs" },
+      ],
+      /trimmed OpenAPI spec provider and the unit suite must run under one condition \(github\.event_name == 'schedule' vs none\)/,
+    ],
+    [
+      "a gated harness step with an ungated composite",
+      COVERAGE,
+      () => onComposite(coverage(), ungated),
+      /checks\.yml#endpoint-coverage: the trimmed OpenAPI spec provider and the e2e harness must run under one condition \(none vs steps\.select/,
+    ],
+    [
+      "an ungated harness step with a gated composite",
+      COVERAGE,
+      () => coverage().map((step) => (HARNESS.runs.test(step.run ?? "") ? ungated(step) : step)),
+      /provider and the e2e harness must run under one condition \(steps\.select\.outputs\.sections != 'none' vs none\)/,
+    ],
+    [
+      "a plain fetch added beside the composite",
+      CANARY,
+      () => [...canary(), { run: `bun ${GRAPHQL.fetchScript}` }],
+      /nightly\.yml#float-canary fetches the GraphQL schema directly; a cached loading job restores it through/,
+    ],
+    [
+      "a composite step before setup-bun",
+      CANARY,
+      () => moved(canary(), isComposite, "first"),
+      /reliable oven-sh\/setup-bun must precede the trimmed OpenAPI spec provider/,
+    ],
+    [
+      "a setup-bun allowed to fail",
+      CANARY,
+      () => onSetupBun(canary(), (step) => ({ ...step, "continue-on-error": true })),
+      /reliable oven-sh\/setup-bun must precede/,
+    ],
+    [
+      "a composite step before the install",
+      CANARY,
+      () => moved(canary(), isInstall, "last"),
+      /reliable bun install must precede the trimmed OpenAPI spec provider/,
+    ],
+    [
+      "a duplicated composite step",
+      CANARY,
+      () => canary().flatMap((step) => (isComposite(step) ? [step, step] : [step])),
+      /nightly\.yml#float-canary provides the trimmed OpenAPI spec 2 times; once is the whole job/,
+    ],
+    [
+      "an install skipped under a condition the composite lacks",
+      CANARY,
+      () => onInstall(canary(), (step) => ({ ...step, if: "github.event_name == 'schedule'" })),
+      /reliable bun install must precede/,
+    ],
+    [
+      "a drift tripwire restoring the cache instead",
+      E2E_NIGHTLY,
+      () => onPlainFetch(e2eNightly(), () => ({ uses: COMPOSITE_USES })),
+      /e2e-nightly\.yml#nightly is a drift tripwire: it must fetch the spec fresh/,
+    ],
+    [
+      "a plain fetch allowed to fail",
+      E2E_NIGHTLY,
+      () => onPlainFetch(e2eNightly(), (step) => ({ ...step, "continue-on-error": true })),
+      /e2e-nightly\.yml#nightly runs the e2e harness without a plain, failure-propagating fetch/,
+    ],
+    [
+      "a plain fetch moved after the second harness step",
+      E2E_NIGHTLY,
+      () => moved(e2eNightly(), isPlainFetch, "last"),
+      /trimmed OpenAPI spec must be provided before the e2e harness/,
+    ],
+  ])("%s fails the guard naming the job (negative control)", (_, where, mutate, message) => {
+    expect(() => expectArtifactsProvided(where, mutate())).toThrow(message);
+  });
+});
+
+/** The step predicates the guards above are built from, each proven on the forms it must accept and reject. */
+describe("step predicates", () => {
+  const cache = (path: string, uses = "actions/cache@v6"): Step => ({ uses, with: { path } });
+
+  test.each([
+    ["the exact path", true, cache(OPENAPI.path)],
+    ["a multiline list containing it", true, cache(`node_modules\n${OPENAPI.path}\n`)],
+    ["its directory", true, cache("test/e2e/openapi")],
+    ["a parent directory with a trailing slash", true, cache("test/e2e/")],
+    ["a glob over it", true, cache("test/e2e/**/*.json")],
+    ["a directory with it negated out", false, cache(`test/e2e/openapi\n!${OPENAPI.path}`)],
+    ["a glob with it negated out by glob", false, cache("test/e2e/**\n!test/e2e/openapi/*.json")],
+    ["an unrelated path list", false, cache("~/.bun/install/cache\ntest/e2e/openapi/other.json")],
+    ["the other artifact", false, cache(GRAPHQL.path)],
+    ["a different action", false, cache(OPENAPI.path, "actions/cache-restore@v6")],
+    ["a run step", false, { run: `cat ${OPENAPI.path}` }],
+  ])("cachesArtifact(): %s -> %p", (_, expected, step) => {
+    expect(cachesArtifact(step, OPENAPI.path)).toBe(expected);
+  });
+
+  const fetch = `bun ${OPENAPI.fetchScript}`;
+  test.each([
+    ["the plain command", true, fetch],
+    ["the command with surrounding whitespace", true, `  ${fetch}\n`],
+    ["a commented command", false, `# ${fetch}`],
+    ["a command short-circuited behind a separator", false, `true || ${fetch}`],
+    ["a command quoted in an echo", false, `echo "; ${fetch}"`],
+    ["a command inside a heredoc body", false, `cat <<'EOF'\n${fetch}\nEOF`],
+    ["a command with its failure masked", false, `${fetch} || true`],
+    ["the other artifact's fetch", false, `bun ${GRAPHQL.fetchScript}`],
+  ])("isFetchCommand(): %s -> %p", (_, expected, run) => {
+    expect(isFetchCommand(run, OPENAPI.fetchScript)).toBe(expected);
+  });
+
+  test.each([
+    ["the whole scalar", true, fetch],
+    ["a line of a script", true, `bun run lint\n${fetch}\nbun test`],
+    ["a negated condition", true, `if ! ${fetch} >log 2>&1; then exit 1; fi`],
+    ["a masked command", true, `${fetch} || true`],
+    ["a subshell", true, `(${fetch})`],
+    ["an echoed command", false, `echo "${fetch}"`],
+    ["a commented command", false, `# ${fetch}`],
+    ["a heredoc body", false, `cat <<EOF\n${fetch}\nEOF`],
+    ["the other artifact's fetch", false, `bun ${GRAPHQL.fetchScript}`],
+  ])("runsFetch(): %s -> %p", (_, expected, run) => {
+    expect(runsFetch(run, OPENAPI.fetchScript)).toBe(expected);
+  });
+
+  test.each([
+    ["a command inside a script", true, "rm bun.lock\nbun install --ignore-scripts\ngit diff"],
+    ["a command after a heredoc", true, "cat <<EOF\nnoise\nEOF\nbun install --frozen-lockfile"],
+    ["a heredoc body", false, "cat <<EOF\nbun install\nEOF"],
+    ["a quoted heredoc body", false, "cat <<'EOF'\n  bun install\nEOF\necho done"],
+    ["an echoed command", false, 'echo "bun install"'],
+    ["a commented command", false, "# bun install"],
+    ["a command with its failure masked", false, "bun install || true"],
+    ["a different subcommand", false, "bun install-nope"],
+  ])("installs(): %s -> %p", (_, expected, run) => {
+    expect(installs(run)).toBe(expected);
   });
 });
 
