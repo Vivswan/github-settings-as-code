@@ -10,6 +10,7 @@
  */
 
 import type { SectionKey } from "../../../src/schema.js";
+import { endpointPath } from "../../../src/sections/contract/endpoints.js";
 import type { GraphqlTolerableError } from "../../../src/sections/contract/graphql.js";
 import { type NameKey, nameKey } from "../../../src/sections/labels/index.js";
 import type {
@@ -18,6 +19,7 @@ import type {
   TaggedEndpoint,
   TaggedGraphqlOp,
 } from "../../../src/sections/registry.js";
+import type { SetupKey, SetupSectionModule } from "../../../src/sections/shared/setup-section.js";
 import { variableKey } from "../../../src/sections/shared/variables-engine.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import {
@@ -382,6 +384,53 @@ export function repoVariablesRestHandlers<K extends VariablesFamilyKey>(section:
       }
       list(state).splice(index, 1);
       return noContent();
+    },
+  };
+  return keyedHandlers(key, roles);
+}
+
+// --- The setup family factory -----------------------------------------------
+
+/** The MockState field each setup section serves. */
+const SETUP_STATE = {
+  code_scanning_default_setup: "code_scanning",
+  code_quality_setup: "code_quality",
+} as const satisfies Record<SetupKey, keyof MockState>;
+
+/** The roles the minted setup modules declare, read off their type. */
+type SetupRole = keyof SetupSectionModule<SetupKey>["endpoints"] & string;
+
+/**
+ * The two handlers every setup section serves: 409 while live_state flags a
+ * configuration run in progress, 202 with a run_id when the PATCH changes
+ * `languages` (GitHub starts an async run), else the spec's empty-object 200.
+ */
+export function setupRestHandlers<K extends SetupKey>(
+  key: K,
+): Record<`${K}.${SetupRole}`, Handler> {
+  const setup = (state: MockState): Json => state[SETUP_STATE[key]];
+  // Annotated, not inferred, so a missing or typo'd role fails to compile.
+  const roles: Readonly<Record<SetupRole, Handler>> = {
+    get: ({ state }) => ok(setup(state)),
+    update: ({ state, body, endpoint }) => {
+      const live = setup(state);
+      if (live.configuration_run_in_progress === true) {
+        return { status: 409, body: { message: "A configuration run is already in progress" } };
+      }
+      const payload = asObject(body);
+      const changesLanguages =
+        "languages" in payload &&
+        JSON.stringify(payload.languages) !== JSON.stringify(live.languages);
+      Object.assign(live, payload);
+      if (!changesLanguages) {
+        return ok({});
+      }
+      const runId = state.nextId++;
+      const path = endpointPath(endpoint.route).replace("{owner}/{repo}", state.slug);
+      return {
+        status: 202,
+        body: { run_id: runId, run_url: `https://api.github.com${path}/runs/${runId}` },
+      };
     },
   };
   return keyedHandlers(key, roles);

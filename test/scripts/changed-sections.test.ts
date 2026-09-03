@@ -126,6 +126,8 @@ describe("changed-sections derived fan-out", () => {
       // repo-variables factory, environments through its nested variables key.
       "variables-engine.ts": inKeyOrder("environments", "actions_variables", "agents_variables"),
       "repo-variables.ts": inKeyOrder("actions_variables", "agents_variables"),
+      // The setup factory: the two GET/PATCH setup sections.
+      "setup-section.ts": inKeyOrder("code_scanning_default_setup", "code_quality_setup"),
       // knobbed() shapes every knobbed section's wrapper and environments'
       // nested lists. src/schema.ts uses it too, but every section reaches
       // src/schema.ts only through type imports, which are not edges.
