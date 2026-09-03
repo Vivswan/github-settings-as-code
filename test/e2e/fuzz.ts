@@ -19,6 +19,8 @@
 
 import { MAX_RETRIES } from "../../src/github/api.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
+import { endpointPath } from "../../src/sections/contract/endpoints.js";
+import { sectionModule } from "../../src/sections/registry.js";
 import type { LiveWitness, LiveWitnessKind } from "./gen-support.js";
 import {
   canariesOf,
@@ -262,10 +264,23 @@ function summaryTableProblems(summary: string, expectedRows: number): string[] {
 }
 
 /**
- * The mutation classes a run PROVABLY reached: successful (2xx) label and
- * milestone writes from the mock's request log - a denied write mutated
- * nothing and does not count - plus a "clean" event when a matching witness
- * earned a clean check verdict.
+ * The collection path of each witness section under the repo prefix ("/labels", "/keys"), read
+ * off its declared list route, so a write to the collection or one of its items attributes to it.
+ */
+const WITNESS_PATHS: Record<WitnessSection, string> = Object.fromEntries(
+  WITNESS_SECTIONS.map((key) => {
+    const list = sectionModule(key).endpoints.list;
+    if (list === undefined) {
+      throw new Error(`${key} declares no "list" role, so its writes cannot be attributed`);
+    }
+    return [key, endpointPath(list.route).replace("/repos/{owner}/{repo}", "")];
+  }),
+) as Record<WitnessSection, string>;
+
+/**
+ * The mutation classes a run PROVABLY reached: successful (2xx) writes to a witness section's
+ * collection from the mock's request log (a denied write mutated nothing and does not count),
+ * plus a "clean" event when a matching witness earned a clean check verdict.
  */
 function witnessCoverage(
   requests: LoggedRequest[],
@@ -278,11 +293,10 @@ function witnessCoverage(
     if (cls === undefined || request.status < 200 || request.status >= 300) {
       continue;
     }
-    const section = request.pathname.includes("/labels")
-      ? "labels"
-      : request.pathname.includes("/milestones")
-        ? "milestones"
-        : undefined;
+    const section = WITNESS_SECTIONS.find((key) => {
+      const path = WITNESS_PATHS[key];
+      return request.pathname.endsWith(path) || request.pathname.includes(`${path}/`);
+    });
     if (section !== undefined) {
       events.push([section, cls]);
     }
@@ -1390,17 +1404,13 @@ async function faultedSectionRun(seed: number, plan: SectionFaultPlan): Promise<
   // Presence live state first (a declared workflow whose file is absent would
   // permanently drift the converge re-run), witness state merged over it.
   const combinedLive: LiveWitness["state"] = { ...(presenceLiveState(settings) ?? {}) };
-  if (plan.section === "labels" || plan.section === "milestones") {
+  const witnessed = WITNESS_SECTIONS.find((key) => key === plan.section);
+  if (witnessed !== undefined) {
     // A matching witness pins the no-fault prediction exactly (clean/applied),
     // so a transient fault must leave the run INDISTINGUISHABLE from a healthy
     // one - the strongest form of "retried away".
-    const witness = genLiveWitness(
-      rng.fork("witness"),
-      plan.section,
-      settings[plan.section],
-      "matching",
-    );
-    liveKinds[plan.section] = witness.kind;
+    const witness = genLiveWitness(rng.fork("witness"), witnessed, settings[witnessed], "matching");
+    liveKinds[witnessed] = witness.kind;
     Object.assign(combinedLive, witness.state);
   }
   const liveState = Object.keys(combinedLive).length > 0 ? combinedLive : undefined;
@@ -2107,7 +2117,7 @@ async function main(): Promise<number> {
     // combo also fires every soak (there are more sections than combos); the
     // pairing and the mode rotate with the master seed, so soaks walk the
     // full cross product over time, and assertFaultBatteryCoverage pins both
-    // per-soak guarantees. Labels/milestones entries get a matching witness
+    // per-soak guarantees. Witness-section entries get a matching witness
     // (exact predictions); a transient combo must be indistinguishable from a
     // healthy run, a fatal one must fail loudly naming its section.
     await runBattery(
@@ -2159,15 +2169,14 @@ async function main(): Promise<number> {
   for (const key of [...coverage.keys()].sort()) {
     console.log(`  ${key}: ${coverage.get(key)}`);
   }
-  // The mutation-class guard: over the whole run (random stream + battery),
-  // labels must provably reach an update write, a delete write, and a clean
-  // verdict; milestones an update write and a clean verdict (delete is
-  // labels-only by design - milestones keep undeclared entries). "create" is
-  // tracked in the histogram but not required: it needs absent live state,
-  // which the battery deliberately never seeds.
+  // The mutation-class guard over the whole run: every witness section reaches its drift write
+  // (an update, or delete plus create without an update role) and a clean verdict, the
+  // delete-default ones an undeclared delete. A standalone create needs live state the battery never seeds.
   const REQUIRED_CLASSES: Record<WitnessSection, MutationClass[]> = {
     labels: ["update", "delete", "clean"],
+    autolinks: ["create", "delete", "clean"],
     milestones: ["update", "clean"],
+    deploy_keys: ["create", "delete", "clean"],
   };
   console.log("\nmutation-class coverage (successful writes from the mock's request log):");
   let coverageFailures = 0;

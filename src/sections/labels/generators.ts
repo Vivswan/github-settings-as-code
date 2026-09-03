@@ -11,6 +11,7 @@ import {
   type LiveWitness,
   type LiveWitnessKind,
   lensWitness,
+  uniqueBy,
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 import { labelsSection, nameKey } from "./index.js";
@@ -28,29 +29,11 @@ const genLabel = generatorFromSlice(LabelConfig, {
 });
 
 export function genLabels(rng: Rng): Json[] {
-  const count = rng.int(4) + 1;
-  const claimed = new Set<string>();
-  const labels: Json[] = [];
-  for (let i = 0; i < count; i++) {
-    const label = genLabel(rng);
-    // The section's own rule: every identity an entry claims (its name and
-    // its rename target) belongs to one entry, case-insensitively.
-    for (const field of ["name", "new_name"]) {
-      if (typeof label[field] !== "string") {
-        continue;
-      }
-      let name = label[field];
-      while (claimed.has(nameKey(name))) {
-        name = `${name}-${i}`;
-      }
-      claimed.add(nameKey(name));
-      label[field] = name;
-    }
-    labels.push(label);
-  }
-  // labels is a WITNESS section: always the plain array form, never
-  // maybeWrapUndeclared (its rationale explains why).
-  return labels;
+  const labels = Array.from({ length: rng.int(4) + 1 }, () => genLabel(rng));
+  // The section's own rule: every identity an entry claims (its name and its
+  // rename target) belongs to one entry, case-insensitively. labels is a
+  // WITNESS section: always the plain array form, never maybeWrapUndeclared.
+  return uniqueBy(labels, ["name", "new_name"], nameKey);
 }
 
 export function labelsWitness(rng: Rng, declared: Json[], kind: LiveWitnessKind): LiveWitness {

@@ -20,6 +20,7 @@ import {
   SECTION_PRIMARY_READ,
   UNPARSEABLE_YAML,
   validateAgainstPublishedSchema,
+  WITNESS_SECTIONS,
 } from "./generators.js";
 import { predictDiscovery } from "./oracle.js";
 import { Rng } from "./prng.js";
@@ -178,11 +179,10 @@ describe("generator couplings and pools", () => {
   });
 
   test("the knobbed non-witness sections emit both forms, every policy included", () => {
-    // labels and milestones are witness sections and stay plain (the oracle
-    // refines their predictions from the witness alone); the other three
-    // knobbed sections must draw the plain array, the bare wrapper, and both
-    // explicit policies across seeds.
-    for (const key of ["autolinks", "collaborators", "rulesets"] as const) {
+    // The witness sections stay plain (the oracle refines their predictions
+    // from the witness alone); the other knobbed sections must draw the plain
+    // array, the bare wrapper, and both explicit policies across seeds.
+    for (const key of ["collaborators", "rulesets", "webhooks"] as const) {
       let plain = 0;
       const wrapped = new Map<string, number>();
       for (let i = 0; i < 400; i++) {
@@ -204,7 +204,7 @@ describe("generator couplings and pools", () => {
   });
 
   test("the witness sections never emit the wrapped form", () => {
-    for (const key of ["labels", "milestones"] as const) {
+    for (const key of WITNESS_SECTIONS) {
       for (let i = 0; i < 400; i++) {
         expect(Array.isArray(genSettings(new Rng(i), key))).toBe(true);
       }
@@ -584,7 +584,7 @@ describe("genScenario", () => {
     };
     for (let i = 0; i < 300; i++) {
       const { scenario, meta } = genScenario(new Rng(i));
-      for (const key of ["labels", "milestones"] as const) {
+      for (const key of WITNESS_SECTIONS) {
         const kind = meta.liveKinds?.[key];
         if (kind === undefined) {
           // No witness: the family keeps absent live state (the create path).

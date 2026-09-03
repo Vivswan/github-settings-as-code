@@ -43,12 +43,12 @@ export function entriesOf(value: unknown): Json[] {
  * behavior itself is pinned by curated scenarios (labels-undeclared-keep,
  * rulesets-undeclared-delete, milestones-undeclared-delete).
  *
- * The WITNESS sections (labels, milestones) must never call this: the
- * oracle refines their predictions from the seeded witness alone, so a
- * generated `undeclared: keep` over an extra-undeclared labels witness
+ * The WITNESS sections (WITNESS_SECTIONS in generators.ts) must never call
+ * this: the oracle refines their predictions from the seeded witness alone,
+ * so a generated `undeclared: keep` over an extra-undeclared labels witness
  * would flip the engine's outcome (a kept note instead of drift/deletion)
- * and fail the iteration, and milestones' delete path has no witness
- * modeling it. New draws live on a forked stream so the pre-existing
+ * and fail the iteration, and the keep-default sections' delete path has no
+ * witness modeling it. New draws live on a forked stream so the pre-existing
  * main-stream sequence (and every recorded seed) stays stable.
  */
 export function maybeWrapUndeclared(rng: Rng, entries: Json[]): EntriesForm {
@@ -90,6 +90,35 @@ export function genName(rng: Rng): string {
 }
 
 /**
+ * Keep every identity an entry claims unique across a generated list: a value already claimed
+ * (under `fold`) gets the entry's index appended, as a section's own duplicate check would
+ * otherwise reject the document. Fields shared by an entry (a label's name and new_name) pool.
+ */
+export function uniqueBy(
+  entries: readonly Json[],
+  fields: readonly string[],
+  fold: (name: string) => string = (name) => name,
+): Json[] {
+  const claimed = new Set<string>();
+  return entries.map((entry, index) => {
+    const out: Json = { ...entry };
+    for (const field of fields) {
+      const value = out[field];
+      if (typeof value !== "string") {
+        continue;
+      }
+      let name = value;
+      while (claimed.has(fold(name))) {
+        name = `${name}-${index}`;
+      }
+      claimed.add(fold(name));
+      out[field] = name;
+    }
+    return out;
+  });
+}
+
+/**
  * The ONE fixed pool secret references draw from, name -> plaintext: webhook
  * config.secret and actions_secrets values alike. Single-sourced: the
  * generators draw `$NAME` references from these keys and scenarioSecretEnv()
@@ -112,12 +141,9 @@ export const E2E_SECRET_ENV = {
  * - "drift-update": one DECLARED field diverges (never an omitted optional -
  *   a divergent value in a field the settings do not declare is not drift),
  *   so check must report drift and apply must issue an update.
- * - "extra-undeclared" (labels only): a live label the settings do not
- *   declare, so check reports undeclared drift and apply DELETEs it.
- *   Milestones keep undeclared entries by default, and their wrapped
- *   `undeclared: delete` path is pinned by a curated scenario
- *   (milestones-undeclared-delete) rather than a witness kind, so this
- *   kind is never generated for them.
+ * - "extra-undeclared" (delete-default sections only): a live item the settings do not declare,
+ *   so check reports undeclared drift and apply DELETEs it. A keep-default section keeps it as a
+ *   note; its wrapped `undeclared: delete` path is pinned by a curated scenario, not a witness kind.
  */
 export type LiveWitnessKind = "matching" | "drift-update" | "extra-undeclared";
 
@@ -258,11 +284,22 @@ export interface LensWitnessSpec<
   readonly section: ListSectionModule<K, Ends, Live, F>;
   /** The GET-shape fields the server fills when a create omits them: the mock's own defaults. */
   readonly defaults: Json;
+  /**
+   * The server-owned fields of one item (the mock spec's `owned`, minted here with a witness id and
+   * WITNESS_SLUG), when the state builder does not complete the collection itself (labels it does).
+   */
+  readonly owned?: (id: number, slug: string, item: Json) => Json;
   /** Per write field, the value a drift-update witness stores instead; each disjoint from every generator pool. */
   readonly sentinels: Readonly<Record<string, unknown>>;
   /** The live item an extra-undeclared witness adds; absent when the section models no such kind. */
   readonly undeclared?: Json;
 }
+
+/** The fixture repository every single-repo mock state is built for; witness items' urls name it. */
+const WITNESS_SLUG = "e2e-owner/e2e-repo";
+
+/** Witness ids start here so they cannot collide with a seed's or the mock's own minted ids. */
+const WITNESS_ID_BASE = 910_000;
 
 /**
  * A live-state witness derived from the section's lens: matching = the write over the server
@@ -285,7 +322,11 @@ export function lensWitness<
   type Entry = Parameters<typeof lens.toWrite>[0];
   const fold = identity.fold ?? ((name: string) => name);
   const writes = declared.map((entry) => lens.toWrite(entry as unknown as Entry));
-  const items: Json[] = writes.map((write) => ({ ...spec.defaults, ...write }));
+  const mint = (index: number, item: Json): Json => ({
+    ...item,
+    ...spec.owned?.(WITNESS_ID_BASE + index, WITNESS_SLUG, item),
+  });
+  const items: Json[] = writes.map((write, index) => mint(index, { ...spec.defaults, ...write }));
   const state = { [collection]: items } as LiveState;
   if (kind === "matching") {
     return { kind, state };
@@ -307,7 +348,7 @@ export function lensWitness<
         `a declared ${spec.section.key} entry resolves to the undeclared sentinel "${sentinelKey}"`,
       );
     }
-    items.push({ ...spec.undeclared });
+    items.push(mint(items.length, { ...spec.undeclared }));
     return { kind, state };
   }
   const eligible = writes.flatMap((write, index) => {

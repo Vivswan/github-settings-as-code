@@ -7,7 +7,7 @@
  * src/sections/:
  * - labels (true): the update is skipped when name, color, description, and
  *   the extra keys all match the live label.
- * - autolinks (true): a live autolink whose declared fields subsetDiff clean
+ * - autolinks (true): a live autolink whose declared fields compare clean
  *   is left alone; only a mismatch triggers the delete-and-recreate.
  * - workflows (true): enable/disable fires only when the live state differs
  *   from the declared one.
@@ -16,7 +16,7 @@
  *   permission (or carrying an unverifiable custom role) is left alone, and
  *   the invitation PATCH/cancel fire only on divergence.
  * - milestones (true): the PATCH is skipped when the declared fields
- *   subsetDiff clean against the live milestone.
+ *   compare clean against the live milestone.
  * - actions_variables (true): the PATCH is skipped when the live value (and
  *   any declared passthrough fields) already match the declaration.
  * - agents_variables (true): as actions_variables, over the Copilot agents

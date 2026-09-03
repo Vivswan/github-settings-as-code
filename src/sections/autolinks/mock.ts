@@ -1,38 +1,22 @@
 /**
- * The autolinks section's e2e mock fragment: one handler per
- * "autolinks.<role>" key in the section's ENDPOINTS, registered in
- * test/e2e/mock/sections.ts. Imports only the leaf seams (mock/support.ts,
- * mock/state.ts) - never routes.ts or sections.ts; the bundle entry is
- * src/main.ts, so this fragment never reaches lib/index.js.
+ * The autolinks e2e mock fragment, derived from the section's declaration (test/e2e/mock/list-fragment.ts):
+ * only the server-owned facts live here. Imports only the leaf seams (never routes.ts or
+ * sections.ts); the bundle entry is src/main.ts, so this fragment never reaches lib/index.js.
  */
 
-import {
-  asObject,
-  type Json,
-  noContent,
-  ok,
-  type SectionRestHandlers,
-} from "../../../test/e2e/mock/support.js";
+import { type ListMockSpec, mockFragmentFor } from "../../../test/e2e/mock/list-fragment.js";
+import type { SectionRestHandlers } from "../../../test/e2e/mock/support.js";
+import { autolinksSection } from "./index.js";
 
-export const autolinksMockHandlers: SectionRestHandlers<"autolinks"> = {
-  "autolinks.list": ({ state }) => ok(state.autolinks), // section GETs unpaginated
-  "autolinks.create": ({ state, body }) => {
-    const payload = asObject(body);
-    const autolink: Json = {
-      id: state.nextId++,
-      is_alphanumeric: true,
-      ...payload,
-    };
-    state.autolinks.push(autolink);
-    return { status: 201, body: autolink };
-  },
-  "autolinks.remove": ({ state, param }) => {
-    const id = param("autolink_id");
-    const index = state.autolinks.findIndex((a) => String(a.id) === id);
-    if (index < 0) {
-      return { status: 404, body: { message: "Not Found" } };
-    }
-    state.autolinks.splice(index, 1);
-    return noContent();
-  },
+/** What the server fills in on an autolink: GitHub's alphanumeric default and the minted id. */
+export const AUTOLINKS_MOCK: ListMockSpec = {
+  collection: (state) => state.autolinks,
+  defaults: { is_alphanumeric: true },
+  owned: (id) => ({ id }),
+  unique: "identity",
 };
+
+export const autolinksMockHandlers: SectionRestHandlers<"autolinks"> = mockFragmentFor(
+  autolinksSection,
+  AUTOLINKS_MOCK,
+);

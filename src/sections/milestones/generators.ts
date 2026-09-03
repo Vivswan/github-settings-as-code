@@ -1,57 +1,49 @@
 /**
- * The milestones section's fuzz generator fragment: the section-shaped
- * settings generator and the live-state witness builder, aggregated by
- * test/e2e/generators.ts. Imports only the test-tree leaf seams
- * (gen-support.ts, prng.ts) - the src -> test inversion is deliberate; the
- * bundle entry is src/main.ts, so this file never reaches lib/index.js.
+ * The milestones fuzz fragment: the entry generator walks the MilestoneConfig slice, so only the
+ * corpus invariants live here (one entry per title, a passthrough due_on, the witness pools).
+ * Imports only the test-tree seams; the bundle entry is src/main.ts, so this never reaches lib/index.js.
  */
 
 import {
   assertSentinelDisjoint,
   DRIFT_DESCRIPTION,
+  generatorFromSlice,
   genName,
   type Json,
   type LiveWitness,
   type LiveWitnessKind,
+  uniqueBy,
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
+import { MilestoneConfig } from "./schema.js";
 
 /** Fixed ISO due dates: a pool, never Date.now, so generation stays deterministic. */
 const DUE_DATES = ["2026-01-15T00:00:00Z", "2026-06-30T00:00:00Z", "2026-12-31T00:00:00Z"] as const;
 
+const genMilestone = generatorFromSlice(MilestoneConfig, {
+  fields: {
+    title: (rng) => rng.pick(["v1", "v2", "backlog"]),
+    description: (rng) => rng.pick(["", "the milestone", genName(rng)]),
+  },
+});
+
 export function genMilestones(rng: Rng): Json[] {
-  const used = new Set<string>();
-  const out: Json[] = [];
-  const count = rng.int(3) + 1;
-  for (let i = 0; i < count; i++) {
-    const title = `${rng.pick(["v1", "v2", "backlog"])}-${i}`;
-    if (used.has(title)) {
-      continue;
-    }
-    used.add(title);
-    const m: Json = { title };
-    if (rng.bool()) {
-      m.description = rng.pick(["", "the milestone", genName(rng)]);
-    }
-    if (rng.bool()) {
-      m.state = rng.pick(["open", "closed"]);
-    }
+  const milestones = Array.from({ length: rng.int(3) + 1 }, () => {
+    const milestone = genMilestone(rng);
+    // due_on is a passthrough field the slice does not name, sent verbatim and compared to the echo.
     if (rng.bool(0.4)) {
-      m.due_on = rng.pick(DUE_DATES);
+      milestone.due_on = rng.pick(DUE_DATES);
     }
-    out.push(m);
-  }
-  // milestones is a WITNESS section: always the plain array form, never
-  // maybeWrapUndeclared (its rationale explains why).
-  return out;
+    return milestone;
+  });
+  // One entry per title (the section's own rule). milestones is a WITNESS
+  // section: always the plain array form, never maybeWrapUndeclared.
+  return uniqueBy(milestones, ["title"]);
 }
 
 /**
- * A live milestone body the milestones handler diffs as EXACTLY equal
- * (src/sections/milestones/): the handler subsetDiffs EVERY declared field
- * verbatim, passthrough fields included, so the whole declaration is spread
- * over the handler-visible defaults - a future passthrough field is mirrored
- * automatically instead of silently reading as drift.
+ * A live milestone body the section reads as EXACTLY matching: every declared field, passthrough
+ * included, is compared verbatim, so the whole declaration is spread over the server defaults.
  */
 function matchingLiveMilestone(milestone: Json, index: number): Json {
   return {

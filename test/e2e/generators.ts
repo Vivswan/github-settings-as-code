@@ -26,7 +26,7 @@ import {
   UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
 import { genActions } from "../../src/sections/actions/generators.js";
-import { genAutolinks } from "../../src/sections/autolinks/generators.js";
+import { autolinksWitness, genAutolinks } from "../../src/sections/autolinks/generators.js";
 import {
   FUZZ_DEPLOYMENT_ENVIRONMENTS,
   genBranches,
@@ -41,7 +41,7 @@ import {
 } from "../../src/sections/collaborators/generators.js";
 import { endpointMethod } from "../../src/sections/contract/endpoints.js";
 import { genCustomProperties } from "../../src/sections/custom_properties/generators.js";
-import { genDeployKeys } from "../../src/sections/deploy_keys/generators.js";
+import { deployKeysWitness, genDeployKeys } from "../../src/sections/deploy_keys/generators.js";
 import { genEnvironments } from "../../src/sections/environments/generators.js";
 import { genInteractionLimits } from "../../src/sections/interaction_limits/generators.js";
 import { genLabels, labelsWitness } from "../../src/sections/labels/generators.js";
@@ -327,17 +327,19 @@ export function genSettings(rng: Rng, key: SectionKey): unknown {
 }
 
 /**
- * The sections the witness generator models. Repository is deferred: a
- * faithful matching witness needs normalized topics, the enable_* toggles,
- * and fixture-aware treatment of absent fields.
+ * The sections the witness generator models, in SECTION_KEYS order. Repository is deferred: a
+ * faithful matching witness needs normalized topics, the enable_* toggles, and fixture-aware
+ * treatment of absent fields.
  */
-export const WITNESS_SECTIONS = ["labels", "milestones"] as const;
+export const WITNESS_SECTIONS = ["labels", "autolinks", "milestones", "deploy_keys"] as const;
 export type WitnessSection = (typeof WITNESS_SECTIONS)[number];
 
-/** The witness kinds each modeled section supports. */
+/** The witness kinds each modeled section supports; extra-undeclared only where the default deletes. */
 export const WITNESS_KINDS: Record<WitnessSection, readonly LiveWitnessKind[]> = {
   labels: ["matching", "drift-update", "extra-undeclared"],
+  autolinks: ["matching", "drift-update", "extra-undeclared"],
   milestones: ["matching", "drift-update"],
+  deploy_keys: ["matching", "drift-update"],
 };
 
 /**
@@ -352,7 +354,9 @@ const WITNESS_BUILDERS: Record<
   (rng: Rng, declared: Json[], kind: LiveWitnessKind) => LiveWitness
 > = {
   labels: labelsWitness,
+  autolinks: autolinksWitness,
   milestones: milestonesWitness,
+  deploy_keys: deployKeysWitness,
 };
 
 /**
@@ -937,7 +941,7 @@ export interface ScenarioMeta {
    */
   onlySections?: SectionKey[];
   /**
-   * The live-state witness seeded per section (labels and milestones only):
+   * The live-state witness seeded per section (WITNESS_SECTIONS only):
    * the KNOWN semantic relation between the generated live state and the
    * declared settings, so the oracle can pin the exact success outcome. A
    * section without an entry has no witness (absent live state, or a family
@@ -990,7 +994,7 @@ export function genScenario(
   // path, letting apply act on them and check converge.
   const presence = presenceLiveState(settings) ?? {};
 
-  // Live-state WITNESSES for labels and milestones: seed live state whose
+  // Live-state WITNESSES (WITNESS_SECTIONS): seed live state whose
   // relation to the declared settings is known (matching, drift-update,
   // extra-undeclared), so the oracle predicts the exact outcome instead of
   // accepting {clean, drift} either way - a false-negative drift detector

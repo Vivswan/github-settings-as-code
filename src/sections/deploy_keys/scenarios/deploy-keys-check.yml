@@ -41,7 +41,7 @@ expect:
   summary_contains:
     - "deploy_keys[deploy-bot]: missing"
     - "deploy_keys[mirror-pull]: live settings differ from the settings file, and deploy keys cannot be edited; apply will delete and recreate it"
-    - "deploy_keys[mirror-pull].key: declared material"
+    - "deploy_keys[mirror-pull].key: declared \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIRotatedRotatedRotatedRotatedRotated\" != live \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStaleStaleStaleStaleStaleStaleStale\""
     - "deploy_keys[mirror-pull].read_only: declared true != live false"
   stdout_contains:
     - "deploy key \"retired-service\" exists on the repo but is not declared"

@@ -21,6 +21,7 @@ export const LABELS_MOCK: ListMockSpec = {
     url: `https://api.github.com/repos/${slug}/labels/${String(label.name)}`,
     default: false,
   }),
+  unique: "identity",
 };
 
 export const labelsMockHandlers: SectionRestHandlers<"labels"> = mockFragmentFor(

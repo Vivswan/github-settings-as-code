@@ -6,21 +6,20 @@
  */
 
 import { z } from "zod";
-import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import { deltas, phantomKeys, phantomNote, renderDelta } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import {
-  beginRun,
   defaultUndeclaredPolicy,
   loosen,
   type SectionModule,
-  type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { call, listAll, rejectDuplicates } from "../contract/requests.js";
+import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
+import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { MilestoneConfig } from "./schema.js";
 
@@ -30,7 +29,11 @@ const LiveMilestone = z.looseObject({ number: z.number(), title: z.string() });
 const permission: SectionPermission = { repo: ["issues"] };
 
 const ENDPOINTS = {
-  list: { route: "GET /repos/{owner}/{repo}/milestones", statuses: { 200: "the milestone list" } },
+  list: {
+    route: "GET /repos/{owner}/{repo}/milestones",
+    statuses: { 200: "the milestone list" },
+    primaryRead: { notFound: "denied" },
+  },
   create: {
     route: "POST /repos/{owner}/{repo}/milestones",
     statuses: { 201: "milestone created" },
@@ -45,14 +48,16 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
+/** Deleting a milestone detaches it from its issues; every undeclared-delete line says so. */
+const DETACH_ACTION = "DELETE it, detaching it from every issue that carries it";
+
 export const milestonesSection = {
   key: "milestones",
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(MilestoneConfig)),
-  async run(ctx, declared): Promise<SectionResult> {
-    const run = beginRun(ctx);
+  async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
@@ -60,93 +65,83 @@ export const milestonesSection = {
       (m) => m.title,
       (m) => m.title,
     );
+    // Closed milestones are still listed under state=all; the default listing
+    // omits them, and a declared closed milestone would read as missing.
     const live = parseLive(
       this,
       ENDPOINTS.list,
       z.array(LiveMilestone),
-      await listAll(ctx, this, ENDPOINTS.list, { query: { state: "all" } }),
+      await ctx.read.list.listAll({ query: { state: "all" } }),
     );
     const liveByTitle = new Map(live.map((m) => [m.title, m]));
     const declaredKeys = new Set<string>();
 
+    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     for (const milestone of desired) {
       declaredKeys.add(milestone.title);
+      const label = `milestones[${milestone.title}]`;
       const existing = liveByTitle.get(milestone.title);
-      // Declared-keys-only AND passthrough: every declared key (including
-      // future ones like due_on) is sent verbatim; undeclared keys are
-      // never touched.
-      const want: Record<string, unknown> = { ...milestone };
-      if (!existing) {
-        if (run.check) {
-          run.result.drift.push(
-            `milestones[${milestone.title}]: missing - declared in the settings file but not on the repo; apply will create it`,
-          );
-        } else {
-          await call(ctx, this, ENDPOINTS.create, { payload: want });
-          run.result.changes.push(`created milestone "${milestone.title}"`);
-        }
+      // Every declared key (including ones this schema does not name) is sent verbatim.
+      const payload = plainData({ ...milestone });
+      if (existing === undefined) {
+        plan.ops.push({
+          role: "create",
+          payload,
+          describe: `creating milestone "${milestone.title}"`,
+          drift: [
+            `${label}: missing - declared in the settings file but not on the repo; apply will create it`,
+          ],
+          change: `created milestone "${milestone.title}"`,
+        });
         continue;
       }
       const { title: _t, ...declaredFields } = milestone;
-      const drift = subsetDiff(declaredFields, existing, `milestones[${milestone.title}]`);
-      if (drift.length === 0) {
+      const drift = deltas(declaredFields, existing, { matchBy: {} }).map((delta) =>
+        renderDelta(label, delta),
+      );
+      if (!hasDrift(drift)) {
         continue;
       }
-      if (run.check) {
-        run.result.drift.push(...drift);
-      } else {
-        const phantom = phantomKeys(declaredFields, existing);
-        if (phantom.length > 0) {
-          run.result.notes.push(
-            phantomNote(
-              `milestones[${milestone.title}]`,
-              phantom,
-              "milestone",
-              "this update will re-run",
-            ),
-          );
-        }
-        await call(ctx, this, ENDPOINTS.update, {
-          params: { milestone_number: String(existing.number) },
-          payload: want,
-        });
-        run.result.changes.push(`updated milestone "${milestone.title}"`);
+      const phantom = phantomKeys(declaredFields, existing);
+      if (phantom.length > 0) {
+        plan.notes.push(phantomNote(label, phantom, "milestone", "this update will re-run"));
       }
+      plan.ops.push({
+        role: "update",
+        params: { milestone_number: String(existing.number) },
+        payload,
+        describe: `updating milestone "${milestone.title}"`,
+        drift,
+        change: `updated milestone "${milestone.title}"`,
+      });
     }
-    // Divergence from Probot: undeclared milestones are kept by default,
-    // because deleting a milestone DETACHES it from every issue carrying it;
-    // the wrapped `undeclared: delete` form opts into exactly that.
+
     for (const milestone of live) {
       if (declaredKeys.has(milestone.title)) {
         continue;
       }
       if (policy === "delete") {
-        if (run.check) {
-          run.result.drift.push(
+        plan.ops.push({
+          role: "remove",
+          params: { milestone_number: String(milestone.number) },
+          describe: `deleting undeclared milestone "${milestone.title}"`,
+          drift: [
             undeclaredDrift(defaultUndeclaredPolicy(this), {
               label: `milestones[${milestone.title}]`,
-              action: "DELETE it, detaching it from every issue that carries it",
+              action: DETACH_ACTION,
             }),
-          );
-        } else {
-          await call(ctx, this, ENDPOINTS.remove, {
-            params: { milestone_number: String(milestone.number) },
-            describe: `deleting undeclared milestone "${milestone.title}"`,
-          });
-          run.result.changes.push(
-            `DELETED undeclared milestone "${milestone.title}" (detached from every issue that carried it)`,
-          );
-        }
+          ],
+          change: `DELETED undeclared milestone "${milestone.title}" (detached from every issue that carried it)`,
+        });
         continue;
       }
-      run.result.notes.push(
+      plan.notes.push(
         undeclaredNote({
           subject: `milestone "${milestone.title}"`,
-          action:
-            "DELETE it, detaching it from every issue that carries it (closing is not enough; closed milestones are still listed)",
+          action: `${DETACH_ACTION} (closing is not enough; closed milestones are still listed)`,
         }),
       );
     }
-    return run.result;
+    return plan;
   },
-} satisfies SectionModule<"milestones">;
+} satisfies SectionModule<"milestones", typeof ENDPOINTS>;
