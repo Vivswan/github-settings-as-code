@@ -13,13 +13,7 @@ import {
 } from "../../src/action/redact.js";
 import { type Io, maskRegistry, prefixedIo } from "../../src/io.js";
 import { isPrivate, markPrivate } from "../../src/private.js";
-
-/** The channels a test does not observe, spread into each fake sink. */
-const idle: Pick<Io, "debug" | "summary" | "output"> = {
-  debug: () => {},
-  summary: () => {},
-  output: () => {},
-};
+import { silentIo } from "../io-fake.js";
 
 /** A private-set predicate from a lowercase-keyed slug list. */
 function privateSet(...slugs: string[]): (slug: string) => boolean {
@@ -127,7 +121,7 @@ describe("planRedaction", () => {
 function recordingIo(): { io: Io; emitted: string[] } {
   const emitted: string[] = [];
   const io: Io = {
-    ...idle,
+    ...silentIo(),
     ...maskRegistry((v) => emitted.push(`mask ${v}`)),
     annotate: (level, message) => emitted.push(`${level}: ${message}`),
     log: (line) => emitted.push(line),
@@ -326,8 +320,7 @@ describe("capturingIo", () => {
   test("suppresses public annotate/log but records them in order", () => {
     const emitted: string[] = [];
     const base: Io = {
-      ...idle,
-      ...maskRegistry(() => {}),
+      ...silentIo(),
       annotate: (level, message) => emitted.push(`annotate ${level}: ${message}`),
       log: (line) => emitted.push(`log: ${line}`),
     };
@@ -375,7 +368,7 @@ describe("capturingIo", () => {
     const masks: string[] = [];
     const emitted: string[] = [];
     const base: Io = {
-      ...idle,
+      ...silentIo(),
       ...maskRegistry((v) => masks.push(v)),
       annotate: (l, m) => emitted.push(`${l}: ${m}`),
       log: (line) => emitted.push(line),
@@ -391,7 +384,7 @@ describe("capturingIo", () => {
 
 describe("prefixedIo", () => {
   test("empty prefix returns the sink unchanged", () => {
-    const base: Io = { ...idle, ...maskRegistry(() => {}), annotate: () => {}, log: () => {} };
+    const base = silentIo();
     expect(prefixedIo(base, "")).toBe(base);
   });
 

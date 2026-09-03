@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { runForRepo, validateSettingsDoc } from "../../../src/engine/orchestrate.js";
 import type { GithubClient } from "../../../src/github/api.js";
-import type { Io } from "../../../src/io.js";
+import { type Io, maskRegistry } from "../../../src/io.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
@@ -396,11 +396,10 @@ describe("actions_secrets execution", () => {
       debug: () => {},
       summary: () => {},
       output: () => {},
-      mask: (value) => {
+      ...maskRegistry((value) => {
         mutationsAtMaskTime.push(api.mutations().length);
         masked.push(value);
-      },
-      masked: () => new Set(masked),
+      }),
     };
     const validated = validateSettingsDoc(
       { actions_secrets: [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }] },

@@ -7,7 +7,32 @@
 /** The level of one workflow annotation, as the Io port (and its captures) spell it. */
 export type AnnotationLevel = "notice" | "warning" | "error";
 
-export interface Io {
+// Module-private, so other modules cannot name the member brand.
+const MASK_PAIR: unique symbol = Symbol("Io.maskPair");
+type Minted<F> = F & { readonly [MASK_PAIR]: true };
+
+/**
+ * maskRegistry() brands both members over one Set, so a plain function
+ * cannot replace either. Pairing members from two calls still typechecks;
+ * closing that would take one opaque registry value on Io.
+ */
+export interface MaskPair {
+  /**
+   * Register a value the runner must mask (`***`) wherever it appears in
+   * later log output. Redaction registers every private slug here as defense
+   * in depth. Required, not optional, so a missing implementation cannot
+   * silently no-op in production.
+   */
+  readonly mask: Minted<(value: string) => void>;
+  /**
+   * Every value registered through mask(), verbatim. The API trace reads it
+   * to redact structurally (whole path, dropped payload) where the runner's
+   * literal `***` cannot.
+   */
+  readonly masked: Minted<() => ReadonlySet<string>>;
+}
+
+export interface Io extends MaskPair {
   annotate(level: AnnotationLevel, message: string): void;
   log(line: string): void;
   /** A trace line, shown only when the run has step debug logging enabled. */
@@ -16,34 +41,21 @@ export interface Io {
   summary(markdown: string): void;
   /** Set an action output; the action layer pins `name` to its declared outputs. */
   output(name: string, value: string): void;
-  /**
-   * Register a value the runner must mask (`***`) wherever it appears in
-   * later log output. Redaction registers every private slug here as defense
-   * in depth. Required, not optional, so a missing implementation cannot
-   * silently no-op in production.
-   */
-  mask(value: string): void;
-  /**
-   * Every value registered through mask(), verbatim. The API trace reads it
-   * to redact structurally (whole path, dropped payload) where the runner's
-   * literal `***` cannot; the two registries are one.
-   */
-  masked(): ReadonlySet<string>;
 }
 
-/**
- * The mask pair an Io carries: `mask` records the value and forwards it to
- * `sink`, `masked` reads that same set - so the structural trace redaction
- * can never consult a different registry than the literal mask.
- */
-export function maskRegistry(sink: (value: string) => void): Pick<Io, "mask" | "masked"> {
+function mint<F extends (...args: never[]) => unknown>(member: F): Minted<F> {
+  return Object.assign(member, { [MASK_PAIR]: true as const });
+}
+
+/** A fresh mask pair over one Set, forwarding every masked value to `sink`. */
+export function maskRegistry(sink: (value: string) => void): MaskPair {
   const masked = new Set<string>();
   return {
-    mask: (value) => {
+    mask: mint((value: string) => {
       masked.add(value);
       sink(value);
-    },
-    masked: () => masked,
+    }),
+    masked: mint(() => masked),
   };
 }
 
@@ -51,7 +63,7 @@ export function maskRegistry(sink: (value: string) => void): Pick<Io, "mask" | "
  * Wrap an Io so every annotation and log line is prefixed with `prefix`.
  * An empty prefix returns the sink unchanged. The other channels pass
  * through untouched: the debug trace, summary, and outputs are rendered by
- * their writers, and `mask` registers a raw value, not a rendered line.
+ * their writers, and the mask pair registers raw values, not rendered lines.
  */
 export function prefixedIo(io: Io, prefix: string): Io {
   if (prefix === "") {
@@ -63,7 +75,7 @@ export function prefixedIo(io: Io, prefix: string): Io {
     debug: (line) => io.debug(line),
     summary: (markdown) => io.summary(markdown),
     output: (name, value) => io.output(name, value),
-    mask: (value) => io.mask(value),
-    masked: () => io.masked(),
+    mask: io.mask,
+    masked: io.masked,
   };
 }

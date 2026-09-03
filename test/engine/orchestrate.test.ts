@@ -130,10 +130,10 @@ describe("runForRepo secret references", () => {
     const mutationsAtMaskTime: number[] = [];
     const trackingIo: Io = {
       ...io,
-      mask: (value) => {
+      ...maskRegistry((value) => {
         mutationsAtMaskTime.push(api.mutations().length);
         io.mask(value);
-      },
+      }),
     };
     const result = await runForRepo(
       api,

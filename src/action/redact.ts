@@ -283,8 +283,8 @@ export function capturingIo(io: Io): { io: Io; drain(): CapturedLine[] } {
       debug: () => {},
       summary: () => {},
       output: () => {},
-      mask: (value) => io.mask(value),
-      masked: () => io.masked(),
+      mask: io.mask,
+      masked: io.masked,
     },
     drain: () => [...captured],
   };
