@@ -1,15 +1,11 @@
 /**
- * Shape validation for one settings document. Each section's loose zod
- * shape lives on its module (sections/<key>/index.ts); this walks the declared
- * sections and reports every mismatch. Unrecognized keys are rejected HERE,
- * during upfront validation and before any section has written anything,
- * for two kinds of surface: closed sections (a `closedSurface` declaration
- * on the module) and strict nested shapes (a strictObject inside a
- * section's zod shape, e.g. actions.cache).
+ * Shape validation for one settings document against each section's loose
+ * zod shape (sections/<key>/index.ts); the parsed output is what the engine
+ * applies. Closed sections and strict nested shapes reject unknown keys here.
  */
 
 import { nonPlainKind } from "../plain-data.js";
-import { SECTION_KEYS } from "../schema.js";
+import { SECTION_KEYS, type SettingsFile } from "../schema.js";
 import { sectionModule, sectionShape } from "../sections/registry.js";
 
 /**
@@ -56,16 +52,16 @@ function findNonPlain(value: unknown, path: string, seen: WeakSet<object>): stri
 }
 
 /**
- * Validate the declared sections' shapes. Returns an error message naming
- * the source file, the exact entries, and what to fix - or null when the
- * document is well-formed. The parsed values are NOT used (zod would clone
- * them); the original document is applied verbatim.
+ * Validate the declared sections' shapes. Returns the parsed document (the
+ * declared sections, each as zod's output: fresh plain objects at every node
+ * the shape describes) or an error naming the source file and what to fix.
  */
 export function validateSectionShapes(
   settings: Record<string, unknown>,
   sourceLabel: string,
-): string | null {
+): { settings: SettingsFile } | { error: string } {
   const problems: string[] = [];
+  const parsedSections: Record<string, unknown> = {};
   for (const key of SECTION_KEYS) {
     const declared = settings[key];
     if (declared === undefined) {
@@ -96,12 +92,15 @@ export function validateSectionShapes(
       }
       continue;
     }
-    problems.push(...closedSurfaceProblems(key, declared));
+    problems.push(...closedSurfaceProblems(key, parsed.data));
+    parsedSections[key] = parsed.data;
   }
   if (problems.length === 0) {
-    return null;
+    return { settings: parsedSections as SettingsFile };
   }
-  return `${sourceLabel} has malformed section entries: ${problems.join("; ")}. Fix these values in the settings file (only the named keys are validated; extra fields pass through, except in closed sections and strict nested objects like actions.cache, which reject unrecognized keys)`;
+  return {
+    error: `${sourceLabel} has malformed section entries: ${problems.join("; ")}. Fix these values in the settings file (only the named keys are validated; extra fields pass through, except in closed sections and strict nested objects like actions.cache, which reject unrecognized keys)`,
+  };
 }
 
 /**

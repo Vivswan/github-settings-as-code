@@ -12,6 +12,12 @@ import { actionsSection, endpointRouted } from "./index.js";
 // cannot spell without giving up typo-checking on the known keys.
 import type { ActionsConfig } from "./schema.js";
 
+/** The verdict's error prose, or null when the document validated. */
+function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
+  const verdict = validateSectionShapes(doc, sourceLabel);
+  return "error" in verdict ? verdict.error : null;
+}
+
 const BASE = "/repos/o/r/actions/permissions";
 const PERMISSIONS = `GET ${BASE}`;
 const SELECTED = `GET ${BASE}/selected-actions`;
@@ -170,7 +176,7 @@ describe("actions", () => {
     expect(result.ops[0]?.payload).toEqual({ allowed_actions: "selected", enabled: true });
     // The contradiction is a shape rejection (both modes, before any section
     // writes), not a plan()-time throw.
-    const error = validateSectionShapes(
+    const error = shapeError(
       { actions: { allowed_actions: "all", selected_actions: { github_owned_allowed: true } } },
       "f.yml",
     );
@@ -178,7 +184,7 @@ describe("actions", () => {
     expect(error).toContain('an allowlist only applies under allowed_actions: "selected"');
     // The valid pairing and the inferred form both pass validation.
     expect(
-      validateSectionShapes(
+      shapeError(
         {
           actions: {
             allowed_actions: "selected",
@@ -189,10 +195,7 @@ describe("actions", () => {
       ),
     ).toBeNull();
     expect(
-      validateSectionShapes(
-        { actions: { selected_actions: { github_owned_allowed: true } } },
-        "f.yml",
-      ),
+      shapeError({ actions: { selected_actions: { github_owned_allowed: true } } }, "f.yml"),
     ).toBeNull();
   });
 
@@ -245,8 +248,15 @@ describe("actions", () => {
 
   test("the shape rejects unrecognized, null, and scalar cache declarations upfront", () => {
     // Inherited names like "constructor" must be caught too: an `in`-based
-    // check would walk the prototype chain and let them silently no-op.
-    for (const cache of [{ max_cache_size: 25 }, { constructor: 5 }, null, 5]) {
+    // check would walk the prototype chain and let them silently no-op. An
+    // own "__proto__" key (JSON.parse creates one) is unrecognized as well.
+    for (const cache of [
+      { max_cache_size: 25 },
+      { constructor: 5 },
+      JSON.parse('{"__proto__": 5}'),
+      null,
+      5,
+    ]) {
       const parsed = actionsSection.shape.safeParse({ cache });
       expect(parsed.success).toBe(false);
     }
@@ -256,20 +266,6 @@ describe("actions", () => {
         some_added_key: "passes through",
       }).success,
     ).toBe(true);
-  });
-
-  test("an own __proto__ key is rejected by the shape and by the plan() backstop", async () => {
-    // JSON.parse creates __proto__ as an OWN key; zod >= 4.5 strictObject
-    // rejects it upfront. plan() still sees the ORIGINAL document (validate.ts
-    // applies the raw values, not zod's clone), so its backstop is exercised
-    // directly too, before any read.
-    const cache = JSON.parse('{"__proto__": 5}');
-    expect(actionsSection.shape.safeParse({ cache }).success).toBe(false);
-    const api = new MockApi({});
-    await expect(plan(api, { cache })).rejects.toThrow(
-      /actions\.cache: unrecognized key\(s\) "__proto__"/,
-    );
-    expect(api.calls).toEqual([]);
   });
 
   test("the OIDC template is planned verbatim to its own endpoint on any divergence", async () => {

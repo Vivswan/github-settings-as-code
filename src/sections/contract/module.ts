@@ -637,14 +637,14 @@ function detectKnobUnion(
 }
 
 /**
- * The runtime shape for a knobbed list section: the union of the plain entry
- * array and the strict `{undeclared, entries}` wrapper, routed by container
- * type instead of z.union so a failing entry keeps its precise issue path.
+ * A knobbed list section's runtime shape: the entry array or the strict
+ * wrapper, routed by container type so a failing entry keeps its precise
+ * issue path, as a transform so the output is the routed shape's parsed data.
  */
 function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
   return z
     .custom<unknown>(() => true)
-    .superRefine((value, ctx) => {
+    .transform((value, ctx) => {
       const shape = Array.isArray(value)
         ? list
         : typeof value === "object" && value !== null
@@ -655,14 +655,16 @@ function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
           code: "custom",
           message: `Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "undeclared" policy), but this section parsed as ${value === null ? "null" : typeof value}`,
         });
-        return;
+        return z.NEVER;
       }
       const parsed = shape.safeParse(value);
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           ctx.addIssue({ ...issue });
         }
+        return z.NEVER;
       }
+      return parsed.data;
     });
 }
 

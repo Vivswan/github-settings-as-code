@@ -16,7 +16,9 @@ import { maskRegistry, prefixedIo } from "../../src/io.js";
 import type { SettingsFile } from "../../src/schema.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import type { SectionPlan } from "../../src/sections/contract/plan.js";
+import { pagesSection } from "../../src/sections/pages/index.js";
 import type { SECTIONS } from "../../src/sections/registry.js";
+import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 import { workflowsSection } from "../../src/sections/workflows/index.js";
 import { MockApi } from "../mock-api.js";
 
@@ -103,6 +105,101 @@ describe("runForRepo", () => {
     const result = await runForRepo(api, opts({ mode: "check" }), prefixedIo(io, "o/r: "));
     expect(result.result).toBe("drift");
     expect(logs[0]).toStartWith("o/r: drift: repository.has_wiki");
+  });
+
+  /**
+   * Run one section with its plan() stubbed to record the declared value it
+   * receives; the recorded values are the preflight probe's and the apply
+   * pass's, in that order.
+   */
+  async function receivedBy<S extends { plan: (ctx: never, desired: never) => Promise<unknown> }>(
+    section: S,
+    raw: SettingsFile,
+  ): Promise<unknown[]> {
+    const received: unknown[] = [];
+    const stubbed = spyOn(section, "plan").mockImplementation((async (
+      _ctx: never,
+      desired: unknown,
+    ) => {
+      received.push(desired);
+      return { ops: [], notes: [], drift: [] };
+    }) as never);
+    try {
+      const result = await runForRepo(
+        new MockApi({}),
+        opts({ settings: validated(raw) }),
+        captureIo().io,
+      );
+      expect(result.result).toBe("applied");
+    } finally {
+      stubbed.mockRestore();
+    }
+    expect(received).toHaveLength(2);
+    expect(received[1]).toBe(received[0]);
+    return received;
+  }
+
+  const prototypeClean = (node: object): void => {
+    expect(Object.getPrototypeOf(node)).toBe(Object.prototype);
+    expect(Object.hasOwn(node, "__proto__")).toBe(false);
+  };
+
+  test("a mapping section receives zod's parsed copy: own __proto__ dropped at every schema node, a passthrough subtree by reference (its own __proto__ ships verbatim)", async () => {
+    // JSON.parse creates "__proto__" as an OWN key; the control proves the raw
+    // document carries it at every level before the hand-off is tested.
+    const raw = JSON.parse(
+      '{"pages":{"source":{"branch":"main","__proto__":{"planted":1}},"__proto__":{"planted":2},"cname":"docs.example.com","extra":{"__proto__":{"planted":3},"k":1}}}',
+    );
+    for (const node of [raw.pages, raw.pages.source, raw.pages.extra]) {
+      expect(Object.hasOwn(node, "__proto__")).toBe(true);
+    }
+    const [desired] = (await receivedBy(pagesSection, raw)) as [
+      { source: object; cname: string; extra: object },
+    ];
+    expect(desired).not.toBe(raw.pages);
+    expect(desired).toEqual({
+      source: { branch: "main" },
+      cname: "docs.example.com",
+      extra: raw.pages.extra,
+    });
+    prototypeClean(desired);
+    prototypeClean(desired.source);
+    // The deliberate residual: the shape describes no node under `extra`, so
+    // the value rides by reference and reaches GitHub as written, as it
+    // always has.
+    expect(desired.extra).toBe(raw.pages.extra);
+  });
+
+  test("a knobbed list section receives zod's parsed copy in both forms: own __proto__ dropped on the list and each entry, rejected on the strict wrapper", async () => {
+    const plain = JSON.parse('{"rulesets":[{"name":"r","__proto__":{"planted":1}}]}');
+    const wrapped = JSON.parse(
+      '{"rulesets":{"undeclared":"keep","entries":[{"name":"r","__proto__":{"planted":1}}]}}',
+    );
+    expect(Object.hasOwn(plain.rulesets[0], "__proto__")).toBe(true);
+    expect(Object.hasOwn(wrapped.rulesets.entries[0], "__proto__")).toBe(true);
+
+    const [plainDesired] = (await receivedBy(rulesetsSection, plain)) as [object[]];
+    expect(plainDesired).not.toBe(plain.rulesets);
+    expect(plainDesired).toEqual([{ name: "r" }]);
+    prototypeClean(plainDesired[0] as object);
+
+    const [wrappedDesired] = (await receivedBy(rulesetsSection, wrapped)) as [
+      { undeclared: string; entries: object[] },
+    ];
+    expect(wrappedDesired).not.toBe(wrapped.rulesets);
+    expect(wrappedDesired).toEqual({ undeclared: "keep", entries: [{ name: "r" }] });
+    prototypeClean(wrappedDesired);
+    prototypeClean(wrappedDesired.entries[0] as object);
+
+    // The wrapper is this action's own strict vocabulary, so an own
+    // "__proto__" there is an unrecognized key and fails validation upfront.
+    const polluted = JSON.parse(
+      '{"rulesets":{"entries":[{"name":"r"}],"__proto__":{"planted":2}}}',
+    );
+    const verdict = validateSettingsDoc(polluted, "s.yml", new Set(), captureIo().io);
+    expect("error" in verdict ? verdict.error : "").toContain(
+      'rulesets: Unrecognized key: "__proto__"',
+    );
   });
 
   test("pages: null is an active section, not an omitted one", async () => {
@@ -269,8 +366,10 @@ describe("validateSettingsDoc", () => {
     if ("error" in verdict) {
       throw new Error(`expected the document to validate: ${verdict.error}`);
     }
-    // The brand is compile-time only: the value is the same document.
-    expect(verdict.settings).toBe(doc as unknown as typeof verdict.settings);
+    // The brand is compile-time only; the value is zod's parsed copy.
+    const branded: unknown = verdict.settings;
+    expect(branded).toEqual(doc);
+    expect(branded).not.toBe(doc);
   });
 });
 
@@ -348,7 +447,7 @@ describe("readOnlyClient", () => {
     } as unknown as (typeof SECTIONS)[number];
     const repoRef = { owner: "o", name: "r", slug: "o/r" };
     await expect(
-      preflightProbe(api, repoRef, [buggySection], { repository: {} } as SettingsFile),
+      preflightProbe(api, repoRef, [buggySection], validated({ repository: {} })),
     ).rejects.toThrow(/preflight: repository: PATCH \/repos\/o\/r was attempted in check mode/);
     // An ordinary probe error is still swallowed (the apply pass surfaces it).
     const throwingSection = {
@@ -358,7 +457,7 @@ describe("readOnlyClient", () => {
       },
     } as unknown as (typeof SECTIONS)[number];
     await expect(
-      preflightProbe(api, repoRef, [throwingSection], { repository: {} } as SettingsFile),
+      preflightProbe(api, repoRef, [throwingSection], validated({ repository: {} })),
     ).resolves.toEqual([]);
   });
 

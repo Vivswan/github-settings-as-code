@@ -195,14 +195,10 @@ function splitDeclared(desired: DeclaredInteractionLimits): DeclaredLimits {
   }
   const limit = base.limit;
   if (typeof limit !== "string") {
-    // The shape's superRefine rejects this pairing upfront for any ordinary
-    // document; this backstop covers plan() seeing the ORIGINAL document
-    // (validate.ts applies the raw values, not zod's clone - zod < 4.5 let
-    // an own "__proto__" key through the shape), so it throws rather than
-    // planning a PUT with no limit. (The actions.cache backstop guards the
-    // same seam.)
+    // The shape's superRefine rejects base keys without a limit upfront, and
+    // the engine hands plan() that shape's output.
     throw new Error(
-      `interaction_limits: base key(s) [${Object.keys(base).join(", ")}] ride the base interaction-limits PUT, which requires a limit, but none was declared; fix the key name, or declare limit alongside them`,
+      `BUG: interaction_limits base key(s) [${Object.keys(base).join(", ")}] reached plan() without a limit; the shape rejects this pairing during document validation`,
     );
   }
   return { base: { ...base, limit }, cap, bypass };

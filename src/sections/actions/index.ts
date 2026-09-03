@@ -181,9 +181,8 @@ const CACHE_ENDPOINT_BY_KEY = {
 /**
  * Compile-time lockstep between the cache config's fields and the endpoint
  * table: the handler below iterates the TABLE, so a new schema field with no
- * entry would compile and then be rejected at run time (after earlier
- * sections wrote) by the unknown-key backstop - fail it here instead. Both
- * directions: an unlisted field and a phantom entry are each a compile error.
+ * entry would compile and then be silently ignored - fail it here instead.
+ * Both directions: an unlisted field and a phantom entry are each a compile error.
  */
 type CacheKey = keyof NonNullable<ActionsConfig["cache"]>;
 type _CacheEndpointsComplete = MustBeNever<Exclude<CacheKey, keyof typeof CACHE_ENDPOINT_BY_KEY>>;
@@ -459,20 +458,6 @@ export const actionsSection = {
       } else {
         permissions[key] = value;
       }
-    }
-    const cache = (desired.cache ?? {}) as Record<string, unknown>;
-    // Backstop behind the shape: plan() sees the ORIGINAL document
-    // (validate.ts applies the raw values, not zod's clone), so a key the
-    // shape never rejected - zod < 4.5 ignored an own "__proto__" key -
-    // must still be caught here. Unlike the shape rejection, this throws
-    // from plan(), so earlier sections may already have applied.
-    const unknownCacheKeys = Object.keys(cache).filter(
-      (k) => !Object.hasOwn(CACHE_ENDPOINT_BY_KEY, k),
-    );
-    if (unknownCacheKeys.length > 0) {
-      throw new Error(
-        `actions.cache: unrecognized key(s) ${unknownCacheKeys.map((k) => `"${k}"`).join(", ")} (known keys: ${Object.keys(CACHE_ENDPOINT_BY_KEY).join(", ")}). Each cache limit is the entire body of its own endpoint, so an extra key has no destination; fix the key name, or remove it`,
-      );
     }
     if (desired.selected_actions !== undefined && permissions.allowed_actions === undefined) {
       // The allowlist endpoint answers 409 unless the policy is "selected";

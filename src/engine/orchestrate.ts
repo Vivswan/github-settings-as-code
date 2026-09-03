@@ -52,8 +52,8 @@ export type SectionOutcome =
  * brand has exactly one construction site (the success return below), so a
  * RepoRunOptions built from an unvalidated document is a compile error - the
  * "validate before run" ordering is carried by the type, not by call-site
- * discipline. The brand is compile-time only; at runtime the value is the
- * same plain document.
+ * discipline. The value is the PARSED document validateSectionShapes built
+ * from zod's output, never the caller's object.
  */
 declare const validatedSettings: unique symbol;
 export type ValidatedSettings = SettingsFile & { readonly [validatedSettings]: true };
@@ -175,14 +175,14 @@ export function validateSettingsDoc(
       `ignoring unknown top-level section(s) outside the "sections" allowlist: ${unknownKeys.join(", ")}. Upgrade the action to a version that knows them, or remove them from ${sourceLabel}`,
     );
   }
-  const malformed = validateSectionShapes(settings as Record<string, unknown>, sourceLabel);
-  if (malformed !== null) {
-    return { error: malformed };
+  const parsed = validateSectionShapes(settings as Record<string, unknown>, sourceLabel);
+  if ("error" in parsed) {
+    return { error: parsed.error };
   }
   // The one place the brand is minted: everything above proved the document
-  // is a mapping of known (or allowlist-tolerated/underscored) sections
-  // whose declared values pass their section shapes.
-  return { settings: settings as ValidatedSettings };
+  // is a mapping of known (or allowlist-tolerated/underscored) sections, and
+  // the parsed document holds exactly the known ones as their shapes' output.
+  return { settings: parsed.settings as ValidatedSettings };
 }
 
 /**
@@ -238,7 +238,7 @@ export async function preflightProbe(
   api: GithubClient,
   repo: RepoRef,
   active: typeof SECTIONS,
-  settings: SettingsFile,
+  settings: ValidatedSettings,
 ): Promise<string[]> {
   const probeCtx: SectionContext = {
     api: readOnlyClient(api),

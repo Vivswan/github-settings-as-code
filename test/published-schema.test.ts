@@ -242,7 +242,7 @@ describe("published schema wrapper strictness", () => {
       // The if/then the EnvironmentConfig schema's meta stamps, run
       // against the ONE shared fixture set the zod superRefine is also
       // tested with - and, per fixture, the AJV verdict must agree with
-      // validateSectionShapes (null = valid), so the schema copy of the
+      // validateSectionShapes (no error = valid), so the schema copy of the
       // invariant cannot drift from the runtime copy. The class counts pin
       // the SET: a deleted fixture would silently weaken both consumers.
       expect(FLAG_PAIRING_FIXTURES.filter((f) => !f.valid)).toHaveLength(4);
@@ -251,7 +251,7 @@ describe("published schema wrapper strictness", () => {
         const doc = { environments: [entry] };
         expect(validate(doc), `published schema: ${name}`).toBe(valid);
         expect(
-          validateSectionShapes(doc, "fixture") === null,
+          !("error" in validateSectionShapes(doc, "fixture")),
           `runtime validateSectionShapes disagrees with the published schema: ${name}`,
         ).toBe(valid);
       }
@@ -263,11 +263,11 @@ describe("published schema wrapper strictness", () => {
       expect(
         validate({
           environments: [
-            { name: "prod", variables: [{ name: "A", value: "1", future_field: "x" }] },
+            { name: "prod", variables: [{ name: "A", value: "1", extra_field: "x" }] },
           ],
         }),
       ).toBe(true);
-      expect(validate({ actions_variables: [{ name: "A", value: "1", future_field: "x" }] })).toBe(
+      expect(validate({ actions_variables: [{ name: "A", value: "1", extra_field: "x" }] })).toBe(
         true,
       );
     });

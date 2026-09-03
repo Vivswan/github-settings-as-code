@@ -9,6 +9,12 @@ import { PermissionDenied } from "../contract/errors.js";
 import { grantFor } from "../contract/permissions.js";
 import { FEATURE_TOGGLES, normalizeTopics, repositorySection } from "./index.js";
 
+/** The verdict's error prose, or null when the document validated. */
+function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
+  const verdict = validateSectionShapes(doc, sourceLabel);
+  return "error" in verdict ? verdict.error : null;
+}
+
 const GET = "GET /repos/o/r";
 const TOOLS = { resolveSecret: () => "" };
 
@@ -411,10 +417,7 @@ describe("repository", () => {
   );
 
   test("non-boolean security toggles are rejected by upfront shape validation with the YAML hint", () => {
-    const error = validateSectionShapes(
-      { repository: { enable_vulnerability_alerts: "no" } },
-      "f.yml",
-    );
+    const error = shapeError({ repository: { enable_vulnerability_alerts: "no" } }, "f.yml");
     expect(error).toContain("repository.enable_vulnerability_alerts");
     expect(error).toContain("not a boolean");
     expect(error).toContain('"no"');
@@ -434,12 +437,12 @@ describe("repository", () => {
   });
 
   test("non-boolean git LFS values hit the shared toggle shape, booleans pass", () => {
-    const error = validateSectionShapes({ repository: { enable_git_lfs: "yes" } }, "f.yml");
+    const error = shapeError({ repository: { enable_git_lfs: "yes" } }, "f.yml");
     expect(error).toContain("repository.enable_git_lfs");
     expect(error).toContain("not a boolean");
     // The section stays loose otherwise: booleans and passthrough keys pass.
     expect(
-      validateSectionShapes({ repository: { enable_git_lfs: true, extra_field: "x" } }, "f.yml"),
+      shapeError({ repository: { enable_git_lfs: true, extra_field: "x" } }, "f.yml"),
     ).toBeNull();
   });
 
@@ -450,7 +453,7 @@ describe("repository", () => {
     // lose its normal failed result.
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    const error = validateSectionShapes({ repository: { enable_git_lfs: cyclic } }, "f.yml");
+    const error = shapeError({ repository: { enable_git_lfs: cyclic } }, "f.yml");
     expect(error).toContain("repository.enable_git_lfs");
     expect(error).toContain("a mapping is not a boolean");
   });
@@ -459,10 +462,8 @@ describe("repository", () => {
     // requirePlainMapping guards the passthrough mapping: a YAML !!timestamp
     // document parses to a Date, which zod's object schemas would accept as
     // an empty mapping, so it must fail shape validation instead.
-    expect(validateSectionShapes({ repository: new Date("2020-01-01") }, "f.yml")).toContain(
-      "repository",
-    );
-    expect(validateSectionShapes({ repository: [1, 2] }, "f.yml")).toContain("repository");
+    expect(shapeError({ repository: new Date("2020-01-01") }, "f.yml")).toContain("repository");
+    expect(shapeError({ repository: [1, 2] }, "f.yml")).toContain("repository");
   });
 
   test("immutable releases reads the {enabled} body, treats 404 as off, and names owner enforcement", async () => {
@@ -794,21 +795,16 @@ describe("repository GraphQL-routed keys", () => {
   });
 
   test("a non-boolean enable_sponsorships is rejected upfront with the YAML hint", () => {
-    const error = validateSectionShapes({ repository: { enable_sponsorships: "yes" } }, "f.yml");
+    const error = shapeError({ repository: { enable_sponsorships: "yes" } }, "f.yml");
     expect(error).toContain("repository.enable_sponsorships");
     expect(error).toContain("not a boolean");
   });
 
   test("an unrecognized issue_creation_policy is rejected upfront naming the vocabulary", () => {
-    const error = validateSectionShapes(
-      { repository: { issue_creation_policy: "everyone" } },
-      "f.yml",
-    );
+    const error = shapeError({ repository: { issue_creation_policy: "everyone" } }, "f.yml");
     expect(error).toContain("repository.issue_creation_policy");
     expect(error).toContain('"collaborators_only"');
-    expect(
-      validateSectionShapes({ repository: { issue_creation_policy: "all" } }, "f.yml"),
-    ).toBeNull();
+    expect(shapeError({ repository: { issue_creation_policy: "all" } }, "f.yml")).toBeNull();
   });
 
   test("prototype-chain property names never pass the policy vocabulary", () => {
@@ -817,7 +813,7 @@ describe("repository GraphQL-routed keys", () => {
     // would validate and then map to garbage at the GraphQL boundary.
     for (const name of ["constructor", "toString", "__proto__"]) {
       expect(
-        validateSectionShapes({ repository: { issue_creation_policy: name } }, "f.yml"),
+        shapeError({ repository: { issue_creation_policy: name } }, "f.yml"),
         `"${name}" must be rejected`,
       ).toContain("repository.issue_creation_policy");
     }

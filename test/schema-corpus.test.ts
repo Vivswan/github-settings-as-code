@@ -129,7 +129,7 @@ describe("published schema agrees with the runtime over the corpus", () => {
     const staleAllowlist = new Set(Object.keys(KNOWN_DIVERGENCES));
     for (const { label, doc } of [...scenarioDocs(), ...generatedDocs()]) {
       const schemaAccepts = validate(doc) === true;
-      const runtimeAccepts = validateSectionShapes(doc, label) === null;
+      const runtimeAccepts = !("error" in validateSectionShapes(doc, label));
       if (schemaAccepts === runtimeAccepts) {
         continue;
       }

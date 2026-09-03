@@ -5,6 +5,12 @@ import { ctx } from "../../../test/sections/context.js";
 import { webhooksSection } from "./index.js";
 import type { WebhookConfig } from "./schema.js";
 
+/** The verdict's error prose, or null when the document validated. */
+function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
+  const verdict = validateSectionShapes(doc, sourceLabel);
+  return "error" in verdict ? verdict.error : null;
+}
+
 const LIST = "GET /repos/o/r/hooks?per_page=100&page=1";
 
 /** A live hook body as the mock list returns it (GET shape, secret echoed). */
@@ -49,7 +55,7 @@ describe("webhooks shape", () => {
   });
 
   test("a name other than 'web' is rejected upfront", () => {
-    const error = validateSectionShapes(
+    const error = shapeError(
       { webhooks: [{ name: "email", config: { url: "https://x.test/h" } }] },
       "settings.yml",
     );
@@ -58,13 +64,10 @@ describe("webhooks shape", () => {
 
   test("name 'web' and an omitted name both parse, in both knob forms", () => {
     expect(
-      validateSectionShapes(
-        { webhooks: [{ name: "web", config: { url: "https://x.test/h" } }] },
-        "s.yml",
-      ),
+      shapeError({ webhooks: [{ name: "web", config: { url: "https://x.test/h" } }] }, "s.yml"),
     ).toBeNull();
     expect(
-      validateSectionShapes(
+      shapeError(
         { webhooks: { undeclared: "delete", entries: [{ config: { url: "https://x.test/h" } }] } },
         "s.yml",
       ),
@@ -72,7 +75,7 @@ describe("webhooks shape", () => {
   });
 
   test("a missing config is rejected with its path", () => {
-    const error = validateSectionShapes({ webhooks: [{ events: ["push"] }] }, "s.yml");
+    const error = shapeError({ webhooks: [{ events: ["push"] }] }, "s.yml");
     expect(error).toContain("webhooks[0].config");
   });
 });
