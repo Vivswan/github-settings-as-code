@@ -16,6 +16,7 @@ import { RESOURCE_SLUGS } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
+import { regionBounds, replaceRegion } from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const README_PATH = "README.md";
@@ -210,42 +211,6 @@ function escapeRe(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// A region's marker spans: a complete `<!-- KIND GENERATED: name -->` comment or a `# KIND
-// GENERATED: name` YAML comment running to end of line; BEGIN may carry a parenthesized hint.
-function markerSpans(text: string, kind: "BEGIN" | "END", name: string): Array<[number, number]> {
-  const hint = kind === "BEGIN" ? String.raw`(?: \([^)\n]*\))?` : "";
-  const marker = `${kind} GENERATED: ${escapeRe(name)}${hint}`;
-  const re = new RegExp(String.raw`<!-- ${marker} -->|(?<=^[ \t]*)# ${marker}(?=[ \t]*$)`, "gm");
-  return [...text.matchAll(re)].map((match) => [match.index, match.index + match[0].length]);
-}
-
-/** A region's marker spans: exactly one BEGIN and one END, in that order, else a throw. */
-function regionBounds(
-  text: string,
-  name: string,
-): { begin: [number, number]; end: [number, number] } {
-  const begins = markerSpans(text, "BEGIN", name);
-  const ends = markerSpans(text, "END", name);
-  if (begins.length !== 1 || ends.length !== 1) {
-    throw new Error(
-      `gen-docs: region "${name}" needs exactly one BEGIN and one END marker, found ${begins.length} and ${ends.length}`,
-    );
-  }
-  const [begin] = begins;
-  const [end] = ends;
-  if (begin === undefined || end === undefined || end[0] < begin[1]) {
-    throw new Error(`gen-docs: region "${name}" has its END marker before its BEGIN marker`);
-  }
-  return { begin, end };
-}
-
-// Replace the span strictly between region `name`'s markers with `body`, keeping the markers
-// (block callers wrap the body in newlines); a missing, duplicated, or reversed pair throws.
-export function replaceRegion(text: string, name: string, body: string): string {
-  const { begin, end } = regionBounds(text, name);
-  return `${text.slice(0, begin[1])}${body}${text.slice(end[0])}`;
-}
-
 /** The reference label the README's token-form link resolves through; the generated definition carries it. */
 const PAT_FORM_LABEL = "pat-form";
 
@@ -305,7 +270,7 @@ function assertOutsideCodeBlocks(before: string, name: string): void {
 // content; a relocated marker would otherwise regenerate cleanly while the page reads wrong.
 export function assertRegionPlacement(readme: string): void {
   for (const [name, region] of Object.entries(REGIONS)) {
-    const { begin, end } = regionBounds(readme, name);
+    const { begin, end } = regionBounds(readme, name, "html");
     assertOutsideCodeBlocks(readme.slice(0, begin[0]), name);
     const body = readme.slice(begin[1], end[0]);
     if (!region.body.test(body)) {
@@ -351,9 +316,10 @@ export function renderReadme(readme: string): string {
     readme,
     "readme-sections-table",
     `\n${renderSectionsTable(SECTIONS, DOCS)}\n`,
+    "html",
   );
-  out = replaceRegion(out, "readme-outputs", renderOutputsList(REPO_RESULTS));
-  out = replaceRegion(out, "readme-pat-url", `\n[${PAT_FORM_LABEL}]: ${url}\n`);
+  out = replaceRegion(out, "readme-outputs", renderOutputsList(REPO_RESULTS), "html");
+  out = replaceRegion(out, "readme-pat-url", `\n[${PAT_FORM_LABEL}]: ${url}\n`, "html");
   // CommonMark trims and case-folds labels and lets the first definition
   // win, so every spelling counts: a mention opening a line and ending in
   // ":" is a definition, any other bracketed mention is a reference.

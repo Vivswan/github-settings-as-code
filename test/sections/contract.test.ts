@@ -9,7 +9,11 @@ import {
   sectionGrant,
   sectionOperations,
 } from "../../src/sections/contract/module.js";
-import { grantFor } from "../../src/sections/contract/permissions.js";
+import {
+  grantFor,
+  type SectionPermission,
+  samePermission,
+} from "../../src/sections/contract/permissions.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { environmentsSection } from "../../src/sections/environments/index.js";
 import { repositorySection } from "../../src/sections/repository/index.js";
@@ -401,5 +405,65 @@ describe("planContext read port", () => {
     expect(api.mutations()).toEqual([]);
     // The port itself is sealed too: no role can be swapped in after binding.
     expect(Object.isFrozen(ctx.read)).toBe(true);
+  });
+});
+
+describe("samePermission", () => {
+  test.each<
+    [label: string, a: SectionPermission | "none", b: SectionPermission | "none", same: boolean]
+  >([
+    [
+      "the same alternatives in another order",
+      { repo: ["administration", "code_scanning_alerts"] },
+      { repo: ["code_scanning_alerts", "administration"] },
+      true,
+    ],
+    ["a duplicated alternative", { repo: ["actions", "actions"] }, { repo: ["actions"] }, true],
+    [
+      "the same org grant",
+      { repo: ["administration"], org: "members" },
+      { repo: ["administration"], org: "members" },
+      true,
+    ],
+    [
+      "a differing org grant",
+      { repo: ["administration"], org: "members" },
+      { repo: ["administration"] },
+      false,
+    ],
+    ["a differing resource", { repo: ["actions"] }, { repo: ["issues"] }, false],
+    ["a strict subset", { repo: ["actions"] }, { repo: ["actions", "issues"] }, false],
+    ['"none" against itself', "none", "none", true],
+    ['"none" against a permission', "none", { repo: ["actions"] }, false],
+  ])("compares %s as %p, symmetrically", (_label, a, b, same) => {
+    expect(samePermission(a, b)).toBe(same);
+    expect(samePermission(b, a)).toBe(same);
+  });
+
+  test("an override restating the section's permission as a separate literal keeps the caveat", () => {
+    // Equal by structure, distinct by identity: an identity comparison would
+    // take the override path and render a caveat-free grant.
+    const restated: EndpointDecl = {
+      route: "GET /repos/{owner}/{repo}/actions/permissions",
+      statuses: { 200: "x" },
+      permission: { repo: ["administration"] },
+    };
+    expect(restated.permission).not.toBe(actionsSection.permission);
+    let thrown: unknown;
+    try {
+      throwFor(
+        actionsSection,
+        "GET",
+        "/repos/o/r/actions/permissions",
+        { status: 403, message: "Resource not accessible", body: "" },
+        { op: restated },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    expect((thrown as PermissionDenied).detail).toContain(
+      `To fix, ${sectionGrant(actionsSection)}`,
+    );
   });
 });

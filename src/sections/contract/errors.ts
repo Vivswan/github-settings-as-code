@@ -10,7 +10,7 @@ import {
   sectionGrant,
   sectionOperations,
 } from "./module.js";
-import { grantFor, type SectionPermission } from "./permissions.js";
+import { grantFor, type SectionPermission, samePermission } from "./permissions.js";
 
 export class PermissionDenied extends Error {
   constructor(
@@ -21,24 +21,6 @@ export class PermissionDenied extends Error {
   ) {
     super(`${section}: ${detail}`);
   }
-}
-
-/**
- * Structural equality of two effective endpoint permissions. The override
- * declarations are separate object literals (the OIDC pair declares two
- * distinct {repo: ["actions"]} values), so reference equality cannot group
- * them; compare the repo resources as a set plus the org grant.
- */
-function samePermission(a: SectionPermission | "none", b: SectionPermission | "none"): boolean {
-  if (a === "none" || b === "none") {
-    return a === b;
-  }
-  if (a.org !== b.org || a.repo.length !== b.repo.length) {
-    return false;
-  }
-  const sortedA = [...a.repo].sort();
-  const sortedB = [...b.repo].sort();
-  return sortedA.every((resource, index) => resource === sortedB[index]);
 }
 
 /**
@@ -103,14 +85,10 @@ export function throwFor(
     // than a missing grant) says so here, right where the user reads the
     // grant advice.
     const denialHint = context?.op?.denialHint ? `. Note: ${context.op.denialHint}` : "";
-    // The section's grant prose carries its caveats, so it stays the default;
-    // an operation override names a DIFFERENT permission, so only then is the
-    // advice re-derived from the override - at the level the SECTION needs
-    // on that permission (see overrideAdviceLevel), so a denied read never
-    // asks for a write grant the section cannot use, and never advises a
-    // read grant a sibling write on the same permission would outgrow.
+    // The section's caveated grant stays the default; only an override naming a structurally
+    // DIFFERENT permission re-derives the advice, at the level the SECTION needs on it.
     const grant =
-      effective !== undefined && effective !== section.permission
+      effective !== undefined && !samePermission(effective, section.permission)
         ? grantFor(effective, undefined, overrideAdviceLevel(section, effective))
         : sectionGrant(section);
     throw new PermissionDenied(

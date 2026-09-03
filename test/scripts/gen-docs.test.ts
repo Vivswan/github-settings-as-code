@@ -12,7 +12,6 @@ import {
   renderPatFormUrl,
   renderReadme,
   renderSectionsTable,
-  replaceRegion,
 } from "../../.github/scripts/gen-docs.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
 
@@ -175,63 +174,6 @@ describe("patFormParameters and renderPatFormUrl", () => {
         slugs,
       ),
     ).toThrow("code_scanning_default_setup.update needs one of [code_scanning_alerts]");
-  });
-});
-
-describe("replaceRegion", () => {
-  const block = [
-    "before",
-    "<!-- BEGIN GENERATED: table (bun run build:docs; edit x) -->",
-    "old",
-    "<!-- END GENERATED: table -->",
-    "after",
-  ].join("\n");
-
-  test("replaces the span between the markers and keeps both markers verbatim", () => {
-    expect(replaceRegion(block, "table", "\nnew\n")).toBe(block.replace("\nold\n", "\nnew\n"));
-    // Inline regions live inside a sentence; a YAML comment marker counts too.
-    expect(
-      replaceRegion(
-        "a (<!-- BEGIN GENERATED: list -->x<!-- END GENERATED: list -->) b",
-        "list",
-        "y",
-      ),
-    ).toBe("a (<!-- BEGIN GENERATED: list -->y<!-- END GENERATED: list -->) b");
-    expect(
-      replaceRegion(
-        "# BEGIN GENERATED: inputs\nold\n# END GENERATED: inputs\n",
-        "inputs",
-        "\nnew\n",
-      ),
-    ).toBe("# BEGIN GENERATED: inputs\nnew\n# END GENERATED: inputs\n");
-  });
-
-  test("throws on a missing, duplicated, or reversed marker pair", () => {
-    expect(() => replaceRegion(block, "missing", "x")).toThrow(
-      'region "missing" needs exactly one BEGIN and one END marker, found 0 and 0',
-    );
-    expect(() => replaceRegion(`${block}\n${block}`, "table", "x")).toThrow("found 2 and 2");
-    expect(() =>
-      replaceRegion("<!-- END GENERATED: t -->\n<!-- BEGIN GENERATED: t -->", "t", "x"),
-    ).toThrow('region "t" has its END marker before its BEGIN marker');
-  });
-
-  test("only a complete comment naming the exact region counts as a marker", () => {
-    // Each line is a near-miss: a name prefix, name suffixes, bare text, an
-    // unterminated comment, a YAML comment with trailing text. None may be
-    // rewritten, so a lookup for the exact name finds nothing.
-    const nearMisses = [
-      "<!-- BEGIN GENERATED: table -->",
-      "<!-- BEGIN GENERATED: tab.extra -->",
-      "<!-- BEGIN GENERATED: tab_y -->",
-      "<!-- BEGIN GENERATED: tabX -->",
-      "BEGIN GENERATED: tab",
-      "<!-- BEGIN GENERATED: tab",
-      "# BEGIN GENERATED: tab and more",
-      "<!-- END GENERATED: table -->",
-      "END GENERATED: tab",
-    ].join("\n");
-    expect(() => replaceRegion(nearMisses, "tab", "x")).toThrow("found 0 and 0");
   });
 });
 

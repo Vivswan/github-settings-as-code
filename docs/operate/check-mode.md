@@ -66,7 +66,13 @@ jobs:
 
 Read this run as a preview, not a gate. A pull request that changes settings is supposed to differ from the live state, so the step exits 1 exactly when the PR changes something check can verify, and the drift lines list the changes an apply on merge will make. The comparison is the proposed file against the live repository, not against the base branch, so drift that existed before the PR shows up too; that is still the true apply-on-merge delta, but not every line is caused by the PR. Verifiable is the other operative word: write-only values (the LFS toggle, the interaction-limit expiry) are re-asserted by every apply without ever drifting a check, and a ruleset entry that declares fewer fields than the live ruleset carries can narrow it on apply without showing drift, because only declared fields are compared. A broken file still fails usefully: YAML parse errors and malformed section entries fail the run before any comparison. Two caveats: do not make this a required check (a legitimate settings change would be unmergeable), and workflows triggered by pull requests from forks run without secrets, so the token is only available on same-repository branches.
 
-One token note for this workflow. Repository secrets are readable from any workflow a push-access user can edit, so wiring `ADMIN_TOKEN` into a `pull_request` job widens where the write-capable token gets used, even though it grants nothing a pusher could not already reach. Check mode only reads, so the preview works with a second fine-grained PAT whose grants are read-only (with one exception: GitHub gates even the Codespaces secrets reads at write, so drop `codespaces_secrets` from the preview or grant it); on repositories where settings changes are more restricted than push access, give the preview that token instead.
+One token note for this workflow. Repository secrets are readable from any workflow a push-access user can edit, so wiring `ADMIN_TOKEN` into a `pull_request` job widens where the write-capable token gets used, even though it grants nothing a pusher could not already reach. Check mode only reads, so the preview works with a second fine-grained PAT whose grants are read-only; on repositories where settings changes are more restricted than push access, give the preview that token instead.
+
+<!-- BEGIN GENERATED: check-mode-gated-reads (bun run build:action-docs; derived from the section endpoints' accessGrade overrides) -->
+The read-only rule has exceptions, each a section to drop from the preview or grant at write:
+
+- GitHub gates even the Codespaces secrets reads at write, so `codespaces_secrets` needs its write grant in check mode too.
+<!-- END GENERATED: check-mode-gated-reads -->
 
 ## What a "cannot verify" note means
 

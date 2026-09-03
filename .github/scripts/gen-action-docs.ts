@@ -1,7 +1,7 @@
 /**
- * Regenerate the declaration-derived regions of action.yml, the README, and
- * the policy and permissions references between their BEGIN/END GENERATED
- * markers: pure renderers plus a CLI (`bun run build:action-docs`).
+ * Regenerate the declaration-derived regions of action.yml, the README, the
+ * policy and permissions references, and the check-mode guide between their
+ * BEGIN/END GENERATED markers: pure renderers plus a CLI (`bun run build:action-docs`).
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -17,45 +17,13 @@ import {
   RESOURCE_LABEL,
   RESOURCE_LABEL_ORG,
   type SectionPermission,
+  samePermission,
 } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
+import { countWord } from "./lib/count-word.js";
+import { markerSyntaxFor, replaceRegion } from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
-
-/**
- * Replace the span between `<!-- BEGIN GENERATED: <name> (hint) -->` (or YAML
- * `# BEGIN GENERATED: <name> (hint)`) and its END marker with `body`, keeping
- * both markers. Throws on a missing, duplicated, or reversed marker.
- */
-export function replaceRegion(text: string, name: string, body: string): string {
-  if (!/^[a-z0-9-]+$/.test(name)) {
-    throw new Error(`a region name is lowercase letters, digits, and dashes; got "${name}"`);
-  }
-  const find = (kind: "BEGIN" | "END"): { start: number; end: number } => {
-    const hint = kind === "BEGIN" ? String.raw`(?: \([^)\n]*\))?` : "";
-    const marker = `${kind} GENERATED: ${name}${hint}`;
-    // A complete HTML comment, or a `#` comment that is the whole line
-    // (its indentation stays outside the span).
-    const hits = [
-      ...text.matchAll(
-        new RegExp(String.raw`<!-- ${marker} -->|(?<=^[ \t]*)# ${marker}(?=[ \t]*$)`, "gm"),
-      ),
-    ];
-    if (hits.length !== 1) {
-      throw new Error(
-        `expected exactly one "${kind} GENERATED: ${name}" marker, found ${hits.length}`,
-      );
-    }
-    const hit = hits[0] as RegExpMatchArray & { index: number };
-    return { start: hit.index, end: hit.index + hit[0].length };
-  };
-  const begin = find("BEGIN");
-  const end = find("END");
-  if (end.start < begin.end) {
-    throw new Error(`the "END GENERATED: ${name}" marker precedes its BEGIN marker`);
-  }
-  return text.slice(0, begin.end) + body + text.slice(end.start);
-}
 
 /** Column budget for a folded description line, indent included. */
 const YAML_WIDTH = 78;
@@ -165,39 +133,6 @@ export function renderReadmeInputsTable(
   ].join("\n");
 }
 
-const COUNT_WORDS = [
-  "zero",
-  "one",
-  "two",
-  "three",
-  "four",
-  "five",
-  "six",
-  "seven",
-  "eight",
-  "nine",
-  "ten",
-  "eleven",
-  "twelve",
-  "thirteen",
-  "fourteen",
-  "fifteen",
-  "sixteen",
-  "seventeen",
-  "eighteen",
-  "nineteen",
-  "twenty",
-] as const;
-
-/** The written-out form of `n`, for prose that counts sections. */
-export function countWord(n: number): string {
-  const word = COUNT_WORDS[n];
-  if (word === undefined) {
-    throw new Error(`extend COUNT_WORDS (gen-action-docs.ts): no word for count ${n}`);
-  }
-  return word;
-}
-
 /** "a, b, and c" (Oxford comma), "a and b", or "a". */
 function proseList(items: readonly string[]): string {
   if (items.length <= 2) {
@@ -303,17 +238,6 @@ export const POLICY_ROW_PROSE: Record<UndeclaredPolicySection, PolicyRowProse> =
   },
 };
 
-/** Equality of two permissions: the same resource SET (alternatives are unordered) and org grant. */
-function samePermission(a: SectionPermission, b: SectionPermission): boolean {
-  const sortedA = [...a.repo].sort();
-  const sortedB = [...b.repo].sort();
-  return (
-    a.org === b.org &&
-    sortedA.length === sortedB.length &&
-    sortedA.every((resource, index) => resource === sortedB[index])
-  );
-}
-
 /** The token-UI label of a permission's primary resource (ANY one grants access; the first is the one to ask for). */
 function primaryLabel(permission: SectionPermission): string {
   return RESOURCE_LABEL[permission.repo[0]];
@@ -395,6 +319,15 @@ export function renderGatedReads(sections: readonly SectionMeta[]): string {
     .join("\n");
 }
 
+/** The check-mode guide's read-only-PAT caveat: the gated reads under their lead-in, or the plain sentence when none is write-gated. */
+export function renderCheckModeGatedReads(sections: readonly SectionMeta[]): string {
+  const bullets = renderGatedReads(sections);
+  if (bullets === "") {
+    return "A read-only PAT covers every section in check mode.";
+  }
+  return `The read-only rule has exceptions, each a section to drop from the preview or grant at write:\n\n${bullets}`;
+}
+
 /** The knobbed sections with their declared defaults, in UNDECLARED_POLICY_SECTIONS order. */
 function knobbedSections(): KnobbedSection[] {
   const byKey = new Map(SECTIONS.map((section) => [section.key, section]));
@@ -424,6 +357,9 @@ export const GENERATED_REGIONS: Readonly<Record<string, Readonly<Record<string, 
     "permissions-grant-sentence": () => renderGrantSentence(SECTIONS),
     "permissions-gated-reads": () => renderGatedReads(SECTIONS),
   },
+  "docs/operate/check-mode.md": {
+    "check-mode-gated-reads": () => renderCheckModeGatedReads(SECTIONS),
+  },
 };
 
 /** `text` with every one of `path`'s regions regenerated (all are block regions: body on its own lines). */
@@ -432,8 +368,9 @@ export function regenerateText(path: string, text: string): string {
   if (regions === undefined) {
     throw new Error(`no generated regions are registered for ${path}`);
   }
+  const syntax = markerSyntaxFor(path);
   return Object.entries(regions).reduce(
-    (current, [name, render]) => replaceRegion(current, name, `\n${render()}\n`),
+    (current, [name, render]) => replaceRegion(current, name, `\n${render()}\n`, syntax),
     text,
   );
 }

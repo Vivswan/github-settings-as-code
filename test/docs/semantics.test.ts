@@ -7,8 +7,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { countWord } from "../../.github/scripts/lib/count-word.js";
 import { MAX_RETRIES, MAX_RETRY_WAIT_S } from "../../src/github/api.js";
-import { countWord } from "./claims.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const semantics = readFileSync(join(ROOT, "docs", "reference", "semantics.md"), "utf8").replace(

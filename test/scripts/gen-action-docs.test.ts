@@ -1,8 +1,5 @@
-/**
- * The generated-region toolchain: the marker splice, each renderer against a
- * fixture with an exact expected text, and the committed files against a
- * fresh regeneration (which is also the marker-integrity check).
- */
+// Each renderer against a fixture with an exact expected text, and the committed files against
+// a fresh regeneration (the splice itself is pinned in generated-regions.test.ts).
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -13,12 +10,12 @@ import {
   regenerateText,
   renderActionInputs,
   renderActionOutputs,
+  renderCheckModeGatedReads,
   renderGatedReads,
   renderGrantSentence,
   renderPolicyCountSentence,
   renderPolicyDefaultsTable,
   renderReadmeInputsTable,
-  replaceRegion,
 } from "../../.github/scripts/gen-action-docs.js";
 import { INPUT_DECLS } from "../../src/action/inputs.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
@@ -26,72 +23,6 @@ import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { sectionModule } from "../../src/sections/registry.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
-
-describe("replaceRegion", () => {
-  test("replaces the span between the markers in either comment syntax and keeps the rest", () => {
-    const markdown =
-      "keep\n<!-- BEGIN GENERATED: x (bun run build; edit y) -->\nold\n<!-- END GENERATED: x -->\ntail";
-    expect(replaceRegion(markdown, "x", "\nnew\n")).toBe(
-      "keep\n<!-- BEGIN GENERATED: x (bun run build; edit y) -->\nnew\n<!-- END GENERATED: x -->\ntail",
-    );
-    const yaml = "a: 1\n  # BEGIN GENERATED: y (edit z)\n  old: 1\n  # END GENERATED: y\nb: 2\n";
-    expect(replaceRegion(yaml, "y", "\n  new: 1\n  ")).toBe(
-      "a: 1\n  # BEGIN GENERATED: y (edit z)\n  new: 1\n  # END GENERATED: y\nb: 2\n",
-    );
-    // An inline region: the markers bound a span inside one sentence.
-    expect(
-      replaceRegion("Outputs: <!-- BEGIN GENERATED: o -->a<!-- END GENERATED: o -->.", "o", "b"),
-    ).toBe("Outputs: <!-- BEGIN GENERATED: o -->b<!-- END GENERATED: o -->.");
-    // Prose that merely mentions a marker is not one: the comment syntax is
-    // required, so the real markers are still the only two found.
-    expect(
-      replaceRegion(
-        `the BEGIN GENERATED: x line and END GENERATED: x line\n${markdown}`,
-        "x",
-        "\nnew\n",
-      ),
-    ).toContain("-->\nnew\n<!--");
-  });
-
-  test("rejects a region name outside the marker grammar before scanning", () => {
-    expect(() => replaceRegion("", "Bad.Name", "")).toThrow(/region name is lowercase/);
-  });
-
-  test.each([
-    [
-      "a region whose name only prefixes the markers' name",
-      "<!-- BEGIN GENERATED: x-long -->\n<!-- END GENERATED: x-long -->",
-      /expected exactly one "BEGIN GENERATED: x" marker, found 0/,
-    ],
-    [
-      "a missing END marker",
-      "<!-- BEGIN GENERATED: x -->\nbody",
-      /expected exactly one "END GENERATED: x" marker, found 0/,
-    ],
-    [
-      "a duplicated BEGIN marker",
-      "<!-- BEGIN GENERATED: x -->\n<!-- BEGIN GENERATED: x -->\n<!-- END GENERATED: x -->",
-      /expected exactly one "BEGIN GENERATED: x" marker, found 2/,
-    ],
-    [
-      "END before BEGIN",
-      "<!-- END GENERATED: x -->\n<!-- BEGIN GENERATED: x -->",
-      /"END GENERATED: x" marker precedes its BEGIN marker/,
-    ],
-    [
-      "a hint spanning lines (it would swallow content)",
-      "<!-- BEGIN GENERATED: x (a\nb) -->\n<!-- END GENERATED: x -->",
-      /expected exactly one "BEGIN GENERATED: x" marker, found 0/,
-    ],
-    [
-      "a # marker with trailing text",
-      "# BEGIN GENERATED: x and more\n# END GENERATED: x",
-      /expected exactly one "BEGIN GENERATED: x" marker, found 0/,
-    ],
-  ])("throws on %s", (_label, text, error) => {
-    expect(() => replaceRegion(text, "x", "")).toThrow(error);
-  });
-});
 
 describe("action.yml renderers", () => {
   test("inputs fold long descriptions, quote every default, and parse back verbatim", () => {
@@ -332,6 +263,21 @@ describe("permissions renderers", () => {
     };
     expect(renderGatedReads([gatedOverride])).toBe(
       "- GitHub gates even the Actions reads at write, so `labels` needs its write grant in check mode too.",
+    );
+  });
+
+  test("the check-mode caveat leads into the gated reads, or says a read-only PAT suffices", () => {
+    expect(
+      renderCheckModeGatedReads([sectionModule("labels"), sectionModule("codespaces_secrets")]),
+    ).toBe(
+      [
+        "The read-only rule has exceptions, each a section to drop from the preview or grant at write:",
+        "",
+        "- GitHub gates even the Codespaces secrets reads at write, so `codespaces_secrets` needs its write grant in check mode too.",
+      ].join("\n"),
+    );
+    expect(renderCheckModeGatedReads([sectionModule("labels")])).toBe(
+      "A read-only PAT covers every section in check mode.",
     );
   });
 });

@@ -32,6 +32,24 @@ export interface SectionPermission {
   readonly org?: "members";
 }
 
+// Set equality over the repo alternatives (unordered, duplicates collapse) plus the org grant;
+// "none" equals only itself. Declarations are distinct literals, so identity cannot group them.
+export function samePermission(
+  a: SectionPermission | "none",
+  b: SectionPermission | "none",
+): boolean {
+  if (a === "none" || b === "none") {
+    return a === b;
+  }
+  const resources = new Set(a.repo);
+  const others = new Set(b.repo);
+  return (
+    a.org === b.org &&
+    resources.size === others.size &&
+    [...resources].every((resource) => others.has(resource))
+  );
+}
+
 /** Human-facing label for each PAT resource, as shown in the token UI. */
 export const RESOURCE_LABEL: Record<PatResource, string> = {
   administration: "Administration",

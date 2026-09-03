@@ -19,7 +19,7 @@
     "build:schema": "bun .github/scripts/gen-settings-schema.ts",
     "build:docs": "bun .github/scripts/gen-docs.ts",
     "build:action-docs": "bun .github/scripts/gen-action-docs.ts",
-    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep . && bun run build:docs && bun run build:action-docs && git diff --exit-code README.md action.yml docs/reference/undeclared-policy.md docs/reference/permissions.md && ! git ls-files --others --exclude-standard README.md action.yml docs/reference/undeclared-policy.md docs/reference/permissions.md | grep .",
+    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep . && bun run build:docs && bun run build:action-docs && git diff --exit-code README.md action.yml docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md && ! git ls-files --others --exclude-standard README.md action.yml docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md | grep .",
     "prepare": "lefthook install"
   },
   "dependencies": {

@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { countWord } from "../../.github/scripts/lib/count-word.js";
 import {
   DEFAULT_PRIVATE_REPOS,
   PRIVATE_REPORT_CHANNELS,
@@ -23,7 +24,7 @@ import {
   SettingsFile as SettingsFileSchema,
 } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { countWord, defaultClaimProblems, deleteEnumerationProblems } from "./claims.js";
+import { defaultClaimProblems, deleteEnumerationProblems } from "./claims.js";
 import { fencedBlocks, sectionLines } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
