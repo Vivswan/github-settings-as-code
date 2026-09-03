@@ -25,15 +25,22 @@ describe("check_suite_preferences", () => {
   });
 
   test("apply PATCHes the declared payload verbatim, counting the echoed entries", async () => {
+    // The echo carries THREE entries against the two declared, so the change
+    // line can only say 3 by reading GitHub's post-state; an echo identical
+    // to the declaration could not tell the count apart from the fallback.
+    const echoed = [...declared.auto_trigger_checks, { app_id: 99999, setting: true }];
     const api = new MockApi({
       [`PATCH ${path}`]: {
-        data: { preferences: declared, repository: { full_name: "o/r" } },
+        data: {
+          preferences: { auto_trigger_checks: echoed },
+          repository: { full_name: "o/r" },
+        },
       },
     });
     const result = await checkSuitePreferencesSection.run(ctx(api), declared);
     expect(api.calls).toEqual([{ method: "PATCH", path, payload: declared }]);
     expect(result.changes).toEqual([
-      "applied check suite preferences (2 auto_trigger_checks entries)",
+      "applied check suite preferences (3 auto_trigger_checks entries)",
     ]);
   });
 

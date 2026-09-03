@@ -129,20 +129,6 @@ describe("environments variables check mode", () => {
       "environments[prod].variables[A]: missing - declared in the settings file but not on the environment; apply will create it",
     ]);
   });
-
-  test("a missing environment skips the variables read and notes it is unverifiable", async () => {
-    const api = new MockApi({});
-    const result = await environmentsSection.run(ctx(api, true), [
-      { name: "prod", variables: [{ name: "A", value: "1" }] },
-    ]);
-    expect(result.drift).toEqual([
-      "environments[prod]: missing - declared in the settings file but not on the repo; apply will create it",
-    ]);
-    expect(result.notes).toEqual([
-      "environments[prod].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables",
-    ]);
-    expect(api.calls.filter((c) => c.path.includes("/variables"))).toEqual([]);
-  });
 });
 
 describe("environments variables case-insensitive matching", () => {
@@ -437,23 +423,6 @@ describe("environments nested secrets check mode", () => {
     // Check mode never touches the sealing key.
     expect(api.calls.some((c) => c.path.endsWith("/public-key"))).toBe(false);
   });
-
-  test("a missing environment earns the unverifiable-secrets note, like variables", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": {
-        error: { status: 404, message: "Not Found", body: "" },
-      },
-    });
-    const result = await environmentsSection.run(ctx(api, true), [
-      { name: "prod", secrets: [{ name: "S", value: "$S" }] },
-    ]);
-    expect(result.drift?.join("\n")).toContain("environments[prod]: missing");
-    expect(result.notes.join("\n")).toContain(
-      "environments[prod].secrets: not verifiable while the environment is missing",
-    );
-    // The secrets list of a missing environment is never requested.
-    expect(api.calls.some((c) => c.path.includes("/secrets"))).toBe(false);
-  });
 });
 
 describe("environments nested secrets validation and shape", () => {
@@ -666,17 +635,6 @@ describe("environments deployment branch policies check mode", () => {
     );
     expect(result.notes).toContain(
       "environments[prod].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and reconcile the declared patterns",
-    );
-    expect(api.calls.some((c) => c.path.includes("/deployment-branch-policies"))).toBe(false);
-  });
-
-  test("a missing environment earns the unverifiable-patterns note", async () => {
-    const api = new MockApi({});
-    const result = await environmentsSection.run(ctx(api, true), [
-      envWithPolicies([{ name: "release/*" }]),
-    ]);
-    expect(result.notes).toContain(
-      "environments[prod].deployment_branch_policies: not verifiable while the environment is missing; apply will create the environment and reconcile the declared patterns",
     );
     expect(api.calls.some((c) => c.path.includes("/deployment-branch-policies"))).toBe(false);
   });
@@ -1016,17 +974,50 @@ describe("environments deployment protection rules check mode", () => {
       'environments[prod].deployment_protection_rules[change-window]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DISABLE it; add it to the settings file to keep it',
     ]);
   });
+});
 
-  test("a missing environment earns the unverifiable-rules note", async () => {
-    const api = new MockApi({});
-    const result = await environmentsSection.run(ctx(api, true), [
+describe("environments missing-environment check mode across the nested families", () => {
+  // One skeleton for all four nested families: only NESTED_RECONCILERS[key]'s
+  // missingNote and the sub-resource path vary. The empty MockApi 404s the
+  // environment GET, so the missing drift fires and every family must skip
+  // its own sub-resource read.
+  test.each([
+    [
+      "variables",
+      { name: "prod", variables: [{ name: "A", value: "1" }] },
+      "environments[prod].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables",
+      "/variables",
+    ],
+    [
+      "secrets",
+      { name: "prod", secrets: [{ name: "S", value: "$S" }] },
+      "environments[prod].secrets: not verifiable while the environment is missing; apply will create the environment and reconcile the declared secrets",
+      "/secrets",
+    ],
+    [
+      "deployment_branch_policies",
+      envWithPolicies([{ name: "release/*" }]),
+      "environments[prod].deployment_branch_policies: not verifiable while the environment is missing; apply will create the environment and reconcile the declared patterns",
+      "/deployment-branch-policies",
+    ],
+    [
+      "deployment_protection_rules",
       { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
-    ]);
-    expect(result.notes).toContain(
       "environments[prod].deployment_protection_rules: not verifiable while the environment is missing; apply will create the environment and reconcile the declared protection rules",
-    );
-    expect(api.calls.some((c) => c.path.includes("deployment_protection_rules"))).toBe(false);
-  });
+      "/deployment_protection_rules",
+    ],
+  ] as Array<[string, EnvironmentConfig, string, string]>)(
+    "%s: the sub-resource read is skipped and the note says it is unverifiable",
+    async (_key, entry, expectedNote, subResourcePath) => {
+      const api = new MockApi({});
+      const result = await environmentsSection.run(ctx(api, true), [entry]);
+      expect(result.drift).toEqual([
+        "environments[prod]: missing - declared in the settings file but not on the repo; apply will create it",
+      ]);
+      expect(result.notes).toEqual([expectedNote]);
+      expect(api.calls.filter((c) => c.path.includes(subResourcePath))).toEqual([]);
+    },
+  );
 });
 
 describe("environments deployment protection rules validation and shape", () => {

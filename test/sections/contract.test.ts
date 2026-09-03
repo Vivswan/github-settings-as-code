@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { actionsSection } from "../../src/sections/actions/index.js";
-import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
+import { type EndpointDecl, endpointKind } from "../../src/sections/contract/endpoints.js";
 import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.js";
 import type { GraphqlOpDecl } from "../../src/sections/contract/graphql.js";
 import {
+  endpointPermission,
   type SectionMeta,
   sectionGrant,
   sectionOperations,
@@ -41,14 +42,25 @@ describe("sectionOperations", () => {
 
   test("every REST endpoint and GraphQL operation of a real section appears exactly once", () => {
     // repositorySection carries BOTH dictionaries, so the GraphQL half of
-    // the length assertion binds (a section without `graphql` would prove
-    // only the REST half).
+    // the flattening binds (a section without `graphql` would prove only the
+    // REST half). Content equality over the mapped dictionaries is the
+    // exactly-once claim: a duplicated entry canceling an omitted one would
+    // keep the length but not the list. No repository endpoint overrides
+    // accessGrade, so wire and grade coincide here; the override split is
+    // pinned by the overrides test below.
     expect(Object.keys(repositorySection.graphql ?? {}).length).toBeGreaterThan(0);
-    const operations = sectionOperations(repositorySection);
-    expect(operations).toHaveLength(
-      Object.keys(repositorySection.endpoints).length +
-        Object.keys(repositorySection.graphql ?? {}).length,
-    );
+    expect(sectionOperations(repositorySection)).toEqual([
+      ...Object.values(repositorySection.endpoints).map((op) => ({
+        wire: endpointKind(op),
+        grade: endpointKind(op),
+        permission: endpointPermission(repositorySection, op),
+      })),
+      ...Object.values(repositorySection.graphql ?? {}).map((op) => ({
+        wire: op.kind,
+        grade: op.kind,
+        permission: endpointPermission(repositorySection, op),
+      })),
+    ]);
   });
 
   test("resolves per-operation permission overrides and accessGrade write-gating", () => {

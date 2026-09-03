@@ -101,52 +101,29 @@ describe("branches", () => {
     ]);
   });
 
-  test("check: declared true against live {enabled: true} is clean", async () => {
+  test.each([
+    ["declared true against live {enabled: true} is clean", true, { enabled: true }, []],
+    ["declared false against live {enabled: false} is clean", false, { enabled: false }, []],
+    ["declared false against an ABSENT live field is clean (absent means false)", false, null, []],
+    [
+      "declared true against an ABSENT live field is drift",
+      true,
+      null,
+      ["branches[main].protection.required_signatures: true != false"],
+    ],
+  ] as const)("check: %s", async (_name, declaredValue, liveField, expectedDrift) => {
     const api = new MockApi({
       "GET /repos/o/r/branches/main/protection": {
-        data: { enforce_admins: { enabled: true }, required_signatures: { enabled: true } },
+        data: {
+          enforce_admins: { enabled: true },
+          ...(liveField === null ? {} : { required_signatures: liveField }),
+        },
       },
     });
     const result = await branchesSection.run(ctx(api, true), [
-      { name: "main", protection: { enforce_admins: true, required_signatures: true } },
+      { name: "main", protection: { enforce_admins: true, required_signatures: declaredValue } },
     ]);
-    expect(result.drift).toEqual([]);
-  });
-
-  test("check: declared false against live {enabled: false} is clean", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/branches/main/protection": {
-        data: { enforce_admins: { enabled: true }, required_signatures: { enabled: false } },
-      },
-    });
-    const result = await branchesSection.run(ctx(api, true), [
-      { name: "main", protection: { enforce_admins: true, required_signatures: false } },
-    ]);
-    expect(result.drift).toEqual([]);
-  });
-
-  test("check: declared false against an ABSENT live field is clean (absent means false)", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/branches/main/protection": {
-        data: { enforce_admins: { enabled: true } },
-      },
-    });
-    const result = await branchesSection.run(ctx(api, true), [
-      { name: "main", protection: { enforce_admins: true, required_signatures: false } },
-    ]);
-    expect(result.drift).toEqual([]);
-  });
-
-  test("check: declared true against an ABSENT live field is drift", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/branches/main/protection": {
-        data: { enforce_admins: { enabled: true } },
-      },
-    });
-    const result = await branchesSection.run(ctx(api, true), [
-      { name: "main", protection: { enforce_admins: true, required_signatures: true } },
-    ]);
-    expect(result.drift).toEqual(["branches[main].protection.required_signatures: true != false"]);
+    expect(result.drift).toEqual([...expectedDrift]);
   });
 
   test('a quoted "true" fails the shape upfront, with the YAML gotcha named', () => {

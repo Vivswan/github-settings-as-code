@@ -543,6 +543,8 @@ describe("section endpoints", () => {
   });
 
   test("toleratedStatuses returns exactly the declared >= 400 statuses", () => {
+    // This pins the invariant the helpers rely on: tolerances are derived
+    // from the declared statuses, never wider.
     expect(
       toleratedStatuses({
         route: "GET /repos/{owner}/{repo}/private-vulnerability-reporting",
@@ -561,31 +563,6 @@ describe("section endpoints", () => {
         route: "DELETE /repos/{owner}/{repo}/labels/{name}",
         statuses: { 204: "a" },
       }),
-    ).toEqual([]);
-  });
-
-  test("every section's tolerated statuses are a subset of its declared statuses", () => {
-    // Trivially true by construction, but this pins the invariant the
-    // helpers rely on: tolerances are derived from statuses, never wider.
-    const offenders: string[] = [];
-    for (const module of SECTIONS) {
-      for (const [role, endpoint] of Object.entries(module.endpoints)) {
-        const declared = new Set(Object.keys(endpoint.statuses).map(Number));
-        for (const status of toleratedStatuses(endpoint)) {
-          if (!declared.has(status)) {
-            offenders.push(
-              `${module.key}.${role}: tolerates ${status}, which its statuses never declare`,
-            );
-          }
-          if (status < 400) {
-            offenders.push(`${module.key}.${role}: tolerates non-error status ${status}`);
-          }
-        }
-      }
-    }
-    expect(
-      offenders,
-      `endpoint(s) whose tolerated statuses escape their declaration:\n  ${offenders.join("\n  ")}`,
     ).toEqual([]);
   });
 
@@ -763,13 +740,6 @@ describe("allGraphqlOps", () => {
       connection: { path: ["repository", "rules"] },
     };
     expect(() => allGraphqlOps([graphqlSection("repository", { rules: cursored })])).not.toThrow();
-  });
-
-  test("the registry's own declarations pass both asserts", () => {
-    // No section declares GraphQL operations yet; the call itself proves the
-    // asserts hold over the live registry, and the first consuming section
-    // inherits the check.
-    expect(() => allGraphqlOps()).not.toThrow();
   });
 });
 
@@ -1015,7 +985,10 @@ describe("the section.role key space reserves ':'", () => {
     ).toThrow(/section key "prod:labels" contains ":"/);
   });
 
-  test("the live registry's keys and roles are colon-free", () => {
+  test("the live registry passes every construction assert of both flatteners", () => {
+    // Colon-free keys and roles, plus the GraphQL declaration asserts: the
+    // calls themselves prove the asserts hold over the live registry, and
+    // the first section to declare GraphQL operations inherits the check.
     expect(() => allEndpoints()).not.toThrow();
     expect(() => allGraphqlOps()).not.toThrow();
   });

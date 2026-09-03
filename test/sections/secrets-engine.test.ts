@@ -22,7 +22,6 @@ import {
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
-  secretDigest,
   unsealSecretValue,
 } from "../e2e/mock/secrets.js";
 import { MockApi } from "../mock-api.js";
@@ -84,14 +83,15 @@ describe("sealSecretValue", () => {
     expect(unsealSecretValue(sealed)).toBe(hostile);
   });
 
-  test("two seals of the same plaintext differ, but their digests agree", async () => {
-    // Sealed boxes use a fresh ephemeral key per seal; the mock's digest is
-    // what makes idempotence judgeable anyway.
+  test("two seals of the same plaintext differ, and each unseals back to it", async () => {
+    // Sealed boxes use a fresh ephemeral key per seal, so the ciphertexts
+    // must differ while both still carry the exact plaintext.
     const a = await sealSecretValue("same-value", MOCK_SECRETS_PUBLIC_KEY);
     const b = await sealSecretValue("same-value", MOCK_SECRETS_PUBLIC_KEY);
     expect(a).not.toBe(b);
     await mockSodiumReady();
-    expect(secretDigest(unsealSecretValue(a) ?? "")).toBe(secretDigest(unsealSecretValue(b) ?? ""));
+    expect(unsealSecretValue(a)).toBe("same-value");
+    expect(unsealSecretValue(b)).toBe("same-value");
   });
 });
 

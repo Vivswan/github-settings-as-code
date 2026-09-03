@@ -4,7 +4,20 @@ import { ctx } from "../../../test/sections/context.js";
 import { validateSectionShapes } from "../../engine/validate.js";
 import { toleratedStatuses } from "../contract/endpoints.js";
 import { PermissionDenied } from "../contract/errors.js";
+import { grantFor } from "../contract/permissions.js";
 import { FEATURE_TOGGLES, normalizeTopics, repositorySection } from "./index.js";
+
+/** The run must reject as PermissionDenied CARRYING the section's grant advice. */
+async function expectAdministrationDenied(run: Promise<unknown>): Promise<void> {
+  let thrown: unknown;
+  try {
+    await run;
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(PermissionDenied);
+  expect((thrown as PermissionDenied).detail).toContain(grantFor({ repo: ["administration"] }));
+}
 
 describe("feature-toggle write tolerances", () => {
   test("every toggle write tolerates only statuses the apply loop interprets", () => {
@@ -71,30 +84,31 @@ describe("repository", () => {
     expect(topics.names).toEqual(["a", "b"]);
   });
 
-  test("permission error surfaces as PermissionDenied", async () => {
+  test("permission error surfaces as PermissionDenied with the grant advice", async () => {
     const api = new MockApi({
       "PATCH /repos/o/r": { error: { status: 403, message: "Resource not accessible", body: "" } },
     });
-    await expect(repositorySection.run(ctx(api), { description: "d" })).rejects.toBeInstanceOf(
-      PermissionDenied,
-    );
+    await expectAdministrationDenied(repositorySection.run(ctx(api), { description: "d" }));
   });
 
-  test("private vulnerability reporting toggles its own endpoint", async () => {
-    const api = new MockApi({}).allowMutations(
-      "PUT /repos/o/r/private-vulnerability-reporting",
-      "DELETE /repos/o/r/private-vulnerability-reporting",
-    );
-    const on = await repositorySection.run(ctx(api), {
-      enable_private_vulnerability_reporting: true,
-    });
-    expect(on.changes).toEqual(["private vulnerability reporting: enabled"]);
-    await repositorySection.run(ctx(api), { enable_private_vulnerability_reporting: false });
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "PUT /repos/o/r/private-vulnerability-reporting",
-      "DELETE /repos/o/r/private-vulnerability-reporting",
-    ]);
-  });
+  test.each(FEATURE_TOGGLES.map((toggle) => [toggle.key, toggle] as const))(
+    "%s toggles its own endpoint: PUT on true, DELETE on false, never in the PATCH",
+    async (_key, toggle) => {
+      // Driven by the exported table on purpose: a future toggle lands here
+      // without a new test. "Never in the PATCH" is the exact-mutations
+      // assertion - a leaked key would add a PATCH /repos/o/r call.
+      const putRoute = toggle.put.route.replace("{owner}", "o").replace("{repo}", "r");
+      const removeRoute = toggle.remove.route.replace("{owner}", "o").replace("{repo}", "r");
+      const on = new MockApi({}).allowMutations(putRoute);
+      const enabled = await repositorySection.run(ctx(on), { [toggle.key]: true });
+      expect(on.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([putRoute]);
+      expect(enabled.changes).toEqual([`${toggle.label}: enabled`]);
+      const off = new MockApi({}).allowMutations(removeRoute);
+      const disabled = await repositorySection.run(ctx(off), { [toggle.key]: false });
+      expect(off.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([removeRoute]);
+      expect(disabled.changes).toEqual([`${toggle.label}: disabled`]);
+    },
+  );
 
   test("private vulnerability reporting check reads the {enabled} body", async () => {
     const api = new MockApi({
@@ -125,9 +139,9 @@ describe("repository", () => {
         error: { status: 403, message: "Forbidden", body: "" },
       },
     });
-    await expect(
+    await expectAdministrationDenied(
       repositorySection.run(ctx(api, true), { enable_private_vulnerability_reporting: true }),
-    ).rejects.toBeInstanceOf(PermissionDenied);
+    );
   });
 
   test("private vulnerability reporting treats 404/422 as not applicable", async () => {
@@ -166,17 +180,6 @@ describe("repository", () => {
     expect(error).toContain("repository.enable_vulnerability_alerts");
     expect(error).toContain("not a boolean");
     expect(error).toContain('"no"');
-  });
-
-  test("git LFS applies blindly: PUT on true, DELETE on false, never in the PATCH", async () => {
-    const on = new MockApi({}).allowMutations("PUT /repos/o/r/lfs");
-    const enabled = await repositorySection.run(ctx(on), { enable_git_lfs: true });
-    expect(on.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(["PUT /repos/o/r/lfs"]);
-    expect(enabled.changes).toEqual(["Git LFS: enabled"]);
-    const off = new MockApi({}).allowMutations("DELETE /repos/o/r/lfs");
-    const disabled = await repositorySection.run(ctx(off), { enable_git_lfs: false });
-    expect(off.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(["DELETE /repos/o/r/lfs"]);
-    expect(disabled.changes).toEqual(["Git LFS: disabled"]);
   });
 
   test("git LFS check mode emits the cannot-verify note, no drift, no requests beyond the GET", async () => {
@@ -220,21 +223,6 @@ describe("repository", () => {
       "repository",
     );
     expect(validateSectionShapes({ repository: [1, 2] }, "f.yml")).toContain("repository");
-  });
-
-  test("immutable releases toggles its own endpoint: PUT on true, DELETE on false", async () => {
-    const on = new MockApi({}).allowMutations("PUT /repos/o/r/immutable-releases");
-    const enabled = await repositorySection.run(ctx(on), { enable_immutable_releases: true });
-    expect(on.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "PUT /repos/o/r/immutable-releases",
-    ]);
-    expect(enabled.changes).toEqual(["immutable releases: enabled"]);
-    const off = new MockApi({}).allowMutations("DELETE /repos/o/r/immutable-releases");
-    const disabled = await repositorySection.run(ctx(off), { enable_immutable_releases: false });
-    expect(off.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "DELETE /repos/o/r/immutable-releases",
-    ]);
-    expect(disabled.changes).toEqual(["immutable releases: disabled"]);
   });
 
   test("immutable releases check reads the {enabled} body and treats 404 as off", async () => {
@@ -528,9 +516,9 @@ describe("repository GraphQL-routed keys", () => {
         },
       },
     });
-    await expect(
+    await expectAdministrationDenied(
       repositorySection.run(ctx(api), { enable_sponsorships: true }),
-    ).rejects.toBeInstanceOf(PermissionDenied);
+    );
   });
 
   test("a non-boolean enable_sponsorships is rejected upfront with the YAML hint", () => {
