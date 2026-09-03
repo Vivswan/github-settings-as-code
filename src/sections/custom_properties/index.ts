@@ -1,26 +1,23 @@
 /**
- * `custom_properties:` section - values of organization-defined custom
- * properties, set per repository. The property DEFINITIONS are
- * organization-scoped and out of scope; on a personal account the section
- * no-ops with a note (custom properties only exist on org-owned repos).
- * `value: null` unsets a property, reverting to the org default, if any.
+ * `custom_properties:` section - values of organization-defined custom properties, set per
+ * repository through ONE bulk PATCH. Definitions are org-scoped, so only values are managed;
+ * a personal account no-ops with a note, and `value: null` unsets (reverting to the org default).
  */
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import {
-  beginRun,
   defaultUndeclaredPolicy,
   loosen,
   type SectionModule,
-  type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { call, probeAbsent, rejectDuplicates } from "../contract/requests.js";
+import type { PlannedOp, SectionPlan } from "../contract/plan.js";
+import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { CustomPropertyConfig } from "./schema.js";
 
@@ -30,11 +27,8 @@ const permission: SectionPermission = { repo: ["custom_properties"] };
 type WireValue = string | string[] | null;
 
 /**
- * Normalize a declared value to the form GitHub stores: booleans and numbers
- * become their string form (GitHub transports true_false values as the
- * strings "true"/"false"), string lists are copied as-is (validation already
- * pins their elements to strings), and null (unset) passes through.
- * Exported for direct testing.
+ * A declared value in the form GitHub stores: booleans and numbers become their string form
+ * (true_false values travel as "true"/"false"), lists are copied, null (unset) passes through.
  */
 export function normalizeValue(value: CustomPropertyConfig["value"]): WireValue {
   if (value === null) {
@@ -47,12 +41,9 @@ export function normalizeValue(value: CustomPropertyConfig["value"]): WireValue 
 }
 
 /**
- * Whether two normalized values agree. Lists compare by SET MEMBERSHIP,
- * order-insensitively (the webhooks eventsMatch precedent): a multi_select
- * value is a set, so a reordered declaration must not read as drift, and a
- * live-side duplicate GitHub would collapse must still converge instead of
- * re-writing forever. Declared-side duplicates are rejected upfront in
- * run(), so a declaration can never lean on the collapse.
+ * Lists compare by SET MEMBERSHIP: a multi_select value is a set, so a reordered declaration is
+ * not drift, and a live-side duplicate GitHub would collapse still converges instead of
+ * re-writing forever (declared-side duplicates are rejected before any read).
  */
 function sameValue(a: WireValue, b: WireValue): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
@@ -68,16 +59,43 @@ function show(value: WireValue): string {
   return value === null ? "unset" : JSON.stringify(value);
 }
 
+/**
+ * A repeated multi_select option is a typo the set comparison would hide forever; an empty list
+ * is rejected because GitHub does not document whether [] stores or normalizes to unset, so it
+ * could re-write on every apply (value: null is the documented unset).
+ */
+function rejectMalformedList(property: CustomPropertyConfig): void {
+  if (!Array.isArray(property.value)) {
+    return;
+  }
+  if (property.value.length === 0) {
+    throw new Error(
+      `custom_properties: the "${property.property_name}" entry declares an empty list; declare value: null to unset the property instead`,
+    );
+  }
+  const seen = new Set<string>();
+  for (const element of property.value) {
+    if (seen.has(element)) {
+      throw new Error(
+        `custom_properties: the "${property.property_name}" entry lists the value ${JSON.stringify(element)} more than once; a multi_select value is a set, so keep each option exactly once`,
+      );
+    }
+    seen.add(element);
+  }
+}
+
 const ENDPOINTS = {
-  // GET /orgs/{org} is a public endpoint, so it needs no token permission.
+  // GET /orgs/{org} is public, so it needs no token permission. Its 404 is the
+  // personal-account signal (no custom properties exist), and the only 404 the
+  // section can meet: the values GET is Metadata-gated, which every token holds.
   org: {
     route: "GET /orgs/{org}",
     statuses: { 200: "the organization", 404: "not an organization (a personal account)" },
     permission: "none",
+    primaryRead: { notFound: "absent" },
   },
-  // The values READ is gated by Metadata (read) only, which every
-  // fine-grained token holds implicitly, so it can never be
-  // permission-denied; only the PATCH needs the Custom properties grant.
+  // Metadata (read) only, so it can never be permission-denied; only the PATCH
+  // needs the Custom properties grant.
   list: {
     route: "GET /repos/{owner}/{repo}/properties/values",
     statuses: { 200: "the custom property values" },
@@ -95,9 +113,8 @@ const ENDPOINTS = {
 } as const satisfies Record<string, EndpointDecl>;
 
 /**
- * One live entry, parsed loudly at the boundary: both fields are REQUIRED on
- * the wire, so an entry without a string property_name (or with a value
- * outside the documented string/string[]/null space) is a contract
+ * One live entry, parsed loudly at the boundary: both fields are REQUIRED on the wire, so an
+ * entry without a string property_name (or a value outside string/string[]/null) is a contract
  * violation parseLive rejects, not something to guess around.
  */
 const LiveProperty = z.looseObject({
@@ -105,12 +122,20 @@ const LiveProperty = z.looseObject({
   value: z.union([z.string(), z.array(z.string()), z.null()]),
 });
 
+/** One property the bulk PATCH writes, with the line each mode renders for it. */
+interface PendingUpdate {
+  readonly property_name: string;
+  readonly value: WireValue;
+  readonly drift: string;
+  readonly change: string;
+}
+
 export const customPropertiesSection = {
   key: "custom_properties",
   undeclaredDefault: "keep",
   permission,
   // Custom properties exist only under an organization owner; the org probe
-  // below implements the personal-account no-op this declares.
+  // in plan() implements the personal-account no-op this declares.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(CustomPropertyConfig)),
@@ -122,149 +147,96 @@ export const customPropertiesSection = {
     consequence:
       "the key would silently never reach GitHub and the misdeclared property would keep its live value",
   },
-  async run(ctx, declared): Promise<SectionResult> {
-    const run = beginRun(ctx);
+  async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
-    // Exact-name matching: GitHub does not document case folding for custom
-    // property names, so two declarations are duplicates only when they match
-    // verbatim - the same names the live list reports.
+    // Exact-name matching: GitHub documents no case folding for property
+    // names, so entries are duplicates only when they match verbatim.
     rejectDuplicates(
       this,
       desired,
       (p) => p.property_name,
       (p) => p.property_name,
     );
-    // A duplicate ELEMENT inside a multi_select list is a user mistake, not
-    // something to quietly collapse: the set comparison below would treat
-    // ["soc2", "soc2"] and ["soc2"] as equal, hiding the typo forever. An
-    // EMPTY list is rejected for a different reason: GitHub does not
-    // document whether [] stores as an empty set or normalizes to unset, so
-    // it could re-write on every apply; value: null is the documented unset.
     for (const property of desired) {
-      if (!Array.isArray(property.value)) {
-        continue;
-      }
-      if (property.value.length === 0) {
-        throw new Error(
-          `custom_properties: the "${property.property_name}" entry declares an empty list; declare value: null to unset the property instead`,
-        );
-      }
-      const seen = new Set<string>();
-      for (const element of property.value) {
-        if (seen.has(element)) {
-          throw new Error(
-            `custom_properties: the "${property.property_name}" entry lists the value ${JSON.stringify(element)} more than once; a multi_select value is a set, so keep each option exactly once`,
-          );
-        }
-        seen.add(element);
-      }
+      rejectMalformedList(property);
     }
-    // Custom properties only exist on organization repos; on a personal
-    // account the values endpoints 404. Probe once and no-op with a note
-    // instead of failing; 403/5xx still flow through the permission policy
-    // via probeAbsent.
-    const orgProbe = await probeAbsent(ctx, this, ENDPOINTS.org, {
-      params: { org: ctx.repo.owner },
-    });
+    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
+    const orgProbe = await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } });
     if ("missing" in orgProbe) {
-      run.result.notes.push(
+      plan.notes.push(
         `custom_properties: owner "${ctx.repo.owner}" is a personal account, and custom properties require an organization-owned repository; section skipped - remove the custom_properties section from the settings file to silence this note`,
       );
-      return run.result;
+      return plan;
     }
-    // The values list endpoint is not paginated; a single GET returns every
-    // property, and sending page params would not advance anything.
-    const live = parseLive(
-      this,
-      ENDPOINTS.list,
-      z.array(LiveProperty),
-      await call(ctx, this, ENDPOINTS.list),
-    );
+    // Not paginated upstream: one GET carries every value.
+    const live = parseLive(this, ENDPOINTS.list, z.array(LiveProperty), await ctx.read.list.call());
     const liveByName = new Map(live.map((p) => [p.property_name, p.value]));
-    const declaredKeys = new Set<string>();
+    const declaredNames = new Set(desired.map((p) => p.property_name));
 
-    // The divergent values, accumulated into ONE bulk PATCH; a live value of
-    // null and an absent live entry both mean "unset". Each entry carries
-    // its provenance from the branch that CREATED it - a declared value, or
-    // an undeclared live value the delete policy unsets - so the change
-    // lines below read the tag instead of re-deriving the split from set
-    // membership.
-    type PendingUpdate =
-      | { kind: "declared"; property_name: string; value: WireValue }
-      | { kind: "undeclared-unset"; property_name: string };
+    // A live null and an absent live entry both mean "unset".
     const updates: PendingUpdate[] = [];
     for (const property of desired) {
-      declaredKeys.add(property.property_name);
+      const name = property.property_name;
       const wanted = normalizeValue(property.value);
-      const current = liveByName.get(property.property_name) ?? null;
+      const current = liveByName.get(name) ?? null;
       if (sameValue(wanted, current)) {
         continue;
       }
-      if (run.check) {
-        if (wanted === null) {
-          run.result.drift.push(
-            `custom_properties[${property.property_name}]: declared null but the live value is ${show(current)}; apply will unset it (reverting to the org default, if any)`,
-          );
-        } else {
-          run.result.drift.push(
-            `custom_properties[${property.property_name}]: declared ${show(wanted)} != live ${show(current)}; apply will set the declared value`,
-          );
-        }
-        continue;
-      }
-      updates.push({ kind: "declared", property_name: property.property_name, value: wanted });
+      const label = `custom_properties[${name}]`;
+      updates.push(
+        wanted === null
+          ? {
+              property_name: name,
+              value: null,
+              drift: `${label}: declared null but the live value is ${show(current)}; apply will unset it (reverting to the org default, if any)`,
+              change: `unset custom property "${name}"`,
+            }
+          : {
+              property_name: name,
+              value: wanted,
+              drift: `${label}: declared ${show(wanted)} != live ${show(current)}; apply will set the declared value`,
+              change: `set custom property "${name}" to ${show(wanted)}`,
+            },
+      );
     }
-
     for (const property of live) {
-      if (declaredKeys.has(property.property_name) || property.value === null) {
+      const name = property.property_name;
+      if (declaredNames.has(name) || property.value === null) {
         continue;
       }
       if (policy === "keep") {
-        run.result.notes.push(
+        plan.notes.push(
           undeclaredNote({
-            subject: `custom property "${property.property_name}"`,
+            subject: `custom property "${name}"`,
             state: "is set on the repo but not declared",
             action: "UNSET it",
           }),
         );
-      } else if (run.check) {
-        run.result.drift.push(
-          undeclaredDrift(defaultUndeclaredPolicy(this), {
-            label: `custom_properties[${property.property_name}]`,
-            action: "unset it (reverting to the org default, if any)",
-          }),
-        );
-      } else {
-        updates.push({ kind: "undeclared-unset", property_name: property.property_name });
+        continue;
       }
-    }
-
-    // One bulk PATCH carries every divergent property; nothing diverging
-    // means no write at all (compare-before-write). Change lines land only
-    // after the write succeeded.
-    if (!run.check && updates.length > 0) {
-      await call(ctx, this, ENDPOINTS.update, {
-        payload: {
-          // An undeclared-unset entry writes null - the documented unset.
-          properties: updates.map((update) => ({
-            property_name: update.property_name,
-            value: update.kind === "declared" ? update.value : null,
-          })),
-        },
-        describe: "updating custom property values",
+      updates.push({
+        property_name: name,
+        value: null,
+        drift: undeclaredDrift(defaultUndeclaredPolicy(this), {
+          label: `custom_properties[${name}]`,
+          action: "unset it (reverting to the org default, if any)",
+        }),
+        change: `unset undeclared custom property "${name}"`,
       });
-      for (const update of updates) {
-        if (update.kind === "undeclared-unset") {
-          run.result.changes.push(`unset undeclared custom property "${update.property_name}"`);
-        } else if (update.value === null) {
-          run.result.changes.push(`unset custom property "${update.property_name}"`);
-        } else {
-          run.result.changes.push(
-            `set custom property "${update.property_name}" to ${show(update.value)}`,
-          );
-        }
-      }
     }
-    return run.result;
+    const [first, ...rest] = updates;
+    if (first === undefined) {
+      return plan;
+    }
+    plan.ops.push({
+      role: "update",
+      payload: {
+        properties: updates.map(({ property_name, value }) => ({ property_name, value })),
+      },
+      describe: "updating custom property values",
+      drift: [first.drift, ...rest.map((update) => update.drift)],
+      change: () => [first.change, ...rest.map((update) => update.change)] as const,
+    });
+    return plan;
   },
-} satisfies SectionModule<"custom_properties">;
+} satisfies SectionModule<"custom_properties", typeof ENDPOINTS>;

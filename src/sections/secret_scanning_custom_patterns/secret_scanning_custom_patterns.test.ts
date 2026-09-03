@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { silentIo } from "../../../test/io-fake.js";
 import { MockApi } from "../../../test/mock-api.js";
-import { ctx } from "../../../test/sections/context.js";
+import { fragmentFake } from "../../../test/sections/fragment-fake.js";
+import { provePlanIdempotent, REPO } from "../../../test/sections/plan-idempotence.js";
 import { validateSettingsDoc } from "../../engine/orchestrate.js";
+import { type PlainData, planContext, type SectionPlan } from "../contract/plan.js";
 import { secretScanningPatternsSection } from "./index.js";
+import { secretScanningCustomPatternsMockHandlers } from "./mock.js";
+import type { SecretScanningPatternConfig } from "./schema.js";
 
 /** The bare-array list body the mock serves for a live pattern set. */
 function listRoute(patterns: Array<Record<string, unknown>>) {
@@ -26,199 +30,214 @@ function livePattern(overrides: Record<string, unknown>): Record<string, unknown
   };
 }
 
+const plan = (api: MockApi, desired: Parameters<typeof secretScanningPatternsSection.plan>[1]) =>
+  secretScanningPatternsSection.plan(
+    planContext(secretScanningPatternsSection, api, REPO),
+    desired,
+  );
+
+/** A plan with every change thunk rendered; the section builds the lines at plan time. */
+function rendered(result: SectionPlan) {
+  return {
+    ...result,
+    ops: result.ops.map((op) => ({
+      ...op,
+      change: typeof op.change === "function" ? [op.change(null)].flat() : [op.change],
+    })),
+  };
+}
+
+const INTERNAL: SecretScanningPatternConfig = {
+  name: "internal-token",
+  pattern: "int_[a-z0-9]{8}",
+};
+
 describe("secret_scanning_custom_patterns", () => {
-  test("creates missing, updates divergent declared fields, keeps undeclared by default", async () => {
+  test("plans one bulk create, one versioned PATCH of only the divergent fields, and keeps undeclared by default", async () => {
+    // A fake that would accept any write: the plan must still issue none.
     const api = new MockApi(
       listRoute([
-        livePattern({ id: 5, name: "internal-token", pattern: "old_[0-9]{4}" }),
+        livePattern({
+          id: 5,
+          name: "internal-token",
+          pattern: "old_[0-9]{4}",
+          end_delimiter: "\\z",
+        }),
         livePattern({ id: 6, name: "unmanaged", custom_pattern_version: "v3" }),
       ]),
-    ).allowMutations(
-      "POST /repos/o/r/secret-scanning/custom-patterns",
-      "PATCH /repos/o/r/secret-scanning/custom-patterns/*",
+      { unroutedMutations: "succeed" },
     );
-    const result = await secretScanningPatternsSection.run(ctx(api), [
-      { name: "internal-token", pattern: "int_[a-z0-9]{8}" },
+    const result = await plan(api, [
+      { ...INTERNAL, end_delimiter: "\\b" },
       { name: "vendor-key", pattern: "key-[0-9]{6}", start_delimiter: "\\b" },
     ]);
-    expect(result.changes).toEqual([
-      'created secret scanning custom pattern "vendor-key"',
-      'updated secret scanning custom pattern "internal-token"',
-    ]);
-    expect(result.notes).toEqual([
-      'secret scanning custom pattern "unmanaged" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it (its alerts are then resolved, not deleted)',
-    ]);
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "POST /repos/o/r/secret-scanning/custom-patterns",
-      "PATCH /repos/o/r/secret-scanning/custom-patterns/5",
-    ]);
-    // ONE bulk POST carrying every missing pattern with its declared fields.
-    expect(api.mutations()[0]?.payload).toEqual({
-      patterns: [{ name: "vendor-key", pattern: "key-[0-9]{6}", start_delimiter: "\\b" }],
+    expect(rendered(result)).toEqual({
+      ops: [
+        {
+          role: "create",
+          payload: {
+            patterns: [{ name: "vendor-key", pattern: "key-[0-9]{6}", start_delimiter: "\\b" }],
+          },
+          describe: 'creating secret scanning pattern(s) "vendor-key"',
+          drift: [
+            "secret_scanning_custom_patterns[vendor-key]: missing - declared in the settings file but not on the repo; apply will create it",
+          ],
+          change: ['created secret scanning custom pattern "vendor-key"'],
+        },
+        {
+          role: "update",
+          params: { pattern_id: "5" },
+          payload: {
+            custom_pattern_version: "v1",
+            pattern: "int_[a-z0-9]{8}",
+            end_delimiter: "\\b",
+          },
+          describe: 'updating secret scanning pattern "internal-token"',
+          drift: [
+            'secret_scanning_custom_patterns[internal-token].pattern: declared "int_[a-z0-9]{8}" != live "old_[0-9]{4}"; apply will set the declared value',
+            'secret_scanning_custom_patterns[internal-token].end_delimiter: declared "\\\\b" != live "\\\\z"; apply will set the declared value',
+          ],
+          change: ['updated secret scanning custom pattern "internal-token"'],
+        },
+      ],
+      notes: [
+        'secret scanning custom pattern "unmanaged" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it (its alerts are then resolved, not deleted)',
+      ],
+      drift: [],
     });
-    // The PATCH sends the live version plus ONLY the divergent fields.
-    expect(api.mutations()[1]?.payload).toEqual({
-      custom_pattern_version: "v1",
-      pattern: "int_[a-z0-9]{8}",
+    expect(api.calls.map((c) => c.method)).toEqual(["GET"]);
+  });
+
+  test.each<[form: string, live: Record<string, unknown>, declared: SecretScanningPatternConfig]>([
+    [
+      "an undeclared optional is never compared: a live delimiter alone",
+      { start_delimiter: "\\A|[^0-9A-Za-z]", must_match: ["^prefix"] },
+      INTERNAL,
+    ],
+    [
+      "the must_match list in the same order",
+      { must_match: ["a", "b"] },
+      { ...INTERNAL, must_match: ["a", "b"] },
+    ],
+    [
+      "a declared empty list against a live null or absent list",
+      { must_match: null, must_not_match: undefined },
+      { ...INTERNAL, must_match: [], must_not_match: [] },
+    ],
+  ])("%s plans nothing", async (_form, live, declared) => {
+    expect(await plan(new MockApi(listRoute([livePattern(live)])), [declared])).toEqual({
+      ops: [],
+      notes: [],
+      drift: [],
     });
   });
 
-  test("an undeclared optional is never compared: a live delimiter alone is converged", async () => {
-    const api = new MockApi(
-      listRoute([livePattern({ start_delimiter: "\\A|[^0-9A-Za-z]", must_match: ["^prefix"] })]),
-    );
-    const result = await secretScanningPatternsSection.run(ctx(api), [
-      { name: "internal-token", pattern: "int_[a-z0-9]{8}" },
+  test.each<
+    [
+      form: string,
+      live: Record<string, unknown>,
+      declared: SecretScanningPatternConfig,
+      payload: PlainData,
+    ]
+  >([
+    [
+      "the must_match list reordered (compared in order)",
+      { must_match: ["a", "b"] },
+      { ...INTERNAL, must_match: ["b", "a"] },
+      { custom_pattern_version: "v1", must_match: ["b", "a"] },
+    ],
+    [
+      "a declared empty list against a live non-empty one",
+      { must_match: ["a"] },
+      { ...INTERNAL, must_match: [] },
+      { custom_pattern_version: "v1", must_match: [] },
+    ],
+    [
+      "a version-less live pattern (custom_pattern_version: null skips the concurrency check)",
+      { pattern: "old_[0-9]{4}", custom_pattern_version: undefined },
+      INTERNAL,
+      { custom_pattern_version: null, pattern: "int_[a-z0-9]{8}" },
+    ],
+  ])("%s plans one PATCH carrying %j", async (_form, live, declared, payload) => {
+    const result = await plan(new MockApi(listRoute([livePattern(live)])), [declared]);
+    expect(result.ops.map((op) => [op.role, op.params, op.payload])).toEqual([
+      ["update", { pattern_id: "1" }, payload],
     ]);
-    expect(result.changes).toEqual([]);
-    // An apply-mode result has no drift list at all (the mode-split types).
-    expect(result.drift).toBeUndefined();
-    expect(api.mutations()).toEqual([]);
   });
 
-  test("the must_match lists compare by value, in order", async () => {
-    const api = new MockApi(listRoute([livePattern({ must_match: ["a", "b"] })])).allowMutations(
-      "PATCH /repos/o/r/secret-scanning/custom-patterns/*",
-    );
-    // Same values -> converged; different order -> an update.
-    const same = await secretScanningPatternsSection.run(ctx(api), [
-      { name: "internal-token", pattern: "int_[a-z0-9]{8}", must_match: ["a", "b"] },
-    ]);
-    expect(same.changes).toEqual([]);
-    const reordered = await secretScanningPatternsSection.run(ctx(api), [
-      { name: "internal-token", pattern: "int_[a-z0-9]{8}", must_match: ["b", "a"] },
-    ]);
-    expect(reordered.changes).toEqual(['updated secret scanning custom pattern "internal-token"']);
-    expect(api.mutations()[0]?.payload).toEqual({
-      custom_pattern_version: "v1",
-      must_match: ["b", "a"],
-    });
-  });
-
-  test("a declared empty list equals a live null or absent list (no perpetual rewrite)", async () => {
-    // The GET marks the lists nullable, so a declared [] against a live
-    // null would otherwise diverge and PATCH [] on EVERY run - forever, if
-    // GitHub stores [] back as null. Both spellings of "no list" converge.
-    const api = new MockApi(
-      listRoute([livePattern({ must_match: null, must_not_match: undefined })]),
-    );
-    const applied = await secretScanningPatternsSection.run(ctx(api), [
-      { name: "internal-token", pattern: "int_[a-z0-9]{8}", must_match: [], must_not_match: [] },
-    ]);
-    expect(applied.changes).toEqual([]);
-    expect(api.mutations()).toEqual([]);
-    const checked = await secretScanningPatternsSection.run(ctx(api, true), [
-      { name: "internal-token", pattern: "int_[a-z0-9]{8}", must_match: [], must_not_match: [] },
-    ]);
-    expect(checked.drift).toEqual([]);
-  });
-
-  test("a declared empty list still clears a live non-empty one", async () => {
-    const api = new MockApi(listRoute([livePattern({ must_match: ["a"] })])).allowMutations(
-      "PATCH /repos/o/r/secret-scanning/custom-patterns/*",
-    );
-    const result = await secretScanningPatternsSection.run(ctx(api), [
-      { name: "internal-token", pattern: "int_[a-z0-9]{8}", must_match: [] },
-    ]);
-    expect(result.changes).toEqual(['updated secret scanning custom pattern "internal-token"']);
-    expect(api.mutations()[0]?.payload).toEqual({ custom_pattern_version: "v1", must_match: [] });
-  });
-
-  test("a rename is delete plus create under undeclared:delete - never a PATCH (no rename inference)", async () => {
+  test("a rename is create plus bulk delete under undeclared:delete, never a PATCH (no rename inference)", async () => {
+    // The declared pattern carries the SAME fields as the live one, only the
+    // name differs: the name is the identity.
     const api = new MockApi(
       listRoute([livePattern({ id: 9, name: "old-name", custom_pattern_version: "v7" })]),
-    ).allowMutations(
-      "POST /repos/o/r/secret-scanning/custom-patterns",
-      "DELETE /repos/o/r/secret-scanning/custom-patterns",
     );
-    // The declared pattern carries the SAME fields as the live one, only the
-    // name differs: still create + delete, because the name is the identity.
-    const result = await secretScanningPatternsSection.run(ctx(api), {
+    const result = await plan(api, {
       undeclared: "delete",
       entries: [{ name: "new-name", pattern: "int_[a-z0-9]{8}" }],
     });
-    expect(result.changes).toEqual([
-      'created secret scanning custom pattern "new-name"',
-      'DELETED undeclared secret scanning custom pattern "old-name" (alerts resolved, not deleted)',
+    expect(rendered(result).ops).toEqual([
+      {
+        role: "create",
+        payload: { patterns: [{ name: "new-name", pattern: "int_[a-z0-9]{8}" }] },
+        describe: 'creating secret scanning pattern(s) "new-name"',
+        drift: [
+          "secret_scanning_custom_patterns[new-name]: missing - declared in the settings file but not on the repo; apply will create it",
+        ],
+        change: ['created secret scanning custom pattern "new-name"'],
+      },
+      {
+        role: "remove",
+        payload: {
+          patterns: [{ pattern_id: 9, custom_pattern_version: "v7" }],
+          post_delete_action: "resolve_alerts",
+        },
+        describe: 'deleting undeclared secret scanning pattern(s) "old-name"',
+        drift: [
+          'secret_scanning_custom_patterns[old-name]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it',
+        ],
+        change: [
+          'DELETED undeclared secret scanning custom pattern "old-name" (alerts resolved, not deleted)',
+        ],
+      },
     ]);
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "POST /repos/o/r/secret-scanning/custom-patterns",
-      "DELETE /repos/o/r/secret-scanning/custom-patterns",
-    ]);
+    // The default keep leaves the renamed-away pattern live, as a note.
+    const kept = await plan(api, [{ name: "new-name", pattern: "int_[a-z0-9]{8}" }]);
+    expect(kept.ops.map((op) => op.role)).toEqual(["create"]);
+    expect(kept.notes).toHaveLength(1);
+    expect(kept.notes[0]).toContain('"old-name"');
   });
 
-  test("a rename under the DEFAULT keep creates the new name and only NOTES the old one", async () => {
-    // "Delete plus create" holds only under undeclared: delete; the default
-    // keep policy leaves the renamed-away pattern live, surfaced as a note.
-    const api = new MockApi(
-      listRoute([livePattern({ id: 9, name: "old-name", custom_pattern_version: "v7" })]),
-    ).allowMutations("POST /repos/o/r/secret-scanning/custom-patterns");
-    const result = await secretScanningPatternsSection.run(ctx(api), [
-      { name: "new-name", pattern: "int_[a-z0-9]{8}" },
-    ]);
-    expect(result.changes).toEqual(['created secret scanning custom pattern "new-name"']);
-    expect(result.notes).toHaveLength(1);
-    expect(result.notes[0]).toContain('"old-name"');
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "POST /repos/o/r/secret-scanning/custom-patterns",
-    ]);
-  });
-
-  test("the bulk DELETE always sends resolve_alerts and each pattern's version", async () => {
-    // The resolve_alerts stance is policy, not configuration: a settings
-    // change must never destroy alert history, so upstream's delete_alerts
+  test("the bulk DELETE always sends resolve_alerts and each pattern's version, omitting a version-less one", async () => {
+    // resolve_alerts is policy, not configuration: upstream's delete_alerts
     // default is never sent and no knob exists.
     const api = new MockApi(
       listRoute([
         livePattern({ id: 3, name: "stale-a", custom_pattern_version: "v3" }),
         livePattern({ id: 4, name: "stale-b", custom_pattern_version: "v9" }),
-      ]),
-    ).allowMutations("DELETE /repos/o/r/secret-scanning/custom-patterns");
-    await secretScanningPatternsSection.run(ctx(api), { undeclared: "delete", entries: [] });
-    expect(api.mutations()).toHaveLength(1);
-    expect(api.mutations()[0]?.payload).toEqual({
-      patterns: [
-        { pattern_id: 3, custom_pattern_version: "v3" },
-        { pattern_id: 4, custom_pattern_version: "v9" },
-      ],
-      post_delete_action: "resolve_alerts",
-    });
-  });
-
-  test("check mode reports per-field drift, creates, and deletes without mutating", async () => {
-    const api = new MockApi(
-      listRoute([
-        livePattern({ id: 5, pattern: "old_[0-9]{4}", end_delimiter: "\\z" }),
-        livePattern({ id: 6, name: "stale" }),
+        livePattern({ id: 5, name: "stale-c", custom_pattern_version: undefined }),
       ]),
     );
-    const result = await secretScanningPatternsSection.run(ctx(api, true), {
-      undeclared: "delete",
-      entries: [
-        { name: "internal-token", pattern: "int_[a-z0-9]{8}", end_delimiter: "\\b" },
-        { name: "vendor-key", pattern: "key-[0-9]{6}" },
+    const result = await plan(api, { undeclared: "delete", entries: [] });
+    expect(result.ops.map((op) => [op.role, op.payload])).toEqual([
+      [
+        "remove",
+        {
+          patterns: [
+            { pattern_id: 3, custom_pattern_version: "v3" },
+            { pattern_id: 4, custom_pattern_version: "v9" },
+            { pattern_id: 5 },
+          ],
+          post_delete_action: "resolve_alerts",
+        },
       ],
-    });
-    expect(result.drift).toEqual([
-      'secret_scanning_custom_patterns[internal-token].pattern: declared "int_[a-z0-9]{8}" != live "old_[0-9]{4}"; apply will set the declared value',
-      'secret_scanning_custom_patterns[internal-token].end_delimiter: declared "\\\\b" != live "\\\\z"; apply will set the declared value',
-      "secret_scanning_custom_patterns[vendor-key]: missing - declared in the settings file but not on the repo; apply will create it",
-      'secret_scanning_custom_patterns[stale]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it',
     ]);
-    expect(api.mutations()).toEqual([]);
-  });
-
-  test("check mode under the keep default notes the undeclared pattern instead of drifting", async () => {
-    const api = new MockApi(listRoute([livePattern({})]));
-    const result = await secretScanningPatternsSection.run(ctx(api, true), []);
-    expect(result.drift).toEqual([]);
-    expect(result.notes).toHaveLength(1);
+    expect(result.ops[0]?.drift).toHaveLength(3);
   });
 
   test("two entries with the same name are rejected before any API call", async () => {
     const api = new MockApi({});
     await expect(
-      secretScanningPatternsSection.run(ctx(api), [
+      plan(api, [
         { name: "dup", pattern: "a" },
         { name: "dup", pattern: "b" },
       ]),
@@ -226,18 +245,29 @@ describe("secret_scanning_custom_patterns", () => {
     expect(api.calls).toHaveLength(0);
   });
 
-  test("an empty delimiter is rejected at document validation (clearing is not expressible)", async () => {
-    // "" cannot mean "clear it": the PATCH updates provided fields only, and
-    // a normalize-back-to-null would repeat the write forever. The rejection
-    // lives in the zod shape, so an invalid document fails BOTH modes before
-    // any repository is touched (the run() path below proves the shape is
-    // what rejects, with zero API calls).
+  test.each<[form: string, live: Record<string, unknown>, at: RegExp]>([
+    ["no id", { name: "no-id" }, /\[0\]\.id/],
+    ["a non-string name", { id: 1, name: 5 }, /\[0\]\.name/],
+    // string = concurrency token; null/absent = none offered; anything else
+    // must not quietly disable the 412 protection.
+    [
+      "a numeric version",
+      livePattern({ custom_pattern_version: 7 }),
+      /\[0\]\.custom_pattern_version/,
+    ],
+  ])("a live entry with %s is a loud contract violation", async (_form, live, at) => {
+    const rejection = plan(new MockApi(listRoute([live])), []).catch(
+      (error: Error) => error.message,
+    );
+    await expect(rejection).resolves.toMatch(/returned a body outside the documented shape/);
+    await expect(rejection).resolves.toMatch(at);
+  });
+
+  test("an empty delimiter is rejected at document validation (clearing is not expressible)", () => {
+    // "" cannot mean "clear it": the PATCH updates provided fields only, so
+    // the zod shape rejects the spelling before any repository is touched.
     for (const key of ["start_delimiter", "end_delimiter"] as const) {
-      const doc = {
-        secret_scanning_custom_patterns: [
-          { name: "internal-token", pattern: "int_[a-z0-9]{8}", [key]: "" },
-        ],
-      };
+      const doc = { secret_scanning_custom_patterns: [{ ...INTERNAL, [key]: "" }] };
       const invalid = validateSettingsDoc(doc, "test doc", new Set(), silentIo());
       expect("error" in invalid ? invalid.error : "").toContain(
         "cannot be cleared with an empty string",
@@ -245,82 +275,59 @@ describe("secret_scanning_custom_patterns", () => {
     }
   });
 
-  test("a live entry without a string name or numeric id is a loud contract violation", async () => {
-    const noId = new MockApi(listRoute([{ name: "no-id" }]));
-    await expect(secretScanningPatternsSection.run(ctx(noId), [])).rejects.toThrow(
-      /returned a body outside the documented shape.*\[0\]\.id/,
+  test("executing the plan against the mock fragment converges: the re-plan is empty", async () => {
+    const api = fragmentFake(
+      secretScanningPatternsSection,
+      secretScanningCustomPatternsMockHandlers,
+      {
+        secret_scanning_patterns: [
+          livePattern({ id: 501, name: "internal-token", pattern: "int_[a-z0-9]{16}" }),
+          livePattern({ id: 502, name: "retired", custom_pattern_version: "v2" }),
+        ],
+      },
     );
-    const badName = new MockApi(listRoute([{ id: 1, name: 5 }]));
-    await expect(secretScanningPatternsSection.run(ctx(badName), [])).rejects.toThrow(
-      /returned a body outside the documented shape.*\[0\]\.name/,
+    const { second, changes, notes } = await provePlanIdempotent(
+      secretScanningPatternsSection,
+      api,
+      {
+        undeclared: "delete",
+        entries: [
+          { ...INTERNAL, start_delimiter: "\\b" },
+          { name: "vendor-key", pattern: "key-[0-9]{6}", must_not_match: ["example"] },
+        ],
+      },
     );
-  });
-
-  test("a non-string, non-null live version is a loud contract violation, never a silent bypass", async () => {
-    // string = concurrency token; null/absent = none offered; a number (or
-    // anything else) must not quietly disable the 412 protection.
-    const api = new MockApi(
-      listRoute([livePattern({ id: 5, name: "stale", custom_pattern_version: 7 })]),
-    );
-    await expect(secretScanningPatternsSection.run(ctx(api), [])).rejects.toThrow(
-      /returned a body outside the documented shape.*\[0\]\.custom_pattern_version/,
-    );
-  });
-
-  test("a version-less live pattern updates with custom_pattern_version: null", async () => {
-    // The GET marks the version optional AND nullable, and the PATCH body
-    // requires the key but accepts null: a pattern predating the versioning
-    // field writes without the concurrency check, as GitHub itself allows -
-    // it must never brick the run.
-    const api = new MockApi(
-      listRoute([
-        livePattern({
-          id: 5,
-          name: "internal-token",
-          pattern: "old_[0-9]{4}",
-          custom_pattern_version: undefined,
-        }),
-      ]),
-    ).allowMutations("PATCH /repos/o/r/secret-scanning/custom-patterns/5");
-    const result = await secretScanningPatternsSection.run(ctx(api), [
-      { name: "internal-token", pattern: "int_[a-z0-9]{8}" },
+    expect(changes).toEqual([
+      'created secret scanning custom pattern "vendor-key"',
+      'updated secret scanning custom pattern "internal-token"',
+      'DELETED undeclared secret scanning custom pattern "retired" (alerts resolved, not deleted)',
     ]);
-    expect(result.changes).toEqual(['updated secret scanning custom pattern "internal-token"']);
-    expect(api.mutations()[0]?.payload).toEqual({
-      custom_pattern_version: null,
-      pattern: "int_[a-z0-9]{8}",
-    });
+    expect(notes).toEqual([]);
+    expect(api.writes).toEqual([
+      "POST /repos/o/r/secret-scanning/custom-patterns",
+      "PATCH /repos/o/r/secret-scanning/custom-patterns/501",
+      "DELETE /repos/o/r/secret-scanning/custom-patterns",
+    ]);
+    expect(second).toEqual({ ops: [], notes: [], drift: [] });
+    expect(
+      api.state.secret_scanning_patterns.map((p) => [p.name, p.pattern, p.start_delimiter]),
+    ).toEqual([
+      ["internal-token", "int_[a-z0-9]{8}", "\\b"],
+      ["vendor-key", "key-[0-9]{6}", undefined],
+    ]);
   });
 
-  test("a version-less undeclared pattern deletes with the version field omitted", async () => {
-    // The bulk DELETE's per-entry schema requires only pattern_id; check
-    // mode reports the same will-DELETE drift without throwing, and keep
-    // stays a note.
-    const versionless = livePattern({
-      id: 5,
-      name: "stale",
-      custom_pattern_version: undefined,
-    });
-    const checkApi = new MockApi(listRoute([versionless]));
-    const checked = await secretScanningPatternsSection.run(ctx(checkApi, true), {
-      undeclared: "delete",
-      entries: [],
-    });
-    expect(checked.drift?.join("\n")).toContain("apply will DELETE it");
-    const applyApi = new MockApi(listRoute([versionless])).allowMutations(
-      "DELETE /repos/o/r/secret-scanning/custom-patterns",
-    );
-    await secretScanningPatternsSection.run(ctx(applyApi), {
-      undeclared: "delete",
-      entries: [],
-    });
-    expect(applyApi.mutations()[0]?.payload).toEqual({
-      patterns: [{ pattern_id: 5 }],
-      post_delete_action: "resolve_alerts",
-    });
-    const keepApi = new MockApi(listRoute([versionless]));
-    const kept = await secretScanningPatternsSection.run(ctx(keepApi, true), []);
-    expect(kept.notes).toHaveLength(1);
+  test("the read port exposes exactly the list role in its denied posture", () => {
+    const ctx = planContext(secretScanningPatternsSection, new MockApi({}), REPO);
+    expect(Object.keys(ctx.read)).toEqual(["list"]);
+    // @ts-expect-error a write role is not a read: the port has no `create`
+    ctx.read.create;
+    // @ts-expect-error nor an `update`
+    ctx.read.update;
+    // @ts-expect-error nor a `remove`
+    ctx.read.remove;
+    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
+    ctx.read.list.probeAbsent;
   });
 });
 
@@ -331,11 +338,7 @@ describe("secret_scanning_custom_patterns closed surface", () => {
     // plausibly try to declare.
     for (const key of ["state", "push_protection_enabled"]) {
       const error = validateSettingsDoc(
-        {
-          secret_scanning_custom_patterns: [
-            { name: "internal-token", pattern: "int_[a-z0-9]{8}", [key]: true },
-          ],
-        },
+        { secret_scanning_custom_patterns: [{ ...INTERNAL, [key]: true }] },
         "settings.yml",
         new Set(),
         silentIo(),
