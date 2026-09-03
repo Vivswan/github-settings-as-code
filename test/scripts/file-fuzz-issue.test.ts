@@ -149,18 +149,11 @@ describe("buildBody", () => {
   test("includes the report, scenario, run link, and artifacts note", () => {
     const body = buildBody(failureDirs(root), env);
     expect(body).toContain("2 failure artifact(s)");
+    expect(body).not.toContain("failing scenario(s)");
     expect(body).toContain("- exit code 1 != 0");
     expect(body).toContain("```yaml");
     expect(body).toContain("Run: https://github.com/o/r/actions/runs/42");
     expect(body).toContain("e2e-artifacts");
-  });
-
-  test("counts artifact directories, phrased as artifacts not scenarios", () => {
-    // The header counts the artifact directories under .artifacts and phrases
-    // that as "failure artifact(s)", the honest name for what is counted.
-    const body = buildBody(failureDirs(root), env);
-    expect(body).toContain("failure artifact(s)");
-    expect(body).not.toContain("failing scenario(s)");
   });
 
   test("caps the body under the GitHub limit and says how many were omitted", () => {

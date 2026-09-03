@@ -326,9 +326,11 @@ describe("OpenApiValidator against the fetched spec", () => {
         },
       }),
     );
-    // The full repo schema has many required fields; assert the PATH matched
-    // (no unknown-route violation), which is the routing contract under test.
-    expect(violations.filter((x) => x.kind === "unknown-route")).toEqual([]);
+    // Route AND body: toJsonSchema strips `required` from response schemas
+    // (pinned by the strips-required test above), so this minimal body must
+    // validate cleanly - the whole violation list is empty, and a body
+    // violation cannot pass silently behind a matched route.
+    expect(violations).toEqual([]);
   });
 
   test("every declared endpoint's pageSize matches the spec's documented per_page cap", () => {

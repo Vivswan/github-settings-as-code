@@ -112,11 +112,6 @@ describe("changed-sections selection", () => {
     expect(renderSelection(selection)).toBe("none");
   });
 
-  test("the selection machinery selects all: a selector-only or checks.yml-only PR must not skip the smoke job", () => {
-    expect(sectionsForFiles([".github/scripts/changed-sections.ts"]).kind).toBe("all");
-    expect(sectionsForFiles([".github/workflows/checks.yml"]).kind).toBe("all");
-  });
-
   test("a section directory selects its key for every file under it", () => {
     // The post-migration layout: src/sections/<key>/... spells the key
     // verbatim, and everything under it - module, mock, test, scenario -
@@ -203,8 +198,15 @@ describe("changed-sections selection", () => {
       "src/main.ts",
       "src/schema.ts",
       "test/e2e/runner.ts",
+      // The selection machinery itself and the repo-owned checks workflow: a
+      // selector-only or checks.yml-only PR must not skip the smoke job.
+      ".github/scripts/changed-sections.ts",
+      ".github/workflows/checks.yml",
+      // src/sections/contract/ holds the cross-cutting contract modules (the
+      // barrel split); a contract-module-only PR must select every section.
+      "src/sections/contract/requests.ts",
     ]) {
-      expect(sectionsForFiles([file]).kind, `${file} should select all`).toBe("all");
+      expect(sectionsForFiles([file]), `${file} should select all`).toEqual({ kind: "all" });
     }
   });
 
@@ -233,11 +235,4 @@ describe("changed-sections selection", () => {
     const selection = sectionsForFiles(["src/sections/labels/index.ts", "src/engine/diff.ts"]);
     expect(selection.kind).toBe("all");
   });
-});
-
-test("a contract-module-only diff selects every section", () => {
-  // The barrel split moved the cross-cutting code into src/sections/contract/;
-  // a change there must select "all" exactly like the barrel, or a
-  // contract-module PR would skip the e2e smoke entirely.
-  expect(sectionsForFiles(["src/sections/contract/requests.ts"])).toEqual({ kind: "all" });
 });

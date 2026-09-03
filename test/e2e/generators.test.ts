@@ -482,12 +482,6 @@ describe("genInvalidSettings", () => {
     }
   });
 
-  test("is deterministic for a seed", () => {
-    expect(JSON.stringify(genInvalidSettings(new Rng(5)))).toBe(
-      JSON.stringify(genInvalidSettings(new Rng(5))),
-    );
-  });
-
   test("draws every catalog case over seeds", () => {
     const drawn = new Set<string>();
     for (let i = 0; i < 400; i++) {
@@ -533,10 +527,6 @@ describe("genScenario", () => {
     "checks",
     "org_members",
   ]);
-
-  test("is deterministic for a seed (byte-equal JSON)", () => {
-    expect(JSON.stringify(genScenario(new Rng(42)))).toBe(JSON.stringify(genScenario(new Rng(42))));
-  });
 
   test("produces internally consistent, schema-valid scenarios with sound meta", () => {
     for (let i = 0; i < 200; i++) {
@@ -733,12 +723,6 @@ describe("genMultiScenario", () => {
     expect(sawNonMapping).toBeGreaterThan(0);
   });
 
-  test("is deterministic for a seed", () => {
-    expect(JSON.stringify(genMultiScenario(new Rng(9)).scenario)).toBe(
-      JSON.stringify(genMultiScenario(new Rng(9)).scenario),
-    );
-  });
-
   test("defaults file declares milestones; a target sometimes nulls it (the opt-out)", () => {
     // The null-section opt-out lives on a TARGET (nulling a section the defaults
     // declare), never in the defaults file itself - a defaults file with a null
@@ -923,11 +907,20 @@ describe("genDiscoveryScenario", () => {
       expect(meta.pool.some((r) => (r.visibility ?? "public") !== "public")).toBe(true);
     }
   });
+});
 
-  test("is deterministic for a seed", () => {
-    expect(JSON.stringify(genDiscoveryScenario(new Rng(31)).scenario)).toBe(
-      JSON.stringify(genDiscoveryScenario(new Rng(31)).scenario),
-    );
+describe("seed determinism (byte-equal JSON)", () => {
+  // Two draws from one seed must serialize byte-identically, or a --seed
+  // replay diverges from the failing run. The multi and discovery cases
+  // project .scenario - the part a seeded replay re-executes.
+  const cases: Array<{ name: string; draw: () => unknown }> = [
+    { name: "genInvalidSettings", draw: () => genInvalidSettings(new Rng(5)) },
+    { name: "genScenario", draw: () => genScenario(new Rng(42)) },
+    { name: "genMultiScenario", draw: () => genMultiScenario(new Rng(9)).scenario },
+    { name: "genDiscoveryScenario", draw: () => genDiscoveryScenario(new Rng(31)).scenario },
+  ];
+  test.each(cases)("$name is deterministic for a seed", ({ draw }) => {
+    expect(JSON.stringify(draw())).toBe(JSON.stringify(draw()));
   });
 });
 

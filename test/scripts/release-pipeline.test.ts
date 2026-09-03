@@ -355,9 +355,11 @@ describe("verifyPublishedRefs", () => {
     const fx = seedFixture();
     packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
     const checker = clone(fx.root, fx.origin, "verify-missing");
+    // The confirmation fetches refs/tags/v2 from origin; with no major ever
+    // pushed, git itself refuses the fetch.
     expect(() =>
       verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha }),
-    ).toThrow();
+    ).toThrow(/couldn't find remote ref/);
   });
 
   test("a version tag on the wrong parent fails the confirmation", () => {

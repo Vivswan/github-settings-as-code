@@ -208,32 +208,41 @@ describe("permission gate grades", () => {
 describe("permission mask semantics", () => {
   const codeScanningPath = `/repos/${OWNER}/${REPO}/code-scanning/default-setup`;
 
-  test("ANY-of-resources: code_scanning read is granted by administration alone", async () => {
-    // code_scanning declares repo: ["administration", "code_scanning_alerts"];
-    // ANY one at the needed grade suffices. Grant administration, deny the other.
-    const h = await start(
-      scenario({ token_permissions: { administration: "read", code_scanning_alerts: "none" } }),
-    );
-    expect((await call(h, "GET", codeScanningPath)).status).toBe(200);
-    expect(h.requests[0]?.deniedBy).toBeUndefined();
-  });
-
-  test("ANY-of-resources: code_scanning read is granted by code_scanning_alerts alone", async () => {
-    const h = await start(
-      scenario({ token_permissions: { administration: "none", code_scanning_alerts: "read" } }),
-    );
-    expect((await call(h, "GET", codeScanningPath)).status).toBe(200);
-    expect(h.requests[0]?.deniedBy).toBeUndefined();
-  });
-
-  test("ANY-of-resources: code_scanning read is denied only when BOTH are insufficient", async () => {
-    const h = await start(
-      scenario({ token_permissions: { administration: "none", code_scanning_alerts: "none" } }),
-    );
-    expect((await call(h, "GET", codeScanningPath)).status).toBe(404);
+  // code_scanning declares repo: ["administration", "code_scanning_alerts"];
+  // ANY one at the needed grade suffices, so the truth table has three rows.
+  test.each([
+    {
+      name: "granted by administration alone",
+      administration: "read",
+      alerts: "none",
+      status: 200,
+      deniedBy: undefined,
+    },
+    {
+      name: "granted by code_scanning_alerts alone",
+      administration: "none",
+      alerts: "read",
+      status: 200,
+      deniedBy: undefined,
+    },
     // The denying resource is the FIRST listed repo resource (deterministic).
-    expect(h.requests[0]?.deniedBy).toBe("administration");
-  });
+    {
+      name: "denied only when BOTH are insufficient",
+      administration: "none",
+      alerts: "none",
+      status: 404,
+      deniedBy: "administration",
+    },
+  ] as const)(
+    "ANY-of-resources: code_scanning read is $name",
+    async ({ administration, alerts, status, deniedBy }) => {
+      const h = await start(
+        scenario({ token_permissions: { administration, code_scanning_alerts: alerts } }),
+      );
+      expect((await call(h, "GET", codeScanningPath)).status).toBe(status);
+      expect(h.requests[0]?.deniedBy).toBe(deniedBy);
+    },
+  );
 
   test("unlisted resources default to write grade", async () => {
     // token_permissions omits "issues" entirely; labels (issues) writes must
@@ -288,18 +297,28 @@ describe("denial style bodies", () => {
     expect((await json(put)).message).toBe("Resource not accessible by personal access token");
   });
 
-  test("style 403: both reads and writes answer 403", async () => {
-    const h = await start(scenario({ denial_style: 403, token_permissions: { issues: "none" } }));
-    const read = await call(h, "GET", labelsPath);
-    expect(read.status).toBe(403);
-  });
-
-  test("style 404: both reads and writes answer 404", async () => {
+  // The full 2x2 matrix: each numeric denial style answers ITS status for both
+  // reads and writes. The write leg uses environments ("absent" denial
+  // semantics), so the probe-then-write path reaches the server and the write
+  // status is asserted cleanly (no violation).
+  test.each([
+    { style: 403, op: "read" },
+    { style: 403, op: "write" },
+    { style: 404, op: "read" },
+    { style: 404, op: "write" },
+  ] as const)("style $style: a denied $op answers $style", async ({ style, op }) => {
+    if (op === "read") {
+      const h = await start(
+        scenario({ denial_style: style, token_permissions: { issues: "none" } }),
+      );
+      expect((await call(h, "GET", labelsPath)).status).toBe(style);
+      return;
+    }
     const h = await start(
-      scenario({ denial_style: 404, token_permissions: { environments: "none" } }),
+      scenario({ denial_style: style, token_permissions: { environments: "none" } }),
     );
     const write = await call(h, "PUT", `/repos/${OWNER}/${REPO}/environments/prod`, { body: {} });
-    expect(write.status).toBe(404);
+    expect(write.status).toBe(style);
   });
 
   test("no denial body ever mentions rate limit", async () => {
@@ -879,11 +898,10 @@ describe("logged response bodies are snapshots, not live-state aliases", () => {
 });
 
 describe("chaos hook", () => {
-  test("invalid_json corrupts the first response only", async () => {
+  test("invalid_json corrupts the first response only (times defaults to 1)", async () => {
     const h = await start(scenario(), { corrupt: { key: "labels.list", mode: "invalid_json" } });
     const first = await call(h, "GET", labelsPath);
     await expect(first.json()).rejects.toThrow();
-    // The second response is clean JSON again.
     const second = await call(h, "GET", labelsPath);
     expect(await second.json()).toEqual([]);
   });
@@ -900,13 +918,6 @@ describe("chaos hook", () => {
     const body = await json(await call(h, "GET", `/repos/${OWNER}/${REPO}/actions/workflows`));
     expect(body.workflows).toBeUndefined();
     expect(body.total_count).toBe(1);
-  });
-
-  test("times defaults to 1: only the first response is corrupt, the follow-up is real", async () => {
-    const h = await start(scenario(), { corrupt: { key: "labels.list", mode: "invalid_json" } });
-    await expect((await call(h, "GET", labelsPath)).json()).rejects.toThrow();
-    // The second request serves the real (empty) labels list.
-    expect(await jsonArray(await call(h, "GET", labelsPath))).toEqual([]);
   });
 
   test('times: "always" corrupts every response', async () => {
@@ -933,16 +944,45 @@ describe("core-route faults and server_error", () => {
   const RAW_ACCEPT = "application/vnd.github.raw+json";
   const contentsPath = (slug: string) => `/repos/${slug}/contents/.github/settings.yml`;
 
-  test("assertFaultKeys accepts registered core keys and still rejects unknown ones", () => {
-    expect(() =>
-      assertFaultKeys([{ key: "core.contentsGet", kind: "server_error" }], undefined),
-    ).not.toThrow();
-    expect(() =>
-      assertFaultKeys(undefined, { key: "core.discoveryList", mode: "invalid_json" }),
-    ).not.toThrow();
-    expect(() => assertFaultKeys([{ key: "core.bogus", kind: "server_error" }], undefined)).toThrow(
-      /unknown endpoint/,
-    );
+  // Key validation, driven directly through both channels (faults and
+  // corrupt) over section and core keys. Duplicate-fault rejection is covered
+  // through startMockServer in the fault-injection suite below.
+  const faultKeyCases: Array<{
+    name: string;
+    channel: "faults" | "corrupt";
+    key: string;
+    rejects?: RegExp;
+  }> = [
+    { name: "accepts a registered section key (faults)", channel: "faults", key: "labels.list" },
+    { name: "accepts a registered core key (faults)", channel: "faults", key: "core.contentsGet" },
+    {
+      name: "accepts a registered core key (corrupt)",
+      channel: "corrupt",
+      key: "core.discoveryList",
+    },
+    {
+      name: "rejects an unknown section-style key",
+      channel: "faults",
+      key: "bogus",
+      rejects: /unknown endpoint/,
+    },
+    {
+      name: "rejects an unknown core-style key",
+      channel: "faults",
+      key: "core.bogus",
+      rejects: /unknown endpoint/,
+    },
+  ];
+  test.each(faultKeyCases)("assertFaultKeys $name", ({ channel, key, rejects }) => {
+    const run =
+      channel === "faults"
+        ? () => assertFaultKeys([{ key, kind: "server_error" }], undefined)
+        : () => assertFaultKeys(undefined, { key, mode: "invalid_json" });
+    if (rejects) {
+      expect(run).toThrow(rejects);
+    } else {
+      expect(run).not.toThrow();
+    }
   });
 
   test("server_error rotates 500/502/503 on the fire count, then serves the real response", async () => {
@@ -2239,15 +2279,6 @@ describe("fault injection", () => {
         ],
       }),
     ).rejects.toThrow(/duplicate fault/);
-  });
-
-  test("assertFaultKeys accepts valid keys and rejects unknown/duplicate directly", () => {
-    expect(() =>
-      assertFaultKeys([{ key: "labels.list", kind: "rate_limit_403" }], undefined),
-    ).not.toThrow();
-    expect(() => assertFaultKeys([{ key: "bogus", kind: "rate_limit_403" }], undefined)).toThrow(
-      /unknown endpoint/,
-    );
   });
 });
 

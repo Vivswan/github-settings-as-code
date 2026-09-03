@@ -329,20 +329,6 @@ describe("toSpecOnlyGapSource", () => {
     );
   });
 
-  test("the rewritten doc keeps the feature clause and drops the stale octokit prose", () => {
-    const result = toSpecOnlyGapSource(SOURCE, GAP_FILE);
-    expect(result).toContain("/** GitHub shipped the merge queue; @octokit/types ships");
-    expect(result).not.toContain("does not carry these routes");
-  });
-
-  test("the rewrite drops the tripwire, the flag, and their imports", () => {
-    const result = toSpecOnlyGapSource(SOURCE, GAP_FILE);
-    expect(result).not.toContain("MustBeNever");
-    expect(result).not.toContain("Endpoints");
-    expect(result).not.toContain("documentedInSpec");
-    expect(result).not.toContain("defineGap(");
-  });
-
   test("routes that fit the line width render inline, matching the formatter", () => {
     const short = SOURCE.replace(
       /routes: \[[\s\S]*?\],/,

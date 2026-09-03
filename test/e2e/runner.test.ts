@@ -53,33 +53,28 @@ describe("ARTIFACT_TEST_RECIPIENT", () => {
 });
 
 describe("exitCodeFailure (expect.exit_code membership)", () => {
-  test("a matching plain-number expectation passes", () => {
-    expect(exitCodeFailure(0, 0)).toBeUndefined();
-  });
-
-  test("a plain-number mismatch keeps the single-code message", () => {
-    expect(exitCodeFailure(1, 0)).toBe("exit code 1 != expected 0");
-  });
-
-  test("an allowed-set member passes", () => {
-    expect(exitCodeFailure(1, [0, 1])).toBeUndefined();
-  });
-
-  test("an exit outside the allowed set names the whole set", () => {
-    expect(exitCodeFailure(2, [0, 1])).toBe("exit code 2 not in [0, 1]");
-  });
-
-  test("the multi-element message renders sorted, whatever the set order", () => {
+  const cases: Array<[string, number, number | number[], string | undefined]> = [
+    ["a matching plain-number expectation passes", 0, 0, undefined],
+    ["a plain-number mismatch keeps the single-code message", 1, 0, "exit code 1 != expected 0"],
+    ["an allowed-set member passes", 1, [0, 1], undefined],
+    ["an exit outside the allowed set names the whole set", 2, [0, 1], "exit code 2 not in [0, 1]"],
     // The fuzz expectation is spread from a Set, whose insertion order varies
     // by seed; the failure text must not.
-    expect(exitCodeFailure(2, [1, 0])).toBe("exit code 2 not in [0, 1]");
-  });
-
-  test("a one-element set keeps the single-code message", () => {
+    [
+      "the multi-element message renders sorted, whatever the set order",
+      2,
+      [1, 0],
+      "exit code 2 not in [0, 1]",
+    ],
     // The fuzz oracle often predicts exactly one legal exit; the message must
     // stay byte-identical to the plain-number form either way it is spelled.
-    expect(exitCodeFailure(1, [0])).toBe("exit code 1 != expected 0");
-  });
+    ["a one-element set keeps the single-code message", 1, [0], "exit code 1 != expected 0"],
+  ];
+  for (const [name, exitCode, expected, want] of cases) {
+    test(name, () => {
+      expect(exitCodeFailure(exitCode, expected)).toBe(want);
+    });
+  }
 });
 
 describe("parseGithubOutput", () => {
