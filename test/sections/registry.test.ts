@@ -849,7 +849,11 @@ describe("handler contracts", () => {
     const _both = { ...runOnly, plan: planOnly.plan } satisfies SectionModule<"workflows">;
     // @ts-expect-error nor neither
     const _neither = { ...base } satisfies SectionModule<"workflows">;
-    expect(SECTIONS.filter((s) => s.plan !== undefined).map((s) => s.key)).toEqual(["workflows"]);
+    // The plan set is whatever the registry declares; the union type forbids a module carrying
+    // both handlers, so a section appears here exactly when it has migrated to plan().
+    const planSections = SECTIONS.filter((s) => s.plan !== undefined).map((s) => s.key);
+    expect(planSections).toContain("workflows");
+    expect(new Set(planSections).size).toBe(planSections.length);
   });
 
   test("every plan section declares exactly one primaryRead, and it agrees with DENIAL_SEMANTICS", () => {
@@ -891,6 +895,7 @@ describe("handler contracts", () => {
         declaring.push(section.key);
       }
     }
-    expect(declaring).toEqual(["workflows"]);
+    // Every plan section declares exactly one primaryRead and no run() section declares any.
+    expect(declaring).toEqual(SECTIONS.filter((s) => s.plan !== undefined).map((s) => s.key));
   });
 });
