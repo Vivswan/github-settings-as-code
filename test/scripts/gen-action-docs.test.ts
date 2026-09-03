@@ -244,7 +244,7 @@ describe("permissions renderers", () => {
     );
   });
 
-  test("the gated-reads list names exactly the sections whose every read is write-gated", () => {
+  test("the gated-reads list names a fully write-gated section by its reads' permission", () => {
     expect(renderGatedReads([sectionModule("labels"), sectionModule("codespaces_secrets")])).toBe(
       "- GitHub gates even the Codespaces secrets reads at write, so `codespaces_secrets` needs its write grant in check mode too.",
     );
@@ -262,7 +262,33 @@ describe("permissions renderers", () => {
       },
     };
     expect(renderGatedReads([gatedOverride])).toBe(
-      "- GitHub gates even the Actions reads at write, so `labels` needs its write grant in check mode too.",
+      "- GitHub gates even the Actions reads at write, so `labels` needs the Actions write grant in check mode too.",
+    );
+  });
+
+  test("a section with only some reads write-gated names those reads by route", () => {
+    // GitHub gates per endpoint (the interaction-limits pull request cap GETs
+    // are Administration-write beside an Administration-read base GET), so
+    // the bullet cannot say "even the ... reads": it names the gated routes.
+    const mixed: SectionMeta = {
+      ...sectionModule("labels"),
+      permission: { repo: ["administration"] },
+      endpoints: {
+        get: { route: "GET /repos/{owner}/{repo}/interaction-limits", statuses: { 200: "x" } },
+        capGet: {
+          route: "GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap",
+          statuses: { 200: "x" },
+          accessGrade: "write",
+        },
+        bypassList: {
+          route: "GET /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list",
+          statuses: { 200: "x" },
+          accessGrade: "write",
+        },
+      },
+    };
+    expect(renderGatedReads([mixed])).toBe(
+      "- GitHub gates the `GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap` and `GET /repos/{owner}/{repo}/interaction-limits/pulls/bypass-list` reads at write, so `labels` needs its Administration write grant in check mode to verify what they return.",
     );
   });
 

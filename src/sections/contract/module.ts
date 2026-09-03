@@ -5,7 +5,13 @@ import type { RepoRef } from "../../discovery/targets.js";
 import type { GithubClient } from "../../github/api.js";
 import type { SectionKey, SettingsFile, UndeclaredPolicySection } from "../../schema.js";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
-import { type EndpointDecl, endpointKind, endpointMethod } from "./endpoints.js";
+import {
+  type EndpointDecl,
+  endpointKind,
+  endpointMethod,
+  type GatedReadDecl,
+  type Route,
+} from "./endpoints.js";
 import type { GraphqlOpDecl } from "./graphql.js";
 import { grantFor, type SectionPermission } from "./permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "./plan.js";
@@ -215,6 +221,8 @@ export type FailingOp = EndpointDecl | GraphqlOpDecl;
  * mock's permission gate) resolve the effective permission, so section vs
  * per-operation precedence lives in one spot.
  */
+export function endpointPermission(section: SectionMeta, op: GatedReadDecl): SectionPermission;
+export function endpointPermission(section: SectionMeta, op: FailingOp): SectionPermission | "none";
 export function endpointPermission(
   section: SectionMeta,
   op: FailingOp,
@@ -239,15 +247,9 @@ export interface SectionOperation {
 }
 
 /**
- * Every operation a section may issue - its REST endpoints and GraphQL
- * operations flattened into one list. Consumers deriving cross-cutting facts
- * from "everything this section can call" (overrideAdviceLevel in ./errors.ts, the
- * fuzz oracle's no-read and write-gated section sets, the registry
- * mixed-grade guard, the README PAT-form and permissions-doc sweeps) walk
- * THIS view instead of section.endpoints alone, so a derivation can never
- * quietly ignore the GraphQL dictionary. The _OperationDictionariesFlattened
- * pin below keeps the flattening total: a new operation dictionary on
- * SectionMeta fails to compile until it is folded in here.
+ * Every operation a section may issue, REST and GraphQL flattened, so a derivation
+ * over "everything this section can call" cannot ignore the GraphQL dictionary.
+ * _OperationDictionariesFlattened below keeps the flattening total.
  */
 export function sectionOperations(section: SectionMeta): SectionOperation[] {
   return [
@@ -264,6 +266,41 @@ export function sectionOperations(section: SectionMeta): SectionOperation[] {
       permission: endpointPermission(section, op),
     })),
   ];
+}
+
+/**
+ * How GitHub gates a section's reads under a read-only grant: "plain" reads all
+ * (also no reads at all), "write-gated" is denied at the first read, "mixed" reads
+ * until the handler reaches a gated one. Read by the fuzz oracle and the docs.
+ */
+export type ReadGating = "plain" | "write-gated" | "mixed";
+
+export function readGating(section: SectionMeta): ReadGating {
+  const reads = sectionOperations(section).filter((op) => op.wire === "read").length;
+  const gated = writeGatedReads(section).length;
+  if (gated === 0) {
+    return "plain";
+  }
+  return gated === reads ? "write-gated" : "mixed";
+}
+
+/** One read GitHub gates at write: its route and effective permission. */
+export interface WriteGatedRead {
+  readonly route: Route;
+  readonly permission: SectionPermission;
+}
+
+/**
+ * The section's GatedReadDecl entries, in declaration order. A GraphQL read is
+ * always gated at read (its kind IS the gate), so the REST dictionary is complete.
+ */
+export function writeGatedReads(section: SectionMeta): WriteGatedRead[] {
+  return Object.values(section.endpoints)
+    .filter((endpoint): endpoint is GatedReadDecl => endpoint.accessGrade === "write")
+    .map((endpoint) => ({
+      route: endpoint.route,
+      permission: endpointPermission(section, endpoint),
+    }));
 }
 
 /** The SectionMeta properties sectionOperations flattens. */

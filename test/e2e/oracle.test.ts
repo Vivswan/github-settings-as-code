@@ -2,13 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { ADMIN_SLUG } from "./constants.js";
 import type { MultiRepoTarget, MultiScenarioMeta, ScenarioMeta } from "./generators.js";
 import {
+  type AbortVerdict,
+  effectiveGrades,
   foldRepoResults,
   foldSectionOutcomes,
+  judgePreflightAbort,
   NO_READ_SECTIONS,
+  type PreflightAbort,
   predictDiscovery,
   predictMulti,
   predictOutcomes,
   predictSection,
+  predictSectionAt,
+  preflightDeniable,
   sectionGrade,
 } from "./oracle.js";
 import type { MaskGrade, MaskKey } from "./schema.js";
@@ -98,6 +104,127 @@ describe("sectionGrade", () => {
     expect(sectionGrade("teams", { administration: "write" }, { org_members: "none" })).toBe(
       "none",
     );
+  });
+});
+
+describe("read gating fold", () => {
+  test("effectiveGrades folds only a read grant, and only through gated reads", () => {
+    expect(effectiveGrades("write", "write-gated")).toEqual(["write"]);
+    expect(effectiveGrades("none", "mixed")).toEqual(["none"]);
+    expect(effectiveGrades("read", "plain")).toEqual(["read"]);
+    expect(effectiveGrades("read", "write-gated")).toEqual(["none"]);
+    expect(effectiveGrades("read", "mixed")).toEqual(["read", "none"]);
+  });
+
+  test("codespaces_secrets under a read-only grant runs at none: denied at the first read", () => {
+    // Both GETs are gated, so a read grant reads nothing (the curated scenario pins it).
+    const readOnly = meta({
+      sections: ["codespaces_secrets"],
+      mask: { codespaces_secrets: "read" },
+      mode: "check",
+      policy: "fail",
+    });
+    const p = predictSection("codespaces_secrets", readOnly);
+    expect(p.grades).toEqual(["none"]);
+    expect([...p.allowed]).toEqual(["failed"]);
+    const apply = predictOutcomes({ ...readOnly, mode: "apply" });
+    expect(apply.preflightAborts).toBe("yes");
+    expect(apply.fullyGranted).toBe(false);
+    expect(apply.writeDeniedSections).toEqual(["codespaces_secrets"]);
+  });
+
+  test("a mixed-gating section under a read-only grant unions the read and denied arms", () => {
+    // Reaching the gated read depends on content the oracle never models, and the
+    // denied read's own 404 posture may be either, so both arms' outcomes are allowed.
+    const readOnly = meta({ mask: { issues: "read" }, mode: "check", policy: "fail" });
+    const check = predictSectionAt("labels", readOnly, "mixed");
+    expect(check.grades).toEqual(["read", "none"]);
+    expect([...check.allowed].sort()).toEqual(["clean", "drift", "failed"]);
+    const warn = predictSectionAt("labels", { ...readOnly, policy: "warn" }, "mixed");
+    expect([...warn.allowed].sort()).toEqual(["clean", "drift", "skipped"]);
+    // The same section declared plain stays the exact read prediction.
+    expect([...predictSectionAt("labels", readOnly, "plain").allowed].sort()).toEqual([
+      "clean",
+      "drift",
+    ]);
+  });
+
+  test("a mixed-gating section with NO grant is denied at its primary read like any other", () => {
+    // With no grant the primary read is denied first, under the section's own posture.
+    const noGrant = meta({ mask: { issues: "none" }, mode: "check", policy: "fail" });
+    const mixed = predictSectionAt("labels", noGrant, "mixed");
+    expect(mixed.grades).toEqual(["none"]);
+    expect(mixed).toEqual(predictSectionAt("labels", noGrant, "plain"));
+    const apply = predictSectionAt("labels", { ...noGrant, mode: "apply" }, "mixed");
+    expect([...apply.allowed]).toEqual(["failed"]);
+    expect(apply.mayWrite).toBe(false);
+  });
+
+  test("the preflight barrier is certain for a write-gated section and only possible for a mixed one", () => {
+    const applyFail = meta({ mask: { issues: "read" }, mode: "apply", policy: "fail" });
+    expect(preflightDeniable(predictSectionAt("labels", applyFail, "plain"), applyFail)).toBe("no");
+    expect(preflightDeniable(predictSectionAt("labels", applyFail, "write-gated"), applyFail)).toBe(
+      "yes",
+    );
+    expect(preflightDeniable(predictSectionAt("labels", applyFail, "mixed"), applyFail)).toBe(
+      "possible",
+    );
+    // A mixed section may still land applied (gated read never reached, no write needed).
+    const mixed = predictSectionAt("labels", applyFail, "mixed");
+    expect([...mixed.allowed].sort()).toEqual(["applied", "failed"]);
+  });
+});
+
+describe("judgePreflightAbort", () => {
+  const rows = "## github-settings-as-code (apply)\n\n| labels | :x: failed |";
+  const barrier = "::error::preflight failed: the token cannot access 1 section(s)";
+  const other = "::error::settings.yml: unknown section";
+  const aborted = { summary: "  \n", result: "failed", stdout: barrier };
+  const ran = { summary: rows, result: "applied", stdout: other };
+  const cases: Array<
+    [string, PreflightAbort, Parameters<typeof judgePreflightAbort>[1], AbortVerdict["kind"]]
+  > = [
+    ["no: a run without the barrier annotation ran", "no", ran, "ran"],
+    ["no: but the barrier fired", "no", aborted, "contradiction"],
+    ["yes with every witness aborted", "yes", aborted, "aborted"],
+    ["yes but the run never annotated the barrier", "yes", ran, "contradiction"],
+    ["yes but another error failed the run", "yes", { ...aborted, stdout: other }, "contradiction"],
+    ["possible without the annotation ran", "possible", ran, "ran"],
+    ["possible with every witness aborted", "possible", aborted, "aborted"],
+    [
+      "possible, empty summary and failed, but no barrier annotation: ran, so the section checks report the absences",
+      "possible",
+      { ...aborted, stdout: other },
+      "ran",
+    ],
+    [
+      "possible with an unparsable summary and no annotation still ran",
+      "possible",
+      { ...ran, summary: "garbage" },
+      "ran",
+    ],
+    ["annotated but sections rendered", "possible", { ...aborted, summary: rows }, "contradiction"],
+    [
+      "annotated but the result is not failed",
+      "yes",
+      { ...aborted, result: "applied" },
+      "contradiction",
+    ],
+    [
+      "annotated but no result at all",
+      "possible",
+      { ...aborted, result: undefined },
+      "contradiction",
+    ],
+    [
+      "the phrase in a plain log line is not the annotation",
+      "yes",
+      { ...aborted, stdout: "preflight failed: retrying" },
+      "contradiction",
+    ],
+  ];
+  test.each(cases)("%s", (_name, predicted, observed, kind) => {
+    expect(judgePreflightAbort(predicted, observed).kind).toBe(kind);
   });
 });
 
@@ -209,7 +336,7 @@ describe("predictSection rules", () => {
         policy: "fail",
       }),
     );
-    expect(p.preflightAborts).toBe(false);
+    expect(p.preflightAborts).toBe("no");
   });
 
   test("a denied no-read section can never land applied: its write is unconditional", () => {
@@ -342,7 +469,7 @@ describe("predictSection rules", () => {
       }),
     );
     expect(p.fullyGranted).toBe(true);
-    expect(p.preflightAborts).toBe(false);
+    expect(p.preflightAborts).toBe("no");
   });
 
   test("an excluded denied section never arms the preflight barrier", () => {
@@ -358,7 +485,7 @@ describe("predictSection rules", () => {
         policy: "fail",
       }),
     );
-    expect(p.preflightAborts).toBe(false);
+    expect(p.preflightAborts).toBe("no");
     expect([...p.allowedExitCodes]).toEqual([0]);
   });
 
@@ -377,7 +504,7 @@ describe("predictSection rules", () => {
         policy: "fail",
       }),
     );
-    expect(p.preflightAborts).toBe(true);
+    expect(p.preflightAborts).toBe("yes");
   });
 
   test("teams + owner_kind user no-ops: applied in apply, clean in check", () => {
@@ -445,32 +572,32 @@ describe("predictOutcomes run level", () => {
     const p = predictOutcomes(
       meta({ sections: ["labels"], mask: { issues: "none" }, mode: "apply", policy: "fail" }),
     );
-    expect(p.preflightAborts).toBe(true);
+    expect(p.preflightAborts).toBe("yes");
   });
 
-  test("preflightAborts is false under warn, under check, and when fully granted", () => {
+  test("preflightAborts is no under warn, under check, and when fully granted", () => {
     const warn = predictOutcomes(
       meta({ sections: ["labels"], mask: { issues: "none" }, mode: "apply", policy: "warn" }),
     );
-    expect(warn.preflightAborts).toBe(false);
+    expect(warn.preflightAborts).toBe("no");
     const check = predictOutcomes(
       meta({ sections: ["labels"], mask: { issues: "none" }, mode: "check", policy: "fail" }),
     );
-    expect(check.preflightAborts).toBe(false);
+    expect(check.preflightAborts).toBe("no");
     const granted = predictOutcomes(
       meta({ sections: ["labels"], mask: {}, mode: "apply", policy: "fail" }),
     );
-    expect(granted.preflightAborts).toBe(false);
+    expect(granted.preflightAborts).toBe("no");
   });
 
-  test("a read grade never aborts preflight: preflight is reads-only", () => {
+  test("a read grant on plain reads never aborts preflight: preflight is reads-only", () => {
     // Preflight runs every handler in check mode behind the write-stopping
     // probe wrapper, so a read-graded section passes it; the write denial
     // happens later, during apply, after the summary rows exist.
     const p = predictOutcomes(
       meta({ sections: ["labels"], mask: { issues: "read" }, mode: "apply", policy: "fail" }),
     );
-    expect(p.preflightAborts).toBe(false);
+    expect(p.preflightAborts).toBe("no");
   });
 
   test("a fine_grained absent-tolerant denial does not abort preflight", () => {
@@ -485,7 +612,7 @@ describe("predictOutcomes run level", () => {
         policy: "fail",
       }),
     );
-    expect(p.preflightAborts).toBe(false);
+    expect(p.preflightAborts).toBe("no");
   });
 });
 

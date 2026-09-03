@@ -12,7 +12,11 @@ import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { UNDECLARED_POLICY_SECTIONS, type UndeclaredPolicySection } from "../../src/schema.js";
 import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
-import { sectionOperations } from "../../src/sections/contract/module.js";
+import {
+  readGating,
+  sectionOperations,
+  writeGatedReads,
+} from "../../src/sections/contract/module.js";
 import {
   RESOURCE_LABEL,
   RESOURCE_LABEL_ORG,
@@ -293,27 +297,29 @@ export function renderGrantSentence(sections: readonly SectionMeta[]): string {
 }
 
 /**
- * One bullet per section whose every read GitHub gates at write (an
- * accessGrade override on each of its GETs), naming the gated reads' own
- * permissions. Empty when no section is write-gated.
+ * One bullet per section with a write-gated read, naming the gated reads' own
+ * permissions; a partly gated section names the gated routes. Empty when none.
  */
 export function renderGatedReads(sections: readonly SectionMeta[]): string {
   return sections
     .flatMap((section) => {
-      const reads = sectionOperations(section).filter((operation) => operation.wire === "read");
-      if (reads.length === 0 || reads.some((operation) => operation.grade !== "write")) {
+      const gated = writeGatedReads(section);
+      if (gated.length === 0) {
         return [];
       }
-      const labels = unique(
-        reads.flatMap((operation) =>
-          operation.permission === "none" ? [] : [primaryLabel(operation.permission)],
-        ),
-      );
-      if (labels.length === 0) {
-        throw new Error(`the "${section.key}" section's write-gated reads name no permission`);
+      const labels = unique(gated.map((read) => primaryLabel(read.permission)));
+      if (readGating(section) === "write-gated") {
+        // "its" grant only for the section's own permission; an override is named.
+        const grant = gated.every((read) => samePermission(read.permission, section.permission))
+          ? "its write grant"
+          : `the ${proseList(labels)} write grant`;
+        return [
+          `- GitHub gates even the ${proseList(labels)} reads at write, so \`${section.key}\` needs ${grant} in check mode too.`,
+        ];
       }
+      const routes = gated.map((read) => `\`${read.route}\``);
       return [
-        `- GitHub gates even the ${proseList(labels)} reads at write, so \`${section.key}\` needs its write grant in check mode too.`,
+        `- GitHub gates the ${proseList(routes)} reads at write, so \`${section.key}\` needs its ${proseList(labels)} write grant in check mode to verify what they return.`,
       ];
     })
     .join("\n");

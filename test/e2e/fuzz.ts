@@ -54,6 +54,7 @@ import type { LoggedRequest } from "./mock/contract.js";
 import {
   foldRepoResults,
   foldSectionOutcomes,
+  judgePreflightAbort,
   NO_READ_SECTIONS,
   predictDiscovery,
   predictMulti,
@@ -367,13 +368,19 @@ async function runPredicted(
     const fired = assertFaultFired(report.faultsFired, opts.fault.key, problems);
     faultClass = fired ? opts.fault.classLabel : undefined;
   }
-  // Each predicted section must APPEAR in the summary (a predicted section
-  // missing entirely is a silent regression the old `if (got)` guard hid), and
-  // its reported outcome must be in its predicted class. EXCEPTION: when the run
-  // aborts at the preflight barrier (apply + fail policy + a permission-denied
-  // section), the engine renders NO sections, so the summary is empty by design.
+  // Each predicted section must APPEAR in the summary with an outcome in its
+  // predicted class, unless the run aborted at the preflight barrier (which renders
+  // no sections) - judged with its witnesses by judgePreflightAbort.
   const observed = parseSummaryOutcomes(report.summary);
-  if (!prediction.preflightAborts) {
+  const verdict = judgePreflightAbort(prediction.preflightAborts, {
+    summary: report.summary,
+    result: report.outputs.result,
+    stdout: report.stdout,
+  });
+  if (verdict.kind === "contradiction") {
+    problems.push(verdict.problem);
+  }
+  if (verdict.kind === "ran") {
     for (const section of prediction.sections) {
       const got = observed[section.key];
       if (got === undefined) {
@@ -384,13 +391,13 @@ async function runPredicted(
       }
       if (!section.allowed.has(got as never)) {
         problems.push(
-          `${section.key}: observed "${got}" not in predicted {${[...section.allowed].join(",")}} (grade ${section.grade})`,
+          `${section.key}: observed "${got}" not in predicted {${[...section.allowed].join(",")}} (grades ${section.grades.join("|")})`,
         );
       }
     }
     // SELF-CONSISTENCY: the `result` output must equal the engine's own fold
     // over the section outcomes it just reported (foldSectionOutcomes mirrors
-    // orchestrate.ts's rollup). Guarded by preflightAborts above: an aborted
+    // orchestrate.ts's rollup). Guarded by the abort verdict above: an aborted
     // run reports "failed" with an EMPTY table by design, which the fold
     // cannot reproduce.
     const folded = foldSectionOutcomes(Object.values(observed), meta.mode === "check");

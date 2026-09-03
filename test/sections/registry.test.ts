@@ -19,7 +19,6 @@ import {
   type SectionMeta,
   type SectionModule,
   sectionGrant,
-  sectionOperations,
 } from "../../src/sections/contract/module.js";
 import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
 import type { PlanContext, SectionPlan } from "../../src/sections/contract/plan.js";
@@ -338,35 +337,6 @@ describe("section endpoints", () => {
         accessGrade: "write",
       }),
     ).toBe("write");
-  });
-
-  test("only the known endpoints carry an accessGrade override, never mixed within a section", () => {
-    // The override models GitHub gating a READ at write (Codespaces secrets
-    // is the only known case). The fuzz oracle collapses grade "read" to
-    // "none" at SECTION level for sections whose every read is write-gated,
-    // so a section mixing write-gated and plain reads would make that
-    // collapse wrong - forbid the shape here until the oracle models
-    // per-endpoint grades. The read universe is sectionOperations, the
-    // flattened REST + GraphQL view the oracle itself derives from: REST
-    // GETs carry their accessGrade as `grade` and GraphQL reads are always
-    // read-gated (their kind IS the gate), so an all-write-gated REST
-    // section gaining a GraphQL read fails here instead of silently
-    // desyncing the oracle.
-    const overridden = Object.entries(allEndpoints())
-      .filter(([, endpoint]) => endpoint.accessGrade !== undefined)
-      .map(([key]) => key)
-      .sort();
-    expect(overridden).toEqual(["codespaces_secrets.list", "codespaces_secrets.publicKey"]);
-    for (const section of SECTIONS) {
-      const readGates = sectionOperations(section)
-        .filter((operation) => operation.wire === "read")
-        .map((operation) => operation.grade);
-      const gated = readGates.filter((gate) => gate === "write");
-      expect(
-        gated.length === 0 || gated.length === readGates.length,
-        `${section.key} mixes write-gated and plain reads`,
-      ).toBe(true);
-    }
   });
 
   test("toleratedStatuses returns exactly the declared >= 400 statuses", () => {

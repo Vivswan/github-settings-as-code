@@ -8,10 +8,14 @@
  */
 
 import type { SectionKey } from "../../src/schema.js";
-import { sectionOperations } from "../../src/sections/contract/module.js";
+import {
+  type ReadGating,
+  readGating,
+  sectionOperations,
+} from "../../src/sections/contract/module.js";
 import type { SectionPermission } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { DENIAL_SEMANTICS } from "./denial-semantics.js";
+import { DENIAL_SEMANTICS, type DenialSemantics } from "./denial-semantics.js";
 import { displayKeyOf, type MultiScenarioMeta, type ScenarioMeta } from "./generators.js";
 import { type DenialStyle, GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
 
@@ -23,24 +27,12 @@ const PERMISSION_BY_KEY: Record<SectionKey, SectionPermission> = Object.fromEntr
 ) as Record<SectionKey, SectionPermission>;
 
 /**
- * Sections whose every read is write-gated (the EndpointDecl accessGrade
- * override; Codespaces secrets today): a read-only grant cannot even list,
- * so grade "read" collapses to "none". Derived from the same declarations
- * the mock's permission gate reads, through sectionOperations - the
- * flattened REST + GraphQL view, where a REST GET carries its accessGrade
- * as `grade` and a GraphQL read is always read-gated (its kind IS the gate) -
- * so mock and oracle cannot disagree. A section with MIXED read grades would
- * make the section-level collapse wrong; the registry unit test forbids
- * that shape.
+ * Each section's read gating, from the same declarations the mock's permission
+ * gate reads, so mock and oracle cannot disagree. Folded by effectiveGrades.
  */
-const READS_REQUIRE_WRITE: ReadonlySet<SectionKey> = new Set(
-  SECTIONS.filter((section) => {
-    const readGates = sectionOperations(section)
-      .filter((op) => op.wire === "read")
-      .map((op) => op.grade);
-    return readGates.length > 0 && readGates.every((gate) => gate === "write");
-  }).map((section) => section.key),
-);
+const READ_GATING: Record<SectionKey, ReadGating> = Object.fromEntries(
+  SECTIONS.map((section) => [section.key, readGating(section)]),
+) as Record<SectionKey, ReadGating>;
 
 /**
  * Sections whose resources exist only under an ORGANIZATION owner: on a
@@ -80,12 +72,9 @@ function repoMaskKeys(permission: SectionPermission): MaskKey[] {
 }
 
 /**
- * The effective grant grade for a section under a mask. The repo permission is
- * "ANY one resource grants access", so the repo grade is the MAX over the
- * section's repo mask keys. When a section also needs an organization
- * permission (teams needs org_members read), that is an ADDITIONAL requirement,
- * so the effective grade is capped by the org grade (an AND). An unspecified
- * resource defaults to "write" (the mask default).
+ * The grade a mask GRANTS a section: the MAX over its repo resources (any one
+ * grants), then none if its required org permission is absent; an unlisted
+ * resource is write. What the section can DO with it is effectiveGrades' question.
  */
 export function sectionGrade(
   key: SectionKey,
@@ -99,11 +88,6 @@ export function sectionGrade(
     if (GRADE_RANK[grade] > GRADE_RANK[repoGrade]) {
       repoGrade = grade;
     }
-  }
-  if (repoGrade === "read" && READS_REQUIRE_WRITE.has(key)) {
-    // Every read this section can issue is write-gated, so a read-only
-    // grant behaves exactly like no grant: the primary read is denied.
-    repoGrade = "none";
   }
   if (permission.org !== "members") {
     return repoGrade;
@@ -126,32 +110,76 @@ export function sectionGrade(
   return orgGrade === "none" ? "none" : repoGrade;
 }
 
+/**
+ * The grades a section may RUN at: the grant folded through its read gating. Only
+ * a read grant folds: write-gated collapses to none (the first read is denied),
+ * mixed keeps both, since reaching a gated read depends on the declared content.
+ */
+export function effectiveGrades(grant: MaskGrade, gating: ReadGating): readonly MaskGrade[] {
+  if (grant !== "read" || gating === "plain") {
+    return [grant];
+  }
+  return gating === "write-gated" ? ["none"] : ["read", "none"];
+}
+
 /** The predicted set of outcomes a section may land in, given the run's shape. */
 export interface SectionPrediction {
   key: SectionKey;
-  grade: MaskGrade;
+  /** The grades the section may run at (effectiveGrades); each contributes to `allowed`. */
+  grades: readonly MaskGrade[];
   /** The outcomes the section is allowed to report; the runner must see one. */
   allowed: Set<Outcome>;
   /** True when the section can write under this prediction (drives universals). */
   mayWrite: boolean;
 }
 
-/**
- * Predict one section's allowed outcome set from its grade, the mode, policy,
- * denial style, and its denial semantics. Mirrors the plan's rule table.
- *
- * When the generator seeded a live-state WITNESS for the section (labels or
- * milestones), the prediction tightens from {clean, drift} to the exact
- * outcome the witness dictates. The permission/mode/policy fold always comes
- * FIRST: a denied or preflight-aborted section stays skipped/failed no matter
- * what the live state looks like; the witness only refines outcomes that are
- * still reachable successes.
- */
+/** Every 404 posture a denied read can have (DenialSemantics, enumerated). */
+const DENIAL_POSTURES: readonly DenialSemantics[] = ["denied", "absent"];
+
+/** Predict one section's allowed outcome set under its declared read gating. */
 export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPrediction {
-  const grade = sectionGrade(key, meta.mask, meta.orgMask ?? meta.mask);
+  return predictSectionAt(key, meta, READ_GATING[key]);
+}
+
+/**
+ * The union of the per-grade predictions over effectiveGrades. A mixed section
+ * denied under a READ grant stops at a gated read whose 404 posture may differ
+ * from the section's DENIAL_SEMANTICS entry, so that arm covers both postures.
+ */
+export function predictSectionAt(
+  key: SectionKey,
+  meta: ScenarioMeta,
+  gating: ReadGating,
+): SectionPrediction {
+  const grant = sectionGrade(key, meta.mask, meta.orgMask ?? meta.mask);
+  const grades = effectiveGrades(grant, gating);
+  const deniedAtGatedRead = gating === "mixed" && grant === "read";
+  const arms = grades.flatMap((grade) =>
+    grade === "none" && deniedAtGatedRead
+      ? DENIAL_POSTURES.map((semantics) => predictAtGrade(key, meta, grade, semantics))
+      : [predictAtGrade(key, meta, grade, DENIAL_SEMANTICS[key])],
+  );
+  return {
+    key,
+    grades,
+    allowed: new Set(arms.flatMap((arm) => [...arm.allowed])),
+    mayWrite: arms.some((arm) => arm.mayWrite),
+  };
+}
+
+/**
+ * One section's allowed outcomes at ONE grade, from mode, policy, denial style,
+ * and the denied read's 404 posture. A seeded live-state WITNESS tightens
+ * {clean, drift} to one outcome, but only after the permission/policy fold.
+ */
+function predictAtGrade(
+  key: SectionKey,
+  meta: ScenarioMeta,
+  grade: MaskGrade,
+  semantics: DenialSemantics,
+): Pick<SectionPrediction, "allowed" | "mayWrite"> {
   const check = meta.mode === "check";
   const required = meta.requiredSections.includes(key);
-  const semantics = DENIAL_SEMANTICS[key];
   const witness = meta.liveKinds?.[key];
   // A declared section outside the `sections` allowlist never runs: the engine
   // reports it "excluded" before any read (orchestrate.ts), so exclusion folds
@@ -163,35 +191,33 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
     meta.onlySections.length > 0 &&
     !meta.onlySections.includes(key)
   ) {
-    return { key, grade, allowed: new Set(["excluded"]), mayWrite: false };
+    return { allowed: new Set(["excluded"]), mayWrite: false };
   }
   // An org-only section on a personal account no-ops regardless of mask:
   // its org probe 404s, the section returns with only a note, so check
   // reports clean and apply reports applied - never both in one mode.
   if (ORG_ONLY_SECTIONS.has(key) && meta.ownerKind === "user") {
-    return { key, grade, allowed: new Set([check ? "clean" : "applied"]), mayWrite: false };
+    return { allowed: new Set([check ? "clean" : "applied"]), mayWrite: false };
   }
   // A section with no read endpoint makes NO request in check mode, so it is
   // exactly clean regardless of the mask - there is nothing a denial could
   // deny - and no witness kind is modeled for it.
   if (check && NO_READ_SECTIONS.has(key)) {
-    return { key, grade, allowed: new Set(["clean"]), mayWrite: false };
+    return { allowed: new Set(["clean"]), mayWrite: false };
   }
 
   if (grade === "write") {
     if (witness === "matching") {
       // The live state mirrors every field the handler diffs, so no write is
       // ever attempted: check is exactly clean and apply a no-op applied.
-      return { key, grade, allowed: new Set([check ? "clean" : "applied"]), mayWrite: false };
+      return { allowed: new Set([check ? "clean" : "applied"]), mayWrite: false };
     }
     if (witness !== undefined) {
       // A seeded drift witness: check MUST report drift (a clean here is a
       // false-negative drift detector); apply writes and reports applied.
-      return { key, grade, allowed: new Set([check ? "drift" : "applied"]), mayWrite: !check };
+      return { allowed: new Set([check ? "drift" : "applied"]), mayWrite: !check };
     }
     return {
-      key,
-      grade,
       allowed: check ? new Set(["clean", "drift"]) : new Set(["applied"]),
       mayWrite: !check,
     };
@@ -213,13 +239,13 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
       // by policy.
       const allowed: Set<Outcome> =
         required || meta.policy === "fail" ? new Set(["failed"]) : new Set(["skipped"]);
-      return { key, grade, allowed, mayWrite: false };
+      return { allowed, mayWrite: false };
     }
     // Apply mode: fail policy or required means the whole run fails at preflight
     // with zero writes; warn means the section is skipped.
     const allowed: Set<Outcome> =
       required || meta.policy === "fail" ? new Set(["failed"]) : new Set(["skipped"]);
-    return { key, grade, allowed, mayWrite: false };
+    return { allowed, mayWrite: false };
   }
 
   // grade none, fine_grained, absent semantics: reads look like missing
@@ -227,17 +253,17 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
   // (which is 403-denied). grade read: reads pass, first write 403-denied.
   if (check) {
     if (witness === "matching") {
-      return { key, grade, allowed: new Set(["clean"]), mayWrite: false };
+      return { allowed: new Set(["clean"]), mayWrite: false };
     }
     if (witness !== undefined) {
-      return { key, grade, allowed: new Set(["drift"]), mayWrite: false };
+      return { allowed: new Set(["drift"]), mayWrite: false };
     }
-    return { key, grade, allowed: new Set(["clean", "drift"]), mayWrite: false };
+    return { allowed: new Set(["clean", "drift"]), mayWrite: false };
   }
   if (witness === "matching") {
     // No write is needed, so the missing write grant is never exercised: the
     // section lands applied even though a write would have been denied.
-    return { key, grade, allowed: new Set(["applied"]), mayWrite: false };
+    return { allowed: new Set(["applied"]), mayWrite: false };
   }
   if (witness !== undefined) {
     // The witness forces exactly one write, and every write is denied at this
@@ -245,7 +271,7 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
     // PermissionDenied fold in orchestrate.ts.
     const allowed: Set<Outcome> =
       required || meta.policy === "fail" ? new Set(["failed"]) : new Set(["skipped"]);
-    return { key, grade, allowed, mayWrite: false };
+    return { allowed, mayWrite: false };
   }
   // Apply: a needed write is denied mid-run. A required section (or fail
   // policy) cannot be skipped, so it fails; warn skips a non-required section.
@@ -260,7 +286,7 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
       : new Set(canSilentlyApply ? ["applied", "skipped"] : ["skipped"]);
   // In absent/read cases the section may attempt one write before the denial;
   // that write hits an "absent"-semantics family (mock rule 4 tolerates it).
-  return { key, grade, allowed, mayWrite: semantics === "absent" };
+  return { allowed, mayWrite: semantics === "absent" };
 }
 
 /** The worst-of section rank the engine uses to fold outcomes into a run result. */
@@ -288,40 +314,83 @@ export interface RunPrediction {
    */
   fullyGranted: boolean;
   /**
-   * True when the run aborts at the preflight barrier before rendering any
-   * section. The barrier only runs under apply + fail policy (orchestrate.ts),
-   * and fires when a section's preflight READ is permission-denied; on abort
-   * the step summary is EMPTY, so a per-section presence check must be skipped.
+   * Whether the run aborts at the preflight barrier (apply + fail policy, a denied
+   * preflight READ) before rendering any section; "possible" when only a mixed
+   * section under a read grant could arm it. Judged by judgePreflightAbort.
    */
-  preflightAborts: boolean;
+  preflightAborts: PreflightAbort;
+}
+
+export type PreflightAbort = "no" | "yes" | "possible";
+
+/**
+ * Whether a run DID abort at the barrier, from the abort path's witnesses (run.ts):
+ * the "preflight failed" error annotation decides, and the empty summary and
+ * "failed" result must agree with it; a disagreement or a wrong prediction contradicts.
+ */
+export type AbortVerdict =
+  | { kind: "aborted" }
+  | { kind: "ran" }
+  | { kind: "contradiction"; problem: string };
+
+export function judgePreflightAbort(
+  predicted: PreflightAbort,
+  observed: { summary: string; result: string | undefined; stdout: string },
+): AbortVerdict {
+  const contradiction = (problem: string): AbortVerdict => ({ kind: "contradiction", problem });
+  if (!/^::error::preflight failed/m.test(observed.stdout)) {
+    return predicted === "yes"
+      ? contradiction(
+          'a certain preflight abort was predicted, but the run never annotated "preflight failed"',
+        )
+      : { kind: "ran" };
+  }
+  if (observed.summary.trim() !== "" || observed.result !== "failed") {
+    return contradiction(
+      `the run annotated "preflight failed" yet wrote ${observed.summary.length} summary characters and result "${observed.result}"`,
+    );
+  }
+  return predicted === "no"
+    ? contradiction("no preflight abort was predicted, but the run aborted at the barrier")
+    : { kind: "aborted" };
+}
+
+/** The run-level fold of per-section abort verdicts: any "yes" aborts, else any "possible" may. */
+function foldPreflightAbort(verdicts: readonly PreflightAbort[]): PreflightAbort {
+  if (verdicts.includes("yes")) {
+    return "yes";
+  }
+  return verdicts.includes("possible") ? "possible" : "no";
+}
+
+/** True when the section runs write-granted for certain (its only effective grade is write). */
+function writeGranted(section: SectionPrediction): boolean {
+  return section.grades.every((grade) => grade === "write");
 }
 
 /**
- * Whether a section can be denied at the preflight barrier: its grade is none
- * and the denial reads as a permission error (a 403 style, or a
- * "denied"-semantics section whose read goes through the classifier). Preflight
- * performs READS only - orchestrate.ts runs every handler in check mode behind
- * a probe wrapper that stops writes client-side - so a read grade always PASSES
- * preflight; its first write is denied later, during apply, and the section
- * still renders its summary row. Absent a permission denial (a fine_grained
- * 404 on an absent-tolerant section) the preflight probe reads as "resource
- * absent" and does not arm the barrier either.
+ * Whether preflight (reads only) denies the section: grade none and the denial
+ * reads as a permission error (403 style, or "denied" semantics). Two effective
+ * grades make it "possible": the probe reaches the gated read only for some content.
  */
-function preflightDeniable(section: SectionPrediction, meta: ScenarioMeta): boolean {
+export function preflightDeniable(section: SectionPrediction, meta: ScenarioMeta): PreflightAbort {
   // Preflight only probes ACTIVE sections (orchestrate.ts filters by the
   // allowlist first), so an excluded section can never arm the barrier.
   if (section.allowed.has("excluded")) {
-    return false;
+    return "no";
   }
   if (NO_READ_SECTIONS.has(section.key)) {
     // No read endpoints: preflight probes nothing, so the barrier cannot arm.
-    return false;
+    return "no";
   }
-  if (section.grade !== "none") {
-    return false;
+  if (!section.grades.includes("none")) {
+    return "no";
+  }
+  if (section.grades.length > 1) {
+    return "possible";
   }
   const semantics = DENIAL_SEMANTICS[section.key];
-  return meta.denialStyle === 403 || semantics === "denied";
+  return meta.denialStyle === 403 || semantics === "denied" ? "yes" : "no";
 }
 
 /**
@@ -333,8 +402,10 @@ function preflightDeniable(section: SectionPrediction, meta: ScenarioMeta): bool
 export function predictOutcomes(meta: ScenarioMeta): RunPrediction {
   const sections = meta.sections.map((key) => predictSection(key, meta));
   const check = meta.mode === "check";
-  const preflightAborts =
-    !check && meta.policy === "fail" && sections.some((s) => preflightDeniable(s, meta));
+  const preflightAborts: PreflightAbort =
+    !check && meta.policy === "fail"
+      ? foldPreflightAbort(sections.map((s) => preflightDeniable(s, meta)))
+      : "no";
 
   // Compute the exit-code set: for each combination of per-section outcomes the
   // classes allow, the worst rank decides the exit. We only need the extremes:
@@ -350,12 +421,10 @@ export function predictOutcomes(meta: ScenarioMeta): RunPrediction {
     sections,
     allowedExitCodes: exitCodes,
     noWritesInCheck: check,
-    writeDeniedSections: sections
-      .filter((s) => s.grade !== "write" && !s.mayWrite)
-      .map((s) => s.key),
+    writeDeniedSections: sections.filter((s) => !writeGranted(s) && !s.mayWrite).map((s) => s.key),
     // Excluded sections never run, so they cannot break convergence or
     // idempotence: fullyGranted quantifies over the sections that WILL run.
-    fullyGranted: sections.every((s) => s.allowed.has("excluded") || s.grade === "write"),
+    fullyGranted: sections.every((s) => s.allowed.has("excluded") || writeGranted(s)),
     preflightAborts,
   };
 }
@@ -493,7 +562,7 @@ export function foldRepoResults(results: string[], check: boolean): string {
  */
 function runResultClass(run: RunPrediction): Set<string> {
   const check = run.noWritesInCheck;
-  if (run.preflightAborts) {
+  if (run.preflightAborts === "yes") {
     return new Set(["failed"]);
   }
   // Reachable flag combinations: start from all-false and, per section, branch

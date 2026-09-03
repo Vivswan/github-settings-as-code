@@ -5,9 +5,11 @@ import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.j
 import type { GraphqlOpDecl } from "../../src/sections/contract/graphql.js";
 import {
   endpointPermission,
+  readGating,
   type SectionMeta,
   sectionGrant,
   sectionOperations,
+  writeGatedReads,
 } from "../../src/sections/contract/module.js";
 import {
   grantFor,
@@ -16,6 +18,7 @@ import {
 } from "../../src/sections/contract/permissions.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { environmentsSection } from "../../src/sections/environments/index.js";
+import { SECTIONS } from "../../src/sections/registry.js";
 import { repositorySection } from "../../src/sections/repository/index.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 import { MockApi } from "../mock-api.js";
@@ -93,8 +96,91 @@ describe("sectionOperations", () => {
   });
 });
 
-/** A synthetic declaration carrying just the context fields under test. */
-function endpoint(extra: Partial<EndpointDecl>): EndpointDecl {
+describe("readGating", () => {
+  const plainGet: EndpointDecl = {
+    route: "GET /repos/{owner}/{repo}/interaction-limits",
+    statuses: { 200: "x" },
+  };
+  const gatedGet: EndpointDecl = {
+    route: "GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap",
+    statuses: { 200: "x" },
+    accessGrade: "write",
+  };
+  const put: EndpointDecl = {
+    route: "PUT /repos/{owner}/{repo}/interaction-limits",
+    statuses: { 200: "x" },
+  };
+  const withEndpoints = (endpoints: SectionMeta["endpoints"]): SectionMeta => ({
+    key: "interaction_limits",
+    permission: { repo: ["administration"] },
+    endpoints,
+    undeclaredDefault: "untouched",
+  });
+
+  test("accessGrade is representable on a GET only", () => {
+    // A mutating route is write-graded by its method, so the override there
+    // is a redundant state: the EndpointDecl arms make it fail to compile.
+    const mutating: EndpointDecl = {
+      route: "PUT /repos/{owner}/{repo}/interaction-limits",
+      statuses: { 200: "x" },
+      // @ts-expect-error accessGrade on a PUT
+      accessGrade: "write",
+    };
+    expect(endpointKind(mutating)).toBe("write");
+    expect(endpointKind(gatedGet)).toBe("write");
+    // A public endpoint has no grant to gate, so a gated read cannot be "none".
+    // @ts-expect-error permission "none" on a write-gated read
+    const publicGated: EndpointDecl = { ...gatedGet, permission: "none" };
+    expect(endpointKind(publicGated)).toBe("write");
+  });
+
+  test("classifies a section by how many of its reads GitHub gates at write", () => {
+    expect(readGating(withEndpoints({ get: plainGet, put }))).toBe("plain");
+    expect(readGating(withEndpoints({ get: gatedGet, put }))).toBe("write-gated");
+    expect(readGating(withEndpoints({ get: plainGet, capGet: gatedGet, put }))).toBe("mixed");
+    // No reads at all: nothing a grant could deny.
+    expect(readGating(withEndpoints({ put }))).toBe("plain");
+  });
+
+  test("a GraphQL read counts as a plain read, so it can turn write-gated into mixed", () => {
+    const readOp: GraphqlOpDecl = {
+      name: "SyntheticRead",
+      kind: "read",
+      query: "query SyntheticRead($owner: String!, $repo: String!) { repository { id } }",
+      outcomes: { ok: "x" },
+    };
+    expect(readGating({ ...withEndpoints({ get: gatedGet }), graphql: { read: readOp } })).toBe(
+      "mixed",
+    );
+  });
+
+  test("writeGatedReads lists the gated GETs with route and effective permission, in order", () => {
+    const section = withEndpoints({
+      get: plainGet,
+      capGet: gatedGet,
+      other: { ...gatedGet, permission: { repo: ["actions"] } },
+      put,
+    });
+    expect(writeGatedReads(section)).toEqual([
+      { route: gatedGet.route, permission: { repo: ["administration"] } },
+      { route: gatedGet.route, permission: { repo: ["actions"] } },
+    ]);
+    expect(writeGatedReads(withEndpoints({ get: plainGet, put }))).toEqual([]);
+  });
+
+  test("the registered sections agree: Codespaces secrets is the write-gated one", () => {
+    // The fuzz oracle and the permissions docs both read this classification;
+    // the README's PAT-form and check-mode prose pin the human side.
+    const gated = SECTIONS.filter((s) => readGating(s) !== "plain").map((s) => [
+      s.key,
+      readGating(s),
+    ]);
+    expect(gated).toEqual([["codespaces_secrets", "write-gated"]]);
+  });
+});
+
+/** A synthetic write declaration carrying just the context fields under test. */
+function endpoint(extra: Partial<Omit<EndpointDecl, "route" | "accessGrade">>): EndpointDecl {
   return { route: "POST /repos/{owner}/{repo}/rulesets", statuses: { 201: "created" }, ...extra };
 }
 

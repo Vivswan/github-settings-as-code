@@ -20,6 +20,9 @@ export type Route = keyof Endpoints | SupplementalRoute;
  */
 export type HintableStatus = 400 | 412 | 422;
 
+/** A route whose method is GET: the reads, as GitHub gates them. */
+type GetRoute = Extract<Route, `GET ${string}`>;
+
 /**
  * One REST endpoint a section may call. `route` is octokit's canonical
  * "METHOD /path/{param}" string. `statuses` maps each HTTP status the handler
@@ -28,19 +31,33 @@ export type HintableStatus = 400 | 412 | 422;
  * meanings are consumable by the e2e mock and its violation messages.
  * Handlers pass these declarations to the request helpers, which build the
  * concrete path via expand(), so a section can never call a path it has not
- * declared.
+ * declared. Two arms: graded by method, or a read gated at write (GatedReadDecl).
  */
-export interface EndpointDecl {
-  readonly route: Route;
+export type EndpointDecl =
+  | (EndpointDeclFields & {
+      readonly route: Route;
+      /**
+       * Overrides the section's permission for this endpoint; "none" means public.
+       * Omit it for the section's own permission. Resolved by endpointPermission().
+       */
+      readonly permission?: SectionPermission | "none";
+      readonly accessGrade?: never;
+    })
+  | GatedReadDecl;
+
+/**
+ * A GET GitHub gates at WRITE (the Codespaces secrets GETs), read by endpointKind().
+ * A public endpoint has no grant to gate, so `permission: "none"` is not representable.
+ */
+export interface GatedReadDecl extends EndpointDeclFields {
+  readonly route: GetRoute;
+  readonly permission?: SectionPermission;
+  readonly accessGrade: "write";
+}
+
+/** The fields both EndpointDecl arms share. */
+interface EndpointDeclFields {
   readonly statuses: Readonly<Record<number, string>>;
-  /**
-   * Overrides the section's permission for this one endpoint. "none" means
-   * the endpoint is public (no token permission needed). Omit it when the
-   * endpoint requires the section's own permission (the common case) - an
-   * override equal to the section permission is redundant. Downstream
-   * consumers resolve the effective permission via endpointPermission().
-   */
-  readonly permission?: SectionPermission | "none";
   /**
    * True for an advisory READ whose non-404 failures are tolerated (the section
    * proceeds without it rather than failing). The e2e mock derives its
@@ -74,15 +91,6 @@ export interface EndpointDecl {
    * this flag, so the contract lives on the declaration it describes.
    */
   readonly alwaysRewrite?: true;
-  /**
-   * The access grade GitHub gates this endpoint at, when it differs from the
-   * method-derived one (GET = read). Codespaces repository secrets are the
-   * known case: the fine-grained permission gates even the list and
-   * public-key READS at write. endpointKind() consults this, so the e2e
-   * mock's permission gate and the fuzz oracle model the real gating - a
-   * read-only grant then denies those reads exactly as production does.
-   */
-  readonly accessGrade?: "write";
   /**
    * The largest per_page this LIST endpoint accepts, when it is smaller than
    * the standard 100 (the Actions variables list caps at 30). The page loop
