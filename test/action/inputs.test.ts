@@ -59,13 +59,23 @@ describe("required-sections x sections cross-validation", () => {
   test("accepts required sections inside the allowlist", () => {
     setEnv({ "required-sections": "labels", sections: "labels,repository" });
     const parsed = parseConfig();
-    expect("error" in parsed).toBe(false);
+    if ("error" in parsed) {
+      throw new Error(`expected acceptance, got: ${parsed.error}`);
+    }
+    // Accepted AND carried into the config: a parse that silently dropped
+    // either set would otherwise pass.
+    expect(parsed.config.requiredSections).toEqual(new Set(["labels"]));
+    expect(parsed.config.onlySections).toEqual(new Set(["labels", "repository"]));
   });
 
   test("an empty sections input restricts nothing, so any required section passes", () => {
     setEnv({ "required-sections": "labels" });
     const parsed = parseConfig();
-    expect("error" in parsed).toBe(false);
+    if ("error" in parsed) {
+      throw new Error(`expected acceptance, got: ${parsed.error}`);
+    }
+    expect(parsed.config.requiredSections).toEqual(new Set(["labels"]));
+    expect(parsed.config.onlySections).toEqual(new Set());
   });
 
   test("unknown-name validation still wins over the cross-check", () => {

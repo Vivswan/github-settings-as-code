@@ -43,14 +43,15 @@ const FLEET_LABEL = 'the secret entry "FLEET_TOKEN"';
 const HOOK_LABEL = 'the webhook "https://x.test/h" config.secret';
 
 describe("secret provenance through the defaults merge", () => {
-  test("a target declaring nothing leaves the defaults' values operator-sourced", () => {
-    expect(mergedValues(FLEET_DEFAULTS, {} as SettingsFile)).toEqual([
-      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "operator" },
-    ]);
-  });
-
-  test("a target declaring an unrelated section leaves the defaults' values operator-sourced", () => {
-    const targetDoc = { labels: [{ name: "healthy", color: "00ff00" }] } as SettingsFile;
+  // Both targets leave actions_secrets undeclared, so the same branch keeps
+  // the defaults' values operator-sourced.
+  test.each([
+    ["a target declaring nothing", {} as SettingsFile],
+    [
+      "a target declaring an unrelated section",
+      { labels: [{ name: "healthy", color: "00ff00" }] } as SettingsFile,
+    ],
+  ])("%s leaves the defaults' values operator-sourced", (_name, targetDoc) => {
     expect(mergedValues(FLEET_DEFAULTS, targetDoc)).toEqual([
       { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "operator" },
     ]);

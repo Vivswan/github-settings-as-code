@@ -197,19 +197,28 @@ describe("tryGraphql errors[] mapping", () => {
     );
   });
 
-  test("mixed types classify rate limit before permission before payload", async () => {
+  // Rate limit wins over BOTH lower priorities: beside FORBIDDEN it must not
+  // read as a permission failure (the user would be told to fix their PAT),
+  // and beside UNPROCESSABLE it must not read as a bad payload.
+  test.each([
+    ["a permission error (FORBIDDEN)", { type: "FORBIDDEN", message: "denied" }],
+    ["a payload error (UNPROCESSABLE)", { type: "UNPROCESSABLE", message: "also broken" }],
+  ])("RATE_LIMITED mixed with %s still classifies as a rate limit", async (_name, sibling) => {
     stubFetch([
       () =>
         graphql({
           data: null,
-          errors: [
-            { type: "UNPROCESSABLE", message: "also broken" },
-            { type: "RATE_LIMITED", message: "slow down" },
-          ],
+          errors: [sibling, { type: "RATE_LIMITED", message: "slow down" }],
         }),
     ]);
     const result = await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r");
-    expect("error" in result && result.error.rateLimited).toBe(true);
+    if (!("error" in result)) {
+      throw new Error("expected an error result");
+    }
+    expect(result.error.status).toBe(403);
+    expect(result.error.rateLimited).toBe(true);
+    expect(isRateLimitError(result.error)).toBe(true);
+    expect(isPermissionError(result.error)).toBe(false);
   });
 
   test("partial data beside errors still fails closed", async () => {

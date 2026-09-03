@@ -358,28 +358,91 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(gets).toHaveLength(1);
   });
 
-  test("private-report != none combined with private-repos: show is a hard config error", async () => {
-    setDiscoveryEnv();
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "show";
-    process.env["INPUT_PRIVATE-REPORT"] = "issue";
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    // rejected at config parse, before any API call
-    expect(api.calls).toHaveLength(0);
-  });
-
-  test("issue-on-failure combined with private-repos: show is a hard config error too", async () => {
-    setDiscoveryEnv();
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "show";
-    process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(api.calls).toHaveLength(0);
-  });
+  // Every invalid private-repos/private-report/report-public-key combination
+  // is rejected at config parse - exit 1 before any API call - and the error
+  // annotation must name ITS OWN rule: exit code and call count alone would
+  // pass on a wrong-rule rejection.
+  test.each([
+    [
+      "private-report: issue with private-repos: show",
+      "show",
+      "issue",
+      "absent",
+      "nothing is redacted and no report would ever be sent",
+    ],
+    [
+      "private-report: issue-on-failure with private-repos: show",
+      "show",
+      "issue-on-failure",
+      "absent",
+      "nothing is redacted and no report would ever be sent",
+    ],
+    [
+      "private-report: artifact with private-repos: show",
+      "show",
+      "artifact",
+      "valid",
+      "nothing is redacted and no report would ever be sent",
+    ],
+    [
+      "private-report: artifact without report-public-key",
+      "redact",
+      "artifact",
+      "absent",
+      'private-report: artifact needs a "report-public-key" input',
+    ],
+    [
+      "private-report: artifact with a malformed report-public-key",
+      "redact",
+      "artifact",
+      "malformed",
+      "not a valid age recipient",
+    ],
+    [
+      "report-public-key with the issue channel",
+      "redact",
+      "issue",
+      "valid",
+      "only applies to private-report: artifact",
+    ],
+    [
+      "report-public-key with the issue-on-failure channel",
+      "redact",
+      "issue-on-failure",
+      "valid",
+      "only applies to private-report: artifact",
+    ],
+    [
+      "report-public-key with the default none channel",
+      "redact",
+      "none",
+      "valid",
+      "only applies to private-report: artifact",
+    ],
+  ] as const)(
+    "%s is a hard config error naming its rule",
+    async (_name, privateRepos, privateReport, key, fragment) => {
+      setDiscoveryEnv();
+      process.env.INPUT_REPOSITORY = "o/r";
+      process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
+      process.env["INPUT_PRIVATE-REPOS"] = privateRepos;
+      process.env["INPUT_PRIVATE-REPORT"] = privateReport;
+      if (key === "absent") {
+        delete process.env["INPUT_REPORT-PUBLIC-KEY"];
+      } else if (key === "malformed") {
+        process.env["INPUT_REPORT-PUBLIC-KEY"] = "age1notavalidkey"; // gitleaks:allow
+      } else {
+        process.env["INPUT_REPORT-PUBLIC-KEY"] = await identityToRecipient(
+          await generateX25519Identity(),
+        );
+      }
+      const api = new MockApi({});
+      expect(await run({ api: api, io: testIo })).toBe(1);
+      // rejected at config parse, before any API call
+      expect(api.calls).toHaveLength(0);
+      expect(captured.filter((line) => line.startsWith("error: ")).join("\n")).toContain(fragment);
+    },
+  );
 
   test("single-repo cross-repo redacted target delivers a report to its own issue", async () => {
     setDiscoveryEnv();
@@ -491,70 +554,6 @@ describe("run in multi-repo mode (env glue)", () => {
       "GET /repos/o/priv/issues?state=open&labels=settings-as-code-report&per_page=100",
     ]);
     expect(api.calls.some((c) => c.path.includes("/labels"))).toBe(false);
-  });
-
-  test("private-report: artifact without report-public-key is a hard config error", async () => {
-    setDiscoveryEnv();
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env["INPUT_PRIVATE-REPORT"] = "artifact";
-    delete process.env["INPUT_REPORT-PUBLIC-KEY"];
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    // rejected at parse, before any API call
-    expect(api.calls).toHaveLength(0);
-  });
-
-  test("private-report: artifact with a malformed report-public-key is a hard config error", async () => {
-    setDiscoveryEnv();
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env["INPUT_PRIVATE-REPORT"] = "artifact";
-    process.env["INPUT_REPORT-PUBLIC-KEY"] = "age1notavalidkey";
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(api.calls).toHaveLength(0);
-  });
-
-  test("report-public-key supplied without the artifact channel is a hard config error", async () => {
-    const recipient = await identityToRecipient(await generateX25519Identity());
-    setDiscoveryEnv();
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env["INPUT_PRIVATE-REPORT"] = "issue";
-    process.env["INPUT_REPORT-PUBLIC-KEY"] = recipient;
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(api.calls).toHaveLength(0);
-  });
-
-  test("report-public-key with issue-on-failure is a hard config error too", async () => {
-    const recipient = await identityToRecipient(await generateX25519Identity());
-    setDiscoveryEnv();
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env["INPUT_PRIVATE-REPORT"] = "issue-on-failure";
-    process.env["INPUT_REPORT-PUBLIC-KEY"] = recipient;
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(api.calls).toHaveLength(0);
-  });
-
-  test("private-report: artifact combined with private-repos: show is a hard config error", async () => {
-    const recipient = await identityToRecipient(await generateX25519Identity());
-    setDiscoveryEnv();
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "show";
-    process.env["INPUT_PRIVATE-REPORT"] = "artifact";
-    process.env["INPUT_REPORT-PUBLIC-KEY"] = recipient;
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(api.calls).toHaveLength(0);
   });
 
   test("single-repo artifact channel redacts and attempts delivery without changing the result", async () => {

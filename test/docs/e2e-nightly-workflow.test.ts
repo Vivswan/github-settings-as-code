@@ -63,9 +63,11 @@ describe("e2e-nightly.yml issue + auto-assign path", () => {
 
   test("tolerates a dispatch failure as a warning, not a job failure", () => {
     const dispatch = steps.find((s) => (s.run ?? "").includes("gh workflow run auto-assign.yml"));
-    expect(dispatch?.run).toContain("::warning::");
-    // The `|| echo` keeps a dispatch failure from failing the step.
-    expect(dispatch?.run).toContain("||");
+    // The joined `|| echo "::warning::` shape ties the warning to the failed
+    // dispatch: the echo runs exactly when the dispatch fails, and its zero
+    // exit keeps the step green. Asserting the pieces separately would pass
+    // with the warning detached from the fallback branch.
+    expect(dispatch?.run).toContain('|| echo "::warning::');
   });
 });
 

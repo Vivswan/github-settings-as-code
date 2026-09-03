@@ -13,8 +13,7 @@ import {
   PRIVATE_REPORT_CHANNELS,
   REDACTED_DETAIL,
 } from "../../src/action/redact.js";
-import { REPO_RESULTS, validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { Io } from "../../src/io.js";
+import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import {
   PROBOT_PARITY_KEYS,
@@ -25,15 +24,17 @@ import {
 import { sectionOperations } from "../../src/sections/contract/module.js";
 import type { PatResource } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
 import {
   CLAIM_FAMILY,
   CLAIM_STEMS,
+  countWord,
   defaultClaimProblems,
   deleteEnumerationProblems,
   stemNegation,
 } from "./claims.js";
 import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
+import { assertValidSettingsExample } from "./settings-examples.js";
+import { stalePins } from "./version-pins.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
@@ -44,6 +45,24 @@ const UNDECLARED_DEFAULT_DISPLAY: Record<string, string> = {
   keep: "kept (settable)",
   untouched: "untouched",
 };
+
+/**
+ * Assert the parenthesized enumeration `leadRe` captures from `text` carries
+ * each `expected` value backticked and nothing else backticked - the same pin
+ * the action-yml contract test applies to the output description, so a new
+ * value cannot skip the prose and a dropped one cannot linger.
+ */
+function assertBacktickedEnumeration(
+  text: string,
+  leadRe: RegExp,
+  expected: readonly string[],
+  label: string,
+): void {
+  const parenthesized = text.match(leadRe)?.[1];
+  expect(parenthesized, label).toBeDefined();
+  const listed = [...(parenthesized ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
+  expect(listed.sort()).toEqual([...expected].sort());
+}
 
 describe("README Sections table", () => {
   const rows = tableRows(sectionLines(readme, "Sections", "README.md"));
@@ -127,25 +146,18 @@ describe("README Sections table", () => {
 
 describe("README Outputs paragraph", () => {
   test("the result value list names exactly the REPO_RESULTS members", () => {
-    // Same pin the action-yml contract test applies to the output
-    // description: REPO_RESULTS (src/engine/orchestrate.ts) is the canonical
-    // value list. Here the parenthesized enumeration after "Outputs:
-    // `result`" must carry each value backticked, and nothing else backticked
-    // may sit inside it, so a new value cannot skip the README and a dropped
-    // one cannot linger.
-    const parenthesized = readme.match(/Outputs: `result` \(([^)]*)\)/)?.[1];
-    expect(
-      parenthesized,
+    // REPO_RESULTS (src/engine/orchestrate.ts) is the canonical value list,
+    // same as the action-yml contract test's output-description pin.
+    assertBacktickedEnumeration(
+      readme,
+      /Outputs: `result` \(([^)]*)\)/,
+      REPO_RESULTS,
       'README must enumerate the result values in "Outputs: `result` (...)"',
-    ).toBeDefined();
-    const listed = [...(parenthesized ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
-    expect(listed.sort()).toEqual([...REPO_RESULTS].sort());
+    );
   });
 });
 
 describe("README example settings.yml blocks", () => {
-  const silentIo: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
-
   test("every settings.yml example validates and its repository keys are known", () => {
     // The example block parses to a settings document (other yaml blocks are
     // workflow yaml). Validate any block whose top level is a mapping of known
@@ -166,22 +178,7 @@ describe("README example settings.yml blocks", () => {
       if (keys.length === 0 || !keys.some((k) => known.has(k))) {
         continue; // not a settings document
       }
-      const invalid = validateSettingsDoc(doc, "README example", new Set(), silentIo);
-      expect(
-        "error" in invalid ? invalid.error : null,
-        `README settings.yml example failed validation: ${"error" in invalid ? invalid.error : ""}`,
-      ).toBeNull();
-      const repository = (doc as Record<string, unknown>).repository;
-      if (repository && typeof repository === "object") {
-        for (const key of Object.keys(repository)) {
-          if (key.startsWith("enable_") || key === "topics") {
-            expect(
-              SPECIAL_KEYS.has(key),
-              `README example uses repository.${key}, which looks like a special key but is not in SPECIAL_KEYS`,
-            ).toBe(true);
-          }
-        }
-      }
+      assertValidSettingsExample(doc, "README settings.yml example");
       validated++;
     }
     expect(validated, "no settings.yml example block was found in the README").toBeGreaterThan(0);
@@ -189,28 +186,20 @@ describe("README example settings.yml blocks", () => {
 });
 
 describe("README version pins", () => {
-  const manifest = JSON.parse(
-    readFileSync(join(ROOT, ".release-please-manifest.json"), "utf8"),
-  ) as Record<string, string>;
-  // Before the first release no tag exists, so no pin can be right yet and
-  // there is nothing to enforce.
-  const version = manifest["."] ?? "";
-
   test("every uses: pin names the current release's moving major tag", () => {
-    if (version === "0.0.0") {
-      return;
-    }
     // The uses: pins carry the inline x-release-please-major annotation, so
     // every release PR that bumps the major rewrites them together with the
     // manifest; this test is the tripwire for the annotations rotting away.
-    const major = `v${version.split(".")[0]}`;
-    const pins = [...readme.matchAll(/uses: Vivswan\/github-settings-as-code@(\S+)/g)].map(
-      (m) => m[1],
-    );
-    expect(pins.length).toBeGreaterThan(0);
-    for (const pin of pins) {
-      expect(pin, `README pins @${pin}, but the current major tag is ${major}`).toBe(major);
+    const pins = stalePins([{ label: "README.md", text: readme }]);
+    if (pins === null) {
+      return; // nothing released yet, no pin can be right
     }
+    expect(pins.references).toBeGreaterThan(0);
+    expect(
+      pins.stale.map(
+        (pin) => `README pins @${pin.ref}, but the current major tag is ${pins.major}`,
+      ),
+    ).toEqual([]);
   });
 
   test("the exact-pin advice names the version tag and the build/ namespace stays retired", () => {
@@ -397,9 +386,10 @@ describe("private repositories guide", () => {
         `the private repositories guide does not document the "${channel}" channel`,
       ).toBe(true);
     }
-    // `none` is the default (it delivers nothing), so it is named as the input
-    // default rather than as a delivering channel; assert it appears at all.
-    expect(section.includes("none")).toBe(true);
+    // `none` is the default (it delivers nothing), so it is named as the
+    // input default rather than as a delivering channel; pin the verbatim
+    // default sentence - a bare "none" would match unrelated prose.
+    expect(section).toContain("defaults to `private-report: none`, which delivers nothing");
   });
 
   test("states the default redaction policy and the placeholder/detail constants", () => {
@@ -434,13 +424,12 @@ describe("private repositories guide", () => {
     // The safe-skeleton paragraph enumerates every result value a redacted
     // target can show; pin the parenthesized list to REPO_RESULTS the same
     // way the action-yml contract test pins the output description.
-    const parenthesized = section.replace(/\n/g, " ").match(/the overall result \(([^)]*)\)/)?.[1];
-    expect(
-      parenthesized,
+    assertBacktickedEnumeration(
+      section.replace(/\n/g, " "),
+      /the overall result \(([^)]*)\)/,
+      REPO_RESULTS,
       'the guide must enumerate the result values in "the overall result (...)"',
-    ).toBeDefined();
-    const listed = [...(parenthesized ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
-    expect(listed.sort()).toEqual([...REPO_RESULTS].sort());
+    );
   });
 });
 
@@ -534,27 +523,6 @@ describe("section-contract README-heading references", () => {
   });
 });
 
-// The written-out counts the prose uses; extend deliberately when a derived
-// list outgrows it (the lookup failing IS the tripwire).
-const COUNT_WORDS = [
-  "zero",
-  "one",
-  "two",
-  "three",
-  "four",
-  "five",
-  "six",
-  "seven",
-  "eight",
-  "nine",
-  "ten",
-  "eleven",
-  "twelve",
-  "thirteen",
-  "fourteen",
-  "fifteen",
-] as const;
-
 describe("forward-compatibility closed-sections claim", () => {
   test("the guide's prose names exactly the closedSurface sections", () => {
     // closedSurface is the module-level source of which sections reject
@@ -576,10 +544,7 @@ describe("forward-compatibility closed-sections claim", () => {
     ).toBeDefined();
     // The sentence opens with the count in words; pin it to the derived list
     // so the next closed section cannot leave the number stale.
-    const word = COUNT_WORDS[closed.length];
-    if (word === undefined) {
-      throw new Error("extend COUNT_WORDS: more closed sections than the lookup covers");
-    }
+    const word = countWord(closed.length);
     const capitalized = word.charAt(0).toUpperCase() + word.slice(1);
     expect(sentence).toContain(`${capitalized} sections are closed`);
     for (const key of closed) {
@@ -697,11 +662,8 @@ describe("pre-filled PAT form URL", () => {
 });
 
 describe("knobbed-section count prose", () => {
-  const countWord = COUNT_WORDS[UNDECLARED_POLICY_SECTIONS.length];
-  if (countWord === undefined) {
-    throw new Error("extend COUNT_WORDS: more knobbed sections than the lookup covers");
-  }
-  const capitalized = countWord[0]?.toUpperCase() + countWord.slice(1);
+  const word = countWord(UNDECLARED_POLICY_SECTIONS.length);
+  const capitalized = word.charAt(0).toUpperCase() + word.slice(1);
   const policyDoc = readFileSync(join(ROOT, "docs", "reference", "undeclared-policy.md"), "utf8");
 
   test("the undeclared-policy guide's intro counts and names every knobbed section", () => {
@@ -715,8 +677,8 @@ describe("knobbed-section count prose", () => {
     }
     // The layering boundary paragraph restates the count in words.
     expect(
-      policyDoc.includes(`The ${countWord} top-level section lists`),
-      `the layering boundary must say "The ${countWord} top-level section lists"`,
+      policyDoc.includes(`The ${word} top-level section lists`),
+      `the layering boundary must say "The ${word} top-level section lists"`,
     ).toBe(true);
   });
 

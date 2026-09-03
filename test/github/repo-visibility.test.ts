@@ -45,9 +45,15 @@ describe("createVisibilityResolver", () => {
     expect(await createVisibilityResolver(api)("o/int")).toBe("internal");
   });
 
-  test("only an explicit private === false (or a real visibility) yields public", async () => {
-    const api = new MockApi({ "GET /repos/o/pub": { data: { private: false } } });
-    expect(await createVisibilityResolver(api)("o/pub")).toBe("public");
+  // The fail-closed negative space of "only an explicit private === false (or
+  // a real visibility) yields public": every near-miss resolves unknown.
+  test.each([
+    ["a string 'false' private flag", { private: "false" }],
+    ["a numeric 0 private flag", { private: 0 }],
+    ["an out-of-enum visibility string", { visibility: "PUBLIC" }],
+  ])("%s fails closed to unknown, never public", async (_name, body) => {
+    const api = new MockApi({ "GET /repos/o/odd": { data: body } });
+    expect(await createVisibilityResolver(api)("o/odd")).toBe("unknown");
   });
 
   test("one probe per repository, case-insensitively, errors included", async () => {

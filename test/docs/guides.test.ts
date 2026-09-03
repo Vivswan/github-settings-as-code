@@ -13,19 +13,17 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { Io } from "../../src/io.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
 import { deleteEnumerationProblems } from "./claims.js";
 import { fencedBlocks } from "./markdown.js";
+import { assertValidSettingsExample } from "./settings-examples.js";
+import { stalePins } from "./version-pins.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const DOCS = join(ROOT, "docs");
-const silentIo: Io = { annotate: () => {}, log: () => {}, mask: () => {} };
 
 const REQUIRED_PAGES = [
   "README.md",
@@ -339,22 +337,7 @@ describe("docs/ guide pages", () => {
         } catch (error) {
           throw new Error(`docs/${page} has an unparseable settings example: ${error}`);
         }
-        const invalid = validateSettingsDoc(doc, `docs/${page} example`, new Set(), silentIo);
-        expect(
-          "error" in invalid ? invalid.error : null,
-          `docs/${page} settings example failed validation: ${"error" in invalid ? invalid.error : ""}`,
-        ).toBeNull();
-        const repository = (doc as Record<string, unknown>).repository;
-        if (repository && typeof repository === "object") {
-          for (const key of Object.keys(repository)) {
-            if (key.startsWith("enable_") || key === "topics") {
-              expect(
-                SPECIAL_KEYS.has(key),
-                `docs/${page} example uses repository.${key}, which looks like a special key but is not in SPECIAL_KEYS`,
-              ).toBe(true);
-            }
-          }
-        }
+        assertValidSettingsExample(doc, `docs/${page} settings example`);
       }
     });
 
@@ -530,35 +513,22 @@ describe("docs/ guide pages", () => {
     // README pins exact versions inside release-please markers; guides use
     // the moving major tag instead so they do not rot per patch release. This
     // pin makes a major-version bump fail here, forcing the guides to follow.
-    const manifest = JSON.parse(
-      readFileSync(join(ROOT, ".release-please-manifest.json"), "utf8"),
-    ) as Record<string, string>;
-    const version = manifest["."] ?? "";
-    if (version === "0.0.0") {
+    const pins = stalePins(
+      guidePages().map((page) => ({
+        label: `docs/${page}`,
+        text: readFileSync(join(DOCS, page), "utf8"),
+      })),
+    );
+    if (pins === null) {
       return; // nothing released yet, no tag can be right
-    }
-    const major = `v${version.split(".")[0]}`;
-    let references = 0;
-    const stale: string[] = [];
-    for (const page of guidePages()) {
-      const markdown = readFileSync(join(DOCS, page), "utf8");
-      for (const [index, line] of markdown.split("\n").entries()) {
-        const m = line.match(/uses: Vivswan\/github-settings-as-code@(\S+)/);
-        if (!m) {
-          continue;
-        }
-        references++;
-        if (m[1] !== major) {
-          stale.push(`docs/${page}:${index + 1} pins @${m[1]}: ${line.trim()}`);
-        }
-      }
     }
     // The guides carry workflow snippets, so zero matches means the pattern
     // rotted, not that the docs went snippet-free.
-    expect(references).toBeGreaterThan(0);
+    expect(pins.references).toBeGreaterThan(0);
+    const stale = pins.stale.map((pin) => `${pin.label}:${pin.line} pins @${pin.ref}: ${pin.text}`);
     expect(
       stale,
-      `${stale.length} guide snippet(s) do not reference the moving major tag @${major}:\n` +
+      `${stale.length} guide snippet(s) do not reference the moving major tag @${pins.major}:\n` +
         `  ${stale.join("\n  ")}\n` +
         `Fix each line by appending " # x-release-please-major" and listing the file under\n` +
         `extra-files in release-please-config.json, so release PRs rewrite the tag; then\n` +

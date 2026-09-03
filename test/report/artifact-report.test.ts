@@ -34,7 +34,9 @@ describe("encryptReport", () => {
   test("round-trips through the age library's own decrypter", async () => {
     const { identity, recipient } = await testKeypair();
     const ciphertext = await encryptReport(recipient, "the private report body");
-    expect(ciphertext).not.toContain(new TextEncoder().encode("private"));
+    // Buffer.includes is a subsequence search; Uint8Array toContain would
+    // compare elements and pass even with the plaintext bytes present.
+    expect(Buffer.from(ciphertext).includes(Buffer.from("private"))).toBe(false);
     const decrypter = new Decrypter();
     decrypter.addIdentity(identity);
     expect(await decrypter.decrypt(ciphertext, "text")).toBe("the private report body");

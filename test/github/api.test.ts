@@ -926,49 +926,101 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
   });
 
-  test("a toJSON collapsing the payload to a primitive aborts instead of leaking", async () => {
-    // A plain object whose toJSON returns a string would dodge the
-    // field-name scan entirely, print in the trace, and go out as a raw
-    // body. Plain data never changes container-ness through a JSON
-    // round-trip, so the collapse aborts the request.
-    const collapser = {
-      note: "clean-looking",
-      toJSON(): unknown {
-        return `flattened: ${hostileSecret}`;
+  // Hostile toJSON shapes, one skeleton: the hand-rolled normalization never
+  // consults toJSON and rejects a function-valued property as non-plain data,
+  // so every shape aborts unsent. The shared calls === 0 assertion is the
+  // proof - a stringify-based normalization would have invoked toJSON, and a
+  // stateful one could show the scan a clean object and the wire the secret.
+  const hostileToJson: Array<[string, (record: () => void) => unknown]> = [
+    [
+      // Plain data never changes container-ness through a JSON round-trip; a
+      // collapse to a primitive would dodge the field-name scan entirely.
+      "collapsing the payload to a primitive",
+      (record) => ({
+        note: "clean-looking",
+        toJSON(): unknown {
+          record();
+          return `flattened: ${hostileSecret}`;
+        },
+      }),
+    ],
+    [
+      "returning null",
+      (record) => ({
+        toJSON(): unknown {
+          record();
+          return null;
+        },
+      }),
+    ],
+    [
+      // First serialization would return a clean object, every later one the
+      // secret.
+      "returning clean output first and the secret later",
+      (record) => {
+        let serializations = 0;
+        return {
+          note: "looks-clean",
+          toJSON(): unknown {
+            record();
+            serializations++;
+            return serializations === 1
+              ? { note: "looks-clean" }
+              : { note: "looks-clean", secret: hostileSecret };
+          },
+        };
       },
-    };
-    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    const dbg = captureDebug();
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", collapser);
-    } catch (error) {
-      thrown = error as Error;
-    } finally {
-      dbg.restore();
-    }
-    expect(thrown?.message).toContain("was not sent");
-    expect(thrown?.message).not.toContain("he said");
-    expect(sent.bodies).toHaveLength(0);
-    expect(dbg.lines.join("")).not.toContain("he said");
-  });
-
-  test("a toJSON returning null aborts the same way", async () => {
-    const nuller = {
-      toJSON(): unknown {
-        return null;
-      },
-    };
-    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", nuller);
-    } catch (error) {
-      thrown = error as Error;
-    }
-    expect(thrown?.message).toContain("was not sent");
-    expect(sent.bodies).toHaveLength(0);
-  });
+    ],
+    [
+      // The sharpest shape: a DIFFERENT plain container where the secret sits
+      // under no field name at all, so a stringify scan would find nothing to
+      // mask and trace the value verbatim.
+      "hiding the secret in a renamed container",
+      (record) => ({
+        secret: hostileSecret,
+        toJSON(): unknown {
+          record();
+          return [hostileSecret];
+        },
+      }),
+    ],
+    [
+      // The field exists only in toJSON's output; a stringify-based
+      // normalization would have to mask it after the fact.
+      "smuggling a secret field into clean-looking output",
+      (record) => ({
+        note: "clean-looking",
+        toJSON(): unknown {
+          record();
+          return { note: "clean-looking", secret: hostileSecret };
+        },
+      }),
+    ],
+  ];
+  test.each(hostileToJson)(
+    "a toJSON %s aborts - toJSON is never consulted",
+    async (_shape, makePayload) => {
+      let calls = 0;
+      const payload = makePayload(() => {
+        calls++;
+      });
+      const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+      const dbg = captureDebug();
+      let thrown: Error | undefined;
+      try {
+        await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", payload);
+      } catch (error) {
+        thrown = error as Error;
+      } finally {
+        dbg.restore();
+      }
+      expect(thrown?.message).toContain("was not sent");
+      expect(thrown?.message).not.toContain("he said");
+      expect(calls).toBe(0);
+      expect(sent.bodies).toHaveLength(0);
+      expect(dbg.lines.join("")).not.toContain("he said");
+    },
+  );
 
   test("a proxy with a throwing getPrototypeOf trap aborts without leaking its error", async () => {
     // The reflective container check itself can throw on a hostile proxy;
@@ -1162,64 +1214,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(dbg.lines.join("")).not.toContain("he said");
   });
 
-  test("a STATEFUL toJSON aborts - toJSON is never consulted at all", async () => {
-    // First serialization would return a clean object, every later one the
-    // secret. The hand-rolled normalization never invokes toJSON and
-    // rejects any function-valued property as non-plain data, so the
-    // request aborts and the secret never leaves the process in any form.
-    let calls = 0;
-    const shifty = {
-      note: "looks-clean",
-      toJSON(): unknown {
-        calls++;
-        return calls === 1
-          ? { note: "looks-clean" }
-          : { note: "looks-clean", secret: hostileSecret };
-      },
-    };
-    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    const dbg = captureDebug();
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", shifty);
-    } catch (error) {
-      thrown = error as Error;
-    } finally {
-      dbg.restore();
-    }
-    expect(thrown?.message).toContain("was not sent");
-    expect(calls).toBe(0);
-    expect(sent.bodies).toHaveLength(0);
-    expect(dbg.lines.join("")).not.toContain("he said");
-  });
-
-  test("a toJSON hiding the secret in a renamed container aborts", async () => {
-    // The sharpest shape: toJSON returns a DIFFERENT plain container where
-    // the secret sits under no field name at all - a scan of stringify
-    // output would find nothing to mask and trace the value verbatim.
-    // Never invoking toJSON closes the class.
-    const renamer = {
-      secret: hostileSecret,
-      toJSON(): unknown {
-        return [hostileSecret];
-      },
-    };
-    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    const dbg = captureDebug();
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", renamer);
-    } catch (error) {
-      thrown = error as Error;
-    } finally {
-      dbg.restore();
-    }
-    expect(thrown?.message).toContain("was not sent");
-    expect(thrown?.message).not.toContain("he said");
-    expect(sent.bodies).toHaveLength(0);
-    expect(dbg.lines.join("")).not.toContain("he said");
-  });
-
   test("field-name matching is case-insensitive", async () => {
     // No GitHub field is anything but lowercase snake_case, but a passthrough
     // payload can carry arbitrary user keys; a `Secret:` spelling must not
@@ -1279,30 +1273,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
     expect(isRateLimitError(result.error)).toBe(true);
     expect(JSON.stringify(result.error)).not.toContain("he said");
-  });
-
-  test("a toJSON smuggling a secret field aborts - functions are not plain data", async () => {
-    // The field exists only in toJSON's output; a stringify-based
-    // normalization would have to mask it after the fact. Never invoking
-    // toJSON and rejecting function-valued properties aborts instead.
-    const sneaky = {
-      note: "clean-looking",
-      toJSON(): unknown {
-        return { note: "clean-looking", secret: hostileSecret };
-      },
-    };
-    stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = captureDebug();
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", sneaky);
-    } catch (error) {
-      thrown = error as Error;
-    } finally {
-      dbg.restore();
-    }
-    expect(thrown?.message).toContain("was not sent");
-    expect(dbg.lines.join("")).not.toContain("he said");
   });
 
   test("a plain-text error body to an encrypted_value request is withheld too", async () => {

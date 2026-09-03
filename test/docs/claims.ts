@@ -57,6 +57,36 @@ export function deleteEnumerationProblems(
   return problems;
 }
 
+// The written-out counts the docs prose uses; extend deliberately when a
+// derived list outgrows it (countWord's loud throw IS the tripwire).
+const COUNT_WORDS = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+] as const;
+
+/** The written-out form of `n`, shared by every prose-count pin. */
+export function countWord(n: number): string {
+  const word = COUNT_WORDS[n];
+  if (word === undefined) {
+    throw new Error(`extend COUNT_WORDS (test/docs/claims.ts): no word for count ${n}`);
+  }
+  return word;
+}
+
 /** Word-boundary claim families; "housekeeping" must not read as a keep claim. */
 export const CLAIM_FAMILY: Record<"delete" | "keep", RegExp> = {
   delete: new RegExp(String.raw`\b(?:${DELETE_STEMS})\b`, "i"),
