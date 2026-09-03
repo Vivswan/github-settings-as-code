@@ -23,8 +23,8 @@
  *   variable fields keep working; phantomKeys warns when a declared key does
  *   not exist on the live variable.
  *
- * Selector fan-out for this file is declared in SHARED_FAN_OUT
- * (.github/scripts/changed-sections.ts).
+ * The smoke selector (.github/scripts/changed-sections.ts) derives this
+ * file's section fan-out from the import graph.
  */
 
 import { z } from "zod";

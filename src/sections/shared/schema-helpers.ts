@@ -3,8 +3,9 @@
  * schema modules under src/sections/<key>/schema.ts. This module imports
  * ONLY zod: a section schema importing root schema.ts back would be a cycle
  * whose top-level const evaluation TDZ-crashes at import time, so everything
- * both sides need lives here. Selector fan-out for this file is declared in
- * SHARED_FAN_OUT (.github/scripts/changed-sections.ts).
+ * both sides need lives here. The smoke selector
+ * (.github/scripts/changed-sections.ts) derives this file's section fan-out
+ * from the import graph.
  */
 
 import { z } from "zod";

@@ -8,8 +8,8 @@
  * above the shared secrets engine (./secrets-engine.ts), which owns the
  * existence-based reconciliation and client-side sealing; the per-environment
  * secrets family (environments) consumes the engine directly with its own
- * nested scopes. Selector fan-out for this file is declared in
- * SHARED_FAN_OUT (.github/scripts/changed-sections.ts).
+ * nested scopes. The smoke selector (.github/scripts/changed-sections.ts)
+ * derives this file's section fan-out from the import graph.
  */
 
 import type { z } from "zod";

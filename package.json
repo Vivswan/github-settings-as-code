@@ -43,6 +43,7 @@
     "graphql": "17.0.2",
     "knip": "6.34.0",
     "lefthook": "2.1.12",
+    "oxc-parser": "0.147.0",
     "typescript": "7.0.2"
   }
 }
