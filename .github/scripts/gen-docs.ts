@@ -1,7 +1,6 @@
-// Emits README.md's generated regions (build:docs): the Sections table, the `result` value
-// list, and the token-form link, each between `<!-- BEGIN/END GENERATED: <name> -->` markers.
-// Authored cells come from the docs registry, everything else from the section declarations.
-
+// Emits the generated regions of README.md and COVERAGE.md (build:docs), each between
+// `<!-- BEGIN/END GENERATED: <name> -->` markers: the README's Sections table, `result` list, and
+// token-form link, and COVERAGE's whole body. Authored prose from the docs registry + coverage-data.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_RESULTS, type RepoResult } from "../../src/engine/orchestrate.js";
@@ -16,10 +15,17 @@ import { RESOURCE_SLUGS } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
-import { escapeRe, type GeneratedRegion, regenerateRegions } from "./lib/generated-regions.js";
+import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
+import {
+  escapeRe,
+  type GeneratedRegion,
+  regenerateRegions,
+  regionBounds,
+} from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const README_PATH = "README.md";
+const COVERAGE_PATH = "COVERAGE.md";
 
 /** The repository the README documents; the token form's name and description derive from it. */
 const REPO_SLUG = "Vivswan/github-settings-as-code";
@@ -92,9 +98,9 @@ export function renderPatCell(grant: string): string {
 
 /** A markdown table cell; a pipe or a line break would split the row, so both are refused. */
 function cell(text: string, where: string): string {
-  if (/[|\r\n]/.test(text)) {
+  if (text.trim() === "" || /[|\r\n]/.test(text)) {
     throw new Error(
-      `gen-docs: ${where} contains "|" or a line break, which would split its table row: ${text}`,
+      `gen-docs: ${where} is blank or contains "|" or a line break, which would break its table row: "${text}"`,
     );
   }
   return text;
@@ -107,7 +113,7 @@ const TABLE_HEADER =
 /** The README Sections table, one row per section in the given order; a section without docs throws. */
 export function renderSectionsTable(
   sections: readonly SectionsTableRow[],
-  docs: Readonly<Record<string, SectionDocs>>,
+  docs: Readonly<Record<string, Pick<SectionDocs, "readme">>>,
 ): string {
   const rows = sections.map((section) => {
     const doc = docs[section.key];
@@ -123,6 +129,116 @@ export function renderSectionsTable(
     ];
   });
   return [TABLE_HEADER, ...rows.map((cells) => `| ${cells.join(" | ")} |`)].join("\n");
+}
+
+/** Text for inside a markdown code span: a cell, and a backtick would close the span early. */
+function codeSpan(text: string, where: string): string {
+  if (text.includes("`")) {
+    throw new Error(
+      `gen-docs: ${where} contains a backtick, which would close its code span: ${text}`,
+    );
+  }
+  return cell(text, where);
+}
+
+/** A paragraph of authored prose: a blank one would leave its heading unexplained, so it is refused. */
+function paragraph(text: string, where: string): string {
+  if (text.trim() === "" || /[\r\n]/.test(text)) {
+    throw new Error(`gen-docs: ${where} is blank or spans several lines: "${text}"`);
+  }
+  return text;
+}
+
+/** A markdown list item's text; a line break would end the bullet early, so it is refused. */
+function bullet(text: string, where: string): string {
+  if (text.trim() === "" || /[\r\n]/.test(text)) {
+    throw new Error(`gen-docs: ${where} is blank or contains a line break: "${text}"`);
+  }
+  return `- ${text}`;
+}
+
+/** The COVERAGE page's section headings, as rendered and as the region shape expects them. */
+const SUPPORTED_HEADING = "## Supported";
+const GAPS_HEADING = "## Repo-scoped gaps (not built yet)";
+const NO_API_HEADING = "## No public API (cannot be built)";
+const OUT_OF_SCOPE_HEADING = "## Out of scope (user or org account surface)";
+
+/** The COVERAGE tables' header and rule lines. */
+const SUPPORTED_HEADER = "| Area | Section | Notes |\n|---|---|---|";
+const GAPS_HEADER = "| Area | Endpoints | Why it matters |\n|---|---|---|";
+
+// The body of COVERAGE.md below its title: the Supported table (each section's rows, sections in
+// the data's display order; the Section cell is the key plus the row's `keys` in parentheses),
+// then the authored gaps table or its empty-state note, no-public-API list, and out-of-scope list.
+export function renderCoverage(
+  sections: ReadonlyArray<Pick<SectionMeta, "key">>,
+  docs: Readonly<Record<string, Pick<SectionDocs, "coverage">>>,
+  data: CoverageData,
+): string {
+  const registered = new Set(sections.map((section) => section.key));
+  const ordered = new Set(data.supportedOrder);
+  const missing = [...registered].filter((key) => !ordered.has(key));
+  const stray = data.supportedOrder.filter(
+    (key, i) => !registered.has(key) || data.supportedOrder.indexOf(key) !== i,
+  );
+  if (missing.length > 0 || stray.length > 0) {
+    throw new Error(
+      `gen-docs: supportedOrder must list every section exactly once; missing [${missing.join(", ")}], unknown or repeated [${stray.join(", ")}]`,
+    );
+  }
+  const supported = data.supportedOrder.flatMap((key) => {
+    const doc = docs[key];
+    if (doc === undefined) {
+      throw new Error(`gen-docs: section "${key}" has no docs entry`);
+    }
+    return doc.coverage.map((row) => {
+      const where = `a ${key} coverage row`;
+      const keys = row.keys === undefined ? "" : ` (${codeSpan(row.keys, `${where}'s keys`)})`;
+      const cells = [
+        cell(row.area, `${where}'s Area cell`),
+        `\`${key}${keys}\``,
+        cell(row.notes, `${where}'s Notes cell`),
+      ];
+      return `| ${cells.join(" | ")} |`;
+    });
+  });
+  const gaps =
+    data.gaps.rows === undefined
+      ? [paragraph(data.gaps.emptyNote, "the gaps section's empty-state note"), "", GAPS_HEADER]
+      : [
+          GAPS_HEADER,
+          ...data.gaps.rows.map((row) => {
+            const where = `the "${row.area}" gap row`;
+            const cells = [
+              cell(row.area, `${where}'s Area cell`),
+              cell(row.endpoints.join(", "), `${where}'s Endpoints cell`),
+              cell(row.why, `${where}'s Why cell`),
+            ];
+            return `| ${cells.join(" | ")} |`;
+          }),
+        ];
+  return [
+    paragraph(data.intro, "the page intro"),
+    "",
+    SUPPORTED_HEADING,
+    "",
+    SUPPORTED_HEADER,
+    ...supported,
+    "",
+    GAPS_HEADING,
+    "",
+    ...gaps,
+    "",
+    NO_API_HEADING,
+    "",
+    paragraph(data.noPublicApi.intro, "the no-public-API intro"),
+    "",
+    ...data.noPublicApi.items.map((item) => bullet(item, "a no-public-API item")),
+    "",
+    OUT_OF_SCOPE_HEADING,
+    "",
+    ...data.outOfScope.items.map((item) => bullet(item, "an out-of-scope item")),
+  ].join("\n");
 }
 
 /** Where each `result` value can appear, in display order; total over RepoResult. */
@@ -270,12 +386,57 @@ export function renderReadme(readme: string): string {
   return out;
 }
 
+// The region shape's pieces, each exactly what its validator lets through: paragraph()/bullet() text
+// (non-blank, one line), cell() text (also no pipe), codeSpan() text (also no backtick). nonBlank is
+// unambiguous on purpose: overlapping parts would backtrack exponentially over a 38-row table.
+const nonBlank = (excluded: string): string =>
+  String.raw`[ \t]*[^${excluded}\s][^${excluded}\r\n]*`;
+const PROSE_LINE = `${nonBlank("")}\n`;
+const CELL = nonBlank("|");
+const SUPPORTED_ROWS = String.raw`(?:\| ${CELL} \| \x60[a-z_]+(?: \(${nonBlank("|\x60")}\))?\x60 \| ${CELL} \|\n)+`;
+const GAP_ROWS = String.raw`(?:\| ${CELL} \| ${CELL} \| ${CELL} \|\n)+`;
+const GAPS_BODY = String.raw`(?:${PROSE_LINE}\n${escapeRe(GAPS_HEADER)}\n|${escapeRe(GAPS_HEADER)}\n${GAP_ROWS})`;
+const BULLETS = `(?:- ${PROSE_LINE})+`;
+
+// The COVERAGE page's one region closes the file and holds everything below the title: the intro,
+// then the four sections in order (or an empty body between fresh markers), so a marker moved over
+// authored prose fails instead of erasing it.
+const COVERAGE_REGIONS: readonly GeneratedRegion[] = [
+  {
+    name: "coverage",
+    placement: { kind: "tail" },
+    body: new RegExp(
+      String.raw`^\n(?:${PROSE_LINE}\n${escapeRe(SUPPORTED_HEADING)}\n\n${escapeRe(SUPPORTED_HEADER)}\n${SUPPORTED_ROWS}\n${escapeRe(GAPS_HEADING)}\n\n${GAPS_BODY}\n${escapeRe(NO_API_HEADING)}\n\n${PROSE_LINE}\n${BULLETS}\n${escapeRe(OUT_OF_SCOPE_HEADING)}\n\n${BULLETS})?$`,
+    ),
+    render: () => `\n${renderCoverage(SECTIONS, DOCS, COVERAGE_DATA)}\n`,
+  },
+];
+
+/** The title line the COVERAGE region must directly follow. */
+const COVERAGE_TITLE = "# Coverage\n\n";
+
+// COVERAGE.md with its region regenerated. Beyond the shared placement checks, the page is exactly
+// the title, the region, and one final newline, or prose left outside could drift from the generator's.
+export function renderCoverageFile(coverage: string): string {
+  const { begin, end } = regionBounds(coverage, "coverage", "html");
+  if (coverage.slice(0, begin[0]) !== COVERAGE_TITLE || coverage.slice(end[1]) !== "\n") {
+    throw new Error(
+      `gen-docs: ${COVERAGE_PATH} must be the "# Coverage" title, the coverage region, and one final newline`,
+    );
+  }
+  return regenerateRegions(coverage, COVERAGE_REGIONS, COVERAGE_PATH);
+}
+
 if (import.meta.main) {
-  const path = join(ROOT, README_PATH);
-  const before = readFileSync(path, "utf8");
-  const after = renderReadme(before);
-  writeFileSync(path, after);
-  console.log(
-    `gen-docs: wrote ${path} (${SECTIONS.length} section rows${after === before ? ", unchanged" : ""})`,
-  );
+  const pages = [
+    [README_PATH, renderReadme, `${SECTIONS.length} section rows`],
+    [COVERAGE_PATH, renderCoverageFile, `${SECTIONS.length} sections`],
+  ] as const;
+  for (const [file, render, summary] of pages) {
+    const path = join(ROOT, file);
+    const before = readFileSync(path, "utf8");
+    const after = render(before);
+    writeFileSync(path, after);
+    console.log(`gen-docs: wrote ${path} (${summary}${after === before ? ", unchanged" : ""})`);
+  }
 }

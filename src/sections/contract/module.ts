@@ -171,13 +171,9 @@ export interface SectionMeta<
    */
   readonly graphql?: G;
   /**
-   * The DEFAULT policy for live resources this section does NOT declare, the
-   * single source the README Sections table and COVERAGE derive their
-   * deletion claims from. Which sections sit in each bucket is read off the
-   * registry (./registry.ts), not restated here. For the sections that
-   * enumerate sibling resources, the settings file can override the default
-   * per run with the wrapped `{undeclared, entries}` form (see
-   * undeclaredPolicy below):
+   * The section's undeclared-entry policy; the generated README and COVERAGE tables and the docs
+   * registry's contradiction tests derive their deletion claims from it. Which sections sit in each
+   * bucket is read off ./registry.ts; the wrapped `{undeclared, entries}` form overrides it per run:
    * - "delete": the section lists live resources and DELETES undeclared ones
    *   by default; `undeclared: keep` softens that to notes.
    * - "keep": the section lists live resources but KEEPS undeclared ones by

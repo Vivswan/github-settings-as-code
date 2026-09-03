@@ -1,72 +1,30 @@
-/**
- * COVERAGE.md contract tests: the Supported table names every section, and the
- * Repo-scoped gaps table never lists an endpoint the action already
- * implements. The anti-test makes implementing a gap force its row to move out
- * of the gaps table.
- */
+// COVERAGE.md contract tests over its sources: the rendered page's file citations resolve on disk,
+// and the authored gaps never name a surface the action already calls (implementing a gap forces
+// its row out). Supported rows are pinned in test/sections/docs-registry.test.ts, the page in test/scripts/gen-docs.test.ts.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { SECTION_KEYS } from "../../src/schema.js";
+import { Kind, parse, type SelectionSetNode } from "graphql";
+import { COVERAGE_DATA, type GapRow } from "../../.github/scripts/coverage-data.js";
+import { renderCoverage } from "../../.github/scripts/gen-docs.js";
 import {
   endpointMethod,
   endpointPath,
   matchesTemplate,
+  type Route,
 } from "../../src/sections/contract/endpoints.js";
-import { allEndpoints, SECTIONS } from "../../src/sections/registry.js";
-import { defaultClaimProblems } from "./claims.js";
-import { sectionLines, tableRows } from "./markdown.js";
+import { DOCS } from "../../src/sections/docs-registry.js";
+import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
-const coverage = readFileSync(join(ROOT, "COVERAGE.md"), "utf8");
+const coverage = renderCoverage(SECTIONS, DOCS, COVERAGE_DATA);
 
-describe("COVERAGE Supported table", () => {
-  const rows = tableRows(sectionLines(coverage, "Supported", "COVERAGE.md"));
-  // Every row's notes, concatenated per section key (a section may span rows).
-  const rowsByKey = new Map<string, string>();
-  for (const cells of rows) {
-    const key = (cells[1] ?? "").replace(/`/g, "").split(" ")[0] ?? "";
-    rowsByKey.set(key, `${rowsByKey.get(key) ?? ""} ${cells[2] ?? ""}`);
-  }
-
-  test("every section key appears in at least one Supported row", () => {
-    const mentioned = rows.map((cells) => cells[1] ?? "").join(" ");
-    for (const key of SECTION_KEYS) {
-      expect(
-        mentioned.includes(key),
-        `COVERAGE Supported table never names the "${key}" section`,
-      ).toBe(true);
-    }
-  });
-
-  test("each section's declared endpoint path tails appear in its rows", () => {
-    // For every registered endpoint, the section's Supported row(s) must name
-    // the distinctive tail of its path, so the coverage doc cannot omit an
-    // endpoint the code calls.
-    for (const endpoint of Object.values(allEndpoints())) {
-      const tail = endpointPath(endpoint.route)
-        .replace("/repos/{owner}/{repo}", "")
-        .replace(/\{[^}]+\}/g, "")
-        .replace(/\/+$/g, "");
-      if (tail === "" || tail === "/") {
-        continue; // the bare repo endpoint has no distinctive tail
-      }
-      const notes = rowsByKey.get(endpoint.section) ?? "";
-      const needle = tail.replace(/^\//, "").split("/")[0] ?? "";
-      expect(
-        notes.includes(needle),
-        `COVERAGE Supported row for "${endpoint.section}" never mentions "${needle}" from endpoint ${endpoint.route}`,
-      ).toBe(true);
-    }
-  });
-
+describe("COVERAGE path citations", () => {
   test("every src/ or test/ path citation resolves on disk", () => {
-    // File moves (a module changing directories) silently rot the prose
-    // citations; existence on disk is the contract.
-    // A citation must carry a file extension so prose slash-pairs
-    // ("test/lint jobs") do not read as paths; a directory citation is
-    // invisible to this test, so cite files.
+    // File moves silently rot prose citations; existence on disk is the contract. A citation
+    // must carry a file extension so prose slash-pairs ("test/lint jobs") do not read as paths;
+    // a directory citation is invisible here, so cite files.
     const cited =
       coverage.match(/\b(?:src|test)\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.[a-z]+\b/g) ?? [];
     expect(cited.length, "COVERAGE.md cites no src/ or test/ path at all").toBeGreaterThan(0);
@@ -77,101 +35,158 @@ describe("COVERAGE Supported table", () => {
       ).toBe(true);
     }
   });
-
-  test("each knobbed section's kept/deleted-by-default wording matches its undeclaredDefault", () => {
-    // SectionMeta.undeclaredDefault's JSDoc (src/sections/contract/module.ts)
-    // names this table as a consumer of the declaration; this test is that
-    // guard. Both names must stay in that JSDoc (word order free) so the
-    // pointer and the guard cannot part ways silently.
-    const contractSrc = readFileSync(
-      join(ROOT, "src", "sections", "contract", "module.ts"),
-      "utf8",
-    );
-    const undeclaredDoc = contractSrc.match(
-      /\/\*\*([^*]|\*(?!\/))*\*\/\s*\n\s*readonly undeclaredDefault:/m,
-    )?.[0];
-    expect(undeclaredDoc, "no JSDoc found above SectionMeta.undeclaredDefault").toBeDefined();
-    for (const name of ["README Sections table", "COVERAGE"]) {
-      expect(
-        undeclaredDoc?.includes(name),
-        `the undeclaredDefault JSDoc no longer names "${name}" as a consumer; realign it with this test`,
-      ).toBe(true);
-    }
-    // Every knobbed row states its default in a "... by default" clause; the
-    // claim windows, families, and negator handling live in ./claims.ts.
-    for (const section of SECTIONS) {
-      if (section.undeclaredDefault === "untouched") {
-        continue;
-      }
-      const notes = rowsByKey.get(section.key) ?? "";
-      for (const problem of defaultClaimProblems(notes, section.undeclaredDefault)) {
-        throw new Error(`COVERAGE Supported row for "${section.key}": ${problem}`);
-      }
-    }
-  });
 });
 
 describe("COVERAGE gaps anti-test", () => {
-  /**
-   * Turn a gap-table path template into a concrete-looking path by replacing
-   * each {param} with a placeholder segment, so matchesTemplate (which matches
-   * a registered TEMPLATE against a CONCRETE path) can decide whether a gap
-   * endpoint collides with a route the action already calls.
-   */
-  function concretize(template: string): string {
-    return template.replace(/\{[^}]+\}/g, "_param_");
+  /** The facet of a GraphQL operation the collision check reads: its document text. */
+  type GraphqlDocument = { readonly query: string };
+
+  // The root fields an operation's document selects, with root-level fragment spreads and inline
+  // fragments expanded so a refactor into fragments cannot hide a field.
+  function rootFields(op: GraphqlDocument): string[] {
+    const document = parse(op.query);
+    const fragments = new Map<string, SelectionSetNode>();
+    for (const definition of document.definitions) {
+      if (definition.kind === Kind.FRAGMENT_DEFINITION) {
+        fragments.set(definition.name.value, definition.selectionSet);
+      }
+    }
+    const fields = (selections: SelectionSetNode): string[] =>
+      selections.selections.flatMap((selection) => {
+        switch (selection.kind) {
+          case Kind.FIELD:
+            return [selection.name.value];
+          case Kind.INLINE_FRAGMENT:
+            return fields(selection.selectionSet);
+          case Kind.FRAGMENT_SPREAD: {
+            const spread = fragments.get(selection.name.value);
+            if (spread === undefined) {
+              throw new Error(`fragment "${selection.name.value}" is not defined in the document`);
+            }
+            return fields(spread);
+          }
+          default:
+            return [];
+        }
+      });
+    return document.definitions.flatMap((definition) =>
+      definition.kind === Kind.OPERATION_DEFINITION ? fields(definition.selectionSet) : [],
+    );
   }
 
-  test("no fully-spelled gap endpoint matches a registered EndpointDecl", () => {
-    const routeTemplates = Object.values(allEndpoints()).map((e) => ({
-      method: endpointMethod(e.route),
-      path: endpointPath(e.route),
-      route: e.route,
-    }));
-    const gapLines = sectionLines(coverage, "Repo-scoped gaps (not built yet)", "COVERAGE.md");
-    // The gaps table spells combined verbs like "GET/POST /repos/..."; expand
-    // each method against the following path.
-    const methodPath =
-      /\b((?:GET|POST|PUT|PATCH|DELETE)(?:\/(?:GET|POST|PUT|PATCH|DELETE))*)\s+(\/[^\s;()]+)/g;
-    let found = 0;
-    for (const line of gapLines) {
-      for (const m of line.matchAll(methodPath)) {
-        const methods = (m[1] ?? "").split("/");
-        const gapPath = concretize(m[2] ?? "");
-        for (const method of methods) {
-          found++;
-          for (const route of routeTemplates) {
-            if (route.method === method && matchesTemplate(route.path, gapPath)) {
-              throw new Error(
-                `COVERAGE gap endpoint "${method} ${m[2]}" matches registered route "${route.route}"; a documented gap must not name an endpoint the action already calls`,
-              );
+  /** A well-formed GraphQL root field name, as the GraphQL grammar spells a Name. */
+  const GRAPHQL_NAME = /^[_A-Za-z][_0-9A-Za-z]*$/;
+  /** A well-formed route path: one or more segments, each a literal of route characters or one {param}. */
+  const REST_PATH = /^(?:\/(?:[A-Za-z0-9_.-]+|\{[A-Za-z_][A-Za-z0-9_]*\}))+$/;
+
+  // A gap endpoint split into method and target, or a throw when the target is not a shape the
+  // collision check can inspect: a check that cannot read its input must fail, not say "no collision".
+  function parseGap(gap: string): { method: string; target: string } {
+    const space = gap.indexOf(" ");
+    const method = gap.slice(0, space);
+    const target = gap.slice(space + 1);
+    const grammar = method === "GraphQL" ? GRAPHQL_NAME : REST_PATH;
+    if (!grammar.test(target)) {
+      throw new Error(
+        `gap endpoint "${gap}" is malformed: a GraphQL gap names one root field, a REST gap one route path`,
+      );
+    }
+    return { method, target };
+  }
+
+  // Every gap endpoint colliding with a surface the action calls, as "<gap> -> <route or op>": a
+  // REST gap matches a same-method route template (each {param} becomes a placeholder segment,
+  // since matchesTemplate takes a CONCRETE path), a GraphQL gap an op selecting its root field.
+  function gapCollisions(
+    rows: readonly GapRow[],
+    routes: ReadonlyArray<Route>,
+    ops: ReadonlyArray<GraphqlDocument & { readonly name: string }>,
+  ): string[] {
+    const collisions: string[] = [];
+    for (const row of rows) {
+      for (const gap of row.endpoints) {
+        const { method, target } = parseGap(gap);
+        if (method === "GraphQL") {
+          for (const op of ops) {
+            if (rootFields(op).includes(target)) {
+              collisions.push(`${gap} -> ${op.name}`);
             }
+          }
+          continue;
+        }
+        const concrete = target.replace(/\{[^}]+\}/g, "_param_");
+        for (const route of routes) {
+          if (endpointMethod(route) === method && matchesTemplate(endpointPath(route), concrete)) {
+            collisions.push(`${gap} -> ${route}`);
           }
         }
       }
     }
-    // Structural, not a tuned constant: EVERY gap row must spell at least one
-    // METHOD /path endpoint in its Endpoints cell, so a single row losing its
-    // endpoint syntax (or the whole table changing format) fails here by
-    // name. Implementing a gap deletes its whole row; an EMPTY table is the
-    // legitimate all-gaps-implemented state, which the section prose must
-    // declare in so many words - the guard that the table did not silently
-    // change format out from under the sweep above.
-    const gapRows = tableRows(gapLines);
-    if (gapRows.length === 0) {
-      expect(
-        gapLines.join(" ").includes("The table is EMPTY right now"),
-        "the gaps table has no rows but its prose does not declare the empty state; either a row lost its table format or the empty-state sentence was dropped",
-      ).toBe(true);
-      return;
-    }
-    expect(found).toBeGreaterThan(0);
-    for (const row of gapRows) {
-      const endpointCell = row[1] ?? "";
-      expect(
-        [...endpointCell.matchAll(methodPath)].length,
-        `gap row "${row[0] ?? ""}" spells no parseable METHOD /path endpoint; the anti-match sweep above cannot see it`,
-      ).toBeGreaterThan(0);
+    return collisions;
+  }
+
+  test("no gap endpoint matches a registered endpoint or GraphQL operation", () => {
+    const routes = Object.values(allEndpoints()).map((endpoint) => endpoint.route);
+    const ops = Object.values(allGraphqlOps());
+    // Controls: a called route is caught in either parameter spelling, a same-path other-method
+    // row is not; a selected GraphQL root field is caught with or without arguments, in the
+    // operation, a spread, or an inline fragment; an unselected field and an op's own NAME are not.
+    const labels: GapRow = {
+      area: "control",
+      endpoints: ["POST /repos/{owner}/{repo}/labels", "DELETE /repos/{o}/{r}/labels/{name}"],
+      why: "control",
+    };
+    const gaps = (...endpoints: GapRow["endpoints"]): GapRow[] => [{ ...labels, endpoints }];
+    expect(gapCollisions([labels], routes, ops)).toEqual([
+      "POST /repos/{owner}/{repo}/labels -> POST /repos/{owner}/{repo}/labels",
+      "DELETE /repos/{o}/{r}/labels/{name} -> DELETE /repos/{owner}/{repo}/labels/{name}",
+    ]);
+    expect(gapCollisions(gaps("PUT /repos/{owner}/{repo}/labels"), routes, ops)).toEqual([]);
+    const synthetic = [
+      { name: "ViewerLogin", query: "query ViewerLogin { viewer { login } }" },
+      {
+        name: "SpreadMeta",
+        query: "query SpreadMeta { ...Root } fragment Root on Query { meta { gitHubServicesSha } }",
+      },
+      { name: "InlineNode", query: 'query InlineNode { ... on Query { node(id: "x") { id } } }' },
+    ];
+    expect(
+      gapCollisions(
+        gaps(
+          "GraphQL pinEnvironment",
+          "GraphQL viewer",
+          "GraphQL meta",
+          "GraphQL node",
+          "GraphQL pinIssue",
+          "GraphQL ViewerLogin",
+        ),
+        routes,
+        [...ops, ...synthetic],
+      ),
+    ).toEqual([
+      "GraphQL pinEnvironment -> PinEnvironment",
+      "GraphQL viewer -> ViewerLogin",
+      "GraphQL meta -> SpreadMeta",
+      "GraphQL node -> InlineNode",
+    ]);
+    expect(gapCollisions(COVERAGE_DATA.gaps.rows ?? [], routes, ops)).toEqual([]);
+  });
+
+  test("a gap endpoint the collision check cannot inspect fails instead of reporting no collision", () => {
+    const malformed: GapRow["endpoints"][number][] = [
+      "GraphQL ",
+      "GraphQL pinEnvironment()",
+      "GraphQL pin environment",
+      "GET /repos/{owner}/{repo}/labels (read-only)",
+      "GET /repos/{}/labels",
+      "GET /repos/{owner/labels",
+      "GET /repos//labels",
+      "GET /repos/{owner}{repo}/labels",
+    ];
+    for (const gap of malformed) {
+      expect(() => gapCollisions([{ area: "x", endpoints: [gap], why: "x" }], [], [])).toThrow(
+        `gap endpoint "${gap}" is malformed`,
+      );
     }
   });
 });

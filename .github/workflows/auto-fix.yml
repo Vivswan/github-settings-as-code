@@ -3,9 +3,9 @@
 # here; three fixes remain. lib/settings.schema.json is a committed build
 # artifact, and CI fails when it drifts from src/ or the generator toolchain
 # (a Dependabot generator bump changes the schema bytes on a branch nobody
-# builds). README.md, action.yml, and the docs pages under docs/ carry
-# generated regions that build:docs and build:action-docs render from the
-# section and input declarations, and CI fails when they drift. src/upstream-gaps/ holds tripwire files that turn the typecheck
+# builds). README.md, COVERAGE.md, action.yml, and the docs pages under docs/
+# carry generated regions that build:docs and build:action-docs render from the
+# declarations and coverage-data.ts, and CI fails when they drift. src/upstream-gaps/ holds tripwire files that turn the typecheck
 # red with TS2344 the moment @octokit/types ships a route a gap file declares
 # as missing; graduate-upstream-gaps.ts retires the shipped files (deleting
 # spec-documented ones, rewriting spec-lagging ones to spec-only gaps) and
@@ -48,6 +48,7 @@ on:
       - "docs/reference/permissions.md"
       - "docs/operate/check-mode.md"
       - ".github/scripts/gen-action-docs.ts"
+      - "COVERAGE.md"
       - "package.json"
       - "bun.lock"
       - "tsconfig.json"
@@ -57,6 +58,7 @@ on:
       - ".github/scripts/gen-gaps-index.ts"
       - ".github/scripts/gen-docs.ts"
       - ".github/scripts/lib/**"
+      - ".github/scripts/coverage-data.ts"
 
 permissions:
   contents: read
@@ -118,7 +120,7 @@ jobs:
           # fix: start from an empty index so the patch holds exactly the
           # allowed paths.
           git reset -q
-          git add -A -- lib/settings.schema.json README.md action.yml docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md
+          git add -A -- lib/settings.schema.json README.md COVERAGE.md action.yml docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md
           # Old branches cut before the gaps directory landed lack it, and
           # an unmatched pathspec would fail the add.
           if [ -d src/upstream-gaps ]; then
@@ -196,14 +198,14 @@ jobs:
           git apply --index --binary "$RUNNER_TEMP/autofix/autofix.patch"
           # The patch was cut on a runner PR code had run on, so treat it
           # as untrusted: refuse to commit anything it staged outside the
-          # three fix-owned paths. --no-renames keeps a staged rename listed
+          # fix-owned paths. --no-renames keeps a staged rename listed
           # as its delete and add halves, so a rename OUT of a protected
           # path cannot hide behind an allowed destination.
           while IFS= read -r -d '' path; do
             case "$path" in
-              lib/settings.schema.json | README.md | action.yml | docs/reference/undeclared-policy.md | docs/reference/permissions.md | docs/operate/check-mode.md | src/upstream-gaps/*) ;;
+              lib/settings.schema.json | README.md | COVERAGE.md | action.yml | docs/reference/undeclared-policy.md | docs/reference/permissions.md | docs/operate/check-mode.md | src/upstream-gaps/*) ;;
               *)
-                echo "::error::the fix patch staged '$path', outside lib/settings.schema.json, the generated docs (README.md, action.yml, docs/reference/undeclared-policy.md, docs/reference/permissions.md, docs/operate/check-mode.md), and src/upstream-gaps/; refusing to push"
+                echo "::error::the fix patch staged '$path', outside lib/settings.schema.json, the generated docs (README.md, COVERAGE.md, action.yml, docs/reference/undeclared-policy.md, docs/reference/permissions.md, docs/operate/check-mode.md), and src/upstream-gaps/; refusing to push"
                 exit 1
                 ;;
             esac

@@ -1,17 +1,48 @@
 // The docs registry's contracts: authored prose stays consistent with the declarations beside it
-// (a Notes cell never contradicts undeclaredDefault, an Endpoints cell names every resource its
-// section calls), and no docs file is reachable from the bundle entrypoint.
+// (a Notes cell or coverage row never contradicts undeclaredDefault; Endpoints cells and coverage
+// rows name every resource the section calls), and no docs file is reachable from the bundle.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { SECTION_KEYS } from "../../src/schema.js";
-import { endpointPath } from "../../src/sections/contract/endpoints.js";
+import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
+import { endpointPath, type Route } from "../../src/sections/contract/endpoints.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
-import { CLAIM_FAMILY, CLAIM_STEMS, stemNegation } from "../docs/claims.js";
+import { CLAIM_FAMILY, CLAIM_STEMS, defaultClaimProblems, stemNegation } from "../docs/claims.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
+
+/** `text` as a regex source matching itself literally. */
+function escapeRe(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Whether `prose` names the GraphQL operation `name` as a whole identifier, case-insensitively:
+// "the pinEnvironment mutation" names PinEnvironment, "DocumentPinEnvironmentAudit" does not.
+function namesOperation(prose: string, name: string): boolean {
+  return new RegExp(`(?<![A-Za-z0-9_])${escapeRe(name)}(?![A-Za-z0-9_])`, "i").test(prose);
+}
+
+// Whether `prose` spells the path segment `segment` as a whole token: a route in prose bounds it
+// with "/" or "{" ("GET .../keys/{key_id}"), so "monkeys" never satisfies "keys" and "labels/{name}" does.
+function mentionsSegment(prose: string, segment: string): boolean {
+  return new RegExp(`(?<![A-Za-z0-9_-])${escapeRe(segment)}(?![A-Za-z0-9_-])`).test(prose);
+}
+
+/** A section's coverage Notes cells joined, since a section may span several rows. */
+function coverageNotes(key: SectionKey): string {
+  return DOCS[key].coverage.map((row) => row.notes).join(" ");
+}
+
+/** The distinctive leading segment of an endpoint's path below the repo, or "" for the bare repo endpoint. */
+function leadingSegment(route: Route): string {
+  const tail = endpointPath(route)
+    .replace("/repos/{owner}/{repo}", "")
+    .replace(/\{[^}]+\}/g, "")
+    .replace(/\/+$/g, "");
+  return tail.replace(/^\//, "").split("/")[0] ?? "";
+}
 
 /** Whether a source path is documentation prose: a section's docs.ts or the docs registry. */
 function isDocsFile(path: string): boolean {
@@ -170,14 +201,11 @@ describe("Endpoints cells vs declared operations", () => {
     // map, not the matching, when a cell is reworded ("hooks" -> "webhooks").
     const COMPOUND_MENTIONS: Record<string, readonly string[]> = { hooks: ["webhooks"] };
     for (const endpoint of Object.values(allEndpoints())) {
-      const tail = endpointPath(endpoint.route)
-        .replace("/repos/{owner}/{repo}", "")
-        .replace(/\{[^}]+\}/g, "")
-        .replace(/\/+$/g, "");
-      if (tail === "" || tail === "/") {
+      const segment = leadingSegment(endpoint.route);
+      if (segment === "") {
         continue; // the bare repo endpoint has no distinctive resource
       }
-      const needle = normalize(tail.replace(/^\//, "").split("/")[0] ?? "");
+      const needle = normalize(segment);
       // Singular variants of the LAST word only ("branches" -> "branch", "orgs" -> "org"), each
       // matched as a whole word, so an over-stripped form ("pages" -> "pag") never matches inside
       // an unrelated word.
@@ -203,11 +231,67 @@ describe("Endpoints cells vs declared operations", () => {
     // GraphQL operations have no path to derive a resource segment from, so
     // the cell must name each one by its wire operationName instead.
     for (const op of Object.values(allGraphqlOps())) {
-      const cell = normalize(DOCS[op.section].readme.endpoints);
       expect(
-        cell.includes(normalize(op.name)),
+        namesOperation(DOCS[op.section].readme.endpoints, op.name),
         `the ${op.section} Endpoints cell never mentions the GraphQL operation "${op.name}"`,
       ).toBe(true);
+    }
+  });
+});
+
+describe("coverage rows vs declarations", () => {
+  test("each section's coverage rows name the leading path segment of every endpoint it calls", () => {
+    // Control for the matcher: a whole token counts, a longer word does not.
+    expect(mentionsSegment("DELETE /repos/{owner}/{repo}/keys/{key_id}", "keys")).toBe(true);
+    expect(mentionsSegment("the monkeys endpoint", "keys")).toBe(false);
+    // The COVERAGE rows spell endpoints out ("GET/POST /repos/{owner}/{repo}/labels"),
+    // so the coverage inventory cannot omit an endpoint the code calls.
+    for (const endpoint of Object.values(allEndpoints())) {
+      const segment = leadingSegment(endpoint.route);
+      if (segment === "") {
+        continue; // the bare repo endpoint has no distinctive resource
+      }
+      expect(
+        mentionsSegment(coverageNotes(endpoint.section), segment),
+        `the ${endpoint.section} coverage rows never mention "${segment}" from endpoint ${endpoint.route}`,
+      ).toBe(true);
+    }
+  });
+
+  test("each section's coverage rows name every GraphQL operation it issues", () => {
+    // Control for the matcher both GraphQL sweeps share: a whole identifier
+    // in either case counts, a longer identifier containing the name does
+    // not, and a name's regex metacharacters match only themselves.
+    expect(namesOperation("the pinEnvironment ({environmentId}) mutation", "PinEnvironment")).toBe(
+      true,
+    );
+    expect(namesOperation("the DocumentPinEnvironmentAudit query", "PinEnvironment")).toBe(false);
+    expect(namesOperation("see a.b here", "a.b")).toBe(true);
+    expect(namesOperation("see axb here", "a.b")).toBe(false);
+    // No path to derive a segment from, so the rows name each operation by
+    // its wire operationName.
+    for (const op of Object.values(allGraphqlOps())) {
+      expect(
+        namesOperation(coverageNotes(op.section), op.name),
+        `the ${op.section} coverage rows never mention the GraphQL operation "${op.name}"`,
+      ).toBe(true);
+    }
+  });
+
+  test("a knobbed section's coverage rows state its undeclaredDefault and never the opposite", () => {
+    // Every knobbed section's rows state the default in a "... by default"
+    // clause; the claim windows, families, and negator handling live in
+    // test/docs/claims.ts, shared with the schema description sweep.
+    for (const section of SECTIONS) {
+      if (section.undeclaredDefault === "untouched") {
+        continue;
+      }
+      for (const problem of defaultClaimProblems(
+        coverageNotes(section.key),
+        section.undeclaredDefault,
+      )) {
+        throw new Error(`the ${section.key} coverage rows: ${problem}`);
+      }
     }
   });
 });
