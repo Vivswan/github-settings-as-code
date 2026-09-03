@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import * as core from "@actions/core";
+import { DefaultArtifactClient } from "@actions/artifact";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import {
   ARTIFACT_FILE,
@@ -113,10 +113,10 @@ describe("default uploader without a runtime token", () => {
 
   test("missing token yields exactly ONE warning and never invokes the artifact client", async () => {
     delete process.env.ACTIONS_RUNTIME_TOKEN;
-    // DefaultArtifactClient emits its OWN core.warning before throwing, so a
-    // double-warning would show up as extra core.warning calls. The guard must
-    // return our single warning without ever reaching the client.
-    const warnSpy = spyOn(core, "warning").mockImplementation(() => {});
+    // Reaching the client would double-warn (it warns on its own before it
+    // throws). Its @actions/core import is a named binding a namespace spy
+    // cannot observe, so the client's entry point is what gets watched.
+    const uploadSpy = spyOn(DefaultArtifactClient.prototype, "uploadArtifact");
     try {
       const { recipient } = await testKeypair();
       const result = await deliverArtifactReport("secret document", recipient);
@@ -127,12 +127,11 @@ describe("default uploader without a runtime token", () => {
       }
       expect(result.warning).toContain("could not upload the private report artifact");
       expect(result.warning).toContain("ACTIONS_RUNTIME_TOKEN");
-      // the client was never reached, so it emitted no core.warning of its own
-      expect(warnSpy).toHaveBeenCalledTimes(0);
+      expect(uploadSpy).toHaveBeenCalledTimes(0);
       // and no report content ever leaves the module
       expect(result.warning).not.toContain("secret document");
     } finally {
-      warnSpy.mockRestore();
+      uploadSpy.mockRestore();
     }
   });
 });

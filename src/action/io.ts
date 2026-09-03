@@ -9,7 +9,8 @@ import { type Io, maskRegistry } from "../io.js";
 
 /**
  * Every action output run() writes, with the description the action.yml
- * `outputs` block is generated from (bun run build:action-docs).
+ * `outputs` block is generated from (bun run build:action-docs). OutputName
+ * types only this layer's setOutput; Io.output callers pass a plain string.
  */
 export const OUTPUT_DECLS = {
   result: {
@@ -27,8 +28,6 @@ export const OUTPUT_DECLS = {
 } as const satisfies Record<string, { readonly description: string }>;
 
 export type OutputName = keyof typeof OUTPUT_DECLS;
-
-export const OUTPUT_NAMES = Object.keys(OUTPUT_DECLS) as readonly OutputName[];
 
 // @actions/core owns workflow-command escaping (%, CR, LF); the static map
 // keeps the namespace access tree-shakeable (biome noDynamicNamespaceImportAccess).

@@ -15,8 +15,24 @@
     "rules": {
       "preset": "recommended",
       "correctness": { "noUnusedImports": "error", "noUnusedVariables": "error" },
-      "style": { "noNonNullAssertion": "error" }
+      "style": {
+        "noNonNullAssertion": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@actions/core": "Only src/action/ implements the Io port over @actions/core; every other layer takes an Io."
+            }
+          }
+        }
+      }
     }
   },
-  "javascript": { "formatter": { "quoteStyle": "double" } }
+  "javascript": { "formatter": { "quoteStyle": "double" } },
+  "overrides": [
+    {
+      "includes": ["src/action/**"],
+      "linter": { "rules": { "style": { "noRestrictedImports": "off" } } }
+    }
+  ]
 }

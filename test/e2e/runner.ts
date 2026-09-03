@@ -18,7 +18,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
-import type { OUTPUT_NAMES } from "../../src/action/io.js";
+import type { OutputName } from "../../src/action/io.js";
 import {
   assertApplyIdempotent,
   captureRerun,
@@ -98,10 +98,10 @@ function builtBundle(): Promise<string> {
 }
 /**
  * The published output the skipped-sections assertion reads, pinned to the
- * action's own OUTPUT_NAMES declaration (src/action/io.ts): a rename there
+ * action's own OUTPUT_DECLS declaration (src/action/io.ts): a rename there
  * fails compilation here instead of leaving a stale string reading nothing.
  */
-const SKIPPED_SECTIONS_OUTPUT = "skipped-sections" satisfies (typeof OUTPUT_NAMES)[number];
+const SKIPPED_SECTIONS_OUTPUT = "skipped-sections" satisfies OutputName;
 /**
  * Hard cap so a hung child never wedges the suite. Sized for the observed
  * worst case, not the typical one: chatty multi-repo children legitimately
