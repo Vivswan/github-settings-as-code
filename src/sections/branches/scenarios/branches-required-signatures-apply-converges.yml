@@ -1,9 +1,7 @@
 # required_signatures never rides the protection PUT (GitHub drops it); the
-# declared boolean routes to its own sub-endpoint after the PUT. sig-on
-# declares true against an unprotected branch (the POST path); sig-off
-# declares false against a live requirement (the DELETE path). A check rerun
-# sees the POSTed {enabled: true} as true and the DELETEd (now omitted) field
-# as false, so both entries converge.
+# toggle routes to its own sub-endpoint: sig-on's POST follows the PUT that
+# protects the branch, sig-off's DELETE stands alone (its REST protection
+# already matches). The GET omits the field once deleted, which reads as false.
 name: branches-required-signatures-apply-converges
 settings:
   branches:
@@ -34,9 +32,9 @@ expect:
   mutations:
     - "PUT /repos/{repo}/branches/sig-on/protection"
     - "POST /repos/{repo}/branches/sig-on/protection/required_signatures"
-    - "PUT /repos/{repo}/branches/sig-off/protection"
     - "DELETE /repos/{repo}/branches/sig-off/protection/required_signatures"
   never:
     - "DELETE /repos/{repo}/branches/sig-on/protection/required_signatures"
+    - "PUT /repos/{repo}/branches/sig-off/protection"
     - "POST /repos/{repo}/branches/sig-off/protection/required_signatures"
-  converges: true
+  apply_idempotent: true

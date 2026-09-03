@@ -24,4 +24,4 @@ expect:
     branches: applied
   mutations:
     - "DELETE /repos/{repo}/branches/main/protection"
-  converges: true
+  apply_idempotent: true

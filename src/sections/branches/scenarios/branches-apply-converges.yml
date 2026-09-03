@@ -25,4 +25,4 @@ expect:
     branches: applied
   mutations:
     - "PUT /repos/{repo}/branches/main/protection"
-  converges: true
+  apply_idempotent: true

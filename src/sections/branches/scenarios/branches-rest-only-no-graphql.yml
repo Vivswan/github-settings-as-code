@@ -23,4 +23,4 @@ expect:
     - "PUT /repos/{repo}/branches/main/protection"
   never:
     - "GRAPHQL"
-  converges: true
+  apply_idempotent: true

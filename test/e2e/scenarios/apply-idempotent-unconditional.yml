@@ -13,10 +13,6 @@ settings:
   repository:
     description: unconditional PATCH witness
     enable_git_lfs: true
-  branches:
-    - name: main
-      protection:
-        enforce_admins: true
   actions:
     default_workflow_permissions: read
   pages:

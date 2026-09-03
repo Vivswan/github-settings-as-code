@@ -44,4 +44,4 @@ expect:
   never:
     - "PUT /repos/{repo}/branches"
     - "DELETE /repos/{repo}/branches"
-  converges: true
+  apply_idempotent: true

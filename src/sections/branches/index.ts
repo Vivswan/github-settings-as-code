@@ -8,7 +8,8 @@
  *     it) and applied through its own POST/DELETE sub-endpoint;
  *   - force_push_bypassers and required_deployments have no REST field at
  *     all, so both are stripped from the PUT and applied through ONE
- *     updateBranchProtectionRule mutation after it;
+ *     updateBranchProtectionRule mutation, planned when they drift and
+ *     again after any planned PUT;
  *   - a WILDCARD entry (its name contains one of the characters git
  *     refnames forbid: `*`, `?`, `[`) is invisible to every REST protection
  *     endpoint, so it reconciles entirely through the GraphQL rule
@@ -20,27 +21,13 @@
 
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
-import { type EndpointDecl, expand, repoVariables } from "../contract/endpoints.js";
+import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import { parseLive } from "../contract/live.js";
-import {
-  beginRun,
-  loosen,
-  type SectionContext,
-  type SectionMeta,
-  type SectionModule,
-  type SectionResult,
-  type SectionRun,
-} from "../contract/module.js";
+import { loosen, type SectionMeta, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import {
-  call,
-  callGraphql,
-  listGraphqlConnection,
-  probeAbsent,
-  rejectDuplicates,
-  tryCall,
-} from "../contract/requests.js";
+import { type PlanContext, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
+import { rejectDuplicates } from "../contract/requests.js";
 import {
   type BranchConfig,
   BranchesConfig,
@@ -111,12 +98,84 @@ const WILDCARD_KEYS = [
 
 const WILDCARD_KEY_SET: ReadonlySet<string> = new Set(WILDCARD_KEYS);
 
+/**
+ * The one list GitHub spells two ways inside required_status_checks: the
+ * GET returns both, so a declaration carrying either covers the other.
+ */
+const STATUS_CHECK_ALIASES: Readonly<Record<string, string>> = {
+  "required_status_checks.checks": "required_status_checks.contexts",
+  "required_status_checks.contexts": "required_status_checks.checks",
+};
+
+/**
+ * Nothing the replacing PUT would need to preserve: a default scalar (GitHub's
+ * fill under a declared block), an empty list, or an actor holder with empty
+ * lists. Any other nested object is a control that is ON by its presence.
+ */
+function isEmptySetting(value: unknown): boolean {
+  if (value === null || value === undefined || value === false || value === "" || value === 0) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  if (isPlainMapping(value)) {
+    const keys = Object.keys(value);
+    return (
+      keys.length > 0 && keys.every((key) => ACTOR_LIST_KEYS.has(key) && isEmptySetting(value[key]))
+    );
+  }
+  return false;
+}
+
+/**
+ * The live settings the replacing PUT would reset because the settings file
+ * omits them: every non-empty live value at a path the declaration does not
+ * carry, at any depth (the PUT replaces each nested object whole).
+ */
+function omittedLiveDrift(
+  declared: Record<string, unknown>,
+  live: Record<string, unknown>,
+  prefix: string,
+  path = "",
+): string[] {
+  const drift: string[] = [];
+  for (const [key, value] of Object.entries(live)) {
+    const keyPath = path === "" ? key : `${path}.${key}`;
+    if (Object.hasOwn(declared, key)) {
+      const inner = declared[key];
+      if (isPlainMapping(inner) && isPlainMapping(value)) {
+        drift.push(...omittedLiveDrift(inner, value, prefix, keyPath));
+      }
+      continue;
+    }
+    const alias = STATUS_CHECK_ALIASES[keyPath];
+    if (alias !== undefined && Object.hasOwn(declared, alias.slice(alias.lastIndexOf(".") + 1))) {
+      continue;
+    }
+    if (isEmptySetting(value)) {
+      continue;
+    }
+    drift.push(
+      `${prefix}.${keyPath}: set live but omitted from the settings file, so apply would REMOVE it; add ${keyPath} to the branch's protection in the settings file to keep it`,
+    );
+  }
+  return drift;
+}
+
+function isPlainMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const permission: SectionPermission = { repo: ["administration"] };
 
 const ENDPOINTS = {
+  // The primary read: a fine-grained 404 reads as "unprotected", so a denied
+  // token surfaces on the first write, not here.
   getProtection: {
     route: "GET /repos/{owner}/{repo}/branches/{branch}/protection",
     statuses: { 200: "the branch protection", 404: "the branch is unprotected or does not exist" },
+    primaryRead: { notFound: "absent" },
   },
   putProtection: {
     route: "PUT /repos/{owner}/{repo}/branches/{branch}/protection",
@@ -131,7 +190,7 @@ const ENDPOINTS = {
   },
   // required_signatures lives on its own sub-resource (the protection PUT
   // silently drops the key), so the declared boolean is applied through
-  // these two calls right after a successful PUT.
+  // these two calls when it drifts, and again after any planned PUT.
   sigPost: {
     route: "POST /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures",
     statuses: { 200: "signed commits now required" },
@@ -140,12 +199,12 @@ const ENDPOINTS = {
     route: "DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures",
     statuses: { 204: "signed-commit requirement removed" },
   },
-  // Advisory branch-existence probe: called directly via tryRequest (not
-  // through the enforced helpers), declared here so the dictionary is
-  // complete for downstream mock-route and USED_PATHS derivation. It is
+  // Advisory branch-existence probe, consulted when the protection read 404s
+  // to tell a missing branch from an unprotected one. The read port tolerates
+  // every failure on it (only a definitive 404 changes the finding). It is
   // Contents-gated in reality, but that requirement stays OUT of the
   // section's grant prose because the probe is optional (a token without
-  // Contents just skips the advisory branch-does-not-exist wording).
+  // Contents just loses the branch-does-not-exist wording).
   branchProbe: {
     route: "GET /repos/{owner}/{repo}/branches/{branch}",
     statuses: { 200: "the branch exists", 404: "no such branch" },
@@ -350,12 +409,25 @@ function hasRoutedGraphqlKeys(protection: BranchProtectionConfig | null): boolea
 /** One live rule node as the rules query returns it. */
 type RuleNode = Record<string, unknown>;
 
+/**
+ * The live rules by pattern, or null when the rules query answered its
+ * tolerated NOT_FOUND: the view is unreadable, which is not the same as
+ * empty - a declared routed key must not read as clean against it.
+ */
+type LiveRules = Map<string, RuleNode> | null;
+
 /** Per-run GraphQL working state: the rules by pattern, and the two caches. */
 interface GraphqlRun {
-  byPattern: Map<string, RuleNode>;
+  rules: LiveRules;
   repoId: string | null;
   actorIds: Map<string, string>;
 }
+
+/** The plan context over this section's literal dictionaries. */
+type BranchesContext = PlanContext<typeof ENDPOINTS, typeof GRAPHQL>;
+
+/** The plan this section returns, its operations typed over its own roles. */
+type BranchesPlan = SectionPlan<PlannedOp<typeof ENDPOINTS, typeof GRAPHQL>>;
 
 /**
  * One declared entry paired with its GraphQL proof at classification time: a
@@ -369,18 +441,15 @@ type ClassifiedEntry =
   | { kind: "wildcard"; branch: BranchConfig; graphqlRun: GraphqlRun }
   | { kind: "literal"; branch: BranchConfig; routed: { graphqlRun: GraphqlRun } | null };
 
-async function fetchRules(
-  ctx: SectionContext,
-  section: SectionMeta,
-): Promise<Map<string, RuleNode>> {
-  const read = await listGraphqlConnection(ctx, section, RULES_QUERY, repoVariables(ctx));
-  const byPattern = new Map<string, RuleNode>();
+async function fetchRules(ctx: BranchesContext): Promise<LiveRules> {
+  const read = await ctx.read.rulesQuery.listConnection(repoVariables(ctx));
   if ("error" in read) {
     // The one tolerated outcome is the declared NOT_FOUND: a fine-grained
-    // denial reads as "no rules visible" (the probeAbsent posture), keeping
-    // the section's denial-surfaces-at-the-first-write semantics.
-    return byPattern;
+    // denial reads as "rules not visible" (the probeAbsent posture), so the
+    // denial surfaces at the first write instead of here.
+    return null;
   }
+  const byPattern = new Map<string, RuleNode>();
   for (const node of read.items) {
     if (typeof node === "object" && node !== null) {
       const rule = node as RuleNode;
@@ -545,6 +614,9 @@ function sameNamesFold(declared: readonly string[], live: readonly string[]): bo
   return a.every((name, i) => name === b[i]);
 }
 
+/** The mutation payload field carrying the persisted rule, per mutation. */
+type MutationPayloadKey = "createBranchProtectionRule" | "updateBranchProtectionRule";
+
 /**
  * The silent-drop check and its siblings: GitHub accepts
  * requiredDeploymentEnvironments names of environments that do not exist and
@@ -558,15 +630,15 @@ function sameNamesFold(declared: readonly string[], live: readonly string[]): bo
  */
 function verifyDeploymentReadback(
   entryName: string,
-  declared: BranchProtectionConfig["required_deployments"],
-  mutationData: Record<string, unknown>,
-  payloadKey: "createBranchProtectionRule" | "updateBranchProtectionRule",
+  declared: NonNullable<BranchProtectionConfig["required_deployments"]> | null,
+  response: unknown,
+  payloadKey: MutationPayloadKey,
 ): void {
-  if (declared === undefined) {
-    return;
-  }
-  const rule = (mutationData[payloadKey] as Record<string, unknown> | undefined)
-    ?.branchProtectionRule as RuleNode | null | undefined;
+  const payload = (response as Record<string, unknown> | null)?.[payloadKey];
+  const rule = (payload as Record<string, unknown> | null | undefined)?.branchProtectionRule as
+    | RuleNode
+    | null
+    | undefined;
   if (typeof rule !== "object" || rule === null) {
     throw new Error(
       `branches[${entryName}].protection.required_deployments: the mutation returned no rule to read back, so the applied deployment requirement cannot be verified; re-run the workflow, and retry later if it persists`,
@@ -605,9 +677,23 @@ function verifyDeploymentReadback(
 function routedKeyDrift(
   prefix: string,
   protection: BranchProtectionConfig,
-  node: RuleNode | undefined,
+  rules: LiveRules,
+  pattern: string,
 ): string[] {
   const drift: string[] = [];
+  if (rules === null) {
+    // Nothing to compare against: the declared value is written as before
+    // the comparison existed, so an unreadable view can never read as clean.
+    for (const key of ["force_push_bypassers", "required_deployments"] as const) {
+      if (protection[key] !== undefined) {
+        drift.push(
+          `${prefix}.${key}: the live rule cannot be read (the rules query answered not found); apply will set the declared value`,
+        );
+      }
+    }
+    return drift;
+  }
+  const node = rules.get(pattern);
   const declaredActors = protection.force_push_bypassers;
   if (declaredActors !== undefined) {
     const live = node ? [...bypassActorStrings(node)].sort() : [];
@@ -660,8 +746,7 @@ function routedKeyDrift(
  * rule CREATE can reuse it instead of a dedicated lookup.
  */
 async function resolveActorId(
-  ctx: SectionContext,
-  section: SectionMeta,
+  ctx: BranchesContext,
   graphqlRun: GraphqlRun,
   raw: string,
 ): Promise<string> {
@@ -676,20 +761,14 @@ async function resolveActorId(
   }
   let id: unknown;
   if (actor.kind === "user") {
-    const data = await callGraphql(
-      ctx,
-      section,
-      ACTOR_USER,
+    const data = await ctx.read.actorUser.call(
       { ...repoVariables(ctx), login: actor.login },
       { describe: `resolving force-push bypass user "${raw}"` },
     );
     adoptRepoId(graphqlRun, data);
     id = (data.user as Record<string, unknown> | null)?.id;
   } else if (actor.kind === "team") {
-    const data = await callGraphql(
-      ctx,
-      section,
-      ACTOR_TEAM,
+    const data = await ctx.read.actorTeam.call(
       { ...repoVariables(ctx), org: actor.org, team: actor.team },
       { describe: `resolving force-push bypass team "${raw}"` },
     );
@@ -705,7 +784,7 @@ async function resolveActorId(
     }
     id = team.id;
   } else {
-    const result = await tryCall(ctx, section, ENDPOINTS.appLookup, {
+    const result = await ctx.read.appLookup.tryCall({
       params: { app_slug: actor.slug },
       describe: `resolving force-push bypass App "${raw}"`,
     });
@@ -734,27 +813,18 @@ function adoptRepoId(graphqlRun: GraphqlRun, data: Record<string, unknown>): voi
 }
 
 /**
- * The rule node whose pattern is `pattern`, refetching the rules once on a
- * miss: a literal branch the REST PUT just protected has a rule node the
- * pre-mutation fetch could not have seen.
+ * A literal branch's rule id, read at EXECUTION time when the plan-time
+ * fetch did not carry it: the PUT planned before this lookup creates the
+ * rule, or the fetch could not see a rule the REST view shows.
  */
-async function ruleNodeFor(
-  ctx: SectionContext,
-  section: SectionMeta,
-  graphqlRun: GraphqlRun,
-  pattern: string,
-): Promise<RuleNode> {
-  let node = graphqlRun.byPattern.get(pattern);
-  if (node === undefined) {
-    graphqlRun.byPattern = await fetchRules(ctx, section);
-    node = graphqlRun.byPattern.get(pattern);
-  }
+async function lateRuleId(ctx: BranchesContext, pattern: string): Promise<unknown> {
+  const node = (await fetchRules(ctx))?.get(pattern);
   if (node === undefined) {
     throw new Error(
-      `branches[${pattern}]: the protection was applied but no branch protection rule with that pattern came back from GitHub, so its GraphQL-only fields cannot be set; re-run the workflow, and report this if it persists`,
+      `branches[${pattern}]: the branch is protected but no branch protection rule with that pattern is visible through GraphQL, so its GraphQL-only fields cannot be set; check that the token can read branch protection rules, re-run the workflow, and report this if it persists`,
     );
   }
-  return node;
+  return node.id;
 }
 
 /**
@@ -762,22 +832,20 @@ async function ruleNodeFor(
  * a time (the request log stays deterministic), through the per-run cache.
  */
 async function resolveActorIds(
-  ctx: SectionContext,
-  section: SectionMeta,
+  ctx: BranchesContext,
   graphqlRun: GraphqlRun,
   actors: readonly string[],
 ): Promise<string[]> {
   const ids: string[] = [];
   for (const actor of actors) {
-    ids.push(await resolveActorId(ctx, section, graphqlRun, actor));
+    ids.push(await resolveActorId(ctx, graphqlRun, actor));
   }
   return ids;
 }
 
 /** The mutation input fields for a wildcard entry, routed keys resolved. */
 async function wildcardInputFields(
-  ctx: SectionContext,
-  section: SectionMeta,
+  ctx: BranchesContext,
   graphqlRun: GraphqlRun,
   protection: BranchProtectionConfig,
 ): Promise<Record<string, unknown>> {
@@ -785,7 +853,6 @@ async function wildcardInputFields(
   if (protection.force_push_bypassers !== undefined) {
     input.bypassForcePushActorIds = await resolveActorIds(
       ctx,
-      section,
       graphqlRun,
       protection.force_push_bypassers,
     );
@@ -794,6 +861,52 @@ async function wildcardInputFields(
     Object.assign(input, deploymentInputFields(protection.required_deployments));
   }
   return input;
+}
+
+/** The repository's node id: one an actor read already carried, else the dedicated lookup. */
+async function repositoryNodeId(ctx: BranchesContext, graphqlRun: GraphqlRun): Promise<string> {
+  if (graphqlRun.repoId === null) {
+    const data = await ctx.read.repoLookup.call(repoVariables(ctx), {
+      describe: "resolving the repository's GraphQL node id",
+    });
+    const id = (data.repository as Record<string, unknown> | null)?.id;
+    if (typeof id !== "string" || id.length === 0) {
+      throw new Error(
+        "branches: the repository lookup returned no GraphQL node id, so no protection rule can be created; re-run the workflow and retry if it persists",
+      );
+    }
+    graphqlRun.repoId = id;
+  }
+  return graphqlRun.repoId;
+}
+
+/**
+ * A drift list proven non-empty - the justification every planned write
+ * carries - or null, in which case nothing is planned.
+ */
+function justified(lines: readonly string[]): readonly [string, ...string[]] | null {
+  const [first, ...rest] = lines;
+  return first === undefined ? null : [first, ...rest];
+}
+
+/**
+ * An op's change line, rendered only once the mutation's read-back agrees
+ * with the declared required_deployments (a throw is the verification
+ * failure); the plain line when the entry declares none.
+ */
+function verifiedChange(
+  line: string,
+  entryName: string,
+  declared: BranchProtectionConfig["required_deployments"],
+  payloadKey: MutationPayloadKey,
+): string | ((response: unknown) => string) {
+  if (declared === undefined) {
+    return line;
+  }
+  return (response) => {
+    verifyDeploymentReadback(entryName, declared, response, payloadKey);
+    return line;
+  };
 }
 
 const WILDCARD_KEY_ERROR = (name: string, key: string): string =>
@@ -864,8 +977,7 @@ export const branchesSection = {
       }
     });
   }),
-  async run(ctx, desired): Promise<SectionResult> {
-    const run = beginRun(ctx);
+  async plan(ctx, desired): Promise<BranchesPlan> {
     // Protection is keyed by exact branch name or pattern; two entries for
     // the same one would overwrite each other's write on every run.
     rejectDuplicates(
@@ -874,6 +986,7 @@ export const branchesSection = {
       (b) => b.name,
       (b) => b.name,
     );
+    const plan: BranchesPlan = { ops: [], notes: [], drift: [] };
     // The one rules read, fired only when an entry needs the GraphQL
     // surface: a pure-REST declaration issues no GraphQL request at all.
     // The SAME predicate that gates the fetch classifies the entries, so
@@ -883,14 +996,14 @@ export const branchesSection = {
     let entries: ClassifiedEntry[];
     if (desired.some(needsGraphql)) {
       const graphqlRun: GraphqlRun = {
-        byPattern: await fetchRules(ctx, this),
+        rules: await fetchRules(ctx),
         repoId: null,
         actorIds: new Map(),
       };
       const declaredPatterns = new Set(desired.map((branch) => branch.name));
-      for (const pattern of [...graphqlRun.byPattern.keys()].sort()) {
+      for (const pattern of [...(graphqlRun.rules?.keys() ?? [])].sort()) {
         if (isWildcardPattern(pattern) && !declaredPatterns.has(pattern)) {
-          run.result.notes.push(
+          plan.notes.push(
             `undeclared classic protection rule "${pattern}" exists on the repo - declare it to manage it (this action never deletes undeclared rules)`,
           );
         }
@@ -910,45 +1023,42 @@ export const branchesSection = {
     }
     for (const entry of entries) {
       if (entry.kind === "wildcard") {
-        await runWildcardEntry(this, entry.graphqlRun, entry.branch, run);
+        await planWildcardEntry(ctx, entry.graphqlRun, entry.branch, plan);
         continue;
       }
-      await runLiteralEntry(this, entry.routed, entry.branch, run);
+      await planLiteralEntry(ctx, this, entry.routed, entry.branch, plan);
     }
-    return run.result;
+    return plan;
   },
-} satisfies SectionModule<"branches">;
+} satisfies SectionModule<"branches", typeof ENDPOINTS, typeof GRAPHQL>;
 
 /**
- * Reconcile one literal-branch entry (the REST path plus routed keys).
- * `routed` is the classification-time proof: non-null exactly when the entry
- * declares a GraphQL-routed key, carrying the per-run GraphQL state. The
- * destructure below drops the pair's type-level link on purpose: this
- * section never needs an apply-only ctx capability, so narrowing happens on
- * `result.check` alone, and the pair still arrived correlated through `run`.
+ * Plan one literal-branch entry: the protection PUT, the signature
+ * sub-endpoint, and the rule mutation, each justified by its drift. `routed`
+ * is non-null exactly when the entry declares a GraphQL-routed key.
  */
-async function runLiteralEntry(
-  section: SectionModule<"branches">,
+async function planLiteralEntry(
+  ctx: BranchesContext,
+  section: SectionMeta,
   routed: { graphqlRun: GraphqlRun } | null,
   branch: BranchConfig,
-  run: SectionRun,
+  plan: BranchesPlan,
 ): Promise<void> {
-  const { ctx, result } = run;
+  const params = { branch: branch.name };
+  const prefix = `branches[${branch.name}].protection`;
+  const probe = await ctx.read.getProtection.probeAbsent({ params });
   if (branch.protection === null) {
-    const probe = await probeAbsent(ctx, section, ENDPOINTS.getProtection, {
-      params: { branch: branch.name },
-    });
     if ("missing" in probe) {
       return;
     }
-    if (result.check) {
-      result.drift.push(
+    plan.ops.push({
+      role: "removeProtection",
+      params,
+      drift: [
         `branches[${branch.name}]: protected live but the settings file declares protection: null; apply will remove the protection`,
-      );
-    } else {
-      await call(ctx, section, ENDPOINTS.removeProtection, { params: { branch: branch.name } });
-      result.changes.push(`removed protection from "${branch.name}"`);
-    }
+      ],
+      change: `removed protection from "${branch.name}"`,
+    });
     return;
   }
   // The routed keys never ride the REST payload: GitHub's protection PUT
@@ -967,228 +1077,244 @@ async function runLiteralEntry(
       payload[key] = null;
     }
   }
-  if (result.check) {
-    const probe = await probeAbsent(ctx, section, ENDPOINTS.getProtection, {
-      params: { branch: branch.name },
+  // The flattened live protection the declared keys diff against; null for
+  // an unprotected branch, which has no requirement and no allowance.
+  let live: Record<string, unknown> | null = null;
+  // GitHub does not document whether the PUT preserves the sub-resource and
+  // the GraphQL-only fields, so a planned PUT re-applies every declared one.
+  let putPlanned = false;
+  if ("missing" in probe) {
+    // Protection 404s for a missing BRANCH too. Only a definitive 404 on the
+    // advisory probe flips the finding; any other failure (no Contents
+    // grant) keeps the plain unprotected reading.
+    const branchProbe = await ctx.read.branchProbe.tryCall({ params });
+    if ("error" in branchProbe && branchProbe.error.status === 404) {
+      // Nothing to plan: no operation can create a branch. Check reports
+      // the drift; apply surfaces it as a note.
+      plan.drift.push(
+        `branches[${branch.name}]: declared in the settings file but the branch does not exist on the repo, so apply cannot protect it; create the branch, or remove it from the settings file`,
+      );
+      return;
+    }
+    plan.ops.push({
+      role: "putProtection",
+      params,
+      payload: plainData(payload),
+      describe: `replacing protection for branch "${branch.name}"`,
+      drift: [
+        `branches[${branch.name}]: unprotected live but the settings file declares protection; apply will protect it`,
+      ],
+      change: `applied protection to "${branch.name}"`,
     });
-    if ("missing" in probe) {
-      // Protection 404s for a missing BRANCH too. The branch probe is
-      // advisory: only a definitive 404 flips the message (other errors,
-      // e.g. a token without Contents read, fall back to the plain
-      // unprotected reading rather than misreporting or failing).
-      const branchProbe = await ctx.api.tryRequest(
-        "GET",
-        expand(ENDPOINTS.branchProbe, ctx, { branch: branch.name }),
-      );
-      if ("error" in branchProbe && branchProbe.error.status === 404) {
-        result.drift.push(
-          `branches[${branch.name}]: declared in the settings file but the branch does not exist on the repo, so apply cannot protect it; create the branch, or remove it from the settings file`,
-        );
-      } else {
-        result.drift.push(
-          `branches[${branch.name}]: unprotected live but the settings file declares protection; apply will protect it`,
-        );
-      }
-    } else {
-      // GET shapes booleans as {enabled: bool}; compare declared keys
-      // against a flattened view. The routed keys were destructured off the
-      // payload above; required_signatures is the one with a REST read to
-      // diff against, the other two diff against the GraphQL rule below.
-      // The parse pins the one field read BY NAME (required_signatures'
-      // {enabled} wrapper); everything else flattens generically.
-      const live = flattenProtection(
-        parseLive(
-          section,
-          ENDPOINTS.getProtection,
-          LiveProtection,
-          probe.data,
-          `branch "${branch.name}"`,
-        ),
-      );
-      // The protection GET OMITS required_signatures entirely when
-      // signed commits are not required, so an absent live field means
-      // false; normalize before the diff so declared false does not
-      // read as drift.
-      if (!("required_signatures" in live)) {
-        live.required_signatures = false;
-      }
-      const declaredRest: Record<string, unknown> = { ...payload };
-      for (const key of REQUIRED_PROTECTION_KEYS) {
-        if (!(key in branch.protection)) {
-          delete declaredRest[key];
-        }
-      }
-      if (requiredSignatures !== undefined) {
-        declaredRest.required_signatures = requiredSignatures;
-      }
-      result.drift.push(...subsetDiff(declaredRest, live, `branches[${branch.name}].protection`));
-      result.drift.push(
-        ...routedKeyDrift(
-          `branches[${branch.name}].protection`,
-          branch.protection,
-          routed?.graphqlRun.byPattern.get(branch.name),
-        ),
-      );
-      // Apply null-fills the four required keys, REMOVING live settings
-      // the declaration omits - surface that as drift, not silence.
-      for (const key of REQUIRED_PROTECTION_KEYS) {
-        if (!(key in branch.protection) && live[key] != null && live[key] !== false) {
-          result.drift.push(
-            `branches[${branch.name}].protection.${key}: set live but omitted from the settings file, so apply would REMOVE it; add ${key} to the branch's protection in the settings file to keep it`,
-          );
-        }
+    putPlanned = true;
+  } else {
+    // The parse pins the one field read BY NAME (required_signatures'
+    // {enabled} wrapper); everything else flattens generically.
+    live = flattenProtection(
+      parseLive(
+        section,
+        ENDPOINTS.getProtection,
+        LiveProtection,
+        probe.data,
+        `branch "${branch.name}"`,
+      ),
+    );
+    // The protection GET OMITS required_signatures entirely when signed
+    // commits are not required, so an absent live field means false;
+    // normalize before the diff so declared false does not read as drift.
+    if (!("required_signatures" in live)) {
+      live.required_signatures = false;
+    }
+    const declaredRest: Record<string, unknown> = { ...payload };
+    for (const key of REQUIRED_PROTECTION_KEYS) {
+      if (!(key in branch.protection)) {
+        delete declaredRest[key];
       }
     }
+    // The PUT replaces the whole protection, so live settings the
+    // declaration omits are REMOVED by it - drift, not silence. The signature
+    // toggle is the one live field the PUT never touches (its own sub-resource).
+    const { required_signatures: _liveSignatures, ...liveRest } = live;
+    const restDrift = [
+      ...subsetDiff(declaredRest, live, prefix),
+      ...omittedLiveDrift(declaredRest, liveRest, prefix),
+    ];
+    const drift = justified(restDrift);
+    if (drift !== null) {
+      plan.ops.push({
+        role: "putProtection",
+        params,
+        payload: plainData(payload),
+        describe: `replacing protection for branch "${branch.name}"`,
+        drift,
+        change: `applied protection to "${branch.name}"`,
+      });
+      putPlanned = true;
+    }
+  }
+  // The declared toggle applies through its sub-endpoint once the PUT has
+  // ensured the protection (and with it the sub-resource) exists; an
+  // undeclared toggle leaves the live requirement alone.
+  if (requiredSignatures !== undefined) {
+    const sigDrift = subsetDiff(
+      { required_signatures: requiredSignatures },
+      { required_signatures: live?.required_signatures ?? false },
+      prefix,
+    );
+    if (sigDrift.length === 0 && putPlanned) {
+      sigDrift.push(
+        `${prefix}.required_signatures: re-applied after the protection PUT (GitHub does not document whether the PUT preserves it)`,
+      );
+    }
+    const drift = justified(sigDrift);
+    if (drift !== null) {
+      plan.ops.push(
+        requiredSignatures
+          ? {
+              role: "sigPost",
+              params,
+              describe: `requiring signed commits on branch "${branch.name}"`,
+              drift,
+              change: `required signed commits on "${branch.name}"`,
+            }
+          : {
+              role: "sigDelete",
+              params,
+              describe: `removing the signed-commit requirement from branch "${branch.name}"`,
+              drift,
+              change: `removed the signed-commit requirement from "${branch.name}"`,
+            },
+      );
+    }
+  }
+  if (routed === null) {
     return;
   }
-  // Actor resolution comes BEFORE the destructive PUT: a misspelled actor
-  // must fail the entry while the live protection is still untouched, not
-  // after the PUT already replaced it. Resolution is read-only.
-  // (forcePushBypassers implies routed; the conjunct carries that fact to
-  // the type checker.)
-  const resolvedBypassIds =
-    routed !== null && forcePushBypassers !== undefined
-      ? await resolveActorIds(ctx, section, routed.graphqlRun, forcePushBypassers)
-      : undefined;
-  await call(ctx, section, ENDPOINTS.putProtection, {
-    params: { branch: branch.name },
-    payload,
-    describe: `replacing protection for branch "${branch.name}"`,
-  });
-  // The declared toggle is applied once the PUT has ensured the
-  // protection (and with it the sub-resource) exists; an undeclared
-  // toggle leaves the live requirement alone.
-  if (requiredSignatures === true) {
-    await call(ctx, section, ENDPOINTS.sigPost, {
-      params: { branch: branch.name },
-      describe: `requiring signed commits on branch "${branch.name}"`,
-    });
-  } else if (requiredSignatures === false) {
-    await call(ctx, section, ENDPOINTS.sigDelete, {
-      params: { branch: branch.name },
-      describe: `removing the signed-commit requirement from branch "${branch.name}"`,
-    });
-  }
-  if (routed !== null) {
-    // The entry declared a routed key, so the classification attached the
-    // run state; the rule node itself may be fresh (the PUT above just
-    // created it), which the one-refetch lookup covers.
-    const node = await ruleNodeFor(ctx, section, routed.graphqlRun, branch.name);
-    const input: Record<string, unknown> = { branchProtectionRuleId: node.id };
-    if (resolvedBypassIds !== undefined) {
-      input.bypassForcePushActorIds = resolvedBypassIds;
-    }
-    if (requiredDeployments !== undefined) {
-      Object.assign(input, deploymentInputFields(requiredDeployments));
-    }
-    const data = await callGraphql(
-      ctx,
-      section,
-      UPDATE_RULE,
-      { input },
-      { describe: `setting the GraphQL-only protection fields of branch "${branch.name}"` },
+  const node = routed.graphqlRun.rules?.get(branch.name);
+  const routedKeys = [
+    ...(forcePushBypassers === undefined ? [] : ["force_push_bypassers"]),
+    ...(requiredDeployments === undefined ? [] : ["required_deployments"]),
+  ].join(" and ");
+  const routedDrift = routedKeyDrift(
+    prefix,
+    branch.protection,
+    routed.graphqlRun.rules,
+    branch.name,
+  );
+  if (routedDrift.length === 0 && putPlanned) {
+    routedDrift.push(
+      `${prefix}: ${routedKeys} re-applied after the protection PUT (GitHub does not document whether the PUT preserves them)`,
     );
-    verifyDeploymentReadback(branch.name, requiredDeployments, data, "updateBranchProtectionRule");
   }
-  result.changes.push(`applied protection to "${branch.name}"`);
+  const drift = justified(routedDrift);
+  if (drift === null) {
+    return;
+  }
+  // Actors resolve at plan time, so a misspelled actor fails the entry while
+  // the live protection is still untouched - never after the PUT replaced it.
+  const fields: Record<string, unknown> = {};
+  if (forcePushBypassers !== undefined) {
+    fields.bypassForcePushActorIds = await resolveActorIds(
+      ctx,
+      routed.graphqlRun,
+      forcePushBypassers,
+    );
+  }
+  if (requiredDeployments !== undefined) {
+    Object.assign(fields, deploymentInputFields(requiredDeployments));
+  }
+  plan.ops.push({
+    role: "updateRule",
+    describe: `setting the GraphQL-only protection fields of branch "${branch.name}"`,
+    // A rule the plan-time fetch did not carry (the PUT planned above
+    // creates it) is looked up once that operation has run.
+    variables:
+      node !== undefined
+        ? { input: { branchProtectionRuleId: node.id, ...fields } }
+        : async () => ({
+            input: {
+              branchProtectionRuleId: await lateRuleId(ctx, branch.name),
+              ...fields,
+            },
+          }),
+    drift,
+    change: verifiedChange(
+      `set ${routedKeys} on "${branch.name}"`,
+      branch.name,
+      requiredDeployments,
+      "updateBranchProtectionRule",
+    ),
+  });
 }
 
-/** Reconcile one wildcard entry, entirely through the GraphQL rule surface. */
-async function runWildcardEntry(
-  section: SectionModule<"branches">,
+/** Plan one wildcard entry, entirely through the GraphQL rule surface. */
+async function planWildcardEntry(
+  ctx: BranchesContext,
   graphqlRun: GraphqlRun,
   branch: BranchConfig,
-  run: SectionRun,
+  plan: BranchesPlan,
 ): Promise<void> {
-  const { ctx, result } = run;
   const pattern = branch.name;
-  const node = graphqlRun.byPattern.get(pattern);
+  const prefix = `branches[${pattern}].protection`;
+  const node = graphqlRun.rules?.get(pattern);
   if (branch.protection === null) {
     if (node === undefined) {
       return;
     }
-    if (result.check) {
-      result.drift.push(
+    plan.ops.push({
+      role: "deleteRule",
+      variables: { input: { branchProtectionRuleId: node.id } },
+      describe: `deleting the protection rule "${pattern}"`,
+      drift: [
         `branches[${pattern}]: a live rule matches this pattern but the settings file declares protection: null; apply will delete the rule`,
-      );
-      return;
-    }
-    await callGraphql(
-      ctx,
-      section,
-      DELETE_RULE,
-      { input: { branchProtectionRuleId: node.id } },
-      { describe: `deleting the protection rule "${pattern}"` },
-    );
-    graphqlRun.byPattern.delete(pattern);
-    result.changes.push(`deleted protection rule "${pattern}"`);
-    return;
-  }
-  if (result.check) {
-    if (node === undefined) {
-      result.drift.push(
-        `branches[${pattern}]: no live rule matches this pattern but the settings file declares protection; apply will create the rule`,
-      );
-      return;
-    }
-    const declared: Record<string, unknown> = { ...branch.protection };
-    delete declared.force_push_bypassers;
-    delete declared.required_deployments;
-    result.drift.push(
-      ...subsetDiff(declared, classicViewOfRule(node), `branches[${pattern}].protection`),
-    );
-    result.drift.push(
-      ...routedKeyDrift(`branches[${pattern}].protection`, branch.protection, node),
-    );
-    return;
-  }
-  const fields = await wildcardInputFields(ctx, section, graphqlRun, branch.protection);
-  if (node !== undefined) {
-    const data = await callGraphql(
-      ctx,
-      section,
-      UPDATE_RULE,
-      { input: { branchProtectionRuleId: node.id, ...fields } },
-      { describe: `updating the protection rule "${pattern}"` },
-    );
-    verifyDeploymentReadback(
-      pattern,
-      branch.protection.required_deployments,
-      data,
-      "updateBranchProtectionRule",
-    );
-    result.changes.push(`updated protection rule "${pattern}"`);
-    return;
-  }
-  if (graphqlRun.repoId === null) {
-    const data = await callGraphql(ctx, section, REPO_LOOKUP, repoVariables(ctx), {
-      describe: "resolving the repository's GraphQL node id",
+      ],
+      change: `deleted protection rule "${pattern}"`,
     });
-    const id = (data.repository as Record<string, unknown> | null)?.id;
-    if (typeof id !== "string" || id.length === 0) {
-      throw new Error(
-        "branches: the repository lookup returned no GraphQL node id, so no protection rule can be created; re-run the workflow, and retry later if it persists",
-      );
-    }
-    graphqlRun.repoId = id;
+    return;
   }
-  const data = await callGraphql(
-    ctx,
-    section,
-    CREATE_RULE,
-    { input: { repositoryId: graphqlRun.repoId, pattern, ...fields } },
-    { describe: `creating the protection rule "${pattern}"` },
-  );
-  verifyDeploymentReadback(
-    pattern,
-    branch.protection.required_deployments,
-    data,
-    "createBranchProtectionRule",
-  );
-  // The mutation payload's rule is NOT cached into graphqlRun.byPattern: it carries
-  // only the read-back fields, not a full rules-query node, and duplicate
-  // rejection means no later entry can look this pattern up anyway.
-  result.changes.push(`created protection rule "${pattern}"`);
+  const deployments = branch.protection.required_deployments;
+  if (node === undefined) {
+    const fields = await wildcardInputFields(ctx, graphqlRun, branch.protection);
+    const repositoryId = await repositoryNodeId(ctx, graphqlRun);
+    plan.ops.push({
+      role: "createRule",
+      variables: { input: { repositoryId, pattern, ...fields } },
+      describe: `creating the protection rule "${pattern}"`,
+      drift: [
+        `branches[${pattern}]: no live rule matches this pattern but the settings file declares protection; apply will create the rule`,
+      ],
+      change: verifiedChange(
+        `created protection rule "${pattern}"`,
+        pattern,
+        deployments,
+        "createBranchProtectionRule",
+      ),
+    });
+    return;
+  }
+  const declared: Record<string, unknown> = { ...branch.protection };
+  delete declared.force_push_bypassers;
+  delete declared.required_deployments;
+  const drift = justified([
+    ...subsetDiff(declared, classicViewOfRule(node), prefix),
+    ...routedKeyDrift(prefix, branch.protection, graphqlRun.rules, pattern),
+  ]);
+  if (drift === null) {
+    return;
+  }
+  const fields = await wildcardInputFields(ctx, graphqlRun, branch.protection);
+  plan.ops.push({
+    role: "updateRule",
+    variables: { input: { branchProtectionRuleId: node.id, ...fields } },
+    describe: `updating the protection rule "${pattern}"`,
+    drift,
+    change: verifiedChange(
+      `updated protection rule "${pattern}"`,
+      pattern,
+      deployments,
+      "updateBranchProtectionRule",
+    ),
+  });
 }
 
 /**
@@ -1202,10 +1328,25 @@ async function runWildcardEntry(
 export function flattenProtection(live: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(live)) {
+    if (GET_ONLY_KEYS.has(key) || isUrlKey(key)) {
+      continue;
+    }
     out[key] = flattenValue(value);
+  }
+  const checks = out.required_status_checks;
+  if (typeof checks === "object" && checks !== null && !Array.isArray(checks)) {
+    delete (checks as Record<string, unknown>).enforcement_level;
   }
   return out;
 }
+
+/**
+ * GET-only metadata the PUT vocabulary has no word for (url keys drop
+ * generically; `required_status_checks.enforcement_level` drops above).
+ */
+const GET_ONLY_KEYS: ReadonlySet<string> = new Set(["name", "enabled"]);
+
+const isUrlKey = (key: string): boolean => key === "url" || key.endsWith("_url");
 
 const ACTOR_NAME_KEYS = ["login", "slug"] as const;
 const ACTOR_LIST_KEYS = new Set(["users", "teams", "apps"]);
@@ -1240,7 +1381,7 @@ function flattenValue(value: unknown): unknown {
         }
         return actor;
       });
-    } else if (key.endsWith("_url") || key === "url") {
+    } else if (isUrlKey(key)) {
       // URLs never appear in the PUT shape; drop to avoid noise.
     } else {
       out[key] = flattenValue(inner);

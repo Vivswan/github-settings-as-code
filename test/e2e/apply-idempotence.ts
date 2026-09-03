@@ -33,8 +33,8 @@
  *   a second apply re-asserts it and the section stays false.
  * - rulesets (false): an existing ruleset is PUT unconditionally (the GET +
  *   diff runs only in check mode).
- * - branches (false): declared protection is PUT unconditionally (only the
- *   protection: null removal probes first).
+ * - branches (true): the protection PUT, the signature sub-endpoint, and the
+ *   rule mutations are all drift-gated, so a converged repo plans nothing.
  * - environments (false): every declared environment is PUT unconditionally.
  *   The nested `variables` reconciliation does compare before writing (it
  *   lists and diffs first, so a second apply issues no variable writes), but
@@ -85,7 +85,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   repository: false,
   labels: true,
   rulesets: false,
-  branches: false,
+  branches: true,
   environments: false,
   autolinks: true,
   actions: true,

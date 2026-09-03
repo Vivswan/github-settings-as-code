@@ -59,7 +59,7 @@ export const BranchProtectionConfig = z
       })
       .optional()
       .describe(
-        "Require signed commits on the branch. A routed key the PUT silently drops, so it is applied through the POST/DELETE .../protection/required_signatures sub-endpoint after the PUT. GitHub does not document whether the protection PUT preserves an existing signature requirement, so declare the toggle on any branch that carries one - a declared value is pinned either way.",
+        "Require signed commits on the branch. On a literal branch this is a routed key the protection PUT silently drops, so it is applied through the POST/DELETE .../protection/required_signatures sub-endpoint: when it drifts, and again after any protection PUT (GitHub does not document whether the PUT preserves an existing requirement), so declare the toggle on any branch that carries one - a declared value is pinned either way. On a wildcard rule it rides the GraphQL rule mutation like every other key.",
       ),
     force_push_bypassers: z
       .array(
@@ -67,7 +67,7 @@ export const BranchProtectionConfig = z
       )
       .optional()
       .describe(
-        'Who may force-push to the branch when "allow force pushes" is in its "specify who" mode. Each actor is one string: a bare login is a user ("octocat"), "org/team-slug" is a team, and "app/slug" is a GitHub App. A REST-invisible surface, so this routed key is stripped from the protection PUT and applied through the updateBranchProtectionRule GraphQL mutation after it; check mode reads the live list back through GraphQL. An empty list clears every allowance; an absent key leaves the live list untouched.',
+        'Who may force-push to the branch when "allow force pushes" is in its "specify who" mode. Each actor is one string: a bare login is a user ("octocat"), "org/team-slug" is a team, and "app/slug" is a GitHub App. A REST-invisible surface: on a literal branch this routed key is stripped from the protection PUT and applied through the updateBranchProtectionRule GraphQL mutation when it drifts, and again after any protection PUT; on a wildcard rule it rides the create or update mutation with the rest of the rule. The live list is read back through GraphQL. An empty list clears every allowance; an absent key leaves the live list untouched.',
       ),
     required_deployments: z
       .strictObject({ environments: z.array(z.string()) })

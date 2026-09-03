@@ -61,7 +61,9 @@ export function genBranches(rng: Rng): Json[] {
     if (sigRng.bool(0.3)) {
       protection.required_signatures = sigRng.bool();
     }
-    if (bprRng.bool(0.25)) {
+    // The first entry stays literal so every generated document reaches the
+    // protection read (the fault target); the draw is consumed either way.
+    if (bprRng.bool(0.25) && i > 0) {
       // A WILDCARD entry replaces the literal one: only translated keys, so
       // the whole entry reconciles through the GraphQL rule mutations.
       const wildcard: Json = {};

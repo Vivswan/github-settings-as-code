@@ -1,154 +1,109 @@
 import { describe, expect, test } from "bun:test";
+import { executePlan } from "../../../src/engine/execute.js";
+import type { GithubClient } from "../../../src/github/api.js";
+import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
+import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
+import { buildState, type LiveState } from "../../../test/e2e/mock/state.js";
+import type { Json } from "../../../test/e2e/mock/support.js";
 import { MockApi } from "../../../test/mock-api.js";
-import { ctx } from "../../../test/sections/context.js";
+import { provePlanIdempotent, REPO } from "../../../test/sections/plan-idempotence.js";
+import {
+  endpointMethod,
+  endpointPath,
+  matchesTemplate,
+  pathSegments,
+} from "../contract/endpoints.js";
 import { branchesSection } from "./index.js";
+import { branchesMockGraphqlHandlers, branchesMockHandlers } from "./mock.js";
 
-describe("branches", () => {
-  const declared = [{ name: "main", protection: { enforce_admins: true } }];
+type Desired = Parameters<typeof branchesSection.plan>[1];
 
-  test("check: existing unprotected branch reports protectable drift", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/branches/main": { data: { name: "main" } },
-    });
-    const result = await branchesSection.run(ctx(api, true), declared);
-    expect(result.drift).toEqual([
-      "branches[main]: unprotected live but the settings file declares protection; apply will protect it",
-    ]);
-  });
+const plan = (api: GithubClient, desired: Desired) =>
+  branchesSection.plan(planContext(branchesSection, api, REPO), desired);
 
-  test("check: missing branch is reported as nonexistent, not unprotected", async () => {
-    const api = new MockApi({}); // every GET 404s, including the branch itself
-    const result = await branchesSection.run(ctx(api, true), declared);
-    expect(result.drift).toHaveLength(1);
-    expect(result.drift?.[0]).toContain("does not exist");
-  });
+/** The tools no branches plan ever needs: the section declares no secret values. */
+const NO_SECRETS = {
+  resolveSecret(): string {
+    throw new Error("the branches section resolves no secrets");
+  },
+};
 
-  test("check: inconclusive branch probe falls back to unprotected drift", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/branches/main": { error: { status: 403, message: "Forbidden", body: "" } },
-    });
-    const result = await branchesSection.run(ctx(api, true), declared);
-    expect(result.drift).toHaveLength(1);
-    expect(result.drift?.[0]).toContain("apply will protect it");
-  });
+/** One recorded request of the stateful fake. */
+interface Recorded {
+  method: string;
+  path: string;
+  payload?: unknown;
+}
 
-  test("duplicate branch names are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      branchesSection.run(ctx(api), [
-        { name: "main", protection: { enforce_admins: true } },
-        { name: "main", protection: null },
-      ]),
-    ).rejects.toThrow(/same branches entry/);
-    expect(api.calls).toHaveLength(0);
-  });
-
-  const SIG_PATH = "/repos/o/r/branches/main/protection/required_signatures";
-
-  test("apply: required_signatures true POSTs the sub-endpoint after the PUT", async () => {
-    const api = new MockApi({
-      "PUT /repos/o/r/branches/main/protection": { data: {} },
-      [`POST ${SIG_PATH}`]: { data: { enabled: true } },
-    });
-    await branchesSection.run(ctx(api), [
-      { name: "main", protection: { enforce_admins: true, required_signatures: true } },
-    ]);
-    expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([
-      "PUT /repos/o/r/branches/main/protection",
-      `POST ${SIG_PATH}`,
-    ]);
-    // The PUT body must not carry the key GitHub would silently drop.
-    const put = api.mutations()[0];
-    expect(Object.keys(put?.payload as Record<string, unknown>)).not.toContain(
-      "required_signatures",
-    );
-  });
-
-  test("apply: required_signatures false DELETEs the sub-endpoint after the PUT", async () => {
-    const api = new MockApi({
-      "PUT /repos/o/r/branches/main/protection": { data: {} },
-      [`DELETE ${SIG_PATH}`]: { data: null },
-    });
-    await branchesSection.run(ctx(api), [
-      { name: "main", protection: { enforce_admins: true, required_signatures: false } },
-    ]);
-    expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([
-      "PUT /repos/o/r/branches/main/protection",
-      `DELETE ${SIG_PATH}`,
-    ]);
-  });
-
-  test("apply: undeclared required_signatures touches the sub-endpoint in neither direction", async () => {
-    const api = new MockApi({
-      "PUT /repos/o/r/branches/main/protection": { data: {} },
-    });
-    await branchesSection.run(ctx(api), declared);
-    expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([
-      "PUT /repos/o/r/branches/main/protection",
-    ]);
-  });
-
-  test("apply: protection null removes protection without touching the sub-endpoint", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/branches/main/protection": {
-        data: { enforce_admins: { enabled: true }, required_signatures: { enabled: true } },
-      },
-      "DELETE /repos/o/r/branches/main/protection": { data: null },
-    });
-    await branchesSection.run(ctx(api), [{ name: "main", protection: null }]);
-    expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([
-      "DELETE /repos/o/r/branches/main/protection",
-    ]);
-  });
-
-  test.each([
-    ["declared true against live {enabled: true} is clean", true, { enabled: true }, []],
-    ["declared false against live {enabled: false} is clean", false, { enabled: false }, []],
-    ["declared false against an ABSENT live field is clean (absent means false)", false, null, []],
-    [
-      "declared true against an ABSENT live field is drift",
-      true,
-      null,
-      ["branches[main].protection.required_signatures: true != false"],
-    ],
-  ] as const)("check: %s", async (_name, declaredValue, liveField, expectedDrift) => {
-    const api = new MockApi({
-      "GET /repos/o/r/branches/main/protection": {
-        data: {
-          enforce_admins: { enabled: true },
-          ...(liveField === null ? {} : { required_signatures: liveField }),
-        },
-      },
-    });
-    const result = await branchesSection.run(ctx(api, true), [
-      { name: "main", protection: { enforce_admins: true, required_signatures: declaredValue } },
-    ]);
-    expect(result.drift).toEqual([...expectedDrift]);
-  });
-
-  test('a quoted "true" fails the shape upfront, with the YAML gotcha named', () => {
-    // The toggle is typed in the zod shape so document validation rejects it
-    // before ANY section writes - not a run()-time throw after earlier
-    // sections already applied.
-    const parsed = branchesSection.shape.safeParse([
-      { name: "main", protection: { enforce_admins: true, required_signatures: "true" } },
-    ]);
-    expect(parsed.success).toBe(false);
-    const messages = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
-    expect(messages.some((m) => m.includes("unquoted true or false"))).toBe(true);
-    // The passthrough survives the typed key: unknown protection fields and
-    // a proper boolean both validate.
-    expect(
-      branchesSection.shape.safeParse([
-        {
-          name: "main",
-          protection: { enforce_admins: true, required_signatures: true, future_field: "x" },
-        },
-        { name: "legacy", protection: null },
-      ]).success,
-    ).toBe(true);
-  });
-});
+/**
+ * A stateful fake of the branches API served by the e2e mock's own handler
+ * fragment, so a plan over executed state sees the converged repository;
+ * GraphQL errors fold to the ApiError shape the real client produces.
+ */
+function liveRepo(live: LiveState): GithubClient & { writes: Recorded[] } {
+  const state = buildState(live, "org");
+  const endpoints = allEndpoints([branchesSection]);
+  const graphqlOps = allGraphqlOps([branchesSection]);
+  return {
+    writes: [],
+    async tryRequest(method, path, payload) {
+      const match = Object.entries(endpoints).find(
+        ([, endpoint]) =>
+          endpointMethod(endpoint.route) === method &&
+          matchesTemplate(endpointPath(endpoint.route), path),
+      );
+      if (match === undefined) {
+        throw new Error(`liveRepo: no branches endpoint serves ${method} ${path}`);
+      }
+      const [key, endpoint] = match;
+      const template = pathSegments(endpointPath(endpoint.route));
+      const concrete = pathSegments(path);
+      const param = (name: string): string => {
+        const index = template.indexOf(`{${name}}`);
+        if (index < 0) {
+          throw new Error(`liveRepo: ${endpoint.route} declares no {${name}}`);
+        }
+        return decodeURIComponent(concrete[index] as string);
+      };
+      const handler = branchesMockHandlers[key as keyof typeof branchesMockHandlers];
+      const response = handler({ state, endpoint, param, query: {}, body: payload });
+      if (method !== "GET") {
+        this.writes.push({ method, path, payload });
+      }
+      if (response.status >= 400) {
+        const message = (response.body as { message?: unknown } | null)?.message;
+        return {
+          error: { status: response.status, message: String(message ?? ""), body: "" },
+        };
+      }
+      return { data: response.body };
+    },
+    async tryGraphql(op, variables) {
+      const match = Object.entries(graphqlOps).find(([, declared]) => declared.name === op.name);
+      if (match === undefined) {
+        throw new Error(`liveRepo: no branches operation is named ${op.name}`);
+      }
+      const [key, tagged] = match;
+      const handler = branchesMockGraphqlHandlers[key as keyof typeof branchesMockGraphqlHandlers];
+      const result = handler({ state, op: tagged, variables: variables as Json });
+      if (op.kind === "write") {
+        this.writes.push({ method: "GRAPHQL", path: op.name, payload: variables });
+      }
+      if (result.errors !== undefined) {
+        const types = [...new Set(result.errors.map((e) => e.type))].sort();
+        return {
+          error: {
+            status: types.includes("FORBIDDEN") ? 403 : types.includes("NOT_FOUND") ? 404 : 422,
+            message: result.errors.map((e) => e.message).join("; "),
+            body: JSON.stringify(result.errors),
+            graphqlTypes: types,
+          },
+        };
+      }
+      return { data: result.data };
+    },
+  };
+}
 
 /** A rules-query response over the given nodes, MockApi-route shaped. */
 function rulesData(nodes: unknown[]): { data: Record<string, unknown> } {
@@ -177,102 +132,528 @@ function ruleNode(
   };
 }
 
-describe("branches GraphQL-routed keys", () => {
-  test("apply: bypassers and deployments ride ONE update mutation after the PUT", async () => {
-    const api = new MockApi({
-      "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
-      "GRAPHQL BranchProtectionActorUser": {
-        data: { repository: { id: "R_1" }, user: { id: "U_1" } },
-      },
-      "GRAPHQL BranchProtectionActorTeam": {
-        data: { repository: { id: "R_1" }, organization: { team: { id: "T_1" } } },
-      },
-      "GET /apps/deploy-gate": { data: { slug: "deploy-gate", node_id: "APP_1" } },
-      "PUT /repos/o/r/branches/main/protection": { data: {} },
-      "GRAPHQL UpdateBranchProtectionRule": {
-        data: {
-          updateBranchProtectionRule: {
-            branchProtectionRule: {
-              id: "RULE:main",
-              pattern: "main",
-              requiresDeployments: true,
-              requiredDeploymentEnvironments: ["prod"],
-            },
-          },
+const PROTECTION = "GET /repos/o/r/branches/main/protection";
+const PROBE = "GET /repos/o/r/branches/main";
+const MAIN = { branch: "main" };
+/** The classic PUT body for `{enforce_admins: true}`: the omitted core keys null-filled. */
+const NULL_FILLED = {
+  enforce_admins: true,
+  required_status_checks: null,
+  required_pull_request_reviews: null,
+  restrictions: null,
+};
+
+describe("branches", () => {
+  const declared: Desired = [{ name: "main", protection: { enforce_admins: true } }];
+
+  test("an unprotected branch plans one PUT with the null-filled payload, and planning writes nothing even where a write would succeed", async () => {
+    const api = new MockApi(
+      { [PROBE]: { data: { name: "main" } } },
+      { unroutedMutations: "succeed" },
+    );
+    const result = await plan(api, declared);
+    expect(result).toEqual({
+      ops: [
+        {
+          role: "putProtection",
+          params: MAIN,
+          payload: NULL_FILLED,
+          describe: 'replacing protection for branch "main"',
+          drift: [
+            "branches[main]: unprotected live but the settings file declares protection; apply will protect it",
+          ],
+          change: 'applied protection to "main"',
         },
-      },
+      ],
+      notes: [],
+      drift: [],
     });
-    await branchesSection.run(ctx(api), [
-      {
-        name: "main",
-        protection: {
-          enforce_admins: true,
-          force_push_bypassers: ["octocat", "e2e-owner/platform", "app/deploy-gate"],
-          required_deployments: { environments: ["prod"] },
-        },
-      },
-    ]);
-    const mutations = api.mutations().map((c) => `${c.method} ${c.path}`);
-    expect(mutations).toEqual([
-      "PUT /repos/o/r/branches/main/protection",
-      "GRAPHQL UpdateBranchProtectionRule",
-    ]);
-    // The PUT payload must not carry the routed keys GitHub has no REST
-    // field for; the single mutation carries both.
-    const put = api.mutations()[0]?.payload as Record<string, unknown>;
-    expect(Object.keys(put)).not.toContain("force_push_bypassers");
-    expect(Object.keys(put)).not.toContain("required_deployments");
-    const update = api.mutations()[1]?.payload as { input: Record<string, unknown> };
-    expect(update.input).toEqual({
-      branchProtectionRuleId: "RULE:main",
-      bypassForcePushActorIds: ["U_1", "T_1", "APP_1"],
-      requiresDeployments: true,
-      requiredDeploymentEnvironments: ["prod"],
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([PROTECTION, PROBE]);
+    expect(api.mutations()).toHaveLength(0);
+  });
+
+  test("a missing branch is op-less drift: nothing can create it, so apply notes it instead of a PUT that 404s", async () => {
+    const api = new MockApi({}); // every GET 404s, the branch probe included
+    const result = await plan(api, declared);
+    expect(result).toEqual({
+      ops: [],
+      notes: [],
+      drift: [
+        "branches[main]: declared in the settings file but the branch does not exist on the repo, so apply cannot protect it; create the branch, or remove it from the settings file",
+      ],
     });
   });
 
-  test("apply: a dropped required-deployment environment fails loudly by name", async () => {
+  test("an inconclusive branch probe (no Contents grant) falls back to the unprotected reading instead of failing", async () => {
     const api = new MockApi({
-      "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
-      "PUT /repos/o/r/branches/main/protection": { data: {} },
-      "GRAPHQL UpdateBranchProtectionRule": {
+      [PROBE]: { error: { status: 403, message: "Forbidden", body: "" } },
+    });
+    const result = await plan(api, declared);
+    expect(result.drift).toEqual([]);
+    expect(result.ops.map((op) => op.drift)).toEqual([
+      [
+        "branches[main]: unprotected live but the settings file declares protection; apply will protect it",
+      ],
+    ]);
+  });
+
+  test("duplicate branch names are rejected before any API call", async () => {
+    const api = new MockApi({});
+    await expect(
+      plan(api, [
+        { name: "main", protection: { enforce_admins: true } },
+        { name: "main", protection: null },
+      ]),
+    ).rejects.toThrow(/same branches entry/);
+    expect(api.calls).toHaveLength(0);
+  });
+
+  test("live protection diffs the declared keys, and whatever the replacing PUT would remove or turn off is its drift too", async () => {
+    const api = new MockApi({
+      [PROTECTION]: {
         data: {
-          updateBranchProtectionRule: {
-            branchProtectionRule: {
-              id: "RULE:main",
-              pattern: "main",
-              requiresDeployments: true,
-              requiredDeploymentEnvironments: ["prod"],
-            },
+          enforce_admins: { enabled: false },
+          restrictions: { users: [{ login: "octocat" }], teams: [], apps: [] },
+          allow_deletions: { enabled: true },
+          required_linear_history: { enabled: false },
+          required_signatures: { enabled: false },
+        },
+      },
+    });
+    const result = await plan(api, declared);
+    expect(result).toEqual({
+      ops: [
+        {
+          role: "putProtection",
+          params: MAIN,
+          payload: NULL_FILLED,
+          describe: 'replacing protection for branch "main"',
+          drift: [
+            "branches[main].protection.enforce_admins: true != false",
+            "branches[main].protection.restrictions: set live but omitted from the settings file, so apply would REMOVE it; add restrictions to the branch's protection in the settings file to keep it",
+            "branches[main].protection.allow_deletions: set live but omitted from the settings file, so apply would REMOVE it; add allow_deletions to the branch's protection in the settings file to keep it",
+          ],
+          change: 'applied protection to "main"',
+        },
+      ],
+      notes: [],
+      drift: [],
+    });
+  });
+
+  test.each([
+    [
+      "a top-level flag",
+      { enforce_admins: { enabled: true }, allow_deletions: { enabled: true } },
+      { enforce_admins: true },
+      "allow_deletions",
+      { enforce_admins: true, allow_deletions: true },
+    ],
+    [
+      "a nested review setting",
+      {
+        enforce_admins: { enabled: true },
+        required_pull_request_reviews: {
+          required_approving_review_count: 2,
+          dismiss_stale_reviews: true,
+          dismissal_restrictions: { users: [], teams: [], apps: [] },
+        },
+      },
+      {
+        enforce_admins: true,
+        required_pull_request_reviews: { required_approving_review_count: 2 },
+      },
+      "required_pull_request_reviews.dismiss_stale_reviews",
+      {
+        enforce_admins: true,
+        required_pull_request_reviews: {
+          required_approving_review_count: 2,
+          dismiss_stale_reviews: true,
+        },
+      },
+    ],
+  ] as const)(
+    "%s enabled live but omitted is the replacing PUT's only justification; declared, it plans nothing",
+    async (_what, liveProtection, omitting, keyPath, declaring) => {
+      // The old unconditional PUT reset the setting silently; the plan resets
+      // it too, and says so. Empty nested lists are nothing to preserve.
+      const api = new MockApi({ [PROTECTION]: { data: liveProtection } });
+      const result = await plan(api, [{ name: "main", protection: omitting }]);
+      expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+        [
+          "putProtection",
+          [
+            `branches[main].protection.${keyPath}: set live but omitted from the settings file, so apply would REMOVE it; add ${keyPath} to the branch's protection in the settings file to keep it`,
+          ],
+        ],
+      ]);
+      expect(await plan(api, [{ name: "main", protection: declaring }])).toEqual({
+        ops: [],
+        notes: [],
+        drift: [],
+      });
+    },
+  );
+
+  /** GitHub's expanded GET shape of a review requirement declared as the bare block. */
+  const DEFAULT_REVIEWS = {
+    required_approving_review_count: 0,
+    dismiss_stale_reviews: false,
+    require_code_owner_reviews: false,
+    require_last_push_approval: false,
+    dismissal_restrictions: { users: [], teams: [], apps: [] },
+  };
+  const liveDefaultReviews = () =>
+    new MockApi({
+      [PROTECTION]: {
+        data: { enforce_admins: { enabled: true }, required_pull_request_reviews: DEFAULT_REVIEWS },
+      },
+    });
+
+  test("a live control whose fields are all defaults is still a setting the replacing PUT would remove", async () => {
+    // Presence is the setting: reviews are required even with a zero count
+    // and every flag off.
+    expect(
+      (await plan(liveDefaultReviews(), declared)).ops.map((op) => [op.role, op.drift]),
+    ).toEqual([
+      [
+        "putProtection",
+        [
+          "branches[main].protection.required_pull_request_reviews: set live but omitted from the settings file, so apply would REMOVE it; add required_pull_request_reviews to the branch's protection in the settings file to keep it",
+        ],
+      ],
+    ]);
+  });
+
+  test.each([
+    ["in full", DEFAULT_REVIEWS],
+    ["as the bare block GitHub expands to those defaults", {}],
+  ])(
+    "the same all-default control declared %s is clean: no drift, no PUT",
+    async (_how, reviews) => {
+      expect(
+        await plan(liveDefaultReviews(), [
+          {
+            name: "main",
+            protection: { enforce_admins: true, required_pull_request_reviews: reviews },
+          },
+        ]),
+      ).toEqual({ ops: [], notes: [], drift: [] });
+    },
+  );
+
+  test("the GET's own metadata and its second spelling of the status-check list never read as omitted settings", async () => {
+    // name, enabled, and enforcement_level exist only in the GET shape; the
+    // checks list mirrors contexts. None of them is a setting the PUT would
+    // reset, so a converged repository plans nothing.
+    const api = new MockApi({
+      [PROTECTION]: {
+        data: {
+          url: "https://api.github.com/repos/o/r/branches/main/protection",
+          name: "main",
+          enabled: true,
+          enforce_admins: { enabled: true },
+          required_status_checks: {
+            strict: true,
+            contexts: ["ci"],
+            checks: [{ context: "ci", app_id: null }],
+            enforcement_level: "everyone",
           },
         },
       },
     });
-    await expect(
-      branchesSection.run(ctx(api), [
+    expect(
+      await plan(api, [
         {
           name: "main",
           protection: {
             enforce_admins: true,
-            required_deployments: { environments: ["prod", "ghost"] },
+            required_status_checks: { strict: true, contexts: ["ci"] },
           },
         },
       ]),
-    ).rejects.toThrow(/silently dropped \[ghost\].*environments: section/s);
+    ).toEqual({ ops: [], notes: [], drift: [] });
   });
 
-  test("check: routed-key drift compares actor strings and environment sets", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/branches/main/protection": {
-        data: { enforce_admins: { enabled: true } },
+  test("protection null removes live protection and plans nothing for an unprotected branch", async () => {
+    const protectedApi = new MockApi({
+      [PROTECTION]: {
+        data: { enforce_admins: { enabled: true }, required_signatures: { enabled: true } },
       },
+    });
+    expect(await plan(protectedApi, [{ name: "main", protection: null }])).toEqual({
+      ops: [
+        {
+          role: "removeProtection",
+          params: MAIN,
+          drift: [
+            "branches[main]: protected live but the settings file declares protection: null; apply will remove the protection",
+          ],
+          change: 'removed protection from "main"',
+        },
+      ],
+      notes: [],
+      drift: [],
+    });
+    expect(await plan(new MockApi({}), [{ name: "main", protection: null }])).toEqual({
+      ops: [],
+      notes: [],
+      drift: [],
+    });
+  });
+
+  const sigOp = (role: "sigPost" | "sigDelete", drift: string, change: string) => ({
+    role,
+    params: MAIN,
+    describe:
+      role === "sigPost"
+        ? 'requiring signed commits on branch "main"'
+        : 'removing the signed-commit requirement from branch "main"',
+    drift: [drift] as [string],
+    change,
+  });
+
+  test.each([
+    ["declared true against live {enabled: true} is clean", true, { enabled: true }, []],
+    ["declared false against live {enabled: false} is clean", false, { enabled: false }, []],
+    ["declared false against an ABSENT live field is clean (absent means false)", false, null, []],
+    [
+      "declared true against an ABSENT live field plans the POST, and nothing else",
+      true,
+      null,
+      [
+        sigOp(
+          "sigPost",
+          "branches[main].protection.required_signatures: true != false",
+          'required signed commits on "main"',
+        ),
+      ],
+    ],
+    [
+      "declared false against a live requirement plans the DELETE, and nothing else",
+      false,
+      { enabled: true },
+      [
+        sigOp(
+          "sigDelete",
+          "branches[main].protection.required_signatures: false != true",
+          'removed the signed-commit requirement from "main"',
+        ),
+      ],
+    ],
+  ] as const)("required_signatures: %s", async (_name, declaredValue, liveField, ops) => {
+    const api = new MockApi({
+      [PROTECTION]: {
+        data: {
+          enforce_admins: { enabled: true },
+          ...(liveField === null ? {} : { required_signatures: liveField }),
+        },
+      },
+    });
+    const result = await plan(api, [
+      { name: "main", protection: { enforce_admins: true, required_signatures: declaredValue } },
+    ]);
+    expect(result).toEqual({ ops: [...ops], notes: [], drift: [] });
+    // The sub-endpoint is the toggle's ONLY carrier: the PUT body never
+    // smuggles the key GitHub would silently drop.
+    expect(result.ops.some((op) => op.role === "putProtection")).toBe(false);
+  });
+
+  test("an unprotected branch declaring required_signatures true plans the PUT, then the POST", async () => {
+    const api = new MockApi({ [PROBE]: { data: { name: "main" } } });
+    const result = await plan(api, [
+      { name: "main", protection: { enforce_admins: true, required_signatures: true } },
+    ]);
+    expect(result.ops.map((op) => [op.role, op.change])).toEqual([
+      ["putProtection", 'applied protection to "main"'],
+      ["sigPost", 'required signed commits on "main"'],
+    ]);
+    expect(Object.keys((result.ops[0] as { payload: object }).payload)).not.toContain(
+      "required_signatures",
+    );
+  });
+
+  test("a planned PUT re-applies a declared toggle that already matches, since GitHub does not document the PUT preserving it", async () => {
+    const api = new MockApi({ [PROBE]: { data: { name: "main" } } });
+    const result = await plan(api, [
+      { name: "main", protection: { enforce_admins: true, required_signatures: false } },
+    ]);
+    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+      [
+        "putProtection",
+        [
+          "branches[main]: unprotected live but the settings file declares protection; apply will protect it",
+        ],
+      ],
+      [
+        "sigDelete",
+        [
+          "branches[main].protection.required_signatures: re-applied after the protection PUT (GitHub does not document whether the PUT preserves it)",
+        ],
+      ],
+    ]);
+  });
+
+  test('a quoted "true" fails the shape upfront, with the YAML gotcha named', () => {
+    // The toggle is typed in the zod shape so document validation rejects it
+    // before ANY section writes - not a plan-time throw after earlier
+    // sections already applied.
+    const parsed = branchesSection.shape.safeParse([
+      { name: "main", protection: { enforce_admins: true, required_signatures: "true" } },
+    ]);
+    expect(parsed.success).toBe(false);
+    const messages = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
+    expect(messages.some((m) => m.includes("unquoted true or false"))).toBe(true);
+    // The passthrough survives the typed key: unknown protection fields and
+    // a proper boolean both validate.
+    expect(
+      branchesSection.shape.safeParse([
+        {
+          name: "main",
+          protection: { enforce_admins: true, required_signatures: true, extra_field: "x" },
+        },
+        { name: "legacy", protection: null },
+      ]).success,
+    ).toBe(true);
+  });
+});
+
+/** A required-deployment list naming an environment no live state seeds. */
+const GHOST = { environments: ["ghost"] };
+
+describe("branches GraphQL-routed keys", () => {
+  const routedDesired: Desired = [
+    {
+      name: "main",
+      protection: {
+        enforce_admins: true,
+        force_push_bypassers: ["octocat", "e2e-owner/platform", "app/deploy-gate"],
+        required_deployments: { environments: ["prod"] },
+      },
+    },
+  ];
+
+  test("an unprotected branch plans the PUT, then ONE rule update whose id is read once the PUT created the rule", async () => {
+    const api = liveRepo({ branches: ["main"], environments: { prod: { name: "prod" } } });
+    const result = await plan(api, routedDesired);
+    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+      [
+        "putProtection",
+        [
+          "branches[main]: unprotected live but the settings file declares protection; apply will protect it",
+        ],
+      ],
+      [
+        "updateRule",
+        [
+          "branches[main].protection.force_push_bypassers: the settings file declares [app/deploy-gate, e2e-owner/platform, octocat] but the live rule allows []; apply will replace the allowance list",
+          "branches[main].protection.required_deployments: the settings file requires deployments to [prod] but the live rule does not require deployments; apply will set the declared list",
+        ],
+      ],
+    ]);
+    // The id is late (no rule exists at plan time) and the change line renders
+    // from the response (the deployment read-back), so both seal at execution.
+    expect(typeof result.ops[1]?.variables).toBe("function");
+    expect(typeof result.ops[1]?.change).toBe("function");
+    expect(api.writes).toEqual([]);
+
+    const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
+    expect(execution).toEqual({
+      status: "applied",
+      changes: [
+        'applied protection to "main"',
+        'set force_push_bypassers and required_deployments on "main"',
+      ],
+      notes: [],
+      landed: 2,
+    });
+    const [put, update] = api.writes;
+    expect(put).toEqual({
+      method: "PUT",
+      path: "/repos/o/r/branches/main/protection",
+      payload: NULL_FILLED,
+    });
+    expect(update?.path).toBe("UpdateBranchProtectionRule");
+    const input = (update as { payload: { input: Record<string, unknown> } }).payload.input;
+    expect(Object.keys(input).sort()).toEqual([
+      "branchProtectionRuleId",
+      "bypassForcePushActorIds",
+      "requiredDeploymentEnvironments",
+      "requiresDeployments",
+    ]);
+    expect(input.bypassForcePushActorIds).toHaveLength(3);
+    expect(input.requiresDeployments).toBe(true);
+    expect(input.requiredDeploymentEnvironments).toEqual(["prod"]);
+    // Converged: the re-plan reads the rule the update wrote and finds nothing to do.
+    expect(await plan(api, routedDesired)).toEqual({ ops: [], notes: [], drift: [] });
+  });
+
+  const droppedEnvironmentPaths: Array<
+    [
+      where: string,
+      live: LiveState,
+      entry: Desired[number],
+      changesBefore: string[],
+      writes: string[],
+    ]
+  > = [
+    [
+      "the literal-branch update, after the PUT landed",
+      { branches: ["main"] },
+      { name: "main", protection: { enforce_admins: true, required_deployments: GHOST } },
+      ['applied protection to "main"'],
+      ["PUT /repos/o/r/branches/main/protection", "GRAPHQL UpdateBranchProtectionRule"],
+    ],
+    [
+      "the wildcard create",
+      {},
+      { name: "release/*", protection: { enforce_admins: true, required_deployments: GHOST } },
+      [],
+      ["GRAPHQL CreateBranchProtectionRule"],
+    ],
+    [
+      "the wildcard update",
+      { branch_protection_rules: [{ pattern: "release/*" }] },
+      { name: "release/*", protection: { enforce_admins: true, required_deployments: GHOST } },
+      [],
+      ["GRAPHQL UpdateBranchProtectionRule"],
+    ],
+  ];
+  test.each(droppedEnvironmentPaths)(
+    "a dropped required-deployment environment fails %s loudly by name, recording no line for it",
+    async (_where, live, entry, changesBefore, writes) => {
+      // No environments seeded: the mock drops every name, as GitHub does.
+      const api = liveRepo(live);
+      const result = await plan(api, [entry]);
+      const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
+      expect(execution.status).toBe("failed");
+      // Every request landed (the failing one included), but only the ones
+      // before the failed read-back rendered a line.
+      expect([execution.changes, execution.notes, execution.landed]).toEqual([
+        changesBefore,
+        [],
+        writes.length,
+      ]);
+      expect(String((execution as { error: Error }).error.message)).toMatch(
+        /silently dropped \[ghost\].*environments: section/s,
+      );
+      expect(api.writes.map((w) => `${w.method} ${w.path}`)).toEqual(writes);
+    },
+  );
+
+  test("routed-key drift compares actor strings and environment sets, and only the update is planned when the REST half is clean", async () => {
+    const api = new MockApi({
+      [PROTECTION]: { data: { enforce_admins: { enabled: true } } },
       "GRAPHQL BranchProtectionRules": rulesData([
         ruleNode("main", { requiresDeployments: true, requiredDeploymentEnvironments: ["qa"] }, [
           { actor: { __typename: "User", login: "octocat" } },
         ]),
       ]),
+      "GRAPHQL BranchProtectionActorUser": {
+        data: { repository: { id: "R_1" }, user: { id: "U_2" } },
+      },
     });
-    const result = await branchesSection.run(ctx(api, true), [
+    const result = await plan(api, [
       {
         name: "main",
         protection: {
@@ -282,20 +663,30 @@ describe("branches GraphQL-routed keys", () => {
         },
       },
     ]);
-    expect(result.drift).toHaveLength(2);
-    expect(result.drift?.[0]).toContain(
-      "force_push_bypassers: the settings file declares [release-bot] but the live rule allows [octocat]",
-    );
-    expect(result.drift?.[1]).toContain("required_deployments");
-    expect(result.drift?.[1]).toContain("[qa]");
+    expect(result.ops).toHaveLength(1);
+    expect(result.ops[0]).toMatchObject({
+      role: "updateRule",
+      variables: {
+        input: {
+          branchProtectionRuleId: "RULE:main",
+          bypassForcePushActorIds: ["U_2"],
+          requiresDeployments: true,
+          requiredDeploymentEnvironments: ["prod"],
+        },
+      },
+      drift: [
+        "branches[main].protection.force_push_bypassers: the settings file declares [release-bot] but the live rule allows [octocat]; apply will replace the allowance list",
+        "branches[main].protection.required_deployments: the settings file requires deployments to [prod] but the live rule requires [qa]; apply will set the declared list",
+      ],
+    });
+    // The line renders from the mutation's read-back, so it is a thunk here.
+    expect(typeof result.ops[0]?.change).toBe("function");
     expect(api.mutations()).toHaveLength(0);
   });
 
-  test("check: matching routed keys are clean, order-insensitively", async () => {
+  test("matching routed keys are clean, order- and case-insensitively (GitHub canonicalizes names)", async () => {
     const api = new MockApi({
-      "GET /repos/o/r/branches/main/protection": {
-        data: { enforce_admins: { enabled: true } },
-      },
+      [PROTECTION]: { data: { enforce_admins: { enabled: true } } },
       "GRAPHQL BranchProtectionRules": rulesData([
         ruleNode("main", { requiresDeployments: true, requiredDeploymentEnvironments: ["prod"] }, [
           { actor: { __typename: "App", slug: "deploy-gate" } },
@@ -303,29 +694,115 @@ describe("branches GraphQL-routed keys", () => {
         ]),
       ]),
     });
-    const result = await branchesSection.run(ctx(api, true), [
+    const result = await plan(api, [
       {
         name: "main",
         protection: {
           enforce_admins: true,
-          force_push_bypassers: ["octocat", "app/deploy-gate"],
-          required_deployments: { environments: ["prod"] },
+          force_push_bypassers: ["OctoCat", "app/deploy-gate"],
+          required_deployments: { environments: ["Prod"] },
         },
       },
     ]);
-    expect(result.drift).toEqual([]);
+    expect(result).toEqual({ ops: [], notes: [], drift: [] });
+    // A clean routed half resolves no actor: the lookups exist to build a write.
+    expect(api.calls.filter((c) => c.path.startsWith("BranchProtectionActor"))).toHaveLength(0);
   });
 
-  test("an unknown team resolves to a named config error, not a node-id crash", async () => {
+  test("a planned PUT re-applies matching routed keys through the update, with the re-apply as its drift", async () => {
     const api = new MockApi({
+      [PROTECTION]: { data: { enforce_admins: { enabled: false } } },
+      "GRAPHQL BranchProtectionRules": rulesData([
+        ruleNode("main", {}, [{ actor: { __typename: "User", login: "octocat" } }]),
+      ]),
+      "GRAPHQL BranchProtectionActorUser": {
+        data: { repository: { id: "R_1" }, user: { id: "U_1" } },
+      },
+    });
+    const result = await plan(api, [
+      { name: "main", protection: { enforce_admins: true, force_push_bypassers: ["octocat"] } },
+    ]);
+    expect(result.ops.map((op) => [op.role, op.drift, op.variables])).toEqual([
+      ["putProtection", ["branches[main].protection.enforce_admins: true != false"], undefined],
+      [
+        "updateRule",
+        [
+          "branches[main].protection: force_push_bypassers re-applied after the protection PUT (GitHub does not document whether the PUT preserves them)",
+        ],
+        { input: { branchProtectionRuleId: "RULE:main", bypassForcePushActorIds: ["U_1"] } },
+      ],
+    ]);
+  });
+
+  test("declared null turns a live requirement off through the update, verified by the read-back", async () => {
+    const api = liveRepo({
+      branches: ["dev"],
+      branch_protection: { dev: { enforce_admins: { enabled: true } } },
+      branch_protection_graphql: {
+        dev: { requiresDeployments: true, requiredDeploymentEnvironments: ["staging"] },
+      },
+    });
+    const result = await plan(api, [
+      { name: "dev", protection: { enforce_admins: true, required_deployments: null } },
+    ]);
+    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+      [
+        "updateRule",
+        [
+          "branches[dev].protection.required_deployments: declared null (not required) but the live rule requires deployments to [staging]; apply will turn the requirement off",
+        ],
+      ],
+    ]);
+    expect(await executePlan(result, branchesSection, api, REPO, NO_SECRETS)).toEqual({
+      status: "applied",
+      changes: ['set required_deployments on "dev"'],
+      notes: [],
+      landed: 1,
+    });
+  });
+
+  test("an unreadable rules view (the tolerated NOT_FOUND) never reads as clean: the declared routed keys are written, loudly", async () => {
+    const api = new MockApi({
+      [PROTECTION]: { data: { enforce_admins: { enabled: true } } },
+      "GRAPHQL BranchProtectionRules": {
+        error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
+      },
+    });
+    const result = await plan(api, [
+      {
+        name: "main",
+        protection: { enforce_admins: true, force_push_bypassers: [], required_deployments: null },
+      },
+    ]);
+    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+      [
+        "updateRule",
+        [
+          "branches[main].protection.force_push_bypassers: the live rule cannot be read (the rules query answered not found); apply will set the declared value",
+          "branches[main].protection.required_deployments: the live rule cannot be read (the rules query answered not found); apply will set the declared value",
+        ],
+      ],
+    ]);
+    // With no rule id in hand the update looks it up at execution, where the
+    // still-unreadable view fails the operation by name instead of silently.
+    const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
+    expect(execution.status).toBe("failed");
+    expect(String((execution as { error: Error }).error.message)).toMatch(
+      /no branch protection rule with that pattern is visible through GraphQL/,
+    );
+    expect(api.mutations()).toHaveLength(0);
+  });
+
+  test("an unknown team is a named config error at plan time, not a node-id crash", async () => {
+    const api = new MockApi({
+      [PROBE]: { data: { name: "main" } },
       "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
-      "PUT /repos/o/r/branches/main/protection": { data: {} },
       "GRAPHQL BranchProtectionActorTeam": {
         data: { repository: { id: "R_1" }, organization: { team: null } },
       },
     });
     await expect(
-      branchesSection.run(ctx(api), [
+      plan(api, [
         {
           name: "main",
           protection: { enforce_admins: true, force_push_bypassers: ["e2e-owner/ghost-team"] },
@@ -333,33 +810,71 @@ describe("branches GraphQL-routed keys", () => {
       ]),
     ).rejects.toThrow(/no team with slug "ghost-team"/);
   });
+
+  test("a misspelled actor fails the plan, so no write - the destructive PUT included - is ever issued", async () => {
+    const api = new MockApi(
+      {
+        [PROBE]: { data: { name: "main" } },
+        "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
+        "GRAPHQL BranchProtectionActorUser": { data: { repository: { id: "R_1" }, user: null } },
+      },
+      { unroutedMutations: "succeed" },
+    );
+    await expect(
+      plan(api, [
+        { name: "main", protection: { enforce_admins: true, force_push_bypassers: ["ghost"] } },
+      ]),
+    ).rejects.toThrow(/GraphQL lookup succeeded but returned no node id/);
+    expect(api.mutations()).toHaveLength(0);
+  });
+
+  test("a mutation payload without a rule fails the read-back with its own message", async () => {
+    const api = new MockApi({
+      [PROBE]: { data: { name: "main" } },
+      "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
+      "PUT /repos/o/r/branches/main/protection": { data: {} },
+      "GRAPHQL UpdateBranchProtectionRule": {
+        data: { updateBranchProtectionRule: { branchProtectionRule: null } },
+      },
+    });
+    const result = await plan(api, [
+      {
+        name: "main",
+        protection: { enforce_admins: true, required_deployments: { environments: ["prod"] } },
+      },
+    ]);
+    const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
+    expect(execution.status).toBe("failed");
+    expect(String((execution as { error: Error }).error.message)).toMatch(
+      /returned no rule to read back/,
+    );
+  });
+
+  test("a live rule with a truncated allowance page fails loudly by pattern", async () => {
+    const api = new MockApi({
+      "GRAPHQL BranchProtectionRules": rulesData([
+        {
+          ...ruleNode("release/*"),
+          bypassForcePushAllowances: { nodes: [], pageInfo: { hasNextPage: true } },
+        },
+      ]),
+    });
+    await expect(
+      plan(api, [{ name: "release/*", protection: { enforce_admins: true } }]),
+    ).rejects.toThrow(/more than 100 force-push bypass actors/);
+  });
 });
 
 describe("branches wildcard entries", () => {
-  test("apply: create, update, and delete route entirely through GraphQL", async () => {
+  test("create, update, and delete plan entirely through GraphQL, each with its drift and change", async () => {
     const api = new MockApi({
       "GRAPHQL BranchProtectionRules": rulesData([
         ruleNode("hotfix/*", { requiresApprovingReviews: true, requiredApprovingReviewCount: 1 }),
         ruleNode("old/*"),
       ]),
       "GRAPHQL BranchProtectionRepository": { data: { repository: { id: "R_1" } } },
-      "GRAPHQL CreateBranchProtectionRule": {
-        data: {
-          createBranchProtectionRule: {
-            branchProtectionRule: ruleNode("release/*", { isAdminEnforced: true }),
-          },
-        },
-      },
-      "GRAPHQL UpdateBranchProtectionRule": {
-        data: {
-          updateBranchProtectionRule: { branchProtectionRule: ruleNode("hotfix/*") },
-        },
-      },
-      "GRAPHQL DeleteBranchProtectionRule": {
-        data: { deleteBranchProtectionRule: { clientMutationId: null } },
-      },
     });
-    const result = await branchesSection.run(ctx(api), [
+    const result = await plan(api, [
       { name: "release/*", protection: { enforce_admins: true } },
       {
         name: "hotfix/*",
@@ -367,31 +882,54 @@ describe("branches wildcard entries", () => {
       },
       { name: "old/*", protection: null },
     ]);
-    expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([
-      "GRAPHQL CreateBranchProtectionRule",
-      "GRAPHQL UpdateBranchProtectionRule",
-      "GRAPHQL DeleteBranchProtectionRule",
-    ]);
-    const create = api.mutations()[0]?.payload as { input: Record<string, unknown> };
-    expect(create.input).toEqual({
-      repositoryId: "R_1",
-      pattern: "release/*",
-      isAdminEnforced: true,
+    expect(result).toEqual({
+      ops: [
+        {
+          role: "createRule",
+          variables: {
+            input: { repositoryId: "R_1", pattern: "release/*", isAdminEnforced: true },
+          },
+          describe: 'creating the protection rule "release/*"',
+          drift: [
+            "branches[release/*]: no live rule matches this pattern but the settings file declares protection; apply will create the rule",
+          ],
+          change: 'created protection rule "release/*"',
+        },
+        {
+          role: "updateRule",
+          variables: {
+            input: {
+              branchProtectionRuleId: "RULE:hotfix/*",
+              requiresApprovingReviews: true,
+              requiredApprovingReviewCount: 2,
+            },
+          },
+          describe: 'updating the protection rule "hotfix/*"',
+          drift: [
+            "branches[hotfix/*].protection.required_pull_request_reviews.required_approving_review_count: 2 != 1",
+          ],
+          change: 'updated protection rule "hotfix/*"',
+        },
+        {
+          role: "deleteRule",
+          variables: { input: { branchProtectionRuleId: "RULE:old/*" } },
+          describe: 'deleting the protection rule "old/*"',
+          drift: [
+            "branches[old/*]: a live rule matches this pattern but the settings file declares protection: null; apply will delete the rule",
+          ],
+          change: 'deleted protection rule "old/*"',
+        },
+      ],
+      notes: [],
+      drift: [],
     });
-    const update = api.mutations()[1]?.payload as { input: Record<string, unknown> };
-    expect(update.input).toEqual({
-      branchProtectionRuleId: "RULE:hotfix/*",
-      requiresApprovingReviews: true,
-      requiredApprovingReviewCount: 2,
-    });
-    expect(result.changes).toEqual([
-      'created protection rule "release/*"',
-      'updated protection rule "hotfix/*"',
-      'deleted protection rule "old/*"',
+    expect(api.calls.map((c) => c.path)).toEqual([
+      "BranchProtectionRules",
+      "BranchProtectionRepository",
     ]);
   });
 
-  test("check: a live wildcard rule diffs through the classic view", async () => {
+  test("a live wildcard rule diffs through the classic view; a matching one plans nothing", async () => {
     const api = new MockApi({
       "GRAPHQL BranchProtectionRules": rulesData([
         ruleNode("release/*", {
@@ -402,7 +940,7 @@ describe("branches wildcard entries", () => {
         }),
       ]),
     });
-    const result = await branchesSection.run(ctx(api, true), [
+    const drifted = await plan(api, [
       {
         name: "release/*",
         protection: {
@@ -411,30 +949,38 @@ describe("branches wildcard entries", () => {
         },
       },
     ]);
-    expect(result.drift).toEqual(["branches[release/*].protection.enforce_admins: true != false"]);
+    expect(drifted.ops.map((op) => op.drift)).toEqual([
+      ["branches[release/*].protection.enforce_admins: true != false"],
+    ]);
+    const clean = await plan(api, [
+      {
+        name: "release/*",
+        protection: { required_status_checks: { strict: true, contexts: ["ci"] } },
+      },
+    ]);
+    expect(clean).toEqual({ ops: [], notes: [], drift: [] });
   });
 
   test("a live wildcard rule the file does not declare earns a note, never a delete", async () => {
     const api = new MockApi({
-      "GET /repos/o/r/branches/main/protection": {
-        data: { enforce_admins: { enabled: true } },
-      },
+      [PROTECTION]: { data: { enforce_admins: { enabled: true } } },
       "GRAPHQL BranchProtectionRules": rulesData([ruleNode("legacy/*")]),
     });
-    const result = await branchesSection.run(ctx(api, true), [
+    const result = await plan(api, [
       { name: "main", protection: { enforce_admins: true, force_push_bypassers: [] } },
     ]);
-    expect(result.notes).toEqual([
-      'undeclared classic protection rule "legacy/*" exists on the repo - declare it to manage it (this action never deletes undeclared rules)',
-    ]);
-    expect(api.mutations()).toHaveLength(0);
+    expect(result).toEqual({
+      ops: [],
+      notes: [
+        'undeclared classic protection rule "legacy/*" exists on the repo - declare it to manage it (this action never deletes undeclared rules)',
+      ],
+      drift: [],
+    });
   });
 
   test("a pure-REST declaration issues no GraphQL request at all", async () => {
-    const api = new MockApi({
-      "PUT /repos/o/r/branches/main/protection": { data: {} },
-    });
-    await branchesSection.run(ctx(api), [{ name: "main", protection: { enforce_admins: true } }]);
+    const api = new MockApi({ [PROBE]: { data: { name: "main" } } });
+    await plan(api, [{ name: "main", protection: { enforce_admins: true } }]);
     expect(api.calls.filter((c) => c.method === "GRAPHQL")).toHaveLength(0);
   });
 
@@ -476,7 +1022,7 @@ describe("branches wildcard entries", () => {
 
   test("a scalar structured key on a wildcard entry fails the shape, not apply", () => {
     // Without this rejection the value passes the looseObject and crashes
-    // translateWildcardProtection mid-apply with a raw TypeError - a config
+    // translateWildcardProtection mid-plan with a raw TypeError - a config
     // that survives check mode must never blow up on apply.
     for (const bad of [
       { required_status_checks: true },
@@ -510,83 +1056,137 @@ describe("branches wildcard entries", () => {
     ]);
     expect(envs.success).toBe(false);
   });
+});
 
-  test("check: routed keys compare case-insensitively (GitHub canonicalizes names)", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/branches/main/protection": {
-        data: { enforce_admins: { enabled: true } },
+describe("branches plan contract", () => {
+  test("executing the plan converges: every kind of write in one apply, and the re-plan over applied state is empty", async () => {
+    const api = liveRepo({
+      branches: ["main", "sig-off", "dev", "reviews"],
+      environments: { prod: { name: "prod" } },
+      branch_protection: {
+        "sig-off": { enforce_admins: { enabled: true }, required_signatures: { enabled: true } },
+        dev: { enforce_admins: { enabled: true } },
+        reviews: {
+          enforce_admins: { enabled: true },
+          required_pull_request_reviews: {
+            required_approving_review_count: 2,
+            dismiss_stale_reviews: true,
+          },
+        },
       },
-      "GRAPHQL BranchProtectionRules": rulesData([
-        ruleNode("main", { requiresDeployments: true, requiredDeploymentEnvironments: ["prod"] }, [
-          { actor: { __typename: "User", login: "octocat" } },
-        ]),
-      ]),
+      branch_protection_graphql: {
+        dev: { requiresDeployments: true, requiredDeploymentEnvironments: ["staging"] },
+      },
+      branch_protection_rules: [
+        { pattern: "hotfix/*", requiresApprovingReviews: true, requiredApprovingReviewCount: 1 },
+        { pattern: "old/*" },
+        { pattern: "legacy/*" },
+      ],
     });
-    const result = await branchesSection.run(ctx(api, true), [
+    const { first, second, changes } = await provePlanIdempotent(branchesSection, api, [
       {
         name: "main",
         protection: {
           enforce_admins: true,
-          force_push_bypassers: ["OctoCat"],
-          required_deployments: { environments: ["Prod"] },
+          required_signatures: true,
+          force_push_bypassers: ["octocat", "e2e-owner/platform", "app/deploy-gate"],
+          required_deployments: { environments: ["prod"] },
         },
       },
+      { name: "sig-off", protection: { enforce_admins: true, required_signatures: false } },
+      { name: "dev", protection: { enforce_admins: true, required_deployments: null } },
+      {
+        name: "reviews",
+        protection: {
+          enforce_admins: true,
+          required_pull_request_reviews: { required_approving_review_count: 2 },
+        },
+      },
+      { name: "gone", protection: null },
+      { name: "release/*", protection: { enforce_admins: true } },
+      {
+        name: "hotfix/*",
+        protection: { required_pull_request_reviews: { required_approving_review_count: 2 } },
+      },
+      { name: "old/*", protection: null },
     ]);
-    expect(result.drift).toEqual([]);
+    expect(changes).toEqual([
+      'applied protection to "main"',
+      'required signed commits on "main"',
+      'set force_push_bypassers and required_deployments on "main"',
+      'removed the signed-commit requirement from "sig-off"',
+      'set required_deployments on "dev"',
+      'applied protection to "reviews"',
+      'created protection rule "release/*"',
+      'updated protection rule "hotfix/*"',
+      'deleted protection rule "old/*"',
+    ]);
+    expect(api.writes.map((w) => `${w.method} ${w.path}`)).toEqual([
+      "PUT /repos/o/r/branches/main/protection",
+      "POST /repos/o/r/branches/main/protection/required_signatures",
+      "GRAPHQL UpdateBranchProtectionRule",
+      "DELETE /repos/o/r/branches/sig-off/protection/required_signatures",
+      "GRAPHQL UpdateBranchProtectionRule",
+      "PUT /repos/o/r/branches/reviews/protection",
+      "GRAPHQL CreateBranchProtectionRule",
+      "GRAPHQL UpdateBranchProtectionRule",
+      "GRAPHQL DeleteBranchProtectionRule",
+    ]);
+    // The undeclared rule's note survives both plans; nothing else does.
+    const note =
+      'undeclared classic protection rule "legacy/*" exists on the repo - declare it to manage it (this action never deletes undeclared rules)';
+    expect(first.notes).toEqual([note]);
+    expect(second).toEqual({ ops: [], notes: [note], drift: [] });
   });
 
-  test("apply: a misspelled actor fails BEFORE the destructive protection PUT", async () => {
-    const api = new MockApi({
-      "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
-      "GRAPHQL BranchProtectionActorUser": {
-        data: { repository: { id: "R_1" }, user: null },
-      },
-    });
-    await expect(
-      branchesSection.run(ctx(api), [
-        {
-          name: "main",
-          protection: { enforce_admins: true, force_push_bypassers: ["ghost"] },
-        },
-      ]),
-    ).rejects.toThrow(/GraphQL lookup succeeded but returned no node id/);
-    expect(api.mutations()).toHaveLength(0);
+  test("the read port exposes exactly the read roles, each narrowed to its declared posture", () => {
+    const ctx = planContext(branchesSection, new MockApi({}), REPO);
+    expect(Object.keys(ctx.read)).toEqual([
+      "getProtection",
+      "branchProbe",
+      "appLookup",
+      "rulesQuery",
+      "repoLookup",
+      "actorUser",
+      "actorTeam",
+    ]);
+    // @ts-expect-error a write role is not a read: the port has no `putProtection`
+    ctx.read.putProtection;
+    // @ts-expect-error nor a GraphQL mutation
+    ctx.read.updateRule;
+    // @ts-expect-error nor the raw client
+    ctx.api;
+    // @ts-expect-error an "absent" primary read offers no throwing helper
+    ctx.read.getProtection.call;
+    // @ts-expect-error an advisory read offers no absence probe (a 500 is not "absent")
+    ctx.read.branchProbe.probeAbsent;
+    // @ts-expect-error nor a must-succeed call
+    ctx.read.branchProbe.call;
+    expect(typeof ctx.read.branchProbe.tryCall).toBe("function");
   });
 
-  test("apply: a mutation payload without a rule fails the read-back with its own message", async () => {
-    const api = new MockApi({
-      "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
-      "PUT /repos/o/r/branches/main/protection": { data: {} },
-      "GRAPHQL UpdateBranchProtectionRule": {
-        data: { updateBranchProtectionRule: { branchProtectionRule: null } },
-      },
-    });
-    await expect(
-      branchesSection.run(ctx(api), [
-        {
-          name: "main",
-          protection: {
-            enforce_admins: true,
-            required_deployments: { environments: ["prod"] },
-          },
-        },
-      ]),
-    ).rejects.toThrow(/returned no rule to read back/);
-  });
-
-  test("a live rule with a truncated allowance page fails loudly by pattern", async () => {
-    const api = new MockApi({
-      "GRAPHQL BranchProtectionRules": rulesData([
-        {
-          ...ruleNode("release/*"),
-          bypassForcePushAllowances: { nodes: [], pageInfo: { hasNextPage: true } },
-        },
-      ]),
-    });
-    await expect(
-      branchesSection.run(ctx(api, true), [
-        { name: "release/*", protection: { enforce_admins: true } },
-      ]),
-    ).rejects.toThrow(/more than 100 force-push bypass actors/);
+  test("a planned operation can only name a declared write role, with the facets its route demands", () => {
+    // Compile-time only: the plans are never executed. Each rejected shape
+    // is built first and assigned on one line, so the directive anchors to
+    // the assignment whichever property the compiler blames.
+    type Op = PlannedOp<typeof branchesSection.endpoints, typeof branchesSection.graphql>;
+    const rest: Op = { role: "sigPost", params: MAIN, drift: ["x"], change: "" };
+    const mutation: Op = { role: "deleteRule", variables: { input: {} }, drift: ["x"], change: "" };
+    expect([rest.role, mutation.role]).toEqual(["sigPost", "deleteRule"]);
+    const read = { role: "getProtection", params: MAIN, drift: ["x"], change: "" } as const;
+    // @ts-expect-error the protection GET is a read, not a plannable write
+    const _read: Op = read;
+    const query = { role: "rulesQuery", variables: {}, drift: ["x"], change: "" } as const;
+    // @ts-expect-error the rules query is a GraphQL read, not a plannable write
+    const _query: Op = query;
+    const silent = { role: "putProtection", params: MAIN, drift: [], change: "" } as const;
+    // @ts-expect-error a write on a non-alwaysRewrite endpoint must carry drift
+    const _silent: Op = silent;
+    const paramless = { role: "removeProtection", drift: ["x"], change: "" } as const;
+    // @ts-expect-error the route's {branch} param is required
+    const _paramless: Op = paramless;
+    const variableless = { role: "updateRule", drift: ["x"], change: "" } as const;
+    // @ts-expect-error a mutation carries its declared variables
+    const _variableless: Op = variableless;
   });
 });

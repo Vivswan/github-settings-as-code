@@ -736,6 +736,7 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
 export const SECTION_PRIMARY_READ = {
   repository: "repository.get",
   labels: "labels.list",
+  branches: "branches.getProtection",
   actions: "actions.getWorkflow",
   interaction_limits: "interaction_limits.get",
   rulesets: "rulesets.list",
@@ -775,6 +776,8 @@ export const SECTION_FAULT_FIXTURE: {
   readonly [K in FaultableSection]?: NonNullable<SettingsFile[K]>;
 } = {
   actions: { default_workflow_permissions: "read" },
+  // A literal entry: a wildcard-only document reconciles through GraphQL alone.
+  branches: [{ name: "main", protection: { enforce_admins: true } }],
   interaction_limits: { limit: "collaborators_only", expiry: "one_week" },
 };
 
@@ -784,7 +787,6 @@ export const SECTION_FAULT_FIXTURE: {
  * battery proves it. With SECTION_PRIMARY_READ this must cover every SectionKey.
  */
 export const UNFAULTABLE_SECTIONS = [
-  "branches",
   "environments",
   "check_suite_preferences",
 ] as const satisfies readonly SectionKey[];
@@ -800,7 +802,7 @@ type _DoublyClassifiedFaultSection = MustBeNever<Extract<FaultableSection, Unfau
  * (the Record type keeps the list and the catalog in lockstep). MAXIMAL on
  * purpose: each entry declares every key it can WITHOUT reaching a read -
  * reads here are check-mode-only or gated on the few keys deliberately left
- * out (environments' nested lists, branches' protection: null) - so the
+ * out (environments' nested lists) - so the
  * battery's claim is "a full-width apply of this section issues no read",
  * not "an apply too small to read anything stays quiet". The fuzz battery
  * arms one-shot faults on EVERY one of the section's GET endpoints
@@ -814,11 +816,6 @@ export const UNFAULTABLE_APPLY_SETTINGS: {
   // instead of silently shrinking the battery's declared width.
   [K in UnfaultableSection]: NonNullable<SettingsFile[K]>;
 } = {
-  // getProtection probes only for a `protection: null` removal, and the
-  // advisory branchProbe runs only inside that check-mode probe; a declared
-  // (non-null) protection is PUT unconditionally and the signatures toggle
-  // rides its own POST.
-  branches: [{ name: "main", protection: { enforce_admins: true, required_signatures: true } }],
   // The environment probe and every nested list read run only in check mode
   // or when an entry declares a nested key (variables/secrets/policies/
   // protection rules), and the GraphQL pins read only when an entry declares

@@ -31,4 +31,4 @@ expect:
   mutations:
     - "PUT /repos/{repo}/branches/main/protection"
     - "GRAPHQL UpdateBranchProtectionRule"
-  converges: true
+  apply_idempotent: true
