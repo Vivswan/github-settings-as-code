@@ -50,7 +50,9 @@
  *   planned only when the declared keys diverge from the live setup.
  * - check_suite_preferences (false): no read endpoint exists to compare
  *   against, so the PATCH is alwaysRewrite by declaration.
- * - teams (false): team access is granted (PUT) unconditionally.
+ * - teams (true): every declared team is probed at plan time in both modes
+ *   and the grant PUT is planned only when the team lacks access or its live
+ *   role diverges; a converged repo plans nothing.
  * - interaction_limits (false): the base PUT is alwaysRewrite by declaration
  *   (it re-arms the self-expiring limit; the expiry cannot be read back); the
  *   cap PATCH and bypass writes are drift-gated, but the base PUT keeps it false.
@@ -97,7 +99,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   code_scanning_default_setup: true,
   code_quality_setup: true,
   collaborators: true,
-  teams: false,
+  teams: true,
   milestones: true,
   interaction_limits: false,
   actions_variables: true,

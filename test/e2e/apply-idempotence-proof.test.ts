@@ -65,14 +65,9 @@ describe("secondApplyWriteFailures (apply-idempotence zero-write subset)", () =>
   });
 
   test("a write to an unconditional-write section passes", () => {
-    // teams (a section still on the legacy run() contract) writes on every
-    // apply, so a second-apply write there is legitimate; only state
-    // stability binds it.
-    expect(
-      secondApplyWriteFailures([
-        write("PUT", "/orgs/e2e-owner/teams/platform/repos/e2e-owner/e2e-repo"),
-      ]),
-    ).toEqual([]);
+    // repository is false-listed for its alwaysRewrite Git LFS PUT, so even its
+    // drift-gated PATCH passes here on a second apply; only state stability binds it.
+    expect(secondApplyWriteFailures([write("PATCH", "/repos/e2e-owner/e2e-repo")])).toEqual([]);
   });
 
   test("an alwaysRewrite write on a compare-before-write section passes; its siblings still fire", () => {
@@ -249,10 +244,10 @@ describe("unwitnessedUnconditionalSections (apply-idempotence corpus witness)", 
 
   test("first-apply writes without any second-apply write name the opposite remedy", () => {
     const witness = coveredWitness();
-    witness.set("teams", { first: 2, second: 0 });
+    witness.set("repository", { first: 2, second: 0 });
     const failures = unwitnessedUnconditionalSections(witness);
     expect(failures).toHaveLength(1);
-    expect(failures[0]).toContain('"teams"');
+    expect(failures[0]).toContain('"repository"');
     expect(failures[0]).toContain("never re-issued by any second apply");
   });
 
@@ -265,12 +260,12 @@ describe("unwitnessedUnconditionalSections (apply-idempotence corpus witness)", 
         // report traffic matches no section endpoint and is skipped too.
         write("POST", "/repos/e2e-owner/e2e-repo/labels"),
         write("POST", "/repos/e2e-owner/svc-private/issues"),
-        write("PUT", "/orgs/e2e-owner/teams/platform/repos/e2e-owner/e2e-repo"),
+        write("PATCH", "/repos/e2e-owner/e2e-repo"),
       ],
-      [write("PUT", "/orgs/e2e-owner/teams/platform/repos/e2e-owner/e2e-repo")],
+      [write("PATCH", "/repos/e2e-owner/e2e-repo")],
     );
-    expect([...witness.keys()]).toEqual(["teams"]);
-    expect(witness.get("teams")).toEqual({ first: 1, second: 1 });
+    expect([...witness.keys()]).toEqual(["repository"]);
+    expect(witness.get("repository")).toEqual({ first: 1, second: 1 });
   });
 });
 

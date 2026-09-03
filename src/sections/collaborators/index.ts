@@ -1,28 +1,23 @@
 /**
- * `collaborators:` section - direct collaborators keyed by username, with
- * pending repository invitations reconciled alongside them: a declared user
- * whose invitation is still pending converges (or gets the invitation
- * updated/re-sent), instead of being re-invited forever. Undeclared
- * collaborators are REMOVED and undeclared invitations cancelled by default
- * (the owner never is); the wrapped `undeclared: keep` form softens both to
- * notes.
+ * `collaborators:` section - direct collaborators by username plus their pending invitations, which
+ * converge, get PATCHed, or are cancelled and re-sent once expired. Undeclared collaborators are REMOVED
+ * and undeclared invitations cancelled by default, never the owner; `undeclared: keep` softens both to notes.
  */
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import {
-  beginRun,
   defaultUndeclaredPolicy,
   loosen,
   type SectionModule,
-  type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { call, listAll, rejectDuplicates } from "../contract/requests.js";
+import type { PlannedOp, SectionPlan } from "../contract/plan.js";
+import { rejectDuplicates } from "../contract/requests.js";
 import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "../shared/roles.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { CollaboratorConfig } from "./schema.js";
@@ -35,10 +30,8 @@ const LiveCollaborator = z.looseObject({
 });
 
 /**
- * A pending repository invitation as the list endpoint returns it. Its
- * `permissions` field speaks the READ vocabulary (read/write/...), the same
- * one roleForPermission maps declared permissions into. `invitee` is null on
- * invitations sent by email, which no username can declare.
+ * A pending invitation as listed: `permissions` speaks the READ vocabulary (read/write/...) that
+ * roleForPermission maps declared permissions into; `invitee` is null on email invitations.
  */
 const LiveInvitation = z.looseObject({
   id: z.number(),
@@ -52,10 +45,8 @@ type LiveInvitation = z.infer<typeof LiveInvitation>;
 type NamedInvitation = LiveInvitation & { invitee: { login: string } };
 
 /**
- * The partition predicate: a NON-EMPTY string login on purpose, so an
- * empty-string login stays in the email pool exactly as the runtime filter
- * always treated it, and an off-contract non-string login can never reach
- * the named pool's string operations.
+ * The partition predicate: a NON-EMPTY string login, so an empty login stays in the email pool
+ * and an off-contract non-string login never reaches the named pool's string operations.
  */
 function isNamedInvitation(invitation: LiveInvitation): invitation is NamedInvitation {
   return typeof invitation.invitee?.login === "string" && invitation.invitee.login !== "";
@@ -67,6 +58,7 @@ const ENDPOINTS = {
   list: {
     route: "GET /repos/{owner}/{repo}/collaborators",
     statuses: { 200: "the direct-collaborator list" },
+    primaryRead: { notFound: "denied" },
   },
   update: {
     route: "PUT /repos/{owner}/{repo}/collaborators/{username}",
@@ -96,16 +88,14 @@ export const collaboratorsSection = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(CollaboratorConfig)),
-  // Closed surface: the PUT accepts exactly one setting ("permission"), so
-  // an extra key is always a typo - and a misspelled "permission" would
-  // silently grant the default role and report clean forever.
+  // Closed surface: the PUT accepts exactly one setting ("permission"), so an extra key is always
+  // a typo - and a misspelled "permission" would silently grant the default role and report clean.
   closedSurface: {
     known: { username: true, permission: true },
     describe: (c) => c.username,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
-  async run(ctx, declared): Promise<SectionResult> {
-    const run = beginRun(ctx);
+  async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
@@ -117,19 +107,17 @@ export const collaboratorsSection = {
       this,
       ENDPOINTS.list,
       z.array(LiveCollaborator),
-      await listAll(ctx, this, ENDPOINTS.list, { query: { affiliation: "direct" } }),
+      await ctx.read.list.listAll({ query: { affiliation: "direct" } }),
     );
     const liveByLogin = new Map(live.map((c) => [c.login.toLowerCase(), c]));
-    // Both live pools are resolved BEFORE the declared walk, so a declared
-    // user is never mistaken for undeclared in the other pool. The type
-    // predicate PARTITIONS the invitations once: the username-addressed pool
-    // carries its logins structurally, and email invitations (null invitee,
-    // which no username can declare) split into their own pool.
+    // Both pools are resolved BEFORE the declared walk, so a declared user is never mistaken for
+    // undeclared in the other pool; the predicate partitions the invitations once, and email
+    // invitations (null invitee, which no username can declare) split into their own pool.
     const allInvitations = parseLive(
       this,
       ENDPOINTS.listInvitations,
       z.array(LiveInvitation),
-      await listAll(ctx, this, ENDPOINTS.listInvitations),
+      await ctx.read.listInvitations.listAll(),
     );
     const invitations = allInvitations.filter(isNamedInvitation);
     const emailInvitations = allInvitations.filter((invitation) => !isNamedInvitation(invitation));
@@ -137,95 +125,84 @@ export const collaboratorsSection = {
       invitations.map((invitation) => [invitation.invitee.login.toLowerCase(), invitation]),
     );
     const declaredKeys = new Set<string>();
+    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
 
     for (const collaborator of desired) {
-      const login = collaborator.username.toLowerCase();
+      const { username } = collaborator;
+      const login = username.toLowerCase();
       declaredKeys.add(login);
       const wantPermission = collaborator.permission ?? DEFAULT_ROLE;
       const wantRole = roleForPermission(wantPermission);
+      const label = `collaborators[${username}]`;
       const existing = liveByLogin.get(login);
       if (existing) {
         // On GitHub a user is never a collaborator AND an invitee at once,
         // so the collaborator branch settles the entry.
-        if ((existing.role_name ?? "") === wantRole) {
-          continue;
-        }
-        if (run.check) {
-          run.result.drift.push(
-            `collaborators[${collaborator.username}]: live role "${existing.role_name}" != declared "${wantRole}"; apply will set the declared permission`,
-          );
-        } else {
-          await call(ctx, this, ENDPOINTS.update, {
-            params: { username: collaborator.username },
+        if ((existing.role_name ?? "") !== wantRole) {
+          plan.ops.push({
+            role: "update",
+            params: { username },
             payload: { permission: wantPermission },
-            describe: `updating collaborator "${collaborator.username}"`,
+            describe: `updating collaborator "${username}"`,
+            drift: [
+              `${label}: live role "${existing.role_name}" != declared "${wantRole}"; apply will set the declared permission`,
+            ],
+            change: `updated collaborator "${username}" (${wantPermission})`,
           });
-          run.result.changes.push(
-            `updated collaborator "${collaborator.username}" (${wantPermission})`,
-          );
         }
         continue;
       }
       const invitation = inviteByLogin.get(login);
       if (invitation && invitation.expired !== true) {
         if (!INVITATION_ROLES.has(wantRole)) {
-          // Invitations carry only the standard roles, so a declared custom
-          // role can never be verified against (or PATCHed onto) a pending
-          // one. Cancelling and re-inviting would just repeat forever, so
-          // leave it: the declared role applies through the regular
-          // collaborator path once the invitation is accepted.
-          run.result.notes.push(
-            `invitation for "${collaborator.username}" is pending; invitations report only the standard roles, so it cannot be compared to the declared custom role "${wantPermission}" - left untouched, the declared role is applied once the invitation is accepted`,
+          // Invitations carry only the standard roles, so a declared custom role can neither be
+          // verified against nor PATCHed onto a pending one; it applies once the invitation is accepted.
+          plan.notes.push(
+            `invitation for "${username}" is pending; invitations report only the standard roles, so it cannot be compared to the declared custom role "${wantPermission}" - left untouched, the declared role is applied once the invitation is accepted`,
           );
           continue;
         }
-        if ((invitation.permissions ?? "") === wantRole) {
-          continue; // the pending invitation already grants the declared permission
+        if ((invitation.permissions ?? "") !== wantRole) {
+          // The invitation PATCH speaks the READ vocabulary, so it takes the
+          // mapped role, not the declared permission.
+          plan.ops.push({
+            role: "updateInvitation",
+            params: { invitation_id: String(invitation.id) },
+            payload: { permissions: wantRole },
+            describe: `updating the pending invitation for "${username}"`,
+            drift: [
+              `${label}: pending invitation permission "${invitation.permissions}" != declared "${wantRole}"; apply will update the invitation`,
+            ],
+            change: `updated pending invitation for "${username}" (${wantPermission})`,
+          });
         }
-        if (run.check) {
-          run.result.drift.push(
-            `collaborators[${collaborator.username}]: pending invitation permission "${invitation.permissions}" != declared "${wantRole}"; apply will update the invitation`,
-          );
-          continue;
-        }
-        // The invitation PATCH speaks the READ vocabulary, so it takes the
-        // mapped role, not the declared permission.
-        await call(ctx, this, ENDPOINTS.updateInvitation, {
-          params: { invitation_id: String(invitation.id) },
-          payload: { permissions: wantRole },
-          describe: `updating the pending invitation for "${collaborator.username}"`,
-        });
-        run.result.changes.push(
-          `updated pending invitation for "${collaborator.username}" (${wantPermission})`,
-        );
-        continue;
-      }
-      if (run.check) {
-        run.result.drift.push(
-          invitation
-            ? `collaborators[${collaborator.username}]: pending invitation expired; apply will cancel it and send a fresh invitation with "${wantPermission}"`
-            : `collaborators[${collaborator.username}]: missing - not a collaborator on the repo; apply will send an invitation with "${wantPermission}"`,
-        );
         continue;
       }
       if (invitation) {
-        // An expired invitation cannot be revived by a PATCH; cancel it and
-        // let the fresh PUT below mint a new one.
-        await call(ctx, this, ENDPOINTS.cancelInvitation, {
+        // An expired invitation cannot be revived by a PATCH: cancel it, and
+        // the PUT below mints a fresh one.
+        plan.ops.push({
+          role: "cancelInvitation",
           params: { invitation_id: String(invitation.id) },
-          describe: `cancelling the expired invitation for "${collaborator.username}"`,
+          describe: `cancelling the expired invitation for "${username}"`,
+          drift: [
+            `${label}: pending invitation expired; apply will cancel it and send a fresh invitation with "${wantPermission}"`,
+          ],
+          change: `cancelled the expired invitation for "${username}"`,
         });
       }
-      await call(ctx, this, ENDPOINTS.update, {
-        params: { username: collaborator.username },
+      plan.ops.push({
+        role: "update",
+        params: { username },
         payload: { permission: wantPermission },
-        describe: `inviting collaborator "${collaborator.username}"`,
+        describe: `inviting collaborator "${username}"`,
+        drift: [
+          `${label}: missing - not a collaborator on the repo; apply will send an invitation with "${wantPermission}"`,
+        ],
+        change: invitation
+          ? `re-invited collaborator "${username}" (${wantPermission}) - the pending invitation had expired`
+          : `invited collaborator "${username}" (${wantPermission})`,
       });
-      run.result.changes.push(
-        invitation
-          ? `re-invited collaborator "${collaborator.username}" (${wantPermission}) - the pending invitation had expired`
-          : `invited collaborator "${collaborator.username}" (${wantPermission})`,
-      );
     }
 
     for (const collaborator of live) {
@@ -234,7 +211,7 @@ export const collaboratorsSection = {
         continue; // never remove the owner (under either policy)
       }
       if (policy === "keep") {
-        run.result.notes.push(
+        plan.notes.push(
           undeclaredNote({
             subject: `collaborator "${collaborator.login}"`,
             state: "has access but is not declared",
@@ -243,21 +220,21 @@ export const collaboratorsSection = {
             action: "REMOVE them",
           }),
         );
-      } else if (run.check) {
-        run.result.drift.push(
+        continue;
+      }
+      plan.ops.push({
+        role: "remove",
+        params: { username: collaborator.login },
+        drift: [
           undeclaredDrift(defaultUndeclaredPolicy(this), {
             label: `collaborators[${collaborator.login}]`,
             action: "REMOVE them",
             add: "them",
             keep: "their access",
           }),
-        );
-      } else {
-        await call(ctx, this, ENDPOINTS.remove, {
-          params: { username: collaborator.login },
-        });
-        run.result.changes.push(`REMOVED undeclared collaborator "${collaborator.login}"`);
-      }
+        ],
+        change: `REMOVED undeclared collaborator "${collaborator.login}"`,
+      });
     }
 
     for (const invitation of invitations) {
@@ -266,7 +243,7 @@ export const collaboratorsSection = {
         continue;
       }
       if (policy === "keep") {
-        run.result.notes.push(
+        plan.notes.push(
           undeclaredNote({
             subject: `invitation for "${invitee}"`,
             state: "is pending but not declared",
@@ -275,8 +252,12 @@ export const collaboratorsSection = {
             action: "CANCEL the invitation",
           }),
         );
-      } else if (run.check) {
-        run.result.drift.push(
+        continue;
+      }
+      plan.ops.push({
+        role: "cancelInvitation",
+        params: { invitation_id: String(invitation.id) },
+        drift: [
           undeclaredDrift(defaultUndeclaredPolicy(this), {
             label: `collaborators[${invitee}]`,
             state: "a pending invitation not in the settings file",
@@ -284,20 +265,16 @@ export const collaboratorsSection = {
             add: "them",
             keep: "the invitation",
           }),
-        );
-      } else {
-        await call(ctx, this, ENDPOINTS.cancelInvitation, {
-          params: { invitation_id: String(invitation.id) },
-        });
-        run.result.changes.push(`CANCELLED undeclared invitation for "${invitee}"`);
-      }
+        ],
+        change: `CANCELLED undeclared invitation for "${invitee}"`,
+      });
     }
 
     for (const invitation of emailInvitations) {
-      run.result.notes.push(
+      plan.notes.push(
         `invitation ${invitation.id} was sent by email, so no username can declare it; left untouched - cancel it from the repository's Access settings if it is unwanted`,
       );
     }
-    return run.result;
+    return plan;
   },
-} satisfies SectionModule<"collaborators">;
+} satisfies SectionModule<"collaborators", typeof ENDPOINTS>;
