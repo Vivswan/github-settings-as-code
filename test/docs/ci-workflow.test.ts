@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { RELEASE_PR_BRANCH_PREFIX } from "../../.github/scripts/release-pipeline.js";
+import { headRefPrefixes } from "./head-ref.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -55,16 +56,10 @@ describe("ci.yml all-green gate", () => {
   });
 });
 
-const HEAD_REF_PREFIX = /startsWith\(github\.head_ref,\s*(['"])([^'"]*)\1\)/g;
-
 /** The guard: every head_ref prefix in a job- or step-level if: spells the constant; none at all is fine. */
 function expectReleasePrefixes(wf: Workflow): void {
-  for (const job of Object.values(wf.jobs)) {
-    for (const condition of [job.if, ...(job.steps ?? []).map((step) => step.if)]) {
-      for (const match of String(condition ?? "").matchAll(HEAD_REF_PREFIX)) {
-        expect(match[2]).toBe(RELEASE_PR_BRANCH_PREFIX);
-      }
-    }
+  for (const literal of headRefPrefixes(wf)) {
+    expect(literal).toBe(RELEASE_PR_BRANCH_PREFIX);
   }
 }
 
@@ -80,5 +75,27 @@ describe("ci.yml release PR branch spelling", () => {
   test("a drifted spelling fails the guard (negative control)", () => {
     const drifted = { jobs: { gate: { if: "startsWith(github.head_ref, 'release-pls--')" } } };
     expect(() => expectReleasePrefixes(drifted)).toThrow();
+  });
+});
+
+describe("headRefPrefixes", () => {
+  test("collects job- and step-level literals in order and none where no condition tests head_ref", () => {
+    const wf = {
+      jobs: {
+        gate: {
+          if: "github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
+          steps: [
+            { if: 'startsWith(github.head_ref, "feature/")' },
+            { if: "startsWith ( github . head_ref ,\n  'hotfix/' )" },
+            { if: "github.actor != 'dependabot[bot]'" },
+            {},
+          ],
+        },
+        plain: { steps: [{}] },
+        bare: {},
+      },
+    };
+    expect(headRefPrefixes(wf)).toEqual(["release-please--", "feature/", "hotfix/"]);
+    expect(headRefPrefixes({ jobs: {} })).toEqual([]);
   });
 });

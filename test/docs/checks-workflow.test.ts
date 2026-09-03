@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { RELEASE_PR_BRANCH_PREFIX } from "../../.github/scripts/release-pipeline.js";
+import { headRefPrefixes, headRefPrefixesIn } from "./head-ref.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const PATHS_TS = "test/e2e/openapi/paths.ts";
@@ -143,27 +144,15 @@ describe("checks.yml openapi-trimmed cache keys", () => {
   });
 });
 
-const HEAD_REF_PREFIX = /startsWith\(github\.head_ref,\s*(['"])([^'"]*)\1\)/g;
-
-/** Every literal an if: condition tests github.head_ref against with startsWith. */
-function headRefPrefixes(condition: string | undefined): string[] {
-  return [...String(condition ?? "").matchAll(HEAD_REF_PREFIX)].map((m) => m[2] ?? "");
-}
-
 /** The guard: one anchor-check step gated on the constant, and no job or step condition spelling it otherwise. */
 function expectReleasePrefixes(wf: Workflow): void {
-  const jobs = Object.values(wf.jobs);
-  const anchorSteps = jobs
+  const anchorSteps = Object.values(wf.jobs)
     .flatMap((job) => job.steps ?? [])
     .filter((step) => (step.run ?? "").includes("release-pipeline.ts anchor-check"));
   expect(anchorSteps.length, "checks.yml lost its anchor-check step").toBe(1);
-  expect(headRefPrefixes(anchorSteps[0]?.if)).toEqual([RELEASE_PR_BRANCH_PREFIX]);
-  for (const job of jobs) {
-    for (const condition of [job.if, ...(job.steps ?? []).map((step) => step.if)]) {
-      for (const literal of headRefPrefixes(condition)) {
-        expect(literal).toBe(RELEASE_PR_BRANCH_PREFIX);
-      }
-    }
+  expect(headRefPrefixesIn(anchorSteps[0]?.if)).toEqual([RELEASE_PR_BRANCH_PREFIX]);
+  for (const literal of headRefPrefixes(wf)) {
+    expect(literal).toBe(RELEASE_PR_BRANCH_PREFIX);
   }
 }
 
