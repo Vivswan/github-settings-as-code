@@ -1,5 +1,5 @@
 /**
- * The nested `deployment_protection_rules` key: reconcile one environment's
+ * The nested `deployment_protection_rules` key: plan one environment's
  * custom deployment protection rules - GitHub App gates, enable/disable
  * only, declared by App slug and resolved to the integration id at apply
  * time.
@@ -8,15 +8,9 @@
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
 import { parseLive } from "../contract/live.js";
-import {
-  type SectionContext,
-  type SectionModule,
-  type SectionRun,
-  undeclaredDrift,
-  undeclaredNote,
-} from "../contract/module.js";
-import { call, listAllEnveloped } from "../contract/requests.js";
-import { ENDPOINTS } from "./endpoints.js";
+import { type SectionMeta, undeclaredDrift, undeclaredNote } from "../contract/module.js";
+import { ENDPOINTS, type EnvironmentsRestContext } from "./endpoints.js";
+import type { NestedPlan } from "./nested.js";
 import type { DeploymentProtectionRuleConfig, EnvironmentConfig } from "./schema.js";
 
 // "keep" like the secret families, for a security reason instead of an
@@ -74,8 +68,8 @@ function liveRuleId(rule: LiveProtectionRule, envName: string): string {
  * PRESENT off-shape value is a contract break parseLive fails loudly.
  */
 async function listProtectionRules(
-  ctx: SectionContext,
-  section: SectionModule<"environments">,
+  ctx: EnvironmentsRestContext,
+  section: SectionMeta,
   envName: string,
 ): Promise<LiveProtectionRule[]> {
   const data = parseLive(
@@ -84,7 +78,7 @@ async function listProtectionRules(
     z
       .looseObject({ custom_deployment_protection_rules: z.array(LiveProtectionRule).optional() })
       .nullable(),
-    await call(ctx, section, ENDPOINTS.listProtectionRules, {
+    await ctx.read.listProtectionRules.call({
       params: { environment_name: envName },
       describe: `listing deployment protection rules of environment "${envName}"`,
     }),
@@ -94,11 +88,9 @@ async function listProtectionRules(
 }
 
 /**
- * Resolve each declared App slug to its integration id via the
- * available-Apps listing (fetched by the caller only when a declared rule is
- * missing). A slug the listing does not carry is a hard error naming the
- * available slugs: the App is not installed or does not provide a rule for
- * this environment, and no API call this section may make can change that.
+ * Resolve a declared App slug to its integration id via the available-Apps
+ * listing; an unlisted slug is a hard error naming the available ones (the
+ * App is not installed, which no call this section may make can change).
  */
 function resolveIntegrationId(
   apps: readonly LiveProtectionRuleApp[],
@@ -128,18 +120,15 @@ type LiveProtectionRuleApp = z.infer<typeof LiveProtectionRuleApp>;
  * resolve a declared rule, so parseLive rejects the whole listing.
  */
 async function listProtectionRuleApps(
-  ctx: SectionContext,
-  section: SectionModule<"environments">,
+  ctx: EnvironmentsRestContext,
+  section: SectionMeta,
   envName: string,
 ): Promise<LiveProtectionRuleApp[]> {
   return parseLive(
     section,
     ENDPOINTS.listProtectionRuleApps,
     z.array(LiveProtectionRuleApp),
-    await listAllEnveloped(
-      ctx,
-      section,
-      ENDPOINTS.listProtectionRuleApps,
+    await ctx.read.listProtectionRuleApps.listAllEnveloped(
       "available_custom_deployment_protection_rule_integrations",
       { params: { environment_name: envName } },
     ),
@@ -171,23 +160,20 @@ export function validateProtectionRules(
 }
 
 /**
- * Reconcile one environment's declared `deployment_protection_rules` list
- * against the enabled rules. Enable/disable only - GitHub offers no update
- * call - so a missing declared rule is enabled (its slug resolved to the
- * integration id through ONE available-Apps fetch, made only when something
- * is missing) and a live undeclared rule follows the policy the caller
- * unwrapped against the table default ("keep": disabling a deployment gate
- * is opt-in).
+ * Plan one environment's protection rules (enable/disable only): a missing
+ * rule is enabled, an undeclared one follows the policy, and the FIRST enable's
+ * thunk resolves EVERY missing slug from one Apps read before any POST leaves.
  */
-export async function reconcileProtectionRules(
-  ctx: SectionContext,
-  section: SectionModule<"environments">,
+export async function planProtectionRules(
+  ctx: EnvironmentsRestContext,
+  section: SectionMeta,
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly DeploymentProtectionRuleConfig[],
-  run: SectionRun,
-): Promise<void> {
-  const live = await listProtectionRules(ctx, section, envName);
+  liveEnv: Record<string, unknown> | undefined,
+): Promise<NestedPlan> {
+  const params = { environment_name: envName };
+  const live = liveEnv === undefined ? [] : await listProtectionRules(ctx, section, envName);
   const liveBySlug = new Map<string, LiveProtectionRule>();
   for (const rule of live) {
     // The map models gates that are ON (see the LiveProtectionRule JSDoc):
@@ -201,34 +187,36 @@ export async function reconcileProtectionRules(
     liveBySlug.set(liveRuleSlug(rule, envName), rule);
   }
   const declared = new Set(entries.map((rule) => rule.app));
+  const planned: NestedPlan = { ops: [], notes: [] };
 
   const missing = entries.filter((rule) => !liveBySlug.has(rule.app));
-  if (run.check) {
-    for (const rule of missing) {
-      run.result.drift.push(
+  let integrationIds: Promise<Map<string, number>> | undefined;
+  const resolveMissing = (): Promise<Map<string, number>> => {
+    integrationIds ??= listProtectionRuleApps(ctx, section, envName).then(
+      (apps) =>
+        new Map(missing.map((rule) => [rule.app, resolveIntegrationId(apps, rule.app, envName)])),
+    );
+    return integrationIds;
+  };
+  for (const rule of missing) {
+    planned.ops.push({
+      role: "createProtectionRule",
+      params,
+      payload: async () => {
+        const integrationId = (await resolveMissing()).get(rule.app);
+        if (integrationId === undefined) {
+          throw new Error(
+            `BUG: environments: the protection rule App "${rule.app}" of environment "${envName}" was planned but not resolved`,
+          );
+        }
+        return { integration_id: integrationId };
+      },
+      drift: [
         `environments[${envName}].deployment_protection_rules[${rule.app}]: missing - declared in the settings file but not enabled on the environment; apply will enable it if the App is available to this environment`,
-      );
-    }
-  } else if (missing.length > 0) {
-    const apps = await listProtectionRuleApps(ctx, section, envName);
-    // Resolve EVERY missing slug before the first POST: an unknown slug is a
-    // hard error, and discovering it mid-loop would leave the environment
-    // half-reconciled - the same validate-before-write posture as the
-    // section's upfront duplicate checks.
-    const resolved = missing.map((rule) => ({
-      rule,
-      integrationId: resolveIntegrationId(apps, rule.app, envName),
-    }));
-    for (const { rule, integrationId } of resolved) {
-      await call(ctx, section, ENDPOINTS.createProtectionRule, {
-        params: { environment_name: envName },
-        payload: { integration_id: integrationId },
-        describe: `enabling deployment protection rule "${rule.app}" in environment "${envName}"`,
-      });
-      run.result.changes.push(
-        `enabled deployment protection rule "${rule.app}" in environment "${envName}"`,
-      );
-    }
+      ],
+      change: `enabled deployment protection rule "${rule.app}" in environment "${envName}"`,
+      describe: `enabling deployment protection rule "${rule.app}" in environment "${envName}"`,
+    });
   }
 
   for (const [slug, rule] of liveBySlug) {
@@ -236,28 +224,27 @@ export async function reconcileProtectionRules(
       continue;
     }
     if (policy === "keep") {
-      run.result.notes.push(
+      planned.notes.push(
         undeclaredNote({
           subject: `deployment protection rule "${slug}"`,
           state: `is enabled on environment "${envName}" but is not declared`,
           action: "DISABLE it",
         }),
       );
-    } else if (run.check) {
-      run.result.drift.push(
+      continue;
+    }
+    planned.ops.push({
+      role: "removeProtectionRule",
+      params: { ...params, protection_rule_id: liveRuleId(rule, envName) },
+      drift: [
         undeclaredDrift(PROTECTION_RULES_DEFAULT_POLICY, {
           label: `environments[${envName}].deployment_protection_rules[${slug}]`,
           action: "DISABLE it",
         }),
-      );
-    } else {
-      await call(ctx, section, ENDPOINTS.removeProtectionRule, {
-        params: { environment_name: envName, protection_rule_id: liveRuleId(rule, envName) },
-        describe: `disabling undeclared deployment protection rule "${slug}" in environment "${envName}"`,
-      });
-      run.result.changes.push(
-        `DISABLED undeclared deployment protection rule "${slug}" in environment "${envName}"`,
-      );
-    }
+      ],
+      change: `DISABLED undeclared deployment protection rule "${slug}" in environment "${envName}"`,
+      describe: `disabling undeclared deployment protection rule "${slug}" in environment "${envName}"`,
+    });
   }
+  return planned;
 }

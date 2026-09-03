@@ -78,9 +78,9 @@ export function phantomKeys(desired: Record<string, unknown>, live: unknown): st
 }
 
 /**
- * The apply-mode note for phantom keys - one source, so the per-section
- * copies cannot drift. `noun` names the live resource ("label"); `rewrite`
- * says what apply will keep doing ("this update will re-run").
+ * The note for phantom keys, rendered in both modes beside the update they
+ * gate. `noun` names the live resource ("label"); `rewrite` says what apply
+ * will keep doing ("this update will re-run").
  */
 export function phantomNote(prefix: string, keys: string[], noun: string, rewrite: string): string {
   const list = keys.map((k) => `"${k}"`).join(", ");

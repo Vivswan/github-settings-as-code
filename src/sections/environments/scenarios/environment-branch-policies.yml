@@ -1,5 +1,6 @@
 # Apply reconciles a declared per-environment deployment_branch_policies list
-# through the pattern endpoints AFTER the environment PUT: the missing pattern
+# through the pattern endpoints on an environment whose flag already matches
+# (so it is not re-PUT): the missing pattern
 # is created, the pattern whose live type differs is replaced (type is
 # immutable upstream, so delete + recreate), and the undeclared one is DELETED
 # (the default policy WITHIN a declared key). A check rerun lists the
@@ -40,7 +41,6 @@ expect:
   outcomes:
     environments: applied
   mutations:
-    - "PUT /repos/{repo}/environments/production"
     - "POST /repos/{repo}/environments/production/deployment-branch-policies"
     - "DELETE /repos/{repo}/environments/production/deployment-branch-policies/4001"
     - "DELETE /repos/{repo}/environments/production/deployment-branch-policies/4002"

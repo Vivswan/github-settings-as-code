@@ -1,7 +1,7 @@
 # The enable POST is gated by Administration WRITE (a per-endpoint
 # override): with Administration granted at read, the preflight passes, the
-# environment PUT lands, the available-Apps read succeeds and resolves the
-# slug - and the enable itself is refused. The denial advice names the
+# environment already matches, the available-Apps read succeeds and resolves
+# the slug - and the enable itself is refused. The denial advice names the
 # "Administration" grant the override requires.
 name: environment-protection-rules-write-denied
 settings:
@@ -24,8 +24,6 @@ expect:
   result: failed
   outcomes:
     environments: failed
-  mutations:
-    - "PUT /repos/{repo}/environments/production"
   never:
     - "DELETE /repos/{repo}/environments"
   requests_contain:

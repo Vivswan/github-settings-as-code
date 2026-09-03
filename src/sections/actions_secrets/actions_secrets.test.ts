@@ -458,7 +458,7 @@ describe("actions_secrets sealing key", () => {
       [PUBLIC_KEY]: { data: { key_id: "k1", key: "!!not-base64!!" } },
     });
     await expect(plan(notB64, [{ name: "X", value: "$V" }])).rejects.toThrow(
-      /actions_secrets: the actions_secrets public key is not valid base64/,
+      /^actions_secrets: GET \/repos\/\{owner\}\/\{repo\}\/actions\/secrets\/public-key \(the actions_secrets sealing key\) returned a key that is not valid base64/,
     );
 
     const wrongLength = new MockApi({

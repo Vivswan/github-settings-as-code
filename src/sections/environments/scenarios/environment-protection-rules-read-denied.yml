@@ -1,8 +1,8 @@
 # The available-Apps read is gated by the Administration permission (a
 # per-endpoint override): with Environments granted and the Actions-gated
-# rules list readable, the preflight read pass succeeds (check mode never
-# reads the Apps listing), the environment PUT lands, and then the mid-apply
-# resolver fetch is refused. The denial advice asks for "Administration"
+# rules list readable, the preflight read pass succeeds (the Apps listing is
+# read only when an enable executes), the environment already matches, and
+# the mid-apply resolver fetch is refused before the enable. The denial advice asks for "Administration"
 # at WRITE level even though the failing call is a read: the enable and
 # disable writes share that permission, so read-level advice would just fail
 # again one grant later.
@@ -27,8 +27,6 @@ expect:
   result: failed
   outcomes:
     environments: failed
-  mutations:
-    - "PUT /repos/{repo}/environments/production"
   never:
     - "POST /repos/{repo}/environments/production/deployment_protection_rules"
   stdout_contains:

@@ -1,29 +1,16 @@
 /**
  * Pinned environments (the routed `pinned` scalar): the pins GraphQL
- * operations and the pin/unpin/reorder reconciliation. run() gates the
- * reconcile call on a declared `pinned` key, so a pin-free settings file
- * stays REST-only and never touches /graphql.
+ * operations and the pin/unpin/reorder planning. plan() gates the call on a
+ * declared `pinned` key, so a pin-free settings file stays REST-only and
+ * never touches /graphql.
  */
 
 import { repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
-import type { SectionContext, SectionModule, SectionRun } from "../contract/module.js";
-import { callGraphql, listGraphqlConnection, tryCallGraphql } from "../contract/requests.js";
+import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
+import type { ENDPOINTS } from "./endpoints.js";
 import { MAX_PINNED_ENVIRONMENTS } from "./schema.js";
 
-/**
- * The pinned-environments listing: each node is a PinnedEnvironment carrying
- * the ORDERING as its own `position` field (1-based; ordering does NOT live
- * on the Environment object) plus the pinned environment's name. Verified
- * against live GitHub: position numbers may be NON-CONTIGUOUS - unpinning
- * leaves a hole, a new pin appends via a monotonic counter, and only a
- * reorder renormalizes - so positions are consumed as a SORT KEY (rank),
- * never as literal slot numbers. NOT_FOUND is a declared outcome so a
- * fine-grained read denial - which GraphQL delivers as NOT_FOUND on the
- * repository - reads as "no pins", the same absent posture as the section's
- * REST probe (DENIAL_SEMANTICS keeps environments "absent"); the denial then
- * surfaces on the first write, exactly like the environment PUT.
- */
 const PINS_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   name: "EnvironmentPins",
   kind: "read",
@@ -38,15 +25,9 @@ const PINS_QUERY = graphqlOp<{ owner: string; repo: string }>()({
 });
 
 /**
- * Pin or unpin one environment, addressed by the node id the REST PUT/GET
- * environment bodies carry (the new-format EN_ ids; no deprecated-ID
- * warnings). Verified against live GitHub: a new pin lands at the TAIL of
- * the pinned list (a monotonic position counter; unpinning never renumbers),
- * which is what lets the reconciler model appends locally instead of
- * re-reading. UNPROCESSABLE is a declared outcome: it is how GitHub rejects
- * a pin once the repository already holds MAX_PINNED_ENVIRONMENTS pins,
- * which the handler turns into an actionable error naming the cap and the
- * way to make room.
+ * Pin or unpin one environment by the node id its REST body carries. Verified
+ * live: a new pin lands at the TAIL (so appends are modelled locally), and
+ * UNPROCESSABLE is GitHub's cap rejection, the belt under the plan's own gate.
  */
 const PIN_ENVIRONMENT = graphqlOp<{ environmentId: string; pinned: boolean }>()({
   name: "PinEnvironment",
@@ -55,7 +36,7 @@ const PIN_ENVIRONMENT = graphqlOp<{ environmentId: string; pinned: boolean }>()(
     "mutation PinEnvironment($environmentId: ID!, $pinned: Boolean!) { pinEnvironment(input: { environmentId: $environmentId, pinned: $pinned }) { environment { name isPinned } } }",
   outcomes: {
     ok: "the environment was pinned or unpinned",
-    UNPROCESSABLE: `the repository already holds ${MAX_PINNED_ENVIRONMENTS} pinned environments (GitHub's cap), so this pin was rejected`,
+    UNPROCESSABLE: `the repository already holds ${MAX_PINNED_ENVIRONMENTS} pinned environments (GitHub's cap), so this pin was rejected; pins without a pinned declaration are left untouched, so declare pinned: false on entries for some of the currently pinned environments, or unpin them in the GitHub UI`,
   },
 });
 
@@ -80,10 +61,24 @@ export const GRAPHQL_OPS = {
   reorder: REORDER_ENVIRONMENT,
 } as const satisfies Record<string, GraphqlOpDecl>;
 
+/** The section's full plan context: the REST read port plus the pins read. */
+export type EnvironmentsPlanContext = PlanContext<typeof ENDPOINTS, typeof GRAPHQL_OPS>;
+
+/** A planned operation of this section, REST or GraphQL. */
+export type EnvironmentsOp = PlannedOp<typeof ENDPOINTS, typeof GRAPHQL_OPS>;
+
+/** What plan() returns for this section. */
+export type EnvironmentsPlan = SectionPlan<EnvironmentsOp>;
+
 /** One entry's declared pin state, in settings-file order. */
 export interface PinDeclaration {
   name: string;
   pinned: boolean;
+  /**
+   * The node id off the body the plan has for the environment (the probe, or a
+   * created environment's PUT response once run); throws when the body lacks it.
+   */
+  nodeId: () => string;
 }
 
 /** The fields of one live pin this section reads off the pins connection. */
@@ -124,11 +119,8 @@ function livePin(node: unknown): LivePin {
  * so the denial surfaces on the first pin write instead of failing the read
  * pass.
  */
-async function listLivePins(
-  ctx: SectionContext,
-  section: SectionModule<"environments">,
-): Promise<LivePin[]> {
-  const listed = await listGraphqlConnection(ctx, section, PINS_QUERY, repoVariables(ctx));
+async function listLivePins(ctx: EnvironmentsPlanContext): Promise<LivePin[]> {
+  const listed = await ctx.read.pins.listConnection(repoVariables(ctx));
   if ("error" in listed) {
     return [];
   }
@@ -136,7 +128,7 @@ async function listLivePins(
 }
 
 /** The pin key: environment names are case-insensitive, like the natural key. */
-export function pinKey(name: string): string {
+function pinKey(name: string): string {
   return name.toLowerCase();
 }
 
@@ -226,64 +218,61 @@ function planPins(
 }
 
 /**
- * Resolve the node id of every environment the plan will mutate, BEFORE the
- * first mutation (the resolve-before-write posture of the protection-rules
- * reconciler): a body that omitted its node_id fails the section here, with
- * zero pins half-applied, instead of on the Nth mutation. The ids are
- * attached to the plan items themselves, so each mutation below carries its
- * own proof and no name-keyed lookup exists to miss.
+ * The node id of every environment the plan will mutate, resolved by the
+ * FIRST pin thunk (after every environment PUT): a body without node_id fails
+ * with zero pins half-applied, and a converged pin state never resolves one.
  */
 function resolvePinIds(
-  nodeIds: ReadonlyMap<string, string>,
-  plan: { unpins: string[]; pins: string[]; reorders: Array<{ name: string; rank: number }> },
-): {
-  unpins: Array<{ name: string; id: string }>;
-  pins: Array<{ name: string; id: string }>;
-  reorders: Array<{ name: string; rank: number; id: string }>;
-} {
-  const idOf = (name: string): string => {
-    const nodeId = nodeIds.get(pinKey(name));
-    if (nodeId === undefined) {
-      throw new Error(
-        `environments: the environment body for "${name}" carried no node_id, so its pin cannot be reconciled. Check the "api-version" input against the GitHub REST docs for the environments endpoint`,
-      );
-    }
-    return nodeId;
-  };
-  return {
-    unpins: plan.unpins.map((name) => ({ name, id: idOf(name) })),
-    pins: plan.pins.map((name) => ({ name, id: idOf(name) })),
-    reorders: plan.reorders.map(({ name, rank }) => ({ name, rank, id: idOf(name) })),
-  };
+  declarations: readonly PinDeclaration[],
+  names: readonly string[],
+): ReadonlyMap<string, string> {
+  const byKey = new Map(declarations.map((entry) => [pinKey(entry.name), entry]));
+  return new Map(
+    names.map((name) => {
+      const declaration = byKey.get(pinKey(name));
+      if (declaration === undefined) {
+        throw new Error(
+          `BUG: environments: a pin mutation was planned for "${name}", which no entry declares a pin state for`,
+        );
+      }
+      return [pinKey(name), declaration.nodeId()];
+    }),
+  );
+}
+
+/** An environment body's `node_id` field as a string, or the loud error when it is not one. */
+export function environmentNodeId(name: string, body: unknown): string {
+  const nodeId = nodeIdField(body);
+  if (typeof nodeId !== "string") {
+    throw new Error(
+      `environments: the environment body for "${name}" carried no node_id, so its pin cannot be reconciled. Check the "api-version" input against the GitHub REST docs for the environments endpoint`,
+    );
+  }
+  return nodeId;
+}
+
+/** The `node_id` field of a body, unvalidated: the one value a plan keeps off a body. */
+export function nodeIdField(body: unknown): unknown {
+  return (body as { node_id?: unknown } | null | undefined)?.node_id;
 }
 
 /**
- * Reconcile the declared pin states against the live pinned-environments
- * list, AFTER every environment PUT (run() gates the call on a declared
- * `pinned` key, so a pin-free settings file stays REST-only). Both modes
- * read the live pins once and derive everything from planPins; apply then
- * executes the plan in an order that can never transiently exceed GitHub's
- * cap - unpins first, then pins, then the leftward reorders. The final
- * count is gated up front in both modes (the shape's cap counts only
- * DECLARED pins, and live pins nobody declared - never unpinned here - can
- * still overflow it): check surfaces the overflow as a note beside its
- * drift, apply fails before the first mutation. The per-pin UNPROCESSABLE
- * handling stays as the belt for a pin raced in between the read and the
- * mutations.
+ * Plan the declared pin states from planPins in cap-safe order (unpins, pins,
+ * leftward reorders); the live overflow is a note in both modes and fails the
+ * first pin thunk, and order drift is one section-level line plus continuations.
  */
-export async function reconcilePins(
-  ctx: SectionContext,
-  section: SectionModule<"environments">,
+export async function planPinned(
+  ctx: EnvironmentsPlanContext,
   declarations: readonly PinDeclaration[],
-  nodeIds: ReadonlyMap<string, string>,
-  run: SectionRun,
-): Promise<void> {
+): Promise<{ ops: EnvironmentsOp[]; notes: string[] }> {
   const desired = declarations.filter((entry) => entry.pinned).map((entry) => entry.name);
-  const live = await listLivePins(ctx, section);
+  const live = await listLivePins(ctx);
   const plan = planPins(declarations, live);
+  const ops: EnvironmentsOp[] = [];
+  const notes: string[] = [];
 
   if (plan.interleaved.length > 0) {
-    run.result.notes.push(
+    notes.push(
       `pinned environment(s) ${plan.interleaved.map((name) => `"${name}"`).join(", ")} have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins`,
     );
   }
@@ -291,73 +280,65 @@ export async function reconcilePins(
     plan.finalCount > MAX_PINNED_ENVIRONMENTS
       ? `pinning the ${plan.pins.length} declared environment(s) not yet pinned would leave ${plan.finalCount} environments pinned, but GitHub allows at most ${MAX_PINNED_ENVIRONMENTS}. Pins without a pinned declaration are left untouched, so declare pinned: false on entries for some of the currently pinned environments, or unpin them in the GitHub UI`
       : undefined;
-
-  if (run.check) {
-    for (const name of plan.pins) {
-      run.result.drift.push(
-        `environments[${name}].pinned: missing - declared pinned but the environment is not pinned on the repo; apply will pin it`,
-      );
-    }
-    for (const name of plan.unpins) {
-      run.result.drift.push(
-        `environments[${name}].pinned: pinned on the repo but declared pinned: false; apply will unpin it`,
-      );
-    }
-    if (plan.reorders.length > 0) {
-      run.result.drift.push(
-        `environments.pinned: the declared pin order is [${desired.join(", ")}] but the live pinned order is [${plan.liveOrder.join(", ")}]; apply will reorder the pins so the declared ones lead in declaration order`,
-      );
-    }
-    if (overflow !== undefined) {
-      run.result.notes.push(`apply will fail: ${overflow}`);
-    }
-    return;
-  }
-
   if (overflow !== undefined) {
-    throw new Error(`environments: ${overflow}`);
+    notes.push(`apply will fail: ${overflow}`);
   }
-  if (plan.unpins.length === 0 && plan.pins.length === 0 && plan.reorders.length === 0) {
-    return;
-  }
-  const resolved = resolvePinIds(nodeIds, plan);
 
-  for (const { name, id } of resolved.unpins) {
-    await callGraphql(
-      ctx,
-      section,
-      PIN_ENVIRONMENT,
-      { environmentId: id, pinned: false },
-      { describe: `unpinning environment "${name}"` },
-    );
-    run.result.changes.push(`unpinned environment "${name}"`);
-  }
-  for (const { name, id } of resolved.pins) {
-    const pinned = await tryCallGraphql(
-      ctx,
-      section,
-      PIN_ENVIRONMENT,
-      { environmentId: id, pinned: true },
-      { describe: `pinning environment "${name}"` },
-    );
-    if ("error" in pinned) {
-      // The one tolerated outcome is UNPROCESSABLE: the repository's pinned
-      // list is full. The settings file cannot fix that by itself (it never
-      // unpins environments it does not declare), so name the way out.
+  // The gate every mutation's thunk passes: the overflow refusal, then the
+  // ids of EVERY planned mutation, resolved once and shared.
+  let ids: ReadonlyMap<string, string> | undefined;
+  const idOf = (name: string): string => {
+    if (overflow !== undefined) {
+      throw new Error(`environments: ${overflow}`);
+    }
+    ids ??= resolvePinIds(declarations, [
+      ...plan.unpins,
+      ...plan.pins,
+      ...plan.reorders.map((reorder) => reorder.name),
+    ]);
+    const id = ids.get(pinKey(name));
+    if (id === undefined) {
       throw new Error(
-        `environments: pinning environment "${name}" failed - GRAPHQL ${PIN_ENVIRONMENT.name}: ${pinned.error.status} ${pinned.error.message}. GitHub allows at most ${MAX_PINNED_ENVIRONMENTS} pinned environments, and pins without a pinned declaration are left untouched - declare pinned: false on entries for some of the currently pinned environments, or unpin them in the GitHub UI`,
+        `BUG: environments: no node id was resolved for the pin mutation of "${name}"`,
       );
     }
-    run.result.changes.push(`pinned environment "${name}"`);
+    return id;
+  };
+
+  for (const name of plan.unpins) {
+    ops.push({
+      role: "pin",
+      variables: () => ({ environmentId: idOf(name), pinned: false }),
+      drift: [
+        `environments[${name}].pinned: pinned on the repo but declared pinned: false; apply will unpin it`,
+      ],
+      change: `unpinned environment "${name}"`,
+      describe: `unpinning environment "${name}"`,
+    });
   }
-  for (const { name, rank, id } of resolved.reorders) {
-    await callGraphql(
-      ctx,
-      section,
-      REORDER_ENVIRONMENT,
-      { environmentId: id, position: rank },
-      { describe: `moving pinned environment "${name}" to position ${rank}` },
-    );
-    run.result.changes.push(`moved pinned environment "${name}" to position ${rank}`);
+  for (const name of plan.pins) {
+    ops.push({
+      role: "pin",
+      variables: () => ({ environmentId: idOf(name), pinned: true }),
+      drift: [
+        `environments[${name}].pinned: missing - declared pinned but the environment is not pinned on the repo; apply will pin it`,
+      ],
+      change: `pinned environment "${name}"`,
+      describe: `pinning environment "${name}"`,
+    });
   }
+  plan.reorders.forEach(({ name, rank }, index) => {
+    ops.push({
+      role: "reorder",
+      variables: () => ({ environmentId: idOf(name), position: rank }),
+      drift: [
+        index === 0
+          ? `environments.pinned: the declared pin order is [${desired.join(", ")}] but the live pinned order is [${plan.liveOrder.join(", ")}]; apply will reorder the pins so the declared ones lead in declaration order`
+          : `environments.pinned: apply will also move "${name}" to position ${rank} in that reordering`,
+      ],
+      change: `moved pinned environment "${name}" to position ${rank}`,
+      describe: `moving pinned environment "${name}" to position ${rank}`,
+    });
+  });
+  return { ops, notes };
 }

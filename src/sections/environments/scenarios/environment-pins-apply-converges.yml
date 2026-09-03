@@ -1,5 +1,6 @@
-# Apply reconciles the declared pin states AFTER every environment PUT, with
-# the node ids captured from the PUT bodies: sandbox declares pinned: false
+# Apply reconciles the declared pin states AFTER every environment write, the
+# node ids read off the probed bodies (api, created here, off its PUT's):
+# sandbox declares pinned: false
 # and is live-pinned, so it is unpinned FIRST (unpin-before-pin keeps the
 # count under GitHub's cap even through a swap); api declares pinned: true
 # and is not pinned, so it is pinned (landing at the tail); the declared pin
@@ -36,8 +37,6 @@ expect:
     environments: applied
   mutations:
     - "PUT /repos/{repo}/environments/api"
-    - "PUT /repos/{repo}/environments/web"
-    - "PUT /repos/{repo}/environments/sandbox"
     - "GRAPHQL PinEnvironment"
     - "GRAPHQL PinEnvironment"
     - "GRAPHQL ReorderEnvironment"

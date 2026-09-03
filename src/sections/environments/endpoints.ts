@@ -1,10 +1,12 @@
 /**
  * The section's REST endpoint declarations: the single dictionary that
  * drives the request paths, the mock routes, and USED_PATHS - the leaf
- * every sibling module making REST calls reads its routes from.
+ * every sibling module making REST calls reads its routes from, and the
+ * literal type the section's planned operations and read port derive from.
  */
 
 import type { EndpointDecl } from "../contract/endpoints.js";
+import type { PlanContext, PlannedOp } from "../contract/plan.js";
 
 /**
  * The 404 on the pattern endpoints is ambiguous: besides a missing grant it
@@ -24,6 +26,10 @@ export const ENDPOINTS = {
   probe: {
     route: "GET /repos/{owner}/{repo}/environments/{environment_name}",
     statuses: { 200: "the environment", 404: "no such environment yet" },
+    // A fine-grained denial reads as "no such environment" and surfaces on
+    // the PUT's 403, so a token that can read nothing still gets an
+    // actionable error from the first write.
+    primaryRead: { notFound: "absent" },
   },
   update: {
     route: "PUT /repos/{owner}/{repo}/environments/{environment_name}",
@@ -130,3 +136,9 @@ export const ENDPOINTS = {
     denialHint: PROTECTION_RULES_DENIAL_HINT,
   },
 } as const satisfies Record<string, EndpointDecl>;
+
+/** The read port and target a per-environment planner sees (REST only; pins have their own). */
+export type EnvironmentsRestContext = PlanContext<typeof ENDPOINTS>;
+
+/** A planned REST write of this section, typed over its endpoint dictionary. */
+export type EnvironmentRestOp = PlannedOp<typeof ENDPOINTS>;

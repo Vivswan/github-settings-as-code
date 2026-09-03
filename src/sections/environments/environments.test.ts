@@ -1,22 +1,77 @@
 import { describe, expect, test } from "bun:test";
+import { matchEndpoint, paramAccessor } from "../../../test/e2e/mock/dispatch.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
   unsealSecretValue,
 } from "../../../test/e2e/mock/secrets.js";
+import { buildState, type LiveState } from "../../../test/e2e/mock/state.js";
 import {
   FIXTURE_ENV_NAME,
   FLAG_PAIRING_FIXTURES,
 } from "../../../test/fixtures/environment-flag-pairing.js";
 import { MockApi } from "../../../test/mock-api.js";
-import { ctx } from "../../../test/sections/context.js";
-import type { SectionContext } from "../contract/module.js";
+import { provePlanIdempotent, REPO } from "../../../test/sections/plan-idempotence.js";
+import { executePlan } from "../../engine/execute.js";
+import type { GithubClient } from "../../github/api.js";
+import { type ExecTools, type PlannedOp, planContext, planDrift } from "../contract/plan.js";
+import { allGraphqlOps, type SectionEndpointKey, type SectionGraphqlKey } from "../registry.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
+import { environmentsMockGraphqlHandlers, environmentsMockHandlers } from "./mock.js";
+import { GRAPHQL_OPS } from "./pins.js";
 import type {
   DeploymentBranchPolicyConfig,
   EnvironmentConfig,
   EnvironmentVariableConfig,
 } from "./schema.js";
+
+type Desired = Parameters<typeof environmentsSection.plan>[1];
+
+/** Execution tools for a plan declaring no secret values: any lookup is a bug. */
+const NO_SECRETS: ExecTools = {
+  resolveSecret(reference) {
+    throw new Error(`BUG: secret reference ${reference} was not resolved up front`);
+  },
+};
+
+/** Execution tools over a fixed reference -> plaintext table, like the engine's. */
+function secretTools(resolved: Record<string, string>): ExecTools {
+  return {
+    resolveSecret(reference) {
+      const plaintext = resolved[reference];
+      if (plaintext === undefined) {
+        throw new Error(`test resolver has no value for ${reference}`);
+      }
+      return plaintext;
+    },
+  };
+}
+
+/** Plan over the read port bound to `api`; reads only. */
+function plan(api: GithubClient, desired: Desired) {
+  return environmentsSection.plan(planContext(environmentsSection, api, REPO), desired);
+}
+
+/** What check mode renders: the plan's drift lines and its notes. */
+async function check(api: GithubClient, desired: Desired) {
+  const planned = await plan(api, desired);
+  return { drift: planDrift(planned), notes: planned.notes };
+}
+
+/** Plan, then execute the plan: apply mode end to end. A failed operation rethrows. */
+async function apply(api: GithubClient, desired: Desired, tools: ExecTools = NO_SECRETS) {
+  const planned = await plan(api, desired);
+  const execution = await executePlan(planned, environmentsSection, api, REPO, tools);
+  if (execution.status === "failed") {
+    throw execution.error;
+  }
+  return { changes: execution.changes, notes: planned.notes };
+}
+
+/** A live environment body with no protection rules (the converged base). */
+function liveEnv(name: string, extra: Record<string, unknown> = {}) {
+  return { data: { name, protection_rules: [], ...extra } };
+}
 
 const VARIABLES_LIST = "GET /repos/o/r/environments/prod/variables?per_page=30&page=1";
 
@@ -25,9 +80,10 @@ function variablesBody(variables: Array<{ name: string; value: string }>) {
   return { data: { total_count: variables.length, variables } };
 }
 
-describe("environments PUT strips nested keys", () => {
-  test("variables never reach the PUT body, and reconciliation runs after the PUT", async () => {
+describe("environments plan", () => {
+  test("the PUT carries the settings alone, and every nested write follows it in wire order", async () => {
     const api = new MockApi({
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
       [VARIABLES_LIST]: variablesBody([
         { name: "UPD", value: "old" },
@@ -48,24 +104,29 @@ describe("environments PUT strips nested keys", () => {
         ],
       },
     ];
-    const result = await environmentsSection.run(ctx(api), declared);
+    const planned = await plan(api, declared);
+    // Planning reads and never writes, whatever the fake would accept.
+    expect(api.mutations()).toEqual([]);
+    expect(planned.ops.map((op) => op.role)).toEqual([
+      "update",
+      "createVariable",
+      "updateVariable",
+      "removeVariable",
+    ]);
+    const result = await apply(api, declared);
     const put = api.calls.find((c) => c.method === "PUT");
     expect(put?.payload).toEqual({ wait_timer: 5 });
-    // The variables list is fetched only AFTER the environment PUT succeeded.
-    const order = api.calls.map((c) => `${c.method} ${c.path.split("?")[0]}`);
-    expect(order.indexOf("PUT /repos/o/r/environments/prod")).toBeLessThan(
-      order.indexOf("GET /repos/o/r/environments/prod/variables"),
-    );
     expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
       "PUT /repos/o/r/environments/prod",
       "POST /repos/o/r/environments/prod/variables",
       "PATCH /repos/o/r/environments/prod/variables/UPD",
       "DELETE /repos/o/r/environments/prod/variables/GONE",
     ]);
-    const post = api.calls.find((c) => c.method === "POST");
-    expect(post?.payload).toEqual({ name: "NEW", value: "v1" });
-    const patch = api.calls.find((c) => c.method === "PATCH");
-    expect(patch?.payload).toEqual({ value: "v2" });
+    expect(api.calls.find((c) => c.method === "POST")?.payload).toEqual({
+      name: "NEW",
+      value: "v1",
+    });
+    expect(api.calls.find((c) => c.method === "PATCH")?.payload).toEqual({ value: "v2" });
     expect(result.changes).toEqual([
       'applied environment "prod"',
       'created variable "NEW" in environment "prod"',
@@ -81,31 +142,119 @@ describe("environments PUT strips nested keys", () => {
     ]);
   });
 
-  test("an entry without a variables key leaves live variables untouched", async () => {
+  test("a converged environment plans nothing: no PUT, no nested traffic", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod", {
+        protection_rules: [{ id: 1, type: "wait_timer", wait_timer: 5 }],
+      }),
     });
-    const result = await environmentsSection.run(ctx(api), [{ name: "prod", wait_timer: 5 }]);
-    expect(result.changes).toEqual(['applied environment "prod"']);
+    const planned = await plan(api, [{ name: "prod", wait_timer: 5 }]);
+    expect(planned).toEqual({ ops: [], notes: [], drift: [] });
     // The variables endpoints are never contacted, not even the list read.
-    expect(api.calls.filter((c) => c.path.includes("/variables"))).toEqual([]);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "GET /repos/o/r/environments/prod",
+    ]);
+  });
+
+  test("a missing environment plans its PUT with the missing line, in both modes", async () => {
+    const api = new MockApi({ "PUT /repos/o/r/environments/prod": { data: { name: "prod" } } });
+    const planned = await plan(api, [{ name: "prod", wait_timer: 5 }]);
+    expect(planned.ops).toEqual([
+      {
+        role: "update",
+        params: { environment_name: "prod" },
+        payload: { wait_timer: 5 },
+        drift: [
+          "environments[prod]: missing - declared in the settings file but not on the repo; apply will create it",
+        ],
+        change: 'applied environment "prod"',
+        describe: 'upserting environment "prod"',
+        capture: undefined,
+      },
+    ]);
+    expect((await apply(api, [{ name: "prod", wait_timer: 5 }])).changes).toEqual([
+      'applied environment "prod"',
+    ]);
+  });
+
+  test("the read port exposes exactly the GET roles and the pins query, the probe in its absent posture", () => {
+    const ctx = planContext(environmentsSection, new MockApi({}), REPO);
+    expect(Object.keys(ctx.read).sort()).toEqual([
+      "listPolicies",
+      "listProtectionRuleApps",
+      "listProtectionRules",
+      "listSecrets",
+      "listVariables",
+      "pins",
+      "probe",
+      "secretsPublicKey",
+    ]);
+    // @ts-expect-error a write role is not a read: the port has no `update`
+    ctx.read.update;
+    // @ts-expect-error nor a secret PUT
+    ctx.read.putSecret;
+    // @ts-expect-error nor a pin mutation
+    ctx.read.pin;
+    // @ts-expect-error nor the raw client
+    ctx.api;
+    // @ts-expect-error an "absent" primary read offers no throwing helper
+    ctx.read.probe.call;
+    // @ts-expect-error nor a list
+    ctx.read.probe.listAll;
+  });
+
+  test("a planned operation can only name a declared write role, and must justify itself", () => {
+    // Compile-time only: the plans are never executed.
+    type Op = PlannedOp<typeof environmentsSection.endpoints, typeof GRAPHQL_OPS>;
+    const pin: Op = {
+      role: "pin",
+      variables: { environmentId: "EN_x", pinned: true },
+      drift: ["pinning"],
+      change: "",
+    };
+    expect(pin.role).toBe("pin");
+    const sealed: Op = {
+      role: "putSecret",
+      params: { environment_name: "prod", secret_name: "S" },
+      payload: async () => ({ encrypted_value: "x", key_id: "k" }),
+      // An alwaysRewrite endpoint may plan without drift.
+      drift: [],
+      change: "",
+    };
+    expect(sealed.role).toBe("putSecret");
+    const read = { role: "probe", params: { environment_name: "p" }, drift: ["x"], change: "" };
+    // @ts-expect-error the probe is a read, not a plannable write
+    const _read: Op = read;
+    const query = { role: "pins", variables: {}, drift: ["x"], change: "" } as const;
+    // @ts-expect-error the pins query is a read, not a plannable mutation
+    const _query: Op = query;
+    const silent = { role: "update", params: { environment_name: "p" }, drift: [], change: "" };
+    // @ts-expect-error the environment PUT must carry drift
+    const _silent: Op = silent;
+    const paramless = { role: "update", drift: ["x"], change: "" } as const;
+    // @ts-expect-error the route's environment_name param is required
+    const _paramless: Op = paramless;
   });
 });
 
 describe("environments variables check mode", () => {
-  const liveEnvironment = {
-    data: { name: "prod", protection_rules: [{ id: 1, type: "wait_timer", wait_timer: 5 }] },
-  };
+  const liveProd = liveEnv("prod", {
+    protection_rules: [{ id: 1, type: "wait_timer", wait_timer: 5 }],
+  });
 
   test("value drift and undeclared variables report drift; the environment diff excludes variables", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnvironment,
-      [VARIABLES_LIST]: variablesBody([
-        { name: "A", value: "2" },
-        { name: "B", value: "x" },
-      ]),
-    });
-    const result = await environmentsSection.run(ctx(api, true), [
+    const api = new MockApi(
+      {
+        "GET /repos/o/r/environments/prod": liveProd,
+        [VARIABLES_LIST]: variablesBody([
+          { name: "A", value: "2" },
+          { name: "B", value: "x" },
+        ]),
+      },
+      // A fake that would accept any write: planning must still issue none.
+      { unroutedMutations: "succeed" },
+    );
+    const result = await check(api, [
       { name: "prod", wait_timer: 5, variables: [{ name: "A", value: "1" }] },
     ]);
     // Exactly the nested lines: a variables key leaking into subsetDiff would
@@ -119,12 +268,10 @@ describe("environments variables check mode", () => {
 
   test("a missing declared variable is drift", async () => {
     const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnvironment,
+      "GET /repos/o/r/environments/prod": liveProd,
       [VARIABLES_LIST]: variablesBody([]),
     });
-    const result = await environmentsSection.run(ctx(api, true), [
-      { name: "prod", variables: [{ name: "A", value: "1" }] },
-    ]);
+    const result = await check(api, [{ name: "prod", variables: [{ name: "A", value: "1" }] }]);
     expect(result.drift).toEqual([
       "environments[prod].variables[A]: missing - declared in the settings file but not on the environment; apply will create it",
     ]);
@@ -134,33 +281,31 @@ describe("environments variables check mode", () => {
 describe("environments variables case-insensitive matching", () => {
   test("a case-differing live name matches and only the value is compared", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [VARIABLES_LIST]: variablesBody([{ name: "DEPLOY_REGION", value: "same" }]),
     });
-    const result = await environmentsSection.run(ctx(api), [
+    const result = await apply(api, [
       { name: "prod", variables: [{ name: "deploy_region", value: "same" }] },
     ]);
     // Matched despite the case difference: no create, no update, no delete.
-    expect(result.changes).toEqual(['applied environment "prod"']);
+    expect(result.changes).toEqual([]);
   });
 
   test("an update addresses the PATCH at the LIVE name", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [VARIABLES_LIST]: variablesBody([{ name: "DEPLOY_REGION", value: "old" }]),
     }).allowMutations("PATCH /repos/o/r/environments/prod/variables/DEPLOY_REGION");
-    await environmentsSection.run(ctx(api), [
-      { name: "prod", variables: [{ name: "deploy_region", value: "new" }] },
-    ]);
+    await apply(api, [{ name: "prod", variables: [{ name: "deploy_region", value: "new" }] }]);
     const patch = api.calls.find((c) => c.method === "PATCH");
     expect(patch?.path).toBe("/repos/o/r/environments/prod/variables/DEPLOY_REGION");
     expect(patch?.payload).toEqual({ value: "new" });
   });
 
-  test("two declared names that collapse case-insensitively are rejected before any write", async () => {
+  test("two declared names that collapse case-insensitively are rejected before any request", async () => {
     const api = new MockApi({});
     await expect(
-      environmentsSection.run(ctx(api), [
+      plan(api, [
         {
           name: "prod",
           variables: [
@@ -172,7 +317,6 @@ describe("environments variables case-insensitive matching", () => {
     ).rejects.toThrow(
       'environments: the "prod" entry declares variables that GitHub treats as the same variable (names are case-insensitive): "Region" and "REGION". Keep exactly one entry per variable',
     );
-    // Fail-fast: nothing was written, not even the environment PUT.
     expect(api.calls).toEqual([]);
   });
 });
@@ -180,39 +324,35 @@ describe("environments variables case-insensitive matching", () => {
 describe("environments variables undeclared policy", () => {
   test("the wrapped undeclared:keep form keeps the live variable as a note", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
     });
-    const result = await environmentsSection.run(ctx(api), [
+    const result = await apply(api, [
       { name: "prod", variables: { undeclared: "keep", entries: [] } },
     ]);
     expect(result.notes).toEqual([
       'variable "LEGACY" exists on environment "prod" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it',
     ]);
-    // No DELETE was issued (the PUT is the only mutation).
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "PUT /repos/o/r/environments/prod",
-    ]);
+    expect(api.mutations()).toEqual([]);
   });
 
   test("the plain array form deletes undeclared variables by default", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
     }).allowMutations("DELETE /repos/o/r/environments/prod/variables/LEGACY");
-    const result = await environmentsSection.run(ctx(api), [{ name: "prod", variables: [] }]);
+    const result = await apply(api, [{ name: "prod", variables: [] }]);
     expect(result.changes).toEqual([
-      'applied environment "prod"',
       'DELETED undeclared variable "LEGACY" from environment "prod"',
     ]);
   });
 
   test("check mode under undeclared:keep converges (note, not drift)", async () => {
     const api = new MockApi({
-      "GET /repos/o/r/environments/prod": { data: { name: "prod", protection_rules: [] } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
     });
-    const result = await environmentsSection.run(ctx(api, true), [
+    const result = await check(api, [
       { name: "prod", variables: { undeclared: "keep", entries: [] } },
     ]);
     expect(result.drift).toEqual([]);
@@ -252,38 +392,51 @@ describe("environments variables shape", () => {
     // reaches the wire on create AND update, and a field GitHub does not
     // echo back earns the phantom note instead of eternal silent drift.
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [VARIABLES_LIST]: variablesBody([{ name: "UPD", value: "old" }]),
     }).allowMutations(
       "POST /repos/o/r/environments/prod/variables",
       "PATCH /repos/o/r/environments/prod/variables/UPD",
     );
-    const result = await environmentsSection.run(ctx(api), [
+    const result = await apply(api, [
       {
         name: "prod",
         variables: [
-          { name: "NEW", value: "v1", future_field: "x" } as EnvironmentVariableConfig,
-          { name: "UPD", value: "new", future_field: "y" } as EnvironmentVariableConfig,
+          { name: "NEW", value: "v1", extra_field: "x" } as EnvironmentVariableConfig,
+          { name: "UPD", value: "new", extra_field: "y" } as EnvironmentVariableConfig,
         ],
       },
     ]);
-    const post = api.calls.find((c) => c.method === "POST");
-    expect(post?.payload).toEqual({
+    expect(api.calls.find((c) => c.method === "POST")?.payload).toEqual({
       name: "NEW",
       value: "v1",
-      future_field: "x",
+      extra_field: "x",
     } as EnvironmentVariableConfig);
-    const patch = api.calls.find((c) => c.method === "PATCH");
-    expect(patch?.payload).toEqual({ value: "new", future_field: "y" });
-    // The mock echoes no future_field back, so the update notes the
-    // phantom rather than pretending it converged.
-    expect(result.notes.some((n) => n.includes("future_field"))).toBe(true);
+    expect(api.calls.find((c) => c.method === "PATCH")?.payload).toEqual({
+      value: "new",
+      extra_field: "y",
+    });
+    // The fake echoes no extra_field back, so the update notes the phantom
+    // rather than pretending it converged - in check mode too, beside the
+    // drift line that names the field the response lacks.
+    const phantom =
+      'environments[prod].variables[UPD]: declared key(s) "extra_field" do not exist on the live variable, so if GitHub ignores them this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file';
+    expect(result.notes).toEqual([phantom]);
+    const checked = await check(api, [
+      {
+        name: "prod",
+        variables: [{ name: "UPD", value: "old", extra_field: "y" } as EnvironmentVariableConfig],
+      },
+    ]);
+    expect(checked.drift).toEqual([
+      'environments[prod].variables[UPD].extra_field: declared "y" but the API response has no such field (new or write-only field?)',
+    ]);
+    expect(checked.notes).toEqual([phantom]);
   });
 });
 
 // --- Nested per-environment secrets -----------------------------------------
 
-const STAGING_SECRETS_LIST = "GET /repos/o/r/environments/staging/secrets?per_page=100&page=1";
 const PROD_SECRETS_LIST = "GET /repos/o/r/environments/prod/secrets?per_page=100&page=1";
 const STAGING_KEY = "GET /repos/o/r/environments/staging/secrets/public-key";
 const PROD_KEY = "GET /repos/o/r/environments/prod/secrets/public-key";
@@ -302,31 +455,15 @@ function secretsBody(names: string[]) {
   };
 }
 
-/** A SectionContext with a resolver, like the engine provides in apply mode. */
-function secretCtx(api: MockApi, resolved: Record<string, string>): SectionContext {
-  return {
-    ...ctx(api),
-    resolveSecret: (reference: string): string => {
-      const plaintext = resolved[reference];
-      if (plaintext === undefined) {
-        throw new Error(`test resolver has no value for ${reference}`);
-      }
-      return plaintext;
-    },
-  };
-}
-
 describe("environments nested secrets apply mode", () => {
-  test("same-named secrets in sibling environments seal each environment's OWN value", async () => {
-    // The regression this pins: prepareSecretValues keys its lookup by
-    // secret name alone, so it must run PER ENVIRONMENT - one global call
-    // would collide DEPLOY_TOKEN across the two scopes and seal one value
-    // into both.
+  test("same-named secrets in sibling environments seal each environment's OWN value, with the key read after the PUT", async () => {
+    // A lookup keyed by secret name alone would seal one value into both
+    // scopes; staging's key is readable only after its PUT, so the thunk reads
+    // it then, never at plan time.
     await mockSodiumReady();
     const api = new MockApi({
       "PUT /repos/o/r/environments/staging": { data: { name: "staging" } },
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
-      [STAGING_SECRETS_LIST]: secretsBody([]),
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [PROD_SECRETS_LIST]: secretsBody(["DEPLOY_TOKEN"]),
       [STAGING_KEY]: { data: { key_id: "k-stg", key: MOCK_SECRETS_PUBLIC_KEY } },
       [PROD_KEY]: { data: { key_id: "k-prod", key: MOCK_SECRETS_PUBLIC_KEY } },
@@ -334,12 +471,29 @@ describe("environments nested secrets apply mode", () => {
       "PUT /repos/o/r/environments/staging/secrets/DEPLOY_TOKEN",
       "PUT /repos/o/r/environments/prod/secrets/DEPLOY_TOKEN",
     );
-    const result = await environmentsSection.run(
-      secretCtx(api, { $STG: "staging-plaintext", $PRD: "prod-plaintext" }),
-      [
-        { name: "staging", secrets: [{ name: "DEPLOY_TOKEN", value: "$STG" }] },
-        { name: "prod", secrets: [{ name: "DEPLOY_TOKEN", value: "$PRD" }] },
-      ],
+    const declared = [
+      { name: "staging", secrets: [{ name: "DEPLOY_TOKEN", value: "$STG" }] },
+      { name: "prod", secrets: [{ name: "DEPLOY_TOKEN", value: "$PRD" }] },
+    ];
+    const planned = await plan(api, declared);
+    // Check mode never touches the sealing key (nor the missing environment's secrets list).
+    expect(api.calls.some((c) => c.path.endsWith("/public-key"))).toBe(false);
+    expect(api.calls.some((c) => c.path.startsWith("/repos/o/r/environments/staging/"))).toBe(
+      false,
+    );
+    expect(planned.ops.map((op) => `${op.role} ${JSON.stringify(op.params)}`)).toEqual([
+      'update {"environment_name":"staging"}',
+      'putSecret {"environment_name":"staging","secret_name":"DEPLOY_TOKEN"}',
+      'putSecret {"environment_name":"prod","secret_name":"DEPLOY_TOKEN"}',
+    ]);
+    const result = await apply(
+      api,
+      declared,
+      secretTools({ $STG: "staging-plaintext", $PRD: "prod-plaintext" }),
+    );
+    const order = api.calls.map((c) => `${c.method} ${c.path}`);
+    expect(order.indexOf("PUT /repos/o/r/environments/staging")).toBeLessThan(
+      order.indexOf(STAGING_KEY),
     );
     const puts = api.mutations().filter((c) => c.method === "PUT" && c.path.includes("/secrets/"));
     expect(puts.map((c) => c.path)).toEqual([
@@ -357,7 +511,6 @@ describe("environments nested secrets apply mode", () => {
     expect(result.changes).toEqual([
       'applied environment "staging"',
       'created secret "DEPLOY_TOKEN" in environment "staging"',
-      'applied environment "prod"',
       'updated secret "DEPLOY_TOKEN" in environment "prod"',
     ]);
   });
@@ -366,51 +519,82 @@ describe("environments nested secrets apply mode", () => {
     await mockSodiumReady();
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
-      [PROD_SECRETS_LIST]: secretsBody([]),
       [PROD_KEY]: { data: { key_id: "k", key: MOCK_SECRETS_PUBLIC_KEY } },
     }).allowMutations("PUT /repos/o/r/environments/prod/secrets/S");
-    await environmentsSection.run(secretCtx(api, { $S: "v" }), [
-      { name: "prod", wait_timer: 5, secrets: [{ name: "S", value: "$S" }] },
-    ]);
+    await apply(
+      api,
+      [{ name: "prod", wait_timer: 5, secrets: [{ name: "S", value: "$S" }] }],
+      secretTools({ $S: "v" }),
+    );
     const envPut = api.calls.find((c) => c.method === "PUT" && !c.path.includes("/secrets/"));
     expect(envPut?.payload).toEqual({ wait_timer: 5 });
   });
 
   test("undeclared live secrets: kept with a note by default, DELETED under the knob", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [PROD_SECRETS_LIST]: secretsBody(["LEGACY"]),
     });
-    const kept = await environmentsSection.run(ctx(api), [{ name: "prod", secrets: [] }]);
+    const kept = await apply(api, [{ name: "prod", secrets: [] }]);
     expect(kept.notes.join("\n")).toContain(
       'prod environment secret "LEGACY" exists on the environment but is not declared',
     );
     expect(api.calls.filter((c) => c.path.includes("/secrets/"))).toEqual([]);
 
     const api2 = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [PROD_SECRETS_LIST]: secretsBody(["LEGACY"]),
     }).allowMutations("DELETE /repos/o/r/environments/prod/secrets/LEGACY");
-    const deleted = await environmentsSection.run(ctx(api2), [
+    const deleted = await apply(api2, [
       { name: "prod", secrets: { undeclared: "delete", entries: [] } },
     ]);
-    expect(deleted.changes).toContain('DELETED undeclared secret "LEGACY" in environment "prod"');
+    expect(deleted.changes).toEqual(['DELETED undeclared secret "LEGACY" in environment "prod"']);
     // Nothing declared, so no resolver was needed and no public key fetched.
     expect(api2.calls.some((c) => c.path.endsWith("/public-key"))).toBe(false);
   });
+
+  test.each([
+    ["a missing key_id", { key: MOCK_SECRETS_PUBLIC_KEY }, /pair \(key_id is missing\)/],
+    ["a key that is not base64", { key_id: "k", key: "not base64!" }, /is not valid base64/],
+    [
+      "a key of the wrong length",
+      { key_id: "k", key: Buffer.from("short").toString("base64") },
+      /decodes to 5 bytes where an X25519 public key has 32/,
+    ],
+    [
+      "a right-sized key that is not a usable point",
+      { key_id: "k", key: Buffer.alloc(32).toString("base64") },
+      /is not a usable X25519 public key/,
+    ],
+  ])(
+    "a sealing key the endpoint cannot supply (%s) fails the secret PUT loudly, naming the scope",
+    async (_what, body, defect) => {
+      const api = new MockApi({
+        "GET /repos/o/r/environments/prod": liveEnv("prod"),
+        [PROD_SECRETS_LIST]: secretsBody([]),
+        [PROD_KEY]: { data: body },
+      }).allowMutations("PUT /repos/o/r/environments/prod/secrets/S");
+      const attempt = apply(
+        api,
+        [{ name: "prod", secrets: [{ name: "S", value: "$S" }] }],
+        secretTools({ $S: "v" }),
+      );
+      await expect(attempt).rejects.toThrow(
+        /^environments: GET \/repos\/\{owner\}\/\{repo\}\/environments\/\{environment_name\}\/secrets\/public-key \(the environments\[prod\]\.secrets sealing key\) returned /,
+      );
+      await expect(attempt).rejects.toThrow(defect);
+      expect(api.mutations()).toEqual([]);
+    },
+  );
 });
 
 describe("environments nested secrets check mode", () => {
-  const liveProd = {
-    data: { name: "prod", protection_rules: [] },
-  };
-
   test("declared-but-missing is drift with the per-environment label; the note names the environment", async () => {
     const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveProd,
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [PROD_SECRETS_LIST]: secretsBody(["LEGACY"]),
     });
-    const result = await environmentsSection.run(ctx(api, true), [
+    const result = await check(api, [
       { name: "prod", secrets: [{ name: "DEPLOY_TOKEN", value: "$D" }] },
     ]);
     expect(result.drift).toEqual([
@@ -429,7 +613,7 @@ describe("environments nested secrets validation and shape", () => {
   test("case-insensitive duplicate names are rejected upfront, naming the environment", async () => {
     const api = new MockApi({});
     await expect(
-      environmentsSection.run(ctx(api), [
+      plan(api, [
         {
           name: "prod",
           secrets: [
@@ -508,10 +692,17 @@ function envWithPolicies(
   };
 }
 
+/** A live prod environment with the custom-branch-policies flag set as given. */
+function liveProdWithFlag(custom: boolean) {
+  return liveEnv("prod", {
+    deployment_branch_policy: { protected_branches: !custom, custom_branch_policies: custom },
+  });
+}
+
 describe("environments deployment branch policies apply mode", () => {
   test("creates missing, replaces a type flip (delete + recreate), deletes undeclared", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveProdWithFlag(true),
       [POLICIES_LIST]: policiesBody([
         { id: 41, name: "v*", type: "branch" },
         { id: 42, name: "legacy/*", type: "branch" },
@@ -521,16 +712,11 @@ describe("environments deployment branch policies apply mode", () => {
       "DELETE /repos/o/r/environments/prod/deployment-branch-policies/41",
       "DELETE /repos/o/r/environments/prod/deployment-branch-policies/42",
     );
-    const result = await environmentsSection.run(ctx(api), [
+    const result = await apply(api, [
       envWithPolicies([{ name: "release/*" }, { name: "v*", type: "tag" }]),
     ]);
-    // The nested key never reaches the PUT; the singular flag object does.
-    const put = api.calls.find((c) => c.method === "PUT");
-    expect(put?.payload).toEqual({
-      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-    });
+    // The flag object matches live, so the environment itself plans no PUT.
     expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "PUT /repos/o/r/environments/prod",
       "POST /repos/o/r/environments/prod/deployment-branch-policies",
       "DELETE /repos/o/r/environments/prod/deployment-branch-policies/41",
       "POST /repos/o/r/environments/prod/deployment-branch-policies",
@@ -542,24 +728,38 @@ describe("environments deployment branch policies apply mode", () => {
     expect(posts[0]?.payload).toEqual({ name: "release/*" });
     expect(posts[1]?.payload).toEqual({ name: "v*", type: "tag" });
     expect(result.changes).toEqual([
+      'created deployment branch policy "release/*" in environment "prod"',
+      'deleted deployment branch policy "v*" in environment "prod" to change its immutable type (branch -> tag)',
+      'recreated deployment branch policy "v*" in environment "prod" as type tag',
+      'DELETED undeclared deployment branch policy "legacy/*" from environment "prod"',
+    ]);
+  });
+
+  test("a missing environment plans its patterns as creates without listing them", async () => {
+    // The pattern routes 404 until the PUT lands, so the plan reads nothing
+    // and the declared patterns follow the PUT as creates.
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+    }).allowMutations("POST /repos/o/r/environments/prod/deployment-branch-policies");
+    const result = await apply(api, [envWithPolicies([{ name: "release/*" }])]);
+    expect(api.calls.some((c) => c.method === "GET" && c.path.includes("/deployment-branch"))).toBe(
+      false,
+    );
+    expect(result.changes).toEqual([
       'applied environment "prod"',
       'created deployment branch policy "release/*" in environment "prod"',
-      'replaced deployment branch policy "v*" in environment "prod" (type is immutable; branch -> tag)',
-      'DELETED undeclared deployment branch policy "legacy/*" from environment "prod"',
     ]);
   });
 
   test("a matching live pattern (type defaulted to branch) is a no-op", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveProdWithFlag(true),
       // The spec marks every field optional; a live policy without a type
       // reads as the upstream default "branch".
       [POLICIES_LIST]: policiesBody([{ id: 41, name: "release/*" }]),
     });
-    const result = await environmentsSection.run(ctx(api), [
-      envWithPolicies([{ name: "release/*" }]),
-    ]);
-    expect(result.changes).toEqual(['applied environment "prod"']);
+    const result = await apply(api, [envWithPolicies([{ name: "release/*" }])]);
+    expect(result.changes).toEqual([]);
   });
 
   test("a live policy without a name fails loudly instead of being silently skipped", async () => {
@@ -568,49 +768,37 @@ describe("environments deployment branch policies apply mode", () => {
     // could report falsely clean. The spec marks the field optional, so the
     // extraction fails as a contract violation naming the endpoint.
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveProdWithFlag(true),
       [POLICIES_LIST]: policiesBody([{ id: 41, type: "branch" }]),
     });
-    await expect(
-      environmentsSection.run(ctx(api), [envWithPolicies([{ name: "release/*" }])]),
-    ).rejects.toThrow(/returned a policy without a name/);
+    await expect(plan(api, [envWithPolicies([{ name: "release/*" }])])).rejects.toThrow(
+      /returned a policy without a name/,
+    );
   });
 
   test("the wrapped undeclared:keep form keeps the live pattern as a note", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveProdWithFlag(true),
       [POLICIES_LIST]: policiesBody([{ id: 41, name: "legacy/*", type: "branch" }]),
     });
-    const result = await environmentsSection.run(ctx(api), [
-      envWithPolicies({ undeclared: "keep", entries: [] }),
-    ]);
+    const result = await apply(api, [envWithPolicies({ undeclared: "keep", entries: [] })]);
     expect(result.notes.join("\n")).toContain(
       'deployment branch policy "legacy/*" exists on environment "prod" but is not declared',
     );
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "PUT /repos/o/r/environments/prod",
-    ]);
+    expect(api.mutations()).toEqual([]);
   });
 });
 
 describe("environments deployment branch policies check mode", () => {
-  const liveProd = (custom: boolean) => ({
-    data: {
-      name: "prod",
-      protection_rules: [],
-      deployment_branch_policy: { protected_branches: !custom, custom_branch_policies: custom },
-    },
-  });
-
   test("missing, type-flip, and undeclared patterns report drift without writing", async () => {
     const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveProd(true),
+      "GET /repos/o/r/environments/prod": liveProdWithFlag(true),
       [POLICIES_LIST]: policiesBody([
         { id: 41, name: "v*", type: "branch" },
         { id: 42, name: "legacy/*", type: "branch" },
       ]),
     });
-    const result = await environmentsSection.run(ctx(api, true), [
+    const result = await check(api, [
       envWithPolicies([{ name: "release/*" }, { name: "v*", type: "tag" }]),
     ]);
     expect(result.drift).toEqual([
@@ -622,27 +810,29 @@ describe("environments deployment branch policies check mode", () => {
     expect(api.mutations()).toEqual([]);
   });
 
-  test("a live environment with the flag off earns a note and never lists patterns", async () => {
+  test("a live environment with the flag off earns a note, never lists patterns, and plans the declared ones as unverified creates", async () => {
     const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveProd(false),
+      "GET /repos/o/r/environments/prod": liveProdWithFlag(false),
     });
-    const result = await environmentsSection.run(ctx(api, true), [
-      envWithPolicies([{ name: "release/*" }]),
-    ]);
-    // The flag drift itself comes from the environment subsetDiff.
-    expect(result.drift?.join("\n")).toContain(
+    const result = await check(api, [envWithPolicies([{ name: "release/*" }])]);
+    // The flag drift itself comes from the environment subsetDiff; the
+    // pattern follows as a create whose line claims nothing about what the
+    // flag hides.
+    expect(result.drift).toEqual([
+      "environments[prod].deployment_branch_policy.protected_branches: false != true",
       "environments[prod].deployment_branch_policy.custom_branch_policies: true != false",
-    );
-    expect(result.notes).toContain(
-      "environments[prod].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and reconcile the declared patterns",
-    );
+      "environments[prod].deployment_branch_policies[release/*]: not verifiable until custom_branch_policies is true; apply will create it once the flag is set",
+    ]);
+    expect(result.notes).toEqual([
+      "environments[prod].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and create the declared patterns, and any pattern already behind the flag reconciles on the next run",
+    ]);
     expect(api.calls.some((c) => c.path.includes("/deployment-branch-policies"))).toBe(false);
   });
 });
 
 describe("environments deployment branch policies validation and shape", () => {
   test("the flag pairing is a SHAPE rule: declaring the list without custom_branch_policies: true fails validation", () => {
-    // In the shape, not the run() hook, on purpose: upfront document
+    // In the shape, not the plan() hook, on purpose: upfront document
     // validation rejects the document in both modes before ANY section
     // writes (the apply-mode preflight swallows non-permission hook errors,
     // so a hook check would fire only after earlier sections wrote). The
@@ -670,9 +860,7 @@ describe("environments deployment branch policies validation and shape", () => {
   test("duplicate patterns are rejected upfront, naming the environment", async () => {
     const api = new MockApi({});
     await expect(
-      environmentsSection.run(ctx(api), [
-        envWithPolicies([{ name: "release/*" }, { name: "release/*", type: "tag" }]),
-      ]),
+      plan(api, [envWithPolicies([{ name: "release/*" }, { name: "release/*", type: "tag" }])]),
     ).rejects.toThrow(
       'environments: the "prod" entry declares deployment branch policy "release/*" more than once. Keep exactly one entry per pattern',
     );
@@ -740,8 +928,9 @@ function ruleAppsBody(apps: Array<{ id: number; slug: string }>) {
 }
 
 describe("environments deployment protection rules apply mode", () => {
-  test("enables a missing rule via ONE apps fetch, keeps an undeclared one by default", async () => {
+  test("enables a missing rule via ONE apps fetch after the PUT, keeps an undeclared one by default", async () => {
     const api = new MockApi({
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
       [RULES_LIST]: rulesBody([liveRule(41, "region-guard"), liveRule(42, "change-window")]),
       [RULE_APPS_LIST]: ruleAppsBody([
@@ -749,18 +938,26 @@ describe("environments deployment protection rules apply mode", () => {
         { id: 3516, slug: "region-guard" },
       ]),
     }).allowMutations(RULE_CREATE);
-    const result = await environmentsSection.run(ctx(api), [
+    const declared = [
       {
         name: "prod",
         wait_timer: 5,
         deployment_protection_rules: [{ app: "deploy-gate" }, { app: "region-guard" }],
       },
-    ]);
+    ];
+    await plan(api, declared);
+    // The apps listing is an apply-time resolver; planning never reads it.
+    expect(api.calls.some((c) => c.path.includes("/apps"))).toBe(false);
+    const result = await apply(api, declared);
     // The nested key never reaches the PUT body.
-    const put = api.calls.find((c) => c.method === "PUT");
-    expect(put?.payload).toEqual({ wait_timer: 5 });
-    // One create, resolved to the App's integration id; region-guard already
-    // enabled, so no second POST.
+    expect(api.calls.find((c) => c.method === "PUT")?.payload).toEqual({ wait_timer: 5 });
+    // One apps fetch, after the environment PUT; one create, resolved to the
+    // App's integration id; region-guard already enabled, so no second POST.
+    const order = api.calls.map((c) => `${c.method} ${c.path}`);
+    expect(order.filter((c) => c.includes("/apps"))).toHaveLength(1);
+    expect(order.indexOf("PUT /repos/o/r/environments/prod")).toBeLessThan(
+      order.indexOf(RULE_APPS_LIST),
+    );
     const posts = api.calls.filter((c) => c.method === "POST");
     expect(posts).toHaveLength(1);
     expect(posts[0]?.payload).toEqual({ integration_id: 3515 });
@@ -777,44 +974,43 @@ describe("environments deployment protection rules apply mode", () => {
 
   test("nothing missing: the apps listing is never fetched", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([liveRule(41, "deploy-gate")]),
     });
-    const result = await environmentsSection.run(ctx(api), [
+    const result = await apply(api, [
       { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
     ]);
     expect(api.calls.some((c) => c.path.includes("/apps"))).toBe(false);
-    expect(result.changes).toEqual(['applied environment "prod"']);
+    expect(result.changes).toEqual([]);
   });
 
   test("the wrapped undeclared:delete form DISABLES a live undeclared rule by id", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
     }).allowMutations("DELETE /repos/o/r/environments/prod/deployment_protection_rules/41");
-    const result = await environmentsSection.run(ctx(api), [
+    const result = await apply(api, [
       { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
     ]);
     expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "PUT /repos/o/r/environments/prod",
       "DELETE /repos/o/r/environments/prod/deployment_protection_rules/41",
     ]);
-    expect(result.changes).toContain(
+    expect(result.changes).toEqual([
       'DISABLED undeclared deployment protection rule "change-window" in environment "prod"',
-    );
+    ]);
   });
 
   test("a declared slug the apps listing does not carry fails loudly, naming the available slugs", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([]),
       [RULE_APPS_LIST]: ruleAppsBody([
         { id: 3515, slug: "deploy-gate" },
         { id: 3516, slug: "region-guard" },
       ]),
-    });
+    }).allowMutations(RULE_CREATE);
     await expect(
-      environmentsSection.run(ctx(api), [
+      apply(api, [
         {
           name: "prod",
           // The resolvable deploy-gate entry comes FIRST: every missing slug
@@ -834,14 +1030,12 @@ describe("environments deployment protection rules apply mode", () => {
     // A real user state, not a contract break: no protection-rule App is
     // installed on the repository, so there is nothing to list in the error.
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([]),
       [RULE_APPS_LIST]: ruleAppsBody([]),
-    });
+    }).allowMutations(RULE_CREATE);
     await expect(
-      environmentsSection.run(ctx(api), [
-        { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
-      ]),
+      apply(api, [{ name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] }]),
     ).rejects.toThrow(
       'environments: the deployment protection rule App "deploy-gate" is not available to environment "prod" (no protection-rule Apps are available to it). Install the GitHub App providing the rule on this repository, or declare one of the available slugs',
     );
@@ -850,28 +1044,26 @@ describe("environments deployment protection rules apply mode", () => {
 
   test("a live rule without an app slug fails loudly instead of being silently skipped", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([{ id: 41, node_id: "n", enabled: true, app: {} }]),
     });
     await expect(
-      environmentsSection.run(ctx(api), [
-        { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
-      ]),
+      plan(api, [{ name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] }]),
     ).rejects.toThrow(/returned a rule without an app slug/);
   });
 
   test("absent envelope keys read as an empty list (the spec marks both optional)", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: { data: { total_count: 0 } },
       [RULE_APPS_LIST]: ruleAppsBody([{ id: 3515, slug: "deploy-gate" }]),
     }).allowMutations(RULE_CREATE);
-    const result = await environmentsSection.run(ctx(api), [
+    const result = await apply(api, [
       { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
     ]);
-    expect(result.changes).toContain(
+    expect(result.changes).toEqual([
       'enabled deployment protection rule "deploy-gate" in environment "prod"',
-    );
+    ]);
   });
 
   test("a PRESENT non-array envelope value is a loud contract violation, never an empty list", async () => {
@@ -879,13 +1071,11 @@ describe("environments deployment protection rules apply mode", () => {
     // array, so only a genuinely ABSENT key may read as empty.
     for (const garbage of ["garbage", null]) {
       const api = new MockApi({
-        "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+        "GET /repos/o/r/environments/prod": liveEnv("prod"),
         [RULES_LIST]: { data: { custom_deployment_protection_rules: garbage } },
       });
       await expect(
-        environmentsSection.run(ctx(api), [
-          { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
-        ]),
+        plan(api, [{ name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] }]),
       ).rejects.toThrow(
         /returned a body outside the documented shape - custom_deployment_protection_rules/,
       );
@@ -897,17 +1087,17 @@ describe("environments deployment protection rules apply mode", () => {
     // (".../deployment_protection_rules/null") and address nothing.
     for (const id of [null, "41"]) {
       const api = new MockApi({
-        "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+        "GET /repos/o/r/environments/prod": liveEnv("prod"),
         [RULES_LIST]: rulesBody([{ ...liveRule(41, "change-window"), id }]),
       });
       await expect(
-        environmentsSection.run(ctx(api), [
+        plan(api, [
           { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
         ]),
       ).rejects.toThrow(
         /returned a body outside the documented shape - custom_deployment_protection_rules\[0\]\.id/,
       );
-      expect(api.mutations().filter((m) => m.method === "DELETE")).toEqual([]);
+      expect(api.mutations()).toEqual([]);
     }
   });
 
@@ -916,16 +1106,16 @@ describe("environments deployment protection rules apply mode", () => {
     // contract: a declared gate whose live rule says enabled: false must be
     // re-enabled, never read as clean.
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([{ ...liveRule(41, "deploy-gate"), enabled: false }]),
       [RULE_APPS_LIST]: ruleAppsBody([{ id: 3515, slug: "deploy-gate" }]),
     }).allowMutations(RULE_CREATE);
-    const result = await environmentsSection.run(ctx(api), [
+    const result = await apply(api, [
       { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
     ]);
-    expect(result.changes).toContain(
+    expect(result.changes).toEqual([
       'enabled deployment protection rule "deploy-gate" in environment "prod"',
-    );
+    ]);
   });
 
   test("a disabled undeclared rule is not an active gate: neither noted nor disabled", async () => {
@@ -934,25 +1124,23 @@ describe("environments deployment protection rules apply mode", () => {
     // satisfies - and a DELETE aimed at a disabled id would likely 404
     // mid-apply for a no-op.
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([{ ...liveRule(41, "change-window"), enabled: false }]),
     });
-    const result = await environmentsSection.run(ctx(api), [
+    const planned = await plan(api, [
       { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
     ]);
-    expect(api.mutations().filter((m) => m.method === "DELETE")).toEqual([]);
-    expect(result.notes.join("\n")).not.toContain("change-window");
-    expect(result.changes?.join("\n")).not.toContain("change-window");
+    expect(planned).toEqual({ ops: [], notes: [], drift: [] });
   });
 });
 
 describe("environments deployment protection rules check mode", () => {
   test("missing declared rules are drift; undeclared ones split by policy; nothing written", async () => {
     const api = new MockApi({
-      "GET /repos/o/r/environments/prod": { data: { name: "prod", protection_rules: [] } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
     });
-    const kept = await environmentsSection.run(ctx(api, true), [
+    const kept = await check(api, [
       { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
     ]);
     expect(kept.drift).toEqual([
@@ -964,10 +1152,10 @@ describe("environments deployment protection rules check mode", () => {
     expect(api.mutations()).toEqual([]);
 
     const api2 = new MockApi({
-      "GET /repos/o/r/environments/prod": { data: { name: "prod", protection_rules: [] } },
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
     });
-    const deleted = await environmentsSection.run(ctx(api2, true), [
+    const deleted = await check(api2, [
       { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
     ]);
     expect(deleted.drift).toEqual([
@@ -976,43 +1164,47 @@ describe("environments deployment protection rules check mode", () => {
   });
 });
 
-describe("environments missing-environment check mode across the nested families", () => {
-  // One skeleton for all four nested families: only NESTED_RECONCILERS[key]'s
-  // missingNote and the sub-resource path vary. The empty MockApi 404s the
-  // environment GET, so the missing drift fires and every family must skip
-  // its own sub-resource read.
+describe("environments missing-environment planning across the nested families", () => {
+  // One skeleton for the four families: the missingNote, the sub-resource
+  // path, and the create's drift line vary. The empty MockApi 404s the
+  // environment GET, so every family plans creates without a sub-resource read.
   test.each([
     [
       "variables",
       { name: "prod", variables: [{ name: "A", value: "1" }] },
       "environments[prod].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables",
       "/variables",
+      "environments[prod].variables[A]: missing - declared in the settings file but not on the environment; apply will create it",
     ],
     [
       "secrets",
       { name: "prod", secrets: [{ name: "S", value: "$S" }] },
       "environments[prod].secrets: not verifiable while the environment is missing; apply will create the environment and reconcile the declared secrets",
       "/secrets",
+      "environments[prod].secrets[S]: missing - declared in the settings file but not on the environment; apply will create it",
     ],
     [
       "deployment_branch_policies",
       envWithPolicies([{ name: "release/*" }]),
       "environments[prod].deployment_branch_policies: not verifiable while the environment is missing; apply will create the environment and reconcile the declared patterns",
       "/deployment-branch-policies",
+      "environments[prod].deployment_branch_policies[release/*]: missing - declared in the settings file but not on the environment; apply will create it",
     ],
     [
       "deployment_protection_rules",
       { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
       "environments[prod].deployment_protection_rules: not verifiable while the environment is missing; apply will create the environment and reconcile the declared protection rules",
       "/deployment_protection_rules",
+      "environments[prod].deployment_protection_rules[deploy-gate]: missing - declared in the settings file but not enabled on the environment; apply will enable it if the App is available to this environment",
     ],
-  ] as Array<[string, EnvironmentConfig, string, string]>)(
-    "%s: the sub-resource read is skipped and the note says it is unverifiable",
-    async (_key, entry, expectedNote, subResourcePath) => {
+  ] as Array<[string, EnvironmentConfig, string, string, string]>)(
+    "%s: the sub-resource read is skipped, the note says it is unverifiable, and the create is planned",
+    async (_key, entry, expectedNote, subResourcePath, createDrift) => {
       const api = new MockApi({});
-      const result = await environmentsSection.run(ctx(api, true), [entry]);
+      const result = await check(api, [entry]);
       expect(result.drift).toEqual([
         "environments[prod]: missing - declared in the settings file but not on the repo; apply will create it",
+        createDrift,
       ]);
       expect(result.notes).toEqual([expectedNote]);
       expect(api.calls.filter((c) => c.path.includes(subResourcePath))).toEqual([]);
@@ -1024,7 +1216,7 @@ describe("environments deployment protection rules validation and shape", () => 
   test("duplicate App slugs are rejected upfront, naming the environment", async () => {
     const api = new MockApi({});
     await expect(
-      environmentsSection.run(ctx(api), [
+      plan(api, [
         {
           name: "prod",
           deployment_protection_rules: [{ app: "deploy-gate" }, { app: "deploy-gate" }],
@@ -1110,32 +1302,50 @@ function envBody(name: string) {
   return { data: { name, protection_rules: [], node_id: `EN_${name}` } };
 }
 
+/** The GraphQL writes a fake recorded, as {op, payload} pairs. */
+function graphqlWrites(api: MockApi) {
+  return api
+    .mutations()
+    .filter((c) => c.method === "GRAPHQL")
+    .map((c) => ({ op: c.path, payload: c.payload }));
+}
+
 describe("environments pinned apply mode", () => {
-  test("pinned never reaches the PUT body, and the pins read runs only after every PUT", async () => {
+  test("pinned never reaches the PUT body, and a created environment's pin addresses the node id its PUT answered with", async () => {
+    // The environment does not exist yet, so its node id is known only once
+    // the PUT has run: the PUT's capture hands it to the pin mutation.
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": envBody("prod"),
       "GRAPHQL EnvironmentPins": pinsBody([]),
     }).allowMutations("GRAPHQL PinEnvironment");
-    const result = await environmentsSection.run(ctx(api), [
-      { name: "prod", wait_timer: 5, pinned: true },
-    ]);
-    const put = api.calls.find((c) => c.method === "PUT");
-    expect(put?.payload).toEqual({ wait_timer: 5 });
-    const order = api.calls.map((c) => `${c.method} ${c.path.split("?")[0]}`);
+    const result = await apply(api, [{ name: "prod", wait_timer: 5, pinned: true }]);
+    expect(api.calls.find((c) => c.method === "PUT")?.payload).toEqual({ wait_timer: 5 });
+    const order = api.calls.map((c) => `${c.method} ${c.path}`);
     expect(order.indexOf("PUT /repos/o/r/environments/prod")).toBeLessThan(
-      order.indexOf("GRAPHQL EnvironmentPins"),
+      order.indexOf("GRAPHQL PinEnvironment"),
     );
-    const pin = api.calls.find((c) => c.path === "PinEnvironment");
-    // The mutation addresses the node id the PUT body carried.
-    expect(pin?.payload).toEqual({ environmentId: "EN_prod", pinned: true });
+    expect(graphqlWrites(api)).toEqual([
+      { op: "PinEnvironment", payload: { environmentId: "EN_prod", pinned: true } },
+    ]);
     expect(result.changes).toEqual(['applied environment "prod"', 'pinned environment "prod"']);
+  });
+
+  test("an existing environment's pin addresses the node id the probe body carried", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/environments/prod": envBody("prod"),
+      "GRAPHQL EnvironmentPins": pinsBody([]),
+    }).allowMutations("GRAPHQL PinEnvironment");
+    const result = await apply(api, [{ name: "prod", pinned: true }]);
+    expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual(["GRAPHQL PinEnvironment"]);
+    expect(graphqlWrites(api)[0]?.payload).toEqual({ environmentId: "EN_prod", pinned: true });
+    expect(result.changes).toEqual(['pinned environment "prod"']);
   });
 
   test("without any pinned key the section stays REST-only", async () => {
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": envBody("prod"),
     });
-    await environmentsSection.run(ctx(api), [{ name: "prod", wait_timer: 5 }]);
+    await apply(api, [{ name: "prod", wait_timer: 5 }]);
     expect(api.calls.filter((c) => c.method === "GRAPHQL")).toEqual([]);
   });
 
@@ -1147,25 +1357,22 @@ describe("environments pinned apply mode", () => {
     // reorder is issued.
     const api = new MockApi({
       "PUT /repos/o/r/environments/a": envBody("a"),
-      "PUT /repos/o/r/environments/b": envBody("b"),
-      "PUT /repos/o/r/environments/c": envBody("c"),
+      "GET /repos/o/r/environments/b": envBody("b"),
+      "GET /repos/o/r/environments/c": envBody("c"),
       "GRAPHQL EnvironmentPins": pinsBody(["c", "b"]),
     }).allowMutations("GRAPHQL PinEnvironment", "GRAPHQL ReorderEnvironment");
-    const result = await environmentsSection.run(ctx(api), [
+    const result = await apply(api, [
       { name: "a", pinned: true },
       { name: "b", pinned: true },
       { name: "c", pinned: false },
     ]);
-    const graphqlWrites = api
-      .mutations()
-      .filter((c) => c.method === "GRAPHQL")
-      .map((c) => ({ op: c.path, payload: c.payload }));
-    expect(graphqlWrites).toEqual([
+    expect(graphqlWrites(api)).toEqual([
       { op: "PinEnvironment", payload: { environmentId: "EN_c", pinned: false } },
       { op: "PinEnvironment", payload: { environmentId: "EN_a", pinned: true } },
       { op: "ReorderEnvironment", payload: { environmentId: "EN_a", position: 1 } },
     ]);
-    expect(result.changes?.slice(3)).toEqual([
+    expect(result.changes).toEqual([
+      'applied environment "a"',
       'unpinned environment "c"',
       'pinned environment "a"',
       'moved pinned environment "a" to position 1',
@@ -1174,15 +1381,15 @@ describe("environments pinned apply mode", () => {
 
   test("a converged pin state issues zero pin mutations", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/a": envBody("a"),
-      "PUT /repos/o/r/environments/b": envBody("b"),
+      "GET /repos/o/r/environments/a": envBody("a"),
+      "GET /repos/o/r/environments/b": envBody("b"),
       "GRAPHQL EnvironmentPins": pinsBody(["a", "b"]),
     });
-    await environmentsSection.run(ctx(api), [
+    const planned = await plan(api, [
       { name: "a", pinned: true },
       { name: "b", pinned: true },
     ]);
-    expect(api.mutations().filter((c) => c.method === "GRAPHQL")).toEqual([]);
+    expect(planned).toEqual({ ops: [], notes: [], drift: [] });
   });
 
   test("hole-y live positions in the right order are converged: rank, not literal numbers", async () => {
@@ -1191,18 +1398,18 @@ describe("environments pinned apply mode", () => {
     // list whose RANK order matches the declaration must read converged,
     // never as position drift.
     const api = new MockApi({
-      "PUT /repos/o/r/environments/a": envBody("a"),
-      "PUT /repos/o/r/environments/b": envBody("b"),
+      "GET /repos/o/r/environments/a": envBody("a"),
+      "GET /repos/o/r/environments/b": envBody("b"),
       "GRAPHQL EnvironmentPins": pinsBody([
         { name: "a", position: 1 },
         { name: "b", position: 3 },
       ]),
     });
-    await environmentsSection.run(ctx(api), [
+    const planned = await plan(api, [
       { name: "a", pinned: true },
       { name: "b", pinned: true },
     ]);
-    expect(api.mutations().filter((c) => c.method === "GRAPHQL")).toEqual([]);
+    expect(planned.ops).toEqual([]);
   });
 
   test("two fresh pins land in declaration order with zero reorders (tail appends)", async () => {
@@ -1214,15 +1421,11 @@ describe("environments pinned apply mode", () => {
       "PUT /repos/o/r/environments/b": envBody("b"),
       "GRAPHQL EnvironmentPins": pinsBody([]),
     }).allowMutations("GRAPHQL PinEnvironment");
-    await environmentsSection.run(ctx(api), [
+    await apply(api, [
       { name: "a", pinned: true },
       { name: "b", pinned: true },
     ]);
-    const writes = api
-      .mutations()
-      .filter((c) => c.method === "GRAPHQL")
-      .map((c) => ({ op: c.path, payload: c.payload }));
-    expect(writes).toEqual([
+    expect(graphqlWrites(api)).toEqual([
       { op: "PinEnvironment", payload: { environmentId: "EN_a", pinned: true } },
       { op: "PinEnvironment", payload: { environmentId: "EN_b", pinned: true } },
     ]);
@@ -1232,7 +1435,8 @@ describe("environments pinned apply mode", () => {
     // The shape's upfront cap sees only declared entries; ten live undeclared
     // pins (which the section never unpins) plus one declared pin overflow
     // GitHub's cap, and discovering that on the pin mutation would leave the
-    // list half-applied. The gate throws after the read, before any write.
+    // list half-applied. The first pin mutation's thunk refuses before its
+    // request leaves; the environment PUT before it has landed.
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": envBody("prod"),
       "GRAPHQL EnvironmentPins": pinsBody([
@@ -1247,17 +1451,28 @@ describe("environments pinned apply mode", () => {
         "u9",
         "u10",
       ]),
-    });
-    await expect(
-      environmentsSection.run(ctx(api), [{ name: "prod", pinned: true }]),
-    ).rejects.toThrow(/would leave 11 environments pinned, but GitHub allows at most 10/);
+    }).allowMutations("GRAPHQL PinEnvironment");
+    const planned = await plan(api, [{ name: "prod", pinned: true }]);
+    // The note sits beside the drift in both modes (u1 also earns the
+    // interleaving note: it leads the list the declared pin should lead).
+    expect(planned.notes).toEqual([
+      'pinned environment(s) "u1" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins',
+      "apply will fail: pinning the 1 declared environment(s) not yet pinned would leave 11 environments pinned, but GitHub allows at most 10. Pins without a pinned declaration are left untouched, so declare pinned: false on entries for some of the currently pinned environments, or unpin them in the GitHub UI",
+    ]);
+    const execution = await executePlan(planned, environmentsSection, api, REPO, NO_SECRETS);
+    expect(execution.status).toBe("failed");
+    expect(execution.changes).toEqual(['applied environment "prod"']);
+    expect(String((execution as { error: unknown }).error)).toMatch(
+      /would leave 11 environments pinned, but GitHub allows at most 10/,
+    );
     expect(api.mutations().filter((c) => c.method === "GRAPHQL")).toEqual([]);
   });
 
-  test("a raced-full pinned list still surfaces GitHub's cap rejection with advice", async () => {
+  test("a raced-full pinned list surfaces GitHub's cap rejection on the pin mutation", async () => {
     // Nine live pins pass the overflow gate (9 + 1 = 10), but a pin raced in
-    // between the read and the mutation makes GitHub reject with the
-    // declared UNPROCESSABLE - the belt under the gate.
+    // between the read and the mutation makes GitHub reject with
+    // UNPROCESSABLE - the belt under the gate, classified like any other
+    // rejected request and naming the operation.
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": envBody("prod"),
       "GRAPHQL EnvironmentPins": pinsBody(["u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"]),
@@ -1270,20 +1485,29 @@ describe("environments pinned apply mode", () => {
         },
       },
     });
-    await expect(
-      environmentsSection.run(ctx(api), [{ name: "prod", pinned: true }]),
-    ).rejects.toThrow(/GitHub allows at most 10 pinned environments/);
+    await expect(apply(api, [{ name: "prod", pinned: true }])).rejects.toThrow(
+      'environments: pinning environment "prod" failed - GRAPHQL PinEnvironment: 422 Repositories may only have 10 pinned environments',
+    );
   });
 
-  test("a PUT body without a node_id fails loudly before the mutation", async () => {
+  test("a PUT response without a node_id fails that operation, records no line, and fires no pin", async () => {
+    // The capture extracts the id synchronously as the PUT lands, so the
+    // failure is the PUT's own (no change line) and the pin never runs.
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
       "GRAPHQL EnvironmentPins": pinsBody([]),
-    });
-    await expect(
-      environmentsSection.run(ctx(api), [{ name: "prod", pinned: true }]),
-    ).rejects.toThrow(/the environment body for "prod" carried no node_id/);
-    expect(api.mutations().filter((c) => c.method === "GRAPHQL")).toEqual([]);
+    }).allowMutations("GRAPHQL PinEnvironment");
+    const planned = await plan(api, [{ name: "prod", pinned: true }]);
+    expect(planned.ops.map((op) => op.role)).toEqual(["update", "pin"]);
+    const execution = await executePlan(planned, environmentsSection, api, REPO, NO_SECRETS);
+    expect(execution.status).toBe("failed");
+    expect(execution.changes).toEqual([]);
+    expect(String((execution as { error: unknown }).error)).toMatch(
+      /the environment body for "prod" carried no node_id/,
+    );
+    expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([
+      "PUT /repos/o/r/environments/prod",
+    ]);
   });
 
   test("EVERY planned mutation's id resolves before the FIRST one fires", async () => {
@@ -1296,7 +1520,7 @@ describe("environments pinned apply mode", () => {
       "GRAPHQL EnvironmentPins": pinsBody([]),
     }).allowMutations("GRAPHQL PinEnvironment");
     await expect(
-      environmentsSection.run(ctx(api), [
+      apply(api, [
         { name: "a", pinned: true },
         { name: "b", pinned: true },
       ]),
@@ -1305,20 +1529,20 @@ describe("environments pinned apply mode", () => {
   });
 
   test("a converged run never resolves ids, so a missing node_id cannot fail it", async () => {
-    // The plan is empty, apply returns before id resolution: an API that
-    // stopped carrying node_id must not break a repository that is already
-    // in the declared state.
+    // The plan carries no pin mutation, so no thunk resolves an id: an API
+    // that stopped carrying node_id must not break a repository that is
+    // already in the declared state.
     const api = new MockApi({
-      "PUT /repos/o/r/environments/a": { data: { name: "a" } },
+      "GET /repos/o/r/environments/a": liveEnv("a"),
       "GRAPHQL EnvironmentPins": pinsBody(["a"]),
     });
-    const result = await environmentsSection.run(ctx(api), [{ name: "a", pinned: true }]);
-    expect(result.changes).toEqual(['applied environment "a"']);
+    const result = await apply(api, [{ name: "a", pinned: true }]);
+    expect(result.changes).toEqual([]);
   });
 
   test("a pin node without position and name fails loudly instead of reconciling blind", async () => {
     const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": envBody("prod"),
+      "GET /repos/o/r/environments/prod": envBody("prod"),
       "GRAPHQL EnvironmentPins": {
         data: {
           repository: {
@@ -1330,14 +1554,14 @@ describe("environments pinned apply mode", () => {
         },
       },
     });
-    await expect(
-      environmentsSection.run(ctx(api), [{ name: "prod", pinned: true }]),
-    ).rejects.toThrow(/returned a pin node this section cannot read/);
+    await expect(plan(api, [{ name: "prod", pinned: true }])).rejects.toThrow(
+      /returned a pin node this section cannot read/,
+    );
   });
 });
 
 describe("environments pinned check mode", () => {
-  test("rank-order drift: missing pin, declared unpin, and ONE order line; nothing written", async () => {
+  test("rank-order drift in wire order: the unpin, the missing pin, then ONE order line; nothing written", async () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/a": envBody("a"),
       "GET /repos/o/r/environments/b": envBody("b"),
@@ -1345,18 +1569,50 @@ describe("environments pinned check mode", () => {
       "GET /repos/o/r/environments/d": envBody("d"),
       "GRAPHQL EnvironmentPins": pinsBody(["c", "b", "a"]),
     });
-    const result = await environmentsSection.run(ctx(api, true), [
+    const result = await check(api, [
       { name: "a", pinned: true },
       { name: "b", pinned: true },
       { name: "c", pinned: false },
       { name: "d", pinned: true },
     ]);
     expect(result.drift).toEqual([
-      "environments[d].pinned: missing - declared pinned but the environment is not pinned on the repo; apply will pin it",
       "environments[c].pinned: pinned on the repo but declared pinned: false; apply will unpin it",
+      "environments[d].pinned: missing - declared pinned but the environment is not pinned on the repo; apply will pin it",
       "environments.pinned: the declared pin order is [a, b, d] but the live pinned order is [c, b, a]; apply will reorder the pins so the declared ones lead in declaration order",
     ]);
     expect(api.mutations()).toEqual([]);
+  });
+
+  test("every reorder after the first is a continuation of the one order line, never per-environment pin drift", async () => {
+    // Live [c, b, a], all three declared pinned: a moves to 1, then b to 2 (c
+    // slid right). The order line explains the sequence once; a misplaced pin
+    // never earns an environments[x].pinned line.
+    const api = new MockApi({
+      "GET /repos/o/r/environments/a": envBody("a"),
+      "GET /repos/o/r/environments/b": envBody("b"),
+      "GET /repos/o/r/environments/c": envBody("c"),
+      "GRAPHQL EnvironmentPins": pinsBody(["c", "b", "a"]),
+    });
+    const planned = await plan(api, [
+      { name: "a", pinned: true },
+      { name: "b", pinned: true },
+      { name: "c", pinned: true },
+    ]);
+    expect(planned.ops.map((op) => [op.role, op.change, ...op.drift])).toEqual([
+      [
+        "reorder",
+        'moved pinned environment "a" to position 1',
+        "environments.pinned: the declared pin order is [a, b, c] but the live pinned order is [c, b, a]; apply will reorder the pins so the declared ones lead in declaration order",
+      ],
+      [
+        "reorder",
+        'moved pinned environment "b" to position 2',
+        'environments.pinned: apply will also move "b" to position 2 in that reordering',
+      ],
+    ]);
+    expect(planDrift(planned).some((line) => /environments\[[abc]\]\.pinned/.test(line))).toBe(
+      false,
+    );
   });
 
   test("clean when the declared pins lead in declaration order; trailing undeclared pins earn nothing", async () => {
@@ -1365,7 +1621,7 @@ describe("environments pinned check mode", () => {
       "GET /repos/o/r/environments/b": envBody("b"),
       "GRAPHQL EnvironmentPins": pinsBody(["a", "b", "legacy"]),
     });
-    const result = await environmentsSection.run(ctx(api, true), [
+    const result = await check(api, [
       { name: "a", pinned: true },
       { name: "b", pinned: true },
     ]);
@@ -1386,59 +1642,26 @@ describe("environments pinned check mode", () => {
         { name: "b", position: 5 },
       ]),
     });
-    const result = await environmentsSection.run(ctx(api, true), [
+    const result = await check(api, [
       { name: "a", pinned: true },
       { name: "b", pinned: true },
     ]);
     expect(result.drift).toEqual([]);
   });
 
-  test("the live-cap overflow surfaces as a note in check mode (apply hard-fails there)", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": envBody("prod"),
-      "GRAPHQL EnvironmentPins": pinsBody([
-        "u1",
-        "u2",
-        "u3",
-        "u4",
-        "u5",
-        "u6",
-        "u7",
-        "u8",
-        "u9",
-        "u10",
-      ]),
-    });
-    const result = await environmentsSection.run(ctx(api, true), [{ name: "prod", pinned: true }]);
-    expect(result.drift?.join("\n")).toContain("environments[prod].pinned: missing");
-    expect(result.notes.join("\n")).toContain(
-      "apply will fail: pinning the 1 declared environment(s) not yet pinned would leave 11 environments pinned",
-    );
-  });
-
   test("an undeclared pin among the declared ranks earns the interleaving note in both modes", async () => {
-    const liveRoutes = {
-      "GRAPHQL EnvironmentPins": pinsBody(["legacy", "a"]),
-    };
-    const checkApi = new MockApi({
+    const api = new MockApi({
       "GET /repos/o/r/environments/a": envBody("a"),
-      ...liveRoutes,
-    });
-    const checked = await environmentsSection.run(ctx(checkApi, true), [
-      { name: "a", pinned: true },
-    ]);
-    const note =
-      'pinned environment(s) "legacy" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins';
-    expect(checked.notes).toEqual([note]);
-    const applyApi = new MockApi({
-      "PUT /repos/o/r/environments/a": envBody("a"),
-      ...liveRoutes,
+      "GRAPHQL EnvironmentPins": pinsBody(["legacy", "a"]),
     }).allowMutations("GRAPHQL ReorderEnvironment");
-    const applied = await environmentsSection.run(ctx(applyApi), [{ name: "a", pinned: true }]);
+    const checked = await check(api, [{ name: "a", pinned: true }]);
+    expect(checked.notes).toEqual([
+      'pinned environment(s) "legacy" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins',
+    ]);
+    const applied = await apply(api, [{ name: "a", pinned: true }]);
     expect(applied.notes).toEqual(checked.notes);
     // Apply moves a left to rank 1; legacy is never unpinned.
-    const writes = applyApi.mutations().filter((c) => c.method === "GRAPHQL");
-    expect(writes.map((c) => c.path)).toEqual(["ReorderEnvironment"]);
+    expect(graphqlWrites(api).map((c) => c.op)).toEqual(["ReorderEnvironment"]);
   });
 
   test("names match case-insensitively, like the section's natural key", async () => {
@@ -1446,7 +1669,7 @@ describe("environments pinned check mode", () => {
       "GET /repos/o/r/environments/prod": envBody("PROD"),
       "GRAPHQL EnvironmentPins": pinsBody(["PROD"]),
     });
-    const result = await environmentsSection.run(ctx(api, true), [{ name: "prod", pinned: true }]);
+    const result = await check(api, [{ name: "prod", pinned: true }]);
     expect(result.drift).toEqual([]);
   });
 
@@ -1461,7 +1684,7 @@ describe("environments pinned check mode", () => {
         error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
       },
     });
-    const result = await environmentsSection.run(ctx(api, true), [{ name: "prod", pinned: true }]);
+    const result = await check(api, [{ name: "prod", pinned: true }]);
     expect(result.drift).toEqual([
       "environments[prod].pinned: missing - declared pinned but the environment is not pinned on the repo; apply will pin it",
     ]);
@@ -1488,5 +1711,274 @@ describe("environments pinned shape", () => {
     expect(issue?.message).toContain("GitHub allows at most 10 pinned environments per repository");
     // The issue points at the first entry OVER the cap.
     expect(issue?.path).toEqual([10, "pinned"]);
+  });
+});
+
+// --- Convergence over the e2e mock's own handlers ------------------------------
+
+/**
+ * A stateful GithubClient over the section's e2e mock fragment and seeded
+ * MockState, so the idempotence proof runs against the scenarios' own model.
+ */
+function liveRepo(liveState: LiveState): GithubClient & { writes: string[] } {
+  const state = buildState(liveState, "org", REPO.slug);
+  const graphqlRoles = Object.entries(GRAPHQL_OPS);
+  return {
+    writes: [],
+    async tryRequest(method, path, payload) {
+      const [pathname = "", search = ""] = path.split("?");
+      const matched = matchEndpoint(method, pathname);
+      if (matched === null || !matched.key.startsWith("environments.")) {
+        throw new Error(`liveRepo: the environments section issued ${method} ${path}`);
+      }
+      const response = environmentsMockHandlers[matched.key as SectionEndpointKey<"environments">]({
+        state,
+        endpoint: matched.endpoint,
+        param: paramAccessor(matched.key, matched.endpoint, matched.params),
+        query: Object.fromEntries(new URLSearchParams(search)),
+        body: payload,
+      });
+      if (response.status >= 400) {
+        const message = (response.body as { message?: unknown } | null)?.message;
+        return { error: { status: response.status, message: String(message ?? ""), body: "" } };
+      }
+      if (method !== "GET") {
+        this.writes.push(`${method} ${pathname}`);
+      }
+      return { data: response.body };
+    },
+    async tryGraphql(op, variables) {
+      const role = graphqlRoles.find(([, declaration]) => declaration.name === op.name)?.[0];
+      if (role === undefined) {
+        throw new Error(`liveRepo: the environments section issued GRAPHQL ${op.name}`);
+      }
+      const key = `environments.${role}` as SectionGraphqlKey<"environments">;
+      const reply = environmentsMockGraphqlHandlers[key]({
+        state,
+        op: allGraphqlOps()[key],
+        variables: { ...variables },
+      });
+      if (reply.errors !== undefined) {
+        const [first] = reply.errors;
+        return {
+          error: {
+            status: first?.type === "NOT_FOUND" ? 404 : 422,
+            message: first?.message ?? "",
+            body: "",
+            graphqlTypes: reply.errors.map((error) => error.type),
+          },
+        };
+      }
+      if (op.kind === "write") {
+        this.writes.push(`GRAPHQL ${op.name}`);
+      }
+      return { data: reply.data };
+    },
+  };
+}
+
+describe("environments convergence", () => {
+  const secretEnv = { $PRD: "prod-plaintext", $NEW: "new-plaintext" };
+
+  test("executing the plan converges: the re-plan over applied state carries only the sealed secret PUTs", async () => {
+    // Every family at once, against the mock's own state: an existing
+    // environment with settings drift and every nested knob diverging, plus
+    // a missing pinned environment whose node id must come from its PUT.
+    await mockSodiumReady();
+    const api = liveRepo({
+      environments: {
+        prod: {
+          name: "prod",
+          protection_rules: [{ id: 1, type: "wait_timer", wait_timer: 15 }],
+          deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+        },
+        legacy: { name: "legacy", protection_rules: [] },
+      },
+      environment_variables: {
+        prod: [
+          {
+            name: "LOG_LEVEL",
+            value: "info",
+            created_at: "2026-06-01T00:00:00Z",
+            updated_at: "2026-06-01T00:00:00Z",
+          },
+          {
+            name: "GONE",
+            value: "x",
+            created_at: "2026-06-01T00:00:00Z",
+            updated_at: "2026-06-01T00:00:00Z",
+          },
+        ],
+      },
+      environment_secrets: {
+        prod: [
+          {
+            name: "DEPLOY_TOKEN",
+            created_at: "2019-08-10T14:59:22Z",
+            updated_at: "2019-08-10T14:59:22Z",
+          },
+          { name: "KEPT", created_at: "2019-08-10T14:59:22Z", updated_at: "2019-08-10T14:59:22Z" },
+        ],
+      },
+      environment_branch_policies: {
+        prod: [
+          { id: 4001, name: "v*", type: "branch" },
+          { id: 4002, name: "legacy/*", type: "branch" },
+        ],
+      },
+      environment_protection_rules: {
+        prod: [
+          {
+            id: 7101,
+            node_id: "DPR_7101",
+            enabled: true,
+            app: { id: 3517, slug: "change-window", integration_url: "u", node_id: "n" },
+          },
+        ],
+      },
+      pinned_environments: ["legacy"],
+    });
+    const { first, second, changes } = await provePlanIdempotent(
+      environmentsSection,
+      api,
+      [
+        {
+          name: "prod",
+          wait_timer: 30,
+          deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+          variables: [
+            { name: "DEPLOY_REGION", value: "eu-west-1" },
+            { name: "log_level", value: "debug" },
+          ],
+          secrets: [{ name: "DEPLOY_TOKEN", value: "$PRD" }],
+          deployment_branch_policies: [{ name: "release/*" }, { name: "v*", type: "tag" }],
+          deployment_protection_rules: [{ app: "deploy-gate" }],
+          pinned: true,
+        },
+        { name: "staging", pinned: true },
+        { name: "legacy", pinned: false },
+      ],
+      secretTools(secretEnv),
+    );
+    expect(changes).toEqual([
+      'applied environment "prod"',
+      'created variable "DEPLOY_REGION" in environment "prod"',
+      'updated variable "log_level" in environment "prod"',
+      'DELETED undeclared variable "GONE" from environment "prod"',
+      'updated secret "DEPLOY_TOKEN" in environment "prod"',
+      'created deployment branch policy "release/*" in environment "prod"',
+      'deleted deployment branch policy "v*" in environment "prod" to change its immutable type (branch -> tag)',
+      'recreated deployment branch policy "v*" in environment "prod" as type tag',
+      'DELETED undeclared deployment branch policy "legacy/*" from environment "prod"',
+      'enabled deployment protection rule "deploy-gate" in environment "prod"',
+      'applied environment "staging"',
+      'unpinned environment "legacy"',
+      'pinned environment "prod"',
+      'pinned environment "staging"',
+    ]);
+    expect(api.writes).toEqual([
+      "PUT /repos/o/r/environments/prod",
+      "POST /repos/o/r/environments/prod/variables",
+      "PATCH /repos/o/r/environments/prod/variables/LOG_LEVEL",
+      "DELETE /repos/o/r/environments/prod/variables/GONE",
+      "PUT /repos/o/r/environments/prod/secrets/DEPLOY_TOKEN",
+      "POST /repos/o/r/environments/prod/deployment-branch-policies",
+      "DELETE /repos/o/r/environments/prod/deployment-branch-policies/4001",
+      "POST /repos/o/r/environments/prod/deployment-branch-policies",
+      "DELETE /repos/o/r/environments/prod/deployment-branch-policies/4002",
+      "POST /repos/o/r/environments/prod/deployment_protection_rules",
+      "PUT /repos/o/r/environments/staging",
+      "GRAPHQL PinEnvironment",
+      "GRAPHQL PinEnvironment",
+      "GRAPHQL PinEnvironment",
+      // The second pass: the sealed PUT recurs by contract, nothing else.
+      "PUT /repos/o/r/environments/prod/secrets/DEPLOY_TOKEN",
+    ]);
+    expect(first.notes).toEqual([
+      "prod environment secret values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run",
+      'prod environment secret "KEPT" exists on the environment but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it (a deleted secret\'s value is unrecoverable)',
+      'deployment protection rule "change-window" is enabled on environment "prod" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DISABLE it',
+    ]);
+    expect(second.ops.map((op) => `${op.role} ${op.change}`)).toEqual([
+      'putSecret updated secret "DEPLOY_TOKEN" in environment "prod"',
+    ]);
+  });
+
+  test("patterns hidden behind a flag that is off reconcile on the run after the one that sets it", async () => {
+    // The mock keeps patterns behind an off flag (the list route 404s): the
+    // first apply sets the flag and creates the declared ones (the hidden
+    // same-name answers 303), the next apply converges on what was revealed.
+    const api = liveRepo({
+      environments: {
+        prod: {
+          name: "prod",
+          protection_rules: [],
+          deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+        },
+      },
+      environment_branch_policies: {
+        prod: [
+          { id: 4001, name: "v*", type: "branch" },
+          { id: 4002, name: "legacy/*", type: "branch" },
+        ],
+      },
+    });
+    const desired = [envWithPolicies([{ name: "release/*" }, { name: "v*", type: "tag" }])];
+    const first = await plan(api, desired);
+    expect(planDrift(first)).toEqual([
+      "environments[prod].deployment_branch_policy.protected_branches: false != true",
+      "environments[prod].deployment_branch_policy.custom_branch_policies: true != false",
+      "environments[prod].deployment_branch_policies[release/*]: not verifiable until custom_branch_policies is true; apply will create it once the flag is set",
+      "environments[prod].deployment_branch_policies[v*]: not verifiable until custom_branch_policies is true; apply will create it once the flag is set",
+    ]);
+    const applied = await executePlan(first, environmentsSection, api, REPO, NO_SECRETS);
+    expect(applied.status).toBe("applied");
+    expect(api.writes).toEqual([
+      "PUT /repos/o/r/environments/prod",
+      "POST /repos/o/r/environments/prod/deployment-branch-policies",
+      "POST /repos/o/r/environments/prod/deployment-branch-policies",
+    ]);
+    const second = await plan(api, desired);
+    expect(planDrift(second)).toEqual([
+      "environments[prod].deployment_branch_policies[v*]: the declared type differs from the live pattern's, and a policy's type is immutable; apply will delete and recreate it",
+      'environments[prod].deployment_branch_policies[v*].type: "tag" != "branch"',
+      "environments[prod].deployment_branch_policies[legacy/*]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+    ]);
+    await executePlan(second, environmentsSection, api, REPO, NO_SECRETS);
+    expect(await plan(api, desired)).toEqual({ ops: [], notes: [], drift: [] });
+  });
+
+  test("a secret created alongside its environment is rewritten as an update by the next plan", async () => {
+    // The first pass creates the environment and its secret (key read after
+    // the PUT); the second plans exactly the recurring PUT, now an update
+    // with no drift.
+    await mockSodiumReady();
+    const api = liveRepo({});
+    const desired = [{ name: "staging", secrets: [{ name: "NEW", value: "$NEW" }] }];
+    const first = await plan(api, desired);
+    expect(planDrift(first)).toEqual([
+      "environments[staging]: missing - declared in the settings file but not on the repo; apply will create it",
+      "environments[staging].secrets[NEW]: missing - declared in the settings file but not on the environment; apply will create it",
+    ]);
+    const execution = await executePlan(
+      first,
+      environmentsSection,
+      api,
+      REPO,
+      secretTools(secretEnv),
+    );
+    expect(execution).toEqual({
+      status: "applied",
+      changes: ['applied environment "staging"', 'created secret "NEW" in environment "staging"'],
+      notes: [],
+      landed: 2,
+    });
+    const second = await plan(api, desired);
+    expect(second.ops.map((op) => ({ role: op.role, drift: op.drift, change: op.change }))).toEqual(
+      [{ role: "putSecret", drift: [], change: 'updated secret "NEW" in environment "staging"' }],
+    );
+    expect(second.notes).toEqual([
+      "staging environment secret values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run",
+    ]);
   });
 });

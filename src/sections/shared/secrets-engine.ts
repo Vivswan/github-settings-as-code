@@ -1,17 +1,17 @@
 /**
  * The shared secrets engine: existence reconciliation (values never read
  * back; every declared secret re-sealed on each apply) over route-free scopes
- * the section builds. planSecrets() plans, reconcileSecrets() is the run() form.
+ * the section builds: planSecrets() returns the operations, and the section
+ * places each under its own role.
  */
 
 import sodium from "libsodium-wrappers";
 import { z } from "zod";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
+import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
 import {
   type DeclaredSecretValue,
-  type SectionContext,
   type SectionMeta,
-  type SectionRun,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
@@ -42,34 +42,7 @@ export type SealedSecretPayload = {
 /** The erased planned-op view; the scopes are generic over the section's exact arms. */
 type AnyPlannedOp = SectionPlan["ops"][number];
 
-/**
- * The run() contract's four operations, as closures built where the routes
- * are literal (so their params typecheck); a nested scope closes over its
- * extra path params here.
- */
-export interface SecretsScopeOps {
-  /** The parsed {name} identities of the enveloped secrets list, all pages. */
-  list(ctx: SectionContext, section: SectionMeta): Promise<LiveSecretName[]>;
-  /** GET the {key_id, key} sealing key for this scope. */
-  publicKey(ctx: SectionContext, section: SectionMeta, describe: string): Promise<unknown>;
-  /** PUT one sealed value: 201 created a new secret, 204 updated an existing one. */
-  put(
-    ctx: SectionContext,
-    section: SectionMeta,
-    secretName: string,
-    payload: SealedSecretPayload,
-    describe: string,
-  ): Promise<unknown>;
-  /** DELETE one secret by name: 204. */
-  remove(
-    ctx: SectionContext,
-    section: SectionMeta,
-    secretName: string,
-    describe: string,
-  ): Promise<unknown>;
-}
-
-/** How a scope names itself in output; shared by both contracts' scopes. */
+/** How a scope names itself in output. */
 interface SecretsScopeProse {
   /** The drift-line prefix, e.g. "actions_secrets" or "environments[prod].secrets". */
   label: string;
@@ -79,11 +52,6 @@ interface SecretsScopeProse {
   home?: string;
   /** Appended to change lines and describes (` in environment "prod"`); "" for the repo families. */
   changeSuffix?: string;
-}
-
-/** One secret scope under the run() contract: a family's operations plus its prose. */
-export interface SecretsScope extends SecretsScopeProse {
-  ops: SecretsScopeOps;
 }
 
 /**
@@ -124,6 +92,8 @@ export interface SecretsPlanScope<Put extends AnyPlannedOp, Remove extends AnyPl
   readonly list: () => Promise<LiveSecretName[]>;
   /** GET the {key_id, key} sealing key for this scope. */
   readonly publicKey: (describe: string) => Promise<unknown>;
+  /** The declaration behind `publicKey`, named in the prose of a key the endpoint cannot supply. */
+  readonly publicKeyEndpoint: EndpointDecl;
   /** The planned sealed PUT; function-valued so a builder demanding an unsupplied facet fails. */
   readonly put: (write: SealedSecretWrite) => Put;
   /** The planned DELETE of one undeclared live secret. */
@@ -208,16 +178,18 @@ export interface SealingKey {
 
 /**
  * Parse a public-key response down to its X25519 key material, so a
- * malformed key fails here with the endpoint named rather than as a bare
- * libsodium error inside a seal.
+ * malformed key fails here with the endpoint and scope named rather than as
+ * a bare libsodium error inside a seal.
  */
 export async function parseSealingKey(
   section: SectionMeta,
   scope: Pick<SecretsScopeProse, "label">,
+  endpoint: EndpointDecl,
   data: unknown,
 ): Promise<SealingKey> {
   await sodium.ready;
   const advice = `Check the "api-version" input against the GitHub REST docs for this endpoint`;
+  const where = `${section.key}: GET ${endpointPath(endpoint.route)} (the ${scope.label} sealing key)`;
   const body = (data ?? {}) as { key_id?: unknown; key?: unknown };
   const keyId = body.key_id;
   const publicKey = body.key;
@@ -239,7 +211,7 @@ export async function parseSealingKey(
             : null;
     const defect = fieldDefect("key_id", keyId) ?? fieldDefect("key", publicKey);
     throw new Error(
-      `${section.key}: the ${scope.label} public-key endpoint returned no usable {key_id, key} pair (${defect}), so no value can be sealed. ${advice}`,
+      `${where} returned no usable {key_id, key} pair (${defect}), so no value can be sealed. ${advice}`,
     );
   }
   let keyBytes: Uint8Array;
@@ -247,12 +219,20 @@ export async function parseSealingKey(
     keyBytes = sodium.from_base64(publicKey, sodium.base64_variants.ORIGINAL);
   } catch {
     throw new Error(
-      `${section.key}: the ${scope.label} public key is not valid base64, so no value can be sealed. ${advice}`,
+      `${where} returned a key that is not valid base64, so no value can be sealed. ${advice}`,
     );
   }
   if (keyBytes.length !== sodium.crypto_box_PUBLICKEYBYTES) {
     throw new Error(
-      `${section.key}: the ${scope.label} public key decodes to ${keyBytes.length} bytes where an X25519 public key has ${sodium.crypto_box_PUBLICKEYBYTES}, so no value can be sealed. ${advice}`,
+      `${where} returned a key that decodes to ${keyBytes.length} bytes where an X25519 public key has ${sodium.crypto_box_PUBLICKEYBYTES}, so no value can be sealed. ${advice}`,
+    );
+  }
+  // Right-sized bytes can still be an unusable point; one probe seal is the exact test.
+  try {
+    sealedBox("", keyBytes);
+  } catch {
+    throw new Error(
+      `${where} returned a key that is not a usable X25519 public key, so no value can be sealed. ${advice}`,
     );
   }
   return {
@@ -331,6 +311,7 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
     const sealingKey = await parseSealingKey(
       section,
       scope,
+      scope.publicKeyEndpoint,
       await scope.publicKey(`reading the ${scope.label} sealing key`),
     );
     for (const entry of entries) {
@@ -368,93 +349,4 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
     }
   }
   return plan;
-}
-
-/**
- * The run() form of planSecrets, executed in place onto `run.result` (the
- * nested family consumes it): check reports existence drift and notes, apply
- * resolves every value up front, then seals and PUTs, then purges per policy.
- */
-export async function reconcileSecrets(
-  run: SectionRun,
-  section: SectionMeta,
-  scope: SecretsScope,
-  opts: {
-    entries: readonly SecretEntry[];
-    policy: UndeclaredPolicy;
-    /**
-     * The DEFAULT the caller unwrapped `policy` against (the section's
-     * undeclaredDefault, or environments' fixed nested default), from which
-     * undeclaredDrift derives its explicit-knob clause.
-     */
-    defaultPolicy: UndeclaredPolicy;
-  },
-): Promise<void> {
-  const { entries, policy, defaultPolicy } = opts;
-  const suffix = scope.changeSuffix ?? "";
-
-  // Apply resolves EVERY declared value up front, before any request of this
-  // scope: a resolution failure - an engine sequencing BUG - must leave the
-  // scope with zero writes. Each plaintext travels WITH its entry, so no
-  // name-keyed lookup exists to miss.
-  const resolvedEntries =
-    !run.check && entries.length > 0
-      ? entries.map((entry) => ({ entry, plaintext: run.ctx.resolveSecret(entry.value) }))
-      : [];
-
-  const liveByKey = liveSecretsByKey(await scope.ops.list(run.ctx, section));
-  const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
-
-  if (run.check) {
-    for (const entry of entries) {
-      if (!liveByKey.has(secretKey(entry.name))) {
-        run.result.drift.push(missingSecretDrift(scope, secretKey(entry.name)));
-      }
-    }
-    if (entries.length > 0) {
-      run.result.notes.push(cannotVerifyNote(scope));
-    }
-  } else if (resolvedEntries.length > 0) {
-    const sealingKey = await parseSealingKey(
-      section,
-      scope,
-      await scope.ops.publicKey(run.ctx, section, `reading the ${scope.label} sealing key`),
-    );
-    for (const { entry, plaintext } of resolvedEntries) {
-      const name = secretKey(entry.name);
-      await scope.ops.put(
-        run.ctx,
-        section,
-        name,
-        sealingKey.seal(plaintext),
-        `writing secret "${name}"${suffix}`,
-      );
-      // Existence from the listing decides the verb; the PUT's own 201/204
-      // says the same thing but call() deliberately does not surface statuses.
-      run.result.changes.push(
-        liveByKey.has(name)
-          ? `updated secret "${name}"${suffix}`
-          : `created secret "${name}"${suffix}`,
-      );
-    }
-  }
-
-  for (const [key, liveName] of liveByKey) {
-    if (declaredKeys.has(key)) {
-      continue;
-    }
-    if (policy === "keep") {
-      run.result.notes.push(undeclaredSecretNote(scope, liveName));
-    } else if (run.check) {
-      run.result.drift.push(undeclaredSecretDrift(scope, defaultPolicy, liveName));
-    } else {
-      await scope.ops.remove(
-        run.ctx,
-        section,
-        liveName,
-        `deleting undeclared secret "${liveName}"${suffix}`,
-      );
-      run.result.changes.push(`DELETED undeclared secret "${liveName}"${suffix}`);
-    }
-  }
 }

@@ -1,19 +1,14 @@
 /**
  * The shared variables engine: value reconciliation (names match uppercased;
  * extra declared fields pass through) over route-free scopes the section
- * builds. planVariables() plans, reconcileVariables() is the run() form.
+ * builds: planVariables() returns the operations, and the section places
+ * each under its own role.
  */
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
-import {
-  type SectionContext,
-  type SectionMeta,
-  type SectionRun,
-  undeclaredDrift,
-  undeclaredNote,
-} from "../contract/module.js";
+import { undeclaredDrift, undeclaredNote } from "../contract/module.js";
 import type { ExecTools, SectionPlan } from "../contract/plan.js";
 
 /** Case-insensitive key for variable names (GitHub stores them uppercased). */
@@ -48,33 +43,7 @@ export interface VariableEntry {
   readonly [key: string]: PlainPayload | undefined;
 }
 
-/**
- * The run() contract's four operations, as closures built where the routes
- * are literal (so their params typecheck) and carrying each family's own
- * describe prose; a nested scope closes over its extra path param here.
- */
-export interface VariablesScopeOps {
-  /** The parsed {name, value} identities of the enveloped list, all pages. */
-  list(ctx: SectionContext, section: SectionMeta): Promise<LiveVariable[]>;
-  /** POST one new variable; the payload carries name, value, and passthrough fields. */
-  create(
-    ctx: SectionContext,
-    section: SectionMeta,
-    name: string,
-    payload: Record<string, unknown>,
-  ): Promise<unknown>;
-  /** PATCH one variable at its LIVE name (the path names what exists); the declared name is prose. */
-  update(
-    ctx: SectionContext,
-    section: SectionMeta,
-    names: { declared: string; live: string },
-    payload: Record<string, unknown>,
-  ): Promise<unknown>;
-  /** DELETE one variable by its live name. */
-  remove(ctx: SectionContext, section: SectionMeta, liveName: string): Promise<unknown>;
-}
-
-/** How a scope names itself in output; shared by both contracts' scopes. */
+/** How a scope names itself in output. */
 interface VariablesScopeProse {
   /** The drift-line prefix, e.g. "actions_variables" or "environments[prod].variables". */
   label: string;
@@ -88,11 +57,6 @@ interface VariablesScopeProse {
   changeSuffix?: string;
   /** Appended to DELETE change lines (` from environment "prod"`); "" by default. */
   removeSuffix?: string;
-}
-
-/** One variable scope under the run() contract: a family's operations plus its prose. */
-export interface VariablesScope extends VariablesScopeProse {
-  ops: VariablesScopeOps;
 }
 
 /** The facets of one planned POST creating a declared variable the repo lacks. */
@@ -272,95 +236,4 @@ export async function planVariables<
     }
   }
   return plan;
-}
-
-/**
- * The run() form of planVariables, executed in place onto `run.result` (the
- * nested family consumes it): create missing, update divergent, and handle
- * undeclared variables per policy.
- */
-export async function reconcileVariables(
-  run: SectionRun,
-  section: SectionMeta,
-  scope: VariablesScope,
-  opts: {
-    entries: readonly VariableEntry[];
-    policy: UndeclaredPolicy;
-    /**
-     * The DEFAULT the caller unwrapped `policy` against (the section's
-     * undeclaredDefault, or environments' fixed nested default), from which
-     * undeclaredDrift derives its explicit-knob clause.
-     */
-    defaultPolicy: UndeclaredPolicy;
-  },
-): Promise<void> {
-  const { entries, policy, defaultPolicy } = opts;
-  const changeSuffix = scope.changeSuffix ?? "";
-  const removeSuffix = scope.removeSuffix ?? "";
-
-  const liveByKey = liveVariablesByKey(await scope.ops.list(run.ctx, section));
-  const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
-
-  for (const variable of entries) {
-    const label = `${scope.label}[${variable.name}]`;
-    const existing = liveByKey.get(variableKey(variable.name));
-    const { name: _name, value: _value, ...extraKeys } = variable;
-    if (!existing) {
-      if (run.check) {
-        run.result.drift.push(missingVariableDrift(scope, label));
-      } else {
-        await scope.ops.create(run.ctx, section, variable.name, {
-          name: variable.name,
-          value: variable.value,
-          ...extraKeys, // declared fields beyond name and value pass through verbatim
-        });
-        run.result.changes.push(`created ${scope.noun} "${variable.name}"${changeSuffix}`);
-      }
-      continue;
-    }
-
-    // The live name never drifts against the declaration: GitHub stores it
-    // uppercased whatever casing the file uses, so only the value (and any
-    // declared passthrough fields) can diverge.
-    const valueDrift = existing.value !== variable.value;
-    const extraDrift = subsetDiff(extraKeys, existing, label);
-    if (!valueDrift && extraDrift.length === 0) {
-      continue;
-    }
-    if (run.check) {
-      if (valueDrift) {
-        run.result.drift.push(valueDriftLine(label, variable.value, existing.value));
-      }
-      run.result.drift.push(...extraDrift);
-    } else {
-      const phantom = phantomKeys(extraKeys, existing);
-      if (phantom.length > 0) {
-        run.result.notes.push(phantomNote(label, phantom, "variable", "this update will re-run"));
-      }
-      await scope.ops.update(
-        run.ctx,
-        section,
-        { declared: variable.name, live: existing.name },
-        {
-          value: variable.value,
-          ...extraKeys, // declared fields beyond name and value pass through verbatim
-        },
-      );
-      run.result.changes.push(`updated ${scope.noun} "${variable.name}"${changeSuffix}`);
-    }
-  }
-
-  for (const variable of liveByKey.values()) {
-    if (declaredKeys.has(variableKey(variable.name))) {
-      continue;
-    }
-    if (policy === "keep") {
-      run.result.notes.push(undeclaredVariableNote(scope, variable.name));
-    } else if (run.check) {
-      run.result.drift.push(undeclaredVariableDrift(scope, defaultPolicy, variable.name));
-    } else {
-      await scope.ops.remove(run.ctx, section, variable.name);
-      run.result.changes.push(`DELETED undeclared ${scope.noun} "${variable.name}"${removeSuffix}`);
-    }
-  }
 }

@@ -737,6 +737,7 @@ export const SECTION_PRIMARY_READ = {
   repository: "repository.get",
   labels: "labels.list",
   branches: "branches.getProtection",
+  environments: "environments.probe",
   actions: "actions.getWorkflow",
   interaction_limits: "interaction_limits.get",
   rulesets: "rulesets.list",
@@ -787,7 +788,6 @@ export const SECTION_FAULT_FIXTURE: {
  * battery proves it. With SECTION_PRIMARY_READ this must cover every SectionKey.
  */
 export const UNFAULTABLE_SECTIONS = [
-  "environments",
   "check_suite_preferences",
 ] as const satisfies readonly SectionKey[];
 export type UnfaultableSection = (typeof UNFAULTABLE_SECTIONS)[number];
@@ -801,8 +801,7 @@ type _DoublyClassifiedFaultSection = MustBeNever<Extract<FaultableSection, Unfau
  * Trigger-avoiding apply settings, one entry per UNFAULTABLE_SECTIONS member
  * (the Record type keeps the list and the catalog in lockstep). MAXIMAL on
  * purpose: each entry declares every key it can WITHOUT reaching a read -
- * reads here are check-mode-only or gated on the few keys deliberately left
- * out (environments' nested lists) - so the
+ * reads here are check-mode-only or absent altogether - so the
  * battery's claim is "a full-width apply of this section issues no read",
  * not "an apply too small to read anything stays quiet". The fuzz battery
  * arms one-shot faults on EVERY one of the section's GET endpoints
@@ -816,11 +815,6 @@ export const UNFAULTABLE_APPLY_SETTINGS: {
   // instead of silently shrinking the battery's declared width.
   [K in UnfaultableSection]: NonNullable<SettingsFile[K]>;
 } = {
-  // The environment probe and every nested list read run only in check mode
-  // or when an entry declares a nested key (variables/secrets/policies/
-  // protection rules), and the GraphQL pins read only when an entry declares
-  // pinned - so those all stay deliberately undeclared.
-  environments: [{ name: "prod", wait_timer: 30 }],
   // The strongest member: the section declares NO read endpoint at all, so
   // the battery has nothing to arm and the exemption holds by construction.
   check_suite_preferences: {
@@ -833,9 +827,8 @@ export const UNFAULTABLE_APPLY_SETTINGS: {
  * endpoints AND the GraphQL read operations - derived from the registry's
  * declarations, the same single source the mock routes and USED_PATHS derive
  * from, so the battery cannot arm a stale hand-copied key while the section
- * reads somewhere else. environments' key-gated pins read is what the
- * GraphQL leg exists for: the battery proves it stays cold in a pin-free
- * apply.
+ * reads somewhere else. The GraphQL leg covers a section's read operations
+ * the same way, so a key-gated query cannot escape the battery.
  */
 export function unfaultableReadKeys(section: UnfaultableSection): string[] {
   return [

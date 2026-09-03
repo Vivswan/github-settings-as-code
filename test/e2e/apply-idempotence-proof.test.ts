@@ -65,13 +65,12 @@ describe("secondApplyWriteFailures (apply-idempotence zero-write subset)", () =>
   });
 
   test("a write to an unconditional-write section passes", () => {
-    // teams (a section still on the legacy run() contract) and environments
-    // write on every apply, so a second-apply write there is legitimate;
-    // only state stability binds them.
+    // teams (a section still on the legacy run() contract) writes on every
+    // apply, so a second-apply write there is legitimate; only state
+    // stability binds it.
     expect(
       secondApplyWriteFailures([
         write("PUT", "/orgs/e2e-owner/teams/platform/repos/e2e-owner/e2e-repo"),
-        write("PUT", "/repos/e2e-owner/e2e-repo/environments/production"),
       ]),
     ).toEqual([]);
   });
@@ -87,6 +86,19 @@ describe("secondApplyWriteFailures (apply-idempotence zero-write subset)", () =>
     expect(failures).toHaveLength(1);
     expect(failures[0]).toContain("DELETE /repos/e2e-owner/e2e-repo/actions/secrets/STALE");
     expect(failures[0]).toContain('"actions_secrets"');
+  });
+
+  test("a section mixing a drift-gated PUT with a nested alwaysRewrite PUT is exempt only on the flagged one", () => {
+    const secretPut = write(
+      "PUT",
+      "/repos/e2e-owner/e2e-repo/environments/production/secrets/DEPLOY_TOKEN",
+    );
+    const environmentPut = write("PUT", "/repos/e2e-owner/e2e-repo/environments/production");
+    expect(secondApplyWriteFailures([secretPut])).toEqual([]);
+    const failures = secondApplyWriteFailures([secretPut, environmentPut]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("PUT /repos/e2e-owner/e2e-repo/environments/production");
+    expect(failures[0]).toContain('"environments"');
   });
 
   test("a write matching no section endpoint fires the outside-section failure", () => {

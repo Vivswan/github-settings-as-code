@@ -1,5 +1,6 @@
 # Apply reconciles a declared per-environment deployment_protection_rules list
-# AFTER the environment PUT: the missing deploy-gate rule is enabled (one
+# on environments that already match (so neither is re-PUT): the missing
+# deploy-gate rule is enabled (one
 # available-Apps fetch resolves its slug to the integration id), the live
 # region-guard rule already satisfies its entry, and the undeclared
 # change-window rule is KEPT with a note (the default WITHIN a declared key:
@@ -61,9 +62,7 @@ expect:
   outcomes:
     environments: applied
   mutations:
-    - "PUT /repos/{repo}/environments/production"
     - "POST /repos/{repo}/environments/production/deployment_protection_rules"
-    - "PUT /repos/{repo}/environments/staging"
     - "DELETE /repos/{repo}/environments/staging/deployment_protection_rules/7001"
   requests_contain:
     - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment_protection_rules"

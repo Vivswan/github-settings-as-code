@@ -1,24 +1,20 @@
 /**
  * Secrets engine tests: the seal round-trip, planSecrets' thunks (each seals
- * its own entry only when executed), reconcileSecrets' resolver use, and
- * duplicate-name rejection.
+ * its own entry only when executed), and duplicate-name rejection. The
+ * context-arm pin at the end guards the SectionContext type the run()
+ * sections still build on.
  */
 
 import { describe, expect, test } from "bun:test";
-import {
-  beginRun,
-  type SectionContext,
-  type SectionMeta,
-} from "../../src/sections/contract/module.js";
+import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
+import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../../src/sections/contract/plan.js";
 import {
   parseSealingKey,
   planSecrets,
-  reconcileSecrets,
   rejectDuplicateSecretNames,
   type SealedSecretPayload,
   type SecretsPlanScope,
-  type SecretsScope,
   sealSecretValue,
   secretKey,
 } from "../../src/sections/shared/secrets-engine.js";
@@ -38,6 +34,11 @@ const section: SectionMeta = {
 
 const KEY_DATA = { key_id: "key-1", key: MOCK_SECRETS_PUBLIC_KEY };
 
+const PUBLIC_KEY_ENDPOINT: EndpointDecl = {
+  route: "GET /repos/{owner}/{repo}/actions/secrets/public-key",
+  statuses: { 200: "the sealing key" },
+};
+
 function resolver(resolved?: Record<string, string>): ExecTools["resolveSecret"] {
   return (reference) => {
     const plaintext = resolved?.[reference];
@@ -45,15 +46,6 @@ function resolver(resolved?: Record<string, string>): ExecTools["resolveSecret"]
       throw new Error(`test resolver has no value for ${reference}`);
     }
     return plaintext;
-  };
-}
-
-function applyCtx(resolved?: Record<string, string>): SectionContext {
-  return {
-    api: new MockApi({}),
-    repo: { owner: "o", name: "r", slug: "o/r" },
-    check: false,
-    resolveSecret: resolver(resolved),
   };
 }
 
@@ -69,6 +61,7 @@ function fabricatedPlanScope(live: string[], reads: string[]): SecretsPlanScope<
       reads.push("list");
       return live.map((name) => ({ name }));
     },
+    publicKeyEndpoint: PUBLIC_KEY_ENDPOINT,
     publicKey: async (describe) => {
       reads.push(describe);
       return KEY_DATA;
@@ -89,30 +82,6 @@ function fabricatedPlanScope(live: string[], reads: string[]): SecretsPlanScope<
   };
 }
 
-/**
- * A fabricated run() scope whose operations never touch an API: the list
- * answers `live`, the public key is the mock keypair's, and every sealed PUT
- * is recorded for the assertions.
- */
-function fabricatedScope(
-  live: string[],
-  puts: Array<{ name: string; payload: SealedSecretPayload }>,
-): SecretsScope {
-  return {
-    label: "actions_secrets",
-    noun: "Actions secret",
-    ops: {
-      list: async () => live.map((name) => ({ name })),
-      publicKey: async () => KEY_DATA,
-      put: async (_ctx, _section, name, payload) => {
-        puts.push({ name, payload });
-        return null;
-      },
-      remove: async () => null,
-    },
-  };
-}
-
 describe("sealing", () => {
   test("sealSecretValue round-trips through the mock keypair, hostile characters included", async () => {
     await mockSodiumReady();
@@ -124,10 +93,41 @@ describe("sealing", () => {
     expect(unsealSecretValue(sealed)).toBe(hostile);
   });
 
+  test.each([
+    ["a missing key_id", { key: MOCK_SECRETS_PUBLIC_KEY }, /pair \(key_id is missing\)/],
+    ["a key that is not base64", { key_id: "k", key: "not base64!" }, /is not valid base64/],
+    [
+      "a key of the wrong length",
+      { key_id: "k", key: Buffer.from("short").toString("base64") },
+      /decodes to 5 bytes where an X25519 public key has 32/,
+    ],
+    [
+      "a right-sized key that is not a usable point",
+      { key_id: "k", key: Buffer.alloc(32).toString("base64") },
+      /is not a usable X25519 public key/,
+    ],
+  ])("parseSealingKey rejects %s, naming the scope and the defect", async (_what, body, defect) => {
+    const attempt = parseSealingKey(
+      section,
+      { label: "actions_secrets" },
+      PUBLIC_KEY_ENDPOINT,
+      body,
+    );
+    await expect(attempt).rejects.toThrow(
+      /^actions_secrets: GET \/repos\/\{owner\}\/\{repo\}\/actions\/secrets\/public-key \(the actions_secrets sealing key\) returned /,
+    );
+    await expect(attempt).rejects.toThrow(defect);
+  });
+
   test("a parsed sealing key seals synchronously into the {encrypted_value, key_id} body, fresh per seal", async () => {
     // Sealed boxes use a fresh ephemeral key per seal, so the ciphertexts
     // must differ while both still carry the exact plaintext.
-    const key = await parseSealingKey(section, { label: "actions_secrets" }, KEY_DATA);
+    const key = await parseSealingKey(
+      section,
+      { label: "actions_secrets" },
+      PUBLIC_KEY_ENDPOINT,
+      KEY_DATA,
+    );
     expect(key.keyId).toBe("key-1");
     const a = key.seal("same-value");
     const b = key.seal("same-value");
@@ -258,12 +258,11 @@ describe("planSecrets and the execution-time resolver", () => {
   });
 });
 
-describe("reconcileSecrets and the apply-arm resolver", () => {
+describe("the section context arms", () => {
   // Reference VALIDATION (literals, provenance, unset/empty) lives in the
   // engine (src/engine/secrets.ts + secret-refs.ts) and runs before any
-  // section; these tests cover only the resolver usage. The context ARMS
-  // themselves are compiler-enforced: a check context cannot carry a
-  // resolver, and an apply context cannot lack one.
+  // section. The context ARMS are compiler-enforced: a check context cannot
+  // carry a resolver, and an apply context cannot lack one.
   test("a check-mode context carrying a resolver does not compile", () => {
     // @ts-expect-error the check arm pins resolveSecret to never
     const checkCtx: SectionContext = {
@@ -273,55 +272,5 @@ describe("reconcileSecrets and the apply-arm resolver", () => {
       resolveSecret: (reference: string): string => reference,
     };
     expect(checkCtx.check).toBe(true);
-  });
-
-  test("an empty declaration in apply mode never touches the resolver", async () => {
-    // A document with no references gets the engine's stub resolver, and
-    // `actions_secrets: []` (or an entries-less `undeclared: delete` purge)
-    // must still apply - nothing to seal means nothing to resolve.
-    const puts: Array<{ name: string; payload: SealedSecretPayload }> = [];
-    const run = beginRun(applyCtx());
-    await reconcileSecrets(run, section, fabricatedScope([], puts), {
-      entries: [],
-      policy: "keep",
-      defaultPolicy: "keep",
-    });
-    expect(run.result.changes).toEqual([]);
-    expect(puts).toEqual([]);
-  });
-
-  test("apply seals each entry's OWN resolved value, uppercasing the name", async () => {
-    await mockSodiumReady();
-    const puts: Array<{ name: string; payload: SealedSecretPayload }> = [];
-    await reconcileSecrets(
-      beginRun(applyCtx({ $ONE: "plain-1", $TWO: "plain-2" })),
-      section,
-      fabricatedScope([], puts),
-      {
-        entries: [
-          { name: "first", value: "$ONE" },
-          { name: "SECOND", value: "$TWO" },
-        ],
-        policy: "keep",
-        defaultPolicy: "keep",
-      },
-    );
-    expect(puts.map((put) => put.name)).toEqual(["FIRST", "SECOND"]);
-    expect(puts.map((put) => unsealSecretValue(put.payload.encrypted_value))).toEqual([
-      "plain-1",
-      "plain-2",
-    ]);
-  });
-
-  test("a value the engine never resolved fails the entry loudly", async () => {
-    const puts: Array<{ name: string; payload: SealedSecretPayload }> = [];
-    await expect(
-      reconcileSecrets(beginRun(applyCtx({})), section, fabricatedScope([], puts), {
-        entries: [{ name: "A", value: "$NEVER_RESOLVED" }],
-        policy: "keep",
-        defaultPolicy: "keep",
-      }),
-    ).rejects.toThrow(/no value for \$NEVER_RESOLVED/);
-    expect(puts).toEqual([]);
   });
 });

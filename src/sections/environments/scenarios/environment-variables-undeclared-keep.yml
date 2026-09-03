@@ -35,7 +35,6 @@ expect:
   outcomes:
     environments: applied
   mutations:
-    - "PUT /repos/{repo}/environments/production"
     - "PATCH /repos/{repo}/environments/production/variables/DEPLOY_REGION"
   never:
     - "DELETE /repos/{repo}/environments/production/variables"

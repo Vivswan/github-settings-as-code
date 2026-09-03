@@ -219,6 +219,44 @@ describe("throwFor context enrichment", () => {
     ).toThrow(/creating ruleset "quality" failed - POST \/repos\/o\/r\/rulesets: 422/);
   });
 
+  test("a GraphQL rejection appends the declared outcome prose of each observed error type; undeclared types add nothing", () => {
+    // The GraphQL twin of the status-keyed REST hint (a GraphQL op cannot
+    // declare one; its type forbids it).
+    const op = {
+      name: "PinEnvironment",
+      kind: "write",
+      query: "mutation PinEnvironment { pinEnvironment { environment { name } } }",
+      outcomes: {
+        ok: "pinned",
+        UNPROCESSABLE: "the pinned list is full; unpin one in the GitHub UI",
+      },
+    } as const;
+    const message = (types: readonly string[]): string => {
+      try {
+        throwFor(
+          section,
+          "GRAPHQL",
+          "PinEnvironment",
+          {
+            status: 422,
+            message: "Repositories may only have 10 pinned",
+            body: "",
+            graphqlTypes: types,
+          },
+          { operation: 'pinning environment "prod"', op },
+        );
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error("throwFor returned");
+    };
+    expect(message(["UNPROCESSABLE"])).toBe(
+      'rulesets: pinning environment "prod" failed - GRAPHQL PinEnvironment: 422 Repositories may only have 10 pinned. The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above. The pinned list is full; unpin one in the GitHub UI',
+    );
+    expect(message(["FORBIDDEN"])).toMatch(/message above$/);
+    expect(message([])).toMatch(/message above$/);
+  });
+
   test("the status-matched hint and documentation_url are appended to the generic branch", () => {
     expect(() =>
       throwFor(

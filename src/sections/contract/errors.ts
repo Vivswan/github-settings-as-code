@@ -3,6 +3,7 @@
 import type { ApiError } from "../../github/api.js";
 import { isPermissionError, isRateLimitError } from "../../github/api.js";
 import type { HintableStatus } from "./endpoints.js";
+import { toleratedGraphqlErrors } from "./graphql.js";
 import {
   endpointPermission,
   type FailingOp,
@@ -107,7 +108,23 @@ export function throwFor(
       `${section.key}: ${cause}. The token was rejected as invalid or expired; update the token input (or the secret it reads) with a valid, unexpired PAT`,
     );
   }
-  const advice = context?.op?.hints?.[error.status as HintableStatus];
+  // A GraphQL rejection carries error types instead of a status; the op's
+  // declared outcome for each observed type is the same kind of advice as a
+  // status-keyed REST hint.
+  const op = context?.op;
+  const advice =
+    op === undefined
+      ? undefined
+      : "outcomes" in op
+        ? toleratedGraphqlErrors(op)
+            .filter((type) => error.graphqlTypes?.includes(type))
+            .map((type) => op.outcomes[type])
+            .filter((outcome): outcome is string => outcome !== undefined)
+            // Outcome prose is written lowercase (it doubles as a declaration
+            // description); as a sentence after the advice it starts a new one.
+            .map((outcome) => outcome.charAt(0).toUpperCase() + outcome.slice(1))
+            .join(". ")
+        : op.hints?.[error.status as HintableStatus];
   const hint = advice ? `. ${advice}` : "";
   const docs = error.documentationUrl
     ? `. The fields and values this endpoint accepts are documented at ${error.documentationUrl}`

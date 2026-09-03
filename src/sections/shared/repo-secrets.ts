@@ -266,6 +266,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
           await ctx.read.list.listAllEnveloped("secrets"),
         ),
       publicKey: (describe) => ctx.read.publicKey.call({ describe }),
+      publicKeyEndpoint: wide.publicKey,
       put: (write) => ({
         role: "put",
         params: { secret_name: write.name },

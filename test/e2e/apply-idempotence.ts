@@ -36,12 +36,9 @@
  *   divergence, and a converged ruleset plans nothing.
  * - branches (true): the protection PUT, the signature sub-endpoint, and the
  *   rule mutations are all drift-gated, so a converged repo plans nothing.
- * - environments (false): every declared environment is PUT unconditionally.
- *   The nested `variables` reconciliation does compare before writing (it
- *   lists and diffs first, so a second apply issues no variable writes), but
- *   the unconditional PUT keeps the whole section false; the state-stability
- *   half of the proof covers the variables family, and the nested `secrets`
- *   PUTs are always-rewrite by contract (see ALWAYS_REWRITE_STATE_FAMILIES).
+ * - environments (true): the PUT fires only on probe drift and every nested
+ *   family lists and diffs first; the sealed environment-secret PUT recurs on
+ *   its alwaysRewrite flag and is exempt (see ALWAYS_REWRITE_STATE_FAMILIES).
  * - actions (true): every endpoint group's PUT is planned only when its own
  *   GET diverges from the declared body.
  * - actions_secrets, dependabot_secrets, codespaces_secrets, agents_secrets
@@ -87,7 +84,7 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   labels: true,
   rulesets: true,
   branches: true,
-  environments: false,
+  environments: true,
   autolinks: true,
   actions: true,
   actions_secrets: true,

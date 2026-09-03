@@ -1,45 +1,37 @@
 /**
- * The nested reconciliation seam: the NESTED_KEYS/NESTED_RECONCILERS table
- * run() loops over, the routed-scalar strip (splitEntry), and the
- * per-environment `variables` and `secrets` adapters over the shared
- * engines. The branch-policy and protection-rule reconcilers live in their
- * own sibling modules; the table wires them in.
+ * The nested planning seam: the NESTED_KEYS/NESTED_PLANNERS table plan()
+ * loops over, splitEntry, and the per-environment variables and secrets
+ * planners; a missing environment's entries plan as creates without a read.
  */
 
 import { z } from "zod";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import { parseLive } from "../contract/live.js";
 import {
   type EntryOf,
-  type SectionContext,
-  type SectionModule,
-  type SectionRun,
+  type SectionMeta,
+  undeclaredDrift,
+  undeclaredNote,
   undeclaredPolicy,
 } from "../contract/module.js";
-import { call, listAllEnveloped } from "../contract/requests.js";
+import { hasDrift, plainData } from "../contract/plan.js";
 import {
   LIVE_SECRET_NAMES,
-  reconcileSecrets,
-  type SecretsScope,
-  type SecretsScopeOps,
+  parseSealingKey,
+  type SealingKey,
   secretKey,
 } from "../shared/secrets-engine.js";
-import {
-  LiveVariable,
-  reconcileVariables as reconcileEngineVariables,
-  type VariablesScope,
-  type VariablesScopeOps,
-  variableKey,
-} from "../shared/variables-engine.js";
+import { LiveVariable, variableKey } from "../shared/variables-engine.js";
 import {
   BRANCH_POLICIES_DEFAULT_POLICY,
-  reconcileBranchPolicies,
+  planBranchPolicies,
   validateBranchPolicies,
 } from "./branch-policies.js";
-import { ENDPOINTS } from "./endpoints.js";
+import { ENDPOINTS, type EnvironmentRestOp, type EnvironmentsRestContext } from "./endpoints.js";
 import {
   PROTECTION_RULES_DEFAULT_POLICY,
-  reconcileProtectionRules,
+  planProtectionRules,
   validateProtectionRules,
 } from "./protection-rules.js";
 import type {
@@ -51,11 +43,8 @@ import type {
 
 /**
  * The per-environment keys that are NOT part of the environment PUT body:
- * each is a sub-resource with its own endpoint family, reconciled AFTER the
- * PUT succeeds by its NESTED_RECONCILERS entry. splitEntry strips them in
- * one place, so a nested key can never leak into the passthrough PUT
- * payload or the check-mode environment diff. Exported so the docs test can
- * pin the undeclared-policy guide's nested-knob enumeration to this list.
+ * each is a sub-resource planned after the PUT by its NESTED_PLANNERS entry;
+ * splitEntry strips them so none can leak into the PUT or the environment diff.
  */
 export const NESTED_KEYS = [
   "variables",
@@ -93,8 +82,14 @@ type NestedByType = {
 type _NestedListComplete = MustBeNever<Exclude<NestedByType, NestedKey>>;
 type _NestedListSound = MustBeNever<Exclude<NestedKey, NestedByType>>;
 
+/** What one nested planner contributes: its operations, in wire order, and its notes. */
+export interface NestedPlan {
+  ops: EnvironmentRestOp[];
+  notes: string[];
+}
+
 /**
- * One nested key's handling, so run() can loop over NESTED_KEYS instead of
+ * One nested key's handling, so plan() can loop over NESTED_KEYS instead of
  * branching per key. The table below is a mapped type over NestedKey, so a
  * key added to NESTED_KEYS without a matching entry fails to compile (the
  * section-registry pattern). Function-valued properties on purpose, not
@@ -103,7 +98,7 @@ type _NestedListSound = MustBeNever<Exclude<NestedKey, NestedByType>>;
  * entry type differs from the variable/secret ones - a swapped pairing is a
  * compile error, not a runtime surprise.
  */
-interface NestedReconciler<K extends NestedKey> {
+interface NestedPlanner<K extends NestedKey> {
   /**
    * The policy for live sub-resources WITHIN a declared key that its entries
    * do not declare, the single source every unwrap reads. An explicit
@@ -114,10 +109,9 @@ interface NestedReconciler<K extends NestedKey> {
    */
   defaultPolicy: UndeclaredPolicy;
   /**
-   * Check-mode note when the declared environment does not exist yet:
-   * listing a missing environment's sub-resources is impossible, so the
-   * declared list cannot be verified until the environment exists, and the
-   * missing-environment drift already fails check.
+   * The note beside a declared environment that does not exist yet: its
+   * sub-resources cannot be listed, so the declared list plans against an
+   * empty environment (every entry a create) instead of a verified one.
    */
   missingNote: (envName: string) => string;
   /**
@@ -126,27 +120,23 @@ interface NestedReconciler<K extends NestedKey> {
    * any write.
    */
   validate?: (env: EnvironmentConfig, entries: readonly NestedEntry<K>[]) => void;
-  /** Reconcile one environment's declared list against the live sub-resources. */
-  reconcile: (
-    ctx: SectionContext,
-    section: SectionModule<"environments">,
+  /** Plan one environment's declared list against the live sub-resources. */
+  plan: (
+    ctx: EnvironmentsRestContext,
+    section: SectionMeta,
     envName: string,
     policy: UndeclaredPolicy,
     entries: readonly NestedEntry<K>[],
-    run: SectionRun,
     /**
-     * The probed live environment body, present in CHECK mode only: the
-     * branch-policy reconciler reads its custom_branch_policies flag to know
-     * whether the pattern list is even readable. Apply mode passes undefined
-     * on purpose - the PUT that just ran defines the live flags there, and
-     * the shape's flag-pairing refinement guarantees the declared flag is
-     * true.
+     * The probed live environment body, or undefined for one the plan creates
+     * (its sub-resources 404 until the PUT lands, so the planner reads nothing
+     * and plans every entry as a create; branch policies also read its flag).
      */
     liveEnv: Record<string, unknown> | undefined,
-  ) => Promise<void>;
+  ) => Promise<NestedPlan>;
 }
 
-export const NESTED_RECONCILERS: { [K in NestedKey]: NestedReconciler<K> } = {
+const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
   variables: {
     // "delete" like the top-level actions_variables default: variables are
     // readable, recreatable configuration.
@@ -154,7 +144,7 @@ export const NESTED_RECONCILERS: { [K in NestedKey]: NestedReconciler<K> } = {
     missingNote: (envName) =>
       `environments[${envName}].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables`,
     validate: (env, entries) => rejectDuplicateVariables(env.name, entries),
-    reconcile: reconcileVariables,
+    plan: planVariables,
   },
   secrets: {
     // "keep" like the top-level secret families: a deleted secret's value is
@@ -163,28 +153,28 @@ export const NESTED_RECONCILERS: { [K in NestedKey]: NestedReconciler<K> } = {
     missingNote: (envName) =>
       `environments[${envName}].secrets: not verifiable while the environment is missing; apply will create the environment and reconcile the declared secrets`,
     validate: (env, entries) => rejectDuplicateSecrets(env.name, entries),
-    reconcile: reconcileEnvironmentSecrets,
+    plan: planEnvironmentSecrets,
   },
   deployment_branch_policies: {
     defaultPolicy: BRANCH_POLICIES_DEFAULT_POLICY,
     missingNote: (envName) =>
       `environments[${envName}].deployment_branch_policies: not verifiable while the environment is missing; apply will create the environment and reconcile the declared patterns`,
     validate: validateBranchPolicies,
-    reconcile: reconcileBranchPolicies,
+    plan: planBranchPolicies,
   },
   deployment_protection_rules: {
     defaultPolicy: PROTECTION_RULES_DEFAULT_POLICY,
     missingNote: (envName) =>
       `environments[${envName}].deployment_protection_rules: not verifiable while the environment is missing; apply will create the environment and reconcile the declared protection rules`,
     validate: validateProtectionRules,
-    reconcile: reconcileProtectionRules,
+    plan: planProtectionRules,
   },
 };
 
 /**
  * Unwrap one nested key's declared value against its own table default.
  * Generic over K so the table lookup and the declared value stay correlated
- * to the same literal key; the union-typed loop variable in run() cannot
+ * to the same literal key; the union-typed loop variable in plan() cannot
  * express that without casts. The parameter is spelled
  * NonNullable<EnvironmentConfig[K]> rather than the identical
  * NestedDeclared[K]: tsc relates the guarded env[key] to the former
@@ -199,33 +189,41 @@ function unwrapNested<K extends NestedKey>(
 ): { policy: UndeclaredPolicy; entries: readonly NestedEntry<K>[] } {
   return undeclaredPolicy(
     declared as readonly NestedEntry<K>[] | UndeclaredPolicyList<NestedEntry<K>>,
-    NESTED_RECONCILERS[key].defaultPolicy,
+    NESTED_PLANNERS[key].defaultPolicy,
   );
 }
 
-/** Run one nested key's upfront validation (see NestedReconciler.validate). */
+/** Run one nested key's upfront validation (see NestedPlanner.validate). */
 export function validateNested<K extends NestedKey>(key: K, env: EnvironmentConfig): void {
   const declared = env[key];
   if (declared !== undefined) {
-    NESTED_RECONCILERS[key].validate?.(env, unwrapNested(key, declared).entries);
+    NESTED_PLANNERS[key].validate?.(env, unwrapNested(key, declared).entries);
   }
 }
 
-/** Reconcile one nested key of one environment; generic like validateNested. */
-export async function reconcileNested<K extends NestedKey>(
-  ctx: SectionContext,
-  section: SectionModule<"environments">,
+/**
+ * Plan one nested key of one environment (generic like validateNested); on a
+ * missing environment the missing-environment note joins the planner's creates.
+ */
+export async function planNested<K extends NestedKey>(
+  ctx: EnvironmentsRestContext,
+  section: SectionMeta,
   key: K,
   envName: string,
   nested: Pick<EnvironmentConfig, NestedKey>,
-  run: SectionRun,
   liveEnv: Record<string, unknown> | undefined,
-): Promise<void> {
+): Promise<NestedPlan> {
   const declared = nested[key];
-  if (declared !== undefined) {
-    const { policy, entries } = unwrapNested(key, declared);
-    await NESTED_RECONCILERS[key].reconcile(ctx, section, envName, policy, entries, run, liveEnv);
+  if (declared === undefined) {
+    return { ops: [], notes: [] };
   }
+  const { policy, entries } = unwrapNested(key, declared);
+  const planner = NESTED_PLANNERS[key];
+  const planned = await planner.plan(ctx, section, envName, policy, entries, liveEnv);
+  return {
+    ops: planned.ops,
+    notes: liveEnv === undefined ? [planner.missingNote(envName), ...planned.notes] : planned.notes,
+  };
 }
 
 /**
@@ -308,75 +306,107 @@ function rejectDuplicateVariables(
 }
 
 /**
- * ONE variables-engine scope per environment, the sibling of
- * environmentSecretsScope below: the four operation closures close over this
- * environment's name, so the per-route params contract typechecks here where
- * the literal routes are known, and the engine never sees a route. The label
- * and the suffixes carry the environment name, so every drift, note, and
- * change line is unambiguous when several environments declare variables.
+ * Plan one environment's `variables`: create missing, update divergent values
+ * and passthrough fields (PATCH at the LIVE name), and apply the undeclared
+ * policy to the rest; every line names the environment.
  */
-function environmentVariablesScope(envName: string): VariablesScope {
-  const ops: VariablesScopeOps = {
-    list: async (ctx, section) =>
-      parseLive(
-        section,
-        ENDPOINTS.listVariables,
-        z.array(LiveVariable),
-        await listAllEnveloped(ctx, section, ENDPOINTS.listVariables, "variables", {
-          params: { environment_name: envName },
-        }),
-        `environment "${envName}"`,
-      ),
-    create: (ctx, section, name, payload) =>
-      call(ctx, section, ENDPOINTS.createVariable, {
-        params: { environment_name: envName },
-        payload,
-        describe: `creating variable "${name}" in environment "${envName}"`,
-      }),
-    update: (ctx, section, names, payload) =>
-      call(ctx, section, ENDPOINTS.updateVariable, {
-        params: { environment_name: envName, name: names.live },
-        payload,
-        describe: `updating variable "${names.declared}" in environment "${envName}"`,
-      }),
-    remove: (ctx, section, liveName) =>
-      call(ctx, section, ENDPOINTS.removeVariable, {
-        params: { environment_name: envName, name: liveName },
-        describe: `deleting undeclared variable "${liveName}" from environment "${envName}"`,
-      }),
-  };
-  return {
-    label: `environments[${envName}].variables`,
-    noun: "variable",
-    home: "the environment",
-    keepHome: `environment "${envName}"`,
-    changeSuffix: ` in environment "${envName}"`,
-    removeSuffix: ` from environment "${envName}"`,
-    ops,
-  };
-}
-
-/**
- * Reconcile one environment's declared `variables` list through the shared
- * variables engine, under the policy the caller unwrapped against the table
- * default: create missing ones, update divergent values, and apply the
- * undeclared policy to the rest.
- */
-async function reconcileVariables(
-  _ctx: SectionContext,
-  section: SectionModule<"environments">,
+async function planVariables(
+  ctx: EnvironmentsRestContext,
+  section: SectionMeta,
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly EnvironmentVariableConfig[],
-  run: SectionRun,
-): Promise<void> {
-  // The engine accumulates directly onto run.result, so no merge exists to
-  // mispair; the context travels inside `run`, correlated with the result.
-  await reconcileEngineVariables(run, section, environmentVariablesScope(envName), {
-    entries,
-    policy,
-    defaultPolicy: NESTED_RECONCILERS.variables.defaultPolicy,
-  });
+  liveEnv: Record<string, unknown> | undefined,
+): Promise<NestedPlan> {
+  const params = { environment_name: envName };
+  const label = `environments[${envName}].variables`;
+  const live =
+    liveEnv === undefined
+      ? []
+      : parseLive(
+          section,
+          ENDPOINTS.listVariables,
+          z.array(LiveVariable),
+          await ctx.read.listVariables.listAllEnveloped("variables", { params }),
+          `environment "${envName}"`,
+        );
+  const liveByKey = new Map(live.map((variable) => [variableKey(variable.name), variable]));
+  const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
+  const planned: NestedPlan = { ops: [], notes: [] };
+
+  for (const variable of entries) {
+    const entryLabel = `${label}[${variable.name}]`;
+    const existing = liveByKey.get(variableKey(variable.name));
+    const { name: _name, value: _value, ...extraKeys } = variable;
+    if (!existing) {
+      planned.ops.push({
+        role: "createVariable",
+        params,
+        payload: plainData({ name: variable.name, value: variable.value, ...extraKeys }),
+        drift: [
+          `${entryLabel}: missing - declared in the settings file but not on the environment; apply will create it`,
+        ],
+        change: `created variable "${variable.name}" in environment "${envName}"`,
+        describe: `creating variable "${variable.name}" in environment "${envName}"`,
+      });
+      continue;
+    }
+    // The live name never drifts against the declaration: GitHub stores it
+    // uppercased whatever casing the file uses, so only the value (and any
+    // declared passthrough fields) can diverge.
+    const drift = [
+      ...(existing.value === variable.value
+        ? []
+        : [
+            `${entryLabel}.value: declared ${JSON.stringify(variable.value)} != live ${JSON.stringify(existing.value)}; apply will set the declared value`,
+          ]),
+      ...subsetDiff(extraKeys, existing, entryLabel),
+    ];
+    if (!hasDrift(drift)) {
+      continue;
+    }
+    const phantom = phantomKeys(extraKeys, existing);
+    if (phantom.length > 0) {
+      planned.notes.push(phantomNote(entryLabel, phantom, "variable", "this update will re-run"));
+    }
+    planned.ops.push({
+      role: "updateVariable",
+      params: { ...params, name: existing.name },
+      payload: plainData({ value: variable.value, ...extraKeys }),
+      drift,
+      change: `updated variable "${variable.name}" in environment "${envName}"`,
+      describe: `updating variable "${variable.name}" in environment "${envName}"`,
+    });
+  }
+
+  for (const variable of liveByKey.values()) {
+    if (declaredKeys.has(variableKey(variable.name))) {
+      continue;
+    }
+    if (policy === "keep") {
+      planned.notes.push(
+        undeclaredNote({
+          subject: `variable "${variable.name}"`,
+          state: `exists on environment "${envName}" but is not declared`,
+          action: "DELETE it",
+        }),
+      );
+      continue;
+    }
+    planned.ops.push({
+      role: "removeVariable",
+      params: { ...params, name: variable.name },
+      drift: [
+        undeclaredDrift(NESTED_PLANNERS.variables.defaultPolicy, {
+          label: `${label}[${variable.name}]`,
+          action: "DELETE it",
+        }),
+      ],
+      change: `DELETED undeclared variable "${variable.name}" from environment "${envName}"`,
+      describe: `deleting undeclared variable "${variable.name}" from environment "${envName}"`,
+    });
+  }
+  return planned;
 }
 
 /**
@@ -407,71 +437,102 @@ function rejectDuplicateSecrets(
 }
 
 /**
- * ONE secrets-engine scope per environment: the four operation closures
- * close over this environment's name, so the per-route params contract
- * typechecks here where the literal routes are known, and the engine never
- * sees a route. The label and noun both carry the environment name, so
- * every drift, note, and change line is unambiguous when several
- * environments declare secrets.
+ * Plan one environment's `secrets`: existence is the only comparable state
+ * (a missing name is drift; every declared secret is a sealed alwaysRewrite
+ * PUT), and the sealing key is read inside the first thunk, after the PUT.
  */
-function environmentSecretsScope(envName: string): SecretsScope {
-  const ops: SecretsScopeOps = {
-    list: async (ctx, section) =>
-      parseLive(
-        section,
-        ENDPOINTS.listSecrets,
-        LIVE_SECRET_NAMES,
-        await listAllEnveloped(ctx, section, ENDPOINTS.listSecrets, "secrets", {
-          params: { environment_name: envName },
-        }),
-        `environment "${envName}"`,
-      ),
-    publicKey: (ctx, section, describe) =>
-      call(ctx, section, ENDPOINTS.secretsPublicKey, {
-        params: { environment_name: envName },
-        describe,
-      }),
-    put: (ctx, section, secretName, payload, describe) =>
-      call(ctx, section, ENDPOINTS.putSecret, {
-        params: { environment_name: envName, secret_name: secretName },
-        payload,
-        describe,
-      }),
-    remove: (ctx, section, secretName, describe) =>
-      call(ctx, section, ENDPOINTS.removeSecret, {
-        params: { environment_name: envName, secret_name: secretName },
-        describe,
-      }),
-  };
-  return {
-    label: `environments[${envName}].secrets`,
-    noun: `${envName} environment secret`,
-    home: "the environment",
-    changeSuffix: ` in environment "${envName}"`,
-    ops,
-  };
-}
-
-/**
- * Reconcile one environment's declared `secrets` list through the shared
- * secrets engine, under the policy the caller unwrapped against the table
- * default. Each call is inherently scoped to ITS environment's entries, so
- * same-named secrets across environments can never collide: the engine
- * resolves each entry's own reference through ctx.resolveSecret.
- */
-async function reconcileEnvironmentSecrets(
-  _ctx: SectionContext,
-  section: SectionModule<"environments">,
+async function planEnvironmentSecrets(
+  ctx: EnvironmentsRestContext,
+  section: SectionMeta,
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly EnvironmentSecretConfig[],
-  run: SectionRun,
-): Promise<void> {
-  // The engine accumulates directly onto run.result, so no merge exists to
-  // mispair; the context travels inside `run`, correlated with the result.
-  await reconcileSecrets(run, section, environmentSecretsScope(envName), {
-    entries,
-    policy,
-    defaultPolicy: NESTED_RECONCILERS.secrets.defaultPolicy,
-  });
+  liveEnv: Record<string, unknown> | undefined,
+): Promise<NestedPlan> {
+  const params = { environment_name: envName };
+  const label = `environments[${envName}].secrets`;
+  const noun = `${envName} environment secret`;
+  const suffix = ` in environment "${envName}"`;
+  const live =
+    liveEnv === undefined
+      ? []
+      : parseLive(
+          section,
+          ENDPOINTS.listSecrets,
+          LIVE_SECRET_NAMES,
+          await ctx.read.listSecrets.listAllEnveloped("secrets", { params }),
+          `environment "${envName}"`,
+        );
+  // Uppercase key -> the name as the API listed it (already uppercase on real
+  // GitHub; normalizing keeps a differently-cased mock or proxy harmless).
+  const liveByKey = new Map(live.map((item) => [secretKey(item.name), item.name]));
+  const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
+  const planned: NestedPlan = { ops: [], notes: [] };
+
+  let sealingKey: Promise<SealingKey> | undefined;
+  const readSealingKey = (): Promise<SealingKey> => {
+    sealingKey ??= ctx.read.secretsPublicKey
+      .call({ params, describe: `reading the ${label} sealing key` })
+      .then((body) => parseSealingKey(section, { label }, ENDPOINTS.secretsPublicKey, body));
+    return sealingKey;
+  };
+  for (const entry of entries) {
+    const name = secretKey(entry.name);
+    const exists = liveByKey.has(name);
+    planned.ops.push({
+      role: "putSecret",
+      params: { ...params, secret_name: name },
+      payload: async (exec) => {
+        const plaintext = exec.resolveSecret(entry.value);
+        return (await readSealingKey()).seal(plaintext);
+      },
+      drift: exists
+        ? []
+        : [
+            `${label}[${name}]: missing - declared in the settings file but not on the environment; apply will create it`,
+          ],
+      // Existence from the listing decides the verb; the PUT's own 201/204
+      // says the same thing but the executor deliberately does not surface
+      // statuses.
+      change: `${exists ? "updated" : "created"} secret "${name}"${suffix}`,
+      describe: `writing secret "${name}"${suffix}`,
+    });
+  }
+  if (entries.length > 0 && liveEnv !== undefined) {
+    // ONE note per environment (the LFS precedent); an environment the plan
+    // creates already carries the missing-environment note, which says the
+    // same of its whole list.
+    planned.notes.push(
+      `${noun} values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run`,
+    );
+  }
+
+  for (const [key, liveName] of liveByKey) {
+    if (declaredKeys.has(key)) {
+      continue;
+    }
+    if (policy === "keep") {
+      planned.notes.push(
+        undeclaredNote({
+          subject: `${noun} "${liveName}"`,
+          state: "exists on the environment but is not declared",
+          action: "DELETE it (a deleted secret's value is unrecoverable)",
+        }),
+      );
+      continue;
+    }
+    planned.ops.push({
+      role: "removeSecret",
+      params: { ...params, secret_name: liveName },
+      drift: [
+        undeclaredDrift(NESTED_PLANNERS.secrets.defaultPolicy, {
+          label: `${label}[${liveName}]`,
+          action: "DELETE it (the value is unrecoverable)",
+        }),
+      ],
+      change: `DELETED undeclared secret "${liveName}"${suffix}`,
+      describe: `deleting undeclared secret "${liveName}"${suffix}`,
+    });
+  }
+  return planned;
 }

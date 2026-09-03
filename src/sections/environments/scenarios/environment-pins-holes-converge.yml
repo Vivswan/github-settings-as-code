@@ -41,9 +41,6 @@ expect:
   outcomes:
     environments: applied
   mutations:
-    - "PUT /repos/{repo}/environments/alpha"
-    - "PUT /repos/{repo}/environments/beta"
-    - "PUT /repos/{repo}/environments/gamma"
     - "PUT /repos/{repo}/environments/delta"
     - "PUT /repos/{repo}/environments/epsilon"
     - "GRAPHQL PinEnvironment"
