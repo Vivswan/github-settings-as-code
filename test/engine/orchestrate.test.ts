@@ -12,7 +12,7 @@ import {
 } from "../../src/engine/orchestrate.js";
 import type { GithubClient } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
-import { prefixedIo } from "../../src/io.js";
+import { maskRegistry, prefixedIo } from "../../src/io.js";
 import type { SettingsFile } from "../../src/schema.js";
 import type { SECTIONS } from "../../src/sections/registry.js";
 import { MockApi } from "../mock-api.js";
@@ -28,8 +28,7 @@ function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: s
       debug: () => {},
       summary: () => {},
       output: () => {},
-      mask: (value) => masked.push(value),
-      masked: () => new Set(masked),
+      ...maskRegistry((value) => masked.push(value)),
     },
     annotations,
     logs,
@@ -48,8 +47,7 @@ function validated(doc: SettingsFile): ValidatedSettings {
     debug: () => {},
     summary: () => {},
     output: () => {},
-    mask: () => {},
-    masked: () => new Set(),
+    ...maskRegistry(() => {}),
   };
   const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silent);
   if ("error" in verdict) {

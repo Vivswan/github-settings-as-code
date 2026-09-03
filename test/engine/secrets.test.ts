@@ -7,7 +7,7 @@ import {
   validateSettingsDoc,
 } from "../../src/engine/orchestrate.js";
 import { collectSecretValues, targetSecretSource } from "../../src/engine/secrets.js";
-import type { Io } from "../../src/io.js";
+import { type Io, maskRegistry } from "../../src/io.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { MockApi } from "../mock-api.js";
@@ -34,8 +34,7 @@ function captureIo(): { io: Io; annotations: string[] } {
       debug: () => {},
       summary: () => {},
       output: () => {},
-      mask: () => {},
-      masked: () => new Set(),
+      ...maskRegistry(() => {}),
     },
     annotations,
   };
@@ -208,8 +207,7 @@ describe("runForRepo with merged provenance", () => {
       debug: () => {},
       summary: () => {},
       output: () => {},
-      mask: () => {},
-      masked: () => new Set(),
+      ...maskRegistry(() => {}),
     };
     const verdict = validateSettingsDoc(doc, "merged fixture", new Set(), silent);
     if ("error" in verdict) {

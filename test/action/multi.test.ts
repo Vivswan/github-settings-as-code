@@ -12,6 +12,7 @@ import {
 } from "../../src/report/artifact-report.js";
 import { applyMarkerInjection } from "../../src/report/delivery.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
+import { silentIo } from "../io-fake.js";
 import { MockApi } from "../mock-api.js";
 
 function captureIo(): {
@@ -1088,16 +1089,7 @@ describe("applyMarkerInjection", () => {
   // Fixtures are branded through the REAL boundary, so an invalid one fails
   // here instead of riding a cast into the injection.
   const validated = (doc: SettingsFile): ValidatedSettings => {
-    const silent: Io = {
-      annotate: () => {},
-      log: () => {},
-      debug: () => {},
-      summary: () => {},
-      output: () => {},
-      mask: () => {},
-      masked: () => new Set(),
-    };
-    const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silent);
+    const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silentIo());
     if ("error" in verdict) {
       throw new Error(`test fixture failed validation: ${verdict.error}`);
     }

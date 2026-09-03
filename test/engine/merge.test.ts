@@ -1,18 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { applyDefaults, deepMerge } from "../../src/engine/merge.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { Io } from "../../src/io.js";
 import type { SettingsFile } from "../../src/schema.js";
-
-const silentIo: Io = {
-  annotate: () => {},
-  log: () => {},
-  debug: () => {},
-  summary: () => {},
-  output: () => {},
-  mask: () => {},
-  masked: () => new Set(),
-};
+import { silentIo } from "../io-fake.js";
 
 /**
  * applyDefaults hands back the merged document UNVALIDATED (unknown) - only
@@ -151,7 +141,7 @@ describe("applyDefaults undeclared-policy knob", () => {
     const { settings } = apply(defaults, repo);
     expect(settings.labels as unknown).toEqual({ undeclared: "delete" });
     // ...and the merged document is rejected downstream, naming the section.
-    const invalid = validateSettingsDoc(settings, "target", new Set(), silentIo);
+    const invalid = validateSettingsDoc(settings, "target", new Set(), silentIo());
     expect("error" in invalid ? invalid.error : "").toContain("labels.entries");
   });
 
@@ -162,7 +152,7 @@ describe("applyDefaults undeclared-policy knob", () => {
     const repo = { labels: {} } as unknown as SettingsFile;
     const { settings } = apply(defaults, repo);
     expect(settings.labels as unknown).toEqual({});
-    const invalid = validateSettingsDoc(settings, "target", new Set(), silentIo);
+    const invalid = validateSettingsDoc(settings, "target", new Set(), silentIo());
     expect("error" in invalid ? invalid.error : "").toContain("labels.entries");
   });
 
@@ -175,7 +165,7 @@ describe("applyDefaults undeclared-policy knob", () => {
     const defaults = { labels: { undeclared: "delete", entries: [] } } as SettingsFile;
     const { settings } = apply(defaults, {});
     expect(settings.labels).toEqual({ undeclared: "delete", entries: [] });
-    expect("error" in validateSettingsDoc(settings, "target", new Set(), silentIo)).toBe(false);
+    expect("error" in validateSettingsDoc(settings, "target", new Set(), silentIo())).toBe(false);
   });
 
   test("two plain arrays resolve to the section default, not each other's", () => {
@@ -245,7 +235,7 @@ describe("applyDefaults undeclared-policy knob", () => {
     );
     expect(settings).toBeInstanceOf(Date);
     expect(disabled).toEqual([]);
-    const verdict = validateSettingsDoc(settings, "target", new Set(), silentIo);
+    const verdict = validateSettingsDoc(settings, "target", new Set(), silentIo());
     expect("error" in verdict ? verdict.error : "").toContain("plain YAML mapping");
   });
 

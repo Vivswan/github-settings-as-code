@@ -1,20 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { silentIo } from "../../../test/io-fake.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { ctx } from "../../../test/sections/context.js";
 import { validateSettingsDoc } from "../../engine/orchestrate.js";
-import type { Io } from "../../io.js";
 import { secretScanningPatternsSection } from "./index.js";
-
-/** A no-op Io so validateSettingsDoc can run without @actions/core. */
-const silentIo: Io = {
-  annotate() {},
-  log() {},
-  debug() {},
-  summary() {},
-  output() {},
-  mask() {},
-  masked: () => new Set(),
-};
 
 /** The bare-array list body the mock serves for a live pattern set. */
 function listRoute(patterns: Array<Record<string, unknown>>) {
@@ -249,7 +238,7 @@ describe("secret_scanning_custom_patterns", () => {
           { name: "internal-token", pattern: "int_[a-z0-9]{8}", [key]: "" },
         ],
       };
-      const invalid = validateSettingsDoc(doc, "test doc", new Set(), silentIo);
+      const invalid = validateSettingsDoc(doc, "test doc", new Set(), silentIo());
       expect("error" in invalid ? invalid.error : "").toContain(
         "cannot be cleared with an empty string",
       );
@@ -349,7 +338,7 @@ describe("secret_scanning_custom_patterns closed surface", () => {
         },
         "settings.yml",
         new Set(),
-        silentIo,
+        silentIo(),
       );
       expect("error" in error, `a declared "${key}" must be rejected`).toBe(true);
       const message = "error" in error ? error.error : "";

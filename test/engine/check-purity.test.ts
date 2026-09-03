@@ -10,9 +10,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { runForRepo, validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { Io } from "../../src/io.js";
 import type { SectionKey } from "../../src/schema.js";
 import { SECTION_KEYS } from "../../src/schema.js";
+import { silentIo } from "../io-fake.js";
 import { MockApi } from "../mock-api.js";
 
 /**
@@ -219,18 +219,6 @@ const ROUTES = {
     ],
   },
 };
-
-function silentIo(): Io {
-  return {
-    annotate: () => {},
-    log: () => {},
-    debug: () => {},
-    summary: () => {},
-    output: () => {},
-    mask: () => {},
-    masked: () => new Set(),
-  };
-}
 
 describe("check-mode purity", () => {
   test("every registered section stays read-only in check mode, even on its drift paths", async () => {

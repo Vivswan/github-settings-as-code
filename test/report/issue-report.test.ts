@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { Io } from "../../src/io.js";
 import {
   deliverIssueReport,
   ISSUE_TITLE,
@@ -10,6 +9,7 @@ import {
   MARKER_LABEL_CONFIG,
 } from "../../src/report/issue-report.js";
 import type { SettingsFile } from "../../src/schema.js";
+import { silentIo } from "../io-fake.js";
 import { MockApi, type Route } from "../mock-api.js";
 
 const SLUG = { owner: "o", name: "private-repo", slug: "o/private-repo" };
@@ -452,15 +452,6 @@ describe("injectMarkerLabel", () => {
     // rejects. The rename-refused arm is the risky one - it writes an
     // explicit `new_name: undefined` key - so all three outcomes are pinned
     // here, in the plain-array and wrapped forms alike.
-    const silentIo: Io = {
-      annotate: () => {},
-      log: () => {},
-      debug: () => {},
-      summary: () => {},
-      output: () => {},
-      mask: () => {},
-      masked: () => new Set(),
-    };
     const cases: Array<{ doc: SettingsFile; expected: string }> = [
       { doc: { labels: [{ name: "bug", color: "d73a4a" }] }, expected: "injected" },
       {
@@ -485,7 +476,7 @@ describe("injectMarkerLabel", () => {
     for (const { doc, expected } of cases) {
       const result = injectMarkerLabel(doc);
       expect(result.outcome).toBe(expected as typeof result.outcome);
-      const verdict = validateSettingsDoc(result.settings, "injected doc", new Set(), silentIo);
+      const verdict = validateSettingsDoc(result.settings, "injected doc", new Set(), silentIo());
       expect(
         "error" in verdict ? verdict.error : null,
         `outcome "${expected}" produced a document validation rejects`,

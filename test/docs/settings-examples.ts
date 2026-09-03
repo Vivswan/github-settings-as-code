@@ -6,22 +6,12 @@
 
 import { expect } from "bun:test";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { Io } from "../../src/io.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
-
-const silentIo: Io = {
-  annotate: () => {},
-  log: () => {},
-  debug: () => {},
-  summary: () => {},
-  output: () => {},
-  mask: () => {},
-  masked: () => new Set(),
-};
+import { silentIo } from "../io-fake.js";
 
 /** Assert `doc` validates and its repository special-looking keys are real. */
 export function assertValidSettingsExample(doc: unknown, label: string): void {
-  const invalid = validateSettingsDoc(doc, label, new Set(), silentIo);
+  const invalid = validateSettingsDoc(doc, label, new Set(), silentIo());
   expect(
     "error" in invalid ? invalid.error : null,
     `${label} failed validation: ${"error" in invalid ? invalid.error : ""}`,

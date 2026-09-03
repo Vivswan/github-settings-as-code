@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { Io } from "../../src/io.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
+import { silentIo } from "../io-fake.js";
 import type { LiveWitnessKind } from "./gen-support.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
@@ -25,17 +25,6 @@ import { predictDiscovery } from "./oracle.js";
 import { Rng } from "./prng.js";
 import { parseScenario } from "./schema.js";
 
-/** A no-op Io so validateSettingsDoc can run without @actions/core. */
-const silentIo: Io = {
-  annotate() {},
-  log() {},
-  debug() {},
-  summary() {},
-  output() {},
-  mask() {},
-  masked: () => new Set(),
-};
-
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {
     const offenders: string[] = [];
@@ -53,7 +42,7 @@ describe("three-way drift detection", () => {
           );
         }
         // 2. The action's own doc validator (unknown-key check + more).
-        const verdict = validateSettingsDoc(doc, "fuzz", new Set(), silentIo);
+        const verdict = validateSettingsDoc(doc, "fuzz", new Set(), silentIo());
         if ("error" in verdict) {
           offenders.push(
             `${key} seed ${i}: validateSettingsDoc rejected the doc: ${verdict.error}`,
@@ -477,7 +466,7 @@ describe("genInvalidSettings", () => {
     for (const { name, build } of INVALID_SETTINGS_CASES) {
       for (let i = 0; i < 25; i++) {
         const { doc, offendingToken } = build(new Rng(i * 13 + 1));
-        const verdict = validateSettingsDoc(doc, "settings.yml", new Set(), silentIo);
+        const verdict = validateSettingsDoc(doc, "settings.yml", new Set(), silentIo());
         if (!("error" in verdict)) {
           throw new Error(`case "${name}" produced a doc the validator accepts`);
         }
