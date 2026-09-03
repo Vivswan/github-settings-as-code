@@ -83,15 +83,19 @@ export function milestonesWitness(rng: Rng, declared: Json[], kind: LiveWitnessK
     // diverge, so the witness degrades to matching (and says so).
     return { kind: "matching", state: { milestones } };
   }
+  // Every eligible sentinel stays disjoint per build, not only the one picked (state and due_on
+  // are disjoint by construction: each draws away from the declared value).
+  for (const entry of eligible) {
+    assertSentinelDisjoint(
+      (declared[entry.index] as Json).description !== DRIFT_DESCRIPTION,
+      `the milestone description pool contains "${DRIFT_DESCRIPTION}"`,
+    );
+  }
   const { index, fields } = rng.pick(eligible);
   const source = declared[index] as Json;
   const live = milestones[index] as Json;
   const field = rng.pick(fields);
   if (field === "description") {
-    assertSentinelDisjoint(
-      source.description !== DRIFT_DESCRIPTION,
-      `the milestone description pool contains "${DRIFT_DESCRIPTION}"`,
-    );
     live.description = DRIFT_DESCRIPTION;
   } else if (field === "state") {
     live.state = source.state === "open" ? "closed" : "open";

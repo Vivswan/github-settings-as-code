@@ -797,8 +797,8 @@ describe("executePlan", () => {
   });
 
   test("a thunk receives a frozen projection holding the resolver and nothing else", async () => {
-    // The engine hands executePlan its apply context, which also carries the
-    // client; the thunk must see neither that object nor anything on it.
+    // A caller may pass a wider object as tools; the thunk must see neither
+    // that object nor anything on it beyond the resolver.
     const api = new MockApi({}).allowMutations("POST /repos/o/r/labels");
     const leaky = { ...TOOLS, api, repo: REPO, check: false as const };
     let seen: unknown;

@@ -356,14 +356,9 @@ async function runPredicted(
   opts: { fault?: InjectedFault } = {},
 ): Promise<IterationResult> {
   const prediction = predictOutcomes(meta);
-  // The oracle predicts a SET of allowed exit codes; the expectation carries
-  // the whole set, so the runner's own exit-code check asserts membership. A
-  // fully-granted apply is a FIXPOINT: prove it with the runner's
-  // apply-idempotence machinery (second apply exit 0, write-quiet
-  // compare-before-write sections, byte-identical state, then a clean check
-  // run - which subsumes the converges re-run). Fault-carrying iterations
-  // keep the lighter converges proof: the idempotence gate requires no
-  // injected faults.
+  // The expectation carries the oracle's whole exit-code set. A fully-granted apply is a
+  // FIXPOINT: the runner's apply-idempotence machinery proves it (second apply exit 0 writing
+  // only endpoints declared to recur, byte-identical state, clean check); faults keep converges.
   const fixpoint = prediction.fullyGranted && meta.mode === "apply";
   const proof: IterationResult["proof"] =
     fixpoint && opts.fault === undefined ? "apply_idempotent" : fixpoint ? "converges" : undefined;
@@ -771,13 +766,9 @@ interface MultiRunOptions {
  * to the channel); no raw-invalid target (its exit 1 would fail the
  * second-apply-exit-0 property); and every normal target's mask EMPTY.
  * Empty-mask is deliberately NARROWER than true fully-granted (a mask
- * explicitly granting write everywhere would also qualify but is excluded):
- * genMultiScenario's masks are sparse random rolls, so the loss is negligible
- * and the check stays obviously sound. Fully granted is REQUIRED, not merely
- * convenient - secondApplyWriteFailures counts REQUESTS to
- * compare-before-write sections, and a warn-policy denied write would be
- * re-attempted identically in the second apply, failing the write-quiet
- * property even though nothing mutates.
+ * explicitly granting write everywhere would also qualify but is excluded; the masks are sparse
+ * rolls, so the loss is negligible). Fully granted is REQUIRED: secondApplyWriteFailures judges
+ * every second-apply request by its endpoint's declared recurrence, and a denied write recurs.
  */
 function multiIdempotenceEligible(meta: MultiScenarioMeta): boolean {
   return (
@@ -813,13 +804,9 @@ async function runMultiPredicted(
   opts: MultiRunOptions = {},
 ): Promise<IterationResult> {
   const prediction = predictMulti(meta);
-  // Apply-idempotence gate: an ELIGIBLE scenario (multiIdempotenceEligible -
-  // the single predicate the fixpoint battery draw shares, so gate and draw
-  // cannot diverge) with no injected fault is a fixpoint the runner can prove
-  // (second apply exit 0, write-quiet compare-before-write sections,
-  // byte-identical state, clean final check). Belt: the oracle must predict
-  // exit 0 exactly - if the belt ever blocks an eligible draw, the battery's
-  // proof tripwire fails loudly instead of passing vacuously.
+  // Apply-idempotence gate: an ELIGIBLE scenario (multiIdempotenceEligible, the one predicate the
+  // fixpoint draw shares) with no fault is a provable fixpoint (second apply writes only declared
+  // recurrences, byte-identical state, clean check). Belt: the oracle must predict exit 0 exactly.
   const idempotent =
     multiIdempotenceEligible(meta) &&
     opts.fault === undefined &&

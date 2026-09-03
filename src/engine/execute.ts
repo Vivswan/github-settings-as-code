@@ -76,9 +76,8 @@ export async function executePlan(
   repo: RepoRef,
   tools: ExecTools,
 ): Promise<PlanExecution> {
-  // Thunks see a frozen projection holding the resolver and nothing else:
-  // whatever the caller passed (the engine hands its apply context, which
-  // also carries the client) never reaches section code.
+  // Thunks see a frozen projection holding the resolver and nothing else: whatever
+  // object the caller passed as tools never reaches section code.
   const exec: ExecTools = Object.freeze({
     resolveSecret: (reference: string): string => tools.resolveSecret(reference),
   });
