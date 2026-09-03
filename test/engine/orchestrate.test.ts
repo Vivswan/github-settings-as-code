@@ -644,6 +644,37 @@ describe("runForRepo plan sections", () => {
         },
       });
 
+    test("an unverifiable facet is a check-mode note beside a clean drift list, and apply renders only the change", async () => {
+      const REASON = "GitHub never echoes the workflow token back, so check cannot verify it";
+      stub({
+        role: "disable",
+        params: { workflow_id: "1" },
+        drift: { unverifiable: REASON, lines: [] },
+        change: "re-sent the workflow token",
+      });
+      const checked = captureIo();
+      const check = await runForRepo(
+        new MockApi({ [WORKFLOWS_LIST]: { data: live } }, { unroutedMutations: "succeed" }),
+        opts({ mode: "check", settings: drifting }),
+        checked.io,
+      );
+      expect(check.result).toBe("clean");
+      expect(checked.logs).toEqual([]);
+      expect(checked.annotations).toEqual([`notice: workflows: ${REASON}`]);
+      expect(check.outcomes).toEqual([{ key: "workflows", status: "clean", detail: [REASON] }]);
+      const applied = captureIo();
+      const api = new MockApi({ [WORKFLOWS_LIST]: { data: live } }).allowMutations(
+        "PUT /repos/o/r/actions/workflows/1/disable",
+      );
+      const apply = await runForRepo(api, opts({ settings: drifting }), applied.io);
+      expect(apply.result).toBe("applied");
+      expect(api.mutations().map((m) => m.path)).toEqual([
+        "/repos/o/r/actions/workflows/1/disable",
+      ]);
+      expect(applied.annotations).toEqual([]);
+      expect(applied.logs).toEqual(["workflows: re-sent the workflow token"]);
+    });
+
     test("a tolerated note reaches the applied outcome's detail and the annotations", async () => {
       stub(
         tolerating("1", (error) => ({

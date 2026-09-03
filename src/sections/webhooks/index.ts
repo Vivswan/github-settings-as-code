@@ -1,44 +1,33 @@
 /**
- * `webhooks:` section - repository webhooks, managed AT MOST ONE per
- * config.url (the natural key). Undeclared hooks are KEPT by default and
- * surfaced as notes, because integrations create their own hooks; the
- * wrapped `undeclared: delete` form hardens that to deletion. A changed
- * config.url is a NEW identity: apply creates a new hook and the old one
- * becomes undeclared (kept and noted, or deleted under the knob) - it is
- * never treated as an update.
- *
- * Hook URLs are configuration, not credentials: they appear in drift lines
- * and notes on purpose. The SECRET never does. A declared config.secret must
- * be a whole-value `$NAME` reference (src/action/secret-refs.ts) that the
- * engine resolves and masks before this handler runs; GitHub echoes a live
- * secret back as "********", so the secret is excluded from the diff (check
- * mode notes it cannot verify) and the declared value rides the config PATCH
- * on EVERY apply run so rotations propagate. Config-field drift goes through
- * the PATCH .../config sub-endpoint, which updates the named fields WITHOUT
- * the general PATCH's replace-the-whole-config semantics - the general PATCH
- * would remove an undeclared live secret, so this section sends it only for
- * events/active drift, never with a config key.
+ * `webhooks:` section - repository webhooks, at most ONE per config.url (a changed url is a NEW
+ * hook; the old one turns undeclared and is kept by default). Hook urls are configuration and appear
+ * in drift on purpose; the secret never does, and a declared one rides the config PATCH every run.
  */
 
 import { z } from "zod";
-import { subsetDiff } from "../../engine/diff.js";
+import { deltas, renderDelta } from "../../engine/diff.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import {
-  type ApplySectionContext,
-  beginRun,
   type DeclaredSecretValue,
   defaultUndeclaredPolicy,
   loosen,
   type SectionModule,
-  type SectionResult,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { call, listAll, rejectDuplicates } from "../contract/requests.js";
+import {
+  type ExecTools,
+  hasDrift,
+  type PlainData,
+  type PlannedOp,
+  plainData,
+  type SectionPlan,
+} from "../contract/plan.js";
+import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { WebhookConfig } from "./schema.js";
 
@@ -55,7 +44,11 @@ type LiveHook = z.infer<typeof LiveHook>;
 const permission: SectionPermission = { repo: ["webhooks"] };
 
 const ENDPOINTS = {
-  list: { route: "GET /repos/{owner}/{repo}/hooks", statuses: { 200: "the webhook list" } },
+  list: {
+    route: "GET /repos/{owner}/{repo}/hooks",
+    statuses: { 200: "the webhook list" },
+    primaryRead: { notFound: "denied" },
+  },
   create: {
     route: "POST /repos/{owner}/{repo}/hooks",
     statuses: { 201: "webhook created" },
@@ -75,10 +68,8 @@ const ENDPOINTS = {
 } as const satisfies Record<string, EndpointDecl>;
 
 /**
- * GitHub stores insecure_ssl as the STRING "0" or "1" and echoes it back
- * that way even when the write sent a number, so both sides normalize to the
- * string form for comparison. Other values pass through as-is (GitHub is the
- * authority on what it accepts).
+ * GitHub stores insecure_ssl as the STRING "0" or "1" and echoes it back that way even when the
+ * write sent a number, so both sides normalize to the string form for comparison.
  */
 function normalizeInsecureSsl(value: unknown): unknown {
   return typeof value === "number" ? String(value) : value;
@@ -101,17 +92,14 @@ function eventsMatch(declared: readonly string[], live: readonly string[]): bool
 }
 
 /**
- * The declared config with the secret reference swapped for its resolved
- * plaintext. Takes the APPLY arm of SectionContext (call sites sit in
- * apply-narrowed branches), whose resolver exists by construction: the
- * engine resolved every reference up front and masked the plaintexts, so
- * the lookup cannot miss.
+ * The declared config with the secret reference swapped for its resolved plaintext, sealed at
+ * execution time: the engine resolved every reference up front, so the lookup cannot miss.
  */
-function resolvedConfig(ctx: ApplySectionContext, hook: WebhookConfig): Record<string, unknown> {
+function resolvedConfig(exec: ExecTools, hook: WebhookConfig): PlainData {
   if (hook.config.secret === undefined) {
-    return { ...hook.config };
+    return plainData({ ...hook.config });
   }
-  return { ...hook.config, secret: ctx.resolveSecret(hook.config.secret) };
+  return plainData({ ...hook.config, secret: exec.resolveSecret(hook.config.secret) });
 }
 
 /**
@@ -167,8 +155,7 @@ export const webhooksSection = {
   // service hook this section does not manage.
   shape: loosen(knobbed(WebhookConfig)),
   secretValues,
-  async run(ctx, declared): Promise<SectionResult> {
-    const run = beginRun(ctx);
+  async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
@@ -176,26 +163,17 @@ export const webhooksSection = {
       (hook) => hook.config.url,
       (hook) => hook.config.url,
     );
-    const live = parseLive(
-      this,
-      ENDPOINTS.list,
-      z.array(LiveHook),
-      await listAll(ctx, this, ENDPOINTS.list),
-    );
+    const live = parseLive(this, ENDPOINTS.list, z.array(LiveHook), await ctx.read.list.listAll());
     const declaredUrls = new Set(desired.map((hook) => hook.config.url));
 
-    // Ambiguity is rejected BEFORE any write: a hard error mid-loop would
-    // leave earlier declared hooks already written (the rejectDuplicates
-    // precedent - reject first, mutate after). Every ambiguous url is
-    // collected before the one throw: each fix is manual GitHub cleanup, so
-    // N ambiguities must cost one run to discover, not N.
+    // Every ambiguous url is collected before the one throw: each fix is
+    // manual GitHub cleanup, so N ambiguities must cost one run to discover.
     const ambiguous: string[] = [];
     for (const hook of desired) {
       const matches = live.filter((candidate) => candidate.config?.url === hook.config.url);
       if (matches.length > 1) {
         // No silent collapse: updating one of N same-url hooks (or all of
-        // them) is a guess either way, so the user resolves the duplication
-        // by hand once and the section converges from then on.
+        // them) is a guess either way, so the user resolves it by hand once.
         ambiguous.push(
           `"${hook.config.url}" matches ${matches.length} live hooks (ids ${matches
             .map((candidate) => candidate.id)
@@ -209,95 +187,84 @@ export const webhooksSection = {
       );
     }
 
+    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     for (const hook of desired) {
       const url = hook.config.url;
-      const matches = live.filter((candidate) => candidate.config?.url === url);
-      const existing = matches[0];
-      const secretDeclared = hook.config.secret !== undefined;
-      if (!existing) {
-        if (run.check) {
-          run.result.drift.push(
-            `webhooks["${url}"]: missing - declared in the settings file but not on the repo; apply will create it`,
-          );
-          if (secretDeclared) {
-            run.result.notes.push(`webhooks["${url}"].config.secret: ${CANNOT_VERIFY_SECRET}`);
-          }
-        } else {
-          const { name: _name, config: _config, events, active, ...extraKeys } = hook;
-          await call(ctx, this, ENDPOINTS.create, {
-            payload: {
-              name: "web",
-              config: resolvedConfig(run.ctx, hook),
-              ...(events === undefined ? {} : { events }),
-              ...(active === undefined ? {} : { active }),
-              ...extraKeys, // future hook fields pass through verbatim
-            },
-            describe: `creating webhook "${url}"`,
-          });
-          run.result.changes.push(`created webhook "${url}"`);
-        }
+      const existing = live.find((candidate) => candidate.config?.url === url);
+      const { name: _name, config: _config, events, active, ...extraKeys } = hook;
+      const secretNote = `webhooks["${url}"].config.secret: ${CANNOT_VERIFY_SECRET}`;
+      const general = {
+        ...(events === undefined ? {} : { events }),
+        ...(active === undefined ? {} : { active }),
+        ...extraKeys, // passthrough hook fields ride verbatim
+      };
+      if (existing === undefined) {
+        const missing = `webhooks["${url}"]: missing - declared in the settings file but not on the repo; apply will create it`;
+        plan.ops.push({
+          role: "create",
+          payload: (exec) =>
+            plainData({ name: "web", config: resolvedConfig(exec, hook), ...general }),
+          describe: `creating webhook "${url}"`,
+          drift:
+            hook.config.secret === undefined
+              ? [missing]
+              : { unverifiable: secretNote, lines: [missing] },
+          change: `created webhook "${url}"`,
+        });
         continue;
       }
 
-      const { name: _name, config: _config, events, active, ...extraKeys } = hook;
-      const configDrift = subsetDiff(
+      const configDrift = deltas(
         comparableConfig(hook.config),
         comparableConfig(existing.config ?? {}),
-        `webhooks["${url}"].config`,
-      );
-      const eventsDrift = events !== undefined && !eventsMatch(events, existing.events ?? []);
-      const activeDrift = active !== undefined && (existing.active ?? true) !== active;
-      const extraDrift = subsetDiff(extraKeys, existing, `webhooks["${url}"]`);
-
-      if (run.check) {
-        run.result.drift.push(...configDrift);
-        if (eventsDrift) {
-          run.result.drift.push(
-            `webhooks["${url}"].events: declared ${JSON.stringify(events)} != live ${JSON.stringify(existing.events ?? [])} (compared order-insensitively); apply will set the declared events`,
-          );
-        }
-        if (activeDrift) {
-          run.result.drift.push(
-            `webhooks["${url}"].active: declared ${JSON.stringify(active)} != live ${JSON.stringify(existing.active ?? true)}; apply will set the declared value`,
-          );
-        }
-        run.result.drift.push(...extraDrift);
-        if (secretDeclared) {
-          run.result.notes.push(`webhooks["${url}"].config.secret: ${CANNOT_VERIFY_SECRET}`);
-        }
-        continue;
-      }
-
-      // Config drift - and a declared secret, unconditionally - go through
-      // the config SUB-endpoint: it updates the named fields without the
-      // general PATCH's whole-config replacement, so a live secret this file
-      // does not declare is never removed. The declared secret rides every
-      // run because GitHub cannot report whether it already matches.
-      if (secretDeclared || configDrift.length > 0) {
-        await call(ctx, this, ENDPOINTS.updateConfig, {
-          params: { hook_id: String(existing.id) },
-          payload: resolvedConfig(run.ctx, hook),
-          describe: `updating webhook "${url}" config`,
+      ).map((delta) => renderDelta(`webhooks["${url}"].config`, delta));
+      // Config drift - and a declared secret, unconditionally - go through the
+      // config SUB-endpoint, which updates named fields only: the general PATCH
+      // would replace the whole config and drop an undeclared live secret.
+      const configOp = {
+        role: "updateConfig",
+        params: { hook_id: String(existing.id) },
+        payload: (exec: ExecTools) => resolvedConfig(exec, hook),
+        describe: `updating webhook "${url}" config`,
+      } as const;
+      if (hook.config.secret !== undefined) {
+        plan.ops.push({
+          ...configOp,
+          drift: { unverifiable: secretNote, lines: configDrift },
+          change: `updated webhook "${url}" config (the declared secret is re-sent every run)`,
         });
-        run.result.changes.push(
-          secretDeclared
-            ? `updated webhook "${url}" config (the declared secret is re-sent every run)`
-            : `updated webhook "${url}" config`,
-        );
+      } else if (hasDrift(configDrift)) {
+        plan.ops.push({
+          ...configOp,
+          drift: configDrift,
+          change: `updated webhook "${url}" config`,
+        });
       }
+
       // events/active (and passthrough extras) go through the general PATCH
       // WITHOUT a config key, so the whole-config replacement never fires.
-      if (eventsDrift || activeDrift || extraDrift.length > 0) {
-        await call(ctx, this, ENDPOINTS.update, {
+      const generalDrift = [
+        ...(events !== undefined && !eventsMatch(events, existing.events ?? [])
+          ? [
+              `webhooks["${url}"].events: declared ${JSON.stringify(events)} != live ${JSON.stringify(existing.events ?? [])} (compared order-insensitively); apply will set the declared events`,
+            ]
+          : []),
+        ...(active !== undefined && (existing.active ?? true) !== active
+          ? [
+              `webhooks["${url}"].active: declared ${JSON.stringify(active)} != live ${JSON.stringify(existing.active ?? true)}; apply will set the declared value`,
+            ]
+          : []),
+        ...deltas(extraKeys, existing).map((delta) => renderDelta(`webhooks["${url}"]`, delta)),
+      ];
+      if (hasDrift(generalDrift)) {
+        plan.ops.push({
+          role: "update",
           params: { hook_id: String(existing.id) },
-          payload: {
-            ...(events === undefined ? {} : { events }),
-            ...(active === undefined ? {} : { active }),
-            ...extraKeys, // future hook fields pass through verbatim
-          },
+          payload: plainData(general),
           describe: `updating webhook "${url}"`,
+          drift: generalDrift,
+          change: `updated webhook "${url}"`,
         });
-        run.result.changes.push(`updated webhook "${url}"`);
       }
     }
 
@@ -309,26 +276,24 @@ export const webhooksSection = {
         continue;
       }
       if (policy === "delete") {
-        if (run.check) {
-          run.result.drift.push(
+        plan.ops.push({
+          role: "remove",
+          params: { hook_id: String(hook.id) },
+          describe: `deleting undeclared webhook ${describeHook(hook)}`,
+          drift: [
             undeclaredDrift(defaultUndeclaredPolicy(this), {
               label: `webhooks[${describeHook(hook)}]`,
               action: "DELETE it",
             }),
-          );
-        } else {
-          await call(ctx, this, ENDPOINTS.remove, {
-            params: { hook_id: String(hook.id) },
-            describe: `deleting undeclared webhook ${describeHook(hook)}`,
-          });
-          run.result.changes.push(`DELETED undeclared webhook ${describeHook(hook)}`);
-        }
+          ],
+          change: `DELETED undeclared webhook ${describeHook(hook)}`,
+        });
         continue;
       }
-      run.result.notes.push(
+      plan.notes.push(
         undeclaredNote({ subject: `webhook ${describeHook(hook)}`, action: "DELETE it" }),
       );
     }
-    return run.result;
+    return plan;
   },
-} satisfies SectionModule<"webhooks">;
+} satisfies SectionModule<"webhooks", typeof ENDPOINTS>;

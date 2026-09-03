@@ -268,11 +268,11 @@ export interface PlanContext<
  * itself with at least one drift line (see DriftFor), so "check reported
  * clean while apply mutated" is unrepresentable.
  */
-interface PlannedOpBase<D extends readonly string[] = readonly string[]> {
+interface PlannedOpBase<D extends Justification = Justification> {
   /**
    * The drift lines this operation resolves, in the check-mode prose
-   * ("labels[bug]: color d73a4a != live ffffff; apply will update it").
-   * Check mode renders them; apply mode renders `change` instead.
+   * ("labels[bug]: color d73a4a != live ffffff; apply will update it"), or
+   * an Unverifiable facet. Check mode renders them; apply mode renders `change`.
    */
   readonly drift: D;
   /**
@@ -293,6 +293,24 @@ interface PlannedOpBase<D extends readonly string[] = readonly string[]> {
    * the hook stores it. It must not render; a throw fails the operation.
    */
   readonly capture?: (response: unknown) => void;
+}
+
+/**
+ * The reason check mode cannot verify a write (a secret GitHub never echoes back), rendered as a
+ * check-mode note beside whatever drift lines the operation does resolve. It occupies the drift
+ * slot: a sibling property cannot keep the DriftFor rule for literals with a union-typed role.
+ */
+interface Unverifiable {
+  readonly unverifiable: string;
+  readonly lines: readonly string[];
+}
+
+/** What a planned operation offers check mode: its drift lines, or an unverifiable facet. */
+type Justification = readonly string[] | Unverifiable;
+
+/** The drift lines an operation resolves, whichever justification it carries. */
+export function driftOf(op: Pick<PlannedOpBase, "drift">): readonly string[] {
+  return "unverifiable" in op.drift ? op.drift.lines : op.drift;
 }
 
 /**
@@ -326,13 +344,15 @@ export function hasDrift(lines: readonly string[]): lines is readonly [string, .
 }
 
 /**
- * The drift an operation must carry: none is legal only on an alwaysRewrite
- * endpoint (a write that recurs by declaration, so check has nothing to report);
+ * The drift a REST operation must carry: none is legal only on an alwaysRewrite endpoint (a write
+ * that recurs by declaration, so check has nothing to report) or under an Unverifiable facet;
  * every other write exists because live state diverged, which check must print.
  */
-type DriftFor<E extends EndpointDecl> = E extends { readonly alwaysRewrite: true }
-  ? readonly string[]
-  : readonly [string, ...string[]];
+type DriftFor<E extends EndpointDecl> =
+  | (E extends { readonly alwaysRewrite: true }
+      ? readonly string[]
+      : readonly [string, ...string[]])
+  | Unverifiable;
 
 /**
  * The params facet of a REST operation, required exactly when the route
@@ -354,9 +374,9 @@ type PlannedRestOp<E extends EndpointDict, R extends WriteRole<E>> = PlannedOpBa
   };
 
 /**
- * A planned GraphQL mutation under one specific role of a literal
- * dictionary. Always drift-bearing: alwaysRewrite is a REST endpoint
- * declaration, so no GraphQL mutation is unconditional by contract.
+ * A planned GraphQL mutation under one specific role of a literal dictionary. Always
+ * drift-bearing: alwaysRewrite is a REST endpoint declaration and no GraphQL mutation writes
+ * a value it cannot read back, so none is unconditional by contract.
  */
 type PlannedGraphqlOp<G extends GraphqlDict, R extends GraphqlWriteRole<G>> = PlannedOpBase<
   readonly [string, ...string[]]
@@ -426,9 +446,17 @@ export interface SectionPlan<Op extends PlannedOpBase = ErasedPlannedOp> {
   drift: string[];
 }
 
-/** The check-mode drift list of a plan: every op's drift, then the op-less lines. */
+/** The check-mode drift list of a plan: every op's drift lines, then the op-less lines. */
 export function planDrift(plan: SectionPlan): string[] {
-  return [...plan.ops.flatMap((op) => op.drift), ...plan.drift];
+  return [...plan.ops.flatMap(driftOf), ...plan.drift];
+}
+
+/** The check-mode notes of a plan: every op's unverifiable reason, then the mode-neutral notes. */
+export function planCheckNotes(plan: SectionPlan): string[] {
+  return [
+    ...plan.ops.flatMap((op) => ("unverifiable" in op.drift ? [op.drift.unverifiable] : [])),
+    ...plan.notes,
+  ];
 }
 
 /**

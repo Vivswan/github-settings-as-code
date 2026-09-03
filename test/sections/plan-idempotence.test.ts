@@ -191,6 +191,70 @@ describe("provePlanIdempotent", () => {
       /would not converge/,
     );
   });
+
+  test("an unverifiable operation may recur, even one the first pass did not plan; a plain one that recurs still fails", async () => {
+    // A secret-bearing write over a compare-before-write endpoint: the first
+    // pass creates (drift-bearing); each pass after it re-sends under the facet.
+    const recurring = {
+      ...META,
+      endpoints: CONDITIONAL_ENDPOINTS,
+      async plan(ctx, desired) {
+        const live = (await ctx.read.list.listAllEnveloped("secrets")) as Array<{ name: string }>;
+        return {
+          ops: entriesOf(desired).map((entry) => {
+            const exists = live.some((s) => s.name === entry.name);
+            return {
+              role: "put" as const,
+              params: { secret_name: entry.name },
+              payload: (exec: ExecTools) => ({ encrypted_value: exec.resolveSecret(entry.value) }),
+              drift: exists
+                ? { unverifiable: `${entry.name} cannot be read back`, lines: [] }
+                : ([`actions_secrets[${entry.name}]: missing`] as [string]),
+              change: `${exists ? "re-sent" : "created"} secret "${entry.name}"`,
+            };
+          }),
+          notes: [],
+          drift: [],
+        };
+      },
+    } satisfies SectionModule<"actions_secrets", typeof CONDITIONAL_ENDPOINTS>;
+    const { first, second, changes } = await provePlanIdempotent(
+      recurring,
+      liveSecrets(),
+      DESIRED,
+      TOOLS,
+    );
+    expect(changes).toEqual(['created secret "DEPLOY_TOKEN"']);
+    expect(first.ops.map((op) => op.drift)).toEqual([["actions_secrets[DEPLOY_TOKEN]: missing"]]);
+    expect(second.ops.map((op) => op.drift)).toEqual([
+      { unverifiable: "DEPLOY_TOKEN cannot be read back", lines: [] },
+    ]);
+    // The controls: the same recurrence without the facet, and the facet
+    // still carrying a drift line, are both sections that do not converge.
+    const redrifted = (drift: (name: string) => PlannedOp<typeof CONDITIONAL_ENDPOINTS>["drift"]) =>
+      ({
+        ...recurring,
+        async plan(ctx, desired) {
+          const planned = await recurring.plan(ctx, desired);
+          return {
+            ...planned,
+            ops: planned.ops.map((op) => ({ ...op, drift: drift(op.params.secret_name) })),
+          };
+        },
+      }) satisfies SectionModule<"actions_secrets", typeof CONDITIONAL_ENDPOINTS>;
+    const plain = redrifted((name) => [`actions_secrets[${name}]: re-sent`]);
+    const facetWithLines = redrifted((name) => ({
+      unverifiable: `${name} cannot be read back`,
+      lines: [`actions_secrets[${name}]: still drifted`],
+    }));
+    for (const stuckSection of [plain, facetWithLines]) {
+      await expect(
+        provePlanIdempotent(stuckSection, liveSecrets(), DESIRED, TOOLS),
+      ).rejects.toThrow(
+        /neither alwaysRewrite by declaration nor unverifiable, so apply would not converge/,
+      );
+    }
+  });
 });
 
 describe("identityOf", () => {

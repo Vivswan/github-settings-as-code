@@ -16,7 +16,7 @@ import {
 } from "../../../test/e2e/mock/secrets.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent, REPO } from "../../../test/sections/plan-idempotence.js";
-import { type ExecTools, type PlannedOp, planContext } from "../contract/plan.js";
+import { driftOf, type ExecTools, type PlannedOp, planContext } from "../contract/plan.js";
 import { actionsSecretsSection } from "./index.js";
 
 const LIST = "GET /repos/o/r/actions/secrets?per_page=100&page=1";
@@ -327,7 +327,7 @@ describe("actions_secrets execution", () => {
     );
     const rendered = [
       ...changes,
-      ...planned.ops.flatMap((op) => op.drift),
+      ...planned.ops.flatMap(driftOf),
       ...planned.drift,
       ...planned.notes,
       ...api.calls.map((call) => call.path),

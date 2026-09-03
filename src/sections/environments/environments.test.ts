@@ -14,7 +14,13 @@ import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent, REPO } from "../../../test/sections/plan-idempotence.js";
 import { executePlan } from "../../engine/execute.js";
 import type { GithubClient } from "../../github/api.js";
-import { type ExecTools, type PlannedOp, planContext, planDrift } from "../contract/plan.js";
+import {
+  driftOf,
+  type ExecTools,
+  type PlannedOp,
+  planContext,
+  planDrift,
+} from "../contract/plan.js";
 import { allGraphqlOps, type SectionEndpointKey, type SectionGraphqlKey } from "../registry.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
 import { environmentsMockGraphqlHandlers, environmentsMockHandlers } from "./mock.js";
@@ -1598,7 +1604,7 @@ describe("environments pinned check mode", () => {
       { name: "b", pinned: true },
       { name: "c", pinned: true },
     ]);
-    expect(planned.ops.map((op) => [op.role, op.change, ...op.drift])).toEqual([
+    expect(planned.ops.map((op) => [op.role, op.change, ...driftOf(op)])).toEqual([
       [
         "reorder",
         'moved pinned environment "a" to position 1',

@@ -74,18 +74,9 @@ function shapeOf(plan: SectionPlan): unknown {
 }
 
 /**
- * Plan, execute, re-plan, execute again. `api` must be a STATEFUL fake (its
- * reads reflect its writes), or the second plan would trivially repeat the
- * first. Three properties are asserted: the second plan carries ONLY the
- * operations the declarations say recur (alwaysRewrite), it carries ALL of
- * them (an unconditional rewrite that stops firing has silently become
- * conditional), and the op-less drift survives both plans - it is by
- * definition what no operation fixes. A third plan after the second
- * execution must match the second, so state is stable, not oscillating.
- * `tools` defaults to a resolver that refuses every lookup, the right
- * posture for a section declaring no secret values; a secret-bearing
- * section passes its own. The first execution's change lines and notes are
- * returned for the caller to pin.
+ * Plan, execute, re-plan, execute again over a STATEFUL fake. The second plan may carry only the
+ * alwaysRewrite ops (all of them, request for request) and unverifiable ops whose lines converged;
+ * op-less drift survives; a third plan matches the second. `tools` defaults to refusing every lookup.
  */
 export async function provePlanIdempotent<M extends PlanSectionModule>(
   section: M,
@@ -136,9 +127,17 @@ export async function provePlanIdempotent<M extends PlanSectionModule>(
   }
 
   const second = await plan();
+  // An unverifiable op recurs for its facet alone: any drift line it still
+  // carries is state the execution should have converged.
   expect(
-    second.ops.filter((op) => section.endpoints[op.role]?.alwaysRewrite !== true).map(identityOf),
-    `${section.key}: the plan over just-applied state still carries operations that are not alwaysRewrite by declaration, so apply would not converge`,
+    second.ops
+      .filter(
+        (op) =>
+          section.endpoints[op.role]?.alwaysRewrite !== true &&
+          !("unverifiable" in op.drift && op.drift.lines.length === 0),
+      )
+      .map(identityOf),
+    `${section.key}: the plan over just-applied state still carries operations that are neither alwaysRewrite by declaration nor unverifiable, so apply would not converge`,
   ).toEqual([]);
   expect(
     rewrites(second),

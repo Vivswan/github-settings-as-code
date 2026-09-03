@@ -17,7 +17,7 @@ import type { Io } from "../io.js";
 import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
 import type { SectionContext, SectionResult } from "../sections/contract/module.js";
-import { planContext, planDrift } from "../sections/contract/plan.js";
+import { planCheckNotes, planContext, planDrift } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
 import { executePlan } from "./execute.js";
@@ -468,11 +468,11 @@ export async function runForRepo(
     try {
       if (section.plan !== undefined) {
         // plan() runs in both modes over the read port; the mode decides
-        // what the plan becomes (drift lines, or executed changes), and the
-        // op-less drift surfaces as apply notes so it is never silent.
+        // what the plan becomes (drift lines plus the cannot-verify notes, or
+        // executed changes), and op-less drift surfaces as apply notes.
         const plan = await section.plan(planContext(section, api, repo), desired);
         if (runCtx.check) {
-          result = { check: true, drift: planDrift(plan), notes: plan.notes };
+          result = { check: true, drift: planDrift(plan), notes: planCheckNotes(plan) };
         } else {
           const execution = await executePlan(plan, section, api, repo, runCtx);
           // The execution's notes are the tolerated operations' outcomes.

@@ -16,9 +16,12 @@ import { PermissionDenied } from "../../src/sections/contract/errors.js";
 import { graphqlOp } from "../../src/sections/contract/graphql.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import {
+  driftOf,
   type ExecTools,
   type PlannedOp,
+  planCheckNotes,
   planContext,
+  planDrift,
   type SectionPlan,
   type ToleratedOutcome,
 } from "../../src/sections/contract/plan.js";
@@ -726,6 +729,47 @@ describe("executePlan", () => {
     const silent = { role: "write", drift: ["x"], change: () => [] as string[] } as const;
     // @ts-expect-error a change thunk cannot return a possibly-empty list
     const _silent: Bounds = silent;
+  });
+
+  test("an operation is justified by drift lines or an unverifiable facet, and by nothing less", () => {
+    type Op = PlannedOp<typeof SECTION.endpoints, typeof SECTION.graphql>;
+    const facet: Op = {
+      role: "create",
+      drift: { unverifiable: "GitHub never echoes the value back", lines: [] },
+      change: "re-sent",
+    };
+    const both: Op = {
+      role: "create",
+      drift: { unverifiable: "GitHub never echoes the value back", lines: ["x drifted"] },
+      change: "re-sent",
+    };
+    expect([driftOf(facet), driftOf(both)]).toEqual([[], ["x drifted"]]);
+    expect(planCheckNotes({ ops: [facet, both], notes: ["kept"], drift: [] })).toEqual([
+      "GitHub never echoes the value back",
+      "GitHub never echoes the value back",
+      "kept",
+    ]);
+    expect(planDrift({ ops: [facet, both], notes: [], drift: ["opless"] })).toEqual([
+      "x drifted",
+      "opless",
+    ]);
+    const empty = { role: "create", drift: [], change: "wrote" } as const;
+    // @ts-expect-error empty drift without a facet is not a justification on a compare-before-write endpoint
+    const _empty: Op = empty;
+    const reasonless = { role: "create", drift: { lines: [] }, change: "wrote" } as const;
+    // @ts-expect-error a facet without its reason is not a justification
+    const _reasonless: Op = reasonless;
+    const lineless = { role: "create", drift: { unverifiable: "why" }, change: "wrote" } as const;
+    // @ts-expect-error a facet without its lines is not a justification
+    const _lineless: Op = lineless;
+    const graphql = {
+      role: "write",
+      variables: {},
+      drift: { unverifiable: "why", lines: [] },
+      change: "wrote",
+    } as const;
+    // @ts-expect-error a GraphQL mutation writes nothing it cannot read back, so it carries no facet
+    const _graphql: Op = graphql;
   });
 
   test("a thunk receives a frozen projection holding the resolver and nothing else", async () => {
