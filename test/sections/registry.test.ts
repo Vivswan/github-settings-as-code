@@ -17,10 +17,12 @@ import {
   endpointPermission,
   type SectionContext,
   type SectionMeta,
+  type SectionModule,
   sectionGrant,
   sectionOperations,
 } from "../../src/sections/contract/module.js";
 import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
+import type { PlanContext, SectionPlan } from "../../src/sections/contract/plan.js";
 import { call, probeAbsent } from "../../src/sections/contract/requests.js";
 import {
   allEndpoints,
@@ -28,6 +30,8 @@ import {
   SECTIONS,
   sectionModule,
 } from "../../src/sections/registry.js";
+import { workflowsSection } from "../../src/sections/workflows/index.js";
+import { DENIAL_SEMANTICS } from "../e2e/denial-semantics.js";
 
 // The caveat code-scanning appends to its derived grant. Kept here so the
 // snapshot below and the derivation check agree on one source of truth.
@@ -814,5 +818,79 @@ describe("the section.role key space reserves ':'", () => {
     // the first section to declare GraphQL operations inherits the check.
     expect(() => allEndpoints()).not.toThrow();
     expect(() => allGraphqlOps()).not.toThrow();
+  });
+});
+
+describe("handler contracts", () => {
+  test("a module declares exactly one of run() and plan()", () => {
+    // The two-arm SectionModule union pins the other arm's handler to never,
+    // so both handlers on one module (or neither) fail at the declaration.
+    // Compile-time only: the bodies never run.
+    const base = {
+      key: "workflows",
+      undeclaredDefault: "untouched",
+      permission: { repo: ["actions"] },
+      endpoints: {},
+      shape: workflowsSection.shape,
+    } as const;
+    const runOnly = {
+      ...base,
+      async run(_ctx: SectionContext) {
+        return { check: true as const, drift: [], notes: [] };
+      },
+    } satisfies SectionModule<"workflows">;
+    const planOnly = {
+      ...base,
+      async plan(_ctx: PlanContext): Promise<SectionPlan> {
+        return { ops: [], notes: [], drift: [] };
+      },
+    } satisfies SectionModule<"workflows">;
+    // @ts-expect-error a module cannot carry both handlers
+    const _both = { ...runOnly, plan: planOnly.plan } satisfies SectionModule<"workflows">;
+    // @ts-expect-error nor neither
+    const _neither = { ...base } satisfies SectionModule<"workflows">;
+    expect(SECTIONS.filter((s) => s.plan !== undefined).map((s) => s.key)).toEqual(["workflows"]);
+  });
+
+  test("every plan section declares exactly one primaryRead, and it agrees with DENIAL_SEMANTICS", () => {
+    // Both state what a fine-grained 404 on the first read means. A plan
+    // section must declare it (the posture narrows its read port); the
+    // harness table shrinks as sections migrate to the declaration.
+    const declaring: string[] = [];
+    for (const section of SECTIONS) {
+      const primaries = Object.entries(section.endpoints).filter(
+        ([, endpoint]) => endpoint.primaryRead !== undefined,
+      );
+      expect(
+        primaries.length,
+        `${section.key} declares primaryRead on more than one endpoint: ${primaries.map(([role]) => role).join(", ")}`,
+      ).toBeLessThanOrEqual(1);
+      if (section.plan !== undefined) {
+        expect(
+          primaries.length,
+          `${section.key} is a plan section but declares no primaryRead posture; its read port cannot be narrowed to the helpers that honor a 404`,
+        ).toBe(1);
+      }
+      for (const [role, endpoint] of primaries) {
+        expect(endpoint.route.startsWith("GET "), `${section.key}.${role} is not a read`).toBe(
+          true,
+        );
+        expect(
+          endpoint.primaryRead?.notFound,
+          `${section.key}.${role} declares a 404 posture DENIAL_SEMANTICS disagrees with`,
+        ).toBe(DENIAL_SEMANTICS[section.key]);
+        if (endpoint.primaryRead?.notFound === "absent") {
+          // An "absent" posture means a 404 reads as "no such resource",
+          // which holds only if the endpoint tolerates 404 - the request
+          // helpers derive their tolerated set from the declared statuses.
+          expect(
+            toleratedStatuses(endpoint),
+            `${section.key}.${role} claims an "absent" 404 posture but does not declare 404 among its statuses, so the helper would classify it as a denial`,
+          ).toContain(404);
+        }
+        declaring.push(section.key);
+      }
+    }
+    expect(declaring).toEqual(["workflows"]);
   });
 });

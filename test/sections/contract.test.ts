@@ -10,9 +10,11 @@ import {
   sectionOperations,
 } from "../../src/sections/contract/module.js";
 import { grantFor } from "../../src/sections/contract/permissions.js";
+import { planContext } from "../../src/sections/contract/plan.js";
 import { environmentsSection } from "../../src/sections/environments/index.js";
 import { repositorySection } from "../../src/sections/repository/index.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
+import { MockApi } from "../mock-api.js";
 
 const section: SectionMeta = rulesetsSection;
 
@@ -339,5 +341,65 @@ describe("throwFor context enrichment", () => {
     expect(denied.detail).toContain(
       'the "oidc_customization_sub" key alone instead needs "Actions"',
     );
+  });
+});
+
+describe("planContext read port", () => {
+  const REPO = { owner: "o", name: "r", slug: "o/r" };
+
+  /** Deliberately MUTABLE declarations, the shape a hostile or buggy caller could hold. */
+  function mutableSection() {
+    const endpoints: Record<string, { route: string; statuses: Record<number, string> }> = {
+      list: { route: "GET /repos/{owner}/{repo}/labels", statuses: { 200: "the labels" } },
+    };
+    const graphql: Record<
+      string,
+      { name: string; kind: string; query: string; outcomes: { ok: string } }
+    > = {
+      probe: {
+        name: "PortProbe",
+        kind: "read",
+        query: "query PortProbe($owner: String!, $repo: String!) { repository { id } }",
+        outcomes: { ok: "the repository" },
+      },
+    };
+    const section = {
+      key: "labels",
+      permission: { repo: ["administration"] },
+      undeclaredDefault: "delete",
+      endpoints,
+      graphql,
+    } as unknown as SectionMeta;
+    return { section, endpoints, graphql };
+  }
+
+  test("mutating a declaration after binding cannot turn a bound read into a write", async () => {
+    const { section, endpoints, graphql } = mutableSection();
+    const api = new MockApi(
+      {
+        "GET /repos/o/r/labels": { data: [] },
+        "GRAPHQL PortProbe": { data: { repository: { id: "R_1" } } },
+      },
+      { unroutedMutations: "succeed" },
+    );
+    const ctx = planContext(section, api, REPO) as unknown as {
+      read: {
+        list: { call(): Promise<unknown> };
+        probe: { call(variables: Record<string, unknown>): Promise<unknown> };
+      };
+    };
+    // The bound port is built; now rewrite both declarations into writes.
+    (endpoints.list as { route: string }).route = "DELETE /repos/{owner}/{repo}/labels";
+    (graphql.probe as { kind: string }).kind = "write";
+    await ctx.read.list.call();
+    await ctx.read.probe.call({ owner: "o", repo: "r" });
+    // Both requests went out as the ORIGINAL reads; the mutations never left.
+    expect(api.calls.map((c) => `${c.method} ${c.path} ${c.graphqlKind ?? ""}`.trim())).toEqual([
+      "GET /repos/o/r/labels",
+      "GRAPHQL PortProbe read",
+    ]);
+    expect(api.mutations()).toEqual([]);
+    // The port itself is sealed too: no role can be swapped in after binding.
+    expect(Object.isFrozen(ctx.read)).toBe(true);
   });
 });

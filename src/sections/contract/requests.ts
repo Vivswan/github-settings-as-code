@@ -50,13 +50,33 @@ export async function call<E extends EndpointDecl>(
     { query?: Readonly<Record<string, string>>; payload?: unknown; describe?: string }
   >
 ): Promise<unknown> {
-  const opts = args[0];
+  return callDeclared(ctx, section, endpoint, args[0] ?? {});
+}
+
+/**
+ * The erased core of call(): the same request, classification, and path
+ * expansion over a declaration whose route type is no longer literal. The
+ * plan executor reaches it with an endpoint resolved from a planned role,
+ * whose params were typed against the route when the plan was built; a
+ * handler calls call() instead, where the route type checks the params.
+ */
+export async function callDeclared(
+  ctx: SectionContext,
+  section: SectionMeta,
+  endpoint: EndpointDecl,
+  opts: {
+    params?: Readonly<Record<string, string>>;
+    query?: Readonly<Record<string, string>>;
+    payload?: unknown;
+    describe?: string;
+  },
+): Promise<unknown> {
   const method = endpointMethod(endpoint.route);
-  const path = expand(endpoint, ctx, opts?.params, opts?.query);
-  const result = await ctx.api.tryRequest(method, path, opts?.payload);
+  const path = expand(endpoint, ctx, opts.params, opts.query);
+  const result = await ctx.api.tryRequest(method, path, opts.payload);
   if ("error" in result) {
     throwFor(section, method, path, result.error, {
-      operation: opts?.describe,
+      operation: opts.describe,
       op: endpoint,
     });
   }

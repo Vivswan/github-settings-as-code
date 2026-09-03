@@ -10,7 +10,8 @@
  */
 
 import type { z } from "zod";
-import { SECTION_KEYS, type SectionKey } from "../schema.js";
+import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
+import type { MustBeNever } from "../types.js";
 import { actionsSection } from "./actions/index.js";
 import { actionsSecretsSection } from "./actions_secrets/index.js";
 import { actionsVariablesSection } from "./actions_variables/index.js";
@@ -25,7 +26,8 @@ import { codespacesSecretsSection } from "./codespaces_secrets/index.js";
 import { collaboratorsSection } from "./collaborators/index.js";
 import type { EndpointDecl } from "./contract/endpoints.js";
 import type { GraphqlOpDecl } from "./contract/graphql.js";
-import type { SectionModule } from "./contract/module.js";
+import type { EndpointDict, GraphqlDict, SectionModule } from "./contract/module.js";
+import type { PlanContext } from "./contract/plan.js";
 import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
 import { deployKeysSection } from "./deploy_keys/index.js";
@@ -72,6 +74,63 @@ const byKey = {
 
 /** Each section's module with its literal endpoint/GraphQL dictionaries. */
 type SectionModules = typeof byKey;
+
+/**
+ * The declarations a module's plan() was TYPED over - the two dictionaries
+ * behind its context plus its declared-value parameter - or never for a
+ * run() module. Read off the handler signature, not the module's own
+ * declarations, so the two can be compared.
+ */
+type PlanTypedOver<M> = M extends {
+  plan: (ctx: PlanContext<infer E, infer G>, desired: infer D) => unknown;
+}
+  ? { endpoints: E; graphql: G; desired: D }
+  : never;
+
+/**
+ * What a module's plan() MUST be typed over, derived from what the module
+ * actually declares: its own endpoint dictionary, its own GraphQL
+ * dictionary (the SectionModule default when it declares none, which is
+ * what `SectionModule<"key", typeof ENDPOINTS>` supplies), and its own
+ * section's declared value.
+ */
+type ExpectedPlanDeclarations<K extends SectionKey, M> = {
+  endpoints: M extends { endpoints: infer E extends EndpointDict } ? E : never;
+  graphql: M extends { graphql: infer G extends GraphqlDict } ? G : GraphqlDict;
+  desired: Exclude<SettingsFile[K], undefined>;
+};
+
+/** Mutual assignability - equality up to structure, in both directions. */
+type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/**
+ * Plan modules whose handler was typed over anything but its own
+ * declarations. Comparing the dictionaries as PROPERTIES is what makes the
+ * comparison strict: reaching them through the context itself would compare
+ * the bound read helpers, whose METHOD parameters TypeScript checks
+ * bivariantly, so a wider endpoint dictionary (roles erased to strings), a
+ * phantom role planContext never binds (undefined at runtime), a widened
+ * GraphQL variables shape, or a narrowed declared value would all measure
+ * as equal.
+ */
+type MisdeclaredPlanModules = {
+  [K in SectionKey]: [PlanTypedOver<SectionModules[K]>] extends [never]
+    ? never
+    : Invariant<
+          PlanTypedOver<SectionModules[K]>,
+          ExpectedPlanDeclarations<K, SectionModules[K]>
+        > extends true
+      ? never
+      : K;
+}[SectionKey];
+
+/**
+ * Compile-time lockstep: a plan section whose handler is typed over
+ * anything but its own literal dictionaries and declared value (the shape
+ * `satisfies SectionModule<"key", typeof ENDPOINTS>` produces) fails here,
+ * naming itself, instead of losing role checking silently.
+ */
+type _PlanModulesAreExact = MustBeNever<MisdeclaredPlanModules>;
 
 /**
  * The `${section}.${role}` key union for REST endpoints - per section, or

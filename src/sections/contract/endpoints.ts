@@ -92,6 +92,23 @@ export interface EndpointDecl {
    * standard 100.
    */
   readonly pageSize?: number;
+  /**
+   * Marks this endpoint as the section's PRIMARY READ and declares what a
+   * 404 on it means under a fine-grained token (which conceals a denied
+   * resource as Not Found):
+   * - "denied": the read classifies through throwFor, so the 404 is a
+   *   PermissionDenied and the section stops; the apply-mode preflight
+   *   catches it before any write.
+   * - "absent": the read is a probeAbsent with 404 tolerated, so a denied
+   *   read looks like "the resource does not exist" and the section
+   *   proceeds; the denial surfaces on the first write's 403.
+   * At most one endpoint per section carries it. Two consumers keep it
+   * honest: a plan section's read port exposes only the helpers matching
+   * the posture (see ReadPort in ./plan.ts), and the lockstep test in
+   * test/sections/registry.test.ts pins it to the e2e harness's
+   * DENIAL_SEMANTICS row for the section.
+   */
+  readonly primaryRead?: { readonly notFound: "denied" | "absent" };
 }
 
 /** The method half of a route ("PATCH /repos/..." -> "PATCH"). */

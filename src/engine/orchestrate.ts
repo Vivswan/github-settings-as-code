@@ -17,8 +17,10 @@ import type { Io } from "../io.js";
 import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
 import type { SectionContext, SectionResult } from "../sections/contract/module.js";
+import { planContext, planDrift } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
+import { executePlan } from "./execute.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
 import { validateSectionShapes } from "./validate.js";
 
@@ -255,7 +257,13 @@ export async function preflightProbe(
       );
     }
     try {
-      await section.run(probeCtx, declared);
+      if (section.plan !== undefined) {
+        // A plan section has no write capability of its own: planning IS
+        // the read-only probe, and the plan is discarded.
+        await section.plan(planContext(section, api, repo), declared);
+      } else {
+        await section.run(probeCtx, declared);
+      }
     } catch (error) {
       if (error instanceof PermissionDenied) {
         denied.push(`${section.key}: ${error.detail}`);
@@ -449,40 +457,81 @@ export async function runForRepo(
       );
     }
     let result: SectionResult;
+    // What a plan section produced before an operation failed: its notes and
+    // the change lines already on the wire (real mutations - the API has no
+    // transactions), reported with the failure instead of vanishing.
+    let produced: { notes: readonly string[]; changes: readonly string[] } = {
+      notes: [],
+      changes: [],
+    };
     try {
-      result = await section.run(runCtx, desired);
-      if (result.check !== check) {
-        // run()'s signature cannot correlate its return arm with the context
-        // arm without forcing a cast into every handler, so the correlation
-        // (beginRun copies ctx.check) is asserted once here at the only
-        // consumer - a cross-mode result must fail loudly, not steer the
-        // narrowing below into the wrong branch.
-        throw new Error(
-          `BUG: section returned ${result.check ? "a check" : "an apply"} result in ${check ? "check" : "apply"} mode; handlers must build their result via beginRun(ctx)`,
-        );
+      if (section.plan !== undefined) {
+        // plan() runs in both modes over the read port; the mode decides
+        // what the plan becomes (drift lines, or executed changes), and the
+        // op-less drift surfaces as apply notes so it is never silent.
+        const plan = await section.plan(planContext(section, api, repo), desired);
+        if (runCtx.check) {
+          result = { check: true, drift: planDrift(plan), notes: plan.notes };
+        } else {
+          const notes = [...plan.notes, ...plan.drift];
+          const execution = await executePlan(plan, section, api, repo, runCtx);
+          produced = { notes, changes: execution.changes };
+          if (execution.status === "failed") {
+            // Already classified by the request helpers; the catch below
+            // reports it exactly as a run() handler's throw.
+            throw execution.error;
+          }
+          result = { check: false, changes: [...execution.changes], notes };
+        }
+      } else {
+        result = await section.run(runCtx, desired);
+        if (result.check !== check) {
+          // run()'s signature cannot correlate its return arm with the
+          // context arm (beginRun copies ctx.check), so the correlation is
+          // asserted once here, at the only consumer.
+          throw new Error(
+            `BUG: section returned ${result.check ? "a check" : "an apply"} result in ${check ? "check" : "apply"} mode; handlers must build their result via beginRun(ctx)`,
+          );
+        }
       }
     } catch (error) {
+      for (const note of produced.notes) {
+        io.annotate("notice", `${section.key}: ${note}`);
+      }
+      for (const line of produced.changes) {
+        io.log(`${section.key}: ${line}`);
+      }
+      const before = [...produced.notes, ...produced.changes];
       if (error instanceof PermissionDenied) {
         const required = opts.requiredSections.has(section.key);
-        if (opts.onMissingPermission === "warn" && !required) {
+        // A denial after some operations landed is a partial mutation, never
+        // a skip: the warn policy applies only when nothing was written.
+        const landed = produced.changes.length;
+        if (opts.onMissingPermission === "warn" && !required && landed === 0) {
           io.annotate("warning", `${section.key}: skipped - ${error.detail}`);
           outcomes.push({
             key: section.key,
             status: "skipped",
-            detail: [error.detail],
+            detail: [...before, error.detail],
             httpStatus: error.status,
           });
           partial = true;
           continue;
         }
+        const why =
+          landed > 0
+            ? ` (${landed} change(s) landed before the denial, so this fails the run whatever the on-missing-permission policy)`
+            : required
+              ? " (listed in required-sections, so this fails the run)"
+              : "";
         io.annotate(
           "error",
-          `${section.key}: not applied${required ? " (listed in required-sections, so this fails the run)" : ""} - ${error.detail}`,
+          `${section.key}: ${landed > 0 ? "partially applied" : "not applied"}${why} - ${error.detail}`,
         );
         outcomes.push({
           key: section.key,
           status: "failed",
-          detail: [error.detail],
+          detail: [...before, error.detail],
           httpStatus: error.status,
         });
         failed = true;
@@ -495,7 +544,7 @@ export async function runForRepo(
         ? message
         : `${section.key}: ${message}`;
       io.annotate("error", annotated);
-      outcomes.push({ key: section.key, status: "failed", detail: [annotated] });
+      outcomes.push({ key: section.key, status: "failed", detail: [...before, annotated] });
       failed = true;
       continue;
     }

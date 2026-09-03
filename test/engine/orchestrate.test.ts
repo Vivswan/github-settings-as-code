@@ -376,3 +376,189 @@ describe("readOnlyClient", () => {
     expect(api.mutations()).toEqual([]);
   });
 });
+
+describe("runForRepo plan sections", () => {
+  // workflows is the plan-contract section: the engine plans it in both
+  // modes and only apply executes, so these are the engine-level twins of
+  // the section's own plan() tests.
+  const WORKFLOWS_LIST = "GET /repos/o/r/actions/workflows?per_page=100&page=1";
+  const live = {
+    total_count: 2,
+    workflows: [
+      { id: 1, name: "CI", path: ".github/workflows/ci.yml", state: "active" },
+      { id: 2, name: "Old", path: ".github/workflows/old.yml", state: "disabled_manually" },
+    ],
+  };
+  const drifting = validated({
+    workflows: [
+      { path: "ci.yml", state: "disabled" },
+      { path: "missing.yml", state: "active" },
+    ],
+  });
+
+  test("check mode renders the plan as drift and issues zero writes even with drift", async () => {
+    // The fake would ACCEPT a write (unroutedMutations: succeed), so a write
+    // reaching it would be recorded, not thrown: the zero below is the proof.
+    const api = new MockApi({ [WORKFLOWS_LIST]: { data: live } }, { unroutedMutations: "succeed" });
+    const { io, logs } = captureIo();
+    const result = await runForRepo(api, opts({ mode: "check", settings: drifting }), io);
+    expect(result.result).toBe("drift");
+    expect(result.outcomes).toEqual([
+      {
+        key: "workflows",
+        status: "drift",
+        detail: [
+          'workflows[ci.yml]: declared "disabled" != live "active"; apply will disable the workflow',
+          expect.stringContaining(
+            "workflows[missing.yml]: declared in the settings file but no workflow",
+          ),
+        ],
+      },
+    ]);
+    expect(logs.filter((line) => line.startsWith("drift: "))).toHaveLength(2);
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("apply mode executes the plan and surfaces op-less drift as a note", async () => {
+    const api = new MockApi({ [WORKFLOWS_LIST]: { data: live } }).allowMutations(
+      "PUT /repos/o/r/actions/workflows/*",
+    );
+    const { io, annotations, logs } = captureIo();
+    const result = await runForRepo(api, opts({ settings: drifting }), io);
+    expect(result.result).toBe("applied");
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PUT /repos/o/r/actions/workflows/1/disable",
+    ]);
+    expect(logs).toEqual(['workflows: disabled workflow ".github/workflows/ci.yml"']);
+    expect(result.outcomes).toEqual([
+      {
+        key: "workflows",
+        status: "applied",
+        detail: ['disabled workflow ".github/workflows/ci.yml"'],
+      },
+    ]);
+    expect(annotations).toEqual([
+      expect.stringMatching(
+        /^notice: workflows: workflows\[missing\.yml\]: declared in the settings file/,
+      ),
+    ]);
+  });
+
+  test("a plan section's read denial arms the preflight barrier like a run section's", async () => {
+    const api = new MockApi({
+      [WORKFLOWS_LIST]: { error: { status: 404, message: "Not Found", body: "" } },
+    });
+    const { io } = captureIo();
+    const result = await runForRepo(api, opts({ settings: drifting }), io);
+    expect(result.result).toBe("failed");
+    expect(result.preflightDenied).toEqual([expect.stringMatching(/^workflows: /)]);
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("a failure mid-plan reports the notes and the operations that already applied", async () => {
+    // Two PUTs planned, the second rejected, plus an op-less finding: the
+    // first change is real (no transactions) and, with the note, must show
+    // in the log and the failed outcome instead of vanishing behind the error.
+    const api = new MockApi({
+      [WORKFLOWS_LIST]: { data: live },
+      "PUT /repos/o/r/actions/workflows/1/disable": { data: null },
+      "PUT /repos/o/r/actions/workflows/2/enable": {
+        error: { status: 422, message: "Unprocessable", body: "" },
+      },
+    });
+    const { io, logs, annotations } = captureIo();
+    const result = await runForRepo(
+      api,
+      opts({
+        settings: validated({
+          workflows: [
+            { path: "ci.yml", state: "disabled" },
+            { path: "old.yml", state: "active" },
+            { path: "missing.yml", state: "active" },
+          ],
+        }),
+      }),
+      io,
+    );
+    expect(result.result).toBe("failed");
+    expect(api.mutations()).toHaveLength(2);
+    expect(logs).toEqual(['workflows: disabled workflow ".github/workflows/ci.yml"']);
+    expect(annotations).toEqual([
+      expect.stringMatching(/^notice: workflows: workflows\[missing\.yml\]/),
+      expect.stringContaining("PUT /repos/o/r/actions/workflows/2/enable: 422"),
+    ]);
+    expect(result.outcomes).toEqual([
+      {
+        key: "workflows",
+        status: "failed",
+        detail: [
+          expect.stringContaining("workflows[missing.yml]"),
+          'disabled workflow ".github/workflows/ci.yml"',
+          expect.stringContaining("PUT /repos/o/r/actions/workflows/2/enable: 422"),
+        ],
+      },
+    ]);
+  });
+
+  test("a denial after an operation landed fails the run even under the warn policy", async () => {
+    // The first PUT succeeds and the second is denied. A skip would claim the
+    // repository was left alone; it was not, so the policy cannot soften it.
+    const api = new MockApi({
+      [WORKFLOWS_LIST]: { data: live },
+      "PUT /repos/o/r/actions/workflows/1/disable": { data: null },
+      "PUT /repos/o/r/actions/workflows/2/enable": {
+        error: { status: 403, message: "Resource not accessible", body: "" },
+      },
+    });
+    const { io, annotations, logs } = captureIo();
+    const result = await runForRepo(
+      api,
+      opts({
+        onMissingPermission: "warn",
+        settings: validated({
+          workflows: [
+            { path: "ci.yml", state: "disabled" },
+            { path: "old.yml", state: "active" },
+          ],
+        }),
+      }),
+      io,
+    );
+    expect(result.result).toBe("failed");
+    expect(skippedSectionKeys(result.outcomes)).toEqual([]);
+    expect(logs).toEqual(['workflows: disabled workflow ".github/workflows/ci.yml"']);
+    expect(annotations).toEqual([
+      expect.stringMatching(
+        /^error: workflows: partially applied \(1 change\(s\) landed before the denial/,
+      ),
+    ]);
+    expect(result.outcomes).toEqual([
+      {
+        key: "workflows",
+        status: "failed",
+        detail: [
+          'disabled workflow ".github/workflows/ci.yml"',
+          expect.stringContaining("PUT /repos/o/r/actions/workflows/2/enable"),
+        ],
+        httpStatus: 403,
+      },
+    ]);
+    // The control: the same denial with NOTHING landed is still a skip.
+    const untouched = new MockApi({
+      [WORKFLOWS_LIST]: { data: live },
+      "PUT /repos/o/r/actions/workflows/1/disable": {
+        error: { status: 403, message: "Resource not accessible", body: "" },
+      },
+    });
+    const skipped = await runForRepo(
+      untouched,
+      opts({
+        onMissingPermission: "warn",
+        settings: validated({ workflows: [{ path: "ci.yml", state: "disabled" }] }),
+      }),
+      captureIo().io,
+    );
+    expect(skipped.result).toBe("partial");
+    expect(skippedSectionKeys(skipped.outcomes)).toEqual(["workflows"]);
+  });
+});

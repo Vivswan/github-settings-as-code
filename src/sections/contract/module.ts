@@ -8,6 +8,7 @@ import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../
 import { type EndpointDecl, endpointKind, endpointMethod } from "./endpoints.js";
 import type { GraphqlOpDecl } from "./graphql.js";
 import { grantFor, type SectionPermission } from "./permissions.js";
+import type { PlanContext, PlannedOp, SectionPlan } from "./plan.js";
 
 /** The facets of a section context shared by both mode arms. */
 interface SectionContextBase {
@@ -104,10 +105,10 @@ export function beginRun(ctx: SectionContext): SectionRun {
 }
 
 /** A section's REST endpoint dictionary: role -> declaration. */
-type EndpointDict = Readonly<Record<string, EndpointDecl>>;
+export type EndpointDict = Readonly<Record<string, EndpointDecl>>;
 
 /** A section's GraphQL operation dictionary: role -> declaration. */
-type GraphqlDict = Readonly<Record<string, GraphqlOpDecl>>;
+export type GraphqlDict = Readonly<Record<string, GraphqlOpDecl>>;
 
 /**
  * The identity every helper needs to classify an error: the section's key
@@ -328,9 +329,10 @@ type SectionInput<K extends SectionKey> = Exclude<SettingsFile[K], undefined>;
 /**
  * One settings section, self-contained: identity and grant advice
  * (SectionMeta), the loose shape validation accepts for its declared
- * value, and the handler. Modules register in ./registry.ts.
+ * value, and the handler under ONE of the two contracts (SectionModule).
+ * Modules register in ./registry.ts.
  */
-export interface SectionModule<
+interface SectionModuleBase<
   K extends SectionKey = SectionKey,
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
@@ -376,8 +378,13 @@ export interface SectionModule<
         known: {
           readonly [P in Extract<keyof EntryOf<NonNullable<SettingsFile[K]>>, string>]: true;
         };
-        /** The entry's natural key, to name it in the error. */
-        describe: (entry: EntryOf<NonNullable<SettingsFile[K]>>) => string;
+        /**
+         * The entry's natural key, to name it in the error. Method syntax
+         * on purpose: a function-typed property is contravariant in its
+         * parameter, which would stop a module's exact per-section type
+         * from erasing to SectionModule<SectionKey> in the registry.
+         */
+        describe(entry: EntryOf<NonNullable<SettingsFile[K]>>): string;
         /** What the unrecognized key would silently do, as message prose. */
         consequence: string;
       };
@@ -393,8 +400,43 @@ export interface SectionModule<
    * nothing here reads the environment.
    */
   secretValues?(declared: SectionInput<K>): DeclaredSecretValue[];
-  run(ctx: SectionContext, desired: SectionInput<K>): Promise<SectionResult>;
 }
+
+/**
+ * The two handler contracts, exactly one per module - the `?: never` pins
+ * make a module declaring both (or neither) a compile error, and the engine
+ * narrows on `plan` to pick the path:
+ * - run(): the section executes under a mode-discriminated SectionContext,
+ *   writing itself in apply mode and reporting through a SectionResult.
+ * - plan(): the section only READS (through the typed port in PlanContext)
+ *   and returns the operations that would converge the repository; the
+ *   engine renders them as drift in check mode and executes them in apply
+ *   mode, so the section has no write capability of its own. Passing the
+ *   module's literal ENDPOINTS as `E` (`satisfies SectionModule<"key",
+ *   typeof ENDPOINTS>`) is what types the read port and the planned roles
+ *   exactly; under the erased default the port is empty and every role is
+ *   a string.
+ */
+export type SectionModule<
+  K extends SectionKey = SectionKey,
+  E extends EndpointDict = EndpointDict,
+  G extends GraphqlDict = GraphqlDict,
+> =
+  | (SectionModuleBase<K, E, G> & {
+      run(ctx: SectionContext, desired: SectionInput<K>): Promise<SectionResult>;
+      plan?: never;
+    })
+  | (SectionModuleBase<K, E, G> & {
+      plan(ctx: PlanContext<E, G>, desired: SectionInput<K>): Promise<SectionPlan<PlannedOp<E, G>>>;
+      run?: never;
+    });
+
+/** The plan-contract arm of SectionModule, for consumers that only plan. */
+export type PlanSectionModule<
+  K extends SectionKey = SectionKey,
+  E extends EndpointDict = EndpointDict,
+  G extends GraphqlDict = GraphqlDict,
+> = Extract<SectionModule<K, E, G>, { plan: unknown }>;
 
 /**
  * One designated secret-field value as a section declares it: the raw value
