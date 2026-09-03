@@ -17,10 +17,16 @@ import {
   renderPolicyDefaultsTable,
   renderReadmeInputsTable,
 } from "../../.github/scripts/gen-action-docs.js";
+import {
+  markerSyntaxFor,
+  type RegionSpec,
+  regionBounds,
+} from "../../.github/scripts/lib/generated-regions.js";
 import { INPUT_DECLS } from "../../src/action/inputs.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { sectionModule } from "../../src/sections/registry.js";
+import { relocatedRegion } from "./relocated-region.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -94,6 +100,7 @@ describe("action.yml renderers", () => {
     ["a newline", "Two\nlines."],
     ["a leading space", " Padded."],
     ["a trailing space", "Padded. "],
+    ["nothing in it", ""],
   ])("rejects a description with %s, which would not fold back verbatim", (_label, description) => {
     expect(() => renderActionInputs({ x: { description, default: "" } })).toThrow(
       /single-spaced prose/,
@@ -312,6 +319,148 @@ describe("generated files", () => {
   test.each(Object.keys(GENERATED_REGIONS))("regenerating %s is a no-op", (path) => {
     const text = readFileSync(join(ROOT, path), "utf8");
     expect(regenerateText(path, text)).toBe(text);
+  });
+
+  test.each(
+    Object.entries(GENERATED_REGIONS).flatMap(([path, regions]) =>
+      regions.map((region): [name: string, path: string, region: RegionSpec] => [
+        region.name,
+        path,
+        region,
+      ]),
+    ),
+  )("refuses to regenerate %s moved away from its home in %s", (name, path, region) => {
+    // Each region pasted after the file's last top-level key (YAML) or last section heading
+    // (markdown), both of which lie outside its declared home; the mechanics of every other
+    // misplacement are pinned in generated-regions.test.ts.
+    const text = readFileSync(join(ROOT, path), "utf8");
+    const { placement } = region;
+    const anchor =
+      placement.kind === "under-key" ? "\nruns:\n" : `\n${text.match(/^## .*$/gm)?.at(-1)}\n`;
+    const home =
+      placement.kind === "under-key"
+        ? `must sit directly under the "${placement.key}:" mapping in ${path}`
+        : placement.kind === "under-heading"
+          ? `must sit under "${placement.heading}" in ${path}`
+          : `must close ${path}`;
+    expect(() =>
+      regenerateText(path, relocatedRegion(text, name, markerSyntaxFor(path), anchor)),
+    ).toThrow(`the ${name} region ${home}`);
+  });
+
+  test("each region's body shape accepts its renderer's output on edge-case declarations", () => {
+    // The shapes are what the placement check holds a committed body to, so every text a
+    // renderer can write must pass them: quoted and escaped keys, folded descriptions, escaped
+    // pipes, caveats, and both the empty and the populated gated-reads forms.
+    const shapes = new Map(
+      Object.values(GENERATED_REGIONS)
+        .flat()
+        .map((region) => [region.name, region.body]),
+    );
+    const accepts = (name: string, rendered: string): void => {
+      expect(`\n${rendered}\n`, name).toMatch(shapes.get(name) ?? /(?!)/);
+    };
+    accepts(
+      "action-inputs",
+      renderActionInputs({
+        'say "hi"': { description: "A quoted, escaped name.", default: 'a "quoted" default' },
+        on: { description: "A".repeat(200), default: "" },
+        "settings-file": { description: "Plain.", default: "" },
+      }),
+    );
+    // Hand-edited bodies the renderers never write, each valid YAML the shape must still refuse:
+    // a bare quote in a default, a YAML-only escape and a raw tab in it, a description line
+    // indented past the fold's six spaces, a YAML word left bare, and a plain name quoted.
+    for (const [key, defaultValue, description] of [
+      ["x", '"bad"quote"', "      D.\n"],
+      ["x", '"\\x61pply"', "      D.\n"],
+      ["x", '"tab\there"', "      D.\n"],
+      ["x", '"x"', "        D.\n"],
+      ["on", '"x"', "      D.\n"],
+      ['"ordinary"', '"x"', "      D.\n"],
+    ]) {
+      const body = `\n  ${key}:\n    description: >-\n${description}    required: false\n    default: ${defaultValue}\n`;
+      expect(shapes.get("action-inputs")?.test(body), body).toBe(false);
+    }
+    accepts("action-outputs", renderActionOutputs({ result: { description: "A | B." } }));
+    accepts(
+      "readme-inputs-table",
+      renderReadmeInputsTable({ x: { default: "", shownDefault: "a", summary: "b | c" } }),
+    );
+    const knobbed = [
+      { key: "labels", undeclaredDefault: "delete" },
+      { key: "rulesets", undeclaredDefault: "keep" },
+    ] as const;
+    accepts("policy-count-sentence", renderPolicyCountSentence(knobbed));
+    accepts(
+      "policy-defaults-table",
+      renderPolicyDefaultsTable(knobbed, {
+        labels: { caveat: "Probot parity", override: "manage a core set" },
+        rulesets: { override: "make the file the inventory" },
+      }),
+    );
+    accepts("permissions-grant-sentence", renderGrantSentence([sectionModule("teams")]));
+    // Every bullet form: none, a wholly gated section on its own grant, one on a named override
+    // grant, and a partly gated section naming its routes.
+    const overrideGated: SectionMeta = {
+      ...sectionModule("labels"),
+      endpoints: {
+        list: {
+          route: "GET /repos/{owner}/{repo}/actions/variables",
+          statuses: { 200: "the variables" },
+          permission: { repo: ["actions"] },
+          accessGrade: "write",
+        },
+      },
+    };
+    const partlyGated: SectionMeta = {
+      ...sectionModule("labels"),
+      permission: { repo: ["administration"] },
+      endpoints: {
+        get: { route: "GET /repos/{owner}/{repo}/interaction-limits", statuses: { 200: "x" } },
+        capGet: {
+          route: "GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap",
+          statuses: { 200: "x" },
+          accessGrade: "write",
+        },
+      },
+    };
+    for (const sections of [
+      [sectionModule("labels")],
+      [sectionModule("codespaces_secrets"), overrideGated, partlyGated],
+    ]) {
+      accepts("permissions-gated-reads", renderGatedReads(sections));
+      accepts("check-mode-gated-reads", renderCheckModeGatedReads(sections));
+    }
+  });
+
+  test("each region's body shape rejects authored text and every other region's body", () => {
+    // The negative half of the shape pin: a shape loosened to accept anything would still pass
+    // the renderer test above, so each must refuse prose, a heading, and its look-alike siblings
+    // (the other tables, sentences, and bullet lists the same pages carry).
+    const regions = Object.entries(GENERATED_REGIONS).flatMap(([path, list]) =>
+      list.map((region) => ({ path, region })),
+    );
+    const bodies = new Map(
+      regions.map(({ path, region }) => {
+        const text = readFileSync(join(ROOT, path), "utf8");
+        const { begin, end } = regionBounds(text, region.name, markerSyntaxFor(path));
+        return [region.name, text.slice(begin[1], end[0])];
+      }),
+    );
+    for (const { region } of regions) {
+      const foreign = [
+        "\nAuthored prose the generator never writes.\n",
+        "\n## A heading\n",
+        ...[...bodies].filter(([name]) => name !== region.name).map(([, body]) => body),
+      ];
+      for (const body of foreign) {
+        expect(
+          region.body.test(body),
+          `${region.name} accepts ${JSON.stringify(body.slice(0, 40))}`,
+        ).toBe(false);
+      }
+    }
   });
 
   test("action.yml parses back to the input and output declarations", () => {

@@ -14,6 +14,7 @@ import {
   renderSectionsTable,
 } from "../../.github/scripts/gen-docs.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
+import { relocatedRegion } from "./relocated-region.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -213,111 +214,61 @@ describe("the committed README", () => {
     expect(() => renderReadme(moved)).toThrow("found 1 and 2");
   });
 
-  test("must keep each region where its prose expects it", () => {
-    // Relocating a marker regenerates cleanly, so placement is asserted: the table region under
-    // "## Inputs", the Outputs sentence under "## Sections", the table's END marker past the next
-    // heading (rendering would erase it), and the link definitions no longer closing the document.
-    const table = readme.match(
-      /<!-- BEGIN GENERATED: readme-sections-table[\s\S]*?<!-- END GENERATED: readme-sections-table -->\n/,
-    )?.[0];
-    expect(table).toBeDefined();
-    const relocatedTable = readme
-      .replace(table ?? "", "")
-      .replace("\n## Inputs\n", `\n## Inputs\n\n${table}`);
-    expect(() => renderReadme(relocatedTable)).toThrow(
-      'the readme-sections-table region must lie entirely under "## Sections"',
-    );
-    const outputs = readme.split("\n").find((line) => line.startsWith("Outputs: `result`"));
-    expect(outputs).toBeDefined();
-    const relocatedOutputs = readme
-      .replace(`${outputs}\n`, "")
-      .replace("\n## Sections\n", `\n## Sections\n\n${outputs}\n`);
-    expect(() => renderReadme(relocatedOutputs)).toThrow(
-      'the readme-outputs region must lie entirely under "## Inputs"',
-    );
-    const tableEnd = "<!-- END GENERATED: readme-sections-table -->\n";
-    const swallowing = readme
-      .replace(tableEnd, "")
-      .replace("\n## Example settings.yml\n", `\n## Example settings.yml\n\n${tableEnd}`);
-    expect(() => renderReadme(swallowing)).toThrow(
-      "the readme-sections-table region encloses content the generator would not write",
-    );
-    // Same section, one paragraph swallowed: the END marker moved below the
-    // authored paragraph that follows the table.
-    const undeclared = /(\nThe Undeclared default column says[^\n]*\n)/;
-    expect(readme).toMatch(undeclared);
-    const swallowingParagraph = readme.replace(tableEnd, "").replace(undeclared, `$1${tableEnd}`);
-    expect(() => renderReadme(swallowingParagraph)).toThrow(
-      "the readme-sections-table region encloses content the generator would not write",
-    );
-    expect(() => renderReadme(`${readme}\ntrailing prose\n`)).toThrow(
+  test.each<[label: string, mutate: (readme: string) => string, error: string]>([
+    [
+      "the Sections table moved under Inputs",
+      (readme) => relocatedRegion(readme, "readme-sections-table", "html", "\n## Inputs\n\n"),
+      'the readme-sections-table region must sit under "## Sections" in README.md; "## Inputs" is the heading above its BEGIN marker',
+    ],
+    [
+      "the Outputs sentence moved under Sections",
+      (readme) => relocatedRegion(readme, "readme-outputs", "html", "\n## Sections\n\n"),
+      'the readme-outputs region must sit under "## Inputs" in README.md; "## Sections" is the heading above its BEGIN marker',
+    ],
+    [
+      "the Outputs sentence quoted",
+      (readme) => readme.replace("\nOutputs: `result` (", "\n> Outputs: `result` ("),
+      "the readme-outputs region sits inside a blockquote in README.md",
+    ],
+    [
+      "prose after the link definitions",
+      (readme) => `${readme}\ntrailing prose\n`,
       "the readme-pat-url region must close README.md",
-    );
-    const patBegin = readme.match(/<!-- BEGIN GENERATED: readme-pat-url[^\n]*\n/)?.[0] ?? "";
-    expect(patBegin).not.toBe("");
-    // The BEGIN marker moved over the Contributing heading, and moved to
-    // just below it: both enclose prose the generator would not write.
-    for (const anchor of ["\n## Contributing\n", "\n## Contributing\n\n"]) {
-      expect(() =>
-        renderReadme(readme.replace(patBegin, "").replace(anchor, `${anchor}${patBegin}`)),
-      ).toThrow("the readme-pat-url region encloses content the generator would not write");
-    }
-  });
-
-  test("must enclose only this generator's own output shape", () => {
-    // Markers moved over look-alike content in the right section: the
-    // Outputs markers around the Inputs table header, the table markers
-    // around the Inputs table, the link markers around another definition.
-    const outputsBegin = readme.match(/<!-- BEGIN GENERATED: readme-outputs[^\n]*?-->/)?.[0] ?? "";
-    const outputsEnd = "<!-- END GENERATED: readme-outputs -->";
-    expect(outputsBegin).not.toBe("");
-    const header = "| Input | Default | Meaning |";
-    expect(readme).toContain(header);
-    const overHeader = readme
-      .replace(outputsBegin, "")
-      .replace(outputsEnd, "")
-      .replace(header, `| ${outputsBegin}Input | Default | Meaning${outputsEnd} |`);
-    expect(() => renderReadme(overHeader)).toThrow(
-      "the readme-outputs region encloses content the generator would not write",
-    );
-    const table = readme.match(
-      /(<!-- BEGIN GENERATED: readme-sections-table[^\n]*\n)([\s\S]*?)(<!-- END GENERATED: readme-sections-table -->)/,
-    );
-    expect(table).not.toBeNull();
-    const inputsTable = readme.match(/\| Input \| Default \| Meaning \|\n[\s\S]*?\n\n/)?.[0] ?? "";
-    expect(inputsTable).not.toBe("");
-    expect(() =>
-      renderReadme(readme.replace(table?.[2] ?? "", `${inputsTable.trimEnd()}\n`)),
-    ).toThrow("the readme-sections-table region encloses content the generator would not write");
-    const definition = readme.split("\n").find((line) => line.startsWith("[pat-form]: ")) ?? "";
-    expect(definition).not.toBe("");
-    expect(() => renderReadme(readme.replace(definition, "[other]: https://example.com"))).toThrow(
-      "the readme-pat-url region encloses content the generator would not write",
-    );
-  });
-
-  test("must not sit inside a fenced code block or a raw HTML block", () => {
-    // Each `before` text lands ahead of "## Sections". CommonMark closes a fence only with the
-    // same character at a length >= the opener's, so a different or shorter fence line is content
-    // and the region stays inside (a fence-line parity count would let those two through).
-    const inside: Array<[label: string, before: string]> = [
-      ["unclosed", "```\n"],
-      ["mixed delimiters", "```\n~~~\n"],
-      ["short closer", "````\n```\n"],
-    ];
-    for (const [label, before] of inside) {
-      expect(
-        () => renderReadme(readme.replace("\n## Sections\n", `\n${before}\n## Sections\n`)),
-        label,
-      ).toThrow("the readme-sections-table region sits inside a fenced code block");
-    }
-    // Controls: a fence closed by its own rule leaves the region outside.
-    for (const before of ["```\ncode\n```\n", "~~~js\n```\n~~~\n", "````\n```\n````\n"]) {
-      const closed = readme.replace("\n## Sections\n", `\n${before}\n## Sections\n`);
-      expect(renderReadme(closed)).toBe(closed);
-    }
-    expect(() =>
-      renderReadme(readme.replace("\n## Contributing\n", "\n<pre>\n\n## Contributing\n")),
-    ).toThrow("the readme-pat-url region sits inside a raw HTML block");
+    ],
+    [
+      "the Sections table markers around the Inputs table",
+      (readme) => {
+        const inputsTable =
+          readme.match(/\| Input \| Default \| Meaning \|\n[\s\S]*?\n\n/)?.[0] ?? "";
+        expect(inputsTable).not.toBe("");
+        return readme.replace(
+          /(<!-- BEGIN GENERATED: readme-sections-table[^\n]*\n)[\s\S]*?(<!-- END GENERATED: readme-sections-table -->)/,
+          `$1${inputsTable.trimEnd()}\n$2`,
+        );
+      },
+      "the readme-sections-table region in README.md encloses content the generator would not write",
+    ],
+    [
+      "the Outputs markers around the Inputs table header",
+      (readme) => {
+        const begin = readme.match(/<!-- BEGIN GENERATED: readme-outputs[^\n]*?-->/)?.[0] ?? "";
+        const end = "<!-- END GENERATED: readme-outputs -->";
+        expect(begin).not.toBe("");
+        return readme
+          .replace(begin, "")
+          .replace(end, "")
+          .replace("| Input | Default | Meaning |", `| ${begin}Input | Default | Meaning${end} |`);
+      },
+      "the readme-outputs region in README.md encloses content the generator would not write",
+    ],
+    [
+      "the link markers around another definition",
+      (readme) => readme.replace(/^\[pat-form\]: /m, "[other]: "),
+      "the readme-pat-url region in README.md encloses content the generator would not write",
+    ],
+  ])("refuses to regenerate with %s", (_label, mutate, error) => {
+    // Each page regenerates cleanly without the placement check and reads wrong with it skipped,
+    // so the committed README's specs are pinned here (the mechanics in generated-regions.test.ts).
+    expect(() => renderReadme(mutate(readme))).toThrow(error);
   });
 });

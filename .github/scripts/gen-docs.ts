@@ -16,7 +16,7 @@ import { RESOURCE_SLUGS } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
-import { regionBounds, replaceRegion } from "./lib/generated-regions.js";
+import { escapeRe, type GeneratedRegion, regenerateRegions } from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const README_PATH = "README.md";
@@ -206,120 +206,54 @@ export function renderPatFormUrl(
   return `https://github.com/settings/personal-access-tokens/new?${query}`;
 }
 
-/** `text` as a regex source matching itself literally. */
-function escapeRe(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /** The reference label the README's token-form link resolves through; the generated definition carries it. */
 const PAT_FORM_LABEL = "pat-form";
 
-// Each region's home and the shape of this generator's own output for it (or an empty body),
-// built from the renderer constants, so a marker moved over authored prose, another table, or
-// another link definition fails instead of erasing it. `heading` bounds it; `tail` ends the file.
-const REGIONS = {
-  "readme-sections-table": {
-    heading: "Sections",
+/** The pre-filled token-form link for this repository over every section operation's permission. */
+function patFormUrl(): string {
+  const operations = SECTIONS.flatMap((section) =>
+    sectionOperations(section).map((operation) => ({ ...operation, section: section.key })),
+  );
+  const repoName = REPO_SLUG.split("/")[1] ?? REPO_SLUG;
+  return renderPatFormUrl(
+    { name: repoName, description: `Token for ${REPO_SLUG}` },
+    patFormParameters(operations, RESOURCE_SLUGS),
+  );
+}
+
+// Each README region: its home, its renderer, and the shape of this generator's own output for
+// it (or an empty body), built from the renderer constants, so a marker moved over authored
+// prose, another table, or another link definition fails instead of erasing it.
+const README_REGIONS: readonly GeneratedRegion[] = [
+  {
+    name: "readme-sections-table",
+    placement: { kind: "under-heading", heading: "## Sections" },
     body: new RegExp(
       String.raw`^\n(?:${escapeRe(TABLE_HEADER)}\n(?:\| \x60[a-z_]+\x60 \| [^\n]* \|\n)*)?$`,
     ),
+    render: () => `\n${renderSectionsTable(SECTIONS, DOCS)}\n`,
   },
-  "readme-outputs": {
-    heading: "Inputs",
+  {
+    name: "readme-outputs",
+    placement: { kind: "under-heading", heading: "## Inputs" },
     body: new RegExp(
       String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where \x60[a-z]+\x60(?: and \x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?)?$`,
     ),
+    render: () => renderOutputsList(REPO_RESULTS),
   },
-  "readme-pat-url": {
-    tail: true,
+  {
+    name: "readme-pat-url",
+    placement: { kind: "tail" },
     body: new RegExp(String.raw`^\n(?:\[${escapeRe(PAT_FORM_LABEL)}\]: \S+\n)?$`),
+    render: () => `\n[${PAT_FORM_LABEL}]: ${patFormUrl()}\n`,
   },
-} as const;
-
-// Throw when `before` (the text preceding a marker) leaves a fenced code block or a raw <pre>
-// open: a region inside one renders as code. CommonMark closes a fence only with the same
-// character at a length >= the opener's, on a bare line; any other fence line inside is content.
-function assertOutsideCodeBlocks(before: string, name: string): void {
-  let fenced: { char: string; length: number } | undefined;
-  for (const line of before.split("\n")) {
-    const fence = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/);
-    if (fence === null) {
-      continue;
-    }
-    const run = fence[1] ?? "";
-    if (fenced === undefined) {
-      fenced = { char: run.charAt(0), length: run.length };
-    } else if (
-      run.charAt(0) === fenced.char &&
-      run.length >= fenced.length &&
-      (fence[2] ?? "").trim() === ""
-    ) {
-      fenced = undefined;
-    }
-  }
-  if (fenced !== undefined) {
-    throw new Error(`gen-docs: the ${name} region sits inside a fenced code block in README.md`);
-  }
-  const open = (before.match(/<pre\b/gi) ?? []).length - (before.match(/<\/pre>/gi) ?? []).length;
-  if (open > 0) {
-    throw new Error(`gen-docs: the ${name} region sits inside a raw HTML block in README.md`);
-  }
-}
-
-// Throw unless every region is where the prose expects it and holds only generator-shaped
-// content; a relocated marker would otherwise regenerate cleanly while the page reads wrong.
-export function assertRegionPlacement(readme: string): void {
-  for (const [name, region] of Object.entries(REGIONS)) {
-    const { begin, end } = regionBounds(readme, name, "html");
-    assertOutsideCodeBlocks(readme.slice(0, begin[0]), name);
-    const body = readme.slice(begin[1], end[0]);
-    if (!region.body.test(body)) {
-      throw new Error(
-        `gen-docs: the ${name} region encloses content the generator would not write; move its marker back`,
-      );
-    }
-    if ("tail" in region) {
-      if (readme.slice(end[1]).trim() !== "") {
-        throw new Error(`gen-docs: the ${name} region must close README.md`);
-      }
-      continue;
-    }
-    const start = readme.indexOf(`\n## ${region.heading}\n`);
-    if (start === -1) {
-      throw new Error(
-        `gen-docs: README.md has no "## ${region.heading}" heading for the ${name} region`,
-      );
-    }
-    const next = readme.indexOf("\n## ", start + 1);
-    if (begin[0] < start || end[1] > (next === -1 ? readme.length : next)) {
-      throw new Error(
-        `gen-docs: the ${name} region must lie entirely under "## ${region.heading}" in README.md`,
-      );
-    }
-  }
-}
+];
 
 // The README with every generated region rendered. The result must define the token-form label
 // exactly once and reference it exactly once (full, collapsed, or shortcut form), or a stale
 // definition or renamed reference would leave the page wrong while regeneration stays a no-op.
 export function renderReadme(readme: string): string {
-  assertRegionPlacement(readme);
-  const operations = SECTIONS.flatMap((section) =>
-    sectionOperations(section).map((operation) => ({ ...operation, section: section.key })),
-  );
-  const repoName = REPO_SLUG.split("/")[1] ?? REPO_SLUG;
-  const url = renderPatFormUrl(
-    { name: repoName, description: `Token for ${REPO_SLUG}` },
-    patFormParameters(operations, RESOURCE_SLUGS),
-  );
-  let out = replaceRegion(
-    readme,
-    "readme-sections-table",
-    `\n${renderSectionsTable(SECTIONS, DOCS)}\n`,
-    "html",
-  );
-  out = replaceRegion(out, "readme-outputs", renderOutputsList(REPO_RESULTS), "html");
-  out = replaceRegion(out, "readme-pat-url", `\n[${PAT_FORM_LABEL}]: ${url}\n`, "html");
+  const out = regenerateRegions(readme, README_REGIONS, README_PATH);
   // CommonMark trims and case-folds labels and lets the first definition
   // win, so every spelling counts: a mention opening a line and ending in
   // ":" is a definition, any other bracketed mention is a reference.
