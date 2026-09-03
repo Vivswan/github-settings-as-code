@@ -11,18 +11,27 @@ import type { GithubClient } from "../github/api.js";
 import { endpointMethod } from "../sections/contract/endpoints.js";
 import type { SectionContext, SectionMeta } from "../sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../sections/contract/plan.js";
-import { callDeclared, callGraphql } from "../sections/contract/requests.js";
+import {
+  callDeclared,
+  callGraphql,
+  declaredTolerance,
+  tryCallDeclared,
+} from "../sections/contract/requests.js";
 
 /**
- * How a plan's execution ended. The API has no transactions, so a failure
- * mid-plan leaves the operations before it applied: both arms carry the
- * change lines rendered so far, and the failed arm carries the error the
- * failing request raised (already classified by the request helpers) for
- * the engine to report exactly as it reports a run() handler's throw.
+ * How a plan's execution ended; a failure mid-plan leaves the earlier
+ * operations applied. `landed` counts the requests GitHub accepted, which
+ * the change lines cannot: a change or capture hook can fail after landing.
  */
+interface PlanExecutionBase {
+  readonly changes: readonly string[];
+  readonly notes: readonly string[];
+  readonly landed: number;
+}
+
 type PlanExecution =
-  | { readonly status: "applied"; readonly changes: readonly string[] }
-  | { readonly status: "failed"; readonly changes: readonly string[]; readonly error: unknown };
+  | (PlanExecutionBase & { readonly status: "applied" })
+  | (PlanExecutionBase & { readonly status: "failed"; readonly error: unknown });
 
 /**
  * A declaration under `role` in `dict`, by OWN property only: an erased plan
@@ -33,13 +42,34 @@ function declared<T>(dict: Readonly<Record<string, T>> | undefined, role: string
   return dict !== undefined && Object.hasOwn(dict, role) ? dict[role] : undefined;
 }
 
+function noop(): void {}
+
 /**
- * Execute every operation of `plan` against `api`, resolving each op's role
- * against the section's declarations - REST endpoints first, then GraphQL
- * operations (the registry asserts the two role spaces are disjoint).
- * Payload and variables thunks seal at this point, with `tools` as their
- * only capability, so a secret is read no earlier than the request that
- * carries it. Stops at the first failing operation.
+ * The change thunk and capture hook are synchronous by contract: a promise
+ * here would let the line record before the hook settled and drop its
+ * rejection, so a thenable is a bug caught before the line records.
+ */
+function rejectThenable(section: SectionMeta, role: string, hook: string, value: unknown): void {
+  const then = (value as { then?: unknown } | null)?.then;
+  if (typeof then === "function") {
+    // The BUG below is the report; the discarded promise's own rejection
+    // must not surface a second time, and a then() that throws changes nothing.
+    try {
+      (then as (onFulfilled: () => void, onRejected: () => void) => unknown).call(
+        value,
+        noop,
+        noop,
+      );
+    } catch {}
+    throw new Error(
+      `BUG: ${section.key}: the ${hook} of operation "${role}" returned a promise; it must be synchronous`,
+    );
+  }
+}
+
+/**
+ * Execute every operation of `plan` against `api` under ONE failure rule:
+ * the change line records only once request, render, and capture succeeded.
  */
 export async function executePlan(
   plan: SectionPlan,
@@ -56,8 +86,11 @@ export async function executePlan(
   });
   const ctx: SectionContext = { api, repo, check: false, resolveSecret: exec.resolveSecret };
   const changes: string[] = [];
+  const notes: string[] = [];
+  let landed = 0;
   for (const op of plan.ops) {
     try {
+      let response: unknown;
       if (typeof op.role !== "string") {
         // Only a string can name a declared role: a number would coerce onto
         // a matching key and a symbol would enter the property-key path.
@@ -74,12 +107,25 @@ export async function executePlan(
             `BUG: ${section.key} planned an operation under role "${op.role}", which is a read endpoint (${endpoint.route}); only write roles are plannable`,
           );
         }
-        const payload = typeof op.payload === "function" ? op.payload(exec) : op.payload;
-        await callDeclared(ctx, section, endpoint, {
-          params: op.params,
-          query: op.query,
-          payload,
-        });
+        const payload = typeof op.payload === "function" ? await op.payload(exec) : op.payload;
+        const request = { params: op.params, query: op.query, payload, describe: op.describe };
+        if (op.tolerate === undefined) {
+          response = await callDeclared(ctx, section, endpoint, request);
+        } else {
+          const result = await tryCallDeclared(ctx, section, endpoint, {
+            ...request,
+            tolerated: declaredTolerance(endpoint, op.tolerate.statuses),
+          });
+          if ("error" in result) {
+            const outcome = op.tolerate.outcome(result.error);
+            if (outcome.failure !== undefined) {
+              throw new Error(outcome.failure);
+            }
+            notes.push(outcome.note);
+            continue;
+          }
+          response = result.data;
+        }
       } else {
         const graphqlOp = declared(section.graphql, op.role);
         if (graphqlOp === undefined) {
@@ -92,13 +138,26 @@ export async function executePlan(
             `BUG: ${section.key} planned an operation under role "${op.role}", which is a GraphQL ${graphqlOp.kind} operation; only write roles are plannable`,
           );
         }
-        const variables = typeof op.variables === "function" ? op.variables(exec) : op.variables;
-        await callGraphql(ctx, section, graphqlOp, variables ?? {});
+        const variables =
+          typeof op.variables === "function" ? await op.variables(exec) : op.variables;
+        response = await callGraphql(ctx, section, graphqlOp, variables ?? {}, {
+          describe: op.describe,
+        });
       }
+      landed++;
+      const lines = typeof op.change === "function" ? op.change(response) : op.change;
+      rejectThenable(section, op.role, "change thunk", lines);
+      if (lines.length === 0) {
+        // The request landed, so apply must have something to report.
+        throw new Error(
+          `BUG: ${section.key}: operation "${op.role}" rendered no change line for a request that landed`,
+        );
+      }
+      rejectThenable(section, op.role, "capture hook", op.capture?.(response));
+      changes.push(...(typeof lines === "string" ? [lines] : lines));
     } catch (error) {
-      return { status: "failed", changes, error };
+      return { status: "failed", changes, notes, landed, error };
     }
-    changes.push(op.change);
   }
-  return { status: "applied", changes };
+  return { status: "applied", changes, notes, landed };
 }

@@ -51,7 +51,7 @@ interface FeatureToggle {
 }
 
 /**
- * A toggle whose state can also be read back. The GET's declared >= 400
+ * A toggle whose state can also be read back. The GET's declared tolerable
  * statuses are the "not enabled" statuses; the DELETE's are the "already off
  * or not applicable here" statuses, so the handler reads tolerances straight
  * off these declarations. All entries are typed as the concrete ENDPOINTS
@@ -486,13 +486,13 @@ export const repositorySection = {
       if (!(toggle.key in desired)) {
         continue;
       }
-      // Both writes go through tryCall so each endpoint's declared >= 400
+      // Both writes go through tryCall so each endpoint's declared tolerable
       // statuses are tolerated: on a DELETE, 404/422 mean the feature does
       // not apply here, so the declared "off" already holds and the change
       // line stands (private vulnerability reporting); a 409 on either write
       // means the setting is enforced above the repository (immutable
       // releases' owner enforcement), so nothing changed - a note, never a
-      // false change line. An endpoint declaring no >= 400 statuses
+      // false change line. An endpoint declaring no tolerable statuses
       // tolerates nothing, so tryCall throws on any error just like call.
       const endpoint = desired[toggle.key] ? toggle.put : toggle.remove;
       const outcome = await tryCall(ctx, this, endpoint);

@@ -166,8 +166,8 @@ export type GraphqlVariablesOf<O extends GraphqlOpDecl> = O extends {
 
 /**
  * The declared error types of a GraphQL operation - its tolerated outcomes,
- * exactly as toleratedStatuses reads an EndpointDecl's >= 400 statuses. The
- * declaration is the single source; tryCallGraphql defaults to this set.
+ * exactly as toleratedStatuses reads an EndpointDecl's tolerable statuses.
+ * The declaration is the single source; tryCallGraphql defaults to this set.
  */
 export function toleratedGraphqlErrors(op: GraphqlOpDecl): GraphqlTolerableError[] {
   return GRAPHQL_TOLERABLE_ERRORS.filter((type) => op.outcomes[type] !== undefined);

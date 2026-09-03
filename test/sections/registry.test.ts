@@ -339,7 +339,7 @@ describe("section endpoints", () => {
     ).toBe("write");
   });
 
-  test("toleratedStatuses returns exactly the declared >= 400 statuses", () => {
+  test("toleratedStatuses returns exactly the declared tolerable statuses", () => {
     // This pins the invariant the helpers rely on: tolerances are derived
     // from the declared statuses, never wider.
     expect(
@@ -711,7 +711,7 @@ describe("probeAbsent tolerance derivation", () => {
     check: true,
   });
 
-  test("without an explicit tolerate, a declared >= 400 status reads as missing", async () => {
+  test("without an explicit tolerate, a declared tolerable status reads as missing", async () => {
     // 404 and 422 are declared, so both are tolerated automatically.
     const endpoint = {
       route: "GET /repos/{owner}/{repo}/private-vulnerability-reporting",

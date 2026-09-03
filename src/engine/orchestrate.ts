@@ -457,12 +457,13 @@ export async function runForRepo(
       );
     }
     let result: SectionResult;
-    // What a plan section produced before an operation failed: its notes and
-    // the change lines already on the wire (real mutations - the API has no
-    // transactions), reported with the failure instead of vanishing.
-    let produced: { notes: readonly string[]; changes: readonly string[] } = {
+    // What a plan section produced before an operation failed, reported with
+    // the failure instead of vanishing. `landed` counts accepted requests: a
+    // change thunk can fail after its request landed, so lines undercount.
+    let produced: { notes: readonly string[]; changes: readonly string[]; landed: number } = {
       notes: [],
       changes: [],
+      landed: 0,
     };
     try {
       if (section.plan !== undefined) {
@@ -473,9 +474,10 @@ export async function runForRepo(
         if (runCtx.check) {
           result = { check: true, drift: planDrift(plan), notes: plan.notes };
         } else {
-          const notes = [...plan.notes, ...plan.drift];
           const execution = await executePlan(plan, section, api, repo, runCtx);
-          produced = { notes, changes: execution.changes };
+          // The execution's notes are the tolerated operations' outcomes.
+          const notes = [...plan.notes, ...plan.drift, ...execution.notes];
+          produced = { notes, changes: execution.changes, landed: execution.landed };
           if (execution.status === "failed") {
             // Already classified by the request helpers; the catch below
             // reports it exactly as a run() handler's throw.
@@ -506,7 +508,7 @@ export async function runForRepo(
         const required = opts.requiredSections.has(section.key);
         // A denial after some operations landed is a partial mutation, never
         // a skip: the warn policy applies only when nothing was written.
-        const landed = produced.changes.length;
+        const landed = produced.landed;
         if (opts.onMissingPermission === "warn" && !required && landed === 0) {
           io.annotate("warning", `${section.key}: skipped - ${error.detail}`);
           outcomes.push({
@@ -520,7 +522,7 @@ export async function runForRepo(
         }
         const why =
           landed > 0
-            ? ` (${landed} change(s) landed before the denial, so this fails the run whatever the on-missing-permission policy)`
+            ? ` (${landed} request(s) landed before the denial, so this fails the run whatever the on-missing-permission policy)`
             : required
               ? " (listed in required-sections, so this fails the run)"
               : "";
@@ -538,11 +540,16 @@ export async function runForRepo(
         continue;
       }
       // throwFor()-raised errors already carry section, cause, and fix;
-      // prefix anything else so the failing section is still named.
+      // prefix anything else so the failing section is still named. A landed
+      // request is a real mutation with or without its line, so say so.
       const message = error instanceof Error ? error.message : String(error);
-      const annotated = message.startsWith(`${section.key}:`)
+      const prefixed = message.startsWith(`${section.key}:`)
         ? message
         : `${section.key}: ${message}`;
+      const annotated =
+        produced.landed > 0
+          ? `${prefixed} (${produced.landed} request(s) landed before this failure, so the repository is partially applied)`
+          : prefixed;
       io.annotate("error", annotated);
       outcomes.push({ key: section.key, status: "failed", detail: [...before, annotated] });
       failed = true;

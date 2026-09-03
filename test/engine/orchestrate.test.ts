@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 
 import {
   preflightProbe,
@@ -14,7 +14,10 @@ import type { GithubClient } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
 import { maskRegistry, prefixedIo } from "../../src/io.js";
 import type { SettingsFile } from "../../src/schema.js";
+import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
+import type { SectionPlan } from "../../src/sections/contract/plan.js";
 import type { SECTIONS } from "../../src/sections/registry.js";
+import { workflowsSection } from "../../src/sections/workflows/index.js";
 import { MockApi } from "../mock-api.js";
 
 function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: string[] } {
@@ -498,6 +501,106 @@ describe("runForRepo plan sections", () => {
     ]);
   });
 
+  describe("a stubbed plan", () => {
+    // No registered plan section tolerates a status or renders from the
+    // response yet, so the workflows plan is stubbed through the erased view.
+    let stubbed: ReturnType<typeof spyOn<typeof workflowsSection, "plan">> | undefined;
+    const disable = workflowsSection.endpoints.disable;
+    afterEach(() => {
+      stubbed?.mockRestore();
+      (workflowsSection.endpoints as Record<string, EndpointDecl>).disable = disable;
+    });
+    const stub = (...ops: SectionPlan["ops"]) => {
+      // A restored spy no longer intercepts, so each test arms its own.
+      stubbed = spyOn(workflowsSection, "plan").mockResolvedValue({
+        ops: ops as never,
+        notes: [],
+        drift: [],
+      });
+    };
+    const disabling = (workflowId: string): SectionPlan["ops"][number] => ({
+      role: "disable",
+      params: { workflow_id: workflowId },
+      drift: [`workflows[${workflowId}]: drifted`],
+      change: `disabled workflow ${workflowId}`,
+    });
+    const tolerating = (
+      workflowId: string,
+      outcome: (error: { status: number }) => { note: string } | { failure: string },
+    ): SectionPlan["ops"][number] => {
+      // The tolerance must be declared: the disable endpoint gains a 409.
+      (workflowsSection.endpoints as Record<string, EndpointDecl>).disable = {
+        ...disable,
+        statuses: { ...disable.statuses, 409: "a run holds the workflow" },
+      };
+      return { ...disabling(workflowId), tolerate: { statuses: [409], outcome } };
+    };
+    const NOTE = "a run holds ci.yml, so it was not disabled (409)";
+    const FAILURE = "old.yml is busy (409); re-run after it finishes";
+    const busy = () =>
+      new MockApi({
+        [WORKFLOWS_LIST]: { data: live },
+        "PUT /repos/o/r/actions/workflows/*": {
+          error: { status: 409, message: "Conflict", body: "" },
+        },
+      });
+
+    test("a tolerated note reaches the applied outcome's detail and the annotations", async () => {
+      stub(
+        tolerating("1", (error) => ({
+          note: `a run holds ci.yml, so it was not disabled (${error.status})`,
+        })),
+      );
+      const { io, annotations, logs } = captureIo();
+      const result = await runForRepo(busy(), opts({ settings: drifting }), io);
+      expect(result.result).toBe("applied");
+      expect(logs).toEqual([]);
+      expect(annotations).toEqual([`notice: workflows: ${NOTE}`]);
+      expect(result.outcomes).toEqual([{ key: "workflows", status: "applied", detail: [NOTE] }]);
+    });
+
+    test("a tolerated note survives a failure, beside the outcome's own failure text", async () => {
+      stub(
+        tolerating("1", () => ({ note: NOTE })),
+        tolerating("2", () => ({ failure: FAILURE })),
+      );
+      const { io, annotations } = captureIo();
+      const result = await runForRepo(busy(), opts({ settings: drifting }), io);
+      expect(result.result).toBe("failed");
+      // Both requests were refused, so nothing landed and no partial-mutation suffix renders.
+      expect(annotations).toEqual([`notice: workflows: ${NOTE}`, `error: workflows: ${FAILURE}`]);
+      expect(result.outcomes).toEqual([
+        { key: "workflows", status: "failed", detail: [NOTE, `workflows: ${FAILURE}`] },
+      ]);
+    });
+
+    test("a change thunk failing after its request landed reports a partial mutation, not a clean failure", async () => {
+      // The first operation's PUT is accepted, then its thunk throws: no
+      // change line rendered, but the repository changed, and the failure
+      // must say so instead of reading as "nothing was written".
+      stub({
+        ...disabling("1"),
+        change: () => {
+          throw new Error("the echo still reads active");
+        },
+      });
+      const api = new MockApi({ [WORKFLOWS_LIST]: { data: live } }).allowMutations(
+        "PUT /repos/o/r/actions/workflows/1/disable",
+      );
+      const { io, annotations, logs } = captureIo();
+      const result = await runForRepo(api, opts({ settings: drifting }), io);
+      expect(result.result).toBe("failed");
+      expect(api.mutations()).toHaveLength(1);
+      expect(logs).toEqual([]);
+      const partial =
+        "error: workflows: the echo still reads active (1 request(s) landed before this failure, so the repository is partially applied)";
+      expect(annotations).toEqual([partial]);
+      expect(result.outcomes).toEqual([
+        { key: "workflows", status: "failed", detail: [partial.slice("error: ".length)] },
+      ]);
+    });
+  });
+
   test("a denial after an operation landed fails the run even under the warn policy", async () => {
     // The first PUT succeeds and the second is denied. A skip would claim the
     // repository was left alone; it was not, so the policy cannot soften it.
@@ -527,7 +630,7 @@ describe("runForRepo plan sections", () => {
     expect(logs).toEqual(['workflows: disabled workflow ".github/workflows/ci.yml"']);
     expect(annotations).toEqual([
       expect.stringMatching(
-        /^error: workflows: partially applied \(1 change\(s\) landed before the denial/,
+        /^error: workflows: partially applied \(1 request\(s\) landed before the denial/,
       ),
     ]);
     expect(result.outcomes).toEqual([

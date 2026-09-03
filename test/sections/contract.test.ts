@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { actionsSection } from "../../src/sections/actions/index.js";
-import { type EndpointDecl, endpointKind } from "../../src/sections/contract/endpoints.js";
+import {
+  type EndpointDecl,
+  endpointKind,
+  toleratedStatuses,
+} from "../../src/sections/contract/endpoints.js";
 import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.js";
 import type { GraphqlOpDecl } from "../../src/sections/contract/graphql.js";
 import {
@@ -16,7 +20,12 @@ import {
   type SectionPermission,
   samePermission,
 } from "../../src/sections/contract/permissions.js";
-import { planContext } from "../../src/sections/contract/plan.js";
+import { hasDrift, plainData, planContext } from "../../src/sections/contract/plan.js";
+import {
+  declaredTolerance,
+  probeAbsent,
+  tryCallDeclared,
+} from "../../src/sections/contract/requests.js";
 import { environmentsSection } from "../../src/sections/environments/index.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { repositorySection } from "../../src/sections/repository/index.js";
@@ -491,6 +500,305 @@ describe("planContext read port", () => {
     expect(api.mutations()).toEqual([]);
     // The port itself is sealed too: no role can be swapped in after binding.
     expect(Object.isFrozen(ctx.read)).toBe(true);
+  });
+
+  test("an advisory read exposes only tryCall, which tolerates every error status", async () => {
+    // No failure on an advisory read may abort the section: the port offers
+    // neither a must-succeed call nor an absence probe (a 500 is not
+    // "absent"), and tryCall hands every status back to interpret.
+    const advisory = {
+      key: "branches",
+      permission: { repo: ["administration"] },
+      undeclaredDefault: "untouched",
+      endpoints: {
+        probe: {
+          route: "GET /repos/{owner}/{repo}/branches/{branch}",
+          statuses: { 200: "the branch", 404: "no such branch" },
+          advisory: true,
+        },
+        plain: {
+          route: "GET /repos/{owner}/{repo}/branches",
+          statuses: { 200: "the branches" },
+        },
+      },
+    } as const satisfies SectionMeta;
+    const api = new MockApi({
+      "GET /repos/o/r/branches/main": {
+        error: { status: 500, message: "Internal Server Error", body: "" },
+      },
+      "GET /repos/o/r/branches": {
+        error: { status: 500, message: "Internal Server Error", body: "" },
+      },
+    });
+    const ctx = planContext(advisory, api, REPO);
+    // @ts-expect-error an advisory read offers no must-succeed call
+    ctx.read.probe.call;
+    // @ts-expect-error nor an absence probe
+    ctx.read.probe.probeAbsent;
+    // @ts-expect-error nor a list
+    ctx.read.probe.listAll;
+    // @ts-expect-error nor an enveloped list
+    ctx.read.probe.listAllEnveloped;
+    expect(await ctx.read.probe.tryCall({ params: { branch: "main" } })).toEqual({
+      error: { status: 500, message: "Internal Server Error", body: "" },
+    });
+    // The control: the same status on a plain read classifies through throwFor.
+    expect(typeof ctx.read.plain.call).toBe("function");
+    await expect(ctx.read.plain.tryCall()).rejects.toThrow(/500/);
+  });
+
+  test("advisory wins over a primaryRead posture on the same declaration", () => {
+    // Compile-time only: the advisory arm is tested first, so a "denied"
+    // posture cannot hand a must-succeed call back to an advisory read.
+    const both = {
+      key: "branches",
+      permission: { repo: ["administration"] },
+      undeclaredDefault: "untouched",
+      endpoints: {
+        probe: {
+          route: "GET /repos/{owner}/{repo}/branches/{branch}",
+          statuses: { 200: "the branch" },
+          advisory: true,
+          primaryRead: { notFound: "denied" },
+        },
+      },
+    } as const satisfies SectionMeta;
+    const ctx = planContext(both, new MockApi({}), REPO);
+    // @ts-expect-error the denied posture's call is not offered under advisory
+    ctx.read.probe.call;
+    expect(typeof ctx.read.probe.tryCall).toBe("function");
+  });
+});
+
+describe("plainData", () => {
+  test("accepts a parsed-YAML shape and returns it as is", () => {
+    // Nested mappings and lists, null, and an omitted optional field
+    // (undefined under a key, which JSON drops) are all what a settings file
+    // parses to.
+    const shape = {
+      name: "x",
+      enabled: true,
+      count: 3,
+      nothing: null,
+      omitted: undefined,
+      rules: [{ type: "deletion" }, { type: "update", parameters: { tags: ["a", "b"] } }],
+    };
+    expect(plainData(shape)).toBe(shape);
+    expect(plainData([1, "two", null, { three: 3 }])).toEqual([1, "two", null, { three: 3 }]);
+  });
+
+  test.each<[what: string, value: unknown, path: string, reason: RegExp]>([
+    ["a function", { rules: [{ check: () => true }] }, "rules[0].check", /a function/],
+    ["a bigint", { limit: 10n }, "limit", /a bigint/],
+    ["a class instance", { when: new Date(0) }, "when", /a non-plain object/],
+    ["a symbol", [Symbol("s")], "[0]", /a symbol/],
+    ["a non-finite number", { ratio: Number.NaN }, "ratio", /non-finite/],
+    ["an undefined list item", { list: [undefined] }, "list[0]", /undefined list item/],
+    ["undefined at the root", undefined, "(root)", /has no JSON form/],
+    // Keys that are not bare identifiers render bracketed, so a dotted key
+    // and a nested key cannot read the same.
+    ["a value under a dotted key", { "a.b": { c: 1n } }, '["a.b"].c', /a bigint/],
+    ["a value under an empty key", { "": 1n }, '[""]', /a bigint/],
+    ["a symbol-keyed property", { ok: true, [Symbol("hidden")]: 1n }, "(root)", /symbol-keyed/],
+    [
+      "a symbol-keyed list",
+      { list: Object.assign([1], { [Symbol("hidden")]: 1n }) },
+      "list",
+      /symbol-keyed/,
+    ],
+    [
+      "a list with named properties",
+      { list: Object.assign([1], { extra: 2 }) },
+      "list",
+      /named properties/,
+    ],
+    [
+      "a list with a non-enumerable named property",
+      { list: Object.defineProperty([1], "extra", { value: 2 }) },
+      "list",
+      /named properties/,
+    ],
+    ["a list of a subclass", { list: new (class Tagged extends Array {})() }, "list", /a subclass/],
+    [
+      "a list with a non-enumerable item",
+      { list: Object.defineProperty([1], "0", { enumerable: false }) },
+      "list",
+      /non-enumerable item/,
+    ],
+    ["a list with a hole", { list: Object.assign(new Array(3), { 0: 1, 2: 3 }) }, "list", /a hole/],
+  ])("rejects %s, naming its path", (_what, value, path, reason) => {
+    expect(() => plainData(value)).toThrow(reason);
+    expect(() => plainData(value)).toThrow(`at ${path}:`);
+  });
+
+  test("rejects a cycle, and only a cycle: a shared sibling reference is plain", () => {
+    const shared = { tag: "x" };
+    expect(plainData({ a: shared, b: shared })).toEqual({ a: { tag: "x" }, b: { tag: "x" } });
+    const cyclic: Record<string, unknown> = { name: "loop" };
+    cyclic.self = cyclic;
+    expect(() => plainData(cyclic)).toThrow(
+      /at self: a reference back to one of its own containers/,
+    );
+  });
+});
+
+describe("hasDrift", () => {
+  test("narrows a computed drift list to the non-empty tuple an operation demands", () => {
+    const lines: readonly string[] = ["labels[bug]: color d73a4a != live ffffff"];
+    expect(hasDrift([])).toBe(false);
+    expect(hasDrift(lines)).toBe(true);
+    if (hasDrift(lines)) {
+      // Under the guard the head is a string, not string | undefined.
+      const [head] = lines;
+      expect(head.startsWith("labels[bug]")).toBe(true);
+    }
+  });
+});
+
+describe("declaredTolerance", () => {
+  const endpoint: EndpointDecl = {
+    route: "GET /repos/{owner}/{repo}/branches/{branch}",
+    statuses: { 200: "the branch", 404: "no such branch", 409: "empty repository" },
+  };
+
+  test("an explicit list tolerates exactly what it names", () => {
+    const tolerated = declaredTolerance(endpoint, [404]);
+    expect([404, 409, 500].map(tolerated)).toEqual([true, false, false]);
+  });
+
+  test("an explicit list may only name declared tolerable statuses", () => {
+    // Only an erased caller can spell these; each is refused before any
+    // request could leave, naming the offending status.
+    for (const status of [422, 200, 401, 500]) {
+      expect(() => declaredTolerance(endpoint, [status])).toThrow(
+        new RegExp(
+          `BUG: GET .*branches/\\{branch\\} was asked to tolerate status\\(es\\) ${status}, which it does not declare`,
+        ),
+      );
+    }
+    // The control: the declared 404 and 409 pass, together.
+    expect(declaredTolerance(endpoint, [404, 409])(409)).toBe(true);
+  });
+
+  test("the declared tolerable set is the 4xx statuses minus 401 and 429; 5xx never", () => {
+    expect(
+      toleratedStatuses({
+        route: "GET /repos/{owner}/{repo}/pages",
+        statuses: {
+          200: "ok",
+          401: "bad token",
+          404: "gone",
+          422: "no",
+          429: "limited",
+          500: "down",
+        },
+      }),
+    ).toEqual([404, 422]);
+  });
+
+  test("an advisory endpoint tolerates every status", () => {
+    const tolerated = declaredTolerance({ ...endpoint, advisory: true });
+    expect([404, 409, 500, 401].map(tolerated)).toEqual([true, true, true, true]);
+    // An explicit list still wins over the advisory default.
+    expect(declaredTolerance({ ...endpoint, advisory: true }, [404])(500)).toBe(false);
+  });
+
+  test("otherwise the endpoint's declared tolerable statuses", () => {
+    const tolerated = declaredTolerance(endpoint);
+    expect([404, 409, 500, 200].map(tolerated)).toEqual([true, true, false, false]);
+  });
+});
+
+describe("tryCallDeclared", () => {
+  // The erased tolerant core takes its tolerance as a resolved predicate
+  // (declaredTolerance); the plan executor reaches it with a planned
+  // operation's own.
+  const ctx = { repo: { owner: "o", name: "r", slug: "o/r" }, check: false as const };
+  const endpoint: EndpointDecl = {
+    route: "PATCH /repos/{owner}/{repo}/code-quality/setup",
+    statuses: { 200: "updated", 409: "a run is in progress" },
+  };
+  const answering = (status: number, message: string, rateLimited?: true) =>
+    new MockApi({
+      "PATCH /repos/o/r/code-quality/setup": {
+        error: { status, message, body: "", ...(rateLimited ? { rateLimited } : {}) },
+      },
+    });
+
+  test("a tolerated status comes back as { error }; any other classifies through throwFor", async () => {
+    const tolerated = declaredTolerance(endpoint);
+    expect(
+      await tryCallDeclared(
+        { ...ctx, api: answering(409, "Conflict"), resolveSecret: () => "" },
+        actionsSection,
+        endpoint,
+        { tolerated, describe: "arming the setup" },
+      ),
+    ).toEqual({ error: { status: 409, message: "Conflict", body: "" } });
+    await expect(
+      tryCallDeclared(
+        { ...ctx, api: answering(422, "Unprocessable"), resolveSecret: () => "" },
+        actionsSection,
+        endpoint,
+        { tolerated, describe: "arming the setup" },
+      ),
+    ).rejects.toThrow(/arming the setup failed - PATCH .*: 422 Unprocessable/);
+  });
+
+  test("a rate limit is never a tolerated outcome, even under a tolerated 403", async () => {
+    // A rate limit is a transport failure whatever status carries it, so it
+    // classifies through throwFor's rate-limit branch; the control shows an
+    // ordinary 403 under the same tolerance is handed back.
+    const declares403 = {
+      route: "GET /repos/{owner}/{repo}/pages",
+      statuses: { 200: "the site", 403: "forbidden", 404: "no site" },
+    } as const satisfies EndpointDecl;
+    const limited = new MockApi({
+      "GET /repos/o/r/pages": {
+        error: { status: 403, message: "API rate limit exceeded", body: "", rateLimited: true },
+      },
+    });
+    await expect(
+      tryCallDeclared(
+        { ...ctx, api: limited, resolveSecret: () => "" },
+        actionsSection,
+        declares403,
+        {
+          tolerated: declaredTolerance(declares403),
+        },
+      ),
+    ).rejects.toThrow(/rate limit was hit/);
+    await expect(
+      probeAbsent({ ...ctx, api: limited, check: true }, actionsSection, declares403),
+    ).rejects.toThrow(/rate limit was hit/);
+    const plain = new MockApi({
+      "GET /repos/o/r/pages": { error: { status: 403, message: "Forbidden", body: "" } },
+    });
+    expect(
+      await tryCallDeclared(
+        { ...ctx, api: plain, resolveSecret: () => "" },
+        actionsSection,
+        declares403,
+        { tolerated: declaredTolerance(declares403) },
+      ),
+    ).toEqual({ error: { status: 403, message: "Forbidden", body: "" } });
+    expect(
+      await probeAbsent({ ...ctx, api: plain, check: true }, actionsSection, declares403),
+    ).toEqual({ missing: true });
+  });
+
+  test("probeAbsent shares the tolerance boundary: an undeclared status is refused before the request", async () => {
+    const api = new MockApi({ "GET /repos/o/r/pages": { data: {} } });
+    const probe = {
+      route: "GET /repos/{owner}/{repo}/pages",
+      statuses: { 200: "the site", 404: "no site" },
+    } as const satisfies EndpointDecl;
+    await expect(
+      probeAbsent({ ...ctx, api, check: true }, actionsSection, probe, {
+        tolerate: [422 as unknown as 404],
+      }),
+    ).rejects.toThrow(/BUG: GET .*pages was asked to tolerate status\(es\) 422/);
+    expect(api.calls).toEqual([]);
   });
 });
 

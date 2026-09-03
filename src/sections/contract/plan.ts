@@ -12,7 +12,12 @@
 import type { RepoRef } from "../../discovery/targets.js";
 import type { ApiError, GithubClient } from "../../github/api.js";
 import type { SectionKey } from "../../schema.js";
-import { type EndpointDecl, endpointMethod, type PathParams } from "./endpoints.js";
+import {
+  type DeclaredErrorStatus,
+  type EndpointDecl,
+  endpointMethod,
+  type PathParams,
+} from "./endpoints.js";
 import type {
   GraphqlOpDecl,
   GraphqlPaginatedReadDecl,
@@ -38,7 +43,7 @@ import {
  * objects because JSON drops them (a declared optional field the settings
  * file omits).
  */
-type PlainData =
+export type PlainData =
   | string
   | number
   | boolean
@@ -47,11 +52,95 @@ type PlainData =
   | { readonly [key: string]: PlainData | undefined };
 
 /**
- * What an operation may compute at EXECUTION time and never at plan time:
- * the plaintext behind a whole-value `$NAME` secret reference. The engine
- * resolves and masks every declared secret up front (after the preflight
- * barrier, before the first mutation), so a lookup here only ever reads an
- * already-resolved name; check mode never constructs one at all.
+ * A declared passthrough mapping as request data: parsed YAML is JSON-plain
+ * by construction, but the loose schemas type it `unknown`, so this ONE walk
+ * proves it instead of a cast per section. A non-JSON value is a bug.
+ */
+export function plainData(value: unknown): PlainData {
+  const render = (path: readonly (string | number)[]): string =>
+    path.length === 0
+      ? "(root)"
+      : path
+          .map((segment, index) => {
+            if (typeof segment === "number") {
+              return `[${segment}]`;
+            }
+            const bare = /^[A-Za-z_$][\w$]*$/.test(segment);
+            return bare ? `${index === 0 ? "" : "."}${segment}` : `[${JSON.stringify(segment)}]`;
+          })
+          .join("");
+  const reject = (path: readonly (string | number)[], reason: string): never => {
+    throw new Error(
+      `BUG: a planned payload carries a value JSON cannot carry at ${render(path)}: ${reason}; request data must be plain`,
+    );
+  };
+  // The containers on the path from the root to the node being checked: a
+  // YAML alias to an ancestor parses to a cycle, which JSON cannot carry
+  // either (a shared alias to a sibling is fine and is visited twice).
+  const ancestors = new Set<object>();
+  const plain = (node: unknown, path: readonly (string | number)[]): void => {
+    if (node === undefined || node === null || typeof node === "string") {
+      return; // an undefined object field is dropped by JSON, as a declared optional the file omits
+    }
+    if (typeof node === "boolean") {
+      return;
+    }
+    if (typeof node === "number") {
+      if (!Number.isFinite(node)) {
+        reject(path, "a non-finite number, which JSON would turn into null");
+      }
+      return;
+    }
+    if (typeof node !== "object") {
+      reject(path, `a ${typeof node}`);
+    }
+    if (ancestors.has(node)) {
+      reject(path, "a reference back to one of its own containers (a cycle)");
+    }
+    if (Object.getOwnPropertySymbols(node).length > 0) {
+      reject(path, "a symbol-keyed property, which JSON drops");
+    }
+    ancestors.add(node);
+    if (Array.isArray(node)) {
+      if (Object.getPrototypeOf(node) !== Array.prototype) {
+        reject(path, "a list of a subclass, which JSON serializes as a plain list");
+      }
+      // Own names must be exactly the indices (enumerable) plus `length`.
+      const indices = new Set(Array.from(node.keys(), String));
+      if (Object.getOwnPropertyNames(node).some((n) => n !== "length" && !indices.has(n))) {
+        reject(path, "a list carrying named properties, which JSON drops");
+      }
+      if (Object.keys(node).length !== node.length) {
+        reject(path, "a list with a hole or a non-enumerable item, which JSON reads as null");
+      }
+      for (const [index, item] of node.entries()) {
+        if (item === undefined) {
+          reject([...path, index], "an undefined list item, which JSON would turn into null");
+        }
+        plain(item, [...path, index]);
+      }
+    } else {
+      const proto = Object.getPrototypeOf(node);
+      if (proto !== Object.prototype && proto !== null) {
+        reject(path, "a non-plain object");
+      }
+      for (const [key, item] of Object.entries(node)) {
+        plain(item, [...path, key]);
+      }
+    }
+    ancestors.delete(node);
+  };
+  if (value === undefined) {
+    reject([], "undefined, which has no JSON form");
+  }
+  plain(value, []);
+  return value as PlainData;
+}
+
+/**
+ * What a thunk may compute at EXECUTION time only: the plaintext behind a
+ * `$NAME` reference (resolved and masked up front, so check mode never sees
+ * one). A thunk may also await the read-only port plan() closed over.
  */
 export interface ExecTools {
   resolveSecret(reference: string): string;
@@ -83,24 +172,24 @@ interface BoundRead<E extends EndpointDecl> {
   call(
     ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; describe?: string }>
   ): Promise<unknown>;
-  /** GET whose declared >= 400 statuses come back as `{ error }`. */
+  /** GET whose declared tolerable statuses come back as `{ error }`. */
   tryCall(
     ...args: OptsArg<
       E,
       {
         query?: Readonly<Record<string, string>>;
-        tolerate?: readonly (keyof E["statuses"] & number)[];
+        tolerate?: readonly DeclaredErrorStatus<E>[];
         describe?: string;
       }
     >
   ): Promise<{ data: unknown } | { error: ApiError }>;
-  /** GET whose declared >= 400 statuses read as `{ missing: true }`. */
+  /** GET whose declared tolerable statuses read as `{ missing: true }`. */
   probeAbsent(
     ...args: OptsArg<
       E,
       {
         query?: Readonly<Record<string, string>>;
-        tolerate?: readonly (keyof E["statuses"] & number)[];
+        tolerate?: readonly DeclaredErrorStatus<E>[];
         accept?: string;
         describe?: string;
       }
@@ -151,18 +240,17 @@ type BoundReads<E extends EndpointDict, G extends GraphqlDict> = {
 };
 
 /**
- * The helpers a read role exposes, narrowed by its declared `primaryRead`
- * posture so the declaration and the request that honors it cannot part:
- * a "denied" primary read (a 404 must classify as PermissionDenied) offers
- * only the throwing helpers, an "absent" one (a 404 means the resource does
- * not exist) only the tolerant ones. A role without the declaration keeps
- * every helper.
+ * The helpers a read role exposes, narrowed by its declaration: an advisory
+ * read (no failure may abort the section) offers only tryCall, a "denied"
+ * primary read only the throwing helpers, an "absent" one only the tolerant.
  */
-type ReadPort<E extends EndpointDecl> = E extends { readonly primaryRead: { notFound: "denied" } }
-  ? Pick<BoundRead<E>, "call" | "listAll" | "listAllEnveloped">
-  : E extends { readonly primaryRead: { notFound: "absent" } }
-    ? Pick<BoundRead<E>, "probeAbsent" | "tryCall">
-    : BoundRead<E>;
+type ReadPort<E extends EndpointDecl> = E extends { readonly advisory: true }
+  ? Pick<BoundRead<E>, "tryCall">
+  : E extends { readonly primaryRead: { notFound: "denied" } }
+    ? Pick<BoundRead<E>, "call" | "listAll" | "listAllEnveloped">
+    : E extends { readonly primaryRead: { notFound: "absent" } }
+      ? Pick<BoundRead<E>, "probeAbsent" | "tryCall">
+      : BoundRead<E>;
 
 /** What a plan() body sees: the target and its typed read port. Nothing else. */
 export interface PlanContext<
@@ -187,8 +275,54 @@ interface PlannedOpBase<D extends readonly string[] = readonly string[]> {
    * Check mode renders them; apply mode renders `change` instead.
    */
   readonly drift: D;
-  /** The change line apply renders once the operation succeeds. */
-  readonly change: string;
+  /**
+   * What apply renders once the operation succeeds: the line itself, or a
+   * thunk over the response (one line or several, never none) when the line
+   * depends on what the server echoed; a throw is the verification failure.
+   */
+  readonly change: string | ((response: unknown) => string | readonly [string, ...string[]]);
+  /**
+   * The operation in settings-file terms ("arming the interaction limit"),
+   * for the failure prose when the request is rejected - the `describe` a
+   * run() handler passes to the request helpers.
+   */
+  readonly describe?: string;
+  /**
+   * Receives the response body, for a server-assigned value (a created
+   * environment's node id) a subsequent operation's thunk reads from where
+   * the hook stores it. It must not render; a throw fails the operation.
+   */
+  readonly capture?: (response: unknown) => void;
+}
+
+/**
+ * A request facet sealed at execution time, the ONLY place a plan may touch
+ * a secret; async so it can read a value an earlier operation created.
+ */
+type Late<T> = (exec: ExecTools) => T | Promise<T>;
+
+/**
+ * What a tolerated status means for the operation that met it (it did not
+ * apply): a note in place of its change line, or a failure carrying the
+ * section's own advice where throwFor's generic text would mislead.
+ */
+export type ToleratedOutcome =
+  | { readonly note: string; readonly failure?: never }
+  | { readonly failure: string; readonly note?: never };
+
+/**
+ * The declared statuses a REST operation absorbs, and how each is reported.
+ * `statuses` defaults to the endpoint's tolerable set; the non-empty tuple
+ * may name only those, so an undeclared tolerance cannot compile.
+ */
+interface Tolerance<E extends EndpointDecl> {
+  readonly statuses?: readonly [DeclaredErrorStatus<E>, ...DeclaredErrorStatus<E>[]];
+  readonly outcome: (error: ApiError) => ToleratedOutcome;
+}
+
+/** The narrowing a plan performs on a computed drift list: non-empty means an operation is due. */
+export function hasDrift(lines: readonly string[]): lines is readonly [string, ...string[]] {
+  return lines.length > 0;
 }
 
 /**
@@ -216,12 +350,9 @@ type PlannedRestOp<E extends EndpointDict, R extends WriteRole<E>> = PlannedOpBa
   RestParams<E[R]["route"]> & {
     readonly role: R;
     readonly query?: Readonly<Record<string, string>>;
-    /**
-     * The request body, or a thunk sealing it at execution time from the
-     * resolved secrets - the ONLY place a plan may touch a secret, and only
-     * once the engine has resolved and masked every reference.
-     */
-    readonly payload?: PlainData | ((exec: ExecTools) => PlainData);
+    /** The request body, or a Late thunk sealing it at execution time. */
+    readonly payload?: PlainData | Late<PlainData>;
+    readonly tolerate?: Tolerance<E[R]>;
     readonly variables?: never;
   };
 
@@ -234,12 +365,12 @@ type PlannedGraphqlOp<G extends GraphqlDict, R extends GraphqlWriteRole<G>> = Pl
   readonly [string, ...string[]]
 > & {
   readonly role: R;
-  readonly variables:
-    | Readonly<GraphqlVariablesOf<G[R]>>
-    | ((exec: ExecTools) => Readonly<GraphqlVariablesOf<G[R]>>);
+  readonly variables: Readonly<GraphqlVariablesOf<G[R]>> | Late<Readonly<GraphqlVariablesOf<G[R]>>>;
   readonly params?: never;
   readonly query?: never;
   readonly payload?: never;
+  /** Tolerance is by HTTP status, which a GraphQL rejection has none of. */
+  readonly tolerate?: never;
 };
 
 /**
@@ -252,10 +383,12 @@ interface ErasedPlannedOp extends PlannedOpBase {
   readonly role: string;
   readonly params?: Readonly<Record<string, string>>;
   readonly query?: Readonly<Record<string, string>>;
-  readonly payload?: PlainData | ((exec: ExecTools) => PlainData);
-  readonly variables?:
-    | Readonly<Record<string, unknown>>
-    | ((exec: ExecTools) => Readonly<Record<string, unknown>>);
+  readonly payload?: PlainData | Late<PlainData>;
+  readonly tolerate?: {
+    readonly statuses?: readonly number[];
+    readonly outcome: (error: ApiError) => ToleratedOutcome;
+  };
+  readonly variables?: Readonly<Record<string, unknown>> | Late<Readonly<Record<string, unknown>>>;
 }
 
 /**

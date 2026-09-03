@@ -84,7 +84,12 @@ export function pinSecretFamily({ section, segment, keyId, noun, secretName }: S
       const execution = await executePlan(planned, section, api, REPO, {
         resolveSecret: () => "family-plain",
       });
-      expect(execution).toEqual({ status: "applied", changes: [`created secret "${secretName}"`] });
+      expect(execution).toEqual({
+        status: "applied",
+        changes: [`created secret "${secretName}"`],
+        notes: [],
+        landed: 1,
+      });
       const put = api.mutations().find((c) => c.method === "PUT");
       expect(put?.path).toBe(`/repos/o/r/${segment}/secrets/${secretName}`);
       const payload = put?.payload as { encrypted_value: string; key_id: string };

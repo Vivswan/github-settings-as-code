@@ -110,9 +110,7 @@ describe("actions_secrets planning", () => {
       { name: "MISSING_ONE", value: "$REF_A" },
       { name: "MISSING_TWO", value: "$REF_B" },
     ]);
-    // Compared untyped: the ops carry their describe prose beside the
-    // contract's facets, which a literal typed against the plan would reject.
-    expect<unknown>(result).toEqual({
+    expect(result).toEqual({
       ops: [
         {
           role: "put",
@@ -189,7 +187,7 @@ describe("actions_secrets planning", () => {
       undeclared: "delete",
       entries: [],
     });
-    expect<unknown>(deleted).toEqual({
+    expect(deleted).toEqual({
       ops: [
         {
           role: "remove",

@@ -1,8 +1,9 @@
 /** Declaration-driven request helpers: REST and GraphQL calls, probes, and page loops. */
 
-import type { ApiError } from "../../github/api.js";
+import { type ApiError, isRateLimitError } from "../../github/api.js";
 import { paginate } from "../../github/paginate.js";
 import {
+  type DeclaredErrorStatus,
   type EndpointDecl,
   endpointMethod,
   expand,
@@ -84,11 +85,9 @@ export async function callDeclared(
 }
 
 /**
- * Like call(), but tolerated error statuses come back as { error } for the
- * caller to interpret (e.g. a 409 that means "drift" or "in progress", not
- * failure); every other error classifies through throwFor. Tolerated
- * statuses default to the endpoint's declared >= 400 statuses; pass an
- * explicit `tolerate` only to tolerate FEWER than declared.
+ * Like call(), but tolerated statuses (declaredTolerance) come back as
+ * { error } for the caller to interpret; every other error classifies through
+ * throwFor. An explicit `tolerate` only ever tolerates FEWER than declared.
  */
 export async function tryCall<E extends EndpointDecl>(
   ctx: SectionContext,
@@ -99,19 +98,70 @@ export async function tryCall<E extends EndpointDecl>(
     {
       query?: Readonly<Record<string, string>>;
       payload?: unknown;
-      tolerate?: readonly (keyof E["statuses"] & number)[];
+      tolerate?: readonly DeclaredErrorStatus<E>[];
       describe?: string;
     }
   >
 ): Promise<{ data: unknown } | { error: ApiError }> {
   const opts = args[0];
+  return tryCallDeclared(ctx, section, endpoint, {
+    ...opts,
+    tolerated: declaredTolerance(endpoint, opts?.tolerate),
+  });
+}
+
+/**
+ * The tolerated set of one request, resolved ONCE for every tolerant caller.
+ * An explicit list may only name declared tolerable statuses (the erased
+ * executor could spell another, so this boundary refuses it); advisory tolerates all.
+ */
+export function declaredTolerance(
+  endpoint: EndpointDecl,
+  explicit?: readonly number[],
+): (status: number) => boolean {
+  if (explicit !== undefined) {
+    const declared = toleratedStatuses(endpoint);
+    const undeclared = explicit.filter((status) => !declared.includes(status));
+    if (undeclared.length > 0) {
+      throw new Error(
+        `BUG: ${endpoint.route} was asked to tolerate status(es) ${undeclared.join(", ")}, which it does not declare as a tolerable error status; a tolerance may only name declared 4xx statuses other than 401 and 429`,
+      );
+    }
+    return (status) => explicit.includes(status);
+  }
+  if (endpoint.advisory === true) {
+    return () => true;
+  }
+  const declared = toleratedStatuses(endpoint);
+  return (status) => declared.includes(status);
+}
+
+/**
+ * The erased core of tryCall() (the callDeclared sibling), taking its
+ * tolerated set as a predicate (declaredTolerance). A rate limit is a
+ * transport failure whatever status carries it: never tolerated.
+ */
+export async function tryCallDeclared(
+  ctx: SectionContext,
+  section: SectionMeta,
+  endpoint: EndpointDecl,
+  opts: {
+    params?: Readonly<Record<string, string>>;
+    query?: Readonly<Record<string, string>>;
+    payload?: unknown;
+    tolerated: (status: number) => boolean;
+    describe?: string;
+  },
+): Promise<{ data: unknown } | { error: ApiError }> {
   const method = endpointMethod(endpoint.route);
-  const path = expand(endpoint, ctx, opts?.params, opts?.query);
-  const tolerate: readonly number[] = opts?.tolerate ?? toleratedStatuses(endpoint);
-  const result = await ctx.api.tryRequest(method, path, opts?.payload);
-  if ("error" in result && !tolerate.includes(result.error.status)) {
+  const path = expand(endpoint, ctx, opts.params, opts.query);
+  const result = await ctx.api.tryRequest(method, path, opts.payload);
+  if (
+    "error" in result &&
+    (isRateLimitError(result.error) || !opts.tolerated(result.error.status))
+  ) {
     throwFor(section, method, path, result.error, {
-      operation: opts?.describe,
+      operation: opts.describe,
       op: endpoint,
     });
   }
@@ -122,8 +172,8 @@ export async function tryCall<E extends EndpointDecl>(
  * GET a resource whose absence is a normal state: tolerated statuses come
  * back as { missing: true }, every other error classifies through throwFor.
  * The shared idiom behind "does this branch/site/environment/toggle exist"
- * probes. Tolerated statuses default to the endpoint's declared >= 400
- * statuses; pass an explicit `tolerate` only to tolerate FEWER than declared.
+ * probes. The tolerated set resolves through declaredTolerance; pass an
+ * explicit `tolerate` only to tolerate FEWER than declared.
  */
 export async function probeAbsent<E extends EndpointDecl>(
   ctx: SectionContext,
@@ -133,7 +183,7 @@ export async function probeAbsent<E extends EndpointDecl>(
     E,
     {
       query?: Readonly<Record<string, string>>;
-      tolerate?: readonly (keyof E["statuses"] & number)[];
+      tolerate?: readonly DeclaredErrorStatus<E>[];
       accept?: string;
       describe?: string;
     }
@@ -141,10 +191,11 @@ export async function probeAbsent<E extends EndpointDecl>(
 ): Promise<{ data: unknown } | { missing: true }> {
   const options = args[0];
   const path = expand(endpoint, ctx, options?.params, options?.query);
-  const tolerate: readonly number[] = options?.tolerate ?? toleratedStatuses(endpoint);
+  const tolerated = declaredTolerance(endpoint, options?.tolerate);
   const result = await ctx.api.tryRequest("GET", path, undefined, { accept: options?.accept });
   if ("error" in result) {
-    if (tolerate.includes(result.error.status)) {
+    // A rate-limited 403 is not an absent resource (the tryCallDeclared rule).
+    if (!isRateLimitError(result.error) && tolerated(result.error.status)) {
       return { missing: true };
     }
     throwFor(section, "GET", path, result.error, {

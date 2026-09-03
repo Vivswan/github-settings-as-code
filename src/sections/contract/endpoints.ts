@@ -27,7 +27,8 @@ type GetRoute = Extract<Route, `GET ${string}`>;
  * One REST endpoint a section may call. `route` is octokit's canonical
  * "METHOD /path/{param}" string. `statuses` maps each HTTP status the handler
  * treats as a normal (non-throwing) outcome to a short plain-prose meaning;
- * the >= 400 keys are the tolerated errors (see toleratedStatuses), and the
+ * the tolerable 4xx keys are the tolerated errors (see toleratedStatuses:
+ * 401 and 429 never are, nor is any 5xx, being transport failures), and the
  * meanings are consumable by the e2e mock and its violation messages.
  * Handlers pass these declarations to the request helpers, which build the
  * concrete path via expand(), so a section can never call a path it has not
@@ -147,16 +148,35 @@ export type PathParams<R extends string> = R extends `${string}{${infer T}}${inf
   : never;
 
 /**
- * The declared statuses that are error responses (>= 400). These ARE the
- * tolerated errors by definition: a status the endpoint declares as a normal
- * outcome must not throw. tryCall and probeAbsent default their tolerated set
- * to this, so the declaration is the single source and no call site restates
- * it.
+ * Statuses no declaration can tolerate: they describe the credential or the
+ * transport, never the resource (a rate-limited 403 is caught per request).
+ */
+type TransportStatus = 401 | 429;
+
+type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+
+/**
+ * The declared tolerable statuses (4xx minus TransportStatus) an explicit
+ * `tolerate` may name; toleratedStatuses() is the runtime twin.
+ */
+export type DeclaredErrorStatus<E extends EndpointDecl> = {
+  [S in keyof E["statuses"] & number]: S extends TransportStatus
+    ? never
+    : `${S}` extends `4${Digit}${Digit}`
+      ? S
+      : never;
+}[keyof E["statuses"] & number];
+
+/**
+ * The declared tolerable statuses (4xx minus TransportStatus): a status the
+ * endpoint declares as a normal outcome must not throw, so the tolerant
+ * helpers default to this set and no call site restates the declaration.
  */
 export function toleratedStatuses(endpoint: EndpointDecl): number[] {
   return Object.keys(endpoint.statuses)
+    .filter((key) => /^4\d\d$/.test(key))
     .map(Number)
-    .filter((status) => status >= 400);
+    .filter((status) => status !== 401 && status !== 429);
 }
 
 /**

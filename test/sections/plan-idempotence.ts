@@ -28,15 +28,20 @@ const NO_SECRETS: ExecTools = {
   },
 };
 
+/** The marker a thunk folds to; a symbol, so no literal value can collide with it. */
+const SEALED = Symbol("a thunk the plan builds afresh on every pass");
+
 /**
  * One planned operation's IDENTITY, as comparing two planning passes needs
- * it: everything but the payload and variables, which a section may build
+ * it: every facet but the payload and variables, which a section may build
  * as a thunk (a fresh closure per pass, unequal by reference and opaque to
  * a value comparison). A thunk's identity is that it exists - what it seals
- * is a secret the plan is not allowed to expose - so it folds to a marker.
+ * is a secret the plan is not allowed to expose - so it folds to a marker,
+ * as does a change thunk (it renders from a response the plan has not
+ * seen). A capture hook counts by presence, a tolerance by its statuses.
  */
-function identityOf(op: SectionPlan["ops"][number]): unknown {
-  const sealed = (value: unknown): unknown => (typeof value === "function" ? "<sealed>" : value);
+export function identityOf(op: SectionPlan["ops"][number]): unknown {
+  const sealed = (value: unknown): unknown => (typeof value === "function" ? SEALED : value);
   return {
     role: op.role,
     params: op.params,
@@ -44,8 +49,23 @@ function identityOf(op: SectionPlan["ops"][number]): unknown {
     payload: sealed(op.payload),
     variables: sealed(op.variables),
     drift: op.drift,
-    change: op.change,
+    change: sealed(op.change),
+    describe: op.describe,
+    capture: op.capture !== undefined,
+    tolerate: op.tolerate === undefined ? undefined : { statuses: op.tolerate.statuses },
   };
+}
+
+/** The request half of an operation's identity: what it sends, not what it renders. */
+export function requestOf(op: SectionPlan["ops"][number]): unknown {
+  const {
+    drift: _drift,
+    change: _change,
+    describe: _describe,
+    capture: _capture,
+    ...request
+  } = identityOf(op) as Record<string, unknown>;
+  return request;
 }
 
 /** A plan compared as a value: its operation identities, notes, and drift. */
@@ -64,29 +84,56 @@ function shapeOf(plan: SectionPlan): unknown {
  * execution must match the second, so state is stable, not oscillating.
  * `tools` defaults to a resolver that refuses every lookup, the right
  * posture for a section declaring no secret values; a secret-bearing
- * section passes its own.
+ * section passes its own. The first execution's change lines and notes are
+ * returned for the caller to pin.
  */
 export async function provePlanIdempotent<M extends PlanSectionModule>(
   section: M,
   api: GithubClient,
   desired: Parameters<M["plan"]>[1],
   tools: ExecTools = NO_SECRETS,
-): Promise<{ first: SectionPlan; second: SectionPlan; changes: readonly string[] }> {
+): Promise<{
+  first: SectionPlan;
+  second: SectionPlan;
+  changes: readonly string[];
+  notes: readonly string[];
+}> {
   const plan = async (): Promise<SectionPlan> =>
     section.plan(planContext(section, api, REPO), desired);
-  const execute = async (of: SectionPlan): Promise<readonly string[]> => {
+  const execute = async (
+    of: SectionPlan,
+  ): Promise<{ changes: readonly string[]; notes: readonly string[] }> => {
     const execution = await executePlan(of, section, api, REPO, tools);
     if (execution.status === "failed") {
       throw execution.error;
     }
-    return execution.changes;
+    return execution;
   };
+  // An alwaysRewrite operation recurs whatever the live state, so across
+  // passes its identity is the REQUEST it issues, not what it renders: the
+  // first pass may render "created" where the second renders "updated".
   const rewrites = (of: SectionPlan): unknown[] =>
-    of.ops.filter((op) => section.endpoints[op.role]?.alwaysRewrite === true).map(identityOf);
+    of.ops.filter((op) => section.endpoints[op.role]?.alwaysRewrite === true).map(requestOf);
 
   const first = await plan();
-  const changes = await execute(first);
-  expect(changes).toEqual(first.ops.map((op) => op.change));
+  // One op per execution keeps each op's lines attributable: a tolerated op
+  // renders a note and no line, a string change exactly itself (a thunk's
+  // lines are the executor's contract). The executor carries no state across ops.
+  const changes: string[] = [];
+  const notes: string[] = [];
+  for (const op of first.ops) {
+    const execution = await execute({ ops: [op], notes: [], drift: [] });
+    if (execution.notes.length > 0) {
+      expect(
+        execution.changes,
+        `${section.key}: a tolerated operation rendered a change line beside its note`,
+      ).toEqual([]);
+    } else if (typeof op.change === "string") {
+      expect(execution.changes).toEqual([op.change]);
+    }
+    changes.push(...execution.changes);
+    notes.push(...execution.notes);
+  }
 
   const second = await plan();
   expect(
@@ -99,13 +146,15 @@ export async function provePlanIdempotent<M extends PlanSectionModule>(
   ).toEqual(rewrites(first));
   expect(second.drift).toEqual(first.drift);
 
-  // State stability: executing the converged plan changes nothing a third
-  // plan can see.
-  await execute(second);
+  // State stability: executing the converged plan (one op at a time, as
+  // above) changes nothing a third plan can see.
+  for (const op of second.ops) {
+    await execute({ ops: [op], notes: [], drift: [] });
+  }
   const third = await plan();
   expect(
     shapeOf(third),
     `${section.key}: re-executing the converged plan changed what the next plan sees, so the section oscillates instead of settling`,
   ).toEqual(shapeOf(second));
-  return { first, second, changes };
+  return { first, second, changes, notes };
 }
