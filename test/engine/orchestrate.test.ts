@@ -10,14 +10,12 @@ import {
   validateSettingsDoc,
   worstOf,
 } from "../../src/engine/orchestrate.js";
-import type { GithubClient } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
 import { maskRegistry, prefixedIo } from "../../src/io.js";
 import type { SettingsFile } from "../../src/schema.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import type { SectionPlan } from "../../src/sections/contract/plan.js";
 import { pagesSection } from "../../src/sections/pages/index.js";
-import type { SECTIONS } from "../../src/sections/registry.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 import { workflowsSection } from "../../src/sections/workflows/index.js";
 import { MockApi } from "../mock-api.js";
@@ -427,38 +425,25 @@ describe("readOnlyClient", () => {
     expect(api.calls).toHaveLength(0);
   });
 
-  test("preflight rethrows a probe write attempt instead of swallowing it", async () => {
-    // A section handler that writes during the read-only probe is a bug the
-    // APPLY pass can never resurface (the same write is legitimate there),
-    // so preflightProbe must fail the run loudly - unlike ordinary probe
-    // errors, which it ignores. Driven through a synthetic section via the
-    // injectable `active` list.
-    const api = new MockApi({}, { unroutedMutations: "succeed" });
-    const buggySection = {
-      key: "repository",
-      permission: { repo: ["administration"] },
-      endpoints: {},
-      undeclaredDefault: "untouched",
-      shape: { safeParse: () => ({ success: true }) },
-      async run(ctx: { api: GithubClient }) {
-        await ctx.api.tryRequest("PATCH", "/repos/o/r", { has_wiki: false });
-        return { changes: [], drift: [], notes: [] };
-      },
-    } as unknown as (typeof SECTIONS)[number];
+  test("preflight swallows an ordinary probe error, and the section loop reports it as the section's failure", async () => {
+    // A section cannot write during the probe (its port binds reads only), so the only
+    // preflight-specific outcome is a denial; any other failure is left to the section loop.
+    const failure = "some transient probe failure";
+    const planSpy = spyOn(pagesSection, "plan").mockRejectedValue(new Error(failure));
+    const api = new MockApi({});
     const repoRef = { owner: "o", name: "r", slug: "o/r" };
-    await expect(
-      preflightProbe(api, repoRef, [buggySection], validated({ repository: {} })),
-    ).rejects.toThrow(/preflight: repository: PATCH \/repos\/o\/r was attempted in check mode/);
-    // An ordinary probe error is still swallowed (the apply pass surfaces it).
-    const throwingSection = {
-      ...buggySection,
-      async run() {
-        throw new Error("some transient probe failure");
-      },
-    } as unknown as (typeof SECTIONS)[number];
-    await expect(
-      preflightProbe(api, repoRef, [throwingSection], validated({ repository: {} })),
-    ).resolves.toEqual([]);
+    const settings = validated({ pages: { build_type: "workflow" } });
+    await expect(preflightProbe(api, repoRef, [pagesSection], settings)).resolves.toEqual([]);
+    const { io, annotations } = captureIo();
+    const result = await runForRepo(api, opts({ settings }), io);
+    expect(result.result).toBe("failed");
+    expect(result.outcomes).toEqual([
+      { key: "pages", status: "failed", detail: [`pages: ${failure}`] },
+    ]);
+    expect(annotations).toContain(`error: pages: ${failure}`);
+    // The explicit probe, then runForRepo's own preflight, then the section loop.
+    expect(planSpy).toHaveBeenCalledTimes(3);
+    planSpy.mockRestore();
   });
 
   test("runForRepo's check-mode context refuses writes end to end", async () => {
@@ -544,7 +529,7 @@ describe("runForRepo plan sections", () => {
     ]);
   });
 
-  test("a plan section's read denial arms the preflight barrier like a run section's", async () => {
+  test("a section's read denial arms the preflight barrier", async () => {
     const api = new MockApi({
       [WORKFLOWS_LIST]: { error: { status: 404, message: "Not Found", body: "" } },
     });

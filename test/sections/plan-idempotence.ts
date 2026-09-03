@@ -10,7 +10,7 @@
 import { expect } from "bun:test";
 import { executePlan } from "../../src/engine/execute.js";
 import type { GithubClient } from "../../src/github/api.js";
-import type { PlanSectionModule } from "../../src/sections/contract/module.js";
+import type { SectionModule } from "../../src/sections/contract/module.js";
 import { type ExecTools, planContext, type SectionPlan } from "../../src/sections/contract/plan.js";
 
 /** The one target every per-section unit test addresses. */
@@ -78,7 +78,7 @@ function shapeOf(plan: SectionPlan): unknown {
  * alwaysRewrite ops (all of them, request for request) and unverifiable ops whose lines converged;
  * op-less drift survives; a third plan matches the second. `tools` defaults to refusing every lookup.
  */
-export async function provePlanIdempotent<M extends PlanSectionModule>(
+export async function provePlanIdempotent<M extends SectionModule>(
   section: M,
   api: GithubClient,
   desired: Parameters<M["plan"]>[1],

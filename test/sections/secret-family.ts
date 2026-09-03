@@ -10,7 +10,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../src/engine/execute.js";
-import type { PlanSectionModule } from "../../src/sections/contract/module.js";
+import type { SectionModule } from "../../src/sections/contract/module.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import type { RepoSecretsKey } from "../../src/sections/shared/repo-secrets.js";
 import {
@@ -23,7 +23,7 @@ import { REPO } from "./plan-idempotence.js";
 
 /** The facts one family owns; everything else is the shared factory's. */
 export interface SecretFamilyFacts {
-  section: PlanSectionModule<RepoSecretsKey>;
+  section: SectionModule<RepoSecretsKey>;
   /** The path segment under /repos/{owner}/{repo} the family's routes use. */
   segment: string;
   /** A distinctive key_id served by the family's public-key route. */

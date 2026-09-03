@@ -76,10 +76,9 @@ const byKey = {
 type SectionModules = typeof byKey;
 
 /**
- * The declarations a module's plan() was TYPED over - the two dictionaries
- * behind its context plus its declared-value parameter - or never for a
- * run() module. Read off the handler signature, not the module's own
- * declarations, so the two can be compared.
+ * The declarations a module's plan() was TYPED over - the two dictionaries behind its context plus
+ * its declared-value parameter. Read off the handler signature, not the module's own declarations,
+ * so the two can be compared.
  */
 type PlanTypedOver<M> = M extends {
   plan: (ctx: PlanContext<infer E, infer G>, desired: infer D) => unknown;
@@ -113,15 +112,15 @@ type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : fals
  * GraphQL variables shape, or a narrowed declared value would all measure
  * as equal.
  */
+/**
+ * `K` when module `M`'s plan() is typed over anything but its own declarations, never when it is
+ * exact. Exported for its negative control (test/sections/registry.test.ts).
+ */
+export type MisdeclaredPlanModule<K extends SectionKey, M> =
+  Invariant<PlanTypedOver<M>, ExpectedPlanDeclarations<K, M>> extends true ? never : K;
+
 type MisdeclaredPlanModules = {
-  [K in SectionKey]: [PlanTypedOver<SectionModules[K]>] extends [never]
-    ? never
-    : Invariant<
-          PlanTypedOver<SectionModules[K]>,
-          ExpectedPlanDeclarations<K, SectionModules[K]>
-        > extends true
-      ? never
-      : K;
+  [K in SectionKey]: MisdeclaredPlanModule<K, SectionModules[K]>;
 }[SectionKey];
 
 /**

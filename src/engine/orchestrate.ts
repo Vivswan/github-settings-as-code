@@ -16,7 +16,7 @@ import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
-import type { SectionContext, SectionResult } from "../sections/contract/module.js";
+import type { SectionContext } from "../sections/contract/module.js";
 import { planCheckNotes, planContext, planDrift } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
@@ -185,23 +185,13 @@ export function validateSettingsDoc(
   return { settings: parsed.settings as ValidatedSettings };
 }
 
-/**
- * Thrown by readOnlyClient when a section handler attempts a mutation in a
- * read-only phase. A dedicated class because the preflight barrier must NOT
- * swallow it like an ordinary probe error: an ordinary error resurfaces on
- * the apply pass with full context, but a check-mode write is legitimate-
- * looking under apply, so swallowing it here would hide the bug forever.
- */
+/** Thrown by readOnlyClient when a mutation is attempted through a check-mode client. */
 class ReadOnlyViolation extends Error {}
 
 /**
- * A GithubClient that refuses every mutation: non-GET REST requests and
- * GraphQL writes both throw ReadOnlyViolation, reads pass through to `api`
- * untouched. The belt over the check-is-read-only convention, worn in BOTH
- * read-only phases: the preflight barrier's probes, and the whole of check
- * mode (runForRepo wraps the context client), so a handler that (wrongly)
- * mutated under check cannot touch the repo. Exported so the refusal is
- * directly testable.
+ * A GithubClient that refuses every mutation: non-GET REST requests and GraphQL writes throw
+ * ReadOnlyViolation, reads pass through to `api` untouched. Check mode's context client wears it
+ * as the belt over the read-only port (a plan section can only read anyway). Exported for its test.
  */
 export function readOnlyClient(api: GithubClient): GithubClient {
   return {
@@ -225,14 +215,9 @@ export function readOnlyClient(api: GithubClient): GithubClient {
 }
 
 /**
- * Probe every active section read-only and collect the permission denials
- * as "key: detail" lines. Empty means every section is accessible. The
- * probe context is built HERE, on the check arm of SectionContext: the
- * preflight runs before the apply context (and its resolver) can exist, and
- * the arm's `resolveSecret?: never` makes handing the probe a resolver
- * uncompilable. Exported with the injectable `active` list so the
- * ReadOnlyViolation rethrow is directly testable against a synthetic
- * section.
+ * Probe every active section by planning it and collect the permission denials as "key: detail"
+ * lines; empty means every section is accessible. A plan section has no write capability, so
+ * planning IS the read-only probe and the plan is discarded. `active` is injectable for tests.
  */
 export async function preflightProbe(
   api: GithubClient,
@@ -240,11 +225,6 @@ export async function preflightProbe(
   active: typeof SECTIONS,
   settings: ValidatedSettings,
 ): Promise<string[]> {
-  const probeCtx: SectionContext = {
-    api: readOnlyClient(api),
-    repo,
-    check: true,
-  };
   const denied: string[] = [];
   for (const section of active) {
     const declared = settings[section.key];
@@ -257,27 +237,13 @@ export async function preflightProbe(
       );
     }
     try {
-      if (section.plan !== undefined) {
-        // A plan section has no write capability of its own: planning IS
-        // the read-only probe, and the plan is discarded.
-        await section.plan(planContext(section, api, repo), declared);
-      } else {
-        await section.run(probeCtx, declared);
-      }
+      await section.plan(planContext(section, api, repo), declared);
     } catch (error) {
       if (error instanceof PermissionDenied) {
         denied.push(`${section.key}: ${error.detail}`);
-        continue;
       }
-      if (error instanceof ReadOnlyViolation) {
-        // A write attempt during the read-only probe is a section-handler
-        // bug the APPLY pass can never resurface (the same write is
-        // legitimate there), so it must fail the run loudly instead of
-        // being ignored like an ordinary probe error.
-        throw new Error(`preflight: ${section.key}: ${error.message}`);
-      }
-      // Other non-permission preflight errors are ignored here; the apply
-      // pass will surface them with full context.
+      // Other preflight errors are ignored here; the section loop surfaces
+      // them with full context.
     }
   }
   return denied;
@@ -451,12 +417,14 @@ export async function runForRepo(
     if (desired === undefined) {
       // disposition() already classified this section "active", which
       // requires a declared value; reaching here is an engine bug, and
-      // probing on undefined would violate run()'s SectionInput contract.
+      // planning on undefined would violate plan()'s SectionInput contract.
       throw new Error(
         `BUG: section "${section.key}" was classified active but the settings document does not declare it`,
       );
     }
-    let result: SectionResult;
+    let result:
+      | { check: true; drift: string[]; notes: string[] }
+      | { check: false; changes: string[]; notes: string[] };
     // What a plan section produced before an operation failed, reported with
     // the failure instead of vanishing. `landed` counts accepted requests: a
     // change thunk can fail after its request landed, so lines undercount.
@@ -466,35 +434,22 @@ export async function runForRepo(
       landed: 0,
     };
     try {
-      if (section.plan !== undefined) {
-        // plan() runs in both modes over the read port; the mode decides
-        // what the plan becomes (drift lines plus the cannot-verify notes, or
-        // executed changes), and op-less drift surfaces as apply notes.
-        const plan = await section.plan(planContext(section, api, repo), desired);
-        if (runCtx.check) {
-          result = { check: true, drift: planDrift(plan), notes: planCheckNotes(plan) };
-        } else {
-          const execution = await executePlan(plan, section, api, repo, runCtx);
-          // The execution's notes are the tolerated operations' outcomes.
-          const notes = [...plan.notes, ...plan.drift, ...execution.notes];
-          produced = { notes, changes: execution.changes, landed: execution.landed };
-          if (execution.status === "failed") {
-            // Already classified by the request helpers; the catch below
-            // reports it exactly as a run() handler's throw.
-            throw execution.error;
-          }
-          result = { check: false, changes: [...execution.changes], notes };
-        }
+      // plan() runs in both modes over the read port; the mode decides
+      // what the plan becomes (drift lines plus the cannot-verify notes, or
+      // executed changes), and op-less drift surfaces as apply notes.
+      const plan = await section.plan(planContext(section, api, repo), desired);
+      if (runCtx.check) {
+        result = { check: true, drift: planDrift(plan), notes: planCheckNotes(plan) };
       } else {
-        result = await section.run(runCtx, desired);
-        if (result.check !== check) {
-          // run()'s signature cannot correlate its return arm with the
-          // context arm (beginRun copies ctx.check), so the correlation is
-          // asserted once here, at the only consumer.
-          throw new Error(
-            `BUG: section returned ${result.check ? "a check" : "an apply"} result in ${check ? "check" : "apply"} mode; handlers must build their result via beginRun(ctx)`,
-          );
+        const execution = await executePlan(plan, section, api, repo, runCtx);
+        // The execution's notes are the tolerated operations' outcomes.
+        const notes = [...plan.notes, ...plan.drift, ...execution.notes];
+        produced = { notes, changes: execution.changes, landed: execution.landed };
+        if (execution.status === "failed") {
+          // Already classified by the request helpers; the catch below reports it.
+          throw execution.error;
         }
+        result = { check: false, changes: [...execution.changes], notes };
       }
     } catch (error) {
       for (const note of produced.notes) {
@@ -558,9 +513,8 @@ export async function runForRepo(
     for (const note of result.notes) {
       io.annotate("notice", `${section.key}: ${note}`);
     }
-    // Narrowing on the RESULT's own discriminant (which mirrors the context
-    // beginRun built it from) is what lets each branch read only the list
-    // its mode can carry: a check-mode result has no changes to misreport.
+    // Narrowing on the result's own discriminant lets each branch read only
+    // the list its mode can carry: a check-mode result has no changes to misreport.
     if (result.check) {
       if (result.drift.length > 0) {
         drifted = true;

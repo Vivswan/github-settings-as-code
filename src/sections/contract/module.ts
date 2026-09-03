@@ -24,91 +24,13 @@ interface SectionContextBase {
 }
 
 /**
- * The context a section handler runs under, discriminated on `check` so the
- * mode carries its own capabilities:
- * - `check: true` (check mode and the apply-mode preflight) is the
- *   read-only phase: references are validated for syntax only, the
- *   environment is never read, and `resolveSecret?: never` makes a resolver
- *   in this phase unrepresentable.
- * - `check: false` (apply) ALWAYS carries `resolveSecret`, which maps a
- *   whole-value `$NAME` secret reference to its plaintext: the engine
- *   resolves EVERY declared secret value up front (after the preflight
- *   barrier, before the first mutation of any section) and registers each
- *   plaintext with output masking before any handler runs, so a handler
- *   only ever looks up an already-resolved name. When the document declares
- *   no secret values the resolver still exists, closed over an empty map,
- *   and any lookup fails with the engine's BUG error - a call it can never
- *   legitimately receive.
- * Handlers narrow on the SectionRun built from this context (beginRun), so
- * the apply branch gets the resolver structurally instead of re-checking
- * for it at runtime.
+ * The context the request helpers run under, discriminated on `check`: the read-only phases (check
+ * mode, the preflight probe, every plan-time read) carry no resolver, and apply ALWAYS carries the
+ * one the engine built after resolving every declared secret value up front (see ExecTools).
  */
 export type SectionContext =
   | (SectionContextBase & { check: true; resolveSecret?: never })
   | (SectionContextBase & { check: false; resolveSecret: (reference: string) => string });
-
-/** The check-mode arm of SectionContext, the ApplySectionContext sibling. */
-type CheckSectionContext = Extract<SectionContext, { check: true }>;
-
-/** The apply-mode arm of SectionContext, for helpers only apply may call. */
-export type ApplySectionContext = Extract<SectionContext, { check: false }>;
-
-/**
- * What check mode may report: drift and notes. `changes?: never` makes a
- * change line in check mode unrepresentable - the arm has no list to push
- * one onto - instead of merely ignored by the engine.
- */
-interface CheckResult {
-  /** Mirrors SectionContext.check; beginRun() copies it at construction. */
-  readonly check: true;
-  /** Drift lines: live state diverging from the settings file. */
-  drift: string[];
-  /** Informational notes (unmanaged resources left alone, skips). */
-  notes: string[];
-  changes?: never;
-}
-
-/** What apply mode may report: mutations performed, and notes. */
-interface ApplyResult {
-  readonly check: false;
-  /** Mutations performed, one line each. */
-  changes: string[];
-  /** Informational notes (unmanaged resources left alone, skips). */
-  notes: string[];
-  drift?: never;
-}
-
-/**
- * A section's outcome, discriminated on the same `check` flag as the
- * context that produced it. The engine narrows on `result.check`, so the
- * check branch structurally cannot read changes and the apply branch
- * cannot read drift.
- */
-export type SectionResult = CheckResult | ApplyResult;
-
-/**
- * A handler's mode-correlated working state: the context arm and the result
- * arm, paired under ONE discriminant so narrowing `run.check` narrows both
- * together - the check branch gets `run.result.drift`, the apply branch gets
- * `run.result.changes` AND `run.ctx.resolveSecret`, and a mixed pairing (a
- * check context with an apply result) is unrepresentable. beginRun() is the
- * sole sanctioned constructor and copies ctx.check, so `result.check`
- * mirrors the mode the handler ran under; run()'s signature cannot encode
- * that correlation on its own (it would force a cast into every handler),
- * so the engine asserts it once where the result comes back. Mode-neutral
- * facts (`notes`, the request helpers' `ctx` argument) read fine off the
- * unnarrowed union.
- */
-export type SectionRun =
-  | { readonly check: true; readonly ctx: CheckSectionContext; readonly result: CheckResult }
-  | { readonly check: false; readonly ctx: ApplySectionContext; readonly result: ApplyResult };
-
-/** Open a section run: pair the context with the empty result of its mode. */
-export function beginRun(ctx: SectionContext): SectionRun {
-  return ctx.check
-    ? { check: true, ctx, result: { check: true, drift: [], notes: [] } }
-    : { check: false, ctx, result: { check: false, changes: [], notes: [] } };
-}
 
 /** A section's REST endpoint dictionary: role -> declaration. */
 export type EndpointDict = Readonly<Record<string, EndpointDecl>>;
@@ -351,7 +273,7 @@ export function writeOnlyCheckNote(
  * The declared value a section receives once its key is present: the
  * section's slice of the validated settings document. The document was
  * parsed once at the boundary (validateSettingsDoc runs every section's
- * shape before any handler sees the value), so run() and secretValues()
+ * shape before any handler sees the value), so plan() and secretValues()
  * carry the proof in their parameter type instead of re-asserting it with
  * a per-section cast. Only `undefined` (the absent-section marker the
  * engine filters) is excluded; a nullable section (interaction_limits)
@@ -360,10 +282,9 @@ export function writeOnlyCheckNote(
 type SectionInput<K extends SectionKey> = Exclude<SettingsFile[K], undefined>;
 
 /**
- * One settings section, self-contained: identity and grant advice
- * (SectionMeta), the loose shape validation accepts for its declared
- * value, and the handler under ONE of the two contracts (SectionModule).
- * Modules register in ./registry.ts.
+ * One settings section, self-contained: identity and grant advice (SectionMeta), the loose shape
+ * validation accepts for its declared value, and the plan() handler (SectionModule). Modules
+ * register in ./registry.ts.
  */
 interface SectionModuleBase<
   K extends SectionKey = SectionKey,
@@ -436,40 +357,19 @@ interface SectionModuleBase<
 }
 
 /**
- * The two handler contracts, exactly one per module - the `?: never` pins
- * make a module declaring both (or neither) a compile error, and the engine
- * narrows on `plan` to pick the path:
- * - run(): the section executes under a mode-discriminated SectionContext,
- *   writing itself in apply mode and reporting through a SectionResult.
- * - plan(): the section only READS (through the typed port in PlanContext)
- *   and returns the operations that would converge the repository; the
- *   engine renders them as drift in check mode and executes them in apply
- *   mode, so the section has no write capability of its own. Passing the
- *   module's literal ENDPOINTS as `E` (`satisfies SectionModule<"key",
- *   typeof ENDPOINTS>`) is what types the read port and the planned roles
- *   exactly; under the erased default the port is empty and every role is
- *   a string.
+ * The section contract: plan() only READS (through the typed port in PlanContext) and returns the
+ * operations that would converge the repository; the engine renders them as drift in check mode and
+ * executes them in apply mode. `E` as the literal ENDPOINTS types the read port and the planned roles.
  */
-export type SectionModule<
+export interface SectionModule<
   K extends SectionKey = SectionKey,
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
-> =
-  | (SectionModuleBase<K, E, G> & {
-      run(ctx: SectionContext, desired: SectionInput<K>): Promise<SectionResult>;
-      plan?: never;
-    })
-  | (SectionModuleBase<K, E, G> & {
-      plan(ctx: PlanContext<E, G>, desired: SectionInput<K>): Promise<SectionPlan<PlannedOp<E, G>>>;
-      run?: never;
-    });
-
-/** The plan-contract arm of SectionModule, for consumers that only plan. */
-export type PlanSectionModule<
-  K extends SectionKey = SectionKey,
-  E extends EndpointDict = EndpointDict,
-  G extends GraphqlDict = GraphqlDict,
-> = Extract<SectionModule<K, E, G>, { plan: unknown }>;
+> extends SectionModuleBase<K, E, G> {
+  plan(ctx: PlanContext<E, G>, desired: SectionInput<K>): Promise<SectionPlan<PlannedOp<E, G>>>;
+  /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
+  run?: never;
+}
 
 /**
  * One designated secret-field value as a section declares it: the raw value

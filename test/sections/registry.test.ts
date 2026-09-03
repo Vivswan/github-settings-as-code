@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import { SECTION_KEYS, type SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -28,10 +28,12 @@ import { call, probeAbsent } from "../../src/sections/contract/requests.js";
 import {
   allEndpoints,
   allGraphqlOps,
+  type MisdeclaredPlanModule,
   SECTIONS,
   sectionModule,
 } from "../../src/sections/registry.js";
 import { workflowsSection } from "../../src/sections/workflows/index.js";
+import type { MustBeNever } from "../../src/types.js";
 import { DENIAL_SEMANTICS } from "../e2e/denial-semantics.js";
 
 // The caveat code-scanning appends to its derived grant. Kept here so the
@@ -794,9 +796,7 @@ describe("the section.role key space reserves ':'", () => {
 });
 
 describe("handler contracts", () => {
-  test("a module declares exactly one of run() and plan()", () => {
-    // The two-arm SectionModule union pins the other arm's handler to never,
-    // so both handlers on one module (or neither) fail at the declaration.
+  test("a module declares plan() and nothing else handles", () => {
     // Compile-time only: the bodies never run.
     const base = {
       key: "workflows",
@@ -805,30 +805,50 @@ describe("handler contracts", () => {
       endpoints: {},
       shape: workflowsSection.shape,
     } as const;
-    const runOnly = {
-      ...base,
-      async run(_ctx: SectionContext) {
-        return { check: true as const, drift: [], notes: [] };
-      },
-    } satisfies SectionModule<"workflows">;
     const planOnly = {
       ...base,
       async plan(_ctx: PlanContext): Promise<SectionPlan> {
         return { ops: [], notes: [], drift: [] };
       },
     } satisfies SectionModule<"workflows">;
-    // @ts-expect-error a module cannot carry both handlers
-    const _both = { ...runOnly, plan: planOnly.plan } satisfies SectionModule<"workflows">;
-    // @ts-expect-error nor neither
+    const _withRun = {
+      ...planOnly,
+      // @ts-expect-error a run() handler is not part of the contract
+      async run(_ctx: SectionContext) {
+        return { check: true as const, drift: [], notes: [] };
+      },
+    } satisfies SectionModule<"workflows">;
+    // A non-literal value carrying run() is refused too: the excess-property check alone would
+    // pass it, so the contract pins run to never.
+    const aliased = { ...planOnly, run: () => {} };
+    // @ts-expect-error run is pinned to never on the contract
+    const _aliased: SectionModule<"workflows"> = aliased;
+    // @ts-expect-error a module without plan() is not a section
     const _neither = { ...base } satisfies SectionModule<"workflows">;
-    // The plan set is whatever the registry declares; the union type forbids a module carrying
-    // both handlers, so a section appears here exactly when it has migrated to plan().
-    const planSections = SECTIONS.filter((s) => s.plan !== undefined).map((s) => s.key);
-    expect(planSections).toContain("workflows");
-    expect(new Set(planSections).size).toBe(planSections.length);
+    expect(SECTIONS.map((s) => s.key)).toContain("workflows");
   });
 
-  test("every plan section with a read declares exactly one primaryRead, and it agrees with DENIAL_SEMANTICS", () => {
+  test("the exactness tripwire names a module whose plan() is typed over another section's value", () => {
+    // The registry's _PlanModulesAreExact pin is only as good as its check: the shipped
+    // workflows module measures exact, and the same module with plan() taking labels'
+    // declared value measures misdeclared, so a passing pin means every module was compared.
+    type Exact = MustBeNever<MisdeclaredPlanModule<"workflows", typeof workflowsSection>>;
+    const misdeclared = {
+      ...workflowsSection,
+      async plan(
+        _ctx: PlanContext<typeof workflowsSection.endpoints>,
+        _desired: Exclude<SettingsFile["labels"], undefined>,
+      ) {
+        return { ops: [], notes: [], drift: [] };
+      },
+    };
+    // @ts-expect-error a plan() over labels' value is not exact for workflows
+    type Wrong = MustBeNever<MisdeclaredPlanModule<"workflows", typeof misdeclared>>;
+    const witness: [Exact, Wrong] | undefined = undefined;
+    expect(witness).toBeUndefined();
+  });
+
+  test("every section with a read declares exactly one primaryRead, and it agrees with DENIAL_SEMANTICS", () => {
     // Both state what a fine-grained 404 on the first read means; only a REST
     // GET can carry the posture, and a section with no read of either kind can
     // classify nothing before its first write - "absent" by construction.
@@ -845,10 +865,10 @@ describe("handler contracts", () => {
         primaries.length,
         `${section.key} declares primaryRead on more than one endpoint: ${primaries.map(([role]) => role).join(", ")}`,
       ).toBeLessThanOrEqual(1);
-      if (section.plan !== undefined && readsRest(section)) {
+      if (readsRest(section)) {
         expect(
           primaries.length,
-          `${section.key} is a plan section but declares no primaryRead posture; its read port cannot be narrowed to the helpers that honor a 404`,
+          `${section.key} declares no primaryRead posture; its read port cannot be narrowed to the helpers that honor a 404`,
         ).toBe(1);
       }
       if (!reads(section)) {
@@ -877,9 +897,7 @@ describe("handler contracts", () => {
         declaring.push(section.key);
       }
     }
-    // Every plan section with a read declares exactly one primaryRead and no run() section declares any.
-    expect(declaring).toEqual(
-      SECTIONS.filter((s) => s.plan !== undefined && readsRest(s)).map((s) => s.key),
-    );
+    // Every section with a REST read declares exactly one primaryRead.
+    expect(declaring).toEqual(SECTIONS.filter((s) => readsRest(s)).map((s) => s.key));
   });
 });

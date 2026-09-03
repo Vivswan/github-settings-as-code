@@ -1,8 +1,8 @@
 /**
  * Secrets engine tests: the seal round-trip, planSecrets' thunks (each seals
  * its own entry only when executed), and duplicate-name rejection. The
- * context-arm pin at the end guards the SectionContext type the run()
- * sections still build on.
+ * context-arm pin at the end guards the SectionContext type the request
+ * helpers and the executor build on.
  */
 
 import { describe, expect, test } from "bun:test";

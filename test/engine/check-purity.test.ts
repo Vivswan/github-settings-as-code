@@ -1,11 +1,7 @@
 /**
- * The check-is-read-only invariant, enforced across the whole registry:
- * every section handler must issue only GETs when ctx.check is true. The
- * preflight barrier in orchestrate.ts re-runs handlers in check mode as a
- * permission probe before applying, so an impure handler would write to
- * the repo during a phase the engine promises is read-only. The fixtures
- * are a total Record over SectionKey: adding a section without a fixture
- * here is a compile error.
+ * The check-is-read-only invariant, enforced across the whole registry: a check-mode run issues
+ * only GETs and read queries. The preflight barrier plans every section as its permission probe
+ * before applying, so the phase must stay read-only. The fixtures are a total Record over SectionKey.
  */
 
 import { describe, expect, test } from "bun:test";

@@ -163,9 +163,8 @@ type GraphqlReadRole<G extends GraphqlDict> = {
 type GraphqlWriteRole<G extends GraphqlDict> = Exclude<keyof G & string, GraphqlReadRole<G>>;
 
 /**
- * The request helpers bound to ONE read endpoint: the same helpers a run()
- * handler calls with a declaration, minus the declaration argument (the
- * role already named it) and minus any payload (a GET carries none).
+ * The request helpers (contract/requests.ts) bound to ONE read endpoint, minus the declaration
+ * argument (the role already named it) and minus any payload (a GET carries none).
  */
 interface BoundRead<E extends EndpointDecl> {
   /** GET that must succeed; every error classifies through throwFor. */
@@ -283,8 +282,8 @@ interface PlannedOpBase<D extends Justification = Justification> {
   readonly change: string | ((response: unknown) => string | readonly [string, ...string[]]);
   /**
    * The operation in settings-file terms ("arming the interaction limit"),
-   * for the failure prose when the request is rejected - the `describe` a
-   * run() handler passes to the request helpers.
+   * for the failure prose when the request is rejected - the `describe`
+   * passed to the request helpers.
    */
   readonly describe?: string;
   /**

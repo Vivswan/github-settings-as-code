@@ -75,11 +75,9 @@ export const ActionsConfig = z
       ),
   })
   .superRefine((declared, refineCtx) => {
-    // The policy-allowlist contradiction lives HERE, in the shape, not in
-    // run(): upfront document validation rejects the document in BOTH modes
-    // before ANY section writes. A run()-time throw would fire only when this
-    // section runs, after earlier sections already wrote - half-applying the
-    // run (the environments flag-pairing precedent).
+    // The policy-allowlist contradiction lives HERE, in the shape, not in plan(): upfront
+    // document validation rejects the document in BOTH modes before ANY section writes, where a
+    // plan-time throw would fire after earlier sections already wrote (the environments precedent).
     if (declared.selected_actions === undefined || declared.allowed_actions === undefined) {
       return;
     }

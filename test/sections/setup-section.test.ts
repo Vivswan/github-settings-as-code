@@ -10,7 +10,7 @@ import type { GithubClient } from "../../src/github/api.js";
 import type { SettingsFile } from "../../src/schema.js";
 import { codeQualitySetupSection } from "../../src/sections/code_quality_setup/index.js";
 import { codeScanningDefaultSetupSection } from "../../src/sections/code_scanning_default_setup/index.js";
-import type { PlanSectionModule } from "../../src/sections/contract/module.js";
+import type { SectionModule } from "../../src/sections/contract/module.js";
 import { type PlanContext, planContext } from "../../src/sections/contract/plan.js";
 import type { SetupKey, SetupSectionModule } from "../../src/sections/shared/setup-section.js";
 import type { MustBeNever } from "../../src/types.js";
@@ -133,7 +133,7 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
   "%s",
   (_key, facts) => {
     // The erased view: one plan() signature over either section's declared value.
-    const section: PlanSectionModule<SetupKey> = facts.section;
+    const section: SectionModule<SetupKey> = facts.section;
     const { path, live, driftDeclared, driftLine, applyPayload, changeLine, denied403 } = facts;
     const plan = (api: GithubClient, declared: Declared) =>
       section.plan(planContext(section, api, REPO), declared);

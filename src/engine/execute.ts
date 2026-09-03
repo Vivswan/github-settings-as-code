@@ -1,9 +1,7 @@
 /**
- * The plan executor: the ONE place a plan section's operations touch the
- * API. Operations run in declaration order through the same request
- * helpers a run() handler uses, so error classification (PermissionDenied
- * vs hard error, hints, denial hints) is identical across the two
- * contracts; each success renders the operation's change line.
+ * The plan executor: the ONE place a section's operations touch the API. Operations run in
+ * declaration order through the request helpers, so error classification (PermissionDenied vs hard
+ * error, hints, denial hints) matches the reads'; each success renders the operation's change line.
  */
 
 import type { RepoRef } from "../discovery/targets.js";
