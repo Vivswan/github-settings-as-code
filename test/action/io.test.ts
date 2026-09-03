@@ -86,8 +86,9 @@ describe("actionsIo", () => {
     process.env.GITHUB_STEP_SUMMARY = file;
     writeSummary(
       actionsIo,
-      [{ key: "repository", status: "drift", detail: ["has_wiki: true -> false"] }],
+      { outcomes: [{ key: "repository", status: "drift", detail: ["has_wiki: true -> false"] }] },
       "check",
+      "drift",
     );
     actionsIo.summary("## second block");
     expect(readFileSync(file, "utf8")).toBe(

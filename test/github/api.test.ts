@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import {
+  type ApiError,
   GithubApi,
   isPermissionError,
   isRateLimitError,
@@ -8,6 +9,7 @@ import {
   redactingOctokitLog,
   SECRET_RESPONSE_WITHHELD,
   TraceRedaction,
+  withheld,
 } from "../../src/github/api.js";
 import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
 
@@ -442,6 +444,90 @@ describe("debug-trace hardening for redacted slugs", () => {
     // neither the direct trace nor the throttle "rate limit on ..." line names it
     expect(trace).not.toContain("secret-repo");
     expect(trace).toContain("rate limit on GET <redacted>");
+  });
+});
+
+describe("withheld() rebuilds from the allowlist", () => {
+  const ALLOWLIST = ["status", "message", "body", "rateLimited", "graphqlTypes"];
+  const base = { status: 422, message: "echo: CANARY", body: '{"echo":"CANARY"}' };
+
+  // Each shape smuggles CANARY past a different field FILTER (spread, copy
+  // loop, for..in); only a rebuild that names its fields drops them all.
+  test.each([
+    [
+      "extra fields",
+      { ...base, documentationUrl: "https://docs/CANARY", extra: "CANARY" } as ApiError,
+    ],
+    ["nested objects", { ...base, rateLimited: true, nested: { deep: "CANARY" } } as ApiError],
+    ["a toJSON hook", { ...base, toJSON: () => ({ leak: "CANARY" }) } as ApiError],
+    [
+      "an enumerable getter",
+      Object.defineProperty({ ...base }, "leak", {
+        get: () => "CANARY",
+        enumerable: true,
+      }) as ApiError,
+    ],
+    [
+      "prototype-chain properties",
+      Object.assign(Object.create({ inherited: "CANARY", rateLimited: true }), base) as ApiError,
+    ],
+  ])("the output carries ONLY allowlisted own data fields against %s", (_shape, error) => {
+    const out = withheld(error, "withheld reason");
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    for (const key of Reflect.ownKeys(out)) {
+      expect(ALLOWLIST).toContain(String(key));
+      const descriptor = Object.getOwnPropertyDescriptor(out, key);
+      expect(descriptor?.get).toBeUndefined();
+    }
+    expect(out.status).toBe(422);
+    expect(out.message).toBe("withheld reason");
+    expect(out.body).toBe("withheld reason");
+    expect(JSON.stringify(out)).not.toContain("CANARY");
+    let inherited = 0;
+    for (const _key in out) {
+      inherited += 1;
+    }
+    expect(inherited).toBe(Object.keys(out).length);
+  });
+
+  test("the classification fields survive as fresh values; anything falsy or absent is dropped", () => {
+    const types = Object.freeze(["FORBIDDEN", "NOT_FOUND"]);
+    const kept = withheld(
+      { status: 403, message: "m", body: "b", rateLimited: true, graphqlTypes: types },
+      "r",
+    );
+    expect(kept).toEqual({
+      status: 403,
+      message: "r",
+      body: "r",
+      rateLimited: true,
+      graphqlTypes: ["FORBIDDEN", "NOT_FOUND"],
+    });
+    expect(kept.graphqlTypes).not.toBe(types);
+    expect(Object.isFrozen(kept.graphqlTypes)).toBe(true);
+    const dropped = withheld(
+      { status: 403, message: "m", body: "b", rateLimited: "yes" as unknown as true },
+      "r",
+    );
+    expect(dropped).toEqual({ status: 403, message: "r", body: "r" });
+    // A type list smuggling free text - or a non-string that merely prints as
+    // a token - loses the WHOLE field, not just the entry.
+    const smuggled = withheld(
+      { status: 404, message: "m", body: "b", graphqlTypes: ["NOT_FOUND", "o/CANARY"] },
+      "r",
+    );
+    expect(smuggled).toEqual({ status: 404, message: "r", body: "r" });
+    const disguised = withheld(
+      {
+        status: 404,
+        message: "m",
+        body: "b",
+        graphqlTypes: [{ leak: "CANARY", toString: () => "FORBIDDEN" }] as unknown as string[],
+      },
+      "r",
+    );
+    expect(disguised).toEqual({ status: 404, message: "r", body: "r" });
+    expect(JSON.stringify(disguised)).not.toContain("CANARY");
   });
 });
 

@@ -7,7 +7,7 @@
 import type { RepoResult, SectionOutcome } from "../engine/orchestrate.js";
 import type { Io } from "../io.js";
 import { markdownCell } from "../report/markdown.js";
-import { type PublicTargetView, REDACTED_NOTE, redactOutcomes } from "./redact.js";
+import type { PublicDetail, PublicTargetView } from "./redact.js";
 
 type SummaryIo = Pick<Io, "summary">;
 
@@ -23,10 +23,7 @@ const STATUS_ICON: Record<SectionOutcome["status"] | RepoResult, string> = {
   failed: "x",
 };
 
-/** The fields the section table renders; both SectionOutcome and the public view meet it. */
-type OutcomeRow = Pick<SectionOutcome, "key" | "status" | "detail">;
-
-function outcomeRows(outcomes: OutcomeRow[]): string[] {
+function outcomeRows(outcomes: PublicDetail["outcomes"]): string[] {
   const rows = ["| Section | Status | Detail |", "|---|---|---|"];
   for (const outcome of outcomes) {
     const detail = outcome.detail.map(markdownCell).join("<br>") || "-";
@@ -37,33 +34,22 @@ function outcomeRows(outcomes: OutcomeRow[]): string[] {
   return rows;
 }
 
-export function writeSummary(io: SummaryIo, outcomes: SectionOutcome[], mode: string): void {
-  io.summary([`## github-settings-as-code (${mode})`, "", ...outcomeRows(outcomes)].join("\n"));
-}
-
 /**
- * The single-repo summary for a redacted cross-repo target. The redaction
- * policy keeps per-section STATUSES visible everywhere, so this renders the
- * same section table the multi path renders - statuses in the clear, detail
- * cells hidden - via the shared redactOutcomes() projection, not a second
- * rendering. Used when the single-repo `repository` input names a different,
- * non-public repo.
+ * The single-repo summary from the target's PUBLIC detail: the section table
+ * (statuses stay visible under redaction; the projection hides the cells),
+ * headed by the result and note when the projection attached one.
  */
-export function writeRedactedSummary(
+export function writeSummary(
   io: SummaryIo,
-  outcomes: SectionOutcome[],
+  view: PublicDetail,
   mode: string,
   result: RepoResult,
 ): void {
-  io.summary(
-    [
-      `## github-settings-as-code (${mode})`,
-      "",
-      `:${STATUS_ICON[result]}: ${result} - ${REDACTED_NOTE}`,
-      "",
-      ...outcomeRows(redactOutcomes(outcomes)),
-    ].join("\n"),
-  );
+  const lines = [`## github-settings-as-code (${mode})`, ""];
+  if (view.note !== undefined) {
+    lines.push(`:${STATUS_ICON[result]}: ${result} - ${markdownCell(view.note)}`, "");
+  }
+  io.summary([...lines, ...outcomeRows(view.outcomes)].join("\n"));
 }
 
 export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode: string): void {

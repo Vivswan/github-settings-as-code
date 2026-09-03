@@ -7,16 +7,32 @@
 import type { components } from "@octokit/openapi-types";
 import { type GithubClient, isPermissionError, RERUN_ADVICE } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
+import { isPrivate, markPrivate, type Private } from "../private.js";
+import { revealPrivate } from "../private-open.js";
 
 type DiscoveredRepo = Pick<
   components["schemas"]["repository"],
   "full_name" | "archived" | "fork" | "topics" | "visibility" | "private"
 >;
 
-/** One discovered repository: its slug plus the visibility the listing reported. */
+/** One discovered repository the run will address: its slug plus the visibility the listing reported. */
 export interface DiscoveredRepoRef {
   slug: string;
   visibility: "public" | "private" | "internal";
+}
+
+/**
+ * A repository a filter dropped: only ever named in the skip notice, so a
+ * non-public one carries its slug sealed (opened under `private-repos: show`).
+ */
+export type FilteredRepoRef =
+  | { slug: string; visibility: "public" }
+  | { slug: Private<string>; visibility: "private" | "internal" };
+
+function sealFiltered(ref: DiscoveredRepoRef): FilteredRepoRef {
+  return ref.visibility === "public"
+    ? { slug: ref.slug, visibility: "public" }
+    : { slug: markPrivate(ref.slug), visibility: ref.visibility };
 }
 
 /**
@@ -95,7 +111,7 @@ export function excludeMatches(pattern: string, slug: string): boolean {
 export interface DiscoveryResult {
   repos: DiscoveredRepoRef[];
   /** Repositories dropped by a filter, grouped by the first reason that hit. */
-  filtered: Array<{ reason: string; repos: DiscoveredRepoRef[] }>;
+  filtered: Array<{ reason: string; repos: FilteredRepoRef[] }>;
 }
 
 /** Discover the repositories the token's user can see, applying the filters. */
@@ -188,7 +204,7 @@ export async function discoverRepos(
     },
   ];
   const kept: DiscoveredRepoRef[] = [];
-  const filtered = new Map<string, DiscoveredRepoRef[]>();
+  const filtered = new Map<string, FilteredRepoRef[]>();
   for (const repo of repos) {
     let reason: string | null = null;
     for (const rule of rules) {
@@ -207,9 +223,9 @@ export async function discoverRepos(
     }
     const group = filtered.get(reason);
     if (group) {
-      group.push(ref);
+      group.push(sealFiltered(ref));
     } else {
-      filtered.set(reason, [ref]);
+      filtered.set(reason, [sealFiltered(ref)]);
     }
   }
   return {
@@ -223,21 +239,19 @@ export async function discoverRepos(
  * would flood the annotations UI (GitHub caps annotations per step).
  * `redactPrivate` keeps private and internal repository names out of the
  * notice: only public slugs are listed, hidden ones become a count, and a
- * group with no public repos renders as a count with no names at all.
+ * group with no public repos renders as a count with no names at all. Under
+ * `show` the operator opted into naming them, so the seal opens here.
  */
 export function formatSkipNotice(
-  group: { reason: string; repos: DiscoveredRepoRef[] },
+  group: { reason: string; repos: FilteredRepoRef[] },
   redactPrivate: boolean,
 ): string {
-  const named = redactPrivate
-    ? group.repos.filter((repo) => repo.visibility === "public")
-    : group.repos;
+  const named: string[] = redactPrivate
+    ? group.repos.flatMap((repo) => (repo.visibility === "public" ? [repo.slug] : []))
+    : group.repos.map((repo) => (isPrivate(repo.slug) ? revealPrivate(repo.slug) : repo.slug));
   const hidden = group.repos.length - named.length;
   const hiddenCount = `${hidden} private or internal ${hidden === 1 ? "repository" : "repositories"}`;
-  const shown = named
-    .slice(0, 20)
-    .map((repo) => repo.slug)
-    .join(", ");
+  const shown = named.slice(0, 20).join(", ");
   const more = named.length > 20 ? `, and ${named.length - 20} more` : "";
   const hiddenTail = hidden > 0 ? `, and ${hiddenCount}` : "";
   const names = named.length > 0 ? `: ${shown}${more}${hiddenTail}` : "";

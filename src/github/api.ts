@@ -220,6 +220,29 @@ export const SECRET_RESPONSE_WITHHELD =
 export const REDACTED_RESPONSE_WITHHELD =
   "response body withheld: the repository is redacted and a GraphQL error message may carry its name or live state";
 
+/** The shape of a GitHub GraphQL error `type`: a closed enum token, never free text. */
+const GRAPHQL_TYPE_TOKEN = /^[A-Z][A-Z0-9_]*$/;
+
+/**
+ * Rebuild an error from the allowlist (status, the structural classification
+ * fields) with `reason` as message and body: constructed, never filtered, so
+ * nothing else survives. The one rebuild behind every withholding site.
+ */
+export function withheld(error: ApiError, reason: string): ApiError {
+  const types =
+    Array.isArray(error.graphqlTypes) &&
+    error.graphqlTypes.every((type) => typeof type === "string" && GRAPHQL_TYPE_TOKEN.test(type))
+      ? Object.freeze([...error.graphqlTypes])
+      : undefined;
+  return {
+    status: error.status,
+    message: reason,
+    body: reason,
+    ...(error.rateLimited === true ? { rateLimited: true } : {}),
+    ...(types === undefined ? {} : { graphqlTypes: types }),
+  };
+}
+
 /**
  * Build a throttling-plugin rate-limit callback. The primary and secondary
  * limits are handled identically - trace the (redacted) request, then retry
@@ -375,14 +398,6 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
     // The ambiguous zero-quota header counts only when the body is withheld
     // and cannot disambiguate; see the doc comment above.
     (carriesSecret && error.status === 403 && String(headers["x-ratelimit-remaining"]) === "0");
-  if (carriesSecret) {
-    return {
-      status: error.status,
-      message: SECRET_RESPONSE_WITHHELD,
-      body: SECRET_RESPONSE_WITHHELD,
-      ...(rateLimited ? { rateLimited: true } : {}),
-    };
-  }
   let message: string;
   let documentationUrl: string | undefined;
   if (typeof body === "object" && body !== null && "message" in body) {
@@ -400,13 +415,14 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
   } else {
     message = error.message;
   }
-  return {
+  const readable: ApiError = {
     status: error.status,
     message,
     body: typeof body === "string" ? body : JSON.stringify(body ?? ""),
     ...(rateLimited ? { rateLimited: true } : {}),
     ...(documentationUrl === undefined ? {} : { documentationUrl }),
   };
+  return carriesSecret ? withheld(readable, SECRET_RESPONSE_WITHHELD) : readable;
 }
 
 /**
@@ -663,20 +679,12 @@ export class GithubApi implements GithubClient {
             ),
       );
     };
-    // A redacted repository's GraphQL error is rebuilt from an allowlist (status
-    // plus the structural classification fields): its messages quote the slug
-    // and live state verbatim, which the exact-literal output mask cannot catch.
+    // A redacted repository's GraphQL error is rebuilt from the allowlist: its
+    // messages quote the slug and live state verbatim, which the exact-literal
+    // output mask cannot catch.
     const withholdContent = (): boolean => scan.carriesSecret || redacted();
-    const withheld = (error: ApiError): ApiError =>
-      redacted()
-        ? {
-            status: error.status,
-            message: REDACTED_RESPONSE_WITHHELD,
-            body: REDACTED_RESPONSE_WITHHELD,
-            ...(error.rateLimited ? { rateLimited: true as const } : {}),
-            ...(error.graphqlTypes ? { graphqlTypes: error.graphqlTypes } : {}),
-          }
-        : error;
+    const forRedacted = (error: ApiError): ApiError =>
+      redacted() ? withheld(error, REDACTED_RESPONSE_WITHHELD) : error;
     let response: { status: number; data: unknown };
     try {
       response = (await this.octokit.request({
@@ -696,7 +704,7 @@ export class GithubApi implements GithubClient {
     } catch (error) {
       if (isHttpError(error)) {
         trace(error.status);
-        return { error: withheld(apiErrorFromHttp(error, withholdContent())) };
+        return { error: forRedacted(apiErrorFromHttp(error, withholdContent())) };
       }
       // The throttling plugin inspects GraphQL bodies itself: it retries a
       // RATE_LIMITED errors[] response like any rate limit and, once the
@@ -707,7 +715,9 @@ export class GithubApi implements GithubClient {
         ?.response?.data?.errors;
       if (Array.isArray(rethrownErrors) && rethrownErrors.length > 0) {
         trace(200);
-        return { error: withheld(apiErrorFromGraphqlErrors(rethrownErrors, withholdContent())) };
+        return {
+          error: forRedacted(apiErrorFromGraphqlErrors(rethrownErrors, withholdContent())),
+        };
       }
       throw transportFailure(
         `GRAPHQL ${op.name}`,
@@ -747,7 +757,7 @@ export class GithubApi implements GithubClient {
     }
     const errors = Array.isArray(body.errors) ? body.errors : [];
     if (errors.length > 0) {
-      return { error: withheld(apiErrorFromGraphqlErrors(errors, withholdContent())) };
+      return { error: forRedacted(apiErrorFromGraphqlErrors(errors, withholdContent())) };
     }
     const data = body.data;
     if (typeof data !== "object" || data === null || Array.isArray(data)) {
@@ -812,16 +822,7 @@ function apiErrorFromGraphqlErrors(errors: unknown[], carriesSecret: boolean): A
   // response untolerable rather than hide behind its typed siblings.
   const graphqlTypes =
     everyEntryTyped && types.size > 0 ? { graphqlTypes: Object.freeze([...types].sort()) } : {};
-  if (carriesSecret) {
-    return {
-      status,
-      message: SECRET_RESPONSE_WITHHELD,
-      body: SECRET_RESPONSE_WITHHELD,
-      ...(rateLimited ? { rateLimited: true } : {}),
-      ...graphqlTypes,
-    };
-  }
-  return {
+  const readable: ApiError = {
     status,
     // GitHub's GraphQL contract makes `message` required on every errors[]
     // entry, so the fallback fires only on off-contract responses - name the
@@ -836,6 +837,7 @@ function apiErrorFromGraphqlErrors(errors: unknown[], carriesSecret: boolean): A
     ...(rateLimited ? { rateLimited: true } : {}),
     ...graphqlTypes,
   };
+  return carriesSecret ? withheld(readable, SECRET_RESPONSE_WITHHELD) : readable;
 }
 
 /**

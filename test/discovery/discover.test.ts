@@ -5,8 +5,10 @@ import {
   type DiscoveryFilters,
   discoverRepos,
   excludeMatches,
+  type FilteredRepoRef,
   formatSkipNotice,
 } from "../../src/discovery/discover.js";
+import { markPrivate } from "../../src/private.js";
 import { MockApi } from "../mock-api.js";
 
 describe("excludeMatches", () => {
@@ -49,8 +51,10 @@ describe("discoverRepos", () => {
     return discovered;
   };
   const slugs = (repos: DiscoveredRepoRef[]) => repos.map((repo) => repo.slug);
-  const filteredSlugs = (filtered: Array<{ reason: string; repos: DiscoveredRepoRef[] }>) =>
-    filtered.map((group) => ({ reason: group.reason, slugs: slugs(group.repos) }));
+  /** Filtered refs by reason; a non-public one compares against its sealed slug (`hidden`). */
+  const filteredSlugs = (filtered: Array<{ reason: string; repos: FilteredRepoRef[] }>) =>
+    filtered.map((group) => ({ reason: group.reason, slugs: group.repos.map((r) => r.slug) }));
+  const hidden = markPrivate;
   const OWNED = "GET /user/repos?affiliation=owner&per_page=100&page=1";
 
   test("default filters list owned repos, skipping archived ones", async () => {
@@ -58,7 +62,9 @@ describe("discoverRepos", () => {
       [OWNED]: { data: [{ full_name: "o/x" }, { full_name: "o/y", archived: true }] },
     });
     expect(slugs(discovered.repos)).toEqual(["o/x"]);
-    expect(filteredSlugs(discovered.filtered)).toEqual([{ reason: "archived", slugs: ["o/y"] }]);
+    expect(filteredSlugs(discovered.filtered)).toEqual([
+      { reason: "archived", slugs: [hidden("o/y")] },
+    ]);
   });
 
   test("visibility normalization fails closed: private wins, both-missing is private", async () => {
@@ -84,8 +90,9 @@ describe("discoverRepos", () => {
       { slug: "o/unknown", visibility: "private" },
       { slug: "o/liar", visibility: "private" },
     ]);
+    // A filtered non-public repo is never addressed again, so its slug is sealed.
     expect(discovered.filtered).toEqual([
-      { reason: "archived", repos: [{ slug: "o/old", visibility: "private" }] },
+      { reason: "archived", repos: [{ slug: markPrivate("o/old"), visibility: "private" }] },
     ]);
   });
 
@@ -96,7 +103,9 @@ describe("discoverRepos", () => {
     expect(both.filtered).toEqual([]);
     const only = await discover({ [OWNED]: { data } }, { archived: "only" });
     expect(slugs(only.repos)).toEqual(["o/y"]);
-    expect(filteredSlugs(only.filtered)).toEqual([{ reason: "archived=only", slugs: ["o/x"] }]);
+    expect(filteredSlugs(only.filtered)).toEqual([
+      { reason: "archived=only", slugs: [hidden("o/x")] },
+    ]);
   });
 
   test("forks: exclude and only split on the fork field", async () => {
@@ -104,7 +113,7 @@ describe("discoverRepos", () => {
     const noForks = await discover({ [OWNED]: { data } }, { forks: "exclude" });
     expect(slugs(noForks.repos)).toEqual(["o/src"]);
     expect(filteredSlugs(noForks.filtered)).toEqual([
-      { reason: "forks=exclude", slugs: ["o/copy"] },
+      { reason: "forks=exclude", slugs: [hidden("o/copy")] },
     ]);
     const onlyForks = await discover({ [OWNED]: { data } }, { forks: "only" });
     expect(slugs(onlyForks.repos)).toEqual(["o/copy"]);
@@ -133,7 +142,7 @@ describe("discoverRepos", () => {
     );
     expect(slugs(discovered.repos)).toEqual(["o/priv"]);
     expect(filteredSlugs(discovered.filtered)).toEqual([
-      { reason: "visibility=private", slugs: ["o/int"] },
+      { reason: "visibility=private", slugs: [hidden("o/int")] },
     ]);
   });
 
@@ -148,7 +157,7 @@ describe("discoverRepos", () => {
     );
     expect(slugs(discovered.repos)).toEqual(["o/int"]);
     expect(filteredSlugs(discovered.filtered)).toEqual([
-      { reason: "visibility=internal", slugs: ["o/pub"] },
+      { reason: "visibility=internal", slugs: [hidden("o/pub")] },
     ]);
   });
 
@@ -167,7 +176,7 @@ describe("discoverRepos", () => {
     );
     expect(slugs(discovered.repos)).toEqual(["o/a"]);
     expect(filteredSlugs(discovered.filtered)).toEqual([
-      { reason: "topics (has none of: team-a, team-b)", slugs: ["o/b", "o/c"] },
+      { reason: "topics (has none of: team-a, team-b)", slugs: [hidden("o/b"), hidden("o/c")] },
     ]);
   });
 
@@ -182,8 +191,8 @@ describe("discoverRepos", () => {
     );
     expect(slugs(discovered.repos)).toEqual(["o/keep"]);
     expect(filteredSlugs(discovered.filtered)).toEqual([
-      { reason: 'exclude pattern "tmp-*"', slugs: ["o/tmp-1"] },
-      { reason: 'exclude pattern "octo/*"', slugs: ["octo/keep"] },
+      { reason: 'exclude pattern "tmp-*"', slugs: [hidden("o/tmp-1")] },
+      { reason: 'exclude pattern "octo/*"', slugs: [hidden("octo/keep")] },
     ]);
   });
 
@@ -196,7 +205,7 @@ describe("discoverRepos", () => {
     );
     expect(discovered.repos).toEqual([]);
     expect(filteredSlugs(discovered.filtered)).toEqual([
-      { reason: "archived", slugs: ["o/tmp-fork"] },
+      { reason: "archived", slugs: [hidden("o/tmp-fork")] },
     ]);
   });
 
@@ -261,8 +270,9 @@ describe("discoverRepos", () => {
 describe("formatSkipNotice", () => {
   const ref = (
     slug: string,
-    visibility: DiscoveredRepoRef["visibility"] = "public",
-  ): DiscoveredRepoRef => ({ slug, visibility });
+    visibility: FilteredRepoRef["visibility"] = "public",
+  ): FilteredRepoRef =>
+    visibility === "public" ? { slug, visibility } : { slug: markPrivate(slug), visibility };
 
   test("without redaction, every slug is listed regardless of visibility", () => {
     const group = {

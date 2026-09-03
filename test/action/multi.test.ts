@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { runMulti } from "../../src/action/multi.js";
-import { redactOutcomes, toPublicView } from "../../src/action/redact.js";
+import type { TargetOutcome } from "../../src/action/redact.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { type ValidatedSettings, validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { type Io, maskRegistry } from "../../src/io.js";
+import { isPrivate } from "../../src/private.js";
 import {
   ARTIFACT_FILE,
   ARTIFACT_NAME,
@@ -50,6 +51,10 @@ function captureIo(): {
     events,
   };
 }
+
+/** True when the target closed sealed: the redaction decision, read from the brand. */
+const redacted = (target: TargetOutcome | undefined): boolean =>
+  target !== undefined && isPrivate(target.detail);
 
 function cfg(overrides: Partial<Parameters<typeof runMulti>[1]> = {}) {
   return {
@@ -114,7 +119,7 @@ describe("runMulti", () => {
       io,
     );
     expect(fatal).toBeNull();
-    const bySlug = Object.fromEntries(targets.map((t) => [t.slug, t.result]));
+    const bySlug = Object.fromEntries(targets.map((t) => [t.display, t.result]));
     expect(bySlug).toEqual({ "o/a": "applied", "o/b": "failed", "o/c": "skipped" });
     expect(annotations.some((a) => a.includes("o/c: skipped - the repository has no"))).toBe(true);
   });
@@ -155,7 +160,7 @@ describe("runMulti", () => {
       io,
     );
     expect(fatal).toBeNull();
-    expect(targets.map((t) => t.slug).sort()).toEqual(["octo/web", "viv/api"]);
+    expect(targets.map((t) => t.display).sort()).toEqual(["octo/web", "viv/api"]);
     // viv/api declares has_wiki; defaults add has_projects; both PATCHed.
     const patch = api.calls.find((c) => c.method === "PATCH" && c.path === "/repos/viv/api");
     expect(patch?.payload).toEqual({ has_wiki: false, has_projects: false });
@@ -281,7 +286,7 @@ describe("runMulti under on-missing-permission: fail", () => {
     const { io, annotations } = captureIo();
     const { fatal, targets } = await runMulti(api, cfg({ reposInput: "o/a, o/d" }), io);
     expect(fatal).toBeNull();
-    const bySlug = Object.fromEntries(targets.map((t) => [t.slug, t.result]));
+    const bySlug = Object.fromEntries(targets.map((t) => [t.display, t.result]));
     expect(bySlug).toEqual({ "o/a": "applied", "o/d": "failed" });
     expect(api.mutations().every((m) => m.path.startsWith("/repos/o/a"))).toBe(true);
     expect(annotations.some((a) => a.includes("o/d: preflight failed"))).toBe(true);
@@ -328,11 +333,11 @@ describe("runMulti redaction (private-repos: redact)", () => {
     expect(annotations.some((a) => a.includes("private repository #1"))).toBe(true);
     // the public target is untouched
     expect(all).toContain("o/pub");
-    // internally the full outcome is kept
-    const priv = targets.find((t) => t.slug === "o/priv");
-    expect(priv?.redacted).toBe(true);
-    expect(priv?.display).toBe("private repository #1");
+    // internally the full outcome is kept, sealed behind the placeholder
+    const priv = targets.find((t) => t.display === "private repository #1");
+    expect(redacted(priv)).toBe(true);
     expect(priv?.result).toBe("drift");
+    expect(JSON.stringify(targets)).not.toContain("o/priv");
   });
 
   test("show is byte-identical to today: no mask, raw slug and live values surface", async () => {
@@ -373,7 +378,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
       io,
     );
     expect(masks).toEqual([]);
-    expect(targets[0]?.redacted).toBe(false);
+    expect(redacted(targets[0])).toBe(false);
     expect(targets[0]?.display).toBe("o/self");
     expect(annotations.join("\n")).not.toContain("private repository");
     // no separate visibility probe for the self slug (only the engine's GET)
@@ -408,7 +413,10 @@ describe("runMulti redaction (private-repos: redact)", () => {
     // probe: its only GET is the engine's repository read.
     const privGets = api.calls.filter((c) => c.method === "GET" && c.path === "/repos/o/priv");
     expect(privGets).toHaveLength(1);
-    expect(targets.find((t) => t.slug === "o/priv")?.redacted).toBe(true);
+    expect(targets.map((t) => [t.display, redacted(t)])).toEqual([
+      ["o/pub", false],
+      ["private repository #1", true],
+    ]);
     expect(annotations.join("\n")).not.toContain("o/priv");
   });
 
@@ -423,7 +431,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
       cfg({ reposInput: "o/mystery", privateRepos: "redact" }),
       io,
     );
-    expect(targets[0]?.redacted).toBe(true);
+    expect(redacted(targets[0])).toBe(true);
     expect(targets[0]?.display).toBe("private repository #1");
     const all = annotations.join("\n");
     expect(all).not.toContain("o/mystery");
@@ -447,68 +455,10 @@ describe("runMulti redaction (private-repos: redact)", () => {
       cfg({ reposInput: "o/p1, o/pub, o/p2", mode: "check", privateRepos: "redact" }),
       io,
     );
-    const display = Object.fromEntries(targets.map((t) => [t.slug, t.display]));
-    expect(display).toEqual({
-      "o/p1": "private repository #1",
-      "o/pub": "o/pub",
-      "o/p2": "private repository #2",
-    });
-  });
-});
-
-describe("toPublicView", () => {
-  test("a plain target passes through byte-identical, keyed by slug", () => {
-    const view = toPublicView({
-      slug: "o/pub",
-      source: "remote",
-      origin: 'the "repos" input',
-      result: "drift",
-      outcomes: [{ key: "repository", status: "drift", detail: ["has_wiki: true != false"] }],
-      display: "o/pub",
-      redacted: false,
-    });
-    expect(view.display).toBe("o/pub");
-    expect(view.outcomes[0]?.detail).toEqual(["has_wiki: true != false"]);
-  });
-
-  test("a redacted target hides every detail, keeps statuses, adds HTTP codes on failures", () => {
-    const view = toPublicView({
-      slug: "o/priv",
-      source: "remote",
-      origin: 'the "repos" input',
-      result: "failed",
-      outcomes: [
-        { key: "repository", status: "applied", detail: ["changed description to SECRET"] },
-        { key: "labels", status: "failed", detail: ["denied SECRET"], httpStatus: 403 },
-      ],
-      note: "boom SECRET",
-      display: "private repository #2",
-      redacted: true,
-    });
-    expect(view.display).toBe("private repository #2");
-    const flat = JSON.stringify(view);
-    expect(flat).not.toContain("SECRET");
-    expect(view.outcomes[0]?.detail).toEqual(["hidden (private repository)"]);
-    expect(view.outcomes[1]?.detail).toEqual(["hidden (private repository), HTTP 403"]);
-    expect(view.outcomes[1]?.status).toBe("failed");
-    expect(view.note).toContain("details hidden");
-  });
-});
-
-describe("redactOutcomes (shared by the multi view and the single-repo summary)", () => {
-  test("keeps key+status, hides detail, and appends HTTP code only on failed/skipped", () => {
-    const redacted = redactOutcomes([
-      { key: "repository", status: "applied", detail: ["set has_wiki=false SECRET"] },
-      { key: "labels", status: "skipped", detail: ["denied SECRET"], httpStatus: 404 },
-      { key: "rulesets", status: "failed", detail: ["boom SECRET"], httpStatus: 403 },
-      { key: "teams", status: "clean", detail: ["no changes SECRET"] },
-    ]);
-    expect(JSON.stringify(redacted)).not.toContain("SECRET");
-    expect(redacted).toEqual([
-      { key: "repository", status: "applied", detail: ["hidden (private repository)"] },
-      { key: "labels", status: "skipped", detail: ["hidden (private repository), HTTP 404"] },
-      { key: "rulesets", status: "failed", detail: ["hidden (private repository), HTTP 403"] },
-      { key: "teams", status: "clean", detail: ["hidden (private repository)"] },
+    expect(targets.map((t) => t.display)).toEqual([
+      "private repository #1",
+      "o/pub",
+      "private repository #2",
     ]);
   });
 });
@@ -685,7 +635,7 @@ describe("runMulti private-report: issue wiring", () => {
       io,
     );
     expect(targets[0]?.result).toBe("failed");
-    expect(targets[0]?.redacted).toBe(true);
+    expect(redacted(targets[0])).toBe(true);
     // No issue/label traffic was even attempted.
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     // One safe warning names the loss through the placeholder, never the slug.
@@ -715,7 +665,7 @@ describe("runMulti private-report: issue wiring", () => {
       io,
     );
     // redacted in the public view
-    expect(targets[0]?.redacted).toBe(true);
+    expect(redacted(targets[0])).toBe(true);
     // but NO issue/label traffic - the report was withheld
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
@@ -834,8 +784,7 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
       io,
     );
     expect(targets[0]?.result).toBe("clean");
-    // the silent skip: no note on the summary row, no annotation about delivery
-    expect(targets[0]?.note).toBeUndefined();
+    // the silent skip: no annotation about delivery
     expect(annotations.some((a) => a.includes("report"))).toBe(false);
     // no mutation of any kind, and the only issue traffic is the open lookup
     expect(api.mutations()).toEqual([]);
@@ -1009,7 +958,7 @@ describe("runMulti private-report: artifact wiring", () => {
       uploader,
     );
     // both are redacted in the public view
-    expect(targets.every((t) => t.redacted)).toBe(true);
+    expect(targets.every((t) => redacted(t))).toBe(true);
     // one upload, and it contains only the proven-private target
     expect(uploads).toHaveLength(1);
     const document = await decrypt(uploads[0]?.file.data as Uint8Array);

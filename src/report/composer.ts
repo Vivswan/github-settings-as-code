@@ -10,7 +10,7 @@ import type { AnnotationLevel } from "../io.js";
 import { markdownCell } from "./markdown.js";
 
 /** One captured Io line: annotations carry a level, plain log lines do not. */
-export interface TranscriptLine {
+interface TranscriptLine {
   level?: AnnotationLevel;
   line: string;
 }

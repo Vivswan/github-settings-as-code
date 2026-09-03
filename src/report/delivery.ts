@@ -6,13 +6,15 @@
  * needs so an apply cannot delete the label the report module creates.
  */
 
-import type { IssueChannel, PrivateReportChannel } from "../action/redact.js";
+import type { IssueChannel, PrivateReportChannel, RedactedDetail } from "../action/redact.js";
 import type { RepoRef } from "../discovery/targets.js";
 import type { RepoRunResult, ValidatedSettings } from "../engine/orchestrate.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
+import type { Private } from "../private.js";
+import { revealPrivate } from "../private-open.js";
 import { type ArtifactUploader, deliverArtifactReport } from "./artifact-report.js";
-import { composeReport, type TranscriptLine } from "./composer.js";
+import { composeReport } from "./composer.js";
 import {
   deliverIssueReport,
   type IssueReportMode,
@@ -73,20 +75,17 @@ export function applyMarkerInjection(
 }
 
 /**
- * Compose the full unredacted report document for one target. Shared by both
- * delivery channels: the issue channel PATCHes it into the target's report
- * issue, the artifact channel accumulates it for the encrypted upload. The
- * `check` flag decides needsAttention alongside the result (a check-mode drift
- * needs attention; an apply-mode drift cannot occur).
+ * Compose the full unredacted report for one target; the seal opens in full
+ * here because the readers are the target repository's own. Shared by both
+ * channels; `check` decides needsAttention (check-mode drift counts).
  */
 export function composeTargetReport(
   meta: ReportRunMeta,
-  slug: string,
   result: RepoRunResult["result"],
-  outcomes: RepoRunResult["outcomes"],
-  transcript: TranscriptLine[],
+  detail: Private<RedactedDetail>,
   check: boolean,
 ): { body: string; needsAttention: boolean } {
+  const { slug, outcomes, transcript } = revealPrivate(detail);
   const body = composeReport({
     target: slug,
     adminRepo: meta.adminRepo,
@@ -105,10 +104,9 @@ export function composeTargetReport(
  * Compose the full unredacted report for a redacted target and deliver it to
  * the issue channel. Under `always` this runs on EVERY result (the report is
  * the private mirror of the run log); under `on-failure` a healthy run at
- * most closes a leftover open issue and its no-op skip is silent. Returns a
- * safe summary-row note on delivery failure - and emits one public-safe
- * warning naming only the placeholder and the HTTP status - or undefined on
- * success; the target's result is never changed either way.
+ * most closes a leftover open issue and its no-op skip is silent. A delivery
+ * failure emits one public-safe warning naming only the placeholder and the
+ * HTTP status; the target's result is never changed either way.
  */
 export async function deliverReport(
   api: GithubClient,
@@ -116,20 +114,12 @@ export async function deliverReport(
   repo: RepoRef,
   display: string,
   result: RepoRunResult["result"],
-  outcomes: RepoRunResult["outcomes"],
-  transcript: TranscriptLine[],
+  detail: Private<RedactedDetail>,
   check: boolean,
   channel: IssueChannel,
   io: Io,
-): Promise<string | undefined> {
-  const { body, needsAttention } = composeTargetReport(
-    meta,
-    repo.slug,
-    result,
-    outcomes,
-    transcript,
-    check,
-  );
+): Promise<void> {
+  const { body, needsAttention } = composeTargetReport(meta, result, detail, check);
   // The one channel-to-mode conversion, exhaustive over IssueChannel: a future
   // issue channel fails to compile here instead of inheriting a default.
   let mode: IssueReportMode;
@@ -144,9 +134,7 @@ export async function deliverReport(
   const delivery = await deliverIssueReport(api, repo, body, needsAttention, mode);
   if ("warning" in delivery) {
     io.annotate("warning", `${display}: ${delivery.warning}`);
-    return delivery.warning;
   }
-  return undefined;
 }
 
 /**
