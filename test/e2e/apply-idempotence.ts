@@ -51,8 +51,7 @@
  * - code_scanning_default_setup, code_quality_setup (true): the PATCH is
  *   planned only when the declared keys diverge from the live setup.
  * - check_suite_preferences (false): no read endpoint exists to compare
- *   against, so the PATCH re-asserts the declared preferences on every
- *   apply by design.
+ *   against, so the PATCH is alwaysRewrite by declaration.
  * - teams (false): team access is granted (PUT) unconditionally.
  * - interaction_limits (false): the base PUT is alwaysRewrite by declaration
  *   (it re-arms the self-expiring limit; the expiry cannot be read back); the
@@ -119,9 +118,9 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
  *   write to its endpoint): per ENDPOINT, since environments mixes both kinds.
  *
  * - Which MOCK STATE FAMILIES may move their updated_at between applies
- *   comes from this mapping: each flagged endpoint names its state family,
- *   or null when the mock stores nothing (Git LFS). The lockstep test pins
- *   the KEY SET against the flags, so a new flag must declare its family here.
+ *   comes from this mapping: each flagged endpoint names its state family, or null
+ *   when nothing in it moves (Git LFS stores nothing; check suite preferences carry no
+ *   timestamp). The lockstep test pins the KEY SET against the flags.
  */
 export const ALWAYS_REWRITE_ENDPOINT_FAMILIES: Readonly<Record<string, string | null>> = {
   "actions_secrets.put": "actions_secrets",
@@ -132,6 +131,7 @@ export const ALWAYS_REWRITE_ENDPOINT_FAMILIES: Readonly<Record<string, string | 
   "interaction_limits.put": "interaction_limits",
   "repository.lfsPut": null,
   "repository.lfsRemove": null,
+  "check_suite_preferences.update": null,
 };
 
 /** The snapshot exclusion set snapshotFamilies consumes, from the mapping. */

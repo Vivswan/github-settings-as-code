@@ -326,12 +326,9 @@ export function hasDrift(lines: readonly string[]): lines is readonly [string, .
 }
 
 /**
- * The drift an operation on this endpoint must carry: none is legal only
- * for an alwaysRewrite endpoint (the sealed secret PUTs, whose values
- * cannot be read back, so their rewrite is unconditional by contract and
- * check has nothing to report). Every other write exists because live
- * state diverged, and that divergence is exactly what check mode must
- * print.
+ * The drift an operation must carry: none is legal only on an alwaysRewrite
+ * endpoint (a write that recurs by declaration, so check has nothing to report);
+ * every other write exists because live state diverged, which check must print.
  */
 type DriftFor<E extends EndpointDecl> = E extends { readonly alwaysRewrite: true }
   ? readonly string[]

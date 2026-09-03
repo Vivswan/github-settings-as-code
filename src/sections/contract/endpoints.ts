@@ -83,13 +83,9 @@ interface EndpointDeclFields {
    */
   readonly denialHint?: string;
   /**
-   * True for a WRITE the section issues for every declared entry on EVERY
-   * apply by contract - the sealed secret PUTs, whose values cannot be read
-   * back, so the unconditional re-write is what propagates a rotated source
-   * value. This is a property of the ENDPOINT, not its section: environments
-   * carries a passthrough PUT and always-rewrite secret PUTs side by side.
-   * The e2e apply-idempotence proof derives its required-rewrite set from
-   * this flag, so the contract lives on the declaration it describes.
+   * True for a WRITE issued on EVERY apply by contract, its result unreadable or its
+   * recurrence by design: sealed secret PUTs, the interaction-limits re-arm, the Git LFS
+   * toggle, the check suite preferences PATCH. Per ENDPOINT; the idempotence proof reads it.
    */
   readonly alwaysRewrite?: true;
   /**

@@ -44,6 +44,7 @@ describe("always-rewrite lockstep (endpoint flag <-> mock state families)", () =
       "interaction_limits.put": "interaction_limits",
       "repository.lfsPut": null,
       "repository.lfsRemove": null,
+      "check_suite_preferences.update": null,
     });
   });
 });
@@ -159,6 +160,16 @@ describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)",
         [secretPut],
       ),
     ).toEqual([]);
+  });
+
+  test("the read-less check suite preferences PATCH binds like a sealed PUT", () => {
+    // Not a secret and not a PUT: the obligation is the alwaysRewrite flag,
+    // whatever the method, so a second apply that skips it fires.
+    const patch = write("PATCH", "/repos/e2e-owner/e2e-repo/check-suites/preferences");
+    const failures = missingSecondApplyRewrites([patch], []);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("PATCH /repos/e2e-owner/e2e-repo/check-suites/preferences");
+    expect(missingSecondApplyRewrites([patch], [patch])).toEqual([]);
   });
 
   test("a first-apply secret DELETE creates no re-write obligation", () => {

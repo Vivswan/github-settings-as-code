@@ -1,22 +1,12 @@
 /**
- * `check_suite_preferences:` section - per-GitHub-App auto_trigger_checks
- * toggles controlling whether pushes automatically create check suites.
- * GitHub exposes NO read endpoint for these preferences, so the section is
- * write-only end to end: check mode emits one cannot-verify note and issues
- * no request, and apply re-asserts the declared preferences with one PATCH
- * on every run (the 200 echoes the resulting preferences).
+ * `check_suite_preferences:` section - per-GitHub-App auto_trigger_checks toggles. GitHub exposes
+ * NO read endpoint, so the plan reads nothing and its one op is an alwaysRewrite PATCH.
  */
 
 import type { EndpointDecl } from "../contract/endpoints.js";
-import {
-  beginRun,
-  loosen,
-  type SectionModule,
-  type SectionResult,
-  writeOnlyCheckNote,
-} from "../contract/module.js";
+import { loosen, type SectionModule, writeOnlyCheckNote } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { call } from "../contract/requests.js";
+import { type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
 import { CheckSuitePreferencesConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["checks"] };
@@ -25,6 +15,8 @@ const ENDPOINTS = {
   update: {
     route: "PATCH /repos/{owner}/{repo}/check-suites/preferences",
     statuses: { 200: "the resulting preferences plus the repository" },
+    // No GET exists to compare against, so the write recurs by contract.
+    alwaysRewrite: true,
   },
 } as const satisfies Record<string, EndpointDecl>;
 
@@ -38,33 +30,30 @@ export const checkSuitePreferencesSection = {
   // Loose on purpose: the PATCH forwards the object verbatim, so future
   // fields ride along at both levels; only the natural pair is checked.
   shape: loosen(CheckSuitePreferencesConfig),
-  async run(ctx, desired): Promise<SectionResult> {
-    const run = beginRun(ctx);
-
-    if (run.check) {
-      // Derived, not restated: writeOnlyCheckNote proves against ENDPOINTS
-      // that no read exists, so this claim cannot outlive the declarations.
-      run.result.notes.push(
-        writeOnlyCheckNote(this, {
-          resource: "check suite preferences",
-          reasserts: "the declared preferences",
-        }),
-      );
-      return run.result;
-    }
-
-    const data = (await call(ctx, this, ENDPOINTS.update, {
-      payload: desired,
-      describe: "setting check suite preferences",
-    })) as { preferences?: { auto_trigger_checks?: unknown } } | null;
-    // The change line reads the ECHOED preferences (what GitHub now holds),
-    // falling back to the declared list only if the echo loses its shape.
-    const echoed = data?.preferences?.auto_trigger_checks;
-    const applied = Array.isArray(echoed) ? echoed : desired.auto_trigger_checks;
-    const count = applied.length;
-    run.result.changes.push(
-      `applied check suite preferences (${count} auto_trigger_checks ${count === 1 ? "entry" : "entries"})`,
+  async plan(_ctx, desired) {
+    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
+    // Derived, not restated: writeOnlyCheckNote proves against ENDPOINTS
+    // that no read exists, so this claim cannot outlive the declarations.
+    plan.notes.push(
+      writeOnlyCheckNote(this, {
+        resource: "check suite preferences",
+        reasserts: "the declared preferences",
+      }),
     );
-    return run.result;
+    plan.ops.push({
+      role: "update",
+      payload: plainData(desired),
+      describe: "setting check suite preferences",
+      drift: [],
+      change: (response) => {
+        // Counts the ECHOED preferences (what GitHub now holds); the declared
+        // list is the fallback only when the echo loses its shape.
+        const echoed = (response as { preferences?: { auto_trigger_checks?: unknown } } | null)
+          ?.preferences?.auto_trigger_checks;
+        const count = Array.isArray(echoed) ? echoed.length : desired.auto_trigger_checks.length;
+        return `applied check suite preferences (${count} auto_trigger_checks ${count === 1 ? "entry" : "entries"})`;
+      },
+    });
+    return plan;
   },
-} satisfies SectionModule<"check_suite_preferences">;
+} satisfies SectionModule<"check_suite_preferences", typeof ENDPOINTS>;

@@ -3,6 +3,7 @@ import { SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import {
   type EndpointDecl,
   endpointKind,
+  endpointMethod,
   endpointPath,
   expand,
   matchesTemplate,
@@ -19,6 +20,7 @@ import {
   type SectionMeta,
   type SectionModule,
   sectionGrant,
+  sectionOperations,
 } from "../../src/sections/contract/module.js";
 import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
 import type { PlanContext, SectionPlan } from "../../src/sections/contract/plan.js";
@@ -826,11 +828,15 @@ describe("handler contracts", () => {
     expect(new Set(planSections).size).toBe(planSections.length);
   });
 
-  test("every plan section declares exactly one primaryRead, and it agrees with DENIAL_SEMANTICS", () => {
-    // Both state what a fine-grained 404 on the first read means. A plan
-    // section must declare it (the posture narrows its read port); the
-    // harness table shrinks as sections migrate to the declaration.
+  test("every plan section with a read declares exactly one primaryRead, and it agrees with DENIAL_SEMANTICS", () => {
+    // Both state what a fine-grained 404 on the first read means; only a REST
+    // GET can carry the posture, and a section with no read of either kind can
+    // classify nothing before its first write - "absent" by construction.
     const declaring: string[] = [];
+    const readsRest = (section: SectionMeta): boolean =>
+      Object.values(section.endpoints).some((endpoint) => endpointMethod(endpoint.route) === "GET");
+    const reads = (section: SectionMeta): boolean =>
+      sectionOperations(section).some((op) => op.wire === "read");
     for (const section of SECTIONS) {
       const primaries = Object.entries(section.endpoints).filter(
         ([, endpoint]) => endpoint.primaryRead !== undefined,
@@ -839,11 +845,17 @@ describe("handler contracts", () => {
         primaries.length,
         `${section.key} declares primaryRead on more than one endpoint: ${primaries.map(([role]) => role).join(", ")}`,
       ).toBeLessThanOrEqual(1);
-      if (section.plan !== undefined) {
+      if (section.plan !== undefined && readsRest(section)) {
         expect(
           primaries.length,
           `${section.key} is a plan section but declares no primaryRead posture; its read port cannot be narrowed to the helpers that honor a 404`,
         ).toBe(1);
+      }
+      if (!reads(section)) {
+        expect(
+          DENIAL_SEMANTICS[section.key],
+          `${section.key} declares no read, so nothing can classify a denial before its first write`,
+        ).toBe("absent");
       }
       for (const [role, endpoint] of primaries) {
         expect(endpoint.route.startsWith("GET "), `${section.key}.${role} is not a read`).toBe(
@@ -865,7 +877,9 @@ describe("handler contracts", () => {
         declaring.push(section.key);
       }
     }
-    // Every plan section declares exactly one primaryRead and no run() section declares any.
-    expect(declaring).toEqual(SECTIONS.filter((s) => s.plan !== undefined).map((s) => s.key));
+    // Every plan section with a read declares exactly one primaryRead and no run() section declares any.
+    expect(declaring).toEqual(
+      SECTIONS.filter((s) => s.plan !== undefined && readsRest(s)).map((s) => s.key),
+    );
   });
 });
