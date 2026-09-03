@@ -1201,14 +1201,9 @@ export interface MultiScenarioMeta {
   /** The `private-repos` policy the run was generated under (redact or show). */
   privateRepos: "redact" | "show";
   /**
-   * The `private-report` channel: `issue` delivers the full report to each
-   * redacted target's own repo; `artifact` age-encrypts the report and uploads
-   * it as a workflow artifact (which fails with a safe warning in the harness,
-   * where the runner token is absent); `none` sends nothing. Only ever `issue`
-   * or `artifact` under redact (the config rejects a delivering channel + show).
-   * `issue-on-failure` is deliberately absent: it stays out of the fuzz
-   * rotation until the oracle can predict per-target needsAttention (follow-up);
-   * the curated multi-report-issue-on-failure-* scenarios cover it meanwhile.
+   * The `private-report` channel; only `issue` or `artifact` under redact (the config rejects a
+   * delivering channel + show). `issue-on-failure` is absent: the oracle does not predict its
+   * per-target needsAttention writes, so the curated multi-report-issue-on-failure-* scenarios pin it.
    */
   privateReport: "none" | "issue" | "artifact";
   /** GITHUB_REPOSITORY: a target whose slug equals it is never redacted. */
@@ -1303,16 +1298,9 @@ export function genMultiScenario(
       : force === "plain-first-target"
         ? "show"
         : rolledPrivateRepos;
-  // The private-report channel. `issue` delivers the full report to each
-  // redacted target's own repo; `artifact` age-encrypts every report into one
-  // workflow artifact (which fails with a safe warning in the harness, where the
-  // runner token is absent). Both are only valid under redact (the config rejects
-  // a delivering channel + show, since show redacts nothing), so they are picked
-  // only then. Randomized so the fuzzer covers delivery, reuse, denial, and the
-  // artifact upload-attempt path. `issue-on-failure` is deliberately NOT in the
-  // rotation: the oracle cannot yet predict per-target needsAttention, so its
-  // conditional writes would be unpredictable (follow-up); the curated
-  // scenarios cover the channel until then.
+  // The private-report channel, picked only under redact (the config rejects a delivering channel
+  // + show): `issue` delivers per redacted target, `artifact` age-encrypts into one upload (a safe
+  // warning in the harness). `issue-on-failure` stays out: the oracle does not predict its writes.
   const rolledReport =
     privateRepos === "redact" ? rng.pick(["none", "issue", "artifact"] as const) : "none";
   const privateReport =

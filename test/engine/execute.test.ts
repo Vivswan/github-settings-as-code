@@ -61,6 +61,11 @@ const SECTION = {
       route: "DELETE /repos/{owner}/{repo}/labels/{name}",
       statuses: { 204: "deleted" },
     },
+    resend: {
+      route: "PATCH /repos/{owner}/{repo}/labels/{name}",
+      statuses: { 200: "re-sent" },
+      unverifiable: true,
+    },
   } satisfies Record<string, EndpointDecl>,
   graphql: { read: READ_OP, write: WRITE_OP },
 } satisfies SectionMeta;
@@ -734,12 +739,14 @@ describe("executePlan", () => {
   test("an operation is justified by drift lines or an unverifiable facet, and by nothing less", () => {
     type Op = PlannedOp<typeof SECTION.endpoints, typeof SECTION.graphql>;
     const facet: Op = {
-      role: "create",
+      role: "resend",
+      params: { name: "x" },
       drift: { unverifiable: "GitHub never echoes the value back", lines: [] },
       change: "re-sent",
     };
     const both: Op = {
-      role: "create",
+      role: "resend",
+      params: { name: "x" },
       drift: { unverifiable: "GitHub never echoes the value back", lines: ["x drifted"] },
       change: "re-sent",
     };
@@ -753,13 +760,30 @@ describe("executePlan", () => {
       "x drifted",
       "opless",
     ]);
+    const undeclared = {
+      role: "create",
+      drift: { unverifiable: "why", lines: [] },
+      change: "wrote",
+    } as const;
+    // @ts-expect-error a facet is admitted only on an endpoint declaring unverifiable
+    const _undeclared: Op = undeclared;
     const empty = { role: "create", drift: [], change: "wrote" } as const;
     // @ts-expect-error empty drift without a facet is not a justification on a compare-before-write endpoint
     const _empty: Op = empty;
-    const reasonless = { role: "create", drift: { lines: [] }, change: "wrote" } as const;
+    const reasonless = {
+      role: "resend",
+      params: { name: "x" },
+      drift: { lines: [] },
+      change: "wrote",
+    } as const;
     // @ts-expect-error a facet without its reason is not a justification
     const _reasonless: Op = reasonless;
-    const lineless = { role: "create", drift: { unverifiable: "why" }, change: "wrote" } as const;
+    const lineless = {
+      role: "resend",
+      params: { name: "x" },
+      drift: { unverifiable: "why" },
+      change: "wrote",
+    } as const;
     // @ts-expect-error a facet without its lines is not a justification
     const _lineless: Op = lineless;
     const graphql = {

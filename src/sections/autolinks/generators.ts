@@ -14,7 +14,6 @@ import {
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 import { autolinksSection } from "./index.js";
-import { AUTOLINKS_MOCK } from "./mock.js";
 import { AutolinkConfig } from "./schema.js";
 
 const genAutolink = generatorFromSlice(AutolinkConfig, {
@@ -34,8 +33,6 @@ export function autolinksWitness(rng: Rng, declared: Json[], kind: LiveWitnessKi
   return lensWitness(
     {
       section: autolinksSection,
-      defaults: AUTOLINKS_MOCK.defaults,
-      owned: AUTOLINKS_MOCK.owned,
       // A template no generated entry can spell (the pool's carry a numeric ref).
       sentinels: { url_template: "https://witness.example.com/<num>" },
       undeclared: {

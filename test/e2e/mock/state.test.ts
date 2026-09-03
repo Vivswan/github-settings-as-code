@@ -17,7 +17,10 @@ import {
   flattenProtection,
 } from "../../../src/sections/branches/index.js";
 import { flattenEnvironment } from "../../../src/sections/environments/index.js";
+import { SECTIONS } from "../../../src/sections/registry.js";
 import { roleForPermission } from "../../../src/sections/shared/roles.js";
+import { genScenario } from "../generators.js";
+import { Rng } from "../prng.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import {
   applyRuleInput,
@@ -30,12 +33,15 @@ import {
   completeRule,
   environmentFromPut,
   invitationFromPut,
+  LIST_MOCKS,
+  type MockState,
   normalizePinnedSeed,
   protectionFromPut,
   ruleFromProtection,
   ruleWireNode,
   teamRepoFromPut,
 } from "./state.js";
+import { storedKeyMaterial } from "./support.js";
 
 describe("buildState overlay semantics", () => {
   test("undefined LiveState uses fixture defaults and empty lists", () => {
@@ -84,6 +90,99 @@ describe("buildState overlay semantics", () => {
     // Generated ids are unique.
     const ids = new Set(state.labels.map((l) => (l as Record<string, unknown>).id));
     expect(ids.size).toBe(3);
+  });
+
+  test("list collections complete sparse seeds with the mock's defaults and server-owned fields", () => {
+    const state = buildState(
+      {
+        labels: [{ name: "bug", color: "d73a4a" }],
+        autolinks: [{ key_prefix: "JIRA-", url_template: "https://j.example.com/<num>" }],
+        deploy_keys: [{ title: "bot", key: "ssh-ed25519 AAAAC3seedseedseed deploy@bot" }],
+      },
+      "org",
+    );
+    expect(state.labels[0]).toEqual({
+      name: "bug",
+      color: "d73a4a",
+      description: null,
+      default: false,
+      id: expect.any(Number),
+      node_id: expect.any(String),
+      url: "https://api.github.com/repos/e2e-owner/e2e-repo/labels/bug",
+    });
+    expect(state.autolinks[0]).toEqual({
+      key_prefix: "JIRA-",
+      url_template: "https://j.example.com/<num>",
+      is_alphanumeric: true,
+      id: expect.any(Number),
+    });
+    // The seed's comment is stripped the way a created key is stored, so a converging apply over a
+    // seeded key still proves the section compares algorithm + blob, not the raw string.
+    expect(state.deploy_keys[0]).toMatchObject({
+      title: "bot",
+      key: storedKeyMaterial("ssh-ed25519 AAAAC3seedseedseed deploy@bot"),
+      read_only: false,
+      verified: true,
+    });
+    expect(String((state.deploy_keys[0] as Record<string, unknown>).key)).not.toContain(
+      "deploy@bot",
+    );
+  });
+
+  test("a pinned seed id anywhere in the overlay is reserved before any family mints", () => {
+    // One pinned id sits in a list collection (last, after a minted sibling), one nested two levels
+    // down in a non-list family; every id every family mints must still clear both.
+    const state = buildState(
+      {
+        labels: [{ name: "minted" }, { name: "pinned", id: 90_000_001 }],
+        autolinks: [{ key_prefix: "A-", url_template: "u" }],
+        hooks: [{ config: { url: "https://example.test/hook" } }],
+        invitations: [{ invitee: { login: "carol" } }],
+        pull_bypass_list: [{ login: "dave" }],
+        environment_branch_policies: { prod: [{ id: 90_000_000, name: "main", type: "branch" }] },
+      },
+      "org",
+    );
+    const ids = [
+      ...state.labels,
+      ...state.autolinks,
+      ...state.hooks,
+      ...state.invitations,
+      ...state.pull_bypass_list,
+      ...(state.environment_branch_policies.prod ?? []),
+    ].map((item) => item.id as number);
+    expect(ids).toContain(90_000_000);
+    expect(ids).toContain(90_000_001);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(state.nextId).toBeGreaterThan(Math.max(...ids));
+  });
+
+  test("every id in a generated scenario's state is distinct, across every minting family", () => {
+    // The one id counter starts past every seeded id, so nothing a family mints can collide with a
+    // seed or with another family; generated live state exercises every seeding path at once.
+    const mintingFamilies = (state: MockState) => [
+      ...state.labels,
+      ...state.autolinks,
+      ...state.deploy_keys,
+      ...state.hooks,
+      ...state.invitations,
+      ...state.pull_bypass_list,
+    ];
+    for (let seed = 0; seed < 25; seed++) {
+      const { scenario } = genScenario(new Rng(seed));
+      const state = buildState(scenario.live_state, scenario.owner_kind ?? "org");
+      const ids = mintingFamilies(state).map((item) => item.id as number);
+      expect(ids.every((id) => typeof id === "number")).toBe(true);
+      expect(new Set(ids).size, `seed ${seed}`).toBe(ids.length);
+      expect(state.nextId).toBeGreaterThan(Math.max(0, ...ids));
+    }
+  });
+
+  test("every section built on the list factory has a completion spec, and nothing else does", () => {
+    // A factory module carries its declaration; its mock serves seeds through LIST_MOCKS, so a new
+    // factory section without a spec would serve incomplete seeds until it lands here.
+    const factoryKeys = SECTIONS.filter((section) => "decl" in section).map((s) => s.key);
+    expect(Object.keys(LIST_MOCKS).sort()).toEqual([...factoryKeys].sort());
   });
 
   test("actions retention and cache limits default to GitHub's values, overlay replaces", () => {

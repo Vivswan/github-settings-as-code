@@ -1,13 +1,6 @@
-# The unconditional half of the COMPARE_BEFORE_WRITE table needs a corpus
-# witness per false-listed section: run.ts fails (unwitnessedUnconditionalSections)
-# when a false-listed section has no apply_idempotent scenario writing to it,
-# because a wrong `false` merely weakens the zero-write proof and nothing else
-# would contradict it. apply-idempotent-mixed carries environments beside
-# several compare-before-write sections; the secrets *-apply-converges
-# scenarios carry the four secret sections and webhooks. This scenario covers
-# the rest: every false-listed section here must be written again by the
-# second apply with byte-identical mock state (repository and interaction_limits
-# through their alwaysRewrite writes), and the true-listed ones stay write-quiet.
+# Corpus witness for the alwaysRewrite endpoints no other apply_idempotent scenario writes: run.ts
+# fails (unwitnessedExemptEndpoints) when a flagged endpoint is never written by a first apply. The
+# LFS PUT, the check suite PATCH, and the interaction-limit PUT recur byte-stably; the rest stay quiet.
 name: apply-idempotent-unconditional
 settings:
   repository:

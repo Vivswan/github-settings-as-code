@@ -282,29 +282,16 @@ export interface LensWitnessSpec<
   F extends string,
 > {
   readonly section: ListSectionModule<K, Ends, Live, F>;
-  /** The GET-shape fields the server fills when a create omits them: the mock's own defaults. */
-  readonly defaults: Json;
-  /**
-   * The server-owned fields of one item (the mock spec's `owned`, minted here with a witness id and
-   * WITNESS_SLUG), when the state builder does not complete the collection itself (labels it does).
-   */
-  readonly owned?: (id: number, slug: string, item: Json) => Json;
   /** Per write field, the value a drift-update witness stores instead; each disjoint from every generator pool. */
   readonly sentinels: Readonly<Record<string, unknown>>;
   /** The live item an extra-undeclared witness adds; absent when the section models no such kind. */
   readonly undeclared?: Json;
 }
 
-/** The fixture repository every single-repo mock state is built for; witness items' urls name it. */
-const WITNESS_SLUG = "e2e-owner/e2e-repo";
-
-/** Witness ids start here so they cannot collide with a seed's or the mock's own minted ids. */
-const WITNESS_ID_BASE = 910_000;
-
 /**
- * A live-state witness derived from the section's lens: matching = the write over the server
- * defaults (what the derived mock stores), drift-update = ONE declared field set to its sentinel (or
- * a case-flipped name, read as a rename), extra-undeclared = the sentinel item appended.
+ * A live-state witness derived from the section's lens, as sparse seeds buildState completes from the
+ * mock's defaults and server-owned fields: matching = the declared writes, drift-update = ONE declared
+ * field set to its sentinel (or a case-flipped name, read as a rename), extra-undeclared = the sentinel item appended.
  */
 export function lensWitness<
   K extends ListSectionKey,
@@ -322,11 +309,7 @@ export function lensWitness<
   type Entry = Parameters<typeof lens.toWrite>[0];
   const fold = identity.fold ?? ((name: string) => name);
   const writes = declared.map((entry) => lens.toWrite(entry as unknown as Entry));
-  const mint = (index: number, item: Json): Json => ({
-    ...item,
-    ...spec.owned?.(WITNESS_ID_BASE + index, WITNESS_SLUG, item),
-  });
-  const items: Json[] = writes.map((write, index) => mint(index, { ...spec.defaults, ...write }));
+  const items: Json[] = writes.map((write) => ({ ...write }));
   const state = { [collection]: items } as LiveState;
   if (kind === "matching") {
     return { kind, state };
@@ -348,7 +331,7 @@ export function lensWitness<
         `a declared ${spec.section.key} entry resolves to the undeclared sentinel "${sentinelKey}"`,
       );
     }
-    items.push(mint(items.length, { ...spec.undeclared }));
+    items.push({ ...spec.undeclared });
     return { kind, state };
   }
   const eligible = writes.flatMap((write, index) => {
@@ -357,6 +340,13 @@ export function lensWitness<
     const fields = Object.keys(write).filter(
       (field) => field !== identity.field && Object.hasOwn(spec.sentinels, field),
     );
+    // Every candidate is checked, not only the one picked, so one build proves the whole pool.
+    for (const field of fields) {
+      assertSentinelDisjoint(
+        (write as Json)[field] !== spec.sentinels[field],
+        `the ${spec.section.key} ${field} pool contains ${JSON.stringify(spec.sentinels[field])}`,
+      );
+    }
     if (flipped !== name && fold(flipped) === fold(name)) {
       fields.push(identity.field);
     }
@@ -367,15 +357,7 @@ export function lensWitness<
   }
   const { index, field } = rng.pick(eligible);
   const live = items[index] as Json;
-  if (field === identity.field) {
-    live[field] = String(live[field]).toUpperCase();
-  } else {
-    const sentinel = spec.sentinels[field];
-    assertSentinelDisjoint(
-      (writes[index] as Json)[field] !== sentinel,
-      `the ${spec.section.key} ${field} pool contains ${JSON.stringify(sentinel)}`,
-    );
-    live[field] = sentinel;
-  }
+  live[field] =
+    field === identity.field ? String(live[field]).toUpperCase() : spec.sentinels[field];
   return { kind: "drift-update", state };
 }

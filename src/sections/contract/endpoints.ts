@@ -32,19 +32,37 @@ type GetRoute = Extract<Route, `GET ${string}`>;
  * meanings are consumable by the e2e mock and its violation messages.
  * Handlers pass these declarations to the request helpers, which build the
  * concrete path via expand(), so a section can never call a path it has not
- * declared. Two arms: graded by method, or a read gated at write (GatedReadDecl).
+ * declared. Three arms: a plain read, a write with its recurrence, or a read gated at write.
  */
 export type EndpointDecl =
   | (EndpointDeclFields & {
-      readonly route: Route;
-      /**
-       * Overrides the section's permission for this endpoint; "none" means public.
-       * Omit it for the section's own permission. Resolved by endpointPermission().
-       */
+      readonly route: GetRoute;
       readonly permission?: SectionPermission | "none";
       readonly accessGrade?: never;
+      readonly alwaysRewrite?: never;
+      readonly unverifiable?: never;
     })
+  | (EndpointDeclFields &
+      Recurrence & {
+        readonly route: Exclude<Route, GetRoute>;
+        /**
+         * Overrides the section's permission for this endpoint; "none" means public.
+         * Omit it for the section's own permission. Resolved by endpointPermission().
+         */
+        readonly permission?: SectionPermission | "none";
+        readonly accessGrade?: never;
+      })
   | GatedReadDecl;
+
+/**
+ * A WRITE's behaviour on a converged second apply, at most one flag: `alwaysRewrite` recurs by
+ * contract (sealed secret PUTs, the interaction-limits re-arm, the Git LFS toggle, the check suite
+ * PATCH); `unverifiable` may recur, carrying a value GitHub never echoes back. The proof reads both.
+ */
+type Recurrence =
+  | { readonly alwaysRewrite?: never; readonly unverifiable?: never }
+  | { readonly alwaysRewrite: true; readonly unverifiable?: never }
+  | { readonly alwaysRewrite?: never; readonly unverifiable: true };
 
 /**
  * A GET GitHub gates at WRITE (the Codespaces secrets GETs), read by endpointKind().
@@ -54,6 +72,8 @@ export interface GatedReadDecl extends EndpointDeclFields {
   readonly route: GetRoute;
   readonly permission?: SectionPermission;
   readonly accessGrade: "write";
+  readonly alwaysRewrite?: never;
+  readonly unverifiable?: never;
 }
 
 /** The fields both EndpointDecl arms share. */
@@ -83,12 +103,6 @@ interface EndpointDeclFields {
    */
   readonly denialHint?: string;
   /**
-   * True for a WRITE issued on EVERY apply by contract, its result unreadable or its
-   * recurrence by design: sealed secret PUTs, the interaction-limits re-arm, the Git LFS
-   * toggle, the check suite preferences PATCH. Per ENDPOINT; the idempotence proof reads it.
-   */
-  readonly alwaysRewrite?: true;
-  /**
    * The largest per_page this LIST endpoint accepts, when it is smaller than
    * the standard 100 (the Actions variables list caps at 30). The page loop
    * requests exactly this many per page and treats a shorter page as the
@@ -98,20 +112,9 @@ interface EndpointDeclFields {
    */
   readonly pageSize?: number;
   /**
-   * Marks this endpoint as the section's PRIMARY READ and declares what a
-   * 404 on it means under a fine-grained token (which conceals a denied
-   * resource as Not Found):
-   * - "denied": the read classifies through throwFor, so the 404 is a
-   *   PermissionDenied and the section stops; the apply-mode preflight
-   *   catches it before any write.
-   * - "absent": the read is a probeAbsent with 404 tolerated, so a denied
-   *   read looks like "the resource does not exist" and the section
-   *   proceeds; the denial surfaces on the first write's 403.
-   * At most one endpoint per section carries it. Two consumers keep it
-   * honest: a plan section's read port exposes only the helpers matching
-   * the posture (see ReadPort in ./plan.ts), and the lockstep test in
-   * test/sections/registry.test.ts pins it to the e2e harness's
-   * DENIAL_SEMANTICS row for the section.
+   * The section's PRIMARY READ and what a fine-grained 404 on it means: "denied" classifies as
+   * PermissionDenied and stops the section, "absent" reads as a missing resource and proceeds. At
+   * most one per section; the read port (ReadPort in ./plan.ts) and denialPosture() read it.
    */
   readonly primaryRead?: { readonly notFound: "denied" | "absent" };
 }

@@ -52,6 +52,7 @@ const ENDPOINTS = {
   create: {
     route: "POST /repos/{owner}/{repo}/hooks",
     statuses: { 201: "webhook created" },
+    unverifiable: true,
   },
   update: {
     route: "PATCH /repos/{owner}/{repo}/hooks/{hook_id}",
@@ -60,6 +61,7 @@ const ENDPOINTS = {
   updateConfig: {
     route: "PATCH /repos/{owner}/{repo}/hooks/{hook_id}/config",
     statuses: { 200: "webhook config updated" },
+    unverifiable: true,
   },
   remove: {
     route: "DELETE /repos/{owner}/{repo}/hooks/{hook_id}",

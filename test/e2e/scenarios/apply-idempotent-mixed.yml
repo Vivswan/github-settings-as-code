@@ -1,6 +1,6 @@
-# One apply converges a mixed bag of sections; the second must be write-quiet
-# for the compare-before-write ones (labels, milestones, autolinks, collaborators,
-# workflows, rulesets), may re-PUT environments, and leaves the state byte-identical.
+# One apply converges a mixed bag of sections (labels, milestones, autolinks, collaborators,
+# workflows, rulesets, environments); every one compares before writing, so the second apply
+# must be write-quiet on every endpoint and leave the mock state byte-identical.
 name: apply-idempotent-mixed
 settings:
   labels:

@@ -14,7 +14,6 @@ import {
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 import { deployKeysSection } from "./index.js";
-import { DEPLOY_KEYS_MOCK } from "./mock.js";
 import { DeployKeyConfig } from "./schema.js";
 
 /**
@@ -46,8 +45,6 @@ export function deployKeysWitness(rng: Rng, declared: Json[], kind: LiveWitnessK
   return lensWitness(
     {
       section: deployKeysSection,
-      defaults: DEPLOY_KEYS_MOCK.defaults,
-      owned: DEPLOY_KEYS_MOCK.owned,
       // A blob outside DEPLOY_KEY_POOL; read_only is a boolean, so no sentinel can be disjoint.
       sentinels: {
         key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIWitnessDriftWitnessDriftWitnessDrift",

@@ -20,6 +20,7 @@ import {
   SECTION_PRIMARY_READ,
   UNPARSEABLE_YAML,
   validateAgainstPublishedSchema,
+  WITNESS_KINDS,
   WITNESS_SECTIONS,
 } from "./generators.js";
 import { predictDiscovery } from "./oracle.js";
@@ -399,18 +400,16 @@ describe("genLiveWitness", () => {
     ).toThrow();
   });
 
-  test("witness sentinels stay disjoint from the generator pools", () => {
-    for (let i = 0; i < 300; i++) {
-      const labels = genSettings(new Rng(i), "labels") as Label[];
-      for (const label of labels) {
-        expect(label.color).not.toBe("123456");
-        expect(label.description).not.toBe("witness-drift");
-        expect(label.name.toLowerCase()).not.toBe("zz-undeclared-witness");
-        expect((label.new_name ?? label.name).toLowerCase()).not.toBe("zz-undeclared-witness");
-      }
-      const milestones = genSettings(new Rng(i), "milestones") as Milestone[];
-      for (const milestone of milestones) {
-        expect(milestone.description).not.toBe("witness-drift");
+  test("witness sentinels stay disjoint from every generator pool, for every witness section and kind", () => {
+    // The witness builders throw (assertSentinelDisjoint) when a sentinel collides with a generated
+    // value, so building every supported kind over many seeds is the assertion; the collision
+    // test below is its negative control.
+    for (const key of WITNESS_SECTIONS) {
+      for (const kind of WITNESS_KINDS[key]) {
+        for (let i = 0; i < 300; i++) {
+          const declared = genSettings(new Rng(i), key);
+          expect(() => genLiveWitness(new Rng(i + 500), key, declared, kind)).not.toThrow();
+        }
       }
     }
   });

@@ -15,6 +15,7 @@ import type {
 } from "../../src/sections/contract/graphql.js";
 import {
   defaultUndeclaredPolicy,
+  denialPosture,
   endpointPermission,
   type SectionContext,
   type SectionMeta,
@@ -34,7 +35,6 @@ import {
 } from "../../src/sections/registry.js";
 import { workflowsSection } from "../../src/sections/workflows/index.js";
 import type { MustBeNever } from "../../src/types.js";
-import { DENIAL_SEMANTICS } from "../e2e/denial-semantics.js";
 
 // The caveat code-scanning appends to its derived grant. Kept here so the
 // snapshot below and the derivation check agree on one source of truth.
@@ -848,44 +848,26 @@ describe("handler contracts", () => {
     expect(witness).toBeUndefined();
   });
 
-  test("every section with a read declares exactly one primaryRead, and it agrees with DENIAL_SEMANTICS", () => {
-    // Both state what a fine-grained 404 on the first read means; only a REST
-    // GET can carry the posture, and a section with no read of either kind can
-    // classify nothing before its first write - "absent" by construction.
+  test("every reading section declares exactly one primaryRead, and its 404 posture derives from it", () => {
+    // denialPosture throws on a missing or repeated posture, so the call is the assertion; a
+    // section with no read of either kind classifies nothing before its first write ("absent").
     const declaring: string[] = [];
-    const readsRest = (section: SectionMeta): boolean =>
-      Object.values(section.endpoints).some((endpoint) => endpointMethod(endpoint.route) === "GET");
-    const reads = (section: SectionMeta): boolean =>
-      sectionOperations(section).some((op) => op.wire === "read");
     for (const section of SECTIONS) {
       const primaries = Object.entries(section.endpoints).filter(
         ([, endpoint]) => endpoint.primaryRead !== undefined,
       );
-      expect(
-        primaries.length,
-        `${section.key} declares primaryRead on more than one endpoint: ${primaries.map(([role]) => role).join(", ")}`,
-      ).toBeLessThanOrEqual(1);
-      if (readsRest(section)) {
-        expect(
-          primaries.length,
-          `${section.key} declares no primaryRead posture; its read port cannot be narrowed to the helpers that honor a 404`,
-        ).toBe(1);
-      }
-      if (!reads(section)) {
-        expect(
-          DENIAL_SEMANTICS[section.key],
-          `${section.key} declares no read, so nothing can classify a denial before its first write`,
-        ).toBe("absent");
+      const reads = sectionOperations(section).some((op) => op.wire === "read");
+      const posture = denialPosture(section);
+      expect(primaries.length, `${section.key} primaryRead declarations`).toBe(reads ? 1 : 0);
+      if (!reads) {
+        expect(posture, `${section.key} declares no read`).toBe("absent");
       }
       for (const [role, endpoint] of primaries) {
         expect(endpoint.route.startsWith("GET "), `${section.key}.${role} is not a read`).toBe(
           true,
         );
-        expect(
-          endpoint.primaryRead?.notFound,
-          `${section.key}.${role} declares a 404 posture DENIAL_SEMANTICS disagrees with`,
-        ).toBe(DENIAL_SEMANTICS[section.key]);
-        if (endpoint.primaryRead?.notFound === "absent") {
+        expect(endpoint.primaryRead?.notFound).toBe(posture);
+        if (posture === "absent") {
           // An "absent" posture means a 404 reads as "no such resource",
           // which holds only if the endpoint tolerates 404 - the request
           // helpers derive their tolerated set from the declared statuses.
@@ -898,6 +880,10 @@ describe("handler contracts", () => {
       }
     }
     // Every section with a REST read declares exactly one primaryRead.
-    expect(declaring).toEqual(SECTIONS.filter((s) => readsRest(s)).map((s) => s.key));
+    expect(declaring).toEqual(
+      SECTIONS.filter((s) =>
+        Object.values(s.endpoints).some((e) => endpointMethod(e.route) === "GET"),
+      ).map((s) => s.key),
+    );
   });
 });

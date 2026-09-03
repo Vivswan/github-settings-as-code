@@ -296,8 +296,8 @@ interface PlannedOpBase<D extends Justification = Justification> {
 
 /**
  * The reason check mode cannot verify a write (a secret GitHub never echoes back), rendered as a
- * check-mode note beside whatever drift lines the operation does resolve. It occupies the drift
- * slot: a sibling property cannot keep the DriftFor rule for literals with a union-typed role.
+ * check-mode note beside whatever drift lines the operation does resolve. It occupies the drift slot
+ * and is admitted only on an endpoint declaring `unverifiable: true` (DriftFor).
  */
 interface Unverifiable {
   readonly unverifiable: string;
@@ -344,14 +344,14 @@ export function hasDrift(lines: readonly string[]): lines is readonly [string, .
 
 /**
  * The drift a REST operation must carry: none is legal only on an alwaysRewrite endpoint (a write
- * that recurs by declaration, so check has nothing to report) or under an Unverifiable facet;
- * every other write exists because live state diverged, which check must print.
+ * that recurs by declaration, so check has nothing to report), an Unverifiable facet only on an
+ * endpoint declaring `unverifiable`; every other write exists because live state diverged.
  */
 type DriftFor<E extends EndpointDecl> =
   | (E extends { readonly alwaysRewrite: true }
       ? readonly string[]
       : readonly [string, ...string[]])
-  | Unverifiable;
+  | (E extends { readonly unverifiable: true } ? Unverifiable : never);
 
 /**
  * The params facet of a REST operation, required exactly when the route

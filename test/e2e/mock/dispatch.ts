@@ -121,12 +121,9 @@ export function graphqlOpForBody(
 }
 
 /**
- * The section a request belongs to, or null when it matches no section
- * endpoint (core routes, unknown paths). A /graphql request attributes by its
- * body's operationName, so `body` must be supplied to resolve those. The
- * runner's apply-idempotence check uses it to attribute a second-apply write
- * to its section, so the compare-before-write subset can be held to write
- * silence.
+ * The section a request belongs to, or null when it matches no section endpoint (core routes,
+ * unknown paths). A /graphql request attributes by its body's operationName, so `body` must be
+ * supplied to resolve those. The apply-idempotence proof names the section behind a second-apply write.
  */
 export function sectionForRequest(
   method: string,

@@ -8,6 +8,7 @@ import {
 import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.js";
 import type { GraphqlOpDecl } from "../../src/sections/contract/graphql.js";
 import {
+  denialPosture,
   endpointPermission,
   readGating,
   type SectionMeta,
@@ -143,6 +144,22 @@ describe("readGating", () => {
     expect(endpointKind(publicGated)).toBe("write");
   });
 
+  test("the recurrence flags are representable on a write only, one at a time", () => {
+    // A read has no second-apply behaviour to declare, and one write cannot both recur by contract
+    // and merely be allowed to; the EndpointDecl arms make each combination fail to compile.
+    const rewritten: EndpointDecl = { ...put, alwaysRewrite: true };
+    const unverifiable: EndpointDecl = { ...put, unverifiable: true };
+    expect([rewritten.alwaysRewrite, unverifiable.unverifiable]).toEqual([true, true]);
+    // @ts-expect-error alwaysRewrite on a GET
+    const _readRewrite: EndpointDecl = { ...plainGet, alwaysRewrite: true };
+    // @ts-expect-error unverifiable on a GET
+    const _readUnverifiable: EndpointDecl = { ...plainGet, unverifiable: true };
+    // @ts-expect-error unverifiable on a write-gated read
+    const _gatedUnverifiable: EndpointDecl = { ...gatedGet, unverifiable: true };
+    // @ts-expect-error both flags on one write
+    const _both: EndpointDecl = { ...put, alwaysRewrite: true, unverifiable: true };
+  });
+
   test("classifies a section by how many of its reads GitHub gates at write", () => {
     expect(readGating(withEndpoints({ get: plainGet, put }))).toBe("plain");
     expect(readGating(withEndpoints({ get: gatedGet, put }))).toBe("write-gated");
@@ -194,7 +211,9 @@ describe("readGating", () => {
 });
 
 /** A synthetic write declaration carrying just the context fields under test. */
-function endpoint(extra: Partial<Omit<EndpointDecl, "route" | "accessGrade">>): EndpointDecl {
+function endpoint(
+  extra: Partial<Pick<EndpointDecl, "hints" | "denialHint" | "permission" | "statuses">>,
+): EndpointDecl {
   return { route: "POST /repos/{owner}/{repo}/rulesets", statuses: { 201: "created" }, ...extra };
 }
 
@@ -482,6 +501,49 @@ describe("throwFor context enrichment", () => {
     const denied = thrown as PermissionDenied;
     expect(denied.detail).toContain(
       'the "oidc_customization_sub" key alone instead needs "Actions"',
+    );
+  });
+});
+
+describe("denialPosture", () => {
+  const get = (notFound?: "denied" | "absent"): EndpointDecl => ({
+    route: "GET /repos/{owner}/{repo}/interaction-limits",
+    statuses: { 200: "x", 404: "none set" },
+    ...(notFound === undefined ? {} : { primaryRead: { notFound } }),
+  });
+  const put: EndpointDecl = {
+    route: "PUT /repos/{owner}/{repo}/interaction-limits",
+    statuses: { 200: "x" },
+  };
+  const readOp: GraphqlOpDecl = {
+    name: "PostureProbe",
+    kind: "read",
+    query: "query PostureProbe($owner: String!, $repo: String!) { repository { id } }",
+    outcomes: { ok: "x" },
+  };
+  const meta = (endpoints: SectionMeta["endpoints"], graphql?: SectionMeta["graphql"]) =>
+    ({
+      key: "interaction_limits",
+      permission: { repo: ["administration"] },
+      endpoints,
+      graphql,
+      undeclaredDefault: "untouched",
+    }) as SectionMeta;
+
+  test("reads the declared posture, and a section with no read at all is absent", () => {
+    expect(denialPosture(meta({ get: get("denied"), put }))).toBe("denied");
+    expect(denialPosture(meta({ get: get("absent"), put }))).toBe("absent");
+    expect(denialPosture(meta({ put }))).toBe("absent");
+  });
+
+  test("a reading section without a posture, or with two, is a BUG rather than a guess", () => {
+    expect(() => denialPosture(meta({ get: get(), put }))).toThrow(/declares no primaryRead/);
+    // A GraphQL read is a read the posture must cover too.
+    expect(() => denialPosture(meta({ put }, { probe: readOp }))).toThrow(
+      /declares no primaryRead/,
+    );
+    expect(() => denialPosture(meta({ get: get("denied"), other: get("absent"), put }))).toThrow(
+      /primaryRead on 2 endpoints/,
     );
   });
 });

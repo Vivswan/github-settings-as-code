@@ -13,4 +13,4 @@ expect:
     repository: applied
   mutations:
     - "DELETE /repos/{repo}/lfs"
-  converges: true
+  apply_idempotent: true

@@ -15,7 +15,6 @@ import {
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 import { labelsSection, nameKey } from "./index.js";
-import { LABELS_MOCK } from "./mock.js";
 import { LabelConfig } from "./schema.js";
 
 const HEX_COLORS = ["d73a4a", "a2eeef", "ededed", "0e8a16", "ffffff", "000000"] as const;
@@ -40,7 +39,6 @@ export function labelsWitness(rng: Rng, declared: Json[], kind: LiveWitnessKind)
   return lensWitness(
     {
       section: labelsSection,
-      defaults: LABELS_MOCK.defaults,
       // A color absent from HEX_COLORS and a description absent from its pool.
       sentinels: { color: "123456", description: "witness-drift" },
       undeclared: {

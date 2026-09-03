@@ -780,10 +780,9 @@ describe("writes mutate state", () => {
   });
 
   test("label create and update preserve passthrough fields the section diffs", async () => {
-    // The labels section sends unknown (future) fields verbatim and subsetDiffs
-    // them on the next read; a mock that dropped them would make a converged
-    // second apply read as drift and re-PATCH, falsely failing the
-    // COMPARE_BEFORE_WRITE zero-write assertion.
+    // The labels section sends unknown passthrough fields verbatim and subsetDiffs them on the
+    // next read; a mock that dropped them would make a converged second apply read as drift and
+    // re-PATCH, falsely failing the idempotence proof's zero-write rule.
     const h = await start(scenario());
     const created = await call(h, "POST", labelsPath, {
       body: { name: "feature", color: "00ff00", tone: "warm" },

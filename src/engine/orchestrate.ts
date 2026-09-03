@@ -1,9 +1,7 @@
 /**
- * Per-repository orchestration: the section pipeline (active-section
- * filter, preflight barrier, section loop) extracted from run() so the
- * same engine drives one repo (legacy mode) or many (multi-repo mode).
- * All output goes through the Io sink; the engine emits unprefixed lines
- * and callers decide how (or whether) to tag them per repository.
+ * Per-repository orchestration: the section pipeline (active-section filter, preflight barrier,
+ * section loop) that drives one repository, so the single- and multi-repo flows share one engine.
+ * All output goes through the Io sink; callers decide how (or whether) to tag lines per repository.
  */
 
 import {
@@ -16,8 +14,12 @@ import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
-import type { SectionContext } from "../sections/contract/module.js";
-import { planCheckNotes, planContext, planDrift } from "../sections/contract/plan.js";
+import {
+  type ExecTools,
+  planCheckNotes,
+  planContext,
+  planDrift,
+} from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
 import { executePlan } from "./execute.js";
@@ -185,35 +187,6 @@ export function validateSettingsDoc(
   return { settings: parsed.settings as ValidatedSettings };
 }
 
-/** Thrown by readOnlyClient when a mutation is attempted through a check-mode client. */
-class ReadOnlyViolation extends Error {}
-
-/**
- * A GithubClient that refuses every mutation: non-GET REST requests and GraphQL writes throw
- * ReadOnlyViolation, reads pass through to `api` untouched. Check mode's context client wears it
- * as the belt over the read-only port (a plan section can only read anyway). Exported for its test.
- */
-export function readOnlyClient(api: GithubClient): GithubClient {
-  return {
-    tryRequest(method, path, payload, options) {
-      if (method !== "GET") {
-        throw new ReadOnlyViolation(
-          `${method} ${path} was attempted in check mode, but section handlers must be read-only in check mode; this is a bug in the section handler`,
-        );
-      }
-      return api.tryRequest(method, path, payload, options);
-    },
-    tryGraphql(op, variables, slug) {
-      if (op.kind !== "read") {
-        throw new ReadOnlyViolation(
-          `GRAPHQL ${op.name} (a ${op.kind} operation) was attempted in check mode, but section handlers must be read-only in check mode; this is a bug in the section handler`,
-        );
-      }
-      return api.tryGraphql(op, variables, slug);
-    },
-  };
-}
-
 /**
  * Probe every active section by planning it and collect the permission denials as "key: detail"
  * lines; empty means every section is accessible. A plan section has no write capability, so
@@ -336,23 +309,11 @@ export async function runForRepo(
     }
   }
 
-  // Secret references, phase (b), apply mode only: resolve EVERY reference
-  // up front - after the preflight barrier (which is read-only and needs no
-  // secrets) and before the first mutation of ANY section, so an unset or
-  // empty variable fails the repository cleanly with zero writes. Every
-  // resolved plaintext is registered with output masking BEFORE the resolver
-  // exists, so no handler can use a value the masker has not seen. The two
-  // context arms are constructed here, one per mode: the check arm cannot
-  // carry a resolver (its type forbids one), and the apply arm ALWAYS does -
-  // over an empty map when nothing was declared, where any lookup hits the
-  // BUG throw below (collectSecretValues read the same settings the handlers
-  // get, so an empty collection proves no legitimate call exists).
-  let runCtx: SectionContext;
-  if (check) {
-    // Check mode is a read-only phase end to end, so the context client
-    // itself refuses mutations - the same belt the preflight probe wears.
-    runCtx = { api: readOnlyClient(api), repo, check: true };
-  } else {
+  // Apply resolves EVERY secret reference up front, after the read-only preflight and before the
+  // first mutation, and masks each plaintext before the resolver exists; check mode executes
+  // nothing and builds no tools. An empty map in apply proves no legitimate lookup exists.
+  let tools: ExecTools | null = null;
+  if (!check) {
     const resolved: Record<string, string> = {};
     if (secretValues.length > 0) {
       const env = opts.secretEnv ?? process.env;
@@ -382,10 +343,7 @@ export async function runForRepo(
         io.mask(plaintext);
       }
     }
-    runCtx = {
-      api,
-      repo,
-      check: false,
+    tools = {
       resolveSecret: (reference: string): string => {
         const plaintext = reference.startsWith("$") ? resolved[reference.slice(1)] : undefined;
         if (plaintext === undefined) {
@@ -438,10 +396,10 @@ export async function runForRepo(
       // what the plan becomes (drift lines plus the cannot-verify notes, or
       // executed changes), and op-less drift surfaces as apply notes.
       const plan = await section.plan(planContext(section, api, repo), desired);
-      if (runCtx.check) {
+      if (tools === null) {
         result = { check: true, drift: planDrift(plan), notes: planCheckNotes(plan) };
       } else {
-        const execution = await executePlan(plan, section, api, repo, runCtx);
+        const execution = await executePlan(plan, section, api, repo, tools);
         // The execution's notes are the tolerated operations' outcomes.
         const notes = [...plan.notes, ...plan.drift, ...execution.notes];
         produced = { notes, changes: execution.changes, landed: execution.landed };

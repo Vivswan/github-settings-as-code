@@ -221,6 +221,35 @@ export function writeGatedReads(section: SectionMeta): WriteGatedRead[] {
     }));
 }
 
+/** What a fine-grained 404 on a section's primary read means (see EndpointDecl.primaryRead). */
+export type DenialPosture = NonNullable<EndpointDecl["primaryRead"]>["notFound"];
+
+/**
+ * The section's 404 posture, off its primaryRead declaration: a section with no read at all
+ * classifies nothing before its first write, so it is "absent"; a reading section that declares
+ * no posture (or several) is a BUG, never a guess. Read by the fuzz oracle and the e2e mock.
+ */
+export function denialPosture(section: SectionMeta): DenialPosture {
+  const primaries = Object.values(section.endpoints).flatMap((endpoint) =>
+    endpoint.primaryRead === undefined ? [] : [endpoint.primaryRead.notFound],
+  );
+  if (primaries.length > 1) {
+    throw new Error(
+      `BUG: ${section.key} declares primaryRead on ${primaries.length} endpoints; at most one read carries the 404 posture`,
+    );
+  }
+  const posture = primaries[0];
+  if (posture !== undefined) {
+    return posture;
+  }
+  if (sectionOperations(section).some((op) => op.wire === "read")) {
+    throw new Error(
+      `BUG: ${section.key} reads but declares no primaryRead posture, so a denied first read cannot be classified`,
+    );
+  }
+  return "absent";
+}
+
 /** The SectionMeta properties sectionOperations flattens. */
 type FlattenedOperationDictionaries = "endpoints" | "graphql";
 

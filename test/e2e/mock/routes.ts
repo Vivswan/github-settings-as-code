@@ -19,9 +19,8 @@
 import type { SectionKey } from "../../../src/schema.js";
 import { endpointPath, toleratedStatuses } from "../../../src/sections/contract/endpoints.js";
 import { toleratedGraphqlErrors } from "../../../src/sections/contract/graphql.js";
-import { endpointPermission } from "../../../src/sections/contract/module.js";
+import { denialPosture, endpointPermission } from "../../../src/sections/contract/module.js";
 import { allGraphqlOps, type TaggedGraphqlOp } from "../../../src/sections/registry.js";
-import { DENIAL_SEMANTICS } from "../denial-semantics.js";
 import type { PermissionMask } from "../schema.js";
 import { applyFault, type CoreFaultKey, takeCorruption, takeFault } from "./chaos.js";
 import {
@@ -160,7 +159,9 @@ function denialBarrier(
   if (!options.deniedReadSections.has(barrierKey)) {
     return undefined;
   }
-  return `write to ${renderRequest(log, false)} reached the server after a fatal denied read in the same target+section; the engine's section loop should have aborted at that read (section "${section}" has "${DENIAL_SEMANTICS[section]}" denial semantics, style ${String(options.scenario.denial_style)})`;
+  const module = SECTION_BY_KEY.get(section);
+  const posture = module === undefined ? "(unregistered)" : denialPosture(module);
+  return `write to ${renderRequest(log, false)} reached the server after a fatal denied read in the same target+section; the engine's section loop should have aborted at that read (section "${section}" has the "${posture}" 404 posture, style ${String(options.scenario.denial_style)})`;
 }
 
 /**
@@ -223,10 +224,9 @@ export function handleGraphqlRequest(
     graphql: { operationName: op.name, kind: op.kind },
   };
 
-  // 3. Check-mode barrier, independent of the engine's own kind-derived
-  // guard: no GraphQL write may leave the client in check mode. Before the
-  // fault barrier for the same reason as REST - a synthetic fault must not
-  // mask the one bug this barrier exists to catch.
+  // 3. Check-mode barrier, independent of the engine's read-only plan port: no GraphQL write may
+  // leave the client in check mode. Before the fault barrier for the same reason as REST - a
+  // synthetic fault must not mask the one bug this barrier exists to catch.
   if (options.checkMode && op.kind !== "read") {
     return violationFor(graphqlLog)(`GraphQL write in check mode (${op.name})`);
   }
@@ -668,36 +668,9 @@ export function runPipeline(
   if (!grading.allowed) {
     const response = denialResponse(scenario.denial_style, requirement.kind);
     const log: LoggedRequest = { ...baseLog, status: response.status, deniedBy: grading.deniedBy };
-    // 5. Denial barrier (denialBarrier, shared with GraphQL). A denied write
-    // is a hard VIOLATION only when a fatal denied READ in the SAME
-    // target+section already happened this run: the engine reads a section
-    // before diffing/writing, so once its read is denied and classified as
-    // fatal, the section loop aborts - a later write reaching the server
-    // proves broken sequencing. This is the ONLY signal. Preflight is
-    // deliberately NOT used as a separate guarantee: preflight (fail policy)
-    // only proves READS work - the engine's probe wrapper stops writes
-    // client-side - so a mask graded READ (write denied) on a "denied"-semantics
-    // section PASSES preflight, and the engine then legitimately sends the first
-    // write. That write is denied but is NOT a violation; the old
-    // "denied-semantics && fail => violation" branch false-flagged exactly this
-    // case. When the read grade is `none` the denied read always precedes the
-    // write and arms the set, so no coverage is lost by relying on it alone.
-    //
-    // A denied read arms ONLY when the engine perceives it as a failure: a
-    // denial status the endpoint tolerates (a fine_grained 404 on a
-    // probeAbsent-tolerant endpoint) reads as "resource absent" and the
-    // section legitimately proceeds. Two categories are EXEMPT because their
-    // denied read is not a section-abort read:
-    //   - the redaction visibility probe (isVisibilityProbe): the FIRST
-    //     repository.get for a repo, issued before the target loop to decide
-    //     redaction. A LATER repository.get (the section's check-mode read) is
-    //     not the probe and arms like any other section read.
-    //   - an ADVISORY read (endpoint.advisory, single-sourced from the endpoint
-    //     declaration, e.g. branches.branchProbe): the engine ignores any
-    //     non-404 status and proceeds to its write anyway, so a denied advisory
-    //     read does not mean the section should have aborted.
-    // Genuine denied-read-then-write coverage is preserved: every non-advisory
-    // section read still arms.
+    // 5. Denial barrier (denialBarrier, shared with GraphQL): a denied write is a violation only
+    // after a fatal denied READ in the same target+section, where the section loop aborts. A read
+    // arms only when the engine sees it fail: tolerated statuses, the visibility probe, and advisory reads do not.
     const arms =
       requirement.kind === "read" &&
       !isVisibilityProbe &&

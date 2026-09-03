@@ -4,7 +4,7 @@
  * Imports only the test-tree seams; the bundle entry is src/main.ts, so this never reaches lib/index.js.
  */
 
-import { generatorFromSlice, type Json } from "../../../test/e2e/gen-support.js";
+import { generatorFromSlice, type Json, uniqueBy } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 import { TeamsConfig } from "./schema.js";
 
@@ -17,19 +17,7 @@ const genTeam = generatorFromSlice(TeamsConfig.element, {
 });
 
 export function genTeams(rng: Rng): Json[] {
-  const count = rng.int(2) + 1;
-  const claimed = new Set<string>();
-  const teams: Json[] = [];
-  for (let i = 0; i < count; i++) {
-    const team = genTeam(rng);
-    // The section's own rule: one entry per slug, case-insensitively.
-    let name = String(team.name);
-    while (claimed.has(name.toLowerCase())) {
-      name = `${name}-${i}`;
-    }
-    claimed.add(name.toLowerCase());
-    team.name = name;
-    teams.push(team);
-  }
-  return teams;
+  const teams = Array.from({ length: rng.int(2) + 1 }, () => genTeam(rng));
+  // The section's own rule: one entry per slug, case-insensitively.
+  return uniqueBy(teams, ["name"], (slug) => slug.toLowerCase());
 }

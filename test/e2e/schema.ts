@@ -214,18 +214,9 @@ const ExpectSchema = z
      */
     converges: z.boolean().optional(),
     /**
-     * When true, the runner re-runs the scenario in APPLY mode a second time
-     * against the SAME mutated mock and proves apply is a fixpoint: the second
-     * apply exits 0; no compare-before-write section (COMPARE_BEFORE_WRITE in
-     * apply-idempotence.ts) issues a write; the mock's working state is
-     * unchanged family by family (unconditional-PUT sections may write again,
-     * but must rewrite the same state); and a final check-mode run converges
-     * (exit 0, zero writes), so `converges` cannot be set alongside.
-     * Requires an apply-mode scenario WITHOUT the issue report channel: that
-     * channel embeds a fresh timestamp in the report issue (state moves every
-     * run) and injects the marker label into the labels declaration, so no
-     * run under it is a fixpoint. Folded into `fixpoint: "apply_idempotent"`
-     * by the transform below.
+     * When true, the runner re-runs the scenario in APPLY mode against the SAME mutated mock and
+     * proves apply is a fixpoint (assertApplyIdempotent), ending in a check run that converges, so
+     * `converges` cannot be set alongside; apply mode without the issue report channel. Folds into `fixpoint`.
      */
     apply_idempotent: z.boolean().optional(),
     /**

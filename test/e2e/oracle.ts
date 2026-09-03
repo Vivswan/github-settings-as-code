@@ -9,13 +9,14 @@
 
 import type { SectionKey } from "../../src/schema.js";
 import {
+  type DenialPosture,
+  denialPosture,
   type ReadGating,
   readGating,
   sectionOperations,
 } from "../../src/sections/contract/module.js";
 import type { SectionPermission } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { DENIAL_SEMANTICS, type DenialSemantics } from "./denial-semantics.js";
 import { displayKeyOf, type MultiScenarioMeta, type ScenarioMeta } from "./generators.js";
 import { type DenialStyle, GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
 
@@ -33,6 +34,11 @@ const PERMISSION_BY_KEY: Record<SectionKey, SectionPermission> = Object.fromEntr
 const READ_GATING: Record<SectionKey, ReadGating> = Object.fromEntries(
   SECTIONS.map((section) => [section.key, readGating(section)]),
 ) as Record<SectionKey, ReadGating>;
+
+/** Each section's 404 posture off its primaryRead declaration; the mock's denial barrier reads the same. */
+const DENIAL_POSTURE: Record<SectionKey, DenialPosture> = Object.fromEntries(
+  SECTIONS.map((section) => [section.key, denialPosture(section)]),
+) as Record<SectionKey, DenialPosture>;
 
 /**
  * Sections whose resources exist only under an ORGANIZATION owner: on a
@@ -133,8 +139,8 @@ export interface SectionPrediction {
   mayWrite: boolean;
 }
 
-/** Every 404 posture a denied read can have (DenialSemantics, enumerated). */
-const DENIAL_POSTURES: readonly DenialSemantics[] = ["denied", "absent"];
+/** Every 404 posture a denied read can have (DenialPosture, enumerated). */
+const DENIAL_POSTURES: readonly DenialPosture[] = ["denied", "absent"];
 
 /** Predict one section's allowed outcome set under its declared read gating. */
 export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPrediction {
@@ -144,7 +150,7 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
 /**
  * The union of the per-grade predictions over effectiveGrades. A mixed section
  * denied under a READ grant stops at a gated read whose 404 posture may differ
- * from the section's DENIAL_SEMANTICS entry, so that arm covers both postures.
+ * from the section's primary read's, so that arm covers both postures.
  */
 export function predictSectionAt(
   key: SectionKey,
@@ -156,8 +162,8 @@ export function predictSectionAt(
   const deniedAtGatedRead = gating === "mixed" && grant === "read";
   const arms = grades.flatMap((grade) =>
     grade === "none" && deniedAtGatedRead
-      ? DENIAL_POSTURES.map((semantics) => predictAtGrade(key, meta, grade, semantics))
-      : [predictAtGrade(key, meta, grade, DENIAL_SEMANTICS[key])],
+      ? DENIAL_POSTURES.map((posture) => predictAtGrade(key, meta, grade, posture))
+      : [predictAtGrade(key, meta, grade, DENIAL_POSTURE[key])],
   );
   return {
     key,
@@ -176,7 +182,7 @@ function predictAtGrade(
   key: SectionKey,
   meta: ScenarioMeta,
   grade: MaskGrade,
-  semantics: DenialSemantics,
+  posture: DenialPosture,
 ): Pick<SectionPrediction, "allowed" | "mayWrite"> {
   const check = meta.mode === "check";
   const required = meta.requiredSections.includes(key);
@@ -223,14 +229,13 @@ function predictAtGrade(
     };
   }
 
-  // A denied read: whether it reads as a permission error or a missing resource
-  // depends on the denial style and the section's semantics. A section with no
-  // reads at all can never be read-denied, whatever the style: its denial
-  // surfaces on the apply-mode write, like the fine_grained "absent" model.
+  // A denied read reads as a permission error or a missing resource by the denial style and the
+  // section's posture. A section with no reads can never be read-denied, whatever the style: its
+  // denial surfaces on the apply-mode write, like the fine_grained "absent" model.
   const readsAsDenied =
     grade === "none" &&
     !NO_READ_SECTIONS.has(key) &&
-    (meta.denialStyle === 403 || semantics === "denied");
+    (meta.denialStyle === 403 || posture === "denied");
 
   if (grade === "none" && readsAsDenied) {
     // Preflight (or the first read) classifies this as a permission denial.
@@ -248,7 +253,7 @@ function predictAtGrade(
     return { allowed, mayWrite: false };
   }
 
-  // grade none, fine_grained, absent semantics: reads look like missing
+  // grade none, fine_grained, absent posture: reads look like missing
   // resources, so check reports clean/drift and apply attempts the first write
   // (which is 403-denied). grade read: reads pass, first write 403-denied.
   if (check) {
@@ -285,8 +290,8 @@ function predictAtGrade(
       ? new Set(canSilentlyApply ? ["applied", "failed"] : ["failed"])
       : new Set(canSilentlyApply ? ["applied", "skipped"] : ["skipped"]);
   // In absent/read cases the section may attempt one write before the denial;
-  // that write hits an "absent"-semantics family (mock rule 4 tolerates it).
-  return { allowed, mayWrite: semantics === "absent" };
+  // that write hits an "absent"-posture family (mock rule 4 tolerates it).
+  return { allowed, mayWrite: posture === "absent" };
 }
 
 /** The worst-of section rank the engine uses to fold outcomes into a run result. */
@@ -401,8 +406,8 @@ export function preflightDeniable(section: SectionPrediction, meta: ScenarioMeta
   if (section.grades.length > 1) {
     return "possible";
   }
-  const semantics = DENIAL_SEMANTICS[section.key];
-  return meta.denialStyle === 403 || semantics === "denied" ? "yes" : "no";
+  const posture = DENIAL_POSTURE[section.key];
+  return meta.denialStyle === 403 || posture === "denied" ? "yes" : "no";
 }
 
 /**
@@ -544,12 +549,9 @@ export function foldSectionOutcomes(outcomes: string[], check: boolean): string 
 }
 
 /**
- * The repo-result worst-first order the MULTI rollup folds with, mirroring
- * orchestrate.ts's REPO_RESULTS exactly (multi.ts computes the overall result
- * as worstOf over per-target results). A harness-local mirror, deliberately
- * NOT an import: importing the engine's own order would let a src rank-order
- * regression agree with itself - the same contradiction-path pattern as
- * DENIAL_SEMANTICS and COMPARE_BEFORE_WRITE.
+ * The repo-result worst-first order the MULTI rollup folds with, mirroring orchestrate.ts's
+ * REPO_RESULTS exactly (multi.ts computes the overall result as worstOf over per-target results).
+ * A harness-local mirror, NOT an import: the engine's own order would agree with its own regression.
  */
 const MULTI_RESULT_ORDER = ["failed", "drift", "partial", "skipped", "applied", "clean"] as const;
 

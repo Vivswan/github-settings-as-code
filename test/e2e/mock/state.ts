@@ -12,18 +12,23 @@
  * proves the round trip.
  */
 
+import { AUTOLINKS_MOCK } from "../../../src/sections/autolinks/mock.js";
 import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
 } from "../../../src/sections/branches/index.js";
 import { parseBypassActor } from "../../../src/sections/branches/schema.js";
+import { DEPLOY_KEYS_MOCK } from "../../../src/sections/deploy_keys/mock.js";
+import { LABELS_MOCK } from "../../../src/sections/labels/mock.js";
+import type { ListSectionKey } from "../../../src/sections/shared/list-section.js";
 import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/shared/roles.js";
 import type { MustBeNever } from "../../../src/types.js";
 import { ADMIN_OWNER } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
 import type { OwnerKind, PermissionMask } from "../schema.js";
+import type { ListMockSpec } from "./list-fragment.js";
 import { decodeNodeId, mintNodeId } from "./node-id.js";
 
 /** A plain JSON object body, the currency of every fixture and overlay. */
@@ -50,8 +55,8 @@ export interface LiveState {
   /** Partial repo object merged (deep) over repo.json. */
   repo?: Json;
   /**
-   * Either an explicit list of label bodies (replaces the baseline) or the
-   * generate sugar. A scenario picks exactly one form.
+   * Either an explicit list of label seeds (replaces the baseline) or the generate sugar. A
+   * scenario picks exactly one form; seeds may be sparse ({name, color}), buildState completes them.
    */
   labels?: Json[] | { generate: LabelsGenerate };
   /** Repository rulesets (summary + full bodies), replaces the baseline. */
@@ -103,7 +108,7 @@ export interface LiveState {
    * exist in `environments` (a pin's target is always a real environment).
    */
   pinned_environments?: Array<string | { name: string; position: number }>;
-  /** Autolinks, replaces the baseline. */
+  /** Autolinks, replaces the baseline; a sparse seed is completed like a label. */
   autolinks?: Json[];
   /** GET /actions/permissions body. */
   actions_permissions?: Json;
@@ -217,10 +222,8 @@ export interface LiveState {
    */
   hooks?: Json[];
   /**
-   * Deploy keys (GET shape: id, key, title, verified, created_at, read_only,
-   * url), replaces the (empty) baseline. Seeded key material should carry no
-   * trailing comment, mirroring GitHub's stored normalization (the create
-   * handler strips comments the same way).
+   * Deploy keys (GET shape), replaces the (empty) baseline; a sparse seed is completed like a label,
+   * its key material stored comment-free the way GitHub normalizes a created key.
    */
   deploy_keys?: Json[];
   /**
@@ -523,42 +526,57 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-/** Expand the labels.generate sugar into concrete GET-shape label bodies. */
-function generateLabels(gen: LabelsGenerate, startId: number, slug: string): Json[] {
-  const out: Json[] = [];
-  for (let i = 0; i < gen.count; i++) {
-    const name = `${gen.prefix}-${i + 1}`;
-    out.push({
-      id: startId + i,
-      node_id: `MDU6TGFiZWw${startId + i}`,
-      url: `https://api.github.com/repos/${slug}/labels/${name}`,
-      name,
-      color: gen.color,
-      default: false,
-      description: null,
-    });
-  }
-  return out;
+/** Expand the labels.generate sugar into sparse seeds, completed like any seeded label. */
+function generateLabels(gen: LabelsGenerate): Json[] {
+  return Array.from({ length: gen.count }, (_, i) => ({
+    name: `${gen.prefix}-${i + 1}`,
+    color: gen.color,
+  }));
 }
 
 /**
- * Complete a (possibly sparse) label body to the spec's required GET shape,
- * the completeHook posture: scenario seeds stay terse ({name, color}), the
- * seed's own fields win, and the server-owned scaffold (id, node_id, url,
- * default, the required-nullable description) fills the rest - so every
- * served label satisfies the shape the sections parse at their boundary.
- * The url derives from `slug` (the owning state's fixed identity), so a
- * multi-repo target's labels name the target.
+ * The list collections buildState completes from the same spec their handlers create with, so a
+ * seed is served exactly as a created item would be: the spec's defaults under the seed and the
+ * server-owned fields minted over it (a seed may pin only its id). The state test pins the key set.
  */
-function completeLabel(seed: Json, id: number, slug: string): Json {
-  return {
-    id,
-    node_id: `MDU6TGFiZWw${id}`,
-    url: `https://api.github.com/repos/${slug}/labels/${String(seed.name ?? "")}`,
-    default: false,
-    description: null,
-    ...seed,
-  };
+export const LIST_MOCKS = {
+  labels: LABELS_MOCK,
+  autolinks: AUTOLINKS_MOCK,
+  deploy_keys: DEPLOY_KEYS_MOCK,
+} as const satisfies Partial<Record<ListSectionKey, ListMockSpec>>;
+
+function completeListItem(spec: ListMockSpec, seed: Json, id: number, slug: string): Json {
+  const item = { ...spec.defaults, ...seed };
+  return { ...item, ...spec.owned(id, slug, item) };
+}
+
+/** Every numeric `id` any object in the overlay pins, at any depth. */
+function seededIds(value: unknown): number[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(seededIds);
+  }
+  if (!isPlainObject(value)) {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, nested]) =>
+    key === "id" && typeof nested === "number" ? [nested] : seededIds(nested),
+  );
+}
+
+/** Complete every list collection's seeds in place; a seed keeps a pinned id, buildState reserved it. */
+function completeListCollections(state: MockState): void {
+  for (const spec of Object.values(LIST_MOCKS)) {
+    const items = spec.collection(state);
+    const completed = items.map((seed) =>
+      completeListItem(
+        spec,
+        seed,
+        typeof seed.id === "number" ? seed.id : state.nextId++,
+        state.slug,
+      ),
+    );
+    items.splice(0, items.length, ...completed);
+  }
 }
 
 /**
@@ -726,7 +744,8 @@ export function buildState(
   slug?: string,
 ): MockState {
   const ls = liveState ?? {};
-  let nextId = 90_000_000;
+  // Every minted id starts past every id a seed pins, so a pinned id can never collide with one.
+  let nextId = Math.max(90_000_000, ...seededIds(ls).map((id) => id + 1));
   const takeId = (): number => nextId++;
 
   // deepMerge shallow-copies the base top level and assigns OVERLAY values by
@@ -757,15 +776,12 @@ export function buildState(
   }
   const stateSlug = slug ?? String(fullName);
 
-  let labels: Json[];
-  if (ls.labels === undefined) {
-    labels = [];
-  } else if (Array.isArray(ls.labels)) {
-    labels = ls.labels.map((label) => completeLabel(clone(label), takeId(), stateSlug));
-  } else {
-    labels = generateLabels(ls.labels.generate, takeId(), stateSlug);
-    nextId += ls.labels.generate.count;
-  }
+  const labels =
+    ls.labels === undefined
+      ? []
+      : Array.isArray(ls.labels)
+        ? clone(ls.labels)
+        : generateLabels(ls.labels.generate);
 
   const pinnedSeed = normalizePinnedSeed(ls.pinned_environments ?? []);
 
@@ -879,6 +895,7 @@ export function buildState(
     _secret_scanning_version_counter: 0,
     nextId,
   };
+  completeListCollections(state);
   stampNodeIds(state);
   return state;
 }

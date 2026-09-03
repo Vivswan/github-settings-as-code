@@ -1,19 +1,15 @@
 /**
- * The apply-idempotence proof engine, beside its tables file
- * (apply-idempotence.ts, which declares WHICH sections compare before writing
- * and maps the always-rewrite ENDPOINTS to their mock state families; the
- * flag itself lives on each EndpointDecl): the state snapshots, the write
- * classifiers, the corpus-level unconditional-write witness, and
- * assertApplyIdempotent, the re-run driver runScenario invokes for
- * expect.fixpoint: "apply_idempotent". The engine never spawns children
- * itself: the runner hands it a ChildInvoker (its own invoke bound to the
- * scenario's temp dir and mock URL), so the spawn/capture machinery stays in
- * runner.ts and this module stays pure over what a child run produced.
+ * The apply-idempotence proof engine: the state snapshots, the write classifiers over recurrence()
+ * (apply-idempotence.ts), the corpus-level witness, and assertApplyIdempotent, the re-run driver
+ * runScenario invokes for expect.fixpoint: "apply_idempotent" through the runner's ChildInvoker.
  */
 
 import { isIssueChannel } from "../../src/action/redact.js";
-import type { SectionKey } from "../../src/schema.js";
-import { ALWAYS_REWRITE_STATE_FAMILIES, COMPARE_BEFORE_WRITE } from "./apply-idempotence.js";
+import {
+  ALWAYS_REWRITE_STATE_FAMILIES,
+  recurrence,
+  recurringEndpointKeys,
+} from "./apply-idempotence.js";
 import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { endpointForRequest, isWriteRequest, sectionForRequest } from "./mock/dispatch.js";
 import type { MockHandle } from "./mock/server.js";
@@ -150,9 +146,9 @@ export function changedFamilies(before: Map<string, string>, after: Map<string, 
 }
 
 /**
- * One failure per second-apply write that is outside every section endpoint
- * or hits a compare-before-write section. Unconditional-PUT sections and
- * alwaysRewrite endpoints (the writes missingSecondApplyRewrites demands) pass.
+ * One failure per second-apply write that is outside every section endpoint or on an endpoint whose
+ * recurrence is "never": every section compares before writing, so only an alwaysRewrite endpoint
+ * or one carrying an unverifiable value may be written again over converged state.
  */
 export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
   const failures: string[] = [];
@@ -164,55 +160,43 @@ export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
       );
       continue;
     }
-    if (endpointForRequest(write.method, write.pathname)?.alwaysRewrite === true) {
+    const endpoint = endpointForRequest(write.method, write.pathname);
+    if (endpoint !== null && recurrence(endpoint) !== "never") {
       continue;
     }
-    if (COMPARE_BEFORE_WRITE[section]) {
-      failures.push(
-        `apply-idempotence: second apply wrote to "${section}" (${renderRequest(write, false)}), but that section compares before writing and the live state already matched`,
-      );
-    }
+    failures.push(
+      `apply-idempotence: second apply wrote to "${section}" (${renderRequest(write, false)}), but the live state already matched and only an alwaysRewrite endpoint or an unverifiable write may recur`,
+    );
   }
   return failures;
 }
 
 /**
- * The inverse leg of COMPARE_BEFORE_WRITE: a wrong `true` fails the first
- * idempotence run that touches the section, but a wrong `false` merely
- * weakens the proof (the zero-write assertion above stops binding) without
- * failing anything. So every idempotence re-run accumulates, per
- * false-listed section, how many first- and second-apply writes the CORPUS
- * issued, and the corpus-level verdict demands both a witness and the
- * re-issued writes. Corpus-level on purpose: one scenario can legitimately
- * go second-apply-quiet on a false section (a one-shot removal, a webhook
- * without a declared secret), but across the corpus the unconditional write
- * path must fire somewhere or the `false` is unwitnessed.
+ * Per exempt endpoint ("section.role", recurrence "always" or "may"), how many writes the corpus's
+ * first and second applies issued to it. Corpus-level on purpose: one scenario can legitimately go
+ * second-apply-quiet on an exempt endpoint, but across the corpus each exemption must be witnessed.
  */
-export type UnconditionalWriteWitness = Map<SectionKey, { first: number; second: number }>;
+export type ExemptWriteWitness = Map<string, { first: number; second: number }>;
 
 /** The witness map THIS process's idempotence re-runs accumulate into. */
-const corpusWriteWitness: UnconditionalWriteWitness = new Map();
+const corpusWriteWitness: ExemptWriteWitness = new Map();
 
-/**
- * Accumulate one idempotence re-run's writes into a witness map. Pure over
- * its arguments (the corpus map is passed in), so the corpus verdict is
- * provably able to fire - the same testability contract the sibling
- * secondApplyWriteFailures/missingSecondApplyRewrites helpers keep.
- */
-export function recordUnconditionalWrites(
-  witness: UnconditionalWriteWitness,
+/** Accumulate one idempotence re-run's exempt writes; pure over its arguments so the verdict is testable. */
+export function recordExemptWrites(
+  witness: ExemptWriteWitness,
   firstWrites: LoggedRequest[],
   secondWrites: LoggedRequest[],
 ): void {
   const bump = (writes: LoggedRequest[], side: "first" | "second"): void => {
     for (const write of writes) {
-      const section = sectionForRequest(write.method, write.pathname, write.body);
-      if (section === null || COMPARE_BEFORE_WRITE[section]) {
+      const endpoint = endpointForRequest(write.method, write.pathname);
+      if (endpoint === null || recurrence(endpoint) === "never") {
         continue;
       }
-      const counts = witness.get(section) ?? { first: 0, second: 0 };
+      const key = `${endpoint.section}.${endpoint.role}`;
+      const counts = witness.get(key) ?? { first: 0, second: 0 };
       counts[side]++;
-      witness.set(section, counts);
+      witness.set(key, counts);
     }
   };
   bump(firstWrites, "first");
@@ -220,32 +204,39 @@ export function recordUnconditionalWrites(
 }
 
 /**
- * The corpus-level verdict over a witness map, demanded for EVERY
- * false-listed section - one failure line per section that is either
- * unwitnessed (no idempotence re-run wrote to it on a first apply, so
- * nothing contradicts a wrong `false`) or contradicted (its first applies
- * wrote but no second apply ever did). The two messages name opposite
- * remedies: an unwitnessed section needs corpus coverage, a contradicted
- * one needs its table entry flipped.
+ * The corpus-level verdict: every exempt endpoint is written by some first apply (a wrong flag or
+ * exemption would otherwise go uncontradicted), and every section exempting unverifiable writes
+ * has some second apply re-issue one of them (the "may" recurrence is live, not a stale exemption).
  */
-export function unwitnessedUnconditionalSections(witness: UnconditionalWriteWitness): string[] {
+export function unwitnessedExemptEndpoints(witness: ExemptWriteWitness): string[] {
   const failures: string[] = [];
-  for (const [section, compares] of Object.entries(COMPARE_BEFORE_WRITE) as Array<
-    [SectionKey, boolean]
-  >) {
-    if (compares) {
-      continue;
+  const unwitnessed = (key: string, how: string): void => {
+    failures.push(
+      `apply-idempotence corpus: "${key}" is ${how} but NO apply_idempotent scenario writes to it on a first apply, so a wrong exemption would go uncontradicted - declare its section in an apply_idempotent scenario (e.g. apply-idempotent-unconditional.yml)`,
+    );
+  };
+  for (const key of recurringEndpointKeys("always")) {
+    if ((witness.get(key)?.first ?? 0) === 0) {
+      unwitnessed(key, "alwaysRewrite by declaration");
     }
-    const counts = witness.get(section);
-    if (counts === undefined || counts.first === 0) {
-      failures.push(
-        `apply-idempotence corpus: "${section}" is listed as unconditional (COMPARE_BEFORE_WRITE false) but NO apply_idempotent scenario in the corpus writes to it, so a wrong \`false\` would go uncontradicted - declare the section in an apply_idempotent scenario (e.g. apply-idempotent-unconditional.yml)`,
-      );
-      continue;
+  }
+  const bySection = new Map<string, { keys: string[]; first: number; second: number }>();
+  for (const key of recurringEndpointKeys("may")) {
+    const counts = witness.get(key) ?? { first: 0, second: 0 };
+    if (counts.first === 0) {
+      unwitnessed(key, "exempt as an unverifiable write");
     }
-    if (counts.second === 0) {
+    const section = key.slice(0, key.indexOf("."));
+    const group = bySection.get(section) ?? { keys: [], first: 0, second: 0 };
+    group.keys.push(key);
+    group.first += counts.first;
+    group.second += counts.second;
+    bySection.set(section, group);
+  }
+  for (const [section, group] of bySection) {
+    if (group.first > 0 && group.second === 0) {
       failures.push(
-        `apply-idempotence corpus: "${section}" is listed as unconditional (COMPARE_BEFORE_WRITE false) but its ${counts.first} first-apply write(s) were never re-issued by any second apply - either the section now compares before writing (flip the table entry) or the corpus lost its unconditional-write witness`,
+        `apply-idempotence corpus: "${section}" exempts [${group.keys.join(", ")}] as unverifiable writes, but no second apply in the corpus re-issued any of them - either the section now compares before writing (drop the exemption) or the corpus lost its witness`,
       );
     }
   }
@@ -253,12 +244,11 @@ export function unwitnessedUnconditionalSections(witness: UnconditionalWriteWitn
 }
 
 /**
- * The verdict over the writes this process recorded. run.ts consults it
- * after the FULL corpus only - a --sections or --scenario slice legitimately
- * starves sections.
+ * The verdict over the writes this process recorded. run.ts consults it after the FULL corpus only:
+ * a --sections or --scenario slice legitimately starves endpoints.
  */
-export function corpusUnwitnessedUnconditionalSections(): string[] {
-  return unwitnessedUnconditionalSections(corpusWriteWitness);
+export function corpusUnwitnessedExemptEndpoints(): string[] {
+  return unwitnessedExemptEndpoints(corpusWriteWitness);
 }
 
 /**
@@ -295,26 +285,9 @@ export function missingSecondApplyRewrites(
 }
 
 /**
- * The apply-idempotence proof (expect.fixpoint: "apply_idempotent"): re-run
- * the scenario in apply mode against the SAME mutated mock and require apply
- * to be a fixpoint. Three properties, each its own regression class:
- *   - the second apply exits 0: a fresh apply over converged state must not
- *     trip over its own output;
- *   - no compare-before-write section writes (COMPARE_BEFORE_WRITE) beyond
- *     its alwaysRewrite endpoints: any other write there means the payload
- *     and its read-back no longer round-trip;
- *   - the mock state is unchanged family by family: unconditional-PUT sections
- *     may write again, but a second apply must rewrite the SAME state.
- * A final check-mode run then converges (exit 0, zero writes) - the same proof
- * `fixpoint: "converges"` makes, which is why the two proofs are one enum
- * field rather than two booleans.
- *
- * The issue report channels are rejected, not neutralized: their delivery embeds
- * a fresh ISO timestamp (the report issue legitimately moves every run), and
- * both `issue` and `issue-on-failure` inject the marker label into the labels
- * section's declared set - so
- * flipping the channel off for the re-run would change what the labels section
- * deletes, which is a different scenario, not a second run of this one.
+ * The apply-idempotence proof (expect.fixpoint: "apply_idempotent"): the second apply exits 0, writes
+ * only where recurrence() allows, leaves every state family byte-stable, and a final check run reads
+ * back clean. Issue report channels are rejected: their report moves state and the marker label every run.
  */
 export async function assertApplyIdempotent(
   scenario: Scenario,
@@ -355,7 +328,7 @@ export async function assertApplyIdempotent(
   failures.push(...secondApplyWriteFailures(writes));
   const firstWrites = handle.requests.slice(0, requestsBefore).filter(isWriteRequest);
   failures.push(...missingSecondApplyRewrites(firstWrites, writes));
-  recordUnconditionalWrites(corpusWriteWitness, firstWrites, writes);
+  recordExemptWrites(corpusWriteWitness, firstWrites, writes);
   const changed = changedFamilies(before, snapshotFamilies(handle));
   if (changed.length > 0) {
     failures.push(`apply-idempotence: second apply changed mock state: ${changed.join(", ")}`);

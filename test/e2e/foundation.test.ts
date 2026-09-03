@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
-import { SECTION_KEYS } from "../../src/schema.js";
 import {
   ADMIN_OWNER,
   ADMIN_REPO,
@@ -10,7 +9,6 @@ import {
   TOKEN_USER_LOGIN,
   VIOLATION_PREFIX,
 } from "./constants.js";
-import { DENIAL_SEMANTICS } from "./denial-semantics.js";
 import { mulberry32, Rng } from "./prng.js";
 import { markerLabelFixtureMismatches, parseScenario } from "./schema.js";
 
@@ -256,54 +254,6 @@ describe("marker-label fixture pin (markerLabelFixtureMismatches)", () => {
       "m.yml",
     );
     expect(markerLabelFixtureMismatches(s)).toEqual([]);
-  });
-});
-
-describe("denial semantics", () => {
-  test("covers every section exactly once", () => {
-    expect(Object.keys(DENIAL_SEMANTICS).sort()).toEqual([...SECTION_KEYS].sort() as string[]);
-  });
-
-  test("the six absent sections are exactly branches, check_suite_preferences, custom_properties, environments, pages, teams", () => {
-    const absent: string[] = SECTION_KEYS.filter((k) => DENIAL_SEMANTICS[k] === "absent");
-    expect(absent.sort()).toEqual(
-      [
-        "branches",
-        "check_suite_preferences",
-        "custom_properties",
-        "environments",
-        "pages",
-        "teams",
-      ].sort(),
-    );
-  });
-
-  test("every other section is denied", () => {
-    const denied: string[] = SECTION_KEYS.filter((k) => DENIAL_SEMANTICS[k] === "denied");
-    expect(denied.sort()).toEqual(
-      [
-        "actions",
-        "actions_variables",
-        "actions_secrets",
-        "agents_secrets",
-        "agents_variables",
-        "dependabot_secrets",
-        "codespaces_secrets",
-        "autolinks",
-        "code_scanning_default_setup",
-        "code_quality_setup",
-        "collaborators",
-        "deploy_keys",
-        "interaction_limits",
-        "labels",
-        "milestones",
-        "repository",
-        "rulesets",
-        "webhooks",
-        "workflows",
-        "secret_scanning_custom_patterns",
-      ].sort(),
-    );
   });
 });
 

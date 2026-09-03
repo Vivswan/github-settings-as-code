@@ -13,7 +13,7 @@
  *   --scenario <name>    run only the scenario with this exact name
  */
 
-import { corpusUnwitnessedUnconditionalSections } from "./apply-idempotence-proof.js";
+import { corpusUnwitnessedExemptEndpoints } from "./apply-idempotence-proof.js";
 import { runScenario } from "./runner.js";
 import { loadScenarios, type Scenario, scenarioRoots } from "./schema.js";
 
@@ -131,14 +131,13 @@ async function main(): Promise<number> {
     }
   }
 
-  // Corpus-level inverse of the per-run idempotence proof, only meaningful
-  // over the FULL corpus: a --sections/--scenario slice can legitimately
-  // starve a false-listed section's unconditional write path. Counted as its
-  // own line item so the pass/fail tally stays honest.
+  // The corpus-level witness behind the per-run exemptions, meaningful over the FULL corpus only: a
+  // --sections/--scenario slice can legitimately starve an exempt endpoint. Its own line item keeps
+  // the pass/fail tally honest.
   let total = scenarios.length;
   if (!flags.sections && !flags.scenario) {
     total++;
-    const unwitnessed = corpusUnwitnessedUnconditionalSections();
+    const unwitnessed = corpusUnwitnessedExemptEndpoints();
     if (unwitnessed.length > 0) {
       failed++;
       table.push("  FAIL  apply-idempotence corpus witness");

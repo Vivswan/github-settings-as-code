@@ -612,9 +612,8 @@ describe("predictOutcomes run level", () => {
   });
 
   test("a read grant on plain reads never aborts preflight: preflight is reads-only", () => {
-    // Preflight runs every handler in check mode behind the write-stopping
-    // probe wrapper, so a read-graded section passes it; the write denial
-    // happens later, during apply, after the summary rows exist.
+    // Preflight plans every section over its read-only port, so a read-graded section passes it;
+    // the write denial surfaces during apply, after the summary rows exist.
     const p = predictOutcomes(
       meta({ sections: ["labels"], mask: { issues: "read" }, mode: "apply", policy: "fail" }),
     );

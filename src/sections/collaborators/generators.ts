@@ -9,6 +9,7 @@ import {
   generatorFromSlice,
   type Json,
   maybeWrapUndeclared,
+  uniqueBy,
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 import { DEFAULT_ROLE, roleForPermission } from "../shared/roles.js";
@@ -23,21 +24,12 @@ const genCollaborator = generatorFromSlice(CollaboratorConfig, {
 });
 
 export function genCollaborators(rng: Rng): EntriesForm {
-  const count = rng.int(3) + 1;
-  const claimed = new Set<string>();
-  const out: Json[] = [];
-  for (let i = 0; i < count; i++) {
-    const collaborator = genCollaborator(rng);
-    // The section's own rule: one entry per login, case-insensitively.
-    let username = String(collaborator.username);
-    while (claimed.has(username.toLowerCase())) {
-      username = `${username}-${i}`;
-    }
-    claimed.add(username.toLowerCase());
-    collaborator.username = username;
-    out.push(collaborator);
-  }
-  return maybeWrapUndeclared(rng, out);
+  const collaborators = Array.from({ length: rng.int(3) + 1 }, () => genCollaborator(rng));
+  // The section's own rule: one entry per login, case-insensitively.
+  return maybeWrapUndeclared(
+    rng,
+    uniqueBy(collaborators, ["username"], (login) => login.toLowerCase()),
+  );
 }
 
 /** The undeclared pending-invitation invitee; no generated username collides with it. */

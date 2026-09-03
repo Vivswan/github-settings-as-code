@@ -27,9 +27,10 @@ const PUT = {
   statuses: { 201: "created", 204: "updated" },
 } as const satisfies EndpointDecl;
 
-/** The two dictionaries differ in ONE declaration: whether the PUT recurs. */
+/** The dictionaries differ in ONE declaration each: whether the PUT recurs, or may carry the facet. */
 const SEALED_ENDPOINTS = { list: LIST, put: { ...PUT, alwaysRewrite: true } } as const;
 const CONDITIONAL_ENDPOINTS = { list: LIST, put: PUT } as const;
+const UNVERIFIABLE_ENDPOINTS = { list: LIST, put: { ...PUT, unverifiable: true } } as const;
 
 const META = {
   key: "actions_secrets",
@@ -193,11 +194,11 @@ describe("provePlanIdempotent", () => {
   });
 
   test("an unverifiable operation may recur, even one the first pass did not plan; a plain one that recurs still fails", async () => {
-    // A secret-bearing write over a compare-before-write endpoint: the first
-    // pass creates (drift-bearing); each pass after it re-sends under the facet.
+    // A secret-bearing write over an unverifiable endpoint: the first pass creates (drift-bearing);
+    // each pass after it re-sends under the facet.
     const recurring = {
       ...META,
-      endpoints: CONDITIONAL_ENDPOINTS,
+      endpoints: UNVERIFIABLE_ENDPOINTS,
       async plan(ctx, desired) {
         const live = (await ctx.read.list.listAllEnveloped("secrets")) as Array<{ name: string }>;
         return {
@@ -217,7 +218,7 @@ describe("provePlanIdempotent", () => {
           drift: [],
         };
       },
-    } satisfies SectionModule<"actions_secrets", typeof CONDITIONAL_ENDPOINTS>;
+    } satisfies SectionModule<"actions_secrets", typeof UNVERIFIABLE_ENDPOINTS>;
     const { first, second, changes } = await provePlanIdempotent(
       recurring,
       liveSecrets(),
@@ -231,7 +232,9 @@ describe("provePlanIdempotent", () => {
     ]);
     // The controls: the same recurrence without the facet, and the facet
     // still carrying a drift line, are both sections that do not converge.
-    const redrifted = (drift: (name: string) => PlannedOp<typeof CONDITIONAL_ENDPOINTS>["drift"]) =>
+    const redrifted = (
+      drift: (name: string) => PlannedOp<typeof UNVERIFIABLE_ENDPOINTS>["drift"],
+    ) =>
       ({
         ...recurring,
         async plan(ctx, desired) {
@@ -241,7 +244,7 @@ describe("provePlanIdempotent", () => {
             ops: planned.ops.map((op) => ({ ...op, drift: drift(op.params.secret_name) })),
           };
         },
-      }) satisfies SectionModule<"actions_secrets", typeof CONDITIONAL_ENDPOINTS>;
+      }) satisfies SectionModule<"actions_secrets", typeof UNVERIFIABLE_ENDPOINTS>;
     const plain = redrifted((name) => [`actions_secrets[${name}]: re-sent`]);
     const facetWithLines = redrifted((name) => ({
       unverifiable: `${name} cannot be read back`,
