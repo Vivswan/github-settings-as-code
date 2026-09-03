@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$ref": "#/definitions/SettingsFile",
-  "$id": "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json",
+  "$id": "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/HEAD/lib/settings.schema.json",
   "definitions": {
     "ActionsConfig": {
       "type": "object",

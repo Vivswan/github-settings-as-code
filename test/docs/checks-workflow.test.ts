@@ -13,16 +13,19 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { RELEASE_PR_BRANCH_PREFIX } from "../../.github/scripts/release-pipeline.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const PATHS_TS = "test/e2e/openapi/paths.ts";
 
 interface Step {
   uses?: string;
+  run?: string;
+  if?: string;
   with?: Record<string, unknown>;
 }
 interface Workflow {
-  jobs: Record<string, { steps?: Step[] }>;
+  jobs: Record<string, { if?: string; steps?: Step[] }>;
 }
 
 /** Every actions/cache key in the workflow that names the trimmed spec. */
@@ -137,5 +140,53 @@ describe("checks.yml openapi-trimmed cache keys", () => {
         `hashFiles pattern '${pattern}' matches no file on disk, so it contributes nothing to the cache key`,
       ).toBeGreaterThan(0);
     }
+  });
+});
+
+const HEAD_REF_PREFIX = /startsWith\(github\.head_ref,\s*(['"])([^'"]*)\1\)/g;
+
+/** Every literal an if: condition tests github.head_ref against with startsWith. */
+function headRefPrefixes(condition: string | undefined): string[] {
+  return [...String(condition ?? "").matchAll(HEAD_REF_PREFIX)].map((m) => m[2] ?? "");
+}
+
+/** The guard: one anchor-check step gated on the constant, and no job or step condition spelling it otherwise. */
+function expectReleasePrefixes(wf: Workflow): void {
+  const jobs = Object.values(wf.jobs);
+  const anchorSteps = jobs
+    .flatMap((job) => job.steps ?? [])
+    .filter((step) => (step.run ?? "").includes("release-pipeline.ts anchor-check"));
+  expect(anchorSteps.length, "checks.yml lost its anchor-check step").toBe(1);
+  expect(headRefPrefixes(anchorSteps[0]?.if)).toEqual([RELEASE_PR_BRANCH_PREFIX]);
+  for (const job of jobs) {
+    for (const condition of [job.if, ...(job.steps ?? []).map((step) => step.if)]) {
+      for (const literal of headRefPrefixes(condition)) {
+        expect(literal).toBe(RELEASE_PR_BRANCH_PREFIX);
+      }
+    }
+  }
+}
+
+describe("checks.yml release PR branch spelling", () => {
+  const text = readFileSync(join(ROOT, ".github", "workflows", "checks.yml"), "utf8");
+
+  // Workflows cannot import the constant, so the head_ref conditions spell
+  // it by hand; a drifted spelling skips the anchor-check on every release
+  // PR instead of failing there.
+  test("the anchor-check step is gated on RELEASE_PR_BRANCH_PREFIX and nothing spells it otherwise", () => {
+    expectReleasePrefixes(parseYaml(text) as Workflow);
+  });
+
+  test("a drifted spelling fails the guard (negative control)", () => {
+    const drifted = text.replaceAll(`'${RELEASE_PR_BRANCH_PREFIX}'`, "'release-pls--'");
+    expect(() => expectReleasePrefixes(parseYaml(drifted) as Workflow)).toThrow();
+  });
+
+  test("a missing anchor-check step fails the guard (negative control)", () => {
+    const wf = parseYaml(text) as Workflow;
+    for (const job of Object.values(wf.jobs)) {
+      job.steps = job.steps?.filter((step) => !(step.run ?? "").includes("anchor-check"));
+    }
+    expect(() => expectReleasePrefixes(wf)).toThrow();
   });
 });

@@ -15,7 +15,7 @@
  * - definitions are sorted so the committed file diffs deterministically.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { SettingsFile } from "../../src/schema.js";
@@ -23,27 +23,12 @@ import { SettingsFile } from "../../src/schema.js";
 const ROOT = join(import.meta.dir, "..", "..");
 
 /**
- * The schema's stable identity: the raw copy of this file at the moving
- * v<MAJOR> tag. One raw-URL template serves every ref - the canonical
- * moving major, exact release tags, the legacy main copy - matching how the
- * action itself is pinned. The major comes from
- * .release-please-manifest.json, the version single source release-please
- * bumps on every release (package.json deliberately carries no version), so
- * a major release moves the $id automatically on the next schema build.
+ * The schema's identity: the raw copy at HEAD, naming no release. Editors pin
+ * a version through the same URL at a release ref (see the README); a versioned
+ * $id would need the schema regenerated on every major bump's release PR.
  */
-const manifestVersion = (
-  JSON.parse(readFileSync(join(ROOT, ".release-please-manifest.json"), "utf8")) as Record<
-    string,
-    string
-  >
-)["."];
-const major = manifestVersion?.match(/^(\d+)\./)?.[1];
-if (major === undefined) {
-  throw new Error(
-    `gen-settings-schema: cannot derive the major version from .release-please-manifest.json ("." is ${JSON.stringify(manifestVersion)})`,
-  );
-}
-const SCHEMA_ID = `https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v${major}/lib/settings.schema.json`;
+const SCHEMA_ID =
+  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/HEAD/lib/settings.schema.json";
 
 interface ZodDefView {
   type?: string;

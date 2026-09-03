@@ -66,9 +66,26 @@ function git(cwd: string, ...args: string[]): string {
   try {
     return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
   } catch (error) {
-    const stderr = (error as { stderr?: unknown }).stderr;
-    const detail = typeof stderr === "string" && stderr.trim() !== "" ? `: ${stderr.trim()}` : "";
-    throw new Error(`git ${args.join(" ")} failed${detail}`);
+    throw gitFailure(args, error);
+  }
+}
+
+function gitFailure(args: string[], error: unknown): Error {
+  const stderr = (error as { stderr?: unknown }).stderr;
+  const detail = typeof stderr === "string" && stderr.trim() !== "" ? `: ${stderr.trim()}` : "";
+  return new Error(`git ${args.join(" ")} failed${detail}`);
+}
+
+/** A yes/no git question: exit 0 is yes, exit 1 is no, anything else is a failure and throws. */
+function gitYesNo(cwd: string, ...args: string[]): boolean {
+  try {
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "ignore", "pipe"] });
+    return true;
+  } catch (error) {
+    if ((error as { status?: unknown }).status === 1) {
+      return false;
+    }
+    throw gitFailure(args, error);
   }
 }
 
@@ -363,7 +380,9 @@ export function verifyPublishedRefs(options: VerifyOptions): {
   return { major, packagedSha };
 }
 
-const RELEASE_PR_BRANCH = "release-please--branches--main";
+/** The namespace release-please's PR branch lives under; the workflows' head_ref conditions spell it by hand (pinned by test). */
+export const RELEASE_PR_BRANCH_PREFIX = "release-please--";
+const RELEASE_PR_BRANCH = `${RELEASE_PR_BRANCH_PREFIX}branches--main`;
 
 export interface AnchorOptions {
   cwd: string;
@@ -417,7 +436,7 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
     // happened), and their anchor must not stamp this head onto a branch
     // still built from an older main. A shallow history that cannot prove
     // ancestry no-ops the same way - the refresh that follows anchors.
-    if (tryGit(cwd, "merge-base", "--is-ancestor", sourceSha, "FETCH_HEAD") === null) {
+    if (!isAncestor(cwd, sourceSha, "FETCH_HEAD")) {
       return {
         changed: false,
         reason: "the release PR branch is not built on this head; its own refresh anchors",
@@ -484,9 +503,16 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
  * last-release-sha must be the newest release merge or its parent -
  * anything else means an anchor was lost (or a release merge slipped past
  * the pipeline) and every release PR refresh would be computed from a
- * stale boundary. Loud and gating beats silently wrong changelogs.
+ * stale boundary. Loud and gating beats silently wrong changelogs. Only an
+ * unrecorded boundary may lack a release merge; one newer than every
+ * recognized merge belongs to a merge this check missed, so it is never rolled back.
  */
 export function boundaryCheck(cwd: string): { boundary: string } {
+  if (git(cwd, "rev-parse", "--is-shallow-repository") === "true") {
+    throw new Error(
+      "boundary-check needs the full history (fetch-depth: 0) and this checkout is shallow: a release merge or the recorded boundary can sit beyond its depth, and no verdict on a truncated history holds.",
+    );
+  }
   const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as {
     "last-release-sha"?: unknown;
     packages?: Record<string, { "release-as"?: unknown }>;
@@ -521,14 +547,36 @@ export function boundaryCheck(cwd: string): { boundary: string } {
   }
   const recorded = config["last-release-sha"];
   if (latest === "") {
-    return { boundary: "none (no release merge on this history yet)" };
+    if (recorded === undefined) {
+      return { boundary: "none (no release merge on this history yet)" };
+    }
+    const cause = isAncestor(cwd, String(recorded), "HEAD")
+      ? `this history holds it, so release-please's merge subject no longer matches ${RELEASE_SUBJECT} (investigate RELEASE_SUBJECT)`
+      : "it is not on this history at all (not main, or a boundary that never landed)";
+    throw new Error(
+      `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but no release merge is reachable from HEAD: ${cause}. Refusing to read a recorded boundary as a pre-first-release history.`,
+    );
   }
   const parent = tryGit(cwd, "rev-parse", `${latest}^`);
   if (recorded === latest || (parent !== null && recorded === parent)) {
     return { boundary: String(recorded) };
   }
+  if (isAncestor(cwd, latest, String(recorded)) && isAncestor(cwd, String(recorded), "HEAD")) {
+    throw new Error(
+      `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, NEWER than ${latest}, the newest release merge whose subject matches ${RELEASE_SUBJECT}: either a newer release merge's subject stopped matching (investigate RELEASE_SUBJECT) or the boundary was edited by hand. It must not be rolled back to ${parent ?? latest}.`,
+    );
+  }
   throw new Error(
     `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but the newest release merge on main is ${latest} (parent ${parent}); release PR refreshes would be computed from a stale boundary. Fix by PR: set last-release-sha to ${parent ?? latest}.`,
+  );
+}
+
+/** merge-base fails outright on a sha this checkout lacks, so unknown ones are screened into a plain "no" first. */
+function isAncestor(cwd: string, ancestor: string, descendant: string): boolean {
+  return (
+    [ancestor, descendant].every((sha) =>
+      gitYesNo(cwd, "rev-parse", "--verify", "--quiet", `${sha}^{commit}`),
+    ) && gitYesNo(cwd, "merge-base", "--is-ancestor", ancestor, descendant)
   );
 }
 

@@ -23,19 +23,12 @@ const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json")
 };
 
 describe("published schema identity", () => {
-  test("$id is the raw copy at the moving major tag, majored from the release manifest", () => {
-    // The identity gen-settings-schema stamps: the raw URL at the moving
-    // v<MAJOR> tag, with the major read from the same release-please
-    // manifest the script derives it from - so a major bump that
-    // regenerates the schema keeps this test green, while a schema whose
-    // $id lags the manifest (or names another shape entirely) fails.
-    const manifest = JSON.parse(
-      readFileSync(join(ROOT, ".release-please-manifest.json"), "utf8"),
-    ) as Record<string, string>;
-    const major = manifest["."]?.match(/^(\d+)\./)?.[1];
-    expect(major, ".release-please-manifest.json lost its '.' version").toBeTruthy();
+  test("$id is the version-free raw copy at HEAD", () => {
+    // The identity gen-settings-schema stamps, pinned as a literal: a $id
+    // that names a release ref again ties every major bump to a schema
+    // regeneration on its release PR.
     expect(schema.$id).toBe(
-      `https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v${major}/lib/settings.schema.json`,
+      "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/HEAD/lib/settings.schema.json",
     );
   });
 });

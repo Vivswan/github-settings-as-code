@@ -583,11 +583,120 @@ describe("boundaryCheck", () => {
     expect(() => boundaryCheck(fx.work)).toThrow(/stale boundary|set last-release-sha/);
   });
 
-  test("a history without release merges passes", () => {
+  test("a history without release merges and no recorded boundary is pre-first-release", () => {
     const fx = seedFixture();
     const dir = clone(fx.root, fx.origin, "boundary-none");
     git(dir, "checkout", "--quiet", fx.seedSha);
+    write(
+      dir,
+      "release-please-config.json",
+      `${JSON.stringify({ packages: { ".": { "release-type": "simple", draft: true } } }, null, 2)}\n`,
+    );
+    commitAll(dir, "chore: bootstrap release-please before any release");
     expect(boundaryCheck(dir).boundary).toContain("no release merge");
+  });
+
+  test("a recorded boundary that is not on this history fails naming that", () => {
+    const fx = seedFixture();
+    const dir = clone(fx.root, fx.origin, "boundary-foreign");
+    // The seed commit records a placeholder boundary and has no release
+    // merge behind it.
+    git(dir, "checkout", "--quiet", fx.seedSha);
+    expect(() => boundaryCheck(dir)).toThrow(/not on this history at all/);
+  });
+
+  test("a shallow checkout is refused before any verdict", () => {
+    const fx = seedFixture();
+    // The release merge is within depth but its parent, the recorded
+    // boundary, is not: a full history passes this, a truncated one would
+    // call it stale.
+    write(
+      fx.work,
+      "release-please-config.json",
+      `${JSON.stringify(
+        {
+          "last-release-sha": fx.seedSha,
+          packages: { ".": { "release-type": "simple", draft: true } },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    commitAll(fx.work, "chore: align the fixture boundary");
+    git(fx.work, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+    const dir = join(fx.root, "boundary-shallow");
+    execFileSync("git", ["clone", "--quiet", "--depth", "2", `file://${fx.origin}`, dir]);
+    expect(() => boundaryCheck(dir)).toThrow(/needs the full history.*shallow/);
+  });
+
+  test("a complete history holding the boundary but no recognizable merge names the matcher", () => {
+    const fx = seedFixture();
+    const dir = clone(fx.root, fx.origin, "boundary-drift");
+    git(dir, "checkout", "--quiet", fx.seedSha);
+    write(
+      dir,
+      "release-please-config.json",
+      `${JSON.stringify(
+        {
+          "last-release-sha": fx.seedSha,
+          packages: { ".": { "release-type": "simple", draft: true } },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    commitAll(dir, "chore(main): release: 2.1.0 (#42)");
+    expect(() => boundaryCheck(dir)).toThrow(/history holds it.*RELEASE_SUBJECT/);
+  });
+
+  test("a boundary newer than the newest recognized merge is drift, not a rollback", () => {
+    const fx = seedFixture();
+    const dir = clone(fx.root, fx.origin, "boundary-newer");
+    write(dir, "src/marker.ts", "export const marker = 3;\n");
+    const between = commitAll(dir, "feat: land between two releases");
+    // The 2.2.0 release PR anchored main's tip and merged under a subject
+    // RELEASE_SUBJECT does not match: the 2.1.0 merge is still the newest
+    // one recognized, yet the boundary sits after it.
+    write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.2.0" }, null, 2)}\n`);
+    write(
+      dir,
+      "release-please-config.json",
+      `${JSON.stringify(
+        {
+          "last-release-sha": between,
+          packages: { ".": { "release-type": "simple", draft: true } },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    commitAll(dir, "chore(main): release v2.2.0 (#43)");
+    expect(() => boundaryCheck(dir)).toThrow(/NEWER than.*must not be rolled back/);
+  });
+
+  test("a boundary on an unmerged branch is stale, not newer", () => {
+    const fx = seedFixture();
+    const dir = clone(fx.root, fx.origin, "boundary-off-main");
+    // A descendant of the release merge that never landed on main: the
+    // stale message's rollback IS the repair here.
+    git(dir, "checkout", "--quiet", "-b", "side");
+    write(dir, "src/marker.ts", "export const marker = 4;\n");
+    const offMain = commitAll(dir, "feat: never merged");
+    git(dir, "checkout", "--quiet", "main");
+    write(
+      dir,
+      "release-please-config.json",
+      `${JSON.stringify(
+        {
+          "last-release-sha": offMain,
+          packages: { ".": { "release-type": "simple", draft: true } },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    commitAll(dir, "chore: record a boundary from the wrong branch");
+    expect(() => boundaryCheck(dir)).toThrow(/stale boundary.*set last-release-sha/);
   });
 
   test("a subject that only shares the release prefix is not a release merge", () => {

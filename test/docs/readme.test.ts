@@ -260,8 +260,16 @@ describe("schema $schema hints and $id", () => {
       .map((name) => ({ label: `docs/${name}`, path: join(ROOT, "docs", name) })),
   ];
 
-  test("every yaml-language-server line in the README and the guides names the schema $id", () => {
+  test("every yaml-language-server line in the README and the guides names the schema at the moving major tag", () => {
     expect(id, "lib/settings.schema.json has no $id").toBeTruthy();
+    // The hints share the $id's owner/repo/path but fetch at the current
+    // release line's moving major tag: the $id is version-free (HEAD), the
+    // hints are what editors download, so they pin a release ref.
+    const pins = stalePins([{ label: "README.md", text: readme }]);
+    expect(pins, "no release yet, so no major tag for the hints to name").not.toBeNull();
+    const idUrl = new URL(id);
+    const [owner, repo, , ...rest] = idUrl.pathname.split("/").filter(Boolean);
+    const expectedHint = `${idUrl.origin}/${owner}/${repo}/${pins?.major}/${rest.join("/")}`;
     // Per-file counts, pinned: a global total would let one of the README's
     // two hints disappear while the guides' hint keeps the sum positive.
     // Adding a hint to a new page is a conscious edit here.
@@ -277,23 +285,22 @@ describe("schema $schema hints and $id", () => {
         `${page.label} carries ${hints.length} $schema hint(s), expected ${EXPECTED_HINTS[page.label] ?? 0}; update EXPECTED_HINTS if the move is deliberate`,
       ).toBe(EXPECTED_HINTS[page.label] ?? 0);
       for (const match of hints) {
-        expect(match[1], `${page.label} carries a $schema hint that is not the schema's $id`).toBe(
-          id,
-        );
+        expect(
+          match[1],
+          `${page.label} carries a $schema hint that is not the schema at ${pins?.major}`,
+        ).toBe(expectedHint);
       }
     }
   });
 
-  test("the $id points at this repository's raw major-tag copy of the build output", () => {
-    // The $id is stamped by gen-settings-schema.ts with the current release
-    // line's moving major tag - the ref the release pipeline points at
-    // every release's build commit, so the URL always serves the line's
-    // newest schema...
+  test("the $id points at this repository's raw HEAD copy of the build output", () => {
+    // The $id is stamped by gen-settings-schema.ts as the raw copy at HEAD,
+    // an identity that names no release...
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
       name: string;
     };
     // ...and the URL's parts must each match their own single source:
-    // https://raw.githubusercontent.com/<owner>/<repo>/<major tag>/<path>.
+    // https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>.
     const url = new URL(id);
     expect(url.protocol).toBe("https:");
     expect(url.hostname).toBe("raw.githubusercontent.com");
@@ -320,12 +327,9 @@ describe("schema $schema hints and $id", () => {
       readme.includes(`uses: ${owner}/${repo}@`),
       `the README never installs "uses: ${owner}/${repo}@...", so the $id's slug matches no workflow snippet`,
     ).toBe(true);
-    // <major tag> is the current release line's, from the same manifest the
-    // version-pin tests read.
-    const manifest = JSON.parse(
-      readFileSync(join(ROOT, ".release-please-manifest.json"), "utf8"),
-    ) as Record<string, string>;
-    expect(ref).toBe(`v${(manifest["."] ?? "").split(".")[0]}`);
+    // <ref> is HEAD: version-free, so a major bump never waits on a schema
+    // regeneration to go green.
+    expect(ref).toBe("HEAD");
   });
 });
 
