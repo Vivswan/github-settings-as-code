@@ -1,10 +1,7 @@
 /**
- * Which sections are COMPARE-BEFORE-WRITE: their apply path reads the live
- * resource and skips the write when it already matches the declaration, so a
- * SECOND apply over just-applied state must issue ZERO writes for them. The
- * rest write unconditionally in apply mode (one PUT/PATCH is their cheapest
- * way to converge), so a second apply legitimately writes again - for those,
- * the apply-idempotence proof is state STABILITY, not write silence.
+ * Which sections are COMPARE-BEFORE-WRITE: a SECOND apply must issue ZERO
+ * writes for them beyond alwaysRewrite endpoints. The rest write
+ * unconditionally, so their proof is state STABILITY, not write silence.
  *
  * Every entry is verified against the section's apply-mode write decision in
  * src/sections/:
@@ -50,11 +47,9 @@
  *   PUTs are always-rewrite by contract (see ALWAYS_REWRITE_STATE_FAMILIES).
  * - actions (false): every declared endpoint group is PUT unconditionally.
  * - actions_secrets, dependabot_secrets, codespaces_secrets, agents_secrets
- *   (false): every declared secret is re-sealed and re-PUT on every apply BY
- *   DESIGN - GitHub cannot return a value to compare against, and the
- *   unconditional rewrite is what makes a rotated source value propagate.
- *   State stability holds because the mock stores a deterministic digest of
- *   the unsealed value, not the (per-seal random) ciphertext.
+ *   (true): every write is gated on the listing except the sealed PUT, which
+ *   recurs by declaration (alwaysRewrite: no value to compare against) and
+ *   is exempt on that flag; the mock stores a digest, so state stays stable.
  * - pages (false): an existing site is PUT unconditionally.
  * - code_scanning_default_setup (false): the PATCH runs unconditionally.
  * - code_quality_setup (false): the PATCH runs unconditionally, mirroring
@@ -80,7 +75,8 @@
  *
  * This table lives in the harness (like DENIAL_SEMANTICS): the engine has no
  * use for it, and both sides are guarded. A wrong `true` fails the first
- * apply_idempotent run that touches the section (the zero-write assertion).
+ * apply_idempotent run that touches the section (the zero-write assertion,
+ * which exempts alwaysRewrite endpoints).
  * A wrong `false` is caught corpus-wide by unwitnessedUnconditionalSections
  * (apply-idempotence-proof.ts, consulted by run.ts over the full corpus), which demands every
  * false-listed section BOTH appears in some apply_idempotent scenario's
@@ -101,10 +97,10 @@ export const COMPARE_BEFORE_WRITE: Record<SectionKey, boolean> = {
   environments: false,
   autolinks: true,
   actions: false,
-  actions_secrets: false,
-  dependabot_secrets: false,
-  codespaces_secrets: false,
-  agents_secrets: false,
+  actions_secrets: true,
+  dependabot_secrets: true,
+  codespaces_secrets: true,
+  agents_secrets: true,
   workflows: true,
   check_suite_preferences: false,
   pages: false,

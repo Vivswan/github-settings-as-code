@@ -13,36 +13,33 @@
  */
 
 import type { z } from "zod";
-import type { UndeclaredPolicyList } from "../../types.js";
+import type { SettingsFile } from "../../schema.js";
+import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsSecretConfig } from "../actions_secrets/schema.js";
 import { AgentsSecretConfig } from "../agents_secrets/schema.js";
 import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
 import { parseLive } from "../contract/live.js";
 import {
-  beginRun,
   defaultUndeclaredPolicy,
   loosen,
-  type SectionContext,
   type SectionModule,
-  type SectionResult,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import { call, listAllEnveloped } from "../contract/requests.js";
+import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import { DependabotSecretConfig } from "../dependabot_secrets/schema.js";
 import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
   LIVE_SECRET_NAMES,
   listSecretValues,
-  reconcileSecrets,
+  planSecrets,
   rejectDuplicateSecretNames,
   type SecretEntry,
-  type SecretsScope,
-  type SecretsScopeOps,
+  type SecretsPlanScope,
 } from "./secrets-engine.js";
 
 /** The section keys the factory may mint, each with its API path segment. */
-type RepoSecretsKey =
+export type RepoSecretsKey =
   | "actions_secrets"
   | "dependabot_secrets"
   | "codespaces_secrets"
@@ -96,6 +93,7 @@ type RepoSecretsEndpoints<P extends SecretsSegment> = {
     readonly route: `GET /repos/{owner}/{repo}/${P}/secrets`;
     readonly statuses: { readonly 200: string };
     readonly accessGrade?: "write";
+    readonly primaryRead: { readonly notFound: "denied" };
   };
   readonly publicKey: {
     readonly route: `GET /repos/{owner}/{repo}/${P}/secrets/public-key`;
@@ -113,8 +111,49 @@ type RepoSecretsEndpoints<P extends SecretsSegment> = {
   };
 };
 
+/** The declared value of one family's section, exactly as the settings document types it. */
+type RepoSecretsDeclared<K extends RepoSecretsKey> = Exclude<SettingsFile[K], undefined>;
+
+/**
+ * One family's plan() over exactly its own dictionary and declared value (the
+ * registry's exactness lockstep); indexed by K so the generic factory can
+ * assign its one SharedPlan to it.
+ */
+type RepoSecretsPlan<K extends RepoSecretsKey> = {
+  [F in RepoSecretsKey]: (
+    ctx: PlanContext<RepoSecretsEndpoints<SecretsSegment<F>>>,
+    declared: RepoSecretsDeclared<F>,
+  ) => Promise<SectionPlan<PlannedOp<RepoSecretsEndpoints<SecretsSegment<F>>>>>;
+}[K];
+
+/**
+ * Every family's routes as one dictionary (each route the union over the
+ * segments): inside the generic factory the segment is unresolved, so the
+ * contract's role derivations only resolve over this view.
+ */
+type WideEndpoints = RepoSecretsEndpoints<SecretsSegment>;
+
 /** The declared value every family accepts: the entry list, plain or wrapped. */
-type RepoSecretsDeclared = SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
+type WideDeclared = SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
+
+/** The one plan the factory builds, over the wide dictionary. */
+type SharedPlan = (
+  ctx: PlanContext<WideEndpoints>,
+  declared: WideDeclared,
+) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
+
+/** Mutual assignability - equality up to structure, in both directions. */
+type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/**
+ * Compile-time pin: the shared plan IS each family's exact plan, so a family
+ * whose roles, params, or declared value diverge fails here by name.
+ */
+type _SharedPlanIsEveryFamilyPlan = MustBeNever<
+  {
+    [K in RepoSecretsKey]: Invariant<SharedPlan, RepoSecretsPlan<K>> extends true ? never : K;
+  }[RepoSecretsKey]
+>;
 
 /**
  * The closed entry surface every family shares, checked HERE as a fresh
@@ -126,7 +165,7 @@ type RepoSecretsDeclared = SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
  * carries any more would otherwise compile silently for all of them. (An
  * intersection admits a property present in ANY constituent, so a key that
  * only ONE family dropped would still pass - a divergence that would break
- * SecretEntry and the shared run signature first.) The missing-key
+ * SecretEntry and the shared plan signature first.) The missing-key
  * direction is plain assignability and still bites at the registry line.
  */
 const CLOSED_SURFACE = {
@@ -153,12 +192,12 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
   readonly shape: z.ZodType;
   readonly secretValues: typeof listSecretValues;
   readonly closedSurface: typeof CLOSED_SURFACE;
-  run(ctx: SectionContext, declared: RepoSecretsDeclared): Promise<SectionResult>;
+  readonly plan: RepoSecretsPlan<K>;
 }
 
 /**
  * Mint one repository-level secret family's section module. Everything the
- * families share - the reconcile-by-existence run, the engine wiring, the
+ * families share - the reconcile-by-existence plan, the engine wiring, the
  * closed {name, value} entry surface, the keep-by-default posture (deleted
  * secret values are unrecoverable, so deletion is opt-in via the wrapped
  * `undeclared: delete` form) - lives here once, and the routes derive from
@@ -187,6 +226,9 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
       route: `GET /repos/{owner}/{repo}/${pathSegment}/secrets`,
       statuses: { 200: "the secrets list (names and timestamps; never values)" },
       ...readGrade,
+      // A fine-grained token conceals a denied list as 404, which is a
+      // denial here: the section stops instead of reading "no secrets".
+      primaryRead: { notFound: "denied" },
     },
     publicKey: {
       route: `GET /repos/{owner}/{repo}/${pathSegment}/secrets/public-key`,
@@ -204,35 +246,48 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     },
   };
 
-  // The engine's four operations, built here where the routes are known so
-  // the params contract compile-checks (secret_name on put/remove). The
-  // request helpers resolve path params from the ROUTE type, which stays
-  // parametric on P inside this generic body, so the ops read the dictionary
-  // through the constraint-widened view - each route becomes the finite
-  // union over every family segment, on which PathParams resolves.
-  const wide: RepoSecretsEndpoints<SecretsSegment> = endpoints;
-  const ops: SecretsScopeOps = {
-    list: async (ctx, section) =>
-      parseLive(
-        section,
-        wide.list,
-        LIVE_SECRET_NAMES,
-        await listAllEnveloped(ctx, section, wide.list, "secrets"),
-      ),
-    publicKey: (ctx, section, describe) => call(ctx, section, wide.publicKey, { describe }),
-    put: (ctx, section, secretName, payload, describe) =>
-      call(ctx, section, wide.put, {
-        params: { secret_name: secretName },
-        payload,
-        describe,
+  const wide: WideEndpoints = endpoints;
+  const plan: SharedPlan = async (ctx, declared) => {
+    const defaultPolicy = defaultUndeclaredPolicy(section);
+    const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
+    rejectDuplicateSecretNames(section, entries);
+    // Built where the routes are known, so params typecheck; each write carries
+    // the describe prose a failing request renders.
+    type Op = PlannedOp<WideEndpoints>;
+    type Described<R extends Op["role"]> = Extract<Op, { role: R }> & { readonly describe: string };
+    const scope: SecretsPlanScope<Described<"put">, Described<"remove">> = {
+      label: key,
+      noun,
+      list: async () =>
+        parseLive(
+          section,
+          wide.list,
+          LIVE_SECRET_NAMES,
+          await ctx.read.list.listAllEnveloped("secrets"),
+        ),
+      publicKey: (describe) => ctx.read.publicKey.call({ describe }),
+      put: (write) => ({
+        role: "put",
+        params: { secret_name: write.name },
+        payload: write.payload,
+        drift: write.drift,
+        change: write.change,
+        describe: write.describe,
       }),
-    remove: (ctx, section, secretName, describe) =>
-      call(ctx, section, wide.remove, { params: { secret_name: secretName }, describe }),
+      remove: (deletion) => ({
+        role: "remove",
+        params: { secret_name: deletion.name },
+        drift: deletion.drift,
+        change: deletion.change,
+        describe: deletion.describe,
+      }),
+    };
+    // The engine validates every $NAME reference before any section plans and,
+    // in apply mode, resolves and masks them; the PUT thunks read them through ExecTools.
+    return planSecrets(section, scope, { entries, policy, defaultPolicy });
   };
 
-  const scope: SecretsScope = { label: key, noun, ops };
-
-  return {
+  const section: RepoSecretsSectionModule<K> = {
     key,
     undeclaredDefault: "keep",
     permission: { repo: [resource] },
@@ -242,16 +297,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     // for the up-front reference resolution.
     secretValues: listSecretValues,
     closedSurface: CLOSED_SURFACE,
-    async run(ctx, declared): Promise<SectionResult> {
-      const defaultPolicy = defaultUndeclaredPolicy(this);
-      const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
-      rejectDuplicateSecretNames(this, entries);
-      // The engine validated every $NAME reference in both modes and, in
-      // apply mode, resolved and masked the plaintexts before any section
-      // ran; the sealed-write path reads them through the run's apply arm.
-      const run = beginRun(ctx);
-      await reconcileSecrets(run, this, scope, { entries, policy, defaultPolicy });
-      return run.result;
-    },
+    plan,
   };
+  return section;
 }

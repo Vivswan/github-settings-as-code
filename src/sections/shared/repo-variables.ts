@@ -12,32 +12,26 @@
  */
 
 import { z } from "zod";
-import type { UndeclaredPolicyList } from "../../types.js";
+import type { SettingsFile } from "../../schema.js";
+import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsVariableConfig } from "../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../agents_variables/schema.js";
 import { parseLive } from "../contract/live.js";
-import {
-  beginRun,
-  defaultUndeclaredPolicy,
-  loosen,
-  type SectionContext,
-  type SectionResult,
-  undeclaredPolicy,
-} from "../contract/module.js";
+import { defaultUndeclaredPolicy, loosen, undeclaredPolicy } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import { call, listAllEnveloped, rejectDuplicates } from "../contract/requests.js";
+import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
+import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
 import {
   LiveVariable,
-  reconcileVariables,
+  planVariables,
   type VariableEntry,
-  type VariablesScope,
-  type VariablesScopeOps,
+  type VariablesPlanScope,
   variableKey,
 } from "./variables-engine.js";
 
 /** The section keys the factory may mint, each with its API path segment. */
-type RepoVariablesKey = "actions_variables" | "agents_variables";
+export type RepoVariablesKey = "actions_variables" | "agents_variables";
 
 /**
  * Each family's path segment under /repos/{owner}/{repo}, keyed by section:
@@ -85,6 +79,7 @@ type RepoVariablesEndpoints<P extends VariablesSegment> = {
     readonly route: `GET /repos/{owner}/{repo}/${P}/variables`;
     readonly statuses: { readonly 200: string };
     readonly pageSize: number;
+    readonly primaryRead: { readonly notFound: "denied" };
   };
   readonly create: {
     readonly route: `POST /repos/{owner}/{repo}/${P}/variables`;
@@ -100,8 +95,42 @@ type RepoVariablesEndpoints<P extends VariablesSegment> = {
   };
 };
 
+/** The declared value of one family's section, exactly as the settings document types it. */
+type RepoVariablesDeclared<K extends RepoVariablesKey> = Exclude<SettingsFile[K], undefined>;
+
+/**
+ * One family's plan() over exactly its own dictionary and declared value (the
+ * registry's exactness lockstep); indexed by K so the generic factory can
+ * assign its one SharedPlan to it.
+ */
+type RepoVariablesPlan<K extends RepoVariablesKey> = {
+  [F in RepoVariablesKey]: (
+    ctx: PlanContext<RepoVariablesEndpoints<VariablesSegment<F>>>,
+    declared: RepoVariablesDeclared<F>,
+  ) => Promise<SectionPlan<PlannedOp<RepoVariablesEndpoints<VariablesSegment<F>>>>>;
+}[K];
+
+/** Every family's routes as one dictionary; see repo-secrets.ts for why the plan is written over it. */
+type WideEndpoints = RepoVariablesEndpoints<VariablesSegment>;
+
 /** The declared value every family accepts: the entry list, plain or wrapped. */
-type RepoVariablesDeclared = VariableEntry[] | UndeclaredPolicyList<VariableEntry>;
+type WideDeclared = VariableEntry[] | UndeclaredPolicyList<VariableEntry>;
+
+/** The one plan the factory builds, over the wide dictionary. */
+type SharedPlan = (
+  ctx: PlanContext<WideEndpoints>,
+  declared: WideDeclared,
+) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
+
+/** Mutual assignability - equality up to structure, in both directions. */
+type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/** Compile-time pin: the shared plan IS each family's exact plan (the repo-secrets.ts pin). */
+type _SharedPlanIsEveryFamilyPlan = MustBeNever<
+  {
+    [K in RepoVariablesKey]: Invariant<SharedPlan, RepoVariablesPlan<K>> extends true ? never : K;
+  }[RepoVariablesKey]
+>;
 
 /** The module shape repoVariablesSection() mints (SectionModule<K> at the registry). */
 export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
@@ -110,12 +139,12 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly permission: { readonly repo: readonly [PatResource] };
   readonly endpoints: RepoVariablesEndpoints<VariablesSegment<K>>;
   readonly shape: z.ZodType;
-  run(ctx: SectionContext, declared: RepoVariablesDeclared): Promise<SectionResult>;
+  readonly plan: RepoVariablesPlan<K>;
 }
 
 /**
  * Mint one repository-level variable family's section module. Everything the
- * families share - the upsert-by-case-insensitive-name run, the engine
+ * families share - the upsert-by-case-insensitive-name plan, the engine
  * wiring, the delete-undeclared-by-default posture (variables are readable,
  * recreatable configuration; the wrapped `undeclared: keep` form softens
  * deletion to notes) - lives here once, and the routes derive from the key
@@ -138,6 +167,9 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
       // This list endpoint caps per_page at 30 (not the standard 100); asking
       // for more would be silently clamped and truncate the walk to one page.
       pageSize: 30,
+      // A fine-grained token conceals a denied list as 404, which is a
+      // denial here: the section stops instead of reading "no variables".
+      primaryRead: { notFound: "denied" },
     },
     create: {
       route: `POST /repos/{owner}/{repo}/${pathSegment}/variables`,
@@ -153,31 +185,59 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     },
   };
 
-  // The engine's four operations, built here where the routes are known so
-  // the params contract compile-checks ({name} on update/remove). The
-  // request helpers resolve path params from the ROUTE type, which stays
-  // parametric on P inside this generic body, so the ops read the dictionary
-  // through the constraint-widened view - each route becomes the finite
-  // union over every family segment, on which PathParams resolves.
-  const wide: RepoVariablesEndpoints<VariablesSegment> = endpoints;
-  const ops: VariablesScopeOps = {
-    list: async (ctx, section) =>
-      parseLive(
-        section,
-        wide.list,
-        z.array(LiveVariable),
-        await listAllEnveloped(ctx, section, wide.list, "variables"),
-      ),
-    create: (ctx, section, _name, payload) => call(ctx, section, wide.create, { payload }),
-    update: (ctx, section, names, payload) =>
-      call(ctx, section, wide.update, { params: { name: names.live }, payload }),
-    remove: (ctx, section, liveName) =>
-      call(ctx, section, wide.remove, { params: { name: liveName } }),
+  const wide: WideEndpoints = endpoints;
+  const plan: SharedPlan = async (ctx, declared) => {
+    const defaultPolicy = defaultUndeclaredPolicy(section);
+    const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
+    // Variable names are case-insensitive on GitHub, so two entries differing
+    // only in case name the same variable and would fight on every run.
+    rejectDuplicates(
+      section,
+      entries,
+      (variable) => variableKey(variable.name),
+      (variable) => variable.name,
+    );
+    // The engine's operations, built here where the routes are known so the
+    // params contract compile-checks ({name} on update/remove).
+    type Op = PlannedOp<WideEndpoints>;
+    const scope: VariablesPlanScope<
+      Extract<Op, { role: "create" }>,
+      Extract<Op, { role: "update" }>,
+      Extract<Op, { role: "remove" }>
+    > = {
+      label: key,
+      noun,
+      list: async () =>
+        parseLive(
+          section,
+          wide.list,
+          z.array(LiveVariable),
+          await ctx.read.list.listAllEnveloped("variables"),
+        ),
+      create: (write) => ({
+        role: "create",
+        payload: write.payload,
+        drift: write.drift,
+        change: write.change,
+      }),
+      update: (write) => ({
+        role: "update",
+        params: { name: write.names.live },
+        payload: write.payload,
+        drift: write.drift,
+        change: write.change,
+      }),
+      remove: (deletion) => ({
+        role: "remove",
+        params: { name: deletion.name },
+        drift: deletion.drift,
+        change: deletion.change,
+      }),
+    };
+    return planVariables(scope, { entries, policy, defaultPolicy });
   };
 
-  const scope: VariablesScope = { label: key, noun, ops };
-
-  return {
+  const section: RepoVariablesSectionModule<K> = {
     key,
     // Undeclared variables are deleted by default, loudly on purpose; the
     // wrapped `undeclared: keep` form downgrades each to a note.
@@ -185,20 +245,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     permission: { repo: [resource] },
     endpoints,
     shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
-    async run(ctx, declared): Promise<SectionResult> {
-      const run = beginRun(ctx);
-      const defaultPolicy = defaultUndeclaredPolicy(this);
-      const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
-      // Variable names are case-insensitive on GitHub, so two entries differing
-      // only in case name the same variable and would fight on every run.
-      rejectDuplicates(
-        this,
-        entries,
-        (variable) => variableKey(variable.name),
-        (variable) => variable.name,
-      );
-      await reconcileVariables(run, this, scope, { entries, policy, defaultPolicy });
-      return run.result;
-    },
+    plan,
   };
+  return section;
 }

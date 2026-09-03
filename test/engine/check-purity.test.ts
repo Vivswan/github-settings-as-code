@@ -12,6 +12,7 @@ import { describe, expect, test } from "bun:test";
 import { runForRepo, validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { SectionKey } from "../../src/schema.js";
 import { SECTION_KEYS } from "../../src/schema.js";
+import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../e2e/mock/secrets.js";
 import { silentIo } from "../io-fake.js";
 import { MockApi } from "../mock-api.js";
 
@@ -115,18 +116,21 @@ const ROUTES = {
   },
   "GET /repos/o/r/actions/permissions": { data: { enabled: true, allowed_actions: "selected" } },
   "GET /repos/o/r/actions/permissions/access": { data: { access_level: "none" } },
-  "GET /repos/o/r/actions/secrets?per_page=100&page=1": {
-    data: { total_count: 0, secrets: [] },
-  },
-  "GET /repos/o/r/dependabot/secrets?per_page=100&page=1": {
-    data: { total_count: 0, secrets: [] },
-  },
-  "GET /repos/o/r/codespaces/secrets?per_page=100&page=1": {
-    data: { total_count: 0, secrets: [] },
-  },
-  "GET /repos/o/r/agents/secrets?per_page=100&page=1": {
-    data: { total_count: 0, secrets: [] },
-  },
+  // Each secret family's plan reads its sealing key beside the list (the
+  // key is closed over by the planned sealed PUTs, in every mode), so the
+  // key routes exist here too; both are reads.
+  ...Object.fromEntries(
+    ["actions", "dependabot", "codespaces", "agents"].flatMap((segment) => [
+      [
+        `GET /repos/o/r/${segment}/secrets?per_page=100&page=1`,
+        { data: { total_count: 0, secrets: [] } },
+      ],
+      [
+        `GET /repos/o/r/${segment}/secrets/public-key`,
+        { data: { key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY } },
+      ],
+    ]),
+  ),
   "GET /repos/o/r/actions/workflows?per_page=100&page=1": {
     data: {
       total_count: 1,

@@ -1,7 +1,8 @@
 /**
  * The apply-idempotence proof engine, beside its tables file
  * (apply-idempotence.ts, which declares WHICH sections compare before writing
- * and WHICH endpoints always rewrite): the state snapshots, the write
+ * and maps the always-rewrite ENDPOINTS to their mock state families; the
+ * flag itself lives on each EndpointDecl): the state snapshots, the write
  * classifiers, the corpus-level unconditional-write witness, and
  * assertApplyIdempotent, the re-run driver runScenario invokes for
  * expect.fixpoint: "apply_idempotent". The engine never spawns children
@@ -149,14 +150,9 @@ export function changedFamilies(before: Map<string, string>, after: Map<string, 
 }
 
 /**
- * Classify the mutating requests a SECOND apply issued, one failure line per
- * offender: a write matching no section endpoint is report/core traffic that
- * has no business in an idempotence re-run, and a write to a
- * compare-before-write section (COMPARE_BEFORE_WRITE) proves the engine's
- * payload and its read-back no longer round-trip - that section diffs live
- * state first, and the live state already matched. Writes to unconditional-PUT
- * sections pass (their state stability is asserted separately). Exported for
- * direct testing, so the zero-write assertion is provably able to fire.
+ * One failure per second-apply write that is outside every section endpoint
+ * or hits a compare-before-write section. Unconditional-PUT sections and
+ * alwaysRewrite endpoints (the writes missingSecondApplyRewrites demands) pass.
  */
 export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
   const failures: string[] = [];
@@ -166,6 +162,9 @@ export function secondApplyWriteFailures(writes: LoggedRequest[]): string[] {
       failures.push(
         `apply-idempotence: second apply wrote outside any section endpoint: ${renderRequest(write, false)}`,
       );
+      continue;
+    }
+    if (endpointForRequest(write.method, write.pathname)?.alwaysRewrite === true) {
       continue;
     }
     if (COMPARE_BEFORE_WRITE[section]) {
@@ -297,9 +296,9 @@ export function missingSecondApplyRewrites(
  * to be a fixpoint. Three properties, each its own regression class:
  *   - the second apply exits 0: a fresh apply over converged state must not
  *     trip over its own output;
- *   - no compare-before-write section writes (COMPARE_BEFORE_WRITE): those
- *     sections diff live state before writing, so a write here means the
- *     engine's payload and its read-back no longer round-trip;
+ *   - no compare-before-write section writes (COMPARE_BEFORE_WRITE) beyond
+ *     its alwaysRewrite endpoints: any other write there means the payload
+ *     and its read-back no longer round-trip;
  *   - the mock state is unchanged family by family: unconditional-PUT sections
  *     may write again, but a second apply must rewrite the SAME state.
  * A final check-mode run then converges (exit 0, zero writes) - the same proof

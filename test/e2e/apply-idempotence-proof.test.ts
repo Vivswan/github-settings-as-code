@@ -71,6 +71,19 @@ describe("secondApplyWriteFailures (apply-idempotence zero-write subset)", () =>
     ).toEqual([]);
   });
 
+  test("an alwaysRewrite write on a compare-before-write section passes; its siblings still fire", () => {
+    // The PUT the other half of the proof demands must pass; the unflagged
+    // DELETE on the same family still fails, so the exemption is the flag,
+    // not the section.
+    const secretPut = write("PUT", "/repos/e2e-owner/e2e-repo/actions/secrets/DEPLOY_TOKEN");
+    const secretDelete = write("DELETE", "/repos/e2e-owner/e2e-repo/actions/secrets/STALE");
+    expect(secondApplyWriteFailures([secretPut])).toEqual([]);
+    const failures = secondApplyWriteFailures([secretPut, secretDelete]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("DELETE /repos/e2e-owner/e2e-repo/actions/secrets/STALE");
+    expect(failures[0]).toContain('"actions_secrets"');
+  });
+
   test("a write matching no section endpoint fires the outside-section failure", () => {
     // Report traffic (the issue channel) is the realistic offender: an
     // idempotence re-run must not deliver a report at all.
@@ -111,7 +124,7 @@ describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)",
 
   test("a re-issued secret PUT passes; other sections' writes never bind", () => {
     // A rulesets PUT on the first run creates no re-write obligation - only
-    // always-rewrite sections do.
+    // alwaysRewrite endpoints bind.
     expect(
       missingSecondApplyRewrites(
         [secretPut, write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000")],

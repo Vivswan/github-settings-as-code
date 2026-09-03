@@ -10,6 +10,7 @@ import { collectSecretValues, targetSecretSource } from "../../src/engine/secret
 import { type Io, maskRegistry } from "../../src/io.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
+import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../e2e/mock/secrets.js";
 import { MockApi } from "../mock-api.js";
 
 /** The operator defaults under test: one fleet secret fanned out to targets. */
@@ -281,6 +282,10 @@ describe("runForRepo with merged provenance", () => {
     const api = new MockApi({
       "GET /repos/o/r/actions/secrets?per_page=100&page=1": {
         data: { total_count: 0, secrets: [] },
+      },
+      // The plan reads the sealing key beside the list in every mode.
+      "GET /repos/o/r/actions/secrets/public-key": {
+        data: { key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY },
       },
     });
     const { io } = captureIo();
