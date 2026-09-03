@@ -33,7 +33,7 @@ export interface SectionPermission {
 }
 
 /** Human-facing label for each PAT resource, as shown in the token UI. */
-const RESOURCE_LABEL: Record<PatResource, string> = {
+export const RESOURCE_LABEL: Record<PatResource, string> = {
   administration: "Administration",
   issues: "Issues",
   environments: "Environments",
@@ -54,7 +54,7 @@ const RESOURCE_LABEL: Record<PatResource, string> = {
 };
 
 /** Human-facing label for each PAT organization resource. */
-const RESOURCE_LABEL_ORG: Record<NonNullable<SectionPermission["org"]>, string> = {
+export const RESOURCE_LABEL_ORG: Record<NonNullable<SectionPermission["org"]>, string> = {
   members: "Members",
 };
 

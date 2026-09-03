@@ -6,13 +6,14 @@ branding:
   color: blue
 
 inputs:
+  # BEGIN GENERATED: action-inputs (bun run build:action-docs; edit src/action/inputs.ts)
   token:
     description: >-
-      Token used for the API calls. Most sections need a fine-grained PAT
-      with Administration read/write on the repository - the default
-      GITHUB_TOKEN can never hold that permission.
+      Token used for the API calls. Most sections need a fine-grained PAT with
+      Administration read/write on the repository - the default GITHUB_TOKEN
+      can never hold that permission.
     required: false
-    default: ${{ github.token }}
+    default: "${{ github.token }}"
   repository:
     description: >-
       Target repository (owner/name). Defaults to the current repository.
@@ -26,120 +27,75 @@ inputs:
       .github/settings.yml, so overriding it alongside repos or repos-dir
       fails the run.
     required: false
-    default: .github/settings.yml
+    default: ".github/settings.yml"
   mode:
     description: >-
       apply (mutate) or check (report drift, exit 1 on any). check makes no
       settings changes, though a private report may still be delivered.
     required: false
-    default: apply
+    default: "apply"
   on-missing-permission:
     description: >-
-      fail (default) or warn. Under warn, sections the token cannot access
-      are skipped with a warning and the run stays green (partial success).
+      fail (default) or warn. Under warn, sections the token cannot access are
+      skipped with a warning and the run stays green (partial success).
     required: false
-    default: fail
+    default: "fail"
   required-sections:
     description: >-
       Comma-separated section names that must fully apply even under
-      on-missing-permission: warn (minimum requirements). Every name must
-      also be allowed by the "sections" input when that allowlist is set;
-      a required section the allowlist excludes is rejected up front,
-      because the run could never attempt it.
+      on-missing-permission: warn (minimum requirements). Every name must also
+      be allowed by the "sections" input when that allowlist is set; a
+      required section the allowlist excludes is rejected up front, because
+      the run could never attempt it.
     required: false
     default: ""
   sections:
-    description: Optional comma-separated allowlist of sections to process.
+    description: >-
+      Optional comma-separated allowlist of sections to process.
     required: false
     default: ""
   api-version:
     description: >-
-      X-GitHub-Api-Version header value. Override to opt into a newer REST
-      API version before this action defaults to it.
+      X-GitHub-Api-Version header value. Override to opt into a newer REST API
+      version before this action defaults to it.
     required: false
     default: "2022-11-28"
   repos:
     description: >-
-      Multi-repo remote mode: comma- or newline-separated owner/name
-      targets, each applied from its own .github/settings.yml (default
-      branch), or "*" alone to discover every repository the token's user
-      owns, filterable via the visibility, archived, forks, exclude,
-      topics, and affiliation inputs. Combinable with repos-dir; a
-      repos-dir file for the same repository wins.
-    required: false
-    default: ""
-  visibility:
-    description: >-
-      Keeps only repositories of this visibility in repos: "*" discovery.
-      One of all (default), public, private, or internal; internal is
-      matched client-side (Enterprise only). Fails if set without
-      repos: "*".
-    required: false
-    default: ""
-  archived:
-    description: >-
-      Archived-repository policy for repos: "*" discovery. One of skip
-      (default; settings writes fail on archived repositories), include,
-      or only (mostly useful with mode: check). Fails if set without
-      repos: "*".
-    required: false
-    default: ""
-  forks:
-    description: >-
-      Fork policy for repos: "*" discovery. One of include (default),
-      exclude, or only. Fails if set without repos: "*".
-    required: false
-    default: ""
-  exclude:
-    description: >-
-      Comma- or newline-separated wildcard patterns removing repositories
-      from repos: "*" discovery. "*" matches any characters; a pattern
-      containing "/" matches the full owner/name, any other the name
-      alone. Case-insensitive. Fails if set without repos: "*".
-    required: false
-    default: ""
-  topics:
-    description: >-
-      Comma- or newline-separated topics; repos: "*" discovery keeps only
-      repositories carrying at least one of them. Unrelated to the topics
-      settings section. Fails if set without repos: "*".
-    required: false
-    default: ""
-  affiliation:
-    description: >-
-      Comma-separated affiliations for repos: "*" discovery, passed to
-      the GitHub /user/repos listing. Any of owner, collaborator,
-      organization_member; the list replaces the default (owner), so use
-      owner,collaborator to widen rather than move discovery. Fails if
-      set without repos: "*".
+      Multi-repo remote mode: comma- or newline-separated owner/name targets,
+      each applied from its own .github/settings.yml (default branch), or "*"
+      alone to discover every repository the token's user owns, filterable via
+      the visibility, archived, forks, exclude, topics, and affiliation
+      inputs. Combinable with repos-dir; a repos-dir file for the same
+      repository wins.
     required: false
     default: ""
   repos-dir:
     description: >-
-      Multi-repo central mode: a directory in the checked-out admin
-      repository holding per-repo settings files - <name>.yml (same owner
-      as this repository) or <owner>/<name>.yml. Requires actions/checkout.
+      Multi-repo central mode: a directory in the checked-out admin repository
+      holding per-repo settings files - <name>.yml (same owner as this
+      repository) or <owner>/<name>.yml. Requires actions/checkout.
     required: false
     default: ""
   defaults-file:
     description: >-
-      YAML file deep-merged UNDER every multi-repo target's settings.
-      Target keys win; objects merge, arrays and scalars replace; a target
-      section set to null opts that repository out of the defaults section.
-      Multi-repo mode only; fails when set without repos or repos-dir.
+      YAML file deep-merged UNDER every multi-repo target's settings. Target
+      keys win; objects merge, arrays and scalars replace; a target section
+      set to null opts that repository out of the defaults section. Multi-repo
+      mode only; fails when set without repos or repos-dir.
     required: false
     default: ""
   private-repos:
     description: >-
-      redact (default) or show. Under redact, private and internal targets
-      are hidden from this run's public logs, summary, and outputs: their
-      slug becomes a "private repository #N" placeholder, live values and
-      error bodies are replaced with "hidden (private repository)", and each
-      slug is registered with the runner's secret masker. A target equal to
+      redact (default) or show. Under redact, private and internal targets are
+      hidden from this run's public logs, summary, and outputs: their slug
+      becomes a "private repository #N" placeholder, live values and error
+      bodies are replaced with "hidden (private repository)", and each slug is
+      registered with the runner's secret masker. A target equal to
       GITHUB_REPOSITORY is never redacted. show reveals everything (today's
       behavior); only use it when the run's logs are not publicly readable.
     required: false
-    default: redact
+    default: "redact"
   private-report:
     description: >-
       none (default), issue, issue-on-failure, or artifact. Delivers the full
@@ -147,9 +103,9 @@ inputs:
       private or internal (an unknown visibility is redacted but excluded from
       delivery). Under issue, each such target's report is delivered as a
       reused, marker-labelled issue on that target repository itself (the one
-      GitHub-private channel a public run has): the body is replaced every run,
-      and the issue is opened when the target fails or drifts and closed when
-      it is healthy. issue-on-failure is the quiet variant: a failing or
+      GitHub-private channel a public run has): the body is replaced every
+      run, and the issue is opened when the target fails or drifts and closed
+      when it is healthy. issue-on-failure is the quiet variant: a failing or
       drifting target gets the same issue, but a healthy run only closes a
       still-open issue from a previous failure and otherwise writes nothing -
       no issue ever appears on a repository that never needed attention
@@ -165,32 +121,79 @@ inputs:
       private-repos: show. Report delivery writes even in mode: check, and its
       failure never changes the run's result.
     required: false
-    default: none
+    default: "none"
   report-public-key:
     description: >-
-      The age recipient (an "age1..." public key) the artifact channel encrypts
-      every report to; safe to commit in the workflow. Generate a keypair with
-      "age-keygen -o key.txt", keep key.txt secret, and decrypt a downloaded
-      artifact with "age -d -i key.txt private-report.md.age". Required when
-      private-report is artifact and rejected otherwise.
+      The age recipient (an "age1..." public key) the artifact channel
+      encrypts every report to; safe to commit in the workflow. Generate a
+      keypair with "age-keygen -o key.txt", keep key.txt secret, and decrypt a
+      downloaded artifact with "age -d -i key.txt private-report.md.age".
+      Required when private-report is artifact and rejected otherwise.
     required: false
     default: ""
+  visibility:
+    description: >-
+      Keeps only repositories of this visibility in repos: "*" discovery. One
+      of all (default), public, private, or internal; internal is matched
+      client-side (Enterprise only). Fails if set without repos: "*".
+    required: false
+    default: ""
+  archived:
+    description: >-
+      Archived-repository policy for repos: "*" discovery. One of skip
+      (default; settings writes fail on archived repositories), include, or
+      only (mostly useful with mode: check). Fails if set without repos: "*".
+    required: false
+    default: ""
+  forks:
+    description: >-
+      Fork policy for repos: "*" discovery. One of include (default), exclude,
+      or only. Fails if set without repos: "*".
+    required: false
+    default: ""
+  exclude:
+    description: >-
+      Comma- or newline-separated wildcard patterns removing repositories from
+      repos: "*" discovery. "*" matches any characters; a pattern containing
+      "/" matches the full owner/name, any other the name alone.
+      Case-insensitive. Fails if set without repos: "*".
+    required: false
+    default: ""
+  topics:
+    description: >-
+      Comma- or newline-separated topics; repos: "*" discovery keeps only
+      repositories carrying at least one of them. Unrelated to the topics
+      settings section. Fails if set without repos: "*".
+    required: false
+    default: ""
+  affiliation:
+    description: >-
+      Comma-separated affiliations for repos: "*" discovery, passed to the
+      GitHub /user/repos listing. Any of owner, collaborator,
+      organization_member; the list replaces the default (owner), so use
+      owner,collaborator to widen rather than move discovery. Fails if set
+      without repos: "*".
+    required: false
+    default: ""
+# END GENERATED: action-inputs
 
 outputs:
+  # BEGIN GENERATED: action-outputs (bun run build:action-docs; edit src/action/io.ts)
   result:
     description: >-
-      applied | partial | clean | drift | failed (worst-of across all
-      targets in multi-repo mode, where skipped can also appear).
+      applied | partial | clean | drift | failed (worst-of across all targets
+      in multi-repo mode, where skipped can also appear).
   skipped-sections:
     description: >-
-      Comma-separated sections skipped for missing permissions (deduped
-      union across targets in multi-repo mode).
+      Comma-separated sections skipped for missing permissions (deduped union
+      across targets in multi-repo mode).
   repos-result:
     description: >-
       Multi-repo mode only: JSON map of owner/name to {result, source,
-      skippedSections}. A redacted private target is keyed by its
-      "private repository #N" placeholder instead of its slug. Empty in
-      single-repo mode.
+      skippedSections}. A redacted private target is keyed by its "private
+      repository #N" placeholder instead of its slug. Empty in single-repo
+      mode.
+# END GENERATED: action-outputs
 
 runs:
   using: node24

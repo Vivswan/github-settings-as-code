@@ -21,11 +21,10 @@ import {
   PROBOT_PARITY_KEYS,
   SECTION_KEYS,
   SettingsFile as SettingsFileSchema,
-  UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { countWord, defaultClaimProblems, deleteEnumerationProblems } from "./claims.js";
-import { fencedBlocks, sectionLines, tableRows } from "./markdown.js";
+import { fencedBlocks, sectionLines } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -451,65 +450,6 @@ describe("forward-compatibility closed-sections claim", () => {
       if (!closed.includes(key)) {
         expect(sentence).not.toContain(`\`${key}\``);
       }
-    }
-  });
-});
-
-describe("knobbed-section count prose", () => {
-  const word = countWord(UNDECLARED_POLICY_SECTIONS.length);
-  const capitalized = word.charAt(0).toUpperCase() + word.slice(1);
-  const policyDoc = readFileSync(join(ROOT, "docs", "reference", "undeclared-policy.md"), "utf8");
-
-  test("the undeclared-policy guide's intro counts and names every knobbed section", () => {
-    const intro = policyDoc.slice(0, policyDoc.indexOf("\n## "));
-    expect(
-      intro.includes(`${capitalized} sections list`),
-      `the guide's intro must say "${capitalized} sections list"`,
-    ).toBe(true);
-    for (const key of UNDECLARED_POLICY_SECTIONS) {
-      expect(intro.includes(`\`${key}\``), `the guide's intro omits \`${key}\``).toBe(true);
-    }
-    // The layering boundary paragraph restates the count in words.
-    expect(
-      policyDoc.includes(`The ${word} top-level section lists`),
-      `the layering boundary must say "The ${word} top-level section lists"`,
-    ).toBe(true);
-  });
-
-  test("the guide's intro names ONLY knobbed sections", () => {
-    // The inclusion loop above cannot catch prose still naming a section
-    // that LOST its knob; scope the negative check to the intro so the
-    // rest of the page stays free to mention any section.
-    const intro = policyDoc.slice(0, policyDoc.indexOf("\n## "));
-    const knobbed = new Set<string>(UNDECLARED_POLICY_SECTIONS);
-    for (const key of SECTION_KEYS) {
-      if (!knobbed.has(key)) {
-        expect(
-          intro.includes(`\`${key}\``),
-          `the intro names \`${key}\`, which carries no undeclared knob`,
-        ).toBe(false);
-      }
-    }
-  });
-
-  test("the guide's Defaults table has exactly one row per knobbed section, stating its default", () => {
-    const rows = tableRows(
-      sectionLines(policyDoc, "Defaults per section", "docs/reference/undeclared-policy.md"),
-    );
-    const byKey = new Map(
-      rows.map((cells) => [(cells[0] ?? "").replace(/`/g, ""), cells[1] ?? ""]),
-    );
-    // Size equality first: the Map would silently collapse a duplicated row,
-    // and "exactly one row per section" is the claim under test.
-    expect(byKey.size).toBe(rows.length);
-    expect([...byKey.keys()].sort()).toEqual([...UNDECLARED_POLICY_SECTIONS].sort());
-    const defaults = new Map(SECTIONS.map((section) => [section.key, section.undeclaredDefault]));
-    for (const key of UNDECLARED_POLICY_SECTIONS) {
-      const cell = byKey.get(key) ?? "";
-      expect(
-        cell.startsWith(defaults.get(key) ?? ""),
-        `the Defaults row for \`${key}\` must state its "${defaults.get(key)}" default, got: ${cell}`,
-      ).toBe(true);
     }
   });
 });

@@ -122,6 +122,7 @@ The [examples cookbook](docs/start/examples.md) is the full tour: a full-feature
 
 ## Inputs
 
+<!-- BEGIN GENERATED: readme-inputs-table (bun run build:action-docs; edit src/action/inputs.ts) -->
 | Input | Default | Meaning |
 |---|---|---|
 | `token` | `github.token` | Token for the API calls (see [Token permissions](docs/reference/permissions.md)) |
@@ -144,6 +145,7 @@ The [examples cookbook](docs/start/examples.md) is the full tour: a full-feature
 | `exclude` | (empty) | Discovery-only: `*` wildcard patterns (name, or `owner/name` if the pattern has a `/`) to drop |
 | `topics` | (empty) | Discovery-only: keep repositories carrying at least one listed topic |
 | `affiliation` | `owner` | Discovery-only: `owner`, `collaborator`, `organization_member` (comma list) |
+<!-- END GENERATED: readme-inputs-table -->
 
 Outputs: `result` (<!-- BEGIN GENERATED: readme-outputs (bun run build:docs; derived from REPO_RESULTS in src/engine/orchestrate.ts) -->`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear<!-- END GENERATED: readme-outputs -->), `skipped-sections`, and `repos-result` (multi-repo mode: a JSON map of `owner/name` to `{result, source, skippedSections}`). A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](#private-repositories).
 

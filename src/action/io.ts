@@ -7,11 +7,27 @@ import * as core from "@actions/core";
 import type { Io } from "../io.js";
 
 /**
- * Every action output name run() writes, and the single source the
- * action.yml `outputs` block is pinned against. Typing setOutput's `name`
- * to this union makes a typo at a call site a compile error.
+ * Every action output run() writes, with the description the action.yml
+ * `outputs` block is generated from (bun run build:action-docs).
  */
-export const OUTPUT_NAMES = ["result", "skipped-sections", "repos-result"] as const;
+export const OUTPUT_DECLS = {
+  result: {
+    description:
+      "applied | partial | clean | drift | failed (worst-of across all targets in multi-repo mode, where skipped can also appear).",
+  },
+  "skipped-sections": {
+    description:
+      "Comma-separated sections skipped for missing permissions (deduped union across targets in multi-repo mode).",
+  },
+  "repos-result": {
+    description:
+      'Multi-repo mode only: JSON map of owner/name to {result, source, skippedSections}. A redacted private target is keyed by its "private repository #N" placeholder instead of its slug. Empty in single-repo mode.',
+  },
+} as const satisfies Record<string, { readonly description: string }>;
+
+export type OutputName = keyof typeof OUTPUT_DECLS;
+
+export const OUTPUT_NAMES = Object.keys(OUTPUT_DECLS) as readonly OutputName[];
 
 // @actions/core owns workflow-command escaping (%, CR, LF); the static map
 // keeps the namespace access tree-shakeable (biome noDynamicNamespaceImportAccess).

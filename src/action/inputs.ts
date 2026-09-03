@@ -37,45 +37,178 @@ import {
  */
 export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
 
-/** Default `mode`, pinned against action.yml by the contract test. */
-export const DEFAULT_MODE = "apply";
-
-/** Default `on-missing-permission`, pinned against action.yml. */
-export const DEFAULT_ON_MISSING_PERMISSION = "fail";
+/**
+ * One action input: its action.yml entry (description, default) and its
+ * README Inputs row (summary, shown default). The runner applies the
+ * defaults; parseConfig() falls back to them outside the runner.
+ */
+export interface InputDecl {
+  /** The action.yml description; the generator folds it to width. */
+  readonly description: string;
+  /** The action.yml default, verbatim (an empty string means "unset"). */
+  readonly default: string;
+  /** The README Inputs table's Meaning cell: the one-line gist. */
+  readonly summary: string;
+  /**
+   * The README Default cell when the raw default is not what a reader should
+   * see: an expression, a prose fallback, or the effective value the code
+   * supplies for an empty raw default (the discovery filters).
+   */
+  readonly shownDefault?: string;
+}
 
 /**
- * Every input name parseConfig() reads, and the single source the
- * action.yml `inputs` block is pinned against (both directions). Keep this
- * in sync when adding or removing an input; the action-yml contract test
- * fails loudly on drift.
+ * Every input parseConfig() reads, in the order the README and action.yml
+ * list them: the single source both are generated from
+ * (bun run build:action-docs), so adding an input here is the whole declaration.
  */
-export const INPUT_NAMES = [
-  "token",
-  "repository",
-  "settings-file",
-  "mode",
-  "on-missing-permission",
-  "required-sections",
-  "sections",
-  "api-version",
-  "repos",
-  "visibility",
-  "archived",
-  "forks",
-  "exclude",
-  "topics",
-  "affiliation",
-  "repos-dir",
-  "defaults-file",
-  "private-repos",
-  "private-report",
-  "report-public-key",
-] as const;
+export const INPUT_DECLS = {
+  token: {
+    description:
+      "Token used for the API calls. Most sections need a fine-grained PAT with Administration read/write on the repository - the default GITHUB_TOKEN can never hold that permission.",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a workflow expression the runner resolves, not a JS template
+    default: "${{ github.token }}",
+    summary: "Token for the API calls (see [Token permissions](docs/reference/permissions.md))",
+    shownDefault: "`github.token`",
+  },
+  repository: {
+    description:
+      "Target repository (owner/name). Defaults to the current repository. Single-repo mode only; cannot be combined with repos or repos-dir.",
+    default: "",
+    summary: "Target `owner/name` (single-repo mode only)",
+    shownDefault: "current repo",
+  },
+  "settings-file": {
+    description:
+      "Path to the settings YAML file. Single-repo mode only; multi-repo targets read repos-dir files or each repository's own .github/settings.yml, so overriding it alongside repos or repos-dir fails the run.",
+    default: DEFAULT_SETTINGS_FILE,
+    summary: "Settings file path (single-repo mode only)",
+  },
+  mode: {
+    description:
+      "apply (mutate) or check (report drift, exit 1 on any). check makes no settings changes, though a private report may still be delivered.",
+    default: "apply",
+    summary:
+      "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered)",
+  },
+  "on-missing-permission": {
+    description:
+      "fail (default) or warn. Under warn, sections the token cannot access are skipped with a warning and the run stays green (partial success).",
+    default: "fail",
+    summary: "`warn` skips sections the token cannot access (partial success)",
+  },
+  "required-sections": {
+    description:
+      'Comma-separated section names that must fully apply even under on-missing-permission: warn (minimum requirements). Every name must also be allowed by the "sections" input when that allowlist is set; a required section the allowlist excludes is rejected up front, because the run could never attempt it.',
+    default: "",
+    summary: "Sections that must fully apply even under `warn`",
+  },
+  sections: {
+    description: "Optional comma-separated allowlist of sections to process.",
+    default: "",
+    summary: "Comma-separated allowlist of sections to process",
+    shownDefault: "(all declared)",
+  },
+  "api-version": {
+    description:
+      "X-GitHub-Api-Version header value. Override to opt into a newer REST API version before this action defaults to it.",
+    default: DEFAULT_API_VERSION,
+    summary: "`X-GitHub-Api-Version` header; override to opt into a newer REST API version",
+  },
+  repos: {
+    description:
+      'Multi-repo remote mode: comma- or newline-separated owner/name targets, each applied from its own .github/settings.yml (default branch), or "*" alone to discover every repository the token\'s user owns, filterable via the visibility, archived, forks, exclude, topics, and affiliation inputs. Combinable with repos-dir; a repos-dir file for the same repository wins.',
+    default: "",
+    summary:
+      "Multi-repo remote mode: `owner/name` list (comma/newline), or `*` to discover owned repos",
+  },
+  "repos-dir": {
+    description:
+      "Multi-repo central mode: a directory in the checked-out admin repository holding per-repo settings files - <name>.yml (same owner as this repository) or <owner>/<name>.yml. Requires actions/checkout.",
+    default: "",
+    summary: "Multi-repo central mode: directory of per-repo settings files in this repo",
+  },
+  "defaults-file": {
+    description:
+      "YAML file deep-merged UNDER every multi-repo target's settings. Target keys win; objects merge, arrays and scalars replace; a target section set to null opts that repository out of the defaults section. Multi-repo mode only; fails when set without repos or repos-dir.",
+    default: "",
+    summary: "YAML merged under every multi-repo target's settings (multi-repo mode only)",
+  },
+  "private-repos": {
+    description:
+      "redact (default) or show. Under redact, private and internal targets are hidden from this run's public logs, summary, and outputs: their slug becomes a \"private repository #N\" placeholder, live values and error bodies are replaced with \"hidden (private repository)\", and each slug is registered with the runner's secret masker. A target equal to GITHUB_REPOSITORY is never redacted. show reveals everything (today's behavior); only use it when the run's logs are not publicly readable.",
+    default: DEFAULT_PRIVATE_REPOS,
+    summary:
+      "`redact` hides private and internal targets from public logs, summary, and outputs; `show` reveals them",
+  },
+  "private-report": {
+    description:
+      "none (default), issue, issue-on-failure, or artifact. Delivers the full unredacted report only for redacted targets the visibility probe proves private or internal (an unknown visibility is redacted but excluded from delivery). Under issue, each such target's report is delivered as a reused, marker-labelled issue on that target repository itself (the one GitHub-private channel a public run has): the body is replaced every run, and the issue is opened when the target fails or drifts and closed when it is healthy. issue-on-failure is the quiet variant: a failing or drifting target gets the same issue, but a healthy run only closes a still-open issue from a previous failure and otherwise writes nothing - no issue ever appears on a repository that never needed attention (though a declared labels section still creates the marker label, and a manually-removed marker label defers the close: the next failing run reattaches it, and the first healthy run after that closes the issue). Under artifact, those reports are concatenated, age-encrypted to report-public-key, and uploaded as one workflow artifact (settings-as-code-private-report) for readers who hold the key but no GitHub access to the targets; the artifact channel needs the Actions artifact service, so on GitHub Enterprise Server it warns and uploads nothing. Applies only to redacted targets, so it is rejected alongside private-repos: show. Report delivery writes even in mode: check, and its failure never changes the run's result.",
+    default: DEFAULT_PRIVATE_REPORT,
+    summary:
+      "`issue` delivers each redacted target's full report to a reused issue on that target repository; `issue-on-failure` writes that issue only when the target fails or drifts, closing it once healthy; `artifact` uploads all reports as one age-encrypted workflow artifact; rejected with `private-repos: show`",
+  },
+  "report-public-key": {
+    description:
+      'The age recipient (an "age1..." public key) the artifact channel encrypts every report to; safe to commit in the workflow. Generate a keypair with "age-keygen -o key.txt", keep key.txt secret, and decrypt a downloaded artifact with "age -d -i key.txt private-report.md.age". Required when private-report is artifact and rejected otherwise.',
+    default: "",
+    summary:
+      "The `age1...` recipient the `artifact` channel encrypts reports to; required with `private-report: artifact`, rejected otherwise",
+  },
+  visibility: {
+    description:
+      'Keeps only repositories of this visibility in repos: "*" discovery. One of all (default), public, private, or internal; internal is matched client-side (Enterprise only). Fails if set without repos: "*".',
+    default: "",
+    summary: "Discovery-only: keep `public`, `private`, or `internal` repositories",
+    shownDefault: `\`${DEFAULT_DISCOVERY_FILTERS.visibility}\``,
+  },
+  archived: {
+    description:
+      'Archived-repository policy for repos: "*" discovery. One of skip (default; settings writes fail on archived repositories), include, or only (mostly useful with mode: check). Fails if set without repos: "*".',
+    default: "",
+    summary: "Discovery-only: `skip`, `include`, or `only` archived repositories",
+    shownDefault: `\`${DEFAULT_DISCOVERY_FILTERS.archived}\``,
+  },
+  forks: {
+    description:
+      'Fork policy for repos: "*" discovery. One of include (default), exclude, or only. Fails if set without repos: "*".',
+    default: "",
+    summary: "Discovery-only: `include`, `exclude`, or `only` forks",
+    shownDefault: `\`${DEFAULT_DISCOVERY_FILTERS.forks}\``,
+  },
+  exclude: {
+    description:
+      'Comma- or newline-separated wildcard patterns removing repositories from repos: "*" discovery. "*" matches any characters; a pattern containing "/" matches the full owner/name, any other the name alone. Case-insensitive. Fails if set without repos: "*".',
+    default: "",
+    summary:
+      "Discovery-only: `*` wildcard patterns (name, or `owner/name` if the pattern has a `/`) to drop",
+  },
+  topics: {
+    description:
+      'Comma- or newline-separated topics; repos: "*" discovery keeps only repositories carrying at least one of them. Unrelated to the topics settings section. Fails if set without repos: "*".',
+    default: "",
+    summary: "Discovery-only: keep repositories carrying at least one listed topic",
+  },
+  affiliation: {
+    description:
+      'Comma-separated affiliations for repos: "*" discovery, passed to the GitHub /user/repos listing. Any of owner, collaborator, organization_member; the list replaces the default (owner), so use owner,collaborator to widen rather than move discovery. Fails if set without repos: "*".',
+    default: "",
+    summary: "Discovery-only: `owner`, `collaborator`, `organization_member` (comma list)",
+    shownDefault: `\`${DEFAULT_DISCOVERY_FILTERS.affiliation.join(",")}\``,
+  },
+} as const satisfies Record<string, InputDecl>;
 
-function input(name: (typeof INPUT_NAMES)[number]): string {
+type InputName = keyof typeof INPUT_DECLS;
+
+function input(name: InputName): string {
   // @actions/core reads INPUT_<NAME> (uppercased, spaces to underscores -
   // dashes survive, e.g. `settings-file` -> INPUT_SETTINGS-FILE) and trims.
   return core.getInput(name);
+}
+
+/** The input, or its declared default when the step (or a local run) left it unset. */
+function inputOrDefault(name: InputName): string {
+  return input(name) || INPUT_DECLS[name].default;
 }
 
 /**
@@ -95,7 +228,7 @@ export const FILTER_INPUTS = [
   "affiliation",
 ] as const satisfies readonly (keyof DiscoveryFilters)[];
 
-/** Read a discovery filter input, whose names are a subset of INPUT_NAMES. */
+/** A discovery filter input name, a subset of the declared inputs. */
 type FilterInput = (typeof FILTER_INPUTS)[number];
 
 /** Compile-time lockstep: a DiscoveryFilters field missing from FILTER_INPUTS fails here. */
@@ -106,7 +239,7 @@ type _UnlistedFilter = MustBeNever<Exclude<keyof DiscoveryFilters, FilterInput>>
  * from, so the type, the check, and the error message cannot drift apart.
  */
 function readEnum<T extends string>(
-  name: (typeof INPUT_NAMES)[number],
+  name: InputName,
   allowed: readonly T[],
   fallback: T,
   noun: string,
@@ -219,7 +352,7 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   // The workflow's own repository, read once and reused for the self slug, the
   // run URL, the central-mode admin owner, and the single-repo fallback target.
   const githubRepository = process.env.GITHUB_REPOSITORY ?? "";
-  const mode = input("mode") || DEFAULT_MODE;
+  const mode = inputOrDefault("mode");
   if (mode !== "apply" && mode !== "check") {
     return {
       error: `the "mode" input is "${mode}", which is not a supported mode. Set it to "apply" (mutate settings) or "check" (report drift only)`,
@@ -228,7 +361,7 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   const onMissingPermission = readEnum(
     "on-missing-permission",
     ["fail", "warn"] as const,
-    DEFAULT_ON_MISSING_PERMISSION,
+    INPUT_DECLS["on-missing-permission"].default,
     "policy",
   );
   if (typeof onMissingPermission !== "string") {
@@ -284,11 +417,11 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
       };
     }
   }
-  const apiVersion = input("api-version") || DEFAULT_API_VERSION;
+  const apiVersion = inputOrDefault("api-version");
   const privateRepos = readEnum(
     "private-repos",
     PRIVATE_REPOS_POLICIES,
-    DEFAULT_PRIVATE_REPOS,
+    INPUT_DECLS["private-repos"].default,
     "private-repository policy",
   );
   if (typeof privateRepos !== "string") {
@@ -297,7 +430,7 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   const privateReport = readEnum(
     "private-report",
     PRIVATE_REPORT_CHANNELS,
-    DEFAULT_PRIVATE_REPORT,
+    INPUT_DECLS["private-report"].default,
     "private-report channel",
   );
   if (typeof privateReport !== "string") {
@@ -393,7 +526,7 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   const reposInput = input("repos");
   const reposDir = input("repos-dir");
   const defaultsFile = input("defaults-file");
-  const settingsFile = input("settings-file") || DEFAULT_SETTINGS_FILE;
+  const settingsFile = inputOrDefault("settings-file");
 
   if (reposInput || reposDir) {
     // Multi-repo mode: the single-repo inputs make no sense here.

@@ -1,6 +1,10 @@
 # The undeclared policy
 
-Fifteen sections list the live resources sitting next to the declared ones: `labels`, `autolinks`, `collaborators`, `actions_variables`, `agents_variables`, `rulesets`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`, `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, and `secret_scanning_custom_patterns`. Each has a default answer for a live resource the settings file does not declare, and each accepts a wrapped form that overrides it per file. This page is the normative statement of that policy: the knob, the defaults per section, and how it layers with a multi-repo defaults file. The README's [Sections table](../../README.md#sections) states each section's default in its Undeclared default column; this page says what the defaults mean and how to change them.
+<!-- BEGIN GENERATED: policy-count-sentence (bun run build:action-docs; derived from UNDECLARED_POLICY_SECTIONS) -->
+Fifteen sections list the live resources sitting next to the declared ones: `labels`, `autolinks`, `collaborators`, `actions_variables`, `agents_variables`, `rulesets`, `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`, and `secret_scanning_custom_patterns`.
+<!-- END GENERATED: policy-count-sentence -->
+
+Each has a default answer for a live resource the settings file does not declare, and each accepts a wrapped form that overrides it per file. This page is the normative statement of that policy: the knob, the defaults per section, and how it layers with a multi-repo defaults file. The README's [Sections table](../../README.md#sections) states each section's default in its Undeclared default column; this page says what the defaults mean and how to change them.
 
 ## The two forms
 
@@ -28,6 +32,7 @@ The wrapper takes only these two keys. Unlike entry fields, which pass through t
 
 ## Defaults per section
 
+<!-- BEGIN GENERATED: policy-defaults-table (bun run build:action-docs; edit .github/scripts/gen-action-docs.ts) -->
 | Section | Default | The override buys you |
 |---|---|---|
 | `labels` | delete (Probot parity) | `keep`: manage a core set without deleting ad-hoc labels |
@@ -36,15 +41,16 @@ The wrapper takes only these two keys. Unlike entry fields, which pass through t
 | `actions_variables` | delete | `keep`: declare the managed variables, tolerate the rest |
 | `agents_variables` | delete | `keep`: declare the managed variables, tolerate the rest |
 | `rulesets` | keep | `delete`: make the file the complete ruleset inventory |
-| `milestones` | keep | `delete`: prune stale milestones, with the caveat below |
-| `webhooks` | keep (integrations create their own hooks) | `delete`: make the file the complete hook inventory |
-| `deploy_keys` | keep (deployment tooling installs its own keys, and deleting a live key breaks whatever authenticates with it) | `delete`: make the file the complete key inventory |
 | `actions_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `dependabot_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `codespaces_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `agents_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
+| `milestones` | keep | `delete`: prune stale milestones, with the caveat below |
+| `webhooks` | keep (integrations create their own hooks) | `delete`: make the file the complete hook inventory |
 | `custom_properties` | keep (an unset can revert to an org default the file does not model) | `delete`: make the file the complete property-value inventory, unsetting the rest |
+| `deploy_keys` | keep (deployment tooling installs its own keys, and deleting a live key breaks whatever authenticates with it) | `delete`: make the file the complete key inventory |
 | `secret_scanning_custom_patterns` | keep | `delete`: prune stale patterns - the pattern's alerts are resolved (never deleted), keeping the audit trail |
+<!-- END GENERATED: policy-defaults-table -->
 
 The owner exemption for collaborators does not move with the knob: under `undeclared: delete` (the default) every undeclared direct collaborator is removed except the repository owner.
 
@@ -78,4 +84,4 @@ a target declaring `labels: [{name: incident}]` gets `undeclared: keep` with onl
 
 There is no way to set a policy without declaring an inventory: a defaults wrapper requires `entries`, and `entries: []` is itself a declaration. A defaults-file section applies to every target the run processes, including targets whose settings file omits the section entirely - that is what a defaults file is. (A repository with no settings file at all is skipped outright, defaults included, and reported as skipped - the defaults never reach it.) So `entries: []` under a policy declares an empty inventory fleet-wide. With `undeclared: keep` that only produces notes; with `undeclared: delete` it deletes every eligible resource on every processed target that does not declare the section itself. To harden a fleet's policy to delete, declare the fleet's entries in the same defaults section, so omitting targets keep them. A check run shows the resulting deletions as drift before an apply performs them.
 
-One boundary to know about: HAVING a policy and INHERITING one are different things. The fifteen top-level section lists take the policy through the multi-repo defaults merge as described above. The nested `environments[].variables`, `environments[].secrets`, `environments[].deployment_branch_policies`, and `environments[].deployment_protection_rules` lists have their own knobs, set per environment entry with their own fixed defaults - they never inherit a policy from their section, from another list, or through the defaults merge.
+One boundary to know about: HAVING a policy and INHERITING one are different things. The top-level section lists take the policy through the multi-repo defaults merge as described above. The nested `environments[].variables`, `environments[].secrets`, `environments[].deployment_branch_policies`, and `environments[].deployment_protection_rules` lists have their own knobs, set per environment entry with their own fixed defaults - they never inherit a policy from their section, from another list, or through the defaults merge.
