@@ -489,72 +489,6 @@ describe("anchorReleasePr", () => {
     };
     expect(config["last-release-sha"]).toBe(fx.mergeSha);
   });
-
-  test("a release-as pin the release PR proves spent is retired inside the PR", () => {
-    const fx = seedFixture();
-    const pinner = clone(fx.root, fx.origin, "anchor-pinner");
-    write(
-      pinner,
-      "release-please-config.json",
-      `${JSON.stringify(
-        {
-          "last-release-sha": fx.mergeSha,
-          packages: { ".": { "release-type": "simple", draft: true, "release-as": "2.2.0" } },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    const mainHead = commitAll(pinner, "chore: pin the next release as 2.2.0");
-    git(pinner, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-    createReleasePrBranch(fx, mainHead, "2.2.0");
-    const worker = clone(fx.root, fx.origin, "anchor-retire");
-    const result = anchorReleasePr({ cwd: worker, sourceSha: mainHead });
-    expect(result.changed).toBe(true);
-    expect(result.reason).toContain("retired the spent release-as 2.2.0");
-    const check = clone(fx.root, fx.origin, "anchor-retire-check");
-    git(check, "checkout", "--quiet", "release-please--branches--main");
-    const config = JSON.parse(readFileSync(join(check, "release-please-config.json"), "utf8")) as {
-      "last-release-sha": string;
-      packages: Record<string, Record<string, unknown>>;
-    };
-    expect(config["last-release-sha"]).toBe(mainHead);
-    expect(config.packages["."]?.["release-as"]).toBeUndefined();
-    // Main's own config keeps the pin until the merge lands the retirement.
-    expect(readFileSync(join(check, "release-please-config.json"), "utf8")).not.toContain(
-      "release-as",
-    );
-    git(check, "checkout", "--quiet", "main");
-    expect(readFileSync(join(check, "release-please-config.json"), "utf8")).toContain("release-as");
-  });
-
-  test("a release PR without a spent pin anchors without touching release-as", () => {
-    const fx = seedFixture();
-    const pinner = clone(fx.root, fx.origin, "anchor-fresh-pin");
-    write(
-      pinner,
-      "release-please-config.json",
-      `${JSON.stringify(
-        {
-          "last-release-sha": fx.mergeSha,
-          packages: { ".": { "release-type": "simple", draft: true, "release-as": "3.0.0" } },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    const mainHead = commitAll(pinner, "chore: pin a future release as 3.0.0");
-    git(pinner, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-    // The release PR cuts 2.2.0; the 3.0.0 pin is not spent by it.
-    createReleasePrBranch(fx, mainHead, "2.2.0");
-    const worker = clone(fx.root, fx.origin, "anchor-keep-pin");
-    const result = anchorReleasePr({ cwd: worker, sourceSha: mainHead });
-    expect(result.changed).toBe(true);
-    expect(result.reason).not.toContain("release-as");
-    const check = clone(fx.root, fx.origin, "anchor-keep-pin-check");
-    git(check, "checkout", "--quiet", "release-please--branches--main");
-    expect(readFileSync(join(check, "release-please-config.json"), "utf8")).toContain("3.0.0");
-  });
 });
 
 describe("boundaryCheck", () => {
@@ -720,25 +654,6 @@ describe("boundaryCheck", () => {
     write(dir, "src/marker.ts", "export const marker = 7;\n");
     commitAll(dir, "chore(main): release pipeline documentation");
     expect(boundaryCheck(dir).boundary).toBe(fx.mergeSha);
-  });
-
-  test("a release-as pin equal to the shipped version fails loudly", () => {
-    const fx = seedFixture();
-    const dir = clone(fx.root, fx.origin, "boundary-release-as");
-    write(
-      dir,
-      "release-please-config.json",
-      `${JSON.stringify(
-        {
-          "last-release-sha": fx.mergeSha,
-          packages: { ".": { "release-type": "simple", draft: true, "release-as": "2.1.0" } },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    commitAll(dir, "chore: forget to drop release-as after 2.1.0");
-    expect(() => boundaryCheck(dir)).toThrow(/remove it/);
   });
 });
 

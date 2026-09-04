@@ -23,13 +23,12 @@
  *                both point at the packaged child of the merge commit, and
  *                that commit's tree carries a non-empty lib/index.js.
  *   anchor       Advance last-release-sha in release-please-config.json on
- *                the release PR branch to the merge parent, and retire a
- *                release-as pin the branch's manifest proves spent.
- *                Load-bearing: version tags live on packaged children that
- *                are NOT on main, and release-please's commit walk only
- *                sees main, so without the anchor the next release PR would
- *                count every commit since the previous boundary - stale
- *                changelog, wrong version.
+ *                the release PR branch to the merge parent. Load-bearing:
+ *                version tags live on packaged children that are NOT on
+ *                main, and release-please's commit walk only sees main, so
+ *                without the anchor the next release PR would count every
+ *                commit since the previous boundary - stale changelog,
+ *                wrong version.
  *   boundary-check
  *                Fail unless last-release-sha matches the newest release
  *                merge on the checked-out history: a failed anchor (or a
@@ -406,13 +405,6 @@ export interface AnchorResult {
  * merge, so the recorded parent cannot be stale at merge time). The parent
  * is as good a boundary as the merge commit: the walk then includes the
  * merge itself, a chore commit the changelog hides.
- *
- * The same commit retires a release-as pin the branch's manifest proves
- * spent (the pin equals the version this PR releases): left in place, the
- * merged config would trip boundary-check's release-as tripwire on the
- * release push itself and park all-green. Resolved here, at the one point
- * that builds the config the merge lands, instead of guarded at every
- * consumer.
  */
 export function anchorReleasePr(options: AnchorOptions): AnchorResult {
   const { cwd, sourceSha, attempts = 3 } = options;
@@ -444,28 +436,11 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
     }
     const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as {
       "last-release-sha"?: unknown;
-      packages?: Record<string, { "release-as"?: unknown }>;
     };
-    const edits: string[] = [];
-    if (config["last-release-sha"] !== sourceSha) {
-      config["last-release-sha"] = sourceSha;
-      edits.push(`anchored at ${sourceSha}`);
-    }
-    const rootPackage = config.packages?.["."];
-    const releaseAs = rootPackage?.["release-as"];
-    if (rootPackage !== undefined && releaseAs !== undefined) {
-      const manifest = JSON.parse(readFileSync(join(cwd, MANIFEST_FILE), "utf8")) as Record<
-        string,
-        unknown
-      >;
-      if (releaseAs === manifest["."]) {
-        delete rootPackage["release-as"];
-        edits.push(`retired the spent release-as ${String(releaseAs)}`);
-      }
-    }
-    if (edits.length === 0) {
+    if (config["last-release-sha"] === sourceSha) {
       return { changed: false, reason: "already anchored" };
     }
+    config["last-release-sha"] = sourceSha;
     writeFileSync(join(cwd, CONFIG_FILE), `${JSON.stringify(config, null, 2)}\n`);
     configureIdentity(cwd);
     git(cwd, "add", CONFIG_FILE);
@@ -475,7 +450,7 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
       "-m",
       "chore: anchor release-please to this release cycle's base",
       "-m",
-      "last-release-sha records the merge parent so the squash merge itself lands the next cycle's boundary on main: version tags live on packaged children that are not on main, so release-please cannot find the boundary by tag. A release-as pin this PR's own version proves spent is retired by the same commit, so the merge cannot land a pin that would park the pipeline.",
+      "last-release-sha records the merge parent so the squash merge itself lands the next cycle's boundary on main: version tags live on packaged children that are not on main, so release-please cannot find the boundary by tag.",
     );
     // Recheck main immediately before pushing: the fetch above can lose a
     // race where a newer push's run already refreshed and anchored the
@@ -487,7 +462,7 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
     }
     try {
       git(cwd, "push", "origin", `HEAD:${branchRef}`);
-      return { changed: true, reason: `${RELEASE_PR_BRANCH}: ${edits.join("; ")}` };
+      return { changed: true, reason: `${RELEASE_PR_BRANCH}: anchored at ${sourceSha}` };
     } catch (error) {
       // release-please force-pushed a refresh mid-anchor; reapply on it.
       console.error(`anchor push attempt ${attempt}/${attempts} lost: ${String(error)}`);
@@ -515,23 +490,7 @@ export function boundaryCheck(cwd: string): { boundary: string } {
   }
   const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as {
     "last-release-sha"?: unknown;
-    packages?: Record<string, { "release-as"?: unknown }>;
   };
-  // A release-as pin equal to the shipped version means someone forgot to
-  // remove it after its release: release-please would propose that version
-  // forever and releases would silently stop.
-  const releaseAs = config.packages?.["."]?.["release-as"];
-  if (releaseAs !== undefined) {
-    const manifest = JSON.parse(readFileSync(join(cwd, MANIFEST_FILE), "utf8")) as Record<
-      string,
-      unknown
-    >;
-    if (releaseAs === manifest["."]) {
-      throw new Error(
-        `release-as ${JSON.stringify(releaseAs)} in ${CONFIG_FILE} equals the shipped version in ${MANIFEST_FILE}; it did its job - remove it, or no further release will ever be proposed.`,
-      );
-    }
-  }
   // The grep narrows candidates cheaply (it matches any message line with
   // the prefix); the strict subject regex then decides, so an ordinary
   // commit like "chore(main): release pipeline documentation" can neither

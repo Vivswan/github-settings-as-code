@@ -7,9 +7,9 @@
 # (see .github/scripts/release-pipeline.ts): called in the same run that
 # refreshed the release PR, GITHUB_SHA is exactly the main head the refresh
 # was built on, and the anchor commits it into the PR branch as
-# last-release-sha (retiring a spent release-as pin with it). The script
-# re-verifies against origin - main still at this head, the branch built on
-# it - before committing, and rechecks main before pushing.
+# last-release-sha. The script re-verifies against origin - main still at
+# this head, the branch built on it - before committing, and rechecks main
+# before pushing.
 # Token caveat: pushes to the PR branch made with the default github.token
 # do NOT re-trigger the PR's CI checks (the close/reopen note in
 # release.yml); with REPO_PLATFORM_TOKEN they do.
