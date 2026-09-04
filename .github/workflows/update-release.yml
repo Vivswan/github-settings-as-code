@@ -20,7 +20,7 @@
 #      bundle and schema to the draft (draft-first because published
 #      releases freeze their assets),
 #   4. confirms origin's refs and the draft's assets before the managed
-#      publish stage attests every asset (attestation.jsonl; public
+#      publish stage attests every asset (attestation.json; public
 #      repositories only, by fleet policy) and flips the release live.
 #      When the draft is published, GitHub binds it to the existing
 #      vX.Y.Z tag, so the release lands on the packaged commit.
@@ -38,7 +38,7 @@
 # Finish a dead run by re-running its FAILED jobs. The same steps by hand
 # (<merge sha> is the draft release's target commitish; a hand-packaged
 # commit carries no workflow-run trailer, and a hand-finished release no
-# attestation.jsonl - both need the workflow's identity):
+# attestation.json - both need the workflow's identity):
 #   git checkout <merge sha>
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts package
@@ -159,16 +159,19 @@ jobs:
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts verify
       # Publishing freezes the asset list, so an incomplete one must stop
       # the pipeline here, while the release is still a draft (v2.0.0
-      # shipped assetless exactly this way). attestation.jsonl is the
+      # shipped assetless exactly this way). attestation.json is the
       # managed publish stage's asset: attached after this job, replaced on
-      # its reruns - ignore it rather than racing it.
+      # its reruns - ignore it rather than racing it. attestation.jsonl is
+      # its name before the template renamed it; a draft a pre-rename
+      # attempt left one on keeps it (the publish stage deletes only the
+      # current name), so it is ignored the same way.
       - name: Confirm the release carries both packaged assets
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
           assets="$(gh release view "$TAG" --json assets \
-            --jq '[.assets[].name | select(. != "attestation.jsonl")] | sort | join(" ")')"
+            --jq '[.assets[].name | select(. != "attestation.json" and . != "attestation.jsonl")] | sort | join(" ")')"
           expected="index.js settings.schema.json"
           if [ "$assets" != "$expected" ]; then
             echo "::error::release $TAG carries assets [$assets], expected [$expected]; re-run package-release before anything publishes."
