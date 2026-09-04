@@ -159,19 +159,21 @@ jobs:
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts verify
       # Publishing freezes the asset list, so an incomplete one must stop
       # the pipeline here, while the release is still a draft (v2.0.0
-      # shipped assetless exactly this way). attestation.json is the
-      # managed publish stage's asset: attached after this job, replaced on
-      # its reruns - ignore it rather than racing it. attestation.jsonl is
-      # its name before the template renamed it; a draft a pre-rename
-      # attempt left one on keeps it (the publish stage deletes only the
-      # current name), so it is ignored the same way.
+      # shipped assetless exactly this way). attestation.json is the managed
+      # publish stage's asset, attached after this job and replaced on its
+      # reruns, so the check ignores it. A legacy attestation.jsonl (the
+      # name before the template renamed it) is stale provenance that stage
+      # no longer cleans up, so it is deleted here before the check.
       - name: Confirm the release carries both packaged assets
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
+          if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx 'attestation.jsonl'; then
+            gh release delete-asset "$TAG" attestation.jsonl --yes
+          fi
           assets="$(gh release view "$TAG" --json assets \
-            --jq '[.assets[].name | select(. != "attestation.json" and . != "attestation.jsonl")] | sort | join(" ")')"
+            --jq '[.assets[].name | select(. != "attestation.json")] | sort | join(" ")')"
           expected="index.js settings.schema.json"
           if [ "$assets" != "$expected" ]; then
             echo "::error::release $TAG carries assets [$assets], expected [$expected]; re-run package-release before anything publishes."
