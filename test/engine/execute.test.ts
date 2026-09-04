@@ -422,6 +422,53 @@ describe("executePlan", () => {
     expect(captured).toBe(false);
   });
 
+  test("a before hook runs ahead of the request, and its throw fails the operation with nothing sent", async () => {
+    // The hook reads through the plan's port (an input a later operation
+    // needs, pinned ahead of this write); its failure leaves the request unsent.
+    const api = new MockApi({
+      "GET /repos/o/r/labels?per_page=100&page=1": { data: [{ name: "live" }] },
+    }).allowMutations("POST /repos/o/r/labels", "GRAPHQL ExecutorWrite");
+    const port = planContext(SECTION, api, REPO).read;
+    const seen: string[] = [];
+    const plan: SectionPlan = {
+      ops: [
+        {
+          role: "create",
+          before: async () => {
+            seen.push(JSON.stringify(await port.list.listAll()));
+          },
+          payload: { name: "bug" },
+          drift: ["labels[bug]: missing"],
+          change: 'created label "bug"',
+        },
+        {
+          role: "write",
+          before: () => {
+            throw new Error("the actor does not exist");
+          },
+          variables: {},
+          drift: ["toggle off"],
+          change: "flipped the toggle",
+        },
+      ],
+      notes: [],
+      drift: [],
+    };
+    const execution = await executePlan(plan, SECTION, api, REPO, TOOLS);
+    expect(execution).toMatchObject({
+      status: "failed",
+      changes: ['created label "bug"'],
+      landed: 1,
+    });
+    expect(errorOf(execution)).toContain("the actor does not exist");
+    expect(seen).toEqual(['[{"name":"live"}]']);
+    // The read ran before the first write; the second write never left.
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "GET /repos/o/r/labels?per_page=100&page=1",
+      "POST /repos/o/r/labels",
+    ]);
+  });
+
   test("a tolerated status renders the operation's own outcome, never throwFor's", async () => {
     // One tolerated 409 turns into a note (the plan goes on, no change line);
     // the next turns into the section's own failure advice. Neither reaches

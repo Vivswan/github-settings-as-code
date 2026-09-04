@@ -26,7 +26,14 @@ import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import { parseLive } from "../contract/live.js";
 import { loosen, type SectionMeta, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { type PlanContext, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
+import {
+  type ExecTools,
+  type Late,
+  type PlanContext,
+  type PlannedOp,
+  plainData,
+  type SectionPlan,
+} from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import {
   type BranchConfig,
@@ -222,6 +229,7 @@ const ENDPOINTS = {
     route: "GET /apps/{app_slug}",
     statuses: { 200: "the GitHub App", 404: "no App with this slug" },
     permission: "none",
+    phase: "execution",
   },
 } as const satisfies Record<string, EndpointDecl>;
 
@@ -297,10 +305,16 @@ const RULES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
 }`,
 });
 
-/** The repository's GraphQL node id, needed only to CREATE a wildcard rule. */
+/**
+ * The repository's GraphQL node id, needed only to CREATE a wildcard rule.
+ * Execution-phase, like the two actor lookups: a fine-grained denial answers
+ * NOT_FOUND, which none of the three tolerates, so they may only run where
+ * the section's posture puts the denial - at the first write.
+ */
 const REPO_LOOKUP = graphqlOp<{ owner: string; repo: string }>()({
   name: "BranchProtectionRepository",
   kind: "read",
+  phase: "execution",
   outcomes: { ok: "the repository's GraphQL node id" },
   query: `query BranchProtectionRepository($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) { id }
@@ -316,6 +330,7 @@ const REPO_LOOKUP = graphqlOp<{ owner: string; repo: string }>()({
 const ACTOR_USER = graphqlOp<{ owner: string; repo: string; login: string }>()({
   name: "BranchProtectionActorUser",
   kind: "read",
+  phase: "execution",
   outcomes: {
     ok: "the user's node id",
     NOT_FOUND: "no user with this login, or the token cannot see it",
@@ -332,6 +347,7 @@ const ACTOR_USER = graphqlOp<{ owner: string; repo: string; login: string }>()({
 const ACTOR_TEAM = graphqlOp<{ owner: string; repo: string; org: string; team: string }>()({
   name: "BranchProtectionActorTeam",
   kind: "read",
+  phase: "execution",
   outcomes: {
     ok: "the team's node id",
     NOT_FOUND: "no organization with this login, or the token cannot see it",
@@ -421,6 +437,12 @@ interface GraphqlRun {
   rules: LiveRules;
   repoId: string | null;
   actorIds: Map<string, string>;
+  /**
+   * Every bypass actor a planned mutation resolves at execution, appended
+   * by ruleVariables() as it seals one; plan() resolves them all ahead of
+   * the FIRST write, whichever entry they belong to.
+   */
+  lateActors: string[];
 }
 
 /** The plan context over this section's literal dictionaries. */
@@ -747,6 +769,7 @@ function routedKeyDrift(
  */
 async function resolveActorId(
   ctx: BranchesContext,
+  exec: ExecTools,
   graphqlRun: GraphqlRun,
   raw: string,
 ): Promise<string> {
@@ -762,6 +785,7 @@ async function resolveActorId(
   let id: unknown;
   if (actor.kind === "user") {
     const data = await ctx.read.actorUser.call(
+      exec,
       { ...repoVariables(ctx), login: actor.login },
       { describe: `resolving force-push bypass user "${raw}"` },
     );
@@ -769,6 +793,7 @@ async function resolveActorId(
     id = (data.user as Record<string, unknown> | null)?.id;
   } else if (actor.kind === "team") {
     const data = await ctx.read.actorTeam.call(
+      exec,
       { ...repoVariables(ctx), org: actor.org, team: actor.team },
       { describe: `resolving force-push bypass team "${raw}"` },
     );
@@ -784,7 +809,7 @@ async function resolveActorId(
     }
     id = team.id;
   } else {
-    const result = await ctx.read.appLookup.tryCall({
+    const result = await ctx.read.appLookup.tryCall(exec, {
       params: { app_slug: actor.slug },
       describe: `resolving force-push bypass App "${raw}"`,
     });
@@ -833,40 +858,71 @@ async function lateRuleId(ctx: BranchesContext, pattern: string): Promise<unknow
  */
 async function resolveActorIds(
   ctx: BranchesContext,
+  exec: ExecTools,
   graphqlRun: GraphqlRun,
   actors: readonly string[],
 ): Promise<string[]> {
   const ids: string[] = [];
   for (const actor of actors) {
-    ids.push(await resolveActorId(ctx, graphqlRun, actor));
+    ids.push(await resolveActorId(ctx, exec, graphqlRun, actor));
   }
   return ids;
 }
 
-/** The mutation input fields for a wildcard entry, routed keys resolved. */
-async function wildcardInputFields(
-  ctx: BranchesContext,
-  graphqlRun: GraphqlRun,
-  protection: BranchProtectionConfig,
-): Promise<Record<string, unknown>> {
+/** The mutation input fields for a wildcard entry the plan knows up front: every key but the actors. */
+function wildcardInput(protection: BranchProtectionConfig): Record<string, unknown> {
   const input = translateWildcardProtection(protection);
-  if (protection.force_push_bypassers !== undefined) {
-    input.bypassForcePushActorIds = await resolveActorIds(
-      ctx,
-      graphqlRun,
-      protection.force_push_bypassers,
-    );
-  }
   if (protection.required_deployments !== undefined) {
     Object.assign(input, deploymentInputFields(protection.required_deployments));
   }
   return input;
 }
 
+/** A rule mutation's variables: a value, or a thunk the executor seals right before the request. */
+type RuleVariables = { input: Record<string, unknown> } | Late<{ input: Record<string, unknown> }>;
+
+/**
+ * A rule mutation's variables: the plan-time `fields` plus what only the read
+ * port supplies at EXECUTION time - the bypass actors' node ids and any id
+ * `late` looks up (the repository's, a rule's the PUT ahead creates). Check
+ * mode must never issue those lookups: a fine-grained denial answers NOT_FOUND
+ * where the section's posture promises the denial surfaces at the first write.
+ * A value when nothing is late, so the idempotence proof compares it by field.
+ */
+function ruleVariables(
+  ctx: BranchesContext,
+  graphqlRun: GraphqlRun,
+  fields: Record<string, unknown>,
+  actors: readonly string[] | undefined,
+  late?: (exec: ExecTools) => Promise<Record<string, unknown>>,
+): RuleVariables {
+  if (actors === undefined && late === undefined) {
+    return { input: fields };
+  }
+  if (actors !== undefined) {
+    graphqlRun.lateActors.push(...actors);
+  }
+  // The actors resolve first: their reads select the repository's node id
+  // too, which spares a create its dedicated lookup (see adoptRepoId).
+  return async (exec) => ({
+    input: {
+      ...fields,
+      ...(actors === undefined
+        ? {}
+        : { bypassForcePushActorIds: await resolveActorIds(ctx, exec, graphqlRun, actors) }),
+      ...(late === undefined ? {} : await late(exec)),
+    },
+  });
+}
+
 /** The repository's node id: one an actor read already carried, else the dedicated lookup. */
-async function repositoryNodeId(ctx: BranchesContext, graphqlRun: GraphqlRun): Promise<string> {
+async function repositoryNodeId(
+  ctx: BranchesContext,
+  exec: ExecTools,
+  graphqlRun: GraphqlRun,
+): Promise<string> {
   if (graphqlRun.repoId === null) {
-    const data = await ctx.read.repoLookup.call(repoVariables(ctx), {
+    const data = await ctx.read.repoLookup.call(exec, repoVariables(ctx), {
       describe: "resolving the repository's GraphQL node id",
     });
     const id = (data.repository as Record<string, unknown> | null)?.id;
@@ -994,12 +1050,10 @@ export const branchesSection = {
     const needsGraphql = (branch: BranchConfig): boolean =>
       isWildcardPattern(branch.name) || hasRoutedGraphqlKeys(branch.protection);
     let entries: ClassifiedEntry[];
-    if (desired.some(needsGraphql)) {
-      const graphqlRun: GraphqlRun = {
-        rules: await fetchRules(ctx),
-        repoId: null,
-        actorIds: new Map(),
-      };
+    const graphqlRun: GraphqlRun | null = desired.some(needsGraphql)
+      ? { rules: await fetchRules(ctx), repoId: null, actorIds: new Map(), lateActors: [] }
+      : null;
+    if (graphqlRun !== null) {
       const declaredPatterns = new Set(desired.map((branch) => branch.name));
       for (const pattern of [...(graphqlRun.rules?.keys() ?? [])].sort()) {
         if (isWildcardPattern(pattern) && !declaredPatterns.has(pattern)) {
@@ -1027,6 +1081,22 @@ export const branchesSection = {
         continue;
       }
       await planLiteralEntry(ctx, this, entry.routed, entry.branch, plan);
+    }
+    // Every actor a planned mutation resolves at execution resolves ahead of
+    // the plan's FIRST write, whichever entry it belongs to: a misspelled
+    // actor fails while every branch's live protection is still untouched,
+    // and the mutations' thunks then find the ids cached.
+    const [lead, ...rest] = plan.ops;
+    if (graphqlRun !== null && graphqlRun.lateActors.length > 0 && lead !== undefined) {
+      plan.ops = [
+        {
+          ...lead,
+          before: async (exec) => {
+            await resolveActorIds(ctx, exec, graphqlRun, graphqlRun.lateActors);
+          },
+        },
+        ...rest,
+      ];
     }
     return plan;
   },
@@ -1187,20 +1257,41 @@ async function planLiteralEntry(
       );
     }
   }
-  if (routed === null) {
-    return;
+  if (routed !== null) {
+    planRoutedUpdate(ctx, routed.graphqlRun, plan, {
+      name: branch.name,
+      protection: branch.protection,
+      prefix,
+      putPlanned,
+    });
   }
-  const node = routed.graphqlRun.rules?.get(branch.name);
+}
+
+/**
+ * Plan a literal entry's rule mutation for its routed keys. Its bypass
+ * actors, when declared, seal into the mutation's variables at execution
+ * (ruleVariables), and plan() resolves them ahead of the section's first write.
+ */
+function planRoutedUpdate(
+  ctx: BranchesContext,
+  graphqlRun: GraphqlRun,
+  plan: BranchesPlan,
+  entry: {
+    name: string;
+    protection: BranchProtectionConfig;
+    prefix: string;
+    putPlanned: boolean;
+  },
+): void {
+  const { name, protection, prefix, putPlanned } = entry;
+  const { force_push_bypassers: forcePushBypassers, required_deployments: requiredDeployments } =
+    protection;
+  const node = graphqlRun.rules?.get(name);
   const routedKeys = [
     ...(forcePushBypassers === undefined ? [] : ["force_push_bypassers"]),
     ...(requiredDeployments === undefined ? [] : ["required_deployments"]),
   ].join(" and ");
-  const routedDrift = routedKeyDrift(
-    prefix,
-    branch.protection,
-    routed.graphqlRun.rules,
-    branch.name,
-  );
+  const routedDrift = routedKeyDrift(prefix, protection, graphqlRun.rules, name);
   if (routedDrift.length === 0 && putPlanned) {
     routedDrift.push(
       `${prefix}: ${routedKeys} re-applied after the protection PUT (GitHub does not document whether the PUT preserves them)`,
@@ -1210,37 +1301,28 @@ async function planLiteralEntry(
   if (drift === null) {
     return;
   }
-  // Actors resolve at plan time, so a misspelled actor fails the entry while
-  // the live protection is still untouched - never after the PUT replaced it.
-  const fields: Record<string, unknown> = {};
-  if (forcePushBypassers !== undefined) {
-    fields.bypassForcePushActorIds = await resolveActorIds(
-      ctx,
-      routed.graphqlRun,
-      forcePushBypassers,
-    );
-  }
-  if (requiredDeployments !== undefined) {
-    Object.assign(fields, deploymentInputFields(requiredDeployments));
-  }
+  const deploymentFields =
+    requiredDeployments === undefined ? {} : deploymentInputFields(requiredDeployments);
   plan.ops.push({
     role: "updateRule",
-    describe: `setting the GraphQL-only protection fields of branch "${branch.name}"`,
+    describe: `setting the GraphQL-only protection fields of branch "${name}"`,
     // A rule the plan-time fetch did not carry (the PUT planned above
     // creates it) is looked up once that operation has run.
     variables:
       node !== undefined
-        ? { input: { branchProtectionRuleId: node.id, ...fields } }
-        : async () => ({
-            input: {
-              branchProtectionRuleId: await lateRuleId(ctx, branch.name),
-              ...fields,
-            },
-          }),
+        ? ruleVariables(
+            ctx,
+            graphqlRun,
+            { branchProtectionRuleId: node.id, ...deploymentFields },
+            forcePushBypassers,
+          )
+        : ruleVariables(ctx, graphqlRun, deploymentFields, forcePushBypassers, async () => ({
+            branchProtectionRuleId: await lateRuleId(ctx, name),
+          })),
     drift,
     change: verifiedChange(
-      `set ${routedKeys} on "${branch.name}"`,
-      branch.name,
+      `set ${routedKeys} on "${name}"`,
+      name,
       requiredDeployments,
       "updateBranchProtectionRule",
     ),
@@ -1273,12 +1355,14 @@ async function planWildcardEntry(
     return;
   }
   const deployments = branch.protection.required_deployments;
+  const actors = branch.protection.force_push_bypassers;
+  const fields = wildcardInput(branch.protection);
   if (node === undefined) {
-    const fields = await wildcardInputFields(ctx, graphqlRun, branch.protection);
-    const repositoryId = await repositoryNodeId(ctx, graphqlRun);
     plan.ops.push({
       role: "createRule",
-      variables: { input: { repositoryId, pattern, ...fields } },
+      variables: ruleVariables(ctx, graphqlRun, { pattern, ...fields }, actors, async (exec) => ({
+        repositoryId: await repositoryNodeId(ctx, exec, graphqlRun),
+      })),
       describe: `creating the protection rule "${pattern}"`,
       drift: [
         `branches[${pattern}]: no live rule matches this pattern but the settings file declares protection; apply will create the rule`,
@@ -1302,10 +1386,14 @@ async function planWildcardEntry(
   if (drift === null) {
     return;
   }
-  const fields = await wildcardInputFields(ctx, graphqlRun, branch.protection);
   plan.ops.push({
     role: "updateRule",
-    variables: { input: { branchProtectionRuleId: node.id, ...fields } },
+    variables: ruleVariables(
+      ctx,
+      graphqlRun,
+      { branchProtectionRuleId: node.id, ...fields },
+      actors,
+    ),
     describe: `updating the protection rule "${pattern}"`,
     drift,
     change: verifiedChange(

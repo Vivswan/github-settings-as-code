@@ -832,11 +832,14 @@ export function markReportTitle(artifactDir: string, marker: string): void {
  * Write a failing scenario's inputs and observed I/O for debugging, and
  * return the directory so the CLI can point the reader at it. Keyed by
  * scenario name and pid so parallel or repeated runs never collide.
+ * `failures` is what report.md lists: the runner's own by default, or a
+ * caller's judgment of a run the runner itself passed (the fuzz oracle's).
  */
 function dumpArtifacts(
   scenario: Scenario,
   report: ScenarioReport,
   requests: LoggedRequest[],
+  failures: readonly string[] = report.failures,
 ): string {
   // Sanitize the scenario name to [a-z0-9-] so it cannot escape the .artifacts
   // root or collide via odd characters; a per-process counter disambiguates
@@ -855,6 +858,17 @@ function dumpArtifacts(
   writeFileSync(join(dir, "stderr.txt"), report.stderr);
   writeFileSync(join(dir, "summary.md"), report.summary);
   writeFileSync(join(dir, "requests.json"), JSON.stringify(requests, null, 2));
+  writeReport(dir, scenario, report, failures);
+  return dir;
+}
+
+/** The report.md the fuzz-issue action reads: title, directory, failures, exit code. */
+function writeReport(
+  dir: string,
+  scenario: Scenario,
+  report: ScenarioReport,
+  failures: readonly string[],
+): void {
   const md = [
     `# ${scenario.name}`,
     "",
@@ -862,10 +876,35 @@ function dumpArtifacts(
     "",
     "## Failures",
     "",
-    ...report.failures.map((f) => `- ${f.replace(/\n/g, "\n  ")}`),
+    ...failures.map((f) => `- ${f.replace(/\n/g, "\n  ")}`),
     "",
     `Exit code: ${report.exitCode}`,
   ].join("\n");
   writeFileSync(join(dir, "report.md"), `${md}\n`);
-  return dir;
+}
+
+/**
+ * The artifact directory a failing run reports, its report.md listing every
+ * failure judged against the run: the runner's own (which dumped the
+ * directory) and a caller's on top (the fuzz oracle's verdicts), or a fresh
+ * directory when only the caller failed a run the runner passed. The
+ * nightly's fuzz-issue action reads report.md, not the log, so a failure
+ * missing from it is a failure it cannot report.
+ */
+export function failureArtifacts(
+  scenario: Scenario,
+  report: ScenarioReport,
+  failures: readonly string[],
+): string | undefined {
+  if (failures.length === 0) {
+    return report.artifactDir;
+  }
+  if (report.artifactDir === undefined) {
+    return dumpArtifacts(scenario, report, report.requests, failures);
+  }
+  const extra = failures.filter((failure) => !report.failures.includes(failure));
+  if (extra.length > 0) {
+    writeReport(report.artifactDir, scenario, report, [...new Set(report.failures), ...extra]);
+  }
+  return report.artifactDir;
 }

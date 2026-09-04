@@ -9,15 +9,18 @@ import {
   checkLeaks,
   declaredBuildBundleScript,
   exitCodeFailure,
+  failureArtifacts,
   forbiddenPresent,
   insertReplay,
   isSubsequence,
   markReportTitle,
   parseGithubOutput,
   parseSummaryOutcomes,
+  type ScenarioReport,
   stripDebugLines,
   stripMaskLines,
 } from "./runner.js";
+import type { Scenario } from "./schema.js";
 
 describe("bundle build parity (harness vs production)", () => {
   test("the declared build:bundle script matches what the harness builds", () => {
@@ -323,6 +326,104 @@ describe("markReportTitle (counterfactual disambiguation)", () => {
       const lines = readFileSync(join(dir, "report.md"), "utf8").split("\n");
       expect(lines[0]).toBe("# fuzz-multi-42 (redaction counterfactual)");
       expect(lines.slice(1)).toEqual(["", "## Failures", "", "- leak", ""]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("failureArtifacts (a verdict the runner did not reach)", () => {
+  const scenario: Scenario = {
+    name: "fuzz-oracle-42",
+    tiers: ["mock"],
+    settings: {},
+    inputs: {},
+    denial_style: "fine_grained",
+    owner_kind: "org",
+    expect: { exit_code: 0 },
+  };
+  const passed: ScenarioReport = {
+    scenario: scenario.name,
+    ok: true,
+    failures: [],
+    exitCode: 0,
+    outputs: {},
+    summary: "",
+    stdout: "",
+    stderr: "",
+    requests: [],
+    faultsFired: {},
+    reposResult: {},
+    reruns: [],
+  };
+
+  test("a run the runner passed but a caller failed gets a report.md listing the caller's failures", () => {
+    const dir = failureArtifacts(scenario, passed, [
+      'branches: observed "failed" not in predicted {clean,drift}',
+    ]);
+    expect(dir).toBeDefined();
+    try {
+      const lines = readFileSync(join(dir as string, "report.md"), "utf8").split("\n");
+      expect(lines[0]).toBe("# fuzz-oracle-42");
+      expect(lines).toContain('- branches: observed "failed" not in predicted {clean,drift}');
+      // The same directory the runner's own dump writes, so the fuzz-issue
+      // action's upload step finds it.
+      expect(dir).toContain(join("test", "e2e", ".artifacts"));
+    } finally {
+      rmSync(dir as string, { recursive: true, force: true });
+    }
+  });
+
+  test("no failures means no directory, and the runner's own dump is never duplicated", () => {
+    expect(failureArtifacts(scenario, passed, [])).toBeUndefined();
+    const dumped = { ...passed, ok: false, artifactDir: "/already/dumped" };
+    expect(failureArtifacts(scenario, dumped, [])).toBe("/already/dumped");
+  });
+
+  test.each<[label: string, runnerFailures: string[], callerFailures: string[], listed: string[]]>([
+    [
+      "a caller failure on top of the runner's",
+      ["exit code 1 != expected 0"],
+      ["exit code 1 != expected 0", "labels: observed skipped, predicted failed"],
+      ["- exit code 1 != expected 0", "- labels: observed skipped, predicted failed"],
+    ],
+    [
+      "a duplicated runner failure beside a new caller failure",
+      ["leak", "leak"],
+      ["oracle: drift predicted"],
+      ["- leak", "- oracle: drift predicted"],
+    ],
+  ])(
+    "%s is merged into the existing report.md, deduplicated",
+    (_label, runnerFailures, callerFailures, listed) => {
+      const dir = mkdtempSync(join(tmpdir(), "failure-artifacts-"));
+      try {
+        writeFileSync(join(dir, "report.md"), "# stale\n");
+        const dumped: ScenarioReport = {
+          ...passed,
+          ok: false,
+          exitCode: 1,
+          failures: runnerFailures,
+          artifactDir: dir,
+        };
+        expect(failureArtifacts(scenario, dumped, callerFailures)).toBe(dir);
+        const lines = readFileSync(join(dir, "report.md"), "utf8").split("\n");
+        expect(lines[0]).toBe("# fuzz-oracle-42");
+        expect(lines.filter((line) => line.startsWith("- "))).toEqual(listed);
+        expect(lines).toContain("Exit code: 1");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("the runner's own failures alone leave its report.md untouched", () => {
+    const dir = mkdtempSync(join(tmpdir(), "failure-artifacts-"));
+    try {
+      writeFileSync(join(dir, "report.md"), "# the runner's own\n");
+      const dumped: ScenarioReport = { ...passed, ok: false, failures: ["leak"], artifactDir: dir };
+      expect(failureArtifacts(scenario, dumped, ["leak"])).toBe(dir);
+      expect(readFileSync(join(dir, "report.md"), "utf8")).toBe("# the runner's own\n");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

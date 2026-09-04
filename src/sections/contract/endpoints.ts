@@ -41,6 +41,16 @@ export type EndpointDecl =
       readonly accessGrade?: never;
       readonly alwaysRewrite?: never;
       readonly unverifiable?: never;
+      /**
+       * When the READ is issued. Omitted: while planning, so check mode and preflight meet
+       * it. "execution": only while EXECUTING a plan (a node id a mutation input needs),
+       * through bound helpers that take the ExecTools token only a thunk receives (see
+       * ReadPort in ./plan.ts), so plan() cannot call it and check mode never issues it;
+       * the e2e mock treats one in check mode as a violation. Such a read carries no
+       * primaryRead posture (denialPosture() rejects the pair): no denied first read can
+       * ever be classified from it.
+       */
+      readonly phase?: "execution";
     })
   | (EndpointDeclFields &
       Recurrence & {
@@ -51,6 +61,7 @@ export type EndpointDecl =
          */
         readonly permission?: SectionPermission | "none";
         readonly accessGrade?: never;
+        readonly phase?: never;
       })
   | GatedReadDecl;
 
@@ -74,6 +85,7 @@ export interface GatedReadDecl extends EndpointDeclFields {
   readonly accessGrade: "write";
   readonly alwaysRewrite?: never;
   readonly unverifiable?: never;
+  readonly phase?: never;
 }
 
 /** The fields both EndpointDecl arms share. */

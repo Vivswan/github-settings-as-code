@@ -17,11 +17,11 @@ import {
   defaultUndeclaredPolicy,
   denialPosture,
   endpointPermission,
+  planningReads,
   type SectionContext,
   type SectionMeta,
   type SectionModule,
   sectionGrant,
-  sectionOperations,
 } from "../../src/sections/contract/module.js";
 import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
 import type { PlanContext, SectionPlan } from "../../src/sections/contract/plan.js";
@@ -856,7 +856,7 @@ describe("handler contracts", () => {
       const primaries = Object.entries(section.endpoints).filter(
         ([, endpoint]) => endpoint.primaryRead !== undefined,
       );
-      const reads = sectionOperations(section).some((op) => op.wire === "read");
+      const reads = planningReads(section).length > 0;
       const posture = denialPosture(section);
       expect(primaries.length, `${section.key} primaryRead declarations`).toBe(reads ? 1 : 0);
       if (!reads) {
@@ -879,10 +879,12 @@ describe("handler contracts", () => {
         declaring.push(section.key);
       }
     }
-    // Every section with a REST read declares exactly one primaryRead.
+    // Every section with a REST read it issues while planning declares exactly one primaryRead.
     expect(declaring).toEqual(
       SECTIONS.filter((s) =>
-        Object.values(s.endpoints).some((e) => endpointMethod(e.route) === "GET"),
+        Object.values(s.endpoints).some(
+          (e) => endpointMethod(e.route) === "GET" && e.phase !== "execution",
+        ),
       ).map((s) => s.key),
     );
   });

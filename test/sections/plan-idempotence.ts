@@ -38,7 +38,8 @@ const SEALED = Symbol("a thunk the plan builds afresh on every pass");
  * a value comparison). A thunk's identity is that it exists - what it seals
  * is a secret the plan is not allowed to expose - so it folds to a marker,
  * as does a change thunk (it renders from a response the plan has not
- * seen). A capture hook counts by presence, a tolerance by its statuses.
+ * seen). A capture hook counts by presence, as does a before hook (what it
+ * reads is execution-time state), a tolerance by its statuses.
  */
 export function identityOf(op: SectionPlan["ops"][number]): unknown {
   const sealed = (value: unknown): unknown => (typeof value === "function" ? SEALED : value);
@@ -52,6 +53,7 @@ export function identityOf(op: SectionPlan["ops"][number]): unknown {
     change: sealed(op.change),
     describe: op.describe,
     capture: op.capture !== undefined,
+    before: op.before !== undefined,
     tolerate: op.tolerate === undefined ? undefined : { statuses: op.tolerate.statuses },
   };
 }

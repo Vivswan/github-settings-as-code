@@ -1,0 +1,42 @@
+# A token denied Administration under fine-grained denial: the protection
+# read 404s, which this section reads as "unprotected" (its declared posture),
+# so check reports drift and the denial surfaces only at apply's first write.
+# Both entries need GraphQL node ids for their writes - the wildcard the
+# repository's, the bypass actor the team's - and those lookups seal at
+# execution: check mode issues none of them, since the denied token answers
+# each with NOT_FOUND, which would fail the section on a read.
+name: branches-administration-denied-check-drift
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        force_push_bypassers:
+          - e2e-owner/platform
+    - name: release/*
+      protection:
+        enforce_admins: true
+inputs:
+  mode: check
+denial_style: fine_grained
+live_state:
+  branches: ["main"]
+token_permissions:
+  administration: none
+  contents: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    branches: drift
+  summary_contains:
+    - "branches[main]: unprotected live but the settings file declares protection; apply will protect it"
+    - "branches[main].protection.force_push_bypassers: the live rule cannot be read (the rules query answered not found); apply will set the declared value"
+    - "branches[release/*]: no live rule matches this pattern but the settings file declares protection; apply will create the rule"
+  requests_contain:
+    - "GRAPHQL BranchProtectionRules"
+  never:
+    - "GRAPHQL BranchProtectionRepository"
+    - "GRAPHQL BranchProtectionActorTeam"
+    - "GRAPHQL BranchProtectionActorUser"
+    - "PUT /repos/{repo}/branches"

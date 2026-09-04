@@ -155,13 +155,16 @@ export function endpointPermission(
  * the wire (a GET or a query vs a mutating method or a mutation), `grade`
  * the access level GitHub gates it at (endpointKind, so an accessGrade
  * override write-gates a wire read; a GraphQL operation's kind is both),
- * and `permission` the effective permission (endpointPermission).
+ * and `permission` the effective permission (endpointPermission). `phase` is
+ * when the section issues it: "plan" (planning, so check mode and preflight
+ * meet it) or "execution" (a thunk, apply only; see EndpointDecl.phase).
  */
 export interface SectionOperation {
   readonly role: string;
   readonly wire: "read" | "write";
   readonly grade: "read" | "write";
   readonly permission: SectionPermission | "none";
+  readonly phase: "plan" | "execution";
 }
 
 /**
@@ -176,14 +179,24 @@ export function sectionOperations(section: SectionMeta): SectionOperation[] {
       wire: endpointMethod(endpoint.route) === "GET" ? ("read" as const) : ("write" as const),
       grade: endpointKind(endpoint),
       permission: endpointPermission(section, endpoint),
+      phase: endpoint.phase ?? ("plan" as const),
     })),
     ...Object.entries(section.graphql ?? {}).map(([role, op]) => ({
       role,
       wire: op.kind,
       grade: op.kind,
       permission: endpointPermission(section, op),
+      phase: op.phase ?? ("plan" as const),
     })),
   ];
+}
+
+/**
+ * The reads a plan() body issues: every read but the execution-phase ones,
+ * which only a thunk reaches, so neither check mode nor preflight meets them.
+ */
+export function planningReads(section: SectionMeta): SectionOperation[] {
+  return sectionOperations(section).filter((op) => op.wire === "read" && op.phase === "plan");
 }
 
 /**
@@ -194,12 +207,12 @@ export function sectionOperations(section: SectionMeta): SectionOperation[] {
 export type ReadGating = "plain" | "write-gated" | "mixed";
 
 export function readGating(section: SectionMeta): ReadGating {
-  const reads = sectionOperations(section).filter((op) => op.wire === "read").length;
-  const gated = writeGatedReads(section).length;
+  const reads = planningReads(section);
+  const gated = reads.filter((op) => op.grade === "write").length;
   if (gated === 0) {
     return "plain";
   }
-  return gated === reads ? "write-gated" : "mixed";
+  return gated === reads.length ? "write-gated" : "mixed";
 }
 
 /** One read GitHub gates at write: its route and effective permission. */
@@ -231,18 +244,24 @@ export type DenialPosture = NonNullable<EndpointDecl["primaryRead"]>["notFound"]
  */
 export function denialPosture(section: SectionMeta): DenialPosture {
   const primaries = Object.values(section.endpoints).flatMap((endpoint) =>
-    endpoint.primaryRead === undefined ? [] : [endpoint.primaryRead.notFound],
+    endpoint.primaryRead === undefined ? [] : [endpoint],
   );
   if (primaries.length > 1) {
     throw new Error(
       `BUG: ${section.key} declares primaryRead on ${primaries.length} endpoints; at most one read carries the 404 posture`,
     );
   }
-  const posture = primaries[0];
+  const primary = primaries[0];
+  if (primary !== undefined && primary.phase === "execution") {
+    throw new Error(
+      `BUG: ${section.key} declares primaryRead on the execution-phase read ${primary.route}; plan() never issues it, so no denied first read can be classified from it`,
+    );
+  }
+  const posture = primary?.primaryRead?.notFound;
   if (posture !== undefined) {
     return posture;
   }
-  if (sectionOperations(section).some((op) => op.wire === "read")) {
+  if (planningReads(section).length > 0) {
     throw new Error(
       `BUG: ${section.key} reads but declares no primaryRead posture, so a denied first read cannot be classified`,
     );
@@ -276,8 +295,8 @@ type _OperationDictionariesFlattened = MustBeNever<
 >;
 
 /**
- * The check-mode note of a WRITE-ONLY section: one that declares no read
- * operation at all, so check mode can verify nothing (and issues no request)
+ * The check-mode note of a WRITE-ONLY section: one that issues no read while
+ * planning, so check mode can verify nothing (and issues no request)
  * while apply re-asserts the declared state on every run. Derived from the
  * section's own operation list rather than restated per section: a read
  * endpoint added later makes the note's claim false, so the helper throws
@@ -290,7 +309,7 @@ export function writeOnlyCheckNote(
   section: SectionMeta,
   opts: { resource: string; reasserts: string },
 ): string {
-  if (sectionOperations(section).some((op) => op.wire === "read")) {
+  if (planningReads(section).length > 0) {
     throw new Error(
       `BUG: ${section.key} declares a read operation, so it is not write-only and the cannot-verify note would be false; diff against the read instead`,
     );

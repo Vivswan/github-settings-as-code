@@ -281,6 +281,7 @@ describe("identityOf", () => {
       payload: () => ({ encrypted_value: "x" }),
       change: () => "set A",
       capture: () => {},
+      before: () => {},
       tolerate: { statuses: [409], outcome: () => ({ note: "" }) },
     };
     const again: Op = {
@@ -288,6 +289,7 @@ describe("identityOf", () => {
       payload: () => ({ encrypted_value: "y" }),
       change: () => "set B",
       capture: () => {},
+      before: async () => {},
       tolerate: { statuses: [409], outcome: () => ({ failure: "" }) },
     };
     expect(identityOf(rebuilt)).toEqual(identityOf(again));
@@ -305,6 +307,7 @@ describe("identityOf", () => {
     ["drift", { ...base, drift: ["stale"] }],
     ["a string change", { ...base, change: "set B" }],
     ["capture presence", { ...base, capture: () => {} }],
+    ["before presence", { ...base, before: () => {} }],
     [
       "tolerated statuses",
       { ...base, tolerate: { statuses: [422], outcome: () => ({ note: "" }) } },
