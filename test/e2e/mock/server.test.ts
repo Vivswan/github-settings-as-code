@@ -641,6 +641,22 @@ describe("check-mode barrier", () => {
     expect(h.violations.some((v) => v.startsWith("write in check mode"))).toBe(true);
   });
 
+  test("an execution-phase GET in check mode is a violation, and passes in apply", async () => {
+    // The branches App lookup is declared execution-phase: only a thunk may
+    // issue it, and check mode runs no thunk.
+    const appPath = "/apps/deploy-gate";
+    const inCheck = await start(scenario({ inputs: { mode: "check" } }));
+    const res = await call(inCheck, "GET", appPath);
+    expect(res.status).toBe(400);
+    expect((await json(res)).message).toContain("execution-phase read in check mode");
+    expect(inCheck.violations).toEqual([
+      'execution-phase read in check mode: GET /apps/deploy-gate (endpoint "branches.appLookup")',
+    ]);
+    const inApply = await start(scenario());
+    expect((await call(inApply, "GET", appPath)).status).toBe(200);
+    expect(inApply.violations).toHaveLength(0);
+  });
+
   test("a faulted write in check mode is STILL a check-mode violation (barrier runs before faults)", async () => {
     // The check-mode barrier runs before the fault barrier, so a synthetic fault
     // cannot mask the write the engine should never have sent in check mode.

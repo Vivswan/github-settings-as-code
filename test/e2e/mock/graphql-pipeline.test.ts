@@ -58,6 +58,12 @@ const G_READ_TOLERANT: TaggedGraphqlOp = {
   role: "gProbe",
   outcomes: { ok: "the toggles", NOT_FOUND: "the feature is off" },
 };
+const G_READ_EXECUTION: TaggedGraphqlOp = {
+  ...G_READ,
+  name: "RepoNodeId",
+  role: "gNodeId",
+  phase: "execution",
+};
 const G_WRITE: TaggedGraphqlOp = {
   name: "UpdateToggles",
   kind: "write",
@@ -71,6 +77,7 @@ const G_WRITE: TaggedGraphqlOp = {
 const OPS: Readonly<Record<string, TaggedGraphqlOp>> = {
   "repository.gToggles": G_READ,
   "repository.gProbe": G_READ_TOLERANT,
+  "repository.gNodeId": G_READ_EXECUTION,
   "repository.gUpdate": G_WRITE,
 };
 
@@ -79,6 +86,9 @@ const HANDLERS: Record<string, GraphqlHandler> = {
     data: { repository: { id: String(state.repo.node_id) } },
   }),
   "repository.gProbe": () => ({ errors: [{ type: "NOT_FOUND", message: "feature off" }] }),
+  "repository.gNodeId": ({ state }) => ({
+    data: { repository: { id: String(state.repo.node_id) } },
+  }),
   "repository.gUpdate": ({ state, variables }) => {
     state.repo.has_wiki = variables.hasWiki === true;
     return { data: { updateRepository: { clientMutationId: null } } };
@@ -223,6 +233,19 @@ describe("GraphQL check-mode barrier", () => {
     );
     expect(result.violation).toBeUndefined();
     expect(result.response.status).toBe(200);
+  });
+
+  test("an execution-phase read is a violation in check mode and passes in apply", () => {
+    const inCheck = dispatch(
+      G_READ_EXECUTION,
+      { owner: OWNER, repo: REPO },
+      options(scenario({ inputs: { mode: "check" } })),
+    );
+    expect(inCheck.violation).toBe("GraphQL execution-phase read in check mode (RepoNodeId)");
+    expect(inCheck.response.status).toBe(400);
+    const inApply = dispatch(G_READ_EXECUTION, { owner: OWNER, repo: REPO }, options(scenario()));
+    expect(inApply.violation).toBeUndefined();
+    expect(inApply.response.status).toBe(200);
   });
 });
 
@@ -427,7 +450,7 @@ describe("GraphQL response guard and chaos", () => {
 describe("assertGraphqlHandlerCompleteness", () => {
   test("both drift directions fail loudly", () => {
     expect(() => assertGraphqlHandlerCompleteness(OPS, {})).toThrow(
-      /GraphQL operations with no mock handler: \[repository\.gProbe \(add it in src\/sections\/repository\/mock\.ts/,
+      /GraphQL operations with no mock handler: \[repository\.gNodeId \(add it in src\/sections\/repository\/mock\.ts/,
     );
     expect(() => assertGraphqlHandlerCompleteness({}, HANDLERS)).toThrow(
       /GraphQL handlers naming no declared operation/,

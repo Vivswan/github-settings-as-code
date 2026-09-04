@@ -115,12 +115,15 @@ export type GraphqlOpDecl<V extends Record<string, unknown> = Record<string, unk
       readonly kind: "read";
       readonly query: `query ${string}`;
       readonly connection?: undefined;
+      /** As EndpointDecl.phase: a read only a thunk may issue, at execution. */
+      readonly phase?: "execution";
     })
   | GraphqlPaginatedReadDecl<V>
   | (GraphqlOpCommon<V> & {
       readonly kind: "write";
       readonly query: `mutation ${string}`;
       readonly connection?: never;
+      readonly phase?: never;
     });
 
 /**
@@ -136,6 +139,7 @@ export type GraphqlPaginatedReadDecl<V extends Record<string, unknown> = Record<
     readonly kind: "read";
     readonly query: `query ${string}$cursor${string}`;
     readonly connection: GraphqlConnectionDecl;
+    readonly phase?: "execution";
   };
 
 /**

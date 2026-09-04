@@ -6,10 +6,11 @@ import {
   toleratedStatuses,
 } from "../../src/sections/contract/endpoints.js";
 import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.js";
-import type { GraphqlOpDecl } from "../../src/sections/contract/graphql.js";
+import { type GraphqlOpDecl, graphqlOp } from "../../src/sections/contract/graphql.js";
 import {
   denialPosture,
   endpointPermission,
+  planningReads,
   readGating,
   type SectionMeta,
   sectionGrant,
@@ -55,7 +56,13 @@ describe("sectionOperations", () => {
       undeclaredDefault: "untouched",
     };
     expect(sectionOperations(graphqlOnly)).toEqual([
-      { role: "read", wire: "read", grade: "read", permission: { repo: ["administration"] } },
+      {
+        role: "read",
+        wire: "read",
+        grade: "read",
+        permission: { repo: ["administration"] },
+        phase: "plan",
+      },
     ]);
   });
 
@@ -69,18 +76,21 @@ describe("sectionOperations", () => {
     // endpoint overrides accessGrade, so wire and grade coincide here; the
     // override split is pinned by the overrides test below.
     expect(Object.keys(repositorySection.graphql ?? {}).length).toBeGreaterThan(0);
+    const phaseOf = (op: EndpointDecl | GraphqlOpDecl): "plan" | "execution" => op.phase ?? "plan";
     expect(sectionOperations(repositorySection)).toEqual([
       ...Object.entries(repositorySection.endpoints).map(([role, op]) => ({
         role,
         wire: endpointKind(op),
         grade: endpointKind(op),
         permission: endpointPermission(repositorySection, op),
+        phase: phaseOf(op),
       })),
       ...Object.entries(repositorySection.graphql ?? {}).map(([role, op]) => ({
         role,
         wire: op.kind,
         grade: op.kind,
         permission: endpointPermission(repositorySection, op),
+        phase: phaseOf(op),
       })),
     ]);
   });
@@ -100,9 +110,70 @@ describe("sectionOperations", () => {
       undeclaredDefault: "untouched",
     };
     expect(sectionOperations(overridden)).toEqual([
-      { role: "gatedList", wire: "read", grade: "write", permission: { repo: ["administration"] } },
-      { role: "read", wire: "read", grade: "read", permission: "none" },
+      {
+        role: "gatedList",
+        wire: "read",
+        grade: "write",
+        permission: { repo: ["administration"] },
+        phase: "plan",
+      },
+      { role: "read", wire: "read", grade: "read", permission: "none", phase: "plan" },
     ]);
+  });
+
+  test("an execution-phase read is not a planning read: a section with only that read plans read-free", () => {
+    // The shape a write-only section gains when a mutation input needs a node
+    // id: check mode and preflight never meet the lookup, so the gating,
+    // the posture (no primaryRead to declare), and the oracle's no-read set
+    // all read the section as one that issues no read while planning.
+    const writeWithLookup = {
+      key: "repository",
+      permission: { repo: ["administration"] },
+      undeclaredDefault: "untouched",
+      endpoints: {
+        app: {
+          route: "GET /apps/{app_slug}",
+          statuses: { 200: "the App" },
+          permission: "none",
+          phase: "execution",
+        },
+        put: {
+          route: "PATCH /repos/{owner}/{repo}",
+          statuses: { 200: "updated" },
+        },
+      },
+      graphql: { lookup: { ...readOp, phase: "execution" } },
+    } as const satisfies SectionMeta;
+    expect(sectionOperations(writeWithLookup)).toEqual([
+      { role: "app", wire: "read", grade: "read", permission: "none", phase: "execution" },
+      {
+        role: "put",
+        wire: "write",
+        grade: "write",
+        permission: { repo: ["administration"] },
+        phase: "plan",
+      },
+      {
+        role: "lookup",
+        wire: "read",
+        grade: "read",
+        permission: { repo: ["administration"] },
+        phase: "execution",
+      },
+    ]);
+    expect(planningReads(writeWithLookup)).toEqual([]);
+    expect(readGating(writeWithLookup)).toBe("plain");
+    expect(denialPosture(writeWithLookup)).toBe("absent");
+    // An execution-phase read can carry no posture: plan() never meets its denial.
+    const postured: SectionMeta = {
+      ...writeWithLookup,
+      endpoints: {
+        app: { ...writeWithLookup.endpoints.app, primaryRead: { notFound: "denied" } },
+      },
+    };
+    expect(() => denialPosture(postured)).toThrow(
+      /BUG: repository declares primaryRead on the execution-phase read GET \/apps\/\{app_slug\}/,
+    );
   });
 });
 
@@ -672,6 +743,65 @@ describe("planContext read port", () => {
     // @ts-expect-error the denied posture's call is not offered under advisory
     ctx.read.probe.call;
     expect(typeof ctx.read.probe.tryCall).toBe("function");
+  });
+
+  test("an execution-phase read demands the ExecTools token only a thunk holds, REST and GraphQL alike", async () => {
+    const gated = {
+      key: "branches",
+      permission: { repo: ["administration"] },
+      undeclaredDefault: "untouched",
+      endpoints: {
+        app: {
+          route: "GET /apps/{app_slug}",
+          statuses: { 200: "the App" },
+          permission: "none",
+          phase: "execution",
+        },
+        plain: {
+          route: "GET /repos/{owner}/{repo}/branches",
+          statuses: { 200: "the branches" },
+        },
+      },
+      graphql: {
+        repo: graphqlOp<{ owner: string; repo: string }>()({
+          name: "GateProbe",
+          kind: "read",
+          phase: "execution",
+          query: "query GateProbe($owner: String!, $repo: String!) { repository { id } }",
+          outcomes: { ok: "the repository" },
+        }),
+      },
+    } as const satisfies SectionMeta;
+    const api = new MockApi({
+      "GET /apps/deploy-gate": { data: { node_id: "A_1" } },
+      "GET /repos/o/r/branches": { data: [] },
+      "GRAPHQL GateProbe": { data: { repository: { id: "R_1" } } },
+    });
+    const ctx = planContext(gated, api, REPO);
+    const exec = {
+      resolveSecret: (): string => {
+        throw new Error("no secrets here");
+      },
+    };
+    // The first parameter is the token; a plan() body, holding none, cannot
+    // spell the call. The ungated read beside them is the control.
+    // @ts-expect-error a request options object is not the token
+    const forgedRest: Parameters<typeof ctx.read.app.call>[0] = { params: { app_slug: "x" } };
+    // @ts-expect-error the variables are not the token either
+    const forgedGraphql: Parameters<typeof ctx.read.repo.call>[0] = { owner: "o", repo: "r" };
+    expect([forgedRest, forgedGraphql].length).toBe(2);
+    expect(await ctx.read.app.call(exec, { params: { app_slug: "deploy-gate" } })).toEqual({
+      node_id: "A_1",
+    });
+    expect(await ctx.read.repo.call(exec, { owner: "o", repo: "r" })).toEqual({
+      repository: { id: "R_1" },
+    });
+    expect(await ctx.read.plain.call()).toEqual([]);
+    expect(api.calls.map((c) => c.path)).toEqual([
+      "/apps/deploy-gate",
+      "GateProbe",
+      "/repos/o/r/branches",
+    ]);
   });
 });
 

@@ -140,10 +140,34 @@ export function plainData(value: unknown): PlainData {
 /**
  * What a thunk may compute at EXECUTION time only: the plaintext behind a
  * `$NAME` reference (resolved and masked up front, so check mode never sees
- * one). A thunk may also await the read-only port plan() closed over.
+ * one). A thunk may also await the read-only port plan() closed over, and it
+ * alone holds this token, which the port's execution-phase reads demand.
  */
 export interface ExecTools {
   resolveSecret(reference: string): string;
+}
+
+/**
+ * The bound helpers of an execution-phase read: each takes the ExecTools
+ * token first. A plan() body has no token, so the call does not compile
+ * there; a thunk passes the one it received.
+ */
+type Gated<T> = {
+  readonly [K in keyof T]: T[K] extends (...args: infer A) => infer R
+    ? (exec: ExecTools, ...args: A) => R
+    : T[K];
+};
+
+/** Gate a bound helper set at runtime: the runtime twin of Gated. */
+function gated<T extends object>(bound: T): Gated<T> {
+  return Object.fromEntries(
+    Object.entries(bound).map(([name, helper]) => [
+      name,
+      typeof helper === "function"
+        ? (_exec: ExecTools, ...args: unknown[]) => helper(...args)
+        : helper,
+    ]),
+  ) as Gated<T>;
 }
 
 /** The roles of a REST dictionary whose route reads on the wire (a GET). */
@@ -230,20 +254,31 @@ type BoundGraphqlRead<O extends GraphqlOpDecl> = {
  * GraphQL alike. Write roles are absent from the type, so a plan() body that
  * reaches for `ctx.read.<writeRole>` does not compile - the reads a section
  * may issue are exactly its declared GETs and GraphQL queries. A REST role
- * declaring a `primaryRead` posture exposes only the helpers that honor it.
+ * declaring a `primaryRead` posture exposes only the helpers that honor it;
+ * a role declaring `phase: "execution"` exposes them Gated.
  */
 type BoundReads<E extends EndpointDict, G extends GraphqlDict> = {
   readonly [R in ReadRole<E>]: ReadPort<E[R]>;
 } & {
-  readonly [R in GraphqlReadRole<G>]: BoundGraphqlRead<G[R]>;
+  readonly [R in GraphqlReadRole<G>]: GraphqlReadPort<G[R]>;
 };
+
+/** A GraphQL read's bound helpers, Gated when the declaration is execution-phase. */
+type GraphqlReadPort<O extends GraphqlOpDecl> = O extends { readonly phase: "execution" }
+  ? Gated<BoundGraphqlRead<O>>
+  : BoundGraphqlRead<O>;
 
 /**
  * The helpers a read role exposes, narrowed by its declaration: an advisory
  * read (no failure may abort the section) offers only tryCall, a "denied"
- * primary read only the throwing helpers, an "absent" one only the tolerant.
+ * primary read only the throwing helpers, an "absent" one only the tolerant;
+ * an execution-phase read offers its set Gated behind the ExecTools token.
  */
-type ReadPort<E extends EndpointDecl> = E extends { readonly advisory: true }
+type ReadPort<E extends EndpointDecl> = E extends { readonly phase: "execution" }
+  ? Gated<PlanReadPort<E>>
+  : PlanReadPort<E>;
+
+type PlanReadPort<E extends EndpointDecl> = E extends { readonly advisory: true }
   ? Pick<BoundRead<E>, "tryCall">
   : E extends { readonly primaryRead: { notFound: "denied" } }
     ? Pick<BoundRead<E>, "call" | "listAll" | "listAllEnveloped">
@@ -292,6 +327,14 @@ interface PlannedOpBase<D extends Justification = Justification> {
    * the hook stores it. It must not render; a throw fails the operation.
    */
   readonly capture?: (response: unknown) => void;
+  /**
+   * Execution-time reads run before this operation's request is sealed and
+   * issued: inputs a later operation of the same entry needs (a bypass
+   * actor's node id), pinned ahead of an earlier write so a bad input fails
+   * while live state is untouched. Never runs in check mode, like every Late
+   * facet. A throw fails the operation with its request never sent.
+   */
+  readonly before?: Late<void>;
 }
 
 /**
@@ -316,7 +359,7 @@ export function driftOf(op: Pick<PlannedOpBase, "drift">): readonly string[] {
  * A request facet sealed at execution time, the ONLY place a plan may touch
  * a secret; async so it can read a value an earlier operation created.
  */
-type Late<T> = (exec: ExecTools) => T | Promise<T>;
+export type Late<T> = (exec: ExecTools) => T | Promise<T>;
 
 /**
  * What a tolerated status means for the operation that met it (it did not
@@ -491,7 +534,7 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
   // The helpers take a SectionContext; reads are the check arm's whole
   // capability, so that is the arm they get.
   const ctx: SectionContext = { api, repo, check: true };
-  const port: Record<string, BoundRead<EndpointDecl> | BoundGraphqlRead<GraphqlOpDecl>> = {};
+  const port: Record<string, object> = {};
   for (const [role, declaration] of Object.entries(meta.endpoints)) {
     if (endpointMethod(declaration.route) !== "GET") {
       continue;
@@ -505,7 +548,7 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
       listAllEnveloped: (envelopeKey, ...args) =>
         listAllEnveloped(ctx, meta, endpoint, envelopeKey, ...args),
     };
-    port[role] = bound;
+    port[role] = endpoint.phase === "execution" ? gated(bound) : bound;
   }
   for (const [role, declaration] of Object.entries(meta.graphql ?? {})) {
     if (declaration.kind !== "read") {
@@ -522,7 +565,7 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
               listGraphqlConnection(ctx, meta, op, variables),
           }),
     };
-    port[role] = bound;
+    port[role] = op.phase === "execution" ? gated(bound) : bound;
   }
   return Object.freeze(port) as BoundReads<E, G>;
 }

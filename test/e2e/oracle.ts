@@ -11,9 +11,9 @@ import type { SectionKey } from "../../src/schema.js";
 import {
   type DenialPosture,
   denialPosture,
+  planningReads,
   type ReadGating,
   readGating,
-  sectionOperations,
 } from "../../src/sections/contract/module.js";
 import type { SectionPermission } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
@@ -67,9 +67,7 @@ const ORG_ONLY_SECTIONS: ReadonlySet<SectionKey> = new Set(
  * set.
  */
 export const NO_READ_SECTIONS: ReadonlySet<SectionKey> = new Set(
-  SECTIONS.filter((section) => sectionOperations(section).every((op) => op.wire === "write")).map(
-    (section) => section.key,
-  ),
+  SECTIONS.filter((section) => planningReads(section).length === 0).map((section) => section.key),
 );
 
 /** Map a section's repo resources to the mask keys they use (org is separate). */

@@ -666,19 +666,25 @@ describe("branches GraphQL-routed keys", () => {
     expect(result.ops).toHaveLength(1);
     expect(result.ops[0]).toMatchObject({
       role: "updateRule",
-      variables: {
-        input: {
-          branchProtectionRuleId: "RULE:main",
-          bypassForcePushActorIds: ["U_2"],
-          requiresDeployments: true,
-          requiredDeploymentEnvironments: ["prod"],
-        },
-      },
       drift: [
         "branches[main].protection.force_push_bypassers: the settings file declares [release-bot] but the live rule allows [octocat]; apply will replace the allowance list",
         "branches[main].protection.required_deployments: the settings file requires deployments to [prod] but the live rule requires [qa]; apply will set the declared list",
       ],
     });
+    // The actor's node id is an execution-time input: the plan issues no
+    // lookup (check mode never does), the sealed variables carry the id.
+    expect(api.calls.filter((c) => c.path.startsWith("BranchProtectionActor"))).toHaveLength(0);
+    const variables = result.ops[0]?.variables;
+    expect(typeof variables).toBe("function");
+    expect(await (variables as (exec: typeof NO_SECRETS) => unknown)(NO_SECRETS)).toEqual({
+      input: {
+        branchProtectionRuleId: "RULE:main",
+        bypassForcePushActorIds: ["U_2"],
+        requiresDeployments: true,
+        requiredDeploymentEnvironments: ["prod"],
+      },
+    });
+    expect(api.calls.filter((c) => c.path === "BranchProtectionActorUser")).toHaveLength(1);
     // The line renders from the mutation's read-back, so it is a thunk here.
     expect(typeof result.ops[0]?.change).toBe("function");
     expect(api.mutations()).toHaveLength(0);
@@ -709,28 +715,47 @@ describe("branches GraphQL-routed keys", () => {
     expect(api.calls.filter((c) => c.path.startsWith("BranchProtectionActor"))).toHaveLength(0);
   });
 
-  test("a planned PUT re-applies matching routed keys through the update, with the re-apply as its drift", async () => {
-    const api = new MockApi({
-      [PROTECTION]: { data: { enforce_admins: { enabled: false } } },
-      "GRAPHQL BranchProtectionRules": rulesData([
-        ruleNode("main", {}, [{ actor: { __typename: "User", login: "octocat" } }]),
-      ]),
-      "GRAPHQL BranchProtectionActorUser": {
-        data: { repository: { id: "R_1" }, user: { id: "U_1" } },
+  test("a planned PUT re-applies matching routed keys through the update, with the re-apply as its drift, and resolves the actors ahead of the PUT", async () => {
+    const api = new MockApi(
+      {
+        [PROTECTION]: { data: { enforce_admins: { enabled: false } } },
+        "GRAPHQL BranchProtectionRules": rulesData([
+          ruleNode("main", {}, [{ actor: { __typename: "User", login: "octocat" } }]),
+        ]),
+        "GRAPHQL BranchProtectionActorUser": {
+          data: { repository: { id: "R_1" }, user: { id: "U_1" } },
+        },
       },
-    });
+      { unroutedMutations: "succeed" },
+    );
     const result = await plan(api, [
       { name: "main", protection: { enforce_admins: true, force_push_bypassers: ["octocat"] } },
     ]);
-    expect(result.ops.map((op) => [op.role, op.drift, op.variables])).toEqual([
-      ["putProtection", ["branches[main].protection.enforce_admins: true != false"], undefined],
+    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+      ["putProtection", ["branches[main].protection.enforce_admins: true != false"]],
       [
         "updateRule",
         [
           "branches[main].protection: force_push_bypassers re-applied after the protection PUT (GitHub does not document whether the PUT preserves them)",
         ],
-        { input: { branchProtectionRuleId: "RULE:main", bypassForcePushActorIds: ["U_1"] } },
       ],
+    ]);
+    // The PUT carries the actor resolution, so a bad actor fails before the
+    // live protection is replaced; the update's variables seal the ids.
+    expect(typeof result.ops[0]?.before).toBe("function");
+    expect(typeof result.ops[1]?.variables).toBe("function");
+
+    const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
+    expect(execution.status).toBe("applied");
+    // One lookup, ahead of the PUT; the update finds the id in the per-run cache.
+    expect(
+      api.calls
+        .filter((c) => c.method === "PUT" || c.path.startsWith("BranchProtectionActor"))
+        .map((c) => (c.method === "PUT" ? "PUT" : c.path)),
+    ).toEqual(["BranchProtectionActorUser", "PUT"]);
+    expect(api.mutations().map((m) => m.payload)).toEqual([
+      NULL_FILLED,
+      { input: { branchProtectionRuleId: "RULE:main", bypassForcePushActorIds: ["U_1"] } },
     ]);
   });
 
@@ -793,25 +818,34 @@ describe("branches GraphQL-routed keys", () => {
     expect(api.mutations()).toHaveLength(0);
   });
 
-  test("an unknown team is a named config error at plan time, not a node-id crash", async () => {
-    const api = new MockApi({
-      [PROBE]: { data: { name: "main" } },
-      "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
-      "GRAPHQL BranchProtectionActorTeam": {
-        data: { repository: { id: "R_1" }, organization: { team: null } },
-      },
-    });
-    await expect(
-      plan(api, [
-        {
-          name: "main",
-          protection: { enforce_admins: true, force_push_bypassers: ["e2e-owner/ghost-team"] },
+  test("an unknown team is a named config error ahead of the entry's first write, not a node-id crash", async () => {
+    const api = new MockApi(
+      {
+        [PROBE]: { data: { name: "main" } },
+        "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
+        "GRAPHQL BranchProtectionActorTeam": {
+          data: { repository: { id: "R_1" }, organization: { team: null } },
         },
-      ]),
-    ).rejects.toThrow(/no team with slug "ghost-team"/);
+      },
+      { unroutedMutations: "succeed" },
+    );
+    const result = await plan(api, [
+      {
+        name: "main",
+        protection: { enforce_admins: true, force_push_bypassers: ["e2e-owner/ghost-team"] },
+      },
+    ]);
+    // The plan carries the PUT; the resolution it runs first names the error.
+    expect(result.ops.map((op) => op.role)).toEqual(["putProtection", "updateRule"]);
+    const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
+    expect(execution.status).toBe("failed");
+    expect(String((execution as { error: Error }).error.message)).toMatch(
+      /no team with slug "ghost-team"/,
+    );
+    expect(api.mutations()).toHaveLength(0);
   });
 
-  test("a misspelled actor fails the plan, so no write - the destructive PUT included - is ever issued", async () => {
+  test("a misspelled actor fails the entry before its first write, so the destructive PUT is never issued", async () => {
     const api = new MockApi(
       {
         [PROBE]: { data: { name: "main" } },
@@ -820,11 +854,17 @@ describe("branches GraphQL-routed keys", () => {
       },
       { unroutedMutations: "succeed" },
     );
-    await expect(
-      plan(api, [
-        { name: "main", protection: { enforce_admins: true, force_push_bypassers: ["ghost"] } },
-      ]),
-    ).rejects.toThrow(/GraphQL lookup succeeded but returned no node id/);
+    const result = await plan(api, [
+      { name: "main", protection: { enforce_admins: true, force_push_bypassers: ["ghost"] } },
+    ]);
+    // Planning issues no lookup: check mode reports the drift without one.
+    expect(api.calls.filter((c) => c.path.startsWith("BranchProtectionActor"))).toHaveLength(0);
+    const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
+    expect(execution.status).toBe("failed");
+    expect(String((execution as { error: Error }).error.message)).toMatch(
+      /GraphQL lookup succeeded but returned no node id/,
+    );
+    expect(execution.landed).toBe(0);
     expect(api.mutations()).toHaveLength(0);
   });
 
@@ -882,46 +922,50 @@ describe("branches wildcard entries", () => {
       },
       { name: "old/*", protection: null },
     ]);
-    expect(result).toEqual({
-      ops: [
-        {
-          role: "createRule",
-          variables: {
-            input: { repositoryId: "R_1", pattern: "release/*", isAdminEnforced: true },
+    const [create, update, remove] = result.ops;
+    expect([update, remove]).toEqual([
+      {
+        role: "updateRule",
+        variables: {
+          input: {
+            branchProtectionRuleId: "RULE:hotfix/*",
+            requiresApprovingReviews: true,
+            requiredApprovingReviewCount: 2,
           },
-          describe: 'creating the protection rule "release/*"',
-          drift: [
-            "branches[release/*]: no live rule matches this pattern but the settings file declares protection; apply will create the rule",
-          ],
-          change: 'created protection rule "release/*"',
         },
-        {
-          role: "updateRule",
-          variables: {
-            input: {
-              branchProtectionRuleId: "RULE:hotfix/*",
-              requiresApprovingReviews: true,
-              requiredApprovingReviewCount: 2,
-            },
-          },
-          describe: 'updating the protection rule "hotfix/*"',
-          drift: [
-            "branches[hotfix/*].protection.required_pull_request_reviews.required_approving_review_count: 2 != 1",
-          ],
-          change: 'updated protection rule "hotfix/*"',
-        },
-        {
-          role: "deleteRule",
-          variables: { input: { branchProtectionRuleId: "RULE:old/*" } },
-          describe: 'deleting the protection rule "old/*"',
-          drift: [
-            "branches[old/*]: a live rule matches this pattern but the settings file declares protection: null; apply will delete the rule",
-          ],
-          change: 'deleted protection rule "old/*"',
-        },
+        describe: 'updating the protection rule "hotfix/*"',
+        drift: [
+          "branches[hotfix/*].protection.required_pull_request_reviews.required_approving_review_count: 2 != 1",
+        ],
+        change: 'updated protection rule "hotfix/*"',
+      },
+      {
+        role: "deleteRule",
+        variables: { input: { branchProtectionRuleId: "RULE:old/*" } },
+        describe: 'deleting the protection rule "old/*"',
+        drift: [
+          "branches[old/*]: a live rule matches this pattern but the settings file declares protection: null; apply will delete the rule",
+        ],
+        change: 'deleted protection rule "old/*"',
+      },
+    ]);
+    expect(result.notes).toEqual([]);
+    expect(result.drift).toEqual([]);
+    // The create needs the repository's node id, an execution-time input: the
+    // plan issues no lookup for it, the sealed variables carry it.
+    expect(create).toMatchObject({
+      role: "createRule",
+      describe: 'creating the protection rule "release/*"',
+      drift: [
+        "branches[release/*]: no live rule matches this pattern but the settings file declares protection; apply will create the rule",
       ],
-      notes: [],
-      drift: [],
+      change: 'created protection rule "release/*"',
+    });
+    expect(api.calls.map((c) => c.path)).toEqual(["BranchProtectionRules"]);
+    const variables = create?.variables;
+    expect(typeof variables).toBe("function");
+    expect(await (variables as (exec: typeof NO_SECRETS) => unknown)(NO_SECRETS)).toEqual({
+      input: { repositoryId: "R_1", pattern: "release/*", isAdminEnforced: true },
     });
     expect(api.calls.map((c) => c.path)).toEqual([
       "BranchProtectionRules",

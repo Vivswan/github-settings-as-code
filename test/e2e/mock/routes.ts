@@ -230,6 +230,9 @@ export function handleGraphqlRequest(
   if (options.checkMode && op.kind !== "read") {
     return violationFor(graphqlLog)(`GraphQL write in check mode (${op.name})`);
   }
+  if (options.checkMode && op.phase === "execution") {
+    return violationFor(graphqlLog)(`GraphQL execution-phase read in check mode (${op.name})`);
+  }
 
   // 4. Target/state resolution, before the fault barrier so a fault can
   // never mask an unknown-target violation. A MUTATION resolves its target
@@ -554,6 +557,11 @@ export function runPipeline(
   // override, so a convergence re-run against the same server arms it too.
   if (options.checkMode && request.method !== "GET") {
     return violation(`write in check mode: ${request.method} ${pathname} (endpoint "${key}")`);
+  }
+  // Its sibling for a read a plan may issue only while executing: check mode
+  // runs no thunk, so one arriving here means a plan() body called it.
+  if (options.checkMode && endpoint.phase === "execution") {
+    return violation(`execution-phase read in check mode: GET ${pathname} (endpoint "${key}")`);
   }
 
   // Resolve the working state and permission mask for this request. In

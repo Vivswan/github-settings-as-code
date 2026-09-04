@@ -66,6 +66,7 @@ import {
 import { Rng } from "./prng.js";
 import {
   checkLeaks,
+  failureArtifacts,
   insertReplay,
   markReportTitle,
   parseReposResult,
@@ -426,7 +427,7 @@ async function runPredicted(
   // every failure.
 
   return iterationResult(problems, {
-    artifactDir: report.artifactDir,
+    artifactDir: failureArtifacts(scenario, report, problems),
     sections: meta.sections,
     coverage: witnessCoverage(report.requests, meta, observed),
     faultClass,
@@ -553,7 +554,7 @@ async function rejectionIteration(seed: number, spec: RejectionSpec): Promise<It
   }
   return iterationResult(
     problems,
-    { artifactDir: report.artifactDir, sections: [] },
+    { artifactDir: failureArtifacts(scenario, report, problems), sections: [] },
     `[${spec.label}] `,
   );
 }
@@ -675,7 +676,7 @@ async function singleShotChaosIteration(
   return iterationResult(
     problems,
     {
-      artifactDir: report.artifactDir,
+      artifactDir: failureArtifacts(scenario, report, problems),
       sections: ["labels"],
       // The scenario armed converges above; label it so the fixpoint-proof
       // stats count this real convergence proof instead of printing "(none)".
@@ -726,7 +727,7 @@ async function persistentChaosIteration(
   }
   return iterationResult(
     problems,
-    { artifactDir: report.artifactDir, sections: ["labels"] },
+    { artifactDir: failureArtifacts(scenario, report, problems), sections: ["labels"] },
     `[persist ${mode}] `,
   );
 }
@@ -1104,7 +1105,7 @@ async function runMultiPredicted(
   }
 
   return iterationResult(problems, {
-    artifactDir: report.artifactDir,
+    artifactDir: failureArtifacts(scenario, report, problems),
     extraArtifactDirs,
     sections: [],
     faultClass,
@@ -1235,7 +1236,7 @@ async function runDiscoveryPredicted(
   return iterationResult(
     problems,
     {
-      artifactDir: report.artifactDir,
+      artifactDir: failureArtifacts(scenario, report, problems),
       sections: [],
       faultClass,
       proof,
@@ -1491,7 +1492,7 @@ async function unfaultableSectionRun(
   }
   return iterationResult(
     problems,
-    { artifactDir: report.artifactDir, sections: [section] },
+    { artifactDir: failureArtifacts(scenario, report, problems), sections: [section] },
     `[unfaultable ${section}] `,
   );
 }
@@ -1526,7 +1527,7 @@ async function exhaustedSectionRun(
   return iterationResult(
     problems,
     {
-      artifactDir: report.artifactDir,
+      artifactDir: failureArtifacts(scenario, report, problems),
       sections: [section],
       faultClass: fired ? faultClass : undefined,
     },
@@ -1646,7 +1647,7 @@ async function fatalDiscoveryRun(
   return iterationResult(
     problems,
     {
-      artifactDir: report.artifactDir,
+      artifactDir: failureArtifacts(scenario, report, problems),
       sections: [],
       faultClass: fired ? faultClass : undefined,
     },
@@ -1708,7 +1709,7 @@ async function preflightFaultRun(seed: number, surviving: boolean): Promise<Iter
   return iterationResult(
     problems,
     {
-      artifactDir: report.artifactDir,
+      artifactDir: failureArtifacts(scenario, report, problems),
       sections: ["labels"],
       faultClass: fired ? faultClass : undefined,
     },

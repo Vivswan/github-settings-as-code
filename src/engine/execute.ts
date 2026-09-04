@@ -104,6 +104,7 @@ export async function executePlan(
             `BUG: ${section.key} planned an operation under role "${op.role}", which is a read endpoint (${endpoint.route}); only write roles are plannable`,
           );
         }
+        await op.before?.(exec);
         const payload = typeof op.payload === "function" ? await op.payload(exec) : op.payload;
         const request = { params: op.params, query: op.query, payload, describe: op.describe };
         if (op.tolerate === undefined) {
@@ -135,6 +136,7 @@ export async function executePlan(
             `BUG: ${section.key} planned an operation under role "${op.role}", which is a GraphQL ${graphqlOp.kind} operation; only write roles are plannable`,
           );
         }
+        await op.before?.(exec);
         const variables =
           typeof op.variables === "function" ? await op.variables(exec) : op.variables;
         response = await callGraphql(ctx, section, graphqlOp, variables ?? {}, {
