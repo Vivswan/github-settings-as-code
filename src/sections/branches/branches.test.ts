@@ -818,7 +818,7 @@ describe("branches GraphQL-routed keys", () => {
     expect(api.mutations()).toHaveLength(0);
   });
 
-  test("an unknown team is a named config error ahead of the entry's first write, not a node-id crash", async () => {
+  test("an unknown team is a named config error ahead of the section's first write, not a node-id crash", async () => {
     const api = new MockApi(
       {
         [PROBE]: { data: { name: "main" } },
@@ -845,7 +845,7 @@ describe("branches GraphQL-routed keys", () => {
     expect(api.mutations()).toHaveLength(0);
   });
 
-  test("a misspelled actor fails the entry before its first write, so the destructive PUT is never issued", async () => {
+  test("a misspelled actor fails before the section's first write, so the destructive PUT is never issued", async () => {
     const api = new MockApi(
       {
         [PROBE]: { data: { name: "main" } },
@@ -865,6 +865,42 @@ describe("branches GraphQL-routed keys", () => {
       /GraphQL lookup succeeded but returned no node id/,
     );
     expect(execution.landed).toBe(0);
+    expect(api.mutations()).toHaveLength(0);
+  });
+
+  test("a misspelled actor on a LATER entry fails before an EARLIER entry's write lands", async () => {
+    // main drifts on the REST half and carries no actors; dev declares the
+    // bad actor. The section's first operation (main's PUT) resolves every
+    // planned actor first, so nothing is written for either branch.
+    const api = new MockApi(
+      {
+        [PROTECTION]: { data: { enforce_admins: { enabled: false } } },
+        "GET /repos/o/r/branches/dev": { data: { name: "dev" } },
+        "GRAPHQL BranchProtectionRules": rulesData([ruleNode("main")]),
+        "GRAPHQL BranchProtectionActorUser": { data: { repository: { id: "R_1" }, user: null } },
+      },
+      { unroutedMutations: "succeed" },
+    );
+    const result = await plan(api, [
+      { name: "main", protection: { enforce_admins: true } },
+      { name: "dev", protection: { enforce_admins: true, force_push_bypassers: ["ghost"] } },
+    ]);
+    expect(result.ops.map((op) => [op.role, typeof op.before])).toEqual([
+      ["putProtection", "function"],
+      ["putProtection", "undefined"],
+      ["updateRule", "undefined"],
+    ]);
+    const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
+    expect(execution).toEqual({
+      status: "failed",
+      changes: [],
+      notes: [],
+      landed: 0,
+      error: expect.any(Error),
+    });
+    expect(String((execution as { error: Error }).error.message)).toMatch(
+      /force_push_bypassers actor "ghost".*returned no node id/,
+    );
     expect(api.mutations()).toHaveLength(0);
   });
 

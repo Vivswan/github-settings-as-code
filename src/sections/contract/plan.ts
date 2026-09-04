@@ -329,10 +329,10 @@ interface PlannedOpBase<D extends Justification = Justification> {
   readonly capture?: (response: unknown) => void;
   /**
    * Execution-time reads run before this operation's request is sealed and
-   * issued: inputs a later operation of the same entry needs (a bypass
-   * actor's node id), pinned ahead of an earlier write so a bad input fails
-   * while live state is untouched. Never runs in check mode, like every Late
-   * facet. A throw fails the operation with its request never sent.
+   * issued (bypass actors' node ids, pinned ahead of the first write so a
+   * bad input fails while live state is untouched). Never runs in check
+   * mode, like every Late facet. A throw fails the operation with its
+   * request never sent.
    */
   readonly before?: Late<void>;
 }

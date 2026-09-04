@@ -437,6 +437,12 @@ interface GraphqlRun {
   rules: LiveRules;
   repoId: string | null;
   actorIds: Map<string, string>;
+  /**
+   * Every bypass actor a planned mutation resolves at execution, appended
+   * by ruleVariables() as it seals one; plan() resolves them all ahead of
+   * the FIRST write, whichever entry they belong to.
+   */
+  lateActors: string[];
 }
 
 /** The plan context over this section's literal dictionaries. */
@@ -893,6 +899,9 @@ function ruleVariables(
   if (actors === undefined && late === undefined) {
     return { input: fields };
   }
+  if (actors !== undefined) {
+    graphqlRun.lateActors.push(...actors);
+  }
   // The actors resolve first: their reads select the repository's node id
   // too, which spares a create its dedicated lookup (see adoptRepoId).
   return async (exec) => ({
@@ -1041,12 +1050,10 @@ export const branchesSection = {
     const needsGraphql = (branch: BranchConfig): boolean =>
       isWildcardPattern(branch.name) || hasRoutedGraphqlKeys(branch.protection);
     let entries: ClassifiedEntry[];
-    if (desired.some(needsGraphql)) {
-      const graphqlRun: GraphqlRun = {
-        rules: await fetchRules(ctx),
-        repoId: null,
-        actorIds: new Map(),
-      };
+    const graphqlRun: GraphqlRun | null = desired.some(needsGraphql)
+      ? { rules: await fetchRules(ctx), repoId: null, actorIds: new Map(), lateActors: [] }
+      : null;
+    if (graphqlRun !== null) {
       const declaredPatterns = new Set(desired.map((branch) => branch.name));
       for (const pattern of [...(graphqlRun.rules?.keys() ?? [])].sort()) {
         if (isWildcardPattern(pattern) && !declaredPatterns.has(pattern)) {
@@ -1074,6 +1081,22 @@ export const branchesSection = {
         continue;
       }
       await planLiteralEntry(ctx, this, entry.routed, entry.branch, plan);
+    }
+    // Every actor a planned mutation resolves at execution resolves ahead of
+    // the plan's FIRST write, whichever entry it belongs to: a misspelled
+    // actor fails while every branch's live protection is still untouched,
+    // and the mutations' thunks then find the ids cached.
+    const [lead, ...rest] = plan.ops;
+    if (graphqlRun !== null && graphqlRun.lateActors.length > 0 && lead !== undefined) {
+      plan.ops = [
+        {
+          ...lead,
+          before: async (exec) => {
+            await resolveActorIds(ctx, exec, graphqlRun, graphqlRun.lateActors);
+          },
+        },
+        ...rest,
+      ];
     }
     return plan;
   },
@@ -1124,9 +1147,6 @@ async function planLiteralEntry(
       payload[key] = null;
     }
   }
-  // This entry's operations, appended to the plan together once the routed
-  // tail knows whether the first must carry the actor resolution.
-  const ops: BranchesPlan["ops"] = [];
   // The flattened live protection the declared keys diff against; null for
   // an unprotected branch, which has no requirement and no allowance.
   let live: Record<string, unknown> | null = null;
@@ -1146,7 +1166,7 @@ async function planLiteralEntry(
       );
       return;
     }
-    ops.push({
+    plan.ops.push({
       role: "putProtection",
       params,
       payload: plainData(payload),
@@ -1191,7 +1211,7 @@ async function planLiteralEntry(
     ];
     const drift = justified(restDrift);
     if (drift !== null) {
-      ops.push({
+      plan.ops.push({
         role: "putProtection",
         params,
         payload: plainData(payload),
@@ -1218,7 +1238,7 @@ async function planLiteralEntry(
     }
     const drift = justified(sigDrift);
     if (drift !== null) {
-      ops.push(
+      plan.ops.push(
         requiredSignatures
           ? {
               role: "sigPost",
@@ -1238,27 +1258,24 @@ async function planLiteralEntry(
     }
   }
   if (routed !== null) {
-    planRoutedUpdate(ctx, routed.graphqlRun, ops, {
+    planRoutedUpdate(ctx, routed.graphqlRun, plan, {
       name: branch.name,
       protection: branch.protection,
       prefix,
       putPlanned,
     });
   }
-  plan.ops.push(...ops);
 }
 
 /**
- * Plan a literal entry's rule mutation for its routed keys, appended to the
- * entry's `ops`. When it declares bypass actors and follows other operations,
- * the entry's FIRST operation carries their resolution: the actors resolve
- * ahead of the PUT that replaces the live protection, so a misspelled actor
- * fails while it is still untouched; the update's thunk then finds them cached.
+ * Plan a literal entry's rule mutation for its routed keys. Its bypass
+ * actors, when declared, seal into the mutation's variables at execution
+ * (ruleVariables), and plan() resolves them ahead of the section's first write.
  */
 function planRoutedUpdate(
   ctx: BranchesContext,
   graphqlRun: GraphqlRun,
-  ops: BranchesPlan["ops"],
+  plan: BranchesPlan,
   entry: {
     name: string;
     protection: BranchProtectionConfig;
@@ -1286,21 +1303,7 @@ function planRoutedUpdate(
   }
   const deploymentFields =
     requiredDeployments === undefined ? {} : deploymentInputFields(requiredDeployments);
-  const [lead, ...rest] = ops;
-  if (forcePushBypassers !== undefined && lead !== undefined) {
-    ops.splice(
-      0,
-      ops.length,
-      {
-        ...lead,
-        before: async (exec) => {
-          await resolveActorIds(ctx, exec, graphqlRun, forcePushBypassers);
-        },
-      },
-      ...rest,
-    );
-  }
-  ops.push({
+  plan.ops.push({
     role: "updateRule",
     describe: `setting the GraphQL-only protection fields of branch "${name}"`,
     // A rule the plan-time fetch did not carry (the PUT planned above
