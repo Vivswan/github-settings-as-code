@@ -163,11 +163,18 @@ describe("GraphQL wire contract (through the server)", () => {
 
 describe("GraphQL dispatch and logging", () => {
   test("a read dispatches to its handler and logs its operation and kind", () => {
-    const result = dispatch(G_READ, { owner: OWNER, repo: REPO }, options(scenario()));
+    const s = scenario();
+    const state = buildState(s.live_state, s.owner_kind);
+    const result = dispatch(
+      G_READ,
+      { owner: OWNER, repo: REPO },
+      options(s, { working: { mode: "single", state } }),
+    );
     expect(result.violation).toBeUndefined();
     expect(result.response.status).toBe(200);
-    const data = (result.response.body as { data: Json }).data;
-    expect(data.repository).toBeDefined();
+    expect(result.response.body).toEqual({
+      data: { repository: { id: String(state.repo.node_id) } },
+    });
     expect(result.log.graphql).toEqual({ operationName: "RepoToggles", kind: "read" });
     expect(isWriteRequest(result.log)).toBe(false);
   });
@@ -311,22 +318,55 @@ describe("GraphQL denial barrier (shared with REST)", () => {
 
   test("a TOLERATED denied read (declared NOT_FOUND outcome) does not arm", () => {
     const s = scenario({ token_permissions: { administration: "none" } });
-    const opts = options(s);
+    const state = buildState(s.live_state, s.owner_kind);
+    const opts = options(s, { working: { mode: "single", state } });
     const read = dispatch(G_READ_TOLERANT, { owner: OWNER, repo: REPO }, opts);
     expect(read.violation).toBeUndefined();
-    const write = dispatch(G_WRITE, { repositoryId: mintNodeId("repo", ADMIN_SLUG, "") }, opts);
+    expect(read.response.body).toEqual({
+      data: null,
+      errors: graphqlDenialErrors("fine_grained", "read"),
+    });
+    // The write is denied on its own merits (an ordinary FORBIDDEN, no
+    // barrier violation) and leaves the state untouched.
+    const wikiBefore = state.repo.has_wiki;
+    const write = dispatch(
+      G_WRITE,
+      { repositoryId: mintNodeId("repo", ADMIN_SLUG, ""), hasWiki: !wikiBefore },
+      opts,
+    );
     expect(write.violation).toBeUndefined();
+    expect(write.response.body).toEqual({
+      data: null,
+      errors: graphqlDenialErrors("fine_grained", "write"),
+    });
+    expect(state.repo.has_wiki).toBe(wikiBefore);
   });
 
   test("an ADVISORY denied read does not arm", () => {
     const advisory: TaggedGraphqlOp = { ...G_READ, advisory: true };
     const ops = { ...OPS, "repository.gToggles": advisory };
     const s = scenario({ token_permissions: { administration: "none" } });
-    const opts = options(s);
+    const state = buildState(s.live_state, s.owner_kind);
+    const opts = options(s, { working: { mode: "single", state } });
     const body = gqlBody(advisory, { owner: OWNER, repo: REPO });
-    handleGraphqlRequest({ method: "POST", body }, opts, baseLog(body), ops, HANDLERS);
-    const write = dispatch(G_WRITE, { repositoryId: mintNodeId("repo", ADMIN_SLUG, "") }, opts);
+    const read = handleGraphqlRequest({ method: "POST", body }, opts, baseLog(body), ops, HANDLERS);
+    expect(read.violation).toBeUndefined();
+    expect(read.response.body).toEqual({
+      data: null,
+      errors: graphqlDenialErrors("fine_grained", "read"),
+    });
+    const wikiBefore = state.repo.has_wiki;
+    const write = dispatch(
+      G_WRITE,
+      { repositoryId: mintNodeId("repo", ADMIN_SLUG, ""), hasWiki: !wikiBefore },
+      opts,
+    );
     expect(write.violation).toBeUndefined();
+    expect(write.response.body).toEqual({
+      data: null,
+      errors: graphqlDenialErrors("fine_grained", "write"),
+    });
+    expect(state.repo.has_wiki).toBe(wikiBefore);
   });
 });
 

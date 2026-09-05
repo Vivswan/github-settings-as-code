@@ -17,20 +17,17 @@ const DEPENDENCY_FIELDS = [
 ] as const;
 
 describe("package.json dependency pins", () => {
-  test("at least one dependency field exists (the tripwire is not vacuous)", () => {
-    expect(DEPENDENCY_FIELDS.filter((f) => f in pkg).length).toBeGreaterThan(0);
+  test("every entry of every dependency field is an exact version", () => {
+    const present = DEPENDENCY_FIELDS.filter((field) => field in pkg);
+    // The fields the sweep walked, so a renamed field cannot pass vacuously.
+    expect(present).toEqual(["dependencies", "devDependencies"]);
+    const loose = present.flatMap((field) =>
+      Object.entries((pkg as Record<string, unknown>)[field] as Record<string, string>)
+        .filter(([, spec]) => !EXACT_VERSION.test(spec))
+        .map(([name, spec]) => `${field}.${name}: "${spec}"`),
+    );
+    expect(loose).toEqual([]);
   });
-
-  for (const field of DEPENDENCY_FIELDS) {
-    test(`every ${field} entry is an exact version`, () => {
-      const entries = Object.entries(
-        ((pkg as Record<string, unknown>)[field] ?? {}) as Record<string, string>,
-      );
-      for (const [name, spec] of entries) {
-        expect(EXACT_VERSION.test(spec), `${name}: "${spec}" is not an exact version`).toBe(true);
-      }
-    });
-  }
 
   test("the exactness check rejects every range and non-registry form", () => {
     const forbidden = [

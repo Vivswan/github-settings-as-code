@@ -244,7 +244,9 @@ describe("applyDefaults undeclared-policy knob", () => {
     // must not turn it into {0: ..., 1: ...} or the "must be a YAML mapping"
     // validator would misreport it as unknown keys.
     const doc = ["a", "b"] as unknown as SettingsFile;
-    const { settings } = apply({ labels: [{ name: "fleet" }] } as SettingsFile, doc);
-    expect(Array.isArray(settings)).toBe(true);
+    expect(apply({ labels: [{ name: "fleet" }] } as SettingsFile, doc) as unknown).toEqual({
+      settings: ["a", "b"],
+      disabled: [],
+    });
   });
 });

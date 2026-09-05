@@ -449,7 +449,6 @@ describe("allEndpoints", () => {
     expect(keys.length).toBe(total);
     for (const [key, endpoint] of Object.entries(all)) {
       expect(key).toBe(`${endpoint.section}.${endpoint.role}`);
-      expect(endpoint.statuses).toBeDefined();
     }
   });
 

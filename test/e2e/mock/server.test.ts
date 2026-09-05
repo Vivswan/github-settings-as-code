@@ -893,7 +893,11 @@ describe("code-scanning 200-vs-202 rule", () => {
     const path = `/repos/${OWNER}/${REPO}/code-scanning/default-setup`;
     const changed = await call(h, "PATCH", path, { body: { languages: ["javascript"] } });
     expect(changed.status).toBe(202);
-    expect((await json(changed)).run_id).toBeDefined();
+    const body = (await json(changed)) as { run_id: number; run_url: string };
+    expect(body).toEqual({
+      run_id: expect.any(Number),
+      run_url: `https://api.github.com${path}/runs/${body.run_id}`,
+    });
 
     const same = await call(h, "PATCH", path, { body: { state: "configured" } });
     expect(same.status).toBe(200);
@@ -1718,7 +1722,12 @@ describe("pages create on empty state", () => {
       body: { source: { branch: "main", path: "/" } },
     });
     expect(res.status).toBe(201);
-    expect(singleState(h).pages).not.toBeNull();
+    const site = {
+      url: `https://api.github.com/repos/${OWNER}/${REPO}/pages`,
+      source: { branch: "main", path: "/" },
+    };
+    expect(await json(res)).toEqual(site);
+    expect(singleState(h).pages).toEqual(site);
   });
 });
 

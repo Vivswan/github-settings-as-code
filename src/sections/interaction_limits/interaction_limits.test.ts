@@ -5,6 +5,7 @@ import { type PlannedOp, planContext } from "../../../src/sections/contract/plan
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent, REPO } from "../../../test/sections/plan-idempotence.js";
 import { PermissionDenied } from "../contract/errors.js";
+import { grantFor } from "../contract/permissions.js";
 import { interactionLimitsSection } from "./index.js";
 import type { InteractionLimitsConfig } from "./schema.js";
 
@@ -197,9 +198,19 @@ describe("interaction_limits", () => {
     },
   );
 
-  test("a denied GET classifies as PermissionDenied", async () => {
+  test("a denied GET classifies as PermissionDenied carrying the status and the Administration grant", async () => {
     const api = new MockApi({ [GET]: { error: { status: 404, message: "Not Found", body: "" } } });
-    await expect(plan(api, { limit: "existing_users" })).rejects.toBeInstanceOf(PermissionDenied);
+    let thrown: unknown;
+    try {
+      await plan(api, { limit: "existing_users" });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    const denied = thrown as PermissionDenied;
+    expect(denied.section).toBe("interaction_limits");
+    expect(denied.status).toBe(404);
+    expect(denied.detail).toContain(grantFor({ repo: ["administration"] }));
   });
 
   test("executing the plan converges: the base limit re-arms on every apply, nothing else recurs", async () => {

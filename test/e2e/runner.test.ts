@@ -38,10 +38,13 @@ describe("bundle build parity (harness vs production)", () => {
     const drifted = bundleBuildParityFailure(
       "bun build src/main.ts --target=node --minify --outfile lib/index.js",
     );
-    expect(drifted).toBeDefined();
-    expect(drifted).toContain("--minify");
+    expect(drifted).toContain(
+      'build:bundle is "bun build src/main.ts --target=node --minify --outfile lib/index.js"',
+    );
     expect(drifted).toContain("Bun.build");
-    expect(bundleBuildParityFailure(undefined)).toBeDefined();
+    const missing = bundleBuildParityFailure(undefined);
+    expect(missing).toContain('build:bundle is "undefined"');
+    expect(missing).toContain("Bun.build");
   });
 });
 

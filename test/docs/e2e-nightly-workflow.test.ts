@@ -76,13 +76,13 @@ describe("auto-assign.yml caller forwards the dispatched issue", () => {
     readFileSync(join(ROOT, ".github", "workflows", "auto-assign.yml"), "utf8"),
   ) as Workflow;
 
-  test("workflow_dispatch declares an optional issue input", () => {
-    const dispatch = wf.on?.workflow_dispatch as { inputs?: Record<string, unknown> } | undefined;
-    expect(dispatch?.inputs).toHaveProperty("issue");
-  });
-
-  test("the reusable call forwards issue from inputs", () => {
-    const withBlock = wf.jobs["auto-assign"]?.with ?? {};
-    expect(String(withBlock.issue)).toContain("inputs.issue");
+  test("workflow_dispatch declares issue as an optional input and the reusable call forwards it", () => {
+    const dispatch = wf.on?.workflow_dispatch as
+      | { inputs?: Record<string, { required?: boolean; default?: unknown }> }
+      | undefined;
+    // Optional with an empty default: the nightly filer always passes a
+    // number, and a bare dispatch must still run the full sweep.
+    expect(dispatch?.inputs?.issue).toMatchObject({ required: false, default: "" });
+    expect(String(wf.jobs["auto-assign"]?.with?.issue)).toContain("inputs.issue");
   });
 });

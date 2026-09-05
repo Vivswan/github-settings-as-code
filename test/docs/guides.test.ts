@@ -442,11 +442,24 @@ describe("docs/ guide pages", () => {
     ).toBe(true);
   });
 
-  test("the guides carry settings examples at all", () => {
-    const total = guidePages()
-      .map((page) => fencedBlocks(readFileSync(join(DOCS, page), "utf8"), "yaml settings").length)
-      .reduce((a, b) => a + b, 0);
-    expect(total).toBeGreaterThan(0);
+  test("fencedBlocks sees every tagged settings example the guides carry", () => {
+    // The per-page corpus tests validate what fencedBlocks returns, so a
+    // blind fencedBlocks would pass them vacuously. Count the openers with
+    // an independent scan and pin the one page that must carry an example.
+    const seen = Object.fromEntries(
+      guidePages().map((page) => {
+        const markdown = readFileSync(join(DOCS, page), "utf8");
+        return [page, fencedBlocks(markdown, "yaml settings").length];
+      }),
+    );
+    const openers = Object.fromEntries(
+      guidePages().map((page) => {
+        const markdown = readFileSync(join(DOCS, page), "utf8");
+        return [page, markdown.split("\n").filter((line) => line === "```yaml settings").length];
+      }),
+    );
+    expect(seen).toEqual(openers);
+    expect(seen["start/getting-started.md"]).toBe(1);
   });
 
   test("the undeclared-policy guide names every nested per-environment knob", () => {
@@ -566,19 +579,39 @@ describe("fence policy guard (mutation checks)", () => {
     expect(fenceViolations("```yaml settings\nlabels: []\n```\n", ALLOWED_FENCE_INFO)).toEqual([]);
   });
 
-  const MUTATIONS: Record<string, string> = {
-    "a missing tag": "```\nlabels: []\n```\n",
-    "a misspelled tag": "```yml settings\nlabels: []\n```\n",
-    "a space before the tag": "``` yaml settings\nlabels: []\n```\n",
-    "an indented fence": "  ```yaml settings\nlabels: []\n  ```\n",
-    "a blockquoted fence": "> ```yaml settings\nlabels: []\n> ```\n",
-    "a tilde fence": "~~~yaml settings\nlabels: []\n~~~\n",
-    "a four-backtick fence": "````yaml settings\nlabels: []\n````\n",
-    "an unclosed fence": "```yaml settings\nlabels: []\n",
+  const notAllowed = (line: number, info: string): string =>
+    `line ${line}: fence info "${info}" is not in the allowed list (${[...ALLOWED_FENCE_INFO].join(", ")})`;
+  const malformed = (line: number, fence: string): string =>
+    `line ${line}: fence "${fence}" must start at column zero with exactly three backticks (no indent, no blockquote)`;
+  const MUTATIONS: Record<string, [markdown: string, violations: string[]]> = {
+    "a missing tag": ["```\nlabels: []\n```\n", [notAllowed(1, "")]],
+    "a misspelled tag": ["```yml settings\nlabels: []\n```\n", [notAllowed(1, "yml settings")]],
+    "a space before the tag": [
+      "``` yaml settings\nlabels: []\n```\n",
+      [notAllowed(1, " yaml settings")],
+    ],
+    // A malformed opener never opens a block, so its closer is reported too.
+    "an indented fence": [
+      "  ```yaml settings\nlabels: []\n  ```\n",
+      [malformed(1, "```yaml settings"), malformed(3, "```")],
+    ],
+    "a blockquoted fence": [
+      "> ```yaml settings\nlabels: []\n> ```\n",
+      [malformed(1, "> ```yaml settings"), malformed(3, "> ```")],
+    ],
+    "a tilde fence": [
+      "~~~yaml settings\nlabels: []\n~~~\n",
+      [malformed(1, "~~~yaml settings"), malformed(3, "~~~")],
+    ],
+    "a four-backtick fence": [
+      "````yaml settings\nlabels: []\n````\n",
+      [malformed(1, "````yaml settings"), malformed(3, "````")],
+    ],
+    "an unclosed fence": ["```yaml settings\nlabels: []\n", ["unclosed fence at end of document"]],
   };
-  for (const [name, markdown] of Object.entries(MUTATIONS)) {
+  for (const [name, [markdown, violations]] of Object.entries(MUTATIONS)) {
     test(`rejects ${name}`, () => {
-      expect(fenceViolations(markdown, ALLOWED_FENCE_INFO).length).toBeGreaterThan(0);
+      expect(fenceViolations(markdown, ALLOWED_FENCE_INFO)).toEqual(violations);
     });
   }
 });

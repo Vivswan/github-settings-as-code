@@ -802,7 +802,8 @@ describe("predictMulti rollup", () => {
     // A non-none contents grade does not gate the target: it gets a real run.
     const readable = meta({ sections: ["labels"], mask: { contents: "read" } });
     const p = predictMulti(multiMeta([normal(readable)]));
-    expect(p.repos[0]?.run).not.toBeNull();
+    expect(p.repos[0]?.run).toEqual(predictOutcomes(readable));
+    expect(p.allowedExitCodes).toEqual(predictOutcomes(readable).allowedExitCodes);
   });
 
   test("all granted targets => exit 0 only", () => {

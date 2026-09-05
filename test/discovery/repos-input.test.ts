@@ -3,23 +3,30 @@ import { parseReposInput } from "../../src/discovery/repos-input.js";
 
 describe("parseReposInput", () => {
   test("splits on commas and newlines", () => {
-    const parsed = parseReposInput("o/a, o/b\no/c");
-    expect("slugs" in parsed && parsed.slugs).toEqual(["o/a", "o/b", "o/c"]);
+    expect(parseReposInput("o/a, o/b\no/c")).toEqual({
+      slugs: ["o/a", "o/b", "o/c"],
+      discover: false,
+    });
   });
 
   test("* alone switches to discovery", () => {
-    const parsed = parseReposInput("*");
-    expect("discover" in parsed && parsed.discover).toBe(true);
+    expect(parseReposInput("*")).toEqual({ slugs: [], discover: true });
   });
 
   test("* mixed with slugs is an error", () => {
-    const parsed = parseReposInput("*, o/a");
-    expect("error" in parsed && parsed.error).toContain('"*" alone');
+    expect(parseReposInput("*, o/a")).toEqual({
+      error: expect.stringContaining('Use "*" alone to discover every repository'),
+    });
   });
 
-  test("bad slug and duplicates are errors", () => {
-    expect("error" in parseReposInput("not-a-slug")).toBe(true);
-    const dup = parseReposInput("o/a, O/A");
-    expect("error" in dup && dup.error).toContain("more than once");
+  test("bad slugs and duplicates are reported once, together, with counts", () => {
+    expect(parseReposInput("not-a-slug")).toEqual({
+      error:
+        'the "repos" input has 1 invalid entry: "not-a-slug" is not an owner/name slug (use values like "octocat/hello-world", comma- or newline-separated). Or use "*" alone to discover repositories',
+    });
+    expect(parseReposInput("o/a, O/A, bad, bad, worse")).toEqual({
+      error:
+        'the "repos" input has 3 invalid entries: "bad", "worse" are not owner/name slugs (use values like "octocat/hello-world", comma- or newline-separated); "O/A" is listed more than once (keep exactly one entry per repository). Or use "*" alone to discover repositories',
+    });
   });
 });

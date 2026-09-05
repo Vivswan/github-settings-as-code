@@ -19,7 +19,7 @@ describe("getRepoFile 404 disambiguation", () => {
     const state = stubFetch([notFound, repoWithPull]);
     const result = await getRepoFile(api(), "o/r", ".github/settings.yml");
     expect(state.calls).toBe(2);
-    expect("missing" in result).toBe(true);
+    expect(result).toEqual({ missing: true });
   });
 
   test("contents 404 without Contents access is an error, not a missing file", async () => {

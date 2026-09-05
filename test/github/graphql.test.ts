@@ -285,7 +285,7 @@ describe("tryGraphql tracing and redaction", () => {
     ]);
     const dbg = traceIo();
     const result = await api(dbg.io).tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r");
-    expect("data" in result).toBe(true);
+    expect(result).toEqual({ data: { repository: { id: "R_1" } } });
     expect(dbg.lines.join("\n")).toContain("warnings:");
     expect(dbg.lines.join("\n")).toContain("legacy node id");
   });

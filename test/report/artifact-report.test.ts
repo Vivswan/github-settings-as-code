@@ -95,7 +95,9 @@ describe("deliverArtifactReport", () => {
   test("a malformed recipient is a warning and the uploader is never called", async () => {
     const { uploader, uploads } = captureUploader();
     const result = await deliverArtifactReport("doc", "not-a-key", uploader);
-    expect("warning" in result).toBe(true);
+    expect(result).toEqual({
+      warning: expect.stringContaining("could not upload the private report artifact"),
+    });
     expect(uploads).toHaveLength(0);
   });
 });

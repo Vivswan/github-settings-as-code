@@ -57,6 +57,13 @@ describe("three-way drift detection", () => {
             `${key} seed ${i}: zod shape rejected the generated value ${JSON.stringify(value)}: ${JSON.stringify(parsed.error.issues)}`,
           );
         }
+        // 4. A witness section is drawn as the bare list its live witness
+        //    mirrors entry by entry, never the wrapped {undeclared, entries} form.
+        if ((WITNESS_SECTIONS as readonly string[]).includes(key) && !Array.isArray(value)) {
+          offenders.push(
+            `${key} seed ${i}: witness section drew the wrapped form ${JSON.stringify(value)}`,
+          );
+        }
       }
     }
     expect(
@@ -200,14 +207,6 @@ describe("generator couplings and pools", () => {
       expect(plain).toBeGreaterThan(0);
       for (const policy of ["keep", "delete", "(omitted)"]) {
         expect(wrapped.get(policy) ?? 0, `${key} never drew the ${policy} form`).toBeGreaterThan(0);
-      }
-    }
-  });
-
-  test("the witness sections never emit the wrapped form", () => {
-    for (const key of WITNESS_SECTIONS) {
-      for (let i = 0; i < 400; i++) {
-        expect(Array.isArray(genSettings(new Rng(i), key))).toBe(true);
       }
     }
   });
