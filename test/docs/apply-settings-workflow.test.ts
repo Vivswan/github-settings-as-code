@@ -17,6 +17,7 @@ interface Step {
   id?: string;
   uses?: string;
   if?: string;
+  run?: string;
   env?: Record<string, string>;
   with?: Record<string, unknown>;
 }
@@ -255,7 +256,21 @@ interface CallerJob {
   uses?: string;
   with?: Record<string, unknown>;
   secrets?: unknown;
+  permissions?: Record<string, string>;
+  steps?: Step[];
   [key: string]: unknown;
+}
+
+/** The step contract of a self-contained job: what each step is (the action
+ * it uses or the command it runs), its gate, and its name. */
+interface PinnedStep {
+  name: string | undefined;
+  id: string | undefined;
+  uses: string | undefined;
+  if: string | undefined;
+  run: string | undefined;
+  env: Record<string, string> | undefined;
+  with: Record<string, unknown> | undefined;
 }
 interface CallTrigger extends Trigger {
   secrets?: Record<string, { required?: boolean }>;
@@ -273,9 +288,39 @@ interface CallerContract {
   /** The whole workflow_call interface ci.yml must satisfy. */
   inputs: Record<string, { required: boolean; type: string | undefined; hasDefault: boolean }>;
   secrets: string[];
-  /** Every job, with its exact key set: nothing may gate, lane, or extend the call. */
-  jobs: Array<{ id: string; keys: string[]; uses: unknown; with: unknown; secrets: unknown }>;
+  /** Every job, with its exact key set: nothing may gate, lane, or extend the call,
+   * and the only job beside it is the build-branch publisher (self-contained steps
+   * pinned by name, gate, and command; no ceiling of its own, so it inherits the
+   * caller's grant; no call of its own). */
+  jobs: Array<{
+    id: string;
+    keys: string[];
+    uses: unknown;
+    with: unknown;
+    secrets: unknown;
+    permissions: unknown;
+    steps: PinnedStep[] | undefined;
+  }>;
 }
+
+/** The build job's gate: every step after the push probe runs only when the token can push. */
+const PROCEED = "steps.token.outputs.proceed == 'true'";
+/** The push probe: a dry-run push over the real channel; a PAT that cannot push
+ * fails the job, a default token that cannot warns naming BOTH remedies. */
+const PUSH_PROBE = [
+  "if git push --dry-run --quiet origin HEAD:refs/dry-run/token-probe 2>probe.err; then",
+  '  echo "proceed=true" >> "$GITHUB_OUTPUT"',
+  'elif [ "$PAT_SET" = "true" ]; then',
+  "  echo \"::error::REPO_PLATFORM_TOKEN cannot push to this repository: $(tr '\\n' ' ' <probe.err)\"",
+  "  exit 1",
+  "else",
+  '  echo "::warning::this run\'s token cannot push (the caller grants contents: read); the build branch and the latest tag were not advanced." \\',
+  '    "Raise the caller\'s ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) and Workflows (write) on this repository, to publish @latest."',
+  '  echo "proceed=false" >> "$GITHUB_OUTPUT"',
+  "fi",
+  "rm -f probe.err",
+  "",
+].join("\n");
 
 const CALLER_EXPECTED: CallerContract = {
   topLevel: ["jobs", "name", "on"],
@@ -289,6 +334,70 @@ const CALLER_EXPECTED: CallerContract = {
       uses: "./.github/workflows/apply-settings.yml",
       with: { sha: `\${{ inputs.sha }}` },
       secrets: "inherit",
+      permissions: undefined,
+      steps: undefined,
+    },
+    {
+      id: "build",
+      keys: ["runs-on", "steps", "timeout-minutes"],
+      uses: undefined,
+      with: undefined,
+      secrets: undefined,
+      permissions: undefined,
+      steps: [
+        {
+          name: undefined,
+          id: undefined,
+          uses: "actions/checkout@v7",
+          if: undefined,
+          run: undefined,
+          env: undefined,
+          with: {
+            ref: `\${{ inputs.sha }}`,
+            "fetch-depth": 0,
+            token: `\${{ secrets.REPO_PLATFORM_TOKEN || github.token }}`,
+          },
+        },
+        {
+          name: "Check the token can push to build",
+          id: "token",
+          uses: undefined,
+          if: undefined,
+          run: PUSH_PROBE,
+          env: { PAT_SET: `\${{ secrets.REPO_PLATFORM_TOKEN != '' }}` },
+          with: undefined,
+        },
+        {
+          name: undefined,
+          id: undefined,
+          uses: "oven-sh/setup-bun@v2",
+          if: PROCEED,
+          run: undefined,
+          env: undefined,
+          with: { "bun-version-file": ".bun-version" },
+        },
+        {
+          name: "Build the bundle",
+          id: undefined,
+          uses: undefined,
+          if: PROCEED,
+          run: "bun install --frozen-lockfile --ignore-scripts\nbun run build:bundle\n",
+          env: undefined,
+          with: undefined,
+        },
+        {
+          name: "Append this commit's packaged child to build and move latest to the tip",
+          id: undefined,
+          uses: undefined,
+          if: PROCEED,
+          run: 'GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts advance-build',
+          env: {
+            SOURCE_SHA: `\${{ inputs.sha }}`,
+            RUN_URL: `\${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}`,
+          },
+          with: undefined,
+        },
+      ],
     },
   ],
 };
@@ -311,6 +420,16 @@ function callerContractOf(wf: Caller): CallerContract {
       uses: job.uses,
       with: job.with,
       secrets: job.secrets,
+      permissions: job.permissions,
+      steps: job.steps?.map((step) => ({
+        name: step.name,
+        id: step.id,
+        uses: step.uses,
+        if: step.if,
+        run: step.run,
+        env: step.env,
+        with: step.with,
+      })),
     })),
   };
 }
@@ -352,8 +471,66 @@ describe("post-green.yml reaches the hook", () => {
       "jobs",
     ],
     [
-      "a second job beside the call",
+      "an undeclared job beside the call",
       (w) => (w.jobs.extra = { "runs-on": "ubuntu-latest", steps: [{ run: "echo" }] }),
+      "jobs",
+    ],
+    [
+      "a build step that runs the append without the token gate",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.at(-1);
+        must(step, "append step").if = undefined;
+      },
+      "jobs",
+    ],
+    [
+      "a build job whose append runs another subcommand",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.at(-1);
+        must(step, "append step").run =
+          'GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts package';
+      },
+      "jobs",
+    ],
+    [
+      "a build job with a ceiling of its own instead of the caller's grant",
+      (w) => (must(w.jobs.build, "build job").permissions = { contents: "read" }),
+      "jobs",
+    ],
+    [
+      "a push probe whose warning names only one of the two remedies",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.[1];
+        must(step, "probe step").run = PUSH_PROBE.replace(
+          "Raise the caller's ceiling to contents: write, or add",
+          "Add",
+        );
+      },
+      "jobs",
+    ],
+    [
+      "a probe whose output the gates cannot read (its id gone)",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.[1];
+        delete must(step, "probe step").id;
+      },
+      "jobs",
+    ],
+    [
+      "a probe that cannot tell a rejected PAT from a read ceiling (PAT_SET gone)",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.[1];
+        delete must(step, "probe step").env;
+      },
+      "jobs",
+    ],
+    [
+      "a checkout that never tries the caller's token",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.[0];
+        must(must(step, "checkout step").with, "checkout with").token =
+          `\${{ secrets.REPO_PLATFORM_TOKEN }}`;
+      },
       "jobs",
     ],
     [

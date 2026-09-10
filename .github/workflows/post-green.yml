@@ -21,3 +21,70 @@ jobs:
     with:
       sha: ${{ inputs.sha }}
     secrets: inherit
+
+  # The `build` branch: every green main commit gets a packaged child (its
+  # tree plus the built lib/index.js) appended to refs/heads/build with a
+  # plain fast-forward push, and the `latest` tag is moved to the new tip
+  # with a lease, so `uses: ...@latest` runs main's newest green code before
+  # a release (main itself is source-only) and the release job that follows
+  # finds the chain commit it tags. Beside apply-settings, not behind it: the
+  # two share no state, and a settings skip must not hold build back.
+  # Idempotent: a rerun on the same sha verifies the chain commit and moves
+  # nothing, and a rerun of an older commit's run finds build already past it
+  # and leaves it there. No permissions key: the job inherits the caller's
+  # grant, and pushes with GITHUB_TOKEN when that grant is contents: write
+  # (the appended tree's .github/workflows/* blobs are byte-identical to
+  # main's, so no workflows permission is needed). REPO_PLATFORM_TOKEN, when
+  # set, is used instead; with neither able to push (today's ci.yml grants
+  # contents: read) the job warns and skips, and the release hook appends the
+  # release's chain commit itself.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          # The script judges whether build's recorded sources lie on this
+          # commit's history; a shallow checkout cannot answer that.
+          fetch-depth: 0
+          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+      # A dry-run push asks origin for its receive-pack advertisement over
+      # the very channel the real push uses, which a token without write
+      # access is refused; nothing is created. The target is a ref that never
+      # exists, not build itself: HEAD is no descendant of build's tip, so a
+      # dry run against build would be rejected locally as a non-fast-forward
+      # whatever the token. A PAT that cannot push is a misconfiguration and
+      # fails the job; a default token that cannot is the caller's ceiling,
+      # and the job skips with a warning.
+      - name: Check the token can push to build
+        id: token
+        env:
+          PAT_SET: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
+        run: |
+          if git push --dry-run --quiet origin HEAD:refs/dry-run/token-probe 2>probe.err; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$PAT_SET" = "true" ]; then
+            echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository: $(tr '\n' ' ' <probe.err)"
+            exit 1
+          else
+            echo "::warning::this run's token cannot push (the caller grants contents: read); the build branch and the latest tag were not advanced." \
+              "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) and Workflows (write) on this repository, to publish @latest."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+          rm -f probe.err
+      - uses: oven-sh/setup-bun@v2
+        if: steps.token.outputs.proceed == 'true'
+        with:
+          bun-version-file: .bun-version
+      - name: Build the bundle
+        if: steps.token.outputs.proceed == 'true'
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build:bundle
+      - name: Append this commit's packaged child to build and move latest to the tip
+        if: steps.token.outputs.proceed == 'true'
+        env:
+          SOURCE_SHA: ${{ inputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts advance-build

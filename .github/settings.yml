@@ -42,9 +42,10 @@ rulesets:
   # every release. A same-name ruleset merges key by key and an array
   # replaces wholesale, so this entry swaps only the include list and
   # inherits everything else (rules, enforcement, bypass) from the fleet.
-  # The vX.Y.Z tags stay immutable: each points at a packaged commit (a
-  # child of its release commit carrying the built bundle) that
-  # template-sync workflow pins and release artifacts reference.
+  # The vX.Y.Z tags stay immutable: each points at a commit on the `build`
+  # branch (its release commit's tree plus the built bundle) that
+  # template-sync workflow pins and release artifacts reference. The
+  # `latest` tag matches neither pattern, so post-green.yml can move it.
   - name: release-tags
     conditions:
       ref_name:
@@ -70,3 +71,24 @@ rulesets:
       - actor_id: 5
         actor_type: RepositoryRole
         bypass_mode: always
+
+  # The `build` branch of packaged commits: post-green.yml appends a
+  # packaged child of every green main commit with a plain push (the
+  # release hook appends one too when post-green could not), so build may
+  # only ever move forward - no force-push can rewrite a commit a version
+  # tag or a consumer already points at, and no deletion can brick every
+  # @latest consumer at once. Declared with NO bypass, like the fleet's
+  # non-bypassable ruleset: an omitted key is invisible to drift detection,
+  # so the empty list is what lets the apply heal an out-of-band bypass actor.
+  - name: build
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - build
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+    bypass_actors: []

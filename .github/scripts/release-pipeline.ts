@@ -1,18 +1,24 @@
 /**
- * The single-tag release pipeline's git topology, called step by step from
- * the repo-owned workflows (update-release.yml for the release chain,
- * checks.yml and update-release-pr.yml for the bookkeeping) and unit-tested
- * against fixture repositories (test/scripts/release-pipeline.test.ts), so
- * "the next release tags the right commits" is proven on every push.
+ * The release pipeline's git topology, called step by step from the
+ * repo-owned workflows (update-release.yml for the release chain, checks.yml
+ * and update-release-pr.yml for the bookkeeping, post-green.yml for the
+ * build branch) and unit-tested against fixture repositories
+ * (test/scripts/release-pipeline.test.ts), so "the next release tags the
+ * right commits" is proven on every push.
  *
- * The scheme: main is source-only, and every ref a consumer can name - the
- * vX.Y.Z release tags and the moving major vX - points ONLY at a packaged
- * commit, a child of the release-please merge commit that adds the built
- * lib/index.js. release-please cuts the DRAFT release itself (no tag: the
+ * The scheme: main is source-only, and every ref a consumer can name points
+ * at a packaged commit - a source commit's tree plus the built lib/index.js
+ * and nothing else - on the `build` branch. Every green push to main appends
+ * one packaged commit to refs/heads/build (parent: the previous tip; the
+ * first commit's parent is its source), each naming its source in a Source
+ * trailer. The `latest` tag follows build's tip; the vX.Y.Z release tags and
+ * the moving major vX sit on the chain commit whose source is the release's
+ * merge commit. release-please cuts the DRAFT release itself (no tag: the
  * config sets `draft` without `force-tag-creation`); these subcommands then
  * run, one per workflow step:
- *   package         packageRelease: tag the packaged child ONCE, or
- *                   byte-verify an existing tag. No path moves a tag.
+ *   package         packageRelease: tag the release's chain commit ONCE
+ *                   (appending it when post-green has not), or byte-verify
+ *                   an existing tag. No path moves a tag.
  *   retag-major     retagMajor: force-move the major tag, never backward.
  *   verify          verifyPublishedRefs: origin's actual refs and tree.
  *   anchor          anchorReleasePr: advance last-release-sha on the
@@ -20,17 +26,28 @@
  *                   release-please's boundary is recorded config).
  *   boundary-check  boundaryCheck: main's recorded boundary is fresh.
  *   anchor-check    anchorCheck: the release PR carries the anchor.
- * Env: TAG and GITHUB_SHA (package/retag-major/anchor), RUN_URL (package's
- * optional provenance trailer). Node builtins only: `bun` runs it pre-install.
+ *   advance-build   advanceBuild: append a green commit's packaged child to
+ *                   build and move latest to the tip.
+ * Env: TAG and GITHUB_SHA (package/retag-major/anchor), GITHUB_SHA
+ * (advance-build), RUN_URL (optional provenance, package/advance-build).
+ * Node builtins only: `bun` runs it pre-install.
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const MANIFEST_FILE = ".release-please-manifest.json";
 const CONFIG_FILE = "release-please-config.json";
 const BUNDLE_FILE = "lib/index.js";
+const BUILD_REF = "refs/heads/build";
+const LATEST_REF = "refs/tags/latest";
+/** How far back along build a source's chain commit is looked for, one
+ * fetched commit per step. The release job runs right after post-green in
+ * the same workflow run, so a release's chain commit is the tip or a few
+ * commits behind it; a source deeper than this is appended again rather
+ * than found. */
+const CHAIN_WALK = 50;
 /** What a squash-merged release-please PR's subject looks like on main.
  * Matched EXACTLY wherever release merges are recognized: a prefix match
  * would let "chore(main): release pipeline documentation" impersonate a
@@ -40,8 +57,17 @@ const RELEASE_SUBJECT = /^chore\(main\): release (\d+\.\d+\.\d+)(?: \(#\d+\))?$/
 /** Run git in cwd, returning trimmed stdout; rethrows with the command and
  * its stderr so a CI failure names the git call that produced it. */
 function git(cwd: string, ...args: string[]): string {
+  return gitWithEnv(cwd, {}, ...args);
+}
+
+/** git() with extra environment (GIT_INDEX_FILE for the private index). */
+function gitWithEnv(cwd: string, env: Record<string, string>, ...args: string[]): string {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    }).trim();
   } catch (error) {
     throw gitFailure(args, error);
   }
@@ -51,6 +77,52 @@ function gitFailure(args: string[], error: unknown): Error {
   const stderr = (error as { stderr?: unknown }).stderr;
   const detail = typeof stderr === "string" && stderr.trim() !== "" ? `: ${stderr.trim()}` : "";
   return new Error(`git ${args.join(" ")} failed${detail}`);
+}
+
+/** The server's compare-and-set diagnostic: the ref is at another value than
+ * advertised, or was created since. */
+const LOCK_LOST =
+  "cannot lock ref '[^']+': (?:is at [0-9a-f]+ but expected [0-9a-f]+|reference already exists)";
+/** git's words for the one push failure a retry can win: the remote ref moved
+ * after this run observed it. Either the client saw it (the `[rejected]` status
+ * line: a plain push no longer a fast-forward, a lease whose expected value went
+ * stale) or the server did between advertising the ref and updating it (GitHub
+ * puts its diagnostic in the status line, stock git on a `remote: error:` line
+ * above the rejection). Each form is anchored to its own line shape, so a hook
+ * message quoting the same words on any other line cannot match, and the
+ * `[remote rejected]` line a hook or ruleset produces matches none. */
+const OVERTAKEN_PUSH = new RegExp(
+  [
+    String.raw`^\s*!\s+\[rejected\]\s.*\((?:fetch first|non-fast-forward|stale info)\)\s*$`,
+    String.raw`^remote: error: ${LOCK_LOST}\s*$`,
+    String.raw`^\s*!\s+\[remote rejected\]\s.*\(${LOCK_LOST}\)\s*$`,
+  ].join("|"),
+  "m",
+);
+
+/**
+ * Push, telling the one failure worth retrying apart from every other, and
+ * deciding that HERE from git's stderr so no caller matches strings itself.
+ * Overtaken (another writer moved the ref after this run observed it) is
+ * returned with the stderr; a token without write access, a ruleset or
+ * protected-ref decline, a transport error, and anything else are permanent
+ * and thrown unchanged, git's stderr in the message.
+ */
+function pushUnlessOvertaken(
+  cwd: string,
+  ...pushArgs: string[]
+): { landed: true } | { landed: false; stderr: string } {
+  const args = ["push", ...pushArgs];
+  try {
+    execFileSync("git", args, { cwd, encoding: "utf8" });
+    return { landed: true };
+  } catch (error) {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    if (typeof stderr === "string" && OVERTAKEN_PUSH.test(stderr)) {
+      return { landed: false, stderr: stderr.trim() };
+    }
+    throw gitFailure(args, error);
+  }
 }
 
 /** A yes/no git question: exit 0 is yes, exit 1 is no, anything else is a failure and throws. */
@@ -84,7 +156,7 @@ function tryGit(cwd: string, ...args: string[]): string | null {
   }
 }
 
-/** The identity the pipeline's own commits (packaged child, anchor) carry. */
+/** The identity the pipeline's own commits (chain commits, anchor) carry. */
 function configureIdentity(cwd: string): void {
   git(cwd, "config", "user.name", "settings-as-code-release");
   git(cwd, "config", "user.email", "settings-as-code-release@users.noreply.github.com");
@@ -104,26 +176,304 @@ function releaseMajor(tag: string): string {
 }
 
 /**
- * The invariant every tagged ref must satisfy before consumers can be
- * pointed at it: the commit's TREE carries a non-empty bundle. Asserted on
- * every path that mints or blesses a ref - fresh package (before the tag
- * push), rerun verification, and the major move - not derived from diffs.
+ * The invariant every consumable ref must satisfy before consumers can be
+ * pointed at it: the tree carries the bundle as a non-empty REGULAR file (a
+ * symlink or a gitlink at that path has a size too, and no bundle). Asserted
+ * on every path that mints or blesses a ref - fresh package (before the
+ * push), rerun verification, the major move, and the build advance.
+ * Returns the entry so a caller can rebuild the tree it belongs in.
  */
-function assertCarriesBundle(cwd: string, sha: string): void {
-  const size = tryGit(cwd, "cat-file", "-s", `${sha}:${BUNDLE_FILE}`);
-  if (size === null || Number(size) === 0) {
+function assertCarriesBundle(cwd: string, treeish: string): { mode: string; blob: string } {
+  const entry = tryGit(cwd, "ls-tree", "-l", treeish, "--", BUNDLE_FILE) ?? "";
+  const [mode = "", , blob = "", size] = entry.split(/\s+/);
+  const regularFile = mode === "100644" || mode === "100755";
+  if (!regularFile || Number(size) === 0) {
+    const found = entry === "" ? "no entry" : `entry ${entry.split("\t")[0]}`;
     throw new Error(
-      `commit ${sha} does not carry a non-empty ${BUNDLE_FILE}; refusing to point a version ref at an unpackaged commit.`,
+      `${treeish} does not carry a non-empty regular-file ${BUNDLE_FILE} (${found}); refusing to point a consumable ref at an unpackaged commit.`,
     );
   }
+  return { mode, blob };
+}
+
+/**
+ * sourceSha's tree plus whatever `addBundle` stages at BUNDLE_FILE, and
+ * nothing else: assembled in a private index read from sourceSha's tree, so
+ * no other path can enter it and the checkout's own index stays untouched.
+ */
+function treePlusBundle(
+  cwd: string,
+  sourceSha: string,
+  addBundle: (env: Record<string, string>) => void,
+): string {
+  const indexFile = join(git(cwd, "rev-parse", "--absolute-git-dir"), "release-pipeline.index");
+  const env = { GIT_INDEX_FILE: indexFile };
+  try {
+    gitWithEnv(cwd, env, "read-tree", sourceSha);
+    addBundle(env);
+    return gitWithEnv(cwd, env, "write-tree");
+  } finally {
+    rmSync(indexFile, { force: true });
+  }
+}
+
+/**
+ * The one definition of "packaged is source's package", asserted wherever a
+ * ref that already exists is blessed (a tagged rerun, the major move, every
+ * build tip): packaged's tree IS the tree rebuilt from source plus
+ * packaged's own bundle entry. Tree identity, not a path diff: a diff lists
+ * paths, so an extra empty subtree or a rename hides from it, while no tree
+ * object hides from its own id. `remedy` tells the operator what to do.
+ */
+function assertPackages(
+  cwd: string,
+  packaged: string,
+  source: string,
+  ref: string,
+  remedy: string,
+): void {
+  const { mode, blob } = assertCarriesBundle(cwd, packaged);
+  const expected = treePlusBundle(cwd, source, (env) =>
+    gitWithEnv(cwd, env, "update-index", "--add", "--cacheinfo", `${mode},${blob},${BUNDLE_FILE}`),
+  );
+  const actual = git(cwd, "rev-parse", `${packaged}^{tree}`);
+  if (actual !== expected) {
+    const changed = git(cwd, "diff", "--no-renames", "--name-only", source, packaged)
+      .split("\n")
+      .filter((path) => path !== "" && path !== BUNDLE_FILE);
+    const listed =
+      changed.length === 0
+        ? "none (an entry a path diff cannot list, such as an empty subtree)"
+        : changed.join(", ");
+    throw new Error(
+      `${ref} is not ${source} plus ${BUNDLE_FILE} alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond the bundle changed relative to ${source}: ${listed}); ${remedy}`,
+    );
+  }
+}
+
+/**
+ * The tree every packaged commit carries: sourceSha's tree plus the bundle
+ * built in the checkout. The checkout must BE sourceSha with a clean
+ * worktree: that is what makes the bundle a build of that source rather
+ * than of a by-hand edit (the bundle itself is gitignored and never shows
+ * as pending).
+ */
+function packagedTree(cwd: string, sourceSha: string): string {
+  const head = git(cwd, "rev-parse", "HEAD");
+  if (head !== sourceSha) {
+    throw new Error(`the checkout is at ${head}, not the source commit ${sourceSha} to package.`);
+  }
+  if (!existsSync(join(cwd, BUNDLE_FILE))) {
+    throw new Error(`${BUNDLE_FILE} is not built; run the build before packaging.`);
+  }
+  const dirty = git(cwd, "status", "--porcelain").split("\n").filter(Boolean);
+  if (dirty.length > 0) {
+    throw new Error(
+      `the worktree has pending changes beyond ${BUNDLE_FILE} (${dirty.join("; ")}); the bundle must be a build of ${sourceSha} alone - commit, stash, or clean them first.`,
+    );
+  }
+  // -f: main gitignores the bundle
+  const tree = treePlusBundle(cwd, sourceSha, (env) =>
+    gitWithEnv(cwd, env, "add", "-f", BUNDLE_FILE),
+  );
+  assertCarriesBundle(cwd, tree);
+  return tree;
+}
+
+/** The Source trailer as git parses it (empty when the commit has none). */
+function sourceTrailer(cwd: string, sha: string): string {
+  return git(cwd, "log", "-1", "--format=%(trailers:key=Source,valueonly)", sha);
+}
+
+/**
+ * The source a packaged commit records. Chain commits carry it as a Source
+ * trailer; the detached packaged children the releases before the build
+ * branch tagged (v2.0.0 and earlier) carry it as a `source:` body line
+ * instead. Both shapes satisfy the same invariant - the tree is that
+ * source's plus the bundle - so a verification reads the source here and
+ * never asks which shape it holds. Empty when the commit records neither.
+ */
+function recordedSource(cwd: string, sha: string): string {
+  const trailer = sourceTrailer(cwd, sha);
+  if (trailer !== "") {
+    return trailer;
+  }
+  const body = git(cwd, "log", "-1", "--format=%B", sha);
+  return body.match(/^source: ([0-9a-f]{40})$/m)?.[1] ?? "";
+}
+
+/** The one shape of chain commit: `tree` under the pipeline's identity, the
+ * source named in a Source trailer (the provenance trailer beside it). */
+function commitChain(
+  cwd: string,
+  tree: string,
+  parent: string,
+  sourceSha: string,
+  runUrl: string | undefined,
+): string {
+  configureIdentity(cwd);
+  const trailers = [`Source: ${sourceSha}`];
+  if (runUrl !== undefined) {
+    trailers.push(`Workflow-run: ${runUrl}`);
+  }
+  const subject = `build: main at ${git(cwd, "rev-parse", "--short", sourceSha)}`;
+  return git(cwd, "commit-tree", "-p", parent, "-m", subject, "-m", trailers.join("\n"), tree);
+}
+
+/** Origin's build tip and main head, read together. */
+interface BuildTip {
+  /** build's tip, or null while the branch does not exist. */
+  tip: string | null;
+  /** origin's main, read AFTER the tip: a commit landing between the two
+   * reads then postdates the tip, not the refresh. */
+  mainHead: string;
+}
+
+/**
+ * Fetch build's tip alone (depth 1: only its tree and message matter here,
+ * never the chain of earlier bundles behind it) and refresh main. The tip's
+ * source may be a main commit newer than this checkout knows (a stale
+ * rerun, or a push race lost to a newer run), and the Source trailer is no
+ * ancestry edge git could follow, so main's head is kept: "on main" is
+ * granted only to a source that is reachable from it.
+ */
+function readBuildTip(cwd: string): BuildTip {
+  // A standalone git() propagates a failing ls-remote, so a transport
+  // error cannot read as "build does not exist yet".
+  let tip: string | null = null;
+  if (git(cwd, "ls-remote", "origin", BUILD_REF) !== "") {
+    git(cwd, "fetch", "--quiet", "--depth=1", "origin", BUILD_REF);
+    tip = git(cwd, "rev-parse", "FETCH_HEAD");
+  }
+  git(cwd, "fetch", "--quiet", "origin", "refs/heads/main");
+  return { tip, mainHead: git(cwd, "rev-parse", "FETCH_HEAD") };
+}
+
+/**
+ * The chain commit whose Source is sourceSha, or null when none is within
+ * CHAIN_WALK commits of the tip. Walked one commit at a time, each fetched
+ * by sha at depth 1 only when this checkout lacks it: a depth-N fetch of
+ * build would mark main commits shallow whenever the chain is shorter than
+ * N, and a shallow main falsifies every ancestry verdict below. The walk
+ * ends at the chain's root (its parent is its source, on main), at a
+ * commit without a Source trailer (not this pipeline's), or at the bound.
+ */
+function findPackaged(
+  cwd: string,
+  tip: string,
+  sourceSha: string,
+  mainHead: string,
+): string | null {
+  let commit: string | null = tip;
+  for (let step = 0; commit !== null && step < CHAIN_WALK; step++) {
+    const source = sourceTrailer(cwd, commit);
+    if (source === sourceSha) {
+      return commit;
+    }
+    if (source === "") {
+      return null;
+    }
+    commit = chainParent(cwd, commit, mainHead);
+  }
+  return null;
+}
+
+/** `commit`'s parent as its object records it (a depth-1 fetch grafts the
+ * parent edge away, so rev-parse cannot answer), fetched when unknown here;
+ * null once the parent lies on main, which is where the chain ends. */
+function chainParent(cwd: string, commit: string, mainHead: string): string | null {
+  const parent = git(cwd, "cat-file", "-p", commit).match(/^parent ([0-9a-f]{40})$/m)?.[1];
+  if (parent === undefined) {
+    return null;
+  }
+  if (!gitYesNo(cwd, "rev-parse", "--verify", "--quiet", `${parent}^{commit}`)) {
+    git(cwd, "fetch", "--quiet", "--depth=1", "origin", parent);
+  }
+  return isAncestor(cwd, parent, mainHead) ? null : parent;
+}
+
+const BY_HAND =
+  "refusing to build on a build branch this pipeline did not mint - inspect it by hand.";
+
+/**
+ * No tip is trusted on its trailer alone: before one is built on, left, or
+ * pointed at by latest, it must name a source on main's history and its
+ * tree must be that source plus the bundle and nothing else. Returns the
+ * tip's source.
+ */
+function validateTip(cwd: string, tip: string, mainHead: string): string {
+  const tipSource = sourceTrailer(cwd, tip);
+  if (tipSource === "") {
+    throw new Error(
+      `${BUILD_REF} is at ${tip}, which carries no Source trailer, so this pipeline did not mint it; ${BY_HAND}`,
+    );
+  }
+  if (!isAncestor(cwd, tipSource, mainHead)) {
+    throw new Error(
+      `${BUILD_REF} is at ${tip}, built from ${tipSource}, which is not on main's history; refusing to append to a build branch this pipeline did not advance - inspect it by hand.`,
+    );
+  }
+  assertPackages(
+    cwd,
+    tip,
+    tipSource,
+    `${BUILD_REF} is at ${tip}, which names ${tipSource} as its source but`,
+    BY_HAND,
+  );
+  return tipSource;
+}
+
+/**
+ * A chain commit that names this source must carry the very tree this
+ * checkout's build packages: the Source trailer cannot tell a tip that was
+ * not built from this source from a build that is not reproducible.
+ */
+function assertSameBuild(cwd: string, packaged: string, sourceSha: string, tree: string): void {
+  assertPackages(
+    cwd,
+    packaged,
+    sourceSha,
+    `${BUILD_REF} holds ${packaged}, which names ${sourceSha} as its source but`,
+    BY_HAND,
+  );
+  const packagedTree = git(cwd, "rev-parse", `${packaged}^{tree}`);
+  if (packagedTree !== tree) {
+    throw new Error(
+      `${BUILD_REF} holds ${packaged}, which names ${sourceSha} as its source but its tree ${packagedTree} is not the tree ${tree} this checkout's build of ${sourceSha} packages, so the two differ in their ${BUNDLE_FILE} entry (bytes or file mode): either the commit was not built from this source or the build is not reproducible, and the Source trailer cannot tell those apart. Diff the two trees by hand; a hand-pushed commit is left for the next green push to bury (the ruleset on build forbids moving it back), a build that differs between runs is fixed before build can be trusted.`,
+    );
+  }
+}
+
+/**
+ * Append `tree`, sourceSha's package, to build after the validated tip,
+ * with a plain fast-forward push: git's compare-and-set is the concurrency
+ * control, so an overtaken push (another run appended first) is reported
+ * for the caller to re-read the chain and decide again, and every other
+ * failure is thrown as git worded it.
+ */
+function appendChain(
+  cwd: string,
+  build: BuildTip,
+  sourceSha: string,
+  tree: string,
+  runUrl: string | undefined,
+): { sha: string } | { overtaken: string } {
+  let parent = sourceSha;
+  if (build.tip !== null) {
+    validateTip(cwd, build.tip, build.mainHead);
+    parent = build.tip;
+  }
+  const sha = commitChain(cwd, tree, parent, sourceSha, runUrl);
+  const push = pushUnlessOvertaken(cwd, "origin", `${sha}:${BUILD_REF}`);
+  return push.landed ? { sha } : { overtaken: push.stderr };
 }
 
 export interface PackageOptions {
   cwd: string;
   tag: string;
-  /** The release-please merge commit this run tested; the tag's parent. */
+  /** The release-please merge commit this run tested; the tag's recorded source. */
   sourceSha: string;
-  /** Provenance trailer for the packaged commit (the workflow run URL). */
+  /** Provenance trailer for a chain commit this run has to append (the workflow run URL). */
   runUrl?: string;
 }
 
@@ -133,18 +483,22 @@ export interface PackagedRelease {
 }
 
 /**
- * Create the packaged commit and its version tag, exactly once. The worktree
- * must be the merge commit with the bundle freshly built; a rerun finds the
- * tag on origin and byte-verifies it instead (parent, whole tree, bundle
- * bytes), so no rerun can move or replace a tag - a mismatch is a loud stop.
+ * Create the release's version tag on its chain commit, exactly once. The
+ * worktree must be the merge commit with the bundle freshly built. The
+ * chain commit is normally build's tip (post-green appended it in the same
+ * workflow run, before this job) and is found by its Source trailer; when
+ * none packages this source (post-green skipped for want of its token, or
+ * its append never landed) it is appended here through the same path
+ * post-green uses, and an overtaken append re-walks: the rival's commit is
+ * tagged when it packages this source, built on otherwise. A rerun finds
+ * the tag on origin and byte-verifies it instead (recorded source, whole
+ * tree, bundle bytes), so no rerun can move or replace a tag - a mismatch
+ * is a loud stop.
  */
 export function packageRelease(options: PackageOptions): PackagedRelease {
   const { cwd, tag, sourceSha, runUrl } = options;
   releaseMajor(tag); // shape gate: nothing downstream may mint a non-vX.Y.Z ref
-  const head = git(cwd, "rev-parse", "HEAD");
-  if (head !== sourceSha) {
-    throw new Error(`the checkout is at ${head}, not the release merge commit ${sourceSha}.`);
-  }
+  const tree = packagedTree(cwd, sourceSha);
   // The tag must be the version THIS source released: a hand recovery with
   // the wrong TAG, or a draft whose metadata points at the wrong commit,
   // must stop here rather than mint an immutable tag from the wrong source.
@@ -154,9 +508,6 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
       `tag ${tag} does not match the manifest version ${JSON.stringify(manifest["."])} at ${sourceSha}; refusing to package a version this source did not release.`,
     );
   }
-  if (!existsSync(join(cwd, BUNDLE_FILE))) {
-    throw new Error(`${BUNDLE_FILE} is not built; run the build before packaging.`);
-  }
   const ref = `refs/tags/${tag}`;
   // A standalone git() propagates a failing ls-remote, so a transport error
   // cannot read as "the tag does not exist".
@@ -165,67 +516,59 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
     git(cwd, "fetch", "--quiet", "--depth=2", "origin", `+${ref}:${ref}`);
     return { created: false, packagedSha: verifyPackagedTag(cwd, tag, sourceSha) };
   }
-  // The packaged commit freezes the whole index, so nothing beyond the
-  // bundle may be pending: a dirty by-hand checkout would otherwise bake
-  // unrelated changes into an immutable tag. The bundle itself is
-  // gitignored and never appears here.
-  const dirty = git(cwd, "status", "--porcelain").split("\n").filter(Boolean);
-  if (dirty.length > 0) {
+  const attempts = 3;
+  let packagedSha: string | null = null;
+  for (let attempt = 1; attempt <= attempts && packagedSha === null; attempt++) {
+    const build = readBuildTip(cwd);
+    const found =
+      build.tip === null ? null : findPackaged(cwd, build.tip, sourceSha, build.mainHead);
+    if (found !== null) {
+      assertSameBuild(cwd, found, sourceSha, tree);
+      packagedSha = found;
+      break;
+    }
+    const appended = appendChain(cwd, build, sourceSha, tree, runUrl);
+    if ("sha" in appended) {
+      packagedSha = appended.sha;
+      break;
+    }
+    // Another run appended in between; re-read the chain, it may now hold this source.
+    console.error(`build push attempt ${attempt}/${attempts} overtaken: ${appended.overtaken}`);
+  }
+  if (packagedSha === null) {
     throw new Error(
-      `the worktree has pending changes beyond ${BUNDLE_FILE} (${dirty.join("; ")}); a packaged commit must add ONLY the bundle - commit, stash, or clean them first.`,
+      `could not append ${sourceSha}'s package to ${BUILD_REF} after ${attempts} attempts; something keeps moving it concurrently - rerun this job once it settles.`,
     );
   }
-  configureIdentity(cwd);
-  git(cwd, "add", "-f", BUNDLE_FILE); // -f: main gitignores the bundle
-  const message = ["-m", `build: package ${tag}`, "-m", `source: ${sourceSha}`];
-  if (runUrl !== undefined) {
-    message.push("-m", `workflow run: ${runUrl}`);
-  }
-  git(cwd, "commit", ...message);
-  const packagedSha = git(cwd, "rev-parse", "HEAD");
-  const committed = git(cwd, "diff", "--name-only", sourceSha, packagedSha)
-    .split("\n")
-    .filter(Boolean);
-  if (committed.length !== 1 || committed[0] !== BUNDLE_FILE) {
-    throw new Error(
-      `the packaged commit would change [${committed.join(", ")}], not only ${BUNDLE_FILE}; refusing to push it.`,
-    );
-  }
-  assertCarriesBundle(cwd, packagedSha);
   git(cwd, "tag", tag, packagedSha);
   git(cwd, "push", "origin", ref);
   return { created: true, packagedSha };
 }
 
 /**
- * Prove an existing version tag is THIS source's package: parented on the
- * merge commit, changing nothing but the bundle (a planted commit that keeps
- * the expected bundle but edits action.yml would otherwise pass), and
- * carrying exactly the bytes the fresh build in the worktree produced.
+ * Prove an existing version tag is THIS source's package: it records the
+ * merge commit as its source, changes nothing but the bundle relative to it
+ * (a planted commit that keeps the expected bundle but edits action.yml
+ * would otherwise pass), and carries exactly the bytes the fresh build in
+ * the worktree produced.
  */
 function verifyPackagedTag(cwd: string, tag: string, sourceSha: string): string {
   const frozen =
     "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.";
   const packagedSha = git(cwd, "rev-parse", `refs/tags/${tag}^{}`);
-  const parent = git(cwd, "rev-parse", `${packagedSha}^`);
-  if (parent !== sourceSha) {
+  const source = recordedSource(cwd, packagedSha);
+  if (source !== sourceSha) {
     throw new Error(
-      `refs/tags/${tag} exists but its parent is ${parent}, not this release's merge commit ${sourceSha}; ${frozen}`,
+      `refs/tags/${tag} exists but records ${source === "" ? "no source" : `${source} as its source`}, not this release's merge commit ${sourceSha}; ${frozen}`,
     );
   }
-  const changed = git(cwd, "diff", "--name-only", parent, packagedSha).split("\n").filter(Boolean);
-  if (changed.length !== 1 || changed[0] !== BUNDLE_FILE) {
-    throw new Error(
-      `refs/tags/${tag} changes more than ${BUNDLE_FILE} relative to ${sourceSha} (changed: ${changed.join(", ")}); ${frozen}`,
-    );
-  }
+  assertPackages(cwd, packagedSha, sourceSha, `refs/tags/${tag} (${packagedSha})`, frozen);
   const tagged = gitBytes(cwd, "show", `${packagedSha}:${BUNDLE_FILE}`);
   if (!tagged.equals(readFileSync(join(cwd, BUNDLE_FILE)))) {
     throw new Error(
       `refs/tags/${tag} carries a ${BUNDLE_FILE} that is not a build of ${sourceSha}'s source; ${frozen}`,
     );
   }
-  assertCarriesBundle(cwd, packagedSha);
   return packagedSha;
 }
 
@@ -243,15 +586,16 @@ export interface RetagMajorOptions {
  * old release's job - a step backward to an older release than the line
  * already shipped. The push is a compare-and-swap (--force-with-lease on
  * the observed major), so a concurrent newer release cannot be clobbered
- * between the newest-check and the push; a lost lease re-evaluates.
+ * between the newest-check and the push; an overtaken lease re-evaluates,
+ * any other failure is thrown as git worded it.
  */
 export function retagMajor(options: RetagMajorOptions): { major: string; packagedSha: string } {
   const { cwd, tag, sourceSha } = options;
   const ref = `refs/tags/${tag}`;
   git(cwd, "fetch", "--quiet", "--depth=2", "origin", `+${ref}:${ref}`);
-  // The full packaged-tag verification (parent, whole tree, bundle bytes),
-  // not a weaker parent-only probe: the major must never bless a child a
-  // fresh package run would refuse, however this command was reached.
+  // The full packaged-tag verification (recorded source, whole tree, bundle
+  // bytes), not a weaker probe: the major must never bless a commit a fresh
+  // package run would refuse, however this command was reached.
   const packagedSha = verifyPackagedTag(cwd, tag, sourceSha);
   const major = releaseMajor(tag);
   configureIdentity(cwd);
@@ -265,18 +609,16 @@ export function retagMajor(options: RetagMajorOptions): { major: string; package
     }
     const observed = git(cwd, "ls-remote", "origin", `refs/tags/${major}`).split("\t")[0] ?? "";
     git(cwd, "tag", "-f", major, packagedSha);
-    try {
-      git(
-        cwd,
-        "push",
-        `--force-with-lease=refs/tags/${major}:${observed}`,
-        "origin",
-        `refs/tags/${major}`,
-      );
+    const push = pushUnlessOvertaken(
+      cwd,
+      `--force-with-lease=refs/tags/${major}:${observed}`,
+      "origin",
+      `refs/tags/${major}`,
+    );
+    if (push.landed) {
       return { major, packagedSha };
-    } catch (error) {
-      console.error(`major lease push attempt ${attempt}/${attempts} lost: ${String(error)}`);
     }
+    console.error(`major lease push attempt ${attempt}/${attempts} overtaken: ${push.stderr}`);
   }
   throw new Error(
     `could not move ${major} after ${attempts} compare-and-swap attempts; something is moving it concurrently - inspect the tag by hand.`,
@@ -322,8 +664,9 @@ export interface VerifyOptions {
 /**
  * The end-of-pipeline confirmation, against origin's ACTUAL state rather
  * than anything this run holds locally: both refs a consumer resolves - the
- * version tag and its major - must point at the packaged child of this
- * release's merge commit, and that commit's tree must carry the bundle.
+ * version tag and its major - must point at a packaged commit recording
+ * this release's merge commit as its source, and that commit's tree must
+ * be the merge commit's plus the bundle and nothing else.
  */
 export function verifyPublishedRefs(options: VerifyOptions): {
   major: string;
@@ -341,13 +684,22 @@ export function verifyPublishedRefs(options: VerifyOptions): {
     `+refs/tags/${major}:refs/verify/${major}`,
   );
   const packagedSha = git(cwd, "rev-parse", `refs/verify/${tag}^{}`);
-  const parent = git(cwd, "rev-parse", `${packagedSha}^`);
-  if (parent !== sourceSha) {
+  const source = recordedSource(cwd, packagedSha);
+  if (source !== sourceSha) {
     throw new Error(
-      `origin's refs/tags/${tag} points at ${packagedSha} whose parent is ${parent}, not this release's merge commit ${sourceSha}.`,
+      `origin's refs/tags/${tag} points at ${packagedSha}, which records ${source === "" ? "no source" : `${source} as its source`}, not this release's merge commit ${sourceSha}.`,
     );
   }
-  assertCarriesBundle(cwd, packagedSha);
+  // The verify job's checkout is main's head at depth 1; the merge commit's
+  // tree comes from origin by sha so the whole-tree check can run here too.
+  git(cwd, "fetch", "--quiet", "--depth=1", "origin", sourceSha);
+  assertPackages(
+    cwd,
+    packagedSha,
+    sourceSha,
+    `origin's refs/tags/${tag} (${packagedSha})`,
+    "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.",
+  );
   const majorSha = git(cwd, "rev-parse", `refs/verify/${major}^{}`);
   if (majorSha !== packagedSha) {
     throw new Error(
@@ -396,8 +748,9 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
     if (git(cwd, "ls-remote", "origin", branchRef) === "") {
       return { changed: false, reason: "no release PR branch to anchor" };
     }
-    // Detached on FETCH_HEAD, never a local branch: a retry after a lost
-    // push must re-fetch, and git refuses to fetch into a checked-out ref.
+    // Detached on FETCH_HEAD, never a local branch: a retry after an
+    // overtaken push must re-fetch, and git refuses to fetch into a
+    // checked-out ref.
     git(cwd, "fetch", "--quiet", "--force", "origin", branchRef);
     git(cwd, "checkout", "--quiet", "--force", "--detach", "FETCH_HEAD");
     // Anchor only a branch release-please built on this head: this
@@ -427,7 +780,7 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
       "-m",
       "chore: anchor release-please to this release cycle's base",
       "-m",
-      "last-release-sha records the merge parent so the squash merge itself lands the next cycle's boundary on main: version tags live on packaged children that are not on main, so release-please cannot find the boundary by tag.",
+      "last-release-sha records the merge parent so the squash merge itself lands the next cycle's boundary on main: version tags live on packaged commits that are not on main, so release-please cannot find the boundary by tag.",
     );
     // Recheck main immediately before pushing: the fetch above can lose a
     // race where a newer push's run already refreshed and anchored the
@@ -437,13 +790,12 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
     if (headNow !== sourceSha) {
       return { changed: false, reason: `main moved to ${headNow ?? "?"}; the newer run anchors` };
     }
-    try {
-      git(cwd, "push", "origin", `HEAD:${branchRef}`);
+    const push = pushUnlessOvertaken(cwd, "origin", `HEAD:${branchRef}`);
+    if (push.landed) {
       return { changed: true, reason: `${RELEASE_PR_BRANCH}: anchored at ${sourceSha}` };
-    } catch (error) {
-      // release-please force-pushed a refresh mid-anchor; reapply on it.
-      console.error(`anchor push attempt ${attempt}/${attempts} lost: ${String(error)}`);
     }
+    // release-please force-pushed a refresh mid-anchor; reapply on it.
+    console.error(`anchor push attempt ${attempt}/${attempts} overtaken: ${push.stderr}`);
   }
   throw new Error(
     `could not anchor ${RELEASE_PR_BRANCH} after ${attempts} attempts; something keeps rewriting the branch - rerun this job once the branch settles.`,
@@ -549,6 +901,182 @@ export function anchorCheck(cwd: string): { boundary: string } {
   return { boundary: String(recorded) };
 }
 
+export interface AdvanceBuildOptions {
+  cwd: string;
+  /** The green main commit this run judged; the checkout must be at it with the bundle built. */
+  sourceSha: string;
+  /** Provenance trailer for the chain commit (the workflow run URL). */
+  runUrl?: string;
+  attempts?: number;
+}
+
+export interface AdvanceBuildResult {
+  /** Whether this run appended to build. */
+  changed: boolean;
+  /** The chain commit packaging this source, or the newer tip build was left at. */
+  buildSha: string;
+  /** Where refs/tags/latest points when this run ends: the chain commit
+   * packaging the newest source (normally build's tip). */
+  latestSha: string;
+  reason: string;
+}
+
+/**
+ * Append the packaged child of a green main commit to refs/heads/build and
+ * move the `latest` tag to build's tip. Every commit on build is its
+ * source's tree plus the bundle and names that source in a Source trailer,
+ * so the branch is a chain of packaged commits whose sources walk forward
+ * along main: the next commit is parented on the current tip and pushed
+ * WITHOUT force, so build can only advance. A rerun on a source the chain
+ * already packages pushes nothing (after checking that commit carries the
+ * very tree this checkout's build packages); a rerun of an older commit's
+ * run finds the tip already past it and leaves it; a tip whose source is
+ * off main's history (a hand push) stops the run instead of being built on.
+ * Needs the full history: whether a recorded source lies behind sourceSha
+ * cannot be judged on a shallow checkout.
+ */
+export function advanceBuild(options: AdvanceBuildOptions): AdvanceBuildResult {
+  const { cwd, sourceSha, runUrl, attempts = 3 } = options;
+  if (git(cwd, "rev-parse", "--is-shallow-repository") === "true") {
+    throw new Error(
+      "advance-build needs the full history (fetch-depth: 0) and this checkout is shallow: whether build's recorded sources lie on this commit's history cannot be judged on a truncated one.",
+    );
+  }
+  const tree = packagedTree(cwd, sourceSha);
+  const advanced = advanceChain(cwd, sourceSha, tree, runUrl, attempts);
+  const latest = publishLatest(cwd, advanced.buildSha, attempts);
+  return {
+    ...advanced,
+    latestSha: latest.sha,
+    reason: `${advanced.reason}; ${latest.reason}`,
+  };
+}
+
+/** The build half of advanceBuild: the chain commit for this source, appended or found. */
+function advanceChain(
+  cwd: string,
+  sourceSha: string,
+  tree: string,
+  runUrl: string | undefined,
+  attempts: number,
+): { changed: boolean; buildSha: string; reason: string } {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const build = readBuildTip(cwd);
+    if (build.tip !== null) {
+      const found = findPackaged(cwd, build.tip, sourceSha, build.mainHead);
+      if (found !== null) {
+        assertSameBuild(cwd, found, sourceSha, tree);
+        return {
+          changed: false,
+          buildSha: found,
+          reason: `${BUILD_REF} already packages ${sourceSha} at ${found}`,
+        };
+      }
+      const tipSource = validateTip(cwd, build.tip, build.mainHead);
+      if (!isAncestor(cwd, tipSource, sourceSha)) {
+        if (!isAncestor(cwd, sourceSha, tipSource)) {
+          throw new Error(
+            `${BUILD_REF} is at ${build.tip}, built from ${tipSource}, which is not on main's history at ${sourceSha}; refusing to append to a build branch this pipeline did not advance - inspect it by hand.`,
+          );
+        }
+        return {
+          changed: false,
+          buildSha: build.tip,
+          reason: `${BUILD_REF} is already past ${sourceSha} (built from ${tipSource}); the newer run advanced it`,
+        };
+      }
+    }
+    const appended = appendChain(cwd, build, sourceSha, tree, runUrl);
+    if ("sha" in appended) {
+      return {
+        changed: true,
+        buildSha: appended.sha,
+        reason: `${BUILD_REF}: advanced to ${appended.sha}`,
+      };
+    }
+    // Another run appended in between; re-evaluate on the new tip.
+    console.error(`build push attempt ${attempt}/${attempts} overtaken: ${appended.overtaken}`);
+  }
+  throw new Error(
+    `could not advance ${BUILD_REF} after ${attempts} attempts; something keeps moving it concurrently - rerun this job once it settles.`,
+  );
+}
+
+/**
+ * Point refs/tags/latest at the chain commit packaging the NEWEST source:
+ * build's tip, unless the tip is a release the hook backfilled behind this
+ * run's own commit (post-green skipped that release, newer commits landed,
+ * then the release job appended it), in which case this run's commit is
+ * newer. The push is a compare-and-swap on the tag value observed BEFORE
+ * the tip is read: build only ever advances and latest only ever names a
+ * value build has held, so a tip read after the observation is that value
+ * or a newer one, and a lease that goes stale means another run moved
+ * latest - re-read both and retry. A latest that already names a newer
+ * source than the target stays where it is (a stale rerun must not lease
+ * it back) until the next green push appends past.
+ */
+function publishLatest(
+  cwd: string,
+  own: string,
+  attempts: number,
+): { sha: string; reason: string } {
+  const ownSource = sourceTrailer(cwd, own);
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const observed = git(cwd, "ls-remote", "origin", LATEST_REF).split("\t")[0] ?? "";
+    const build = readBuildTip(cwd);
+    if (build.tip === null) {
+      throw new Error(
+        `${BUILD_REF} vanished after this run appended to it; inspect origin by hand.`,
+      );
+    }
+    const tipSource = validateTip(cwd, build.tip, build.mainHead);
+    const [target, targetSource] = isAncestor(cwd, ownSource, tipSource)
+      ? [build.tip, tipSource]
+      : [own, ownSource];
+    if (observed === target) {
+      return { sha: target, reason: `${LATEST_REF} already at ${target}` };
+    }
+    if (observed !== "") {
+      git(cwd, "fetch", "--quiet", "--depth=1", "origin", LATEST_REF);
+      // Absent (the tag moved between the two reads, or names no commit) or
+      // not this pipeline's (no trailer, a source off main): nothing newer
+      // to defer to, so the target takes over; the lease settles the race.
+      const latestSource =
+        tryGit(
+          cwd,
+          "log",
+          "-1",
+          "--format=%(trailers:key=Source,valueonly)",
+          `${observed}^{commit}`,
+        ) ?? "";
+      if (
+        latestSource !== "" &&
+        latestSource !== targetSource &&
+        isAncestor(cwd, latestSource, build.mainHead) &&
+        isAncestor(cwd, targetSource, latestSource)
+      ) {
+        return {
+          sha: observed,
+          reason: `${LATEST_REF} stays at ${observed} (built from ${latestSource}), newer than ${target} (built from ${targetSource}); the next green push appends past it`,
+        };
+      }
+    }
+    const push = pushUnlessOvertaken(
+      cwd,
+      `--force-with-lease=${LATEST_REF}:${observed}`,
+      "origin",
+      `${target}:${LATEST_REF}`,
+    );
+    if (push.landed) {
+      return { sha: target, reason: `${LATEST_REF}: moved to ${target}` };
+    }
+    console.error(`latest lease push attempt ${attempt}/${attempts} overtaken: ${push.stderr}`);
+  }
+  throw new Error(
+    `could not move ${LATEST_REF} after ${attempts} compare-and-swap attempts; something keeps moving it concurrently - rerun this job once it settles.`,
+  );
+}
+
 if (import.meta.main) {
   const cwd = process.cwd();
   const [command] = process.argv.slice(2);
@@ -570,7 +1098,7 @@ if (import.meta.main) {
         });
         console.error(
           result.created
-            ? `created ${env("TAG")} on packaged commit ${result.packagedSha}`
+            ? `created ${env("TAG")} on chain commit ${result.packagedSha}`
             : `${env("TAG")} already packages this source at ${result.packagedSha}`,
         );
         break;
@@ -602,9 +1130,18 @@ if (import.meta.main) {
         console.error(`the release PR carries this cycle's anchor: ${result.boundary}`);
         break;
       }
+      case "advance-build": {
+        const result = advanceBuild({
+          cwd,
+          sourceSha: env("GITHUB_SHA"),
+          runUrl: process.env.RUN_URL,
+        });
+        console.error(result.reason);
+        break;
+      }
       default:
         throw new Error(
-          `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | verify | anchor | boundary-check | anchor-check`,
+          `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | verify | anchor | boundary-check | anchor-check | advance-build`,
         );
     }
   } catch (error) {
