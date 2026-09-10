@@ -259,7 +259,23 @@ The per-layer validation catches what a standalone settings file could not say, 
 
 The fold itself refuses what only a merge can judge (`layer ".github/settings/repo.yml": ...`). A fold refusal names the key path (entries by index) and the kind of problem, never a value from the document: the merge runs without a repository's redaction context, so a label name or rule type echoed here could put a private repository's settings into a public log.
 
-That guarantee covers the fold alone. The per-layer validation prints the same messages an apply or check run prints, and those can name what they find: an unrecognized key in a strict object (`actions.cache: Unrecognized key: "cache_ttl"`), an unknown top-level section by its name, a closed section's entry by its identity with the key it does not know (`collaborators[octocat]: declares "permision", which this section does not recognize`), and, where a section words its own error, the rejected value itself (`repository.enable_vulnerability_alerts: "yes" is not a boolean`; `interaction_limits.pull_request_creation_bypass: "Octocat" and "octocat" name the same login`; a duplicate environment or bypass actor under `branches`; the name of an `environments` entry missing its branch-policy flag). A YAML syntax error quotes the offending source line. A merge-mode log can therefore show your settings file's structure and, from those messages, a value from it: treat it like any log that prints a parse error for a file the runner holds.
+That guarantee covers the fold alone. The per-layer validation prints the same messages an apply or check run prints, and these message families can name what they find:
+
+- An unrecognized key in a strict object: `actions.cache: Unrecognized key: "cache_ttl"`.
+- An unknown top-level section, by its name: `unknown top-level section(s) in repo.yml: lables`.
+- A key path through keys you chose, wherever a section accepts arbitrary ones: `repository.private_project is not plain YAML data`, and under `interaction_limits` the unknown keys themselves: `interaction_limits.limit: key(s) [private_project] ride the base interaction-limits PUT`.
+- A closed section's entry, by its identity, with the key it does not know: `collaborators[octocat]: declares "permision", which this section does not recognize`.
+- A section-worded error that prints the rejected value:
+  - `repository` toggles and the issue policy: `repository.enable_vulnerability_alerts: "yes" is not a boolean` and `repository.issue_creation_policy: "everyone" is not a recognized policy`.
+  - `interaction_limits` logins: `interaction_limits.pull_request_creation_bypass: "Octocat" and "octocat" name the same login`.
+  - `branches` duplicates: `branches[0].protection.force_push_bypassers: force_push_bypassers lists "octocat" more than once`, and the same for `required_deployments.environments`.
+  - `branches` wildcard entries, by name with the unrecognized key: `branches[0].protection.enforce_admin: the wildcard entry "release/*" declares protection.enforce_admin, which this section does not manage on wildcard rules`.
+  - `branches` wildcard entries, by name with the scalar declared where a mapping belongs, the widest echo in the set: `branches[0].protection.required_status_checks: the wildcard entry "release/*" declares protection.required_status_checks as "strict", but on a wildcard rule it must be a mapping`.
+  - `environments` entries, by name: `environments[0].deployment_branch_policies: the "prod" entry declares deployment_branch_policies, so it must also declare deployment_branch_policy`.
+  - `actions.selected_actions` repeats the declared `allowed_actions`, which has already passed its enum, so only `all`, `local_only`, or `selected` can appear there.
+- A YAML syntax error, quoting the offending source line with a caret under the column; an unresolved alias names the alias instead. A parser warning (an unresolved tag, an unknown directive, an ambiguous anchor) leaves the parse successful, but the parser still prints the offending source line, values included, to the step's log; a collection used as a key warns with the stringified key.
+
+A merge-mode log can therefore show your settings file's structure and, through these messages, a value from it: treat it like any log that prints a parse error for a file the runner holds.
 
 | The layer has | The fold says |
 |---|---|
