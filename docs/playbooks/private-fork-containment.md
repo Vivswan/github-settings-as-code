@@ -1,3 +1,7 @@
+---
+order: 350
+---
+
 # Private-fork PR containment
 
 A workflow triggered by a fork's pull request runs the fork's code, and on a private repository the settings decide what that code can reach: whether it runs at all, whether it gets a write-capable token, and whether secrets and variables flow into it. A contributor who can open a pull request from a fork should not be able to exfiltrate secrets or approve their own changes. One settings block declares the containment posture:

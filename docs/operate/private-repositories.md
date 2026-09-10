@@ -1,3 +1,7 @@
+---
+order: 230
+---
+
 # Private repositories
 
 When a run manages repositories more private than its own logs, the details it prints become a leak. This page covers the `private-repos` redaction that closes that leak, what a redacted run still shows, and the `private-report` channels that deliver the full detail privately. It matters to anyone whose admin repository is public (or merely less restricted) while some of its multi-repo targets are private or internal.

@@ -1,3 +1,7 @@
+---
+order: 320
+---
+
 # A fleet security baseline, rolled out in rings
 
 One reviewed defaults file defines "secure by default" for every managed repository, and a topic per rollout ring controls who gets it when. The baseline lives in the admin repository:
@@ -44,7 +48,7 @@ rulesets:
           required_review_thread_resolution: true
 ```
 
-Two details in that file earn a sentence each. Rule parameters pass through verbatim, so `required_signatures` works as a ruleset rule today even though classic `branches` protection does not support it (see [COVERAGE.md](../../COVERAGE.md)). And the `bypass_actors` entry is a deliberate break-glass path: `bypass_mode: pull_request` lets repository admins bypass through a pull request while still blocking direct pushes, which is usually the right emergency valve for a baseline. Capability boundaries shape what belongs in shared defaults for a mixed fleet. Settings that exist only on public repositories (private vulnerability reporting, for one) go in a job scoped with `visibility: public`. Settings gated by plan rather than visibility (secret scanning on private repositories needs Advanced Security, which no discovery filter can see) go in a topic-marked capability cohort, the same mechanism as the rings. And `selected_actions.patterns_allowed` sits in between: it is accepted everywhere but only applies to public repositories, so private repositories in this cohort rely on the `github_owned_allowed` and `verified_allowed` flags alone.
+Two details in that file earn a sentence each. Rule parameters pass through verbatim, so `required_signatures` works as a ruleset rule today even though classic `branches` protection does not support it (see [COVERAGE.md](https://github.com/Vivswan/github-settings-as-code/blob/main/COVERAGE.md)). And the `bypass_actors` entry is a deliberate break-glass path: `bypass_mode: pull_request` lets repository admins bypass through a pull request while still blocking direct pushes, which is usually the right emergency valve for a baseline. Capability boundaries shape what belongs in shared defaults for a mixed fleet. Settings that exist only on public repositories (private vulnerability reporting, for one) go in a job scoped with `visibility: public`. Settings gated by plan rather than visibility (secret scanning on private repositories needs Advanced Security, which no discovery filter can see) go in a topic-marked capability cohort, the same mechanism as the rings. And `selected_actions.patterns_allowed` sits in between: it is accepted everywhere but only applies to public repositories, so private repositories in this cohort rely on the `github_owned_allowed` and `verified_allowed` flags alone.
 
 The workflow applies the baseline ring by ring, using `repos: "*"` discovery filtered by topic:
 

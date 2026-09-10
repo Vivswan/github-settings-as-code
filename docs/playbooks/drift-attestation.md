@@ -1,3 +1,7 @@
+---
+order: 370
+---
+
 # Drift attestation for auditors
 
 An auditor wants evidence that protection was enforced across the quarter, not at the moment they asked. A daily check whose output is retained is that evidence:

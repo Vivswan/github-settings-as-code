@@ -13,9 +13,9 @@ import {
   renderCheckModeGatedReads,
   renderGatedReads,
   renderGrantSentence,
+  renderInputsTable,
   renderPolicyCountSentence,
   renderPolicyDefaultsTable,
-  renderReadmeInputsTable,
 } from "../../.github/scripts/gen-action-docs.js";
 import {
   markerSyntaxFor,
@@ -130,20 +130,23 @@ describe("action.yml renderers", () => {
   });
 });
 
-describe("README Inputs table renderer", () => {
+describe("Inputs table renderer", () => {
   test("shows the declared default backticked, an empty one as (empty), and a shown default verbatim", () => {
     expect(
-      renderReadmeInputsTable({
-        token: {
-          default: "an expression the runner resolves",
-          shownDefault: "`github.token`",
-          summary: "Token for the API calls",
+      renderInputsTable(
+        {
+          token: {
+            default: "an expression the runner resolves",
+            shownDefault: "`github.token`",
+            summary: "Token for the API calls",
+          },
+          mode: { default: "apply", summary: "`apply` mutates; `check` reports" },
+          repos: { default: "", summary: "Multi-repo remote mode" },
+          visibility: { default: "", shownDefault: "`all`", summary: "Discovery-only: a | b" },
+          archived: { default: "", summary: "kept \\| as is, but \\\\| gets escaped" },
         },
-        mode: { default: "apply", summary: "`apply` mutates; `check` reports" },
-        repos: { default: "", summary: "Multi-repo remote mode" },
-        visibility: { default: "", shownDefault: "`all`", summary: "Discovery-only: a | b" },
-        archived: { default: "", summary: "kept \\| as is, but \\\\| gets escaped" },
-      }),
+        ".",
+      ),
     ).toBe(
       [
         "| Input | Default | Meaning |",
@@ -156,10 +159,34 @@ describe("README Inputs table renderer", () => {
       ].join("\n"),
     );
     for (const summary of ["two\nlines", "carriage\rreturn"]) {
-      expect(() => renderReadmeInputsTable({ x: { default: "", summary } })).toThrow(
+      expect(() => renderInputsTable({ x: { default: "", summary } }, ".")).toThrow(
         /cannot contain a line break/,
       );
     }
+  });
+
+  test("rebases a summary's root-relative links onto the page's directory, leaving URLs and fragments alone", () => {
+    const decls = {
+      token: {
+        default: "",
+        summary:
+          "see [permissions](docs/reference/permissions.md#what-to-grant), [the guide](docs/start/getting-started.md), and [GitHub](https://docs.github.com/x)",
+      },
+      mode: {
+        default: "",
+        summary:
+          "[a](//docs.example/x), [b](HTTPS://x), [c](mailto:a@b), [d](/site/x.md), [e](docs/x.md#top), [f](#top)",
+      },
+    };
+    const rows = (table: string): string[] => table.split("\n").slice(2);
+    expect(rows(renderInputsTable(decls, "."))).toEqual([
+      "| `token` | (empty) | see [permissions](docs/reference/permissions.md#what-to-grant), [the guide](docs/start/getting-started.md), and [GitHub](https://docs.github.com/x) |",
+      "| `mode` | (empty) | [a](//docs.example/x), [b](HTTPS://x), [c](mailto:a@b), [d](/site/x.md), [e](docs/x.md#top), [f](#top) |",
+    ]);
+    expect(rows(renderInputsTable(decls, "docs/reference"))).toEqual([
+      "| `token` | (empty) | see [permissions](permissions.md#what-to-grant), [the guide](../start/getting-started.md), and [GitHub](https://docs.github.com/x) |",
+      "| `mode` | (empty) | [a](//docs.example/x), [b](HTTPS://x), [c](mailto:a@b), [d](/site/x.md), [e](../x.md#top), [f](#top) |",
+    ]);
   });
 });
 
@@ -387,7 +414,7 @@ describe("generated files", () => {
     accepts("action-outputs", renderActionOutputs({ result: { description: "A | B." } }));
     accepts(
       "readme-inputs-table",
-      renderReadmeInputsTable({ x: { default: "", shownDefault: "a", summary: "b | c" } }),
+      renderInputsTable({ x: { default: "", shownDefault: "a", summary: "b | c" } }, "."),
     );
     const knobbed = [
       { key: "labels", undeclaredDefault: "delete" },
@@ -439,10 +466,12 @@ describe("generated files", () => {
   test("each region's body shape rejects authored text and every other region's body", () => {
     // The negative half of the shape pin: a shape loosened to accept anything would still pass
     // the renderer test above, so each must refuse prose, a heading, and its look-alike siblings
-    // (the other tables, sentences, and bullet lists the same pages carry).
+    // (the other tables, sentences, and bullet lists the same pages carry). A sibling sharing the
+    // shape is the same table in another home, which the shape accepts by design.
     const regions = Object.entries(GENERATED_REGIONS).flatMap(([path, list]) =>
       list.map((region) => ({ path, region })),
     );
+    const shapes = new Map(regions.map(({ region }) => [region.name, region.body.source]));
     const bodies = new Map(
       regions.map(({ path, region }) => {
         const text = readFileSync(join(ROOT, path), "utf8");
@@ -454,7 +483,9 @@ describe("generated files", () => {
       const foreign = [
         "\nAuthored prose the generator never writes.\n",
         "\n## A heading\n",
-        ...[...bodies].filter(([name]) => name !== region.name).map(([, body]) => body),
+        ...[...bodies]
+          .filter(([name]) => shapes.get(name) !== region.body.source)
+          .map(([, body]) => body),
       ];
       for (const body of foreign) {
         expect(

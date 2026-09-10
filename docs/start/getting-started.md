@@ -1,12 +1,16 @@
+---
+order: 10
+---
+
 # Getting started
 
-This walkthrough takes one repository from nothing to a settings file that is applied on every change: create the token, add the settings file and the workflow, run check mode first, then switch to apply. What each section of the settings file manages, and what applying it deletes or keeps, is specified in the [README Sections table](../../README.md#sections); this page only gets you to a first green run.
+This walkthrough takes one repository from nothing to a settings file that is applied on every change: create the token, add the settings file and the workflow, run check mode first, then switch to apply. What each section of the settings file manages, and what applying it deletes or keeps, is specified in the [Sections table](../reference/sections.md); this page only gets you to a first green run.
 
 ## 1. Create the token
 
 The action authenticates with a fine-grained personal access token. Many sections need the Administration permission, which the default workflow `GITHUB_TOKEN` can never hold, so plan on a PAT.
 
-The [pre-filled token form linked in the README](../../README.md#usage) starts you off with every repository permission the Sections table can need. Pick the resource owner and the repositories the token may touch. If the owner is an organization and you plan to manage the `teams` section, also add the Members organization permission at read; the form only offers organization permissions once an organization is selected.
+The [pre-filled token form linked in the README](https://github.com/Vivswan/github-settings-as-code#usage) starts you off with every repository permission the Sections table can need. Pick the resource owner and the repositories the token may touch. If the owner is an organization and you plan to manage the `teams` section, also add the Members organization permission at read; the form only offers organization permissions once an organization is selected.
 
 You can also grant less. The token only needs the permissions for the sections your settings file declares, and [Token permissions](../reference/permissions.md) explains which grant maps to which section.
 
@@ -30,7 +34,7 @@ labels:
     description: Something isn't working
 ```
 
-Only declared keys are ever applied or compared, so everything this file does not mention stays as it is. The exceptions are the sections the [Sections table](../../README.md#sections) marks as deleting undeclared entries: declaring `labels`, `autolinks`, `collaborators`, `actions_variables`, or `agents_variables` makes the declared list authoritative, and live entries missing from it are deleted on apply. That is why the first run below is a check, not an apply.
+Only declared keys are ever applied or compared, so everything this file does not mention stays as it is. The exceptions are the sections the [Sections table](../reference/sections.md) marks as deleting undeclared entries: declaring `labels`, `autolinks`, `collaborators`, `actions_variables`, or `agents_variables` makes the declared list authoritative, and live entries missing from it are deleted on apply. That is why the first run below is a check, not an apply.
 
 ## 3. Add the workflow
 
@@ -91,7 +95,7 @@ To keep a permanent drift-report workflow alongside the applying one, see the [c
 
 Three surfaces carry the result. The log holds the per-drift and per-change lines shown above; a run that succeeds or finds drift ends in a `result:` line naming the outcome (`applied`, `clean`, `drift`, or `partial`), while a failing single-repo run stops at its error annotation instead (the `result` output still reads `failed`). The step summary renders a table with one row per declared section: its status plus the same detail lines, so you rarely need to open the log at all. Annotations surface problems on the run page: errors carry the GitHub API's message verbatim plus the fix, warnings mark sections skipped under `on-missing-permission: warn`, and notices carry advisory notes (for example that `enable_git_lfs` is write-only, so check mode cannot verify it).
 
-The action also sets a `result` output for downstream steps; the [README Inputs table](../../README.md#inputs) documents it alongside every input.
+The action also sets a `result` output for downstream steps; the [Inputs and outputs](../reference/inputs.md) page documents it alongside every input.
 
 ## Where to go next
 

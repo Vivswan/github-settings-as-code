@@ -1,11 +1,11 @@
 /**
  * Regenerate the declaration-derived regions of action.yml, the README, the
- * policy and permissions references, and the check-mode guide between their
- * BEGIN/END GENERATED markers: pure renderers plus a CLI (`bun run build:action-docs`).
+ * inputs, policy, and permissions references, and the check-mode guide between
+ * their BEGIN/END GENERATED markers: pure renderers plus a CLI (`bun run build:action-docs`).
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import type { InputDecl } from "../../src/action/inputs.js";
 import { INPUT_DECLS } from "../../src/action/inputs.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
@@ -124,17 +124,31 @@ function shownDefault(decl: Pick<InputDecl, "default" | "shownDefault">): string
   return decl.default === "" ? "(empty)" : `\`${decl.default}\``;
 }
 
-/** The README Inputs table's header and rule lines, as rendered and as the region shape expects them. */
+/** The Inputs table's header and rule lines, as rendered and as the region shape expects them. */
 const INPUTS_TABLE_HEADER = "| Input | Default | Meaning |\n|---|---|---|";
 
-/** The README Inputs table, header included. */
-export function renderReadmeInputsTable(
+/** A link target that is not a repository path: a URI scheme (any case), protocol-relative, or site-absolute. */
+const ABSOLUTE_TARGET = /^(?:[a-z][a-z0-9+.-]*:|\/)/i;
+
+/**
+ * `text` with every relative markdown link target, written root-relative in the declarations,
+ * rebased onto `pageDir`, so one summary reads right from every page the table renders on.
+ */
+function rebaseLinks(text: string, pageDir: string): string {
+  return text.replace(/\]\(([^)#]+)(#[^)]*)?\)/g, (match, target: string, fragment: string = "") =>
+    ABSOLUTE_TARGET.test(target) ? match : `](${posix.relative(pageDir, target)}${fragment})`,
+  );
+}
+
+/** The Inputs table, header included, for the page in `pageDir` (the repository root is "."). */
+export function renderInputsTable(
   decls: Readonly<Record<string, Pick<InputDecl, "default" | "shownDefault" | "summary">>>,
+  pageDir: string,
 ): string {
   return [
     INPUTS_TABLE_HEADER,
     ...Object.entries(decls).map(([name, decl]) =>
-      row([`\`${name}\``, shownDefault(decl), decl.summary]),
+      row([`\`${name}\``, shownDefault(decl), rebaseLinks(decl.summary, pageDir)]),
     ),
   ].join("\n");
 }
@@ -394,6 +408,19 @@ function block(render: () => string): () => string {
   return () => `\n${render()}\n`;
 }
 
+/** The Inputs table as region `name` under `heading` of the page at `path`, its links rebased onto that page. */
+function inputsTableRegion(name: string, heading: string, path: string): GeneratedRegion {
+  return {
+    name,
+    placement: { kind: "under-heading", heading },
+    body: tableShape(INPUTS_TABLE_HEADER, String.raw`\x60[^\x60\n]+\x60 \| [^\n]* \| [^\n]*`),
+    render: block(() => renderInputsTable(INPUT_DECLS, dirname(path))),
+  };
+}
+
+const README_PATH = "README.md";
+const INPUTS_PAGE_PATH = "docs/reference/inputs.md";
+
 /**
  * Every generated region, keyed by file, with where it sits and the shape of every body this
  * generator could have written for it, so a marker moved elsewhere fails instead of regenerating
@@ -416,14 +443,8 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
       render: block(() => renderActionOutputs(OUTPUT_DECLS)),
     },
   ],
-  "README.md": [
-    {
-      name: "readme-inputs-table",
-      placement: { kind: "under-heading", heading: "## Inputs" },
-      body: tableShape(INPUTS_TABLE_HEADER, String.raw`\x60[^\x60\n]+\x60 \| [^\n]* \| [^\n]*`),
-      render: block(() => renderReadmeInputsTable(INPUT_DECLS)),
-    },
-  ],
+  [README_PATH]: [inputsTableRegion("readme-inputs-table", "## Inputs", README_PATH)],
+  [INPUTS_PAGE_PATH]: [inputsTableRegion("inputs-table", "## Inputs", INPUTS_PAGE_PATH)],
   "docs/reference/undeclared-policy.md": [
     {
       name: "policy-count-sentence",

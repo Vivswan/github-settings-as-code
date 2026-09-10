@@ -62,6 +62,8 @@ describe("markerSyntaxFor", () => {
   test.each<[path: string, syntax: MarkerSyntax]>([
     ["README.md", "html"],
     ["docs/operate/check-mode.md", "html"],
+    ["docs/reference/sections.md", "html"],
+    ["docs/reference/inputs.md", "html"],
     ["action.yml", "yaml"],
     [".github/workflows/x.yaml", "yaml"],
   ])("%s uses %s markers", (path, syntax) => {

@@ -1,3 +1,7 @@
+---
+order: 400
+---
+
 # Sunset and decommission
 
 Repositories at end of life need a defined terminal state, and archiving has an ordering trap: settings writes fail on archived repositories, and sections run in a fixed order with `repository` first, so a single file that sets `archived: true` alongside other sections archives the repository and then fails the rest. Sunset in two steps. First the terminal state:

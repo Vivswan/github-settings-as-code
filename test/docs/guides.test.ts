@@ -11,7 +11,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
@@ -30,6 +30,8 @@ const REQUIRED_PAGES = [
   "start/getting-started.md",
   "start/examples.md",
   "start/migrating-from-probot.md",
+  "reference/sections.md",
+  "reference/inputs.md",
   "reference/semantics.md",
   "reference/permissions.md",
   "reference/undeclared-policy.md",
@@ -153,6 +155,102 @@ function linesOutsideFences(markdown: string, source: string): string[] {
   return lines;
 }
 
+/** The named entities an attribute value can carry: the ones Bun's HTML renderer writes. */
+const NAMED_ENTITIES: Readonly<Record<string, string>> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+};
+
+/** An attribute value with its numeric character references (semicolon optional, as HTML parses them) decoded first, then the named entities. */
+function decodeAttribute(raw: string): string {
+  return raw
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);?/g, (_, decimal: string) => String.fromCodePoint(Number(decimal)))
+    .replace(/&(?:amp|lt|gt|quot);/g, (entity) => NAMED_ENTITIES[entity] ?? entity);
+}
+
+/**
+ * Every `href` and `src` attribute value in `markdown`, as the rendered page
+ * carries it: the markdown is rendered to HTML (so every CommonMark destination
+ * form, including entities, backslash escapes, angle brackets, multi-line
+ * labels, and raw HTML tags, resolves the way a site build would) and the two
+ * attributes are read back from every element carrying them (a, img, video,
+ * source, iframe, link, ...) and HTML-unescaped.
+ */
+async function linkDestinations(markdown: string): Promise<string[]> {
+  const destinations: string[] = [];
+  await new HTMLRewriter()
+    .on("[href], [src]", {
+      element(element) {
+        for (const attribute of ["href", "src"]) {
+          const value = element.getAttribute(attribute);
+          if (value !== null) {
+            destinations.push(decodeAttribute(value));
+          }
+        }
+      },
+    })
+    .transform(new Response(Bun.markdown.html(markdown)))
+    .text();
+  return destinations;
+}
+
+/**
+ * The stand-in site the guard resolves against: docs/ served under a path no
+ * real link names, so a destination that climbs out of it (and even one that
+ * climbs out and back into a literal "docs/") lands outside that prefix.
+ */
+const SITE_ORIGIN = "https://docs-site.invalid";
+const SITE_ROOT = "/docs-root-7c1e/";
+
+/**
+ * Every relative link or image in the docs/ page at `page` (its path under
+ * docs/) that resolves outside docs/, as "docs/<page>:<line>: (<target>)".
+ * Resolution is the WHATWG URL parser's, as a browser would do it (whitespace
+ * and newlines stripped, backslashes as slashes, dot segments folded). The line
+ * is the first one carrying the destination (or, for an encoded one, its file
+ * name). The published site is built from docs/ alone, so a link to the
+ * README, COVERAGE.md, or lib/ has nothing to land on there; those go through
+ * an absolute URL.
+ */
+async function linksLeavingDocs(markdown: string, page: string): Promise<string[]> {
+  const base = new URL(`${SITE_ROOT}${page}`, SITE_ORIGIN);
+  const lines = markdown.split("\n");
+  const lineOf = (target: string): string => {
+    const name = posix.basename(target.split("#")[0] ?? "");
+    const decoded = (text: string): string => {
+      try {
+        return decodeURIComponent(text);
+      } catch {
+        return text;
+      }
+    };
+    const needles = [target, decoded(target), name, decoded(name)];
+    const index = needles
+      .map((needle) => lines.findIndex((line) => line.includes(needle)))
+      .find((found) => found !== -1);
+    return index === undefined ? "?" : String(index + 1);
+  };
+  const problems: string[] = [];
+  for (const destination of await linkDestinations(markdown)) {
+    let url: URL;
+    try {
+      url = new URL(destination, base);
+    } catch {
+      continue; // not a URL at all; the existence check reports it
+    }
+    if (url.origin === SITE_ORIGIN && !url.pathname.startsWith(SITE_ROOT)) {
+      const target = destination.trim();
+      problems.push(`docs/${page}:${lineOf(target)}: (${target}) leaves docs/`);
+    }
+  }
+  return problems;
+}
+
 /** Every fragment a file's headings answer to, duplicate suffixes included. */
 function headingSlugs(markdown: string, source: string): Set<string> {
   const slugs = new Set<string>();
@@ -221,6 +319,16 @@ describe("docs/ guide pages", () => {
       }
     }
     expect(broken).toEqual([]);
+  });
+
+  test("no guide links outside docs/", async () => {
+    // The docs site is built from docs/ alone: every relative link must land
+    // on a page inside it, and the repository's root files are reached by URL.
+    const leaving: string[] = [];
+    for (const page of guidePages()) {
+      leaving.push(...(await linksLeavingDocs(readFileSync(join(DOCS, page), "utf8"), page)));
+    }
+    expect(leaving).toEqual([]);
   });
 
   test("every relative link with a #fragment points at a real heading", () => {
@@ -568,6 +676,88 @@ describe("docs/ guide pages", () => {
         }
       }
     }
+  });
+});
+
+describe("links-leaving-docs guard (mutation checks)", () => {
+  // Every CommonMark way of writing a destination that climbs out of docs/ is
+  // named with its page and line, whatever element carries it (a, img, video,
+  // source, iframe, link); links that stay inside docs/ from any depth,
+  // fenced or inline-code look-alikes, absolute URLs, and in-page fragments
+  // never are.
+  const page = [
+    "# Title",
+    "",
+    "See [sections](../reference/sections.md#labels) and [the README](../../README.md#sections).",
+    "",
+    "```yaml",
+    "# not a link: [x](../../README.md)",
+    "```",
+    "",
+    "[COVERAGE](../../COVERAGE.md), [site](https://example.com/../x), [here](#title), `[code](../../README.md)`.",
+    "",
+    "Reference-style: [the README][root], [semantics][sem], [schema][schema], [coverage][cov], and [two",
+    "lines][two lines].",
+    "",
+    "[root]: ../../README.md#sections",
+    "[sem]: ../reference/semantics.md",
+    "[schema]: <../../lib/settings.schema.json>",
+    "[cov]:",
+    "../../COVERAGE.md#supported 'Coverage'",
+    "[two",
+    "lines]: ../../SECURITY.md",
+    "",
+    'Angle brackets inline: [x](<../../README.md> "Readme"), [y](<../operate/check-mode.md>), and [z](',
+    "../../CONTRIBUTING.md",
+    ").",
+    "",
+    "Encoded: [e](&#46;&#46;/&#46;&#46;/LICENSE.md), [b](\\.\\./\\.\\./CHANGELOG.md), and [s](<../../a file.md>).",
+    "",
+    '> [q](../../quoted.md) and ![img](../../image.png) and <a href="../../raw.html">raw</a>',
+    "",
+    '<a href="&#46;&#46;/&#x2e;&#x2e;/NOTICE.md">refs</a> <a href="  ../../padded.md ">padded</a> <a href="../a&amp;b.md">amp</a>',
+    "",
+    '<a href="&#46&#46/&#x2e&#x2e/AUTHORS.md">bare refs</a> <a href="..\\..\\SUPPORT.md">backslashes</a> <a href="../',
+    '../FUNDING.md">newline</a> <a href="mailto:x@y.z">mail</a>',
+    "",
+    '<video src="../../demo.mp4" controls></video> <source src="../../demo.webm"> <video src="../assets/demo.mp4"></video>',
+    "",
+    '<iframe src="../../embed.html"></iframe> <link href="../../style.css"> <link href="../assets/style.css">',
+    "",
+  ].join("\n");
+  test("names each escaping link by page and line", async () => {
+    expect(await linksLeavingDocs(page, "start/getting-started.md")).toEqual([
+      "docs/start/getting-started.md:3: (../../README.md#sections) leaves docs/",
+      "docs/start/getting-started.md:9: (../../COVERAGE.md) leaves docs/",
+      "docs/start/getting-started.md:3: (../../README.md#sections) leaves docs/",
+      "docs/start/getting-started.md:16: (../../lib/settings.schema.json) leaves docs/",
+      "docs/start/getting-started.md:18: (../../COVERAGE.md#supported) leaves docs/",
+      "docs/start/getting-started.md:20: (../../SECURITY.md) leaves docs/",
+      "docs/start/getting-started.md:3: (../../README.md) leaves docs/",
+      "docs/start/getting-started.md:23: (../../CONTRIBUTING.md) leaves docs/",
+      "docs/start/getting-started.md:26: (../../LICENSE.md) leaves docs/",
+      "docs/start/getting-started.md:26: (../../CHANGELOG.md) leaves docs/",
+      "docs/start/getting-started.md:26: (../../a%20file.md) leaves docs/",
+      "docs/start/getting-started.md:28: (../../quoted.md) leaves docs/",
+      "docs/start/getting-started.md:28: (../../image.png) leaves docs/",
+      "docs/start/getting-started.md:28: (../../raw.html) leaves docs/",
+      "docs/start/getting-started.md:30: (../../NOTICE.md) leaves docs/",
+      "docs/start/getting-started.md:30: (../../padded.md) leaves docs/",
+      "docs/start/getting-started.md:32: (../../AUTHORS.md) leaves docs/",
+      "docs/start/getting-started.md:32: (..\\..\\SUPPORT.md) leaves docs/",
+      "docs/start/getting-started.md:33: (../\n../FUNDING.md) leaves docs/",
+      "docs/start/getting-started.md:35: (../../demo.mp4) leaves docs/",
+      "docs/start/getting-started.md:35: (../../demo.webm) leaves docs/",
+      "docs/start/getting-started.md:37: (../../embed.html) leaves docs/",
+      "docs/start/getting-started.md:37: (../../style.css) leaves docs/",
+    ]);
+    expect(
+      await linksLeavingDocs("[README](../README.md) and [ok](start/x.md)", "README.md"),
+    ).toEqual(["docs/README.md:1: (../README.md) leaves docs/"]);
+    // Climbing out and back in still leaves the site's root, where no docs/ directory exists.
+    expect(await linksLeavingDocs("[up and back](../../docs/start/x.md)", "start/y.md")).toEqual([
+      "docs/start/y.md:1: (../../docs/start/x.md) leaves docs/",
+    ]);
   });
 });
 

@@ -1,6 +1,7 @@
-// Emits the generated regions of README.md and COVERAGE.md (build:docs), each between
-// `<!-- BEGIN/END GENERATED: <name> -->` markers: the README's Sections table, `result` list, and
-// token-form link, and COVERAGE's whole body. Authored prose from the docs registry + coverage-data.
+// Emits the generated regions of README.md, COVERAGE.md, and the sections and inputs reference
+// pages (build:docs), each between `<!-- BEGIN/END GENERATED: <name> -->` markers: the Sections
+// table, the `result` list, the README's token-form link, and COVERAGE's whole body. Authored
+// prose from the docs registry + coverage-data.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_RESULTS, type RepoResult } from "../../src/engine/orchestrate.js";
@@ -337,26 +338,37 @@ function patFormUrl(): string {
   );
 }
 
-// Each README region: its home, its renderer, and the shape of this generator's own output for
-// it (or an empty body), built from the renderer constants, so a marker moved over authored
-// prose, another table, or another link definition fails instead of erasing it.
-const README_REGIONS: readonly GeneratedRegion[] = [
-  {
-    name: "readme-sections-table",
-    placement: { kind: "under-heading", heading: "## Sections" },
+// The Sections table as region `name` under `heading`, and the shape of this generator's own
+// output for it (or an empty body), built from the renderer constants, so a marker moved over
+// authored prose or another table fails instead of erasing it.
+function sectionsTableRegion(name: string, heading: string): GeneratedRegion {
+  return {
+    name,
+    placement: { kind: "under-heading", heading },
     body: new RegExp(
       String.raw`^\n(?:${escapeRe(TABLE_HEADER)}\n(?:\| \x60[a-z_]+\x60 \| [^\n]* \|\n)*)?$`,
     ),
     render: () => `\n${renderSectionsTable(SECTIONS, DOCS)}\n`,
-  },
-  {
-    name: "readme-outputs",
-    placement: { kind: "under-heading", heading: "## Inputs" },
+  };
+}
+
+/** The `result` value enumeration as inline region `name` under `heading`. */
+function outputsListRegion(name: string, heading: string): GeneratedRegion {
+  return {
+    name,
+    placement: { kind: "under-heading", heading },
     body: new RegExp(
       String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where \x60[a-z]+\x60(?: and \x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?)?$`,
     ),
     render: () => renderOutputsList(REPO_RESULTS),
-  },
+  };
+}
+
+// Each README region: its home, its renderer, and its body shape; the token-form link definition
+// closes the file.
+const README_REGIONS: readonly GeneratedRegion[] = [
+  sectionsTableRegion("readme-sections-table", "## Sections"),
+  outputsListRegion("readme-outputs", "## Inputs"),
   {
     name: "readme-pat-url",
     placement: { kind: "tail" },
@@ -364,6 +376,21 @@ const README_REGIONS: readonly GeneratedRegion[] = [
     render: () => `\n[${PAT_FORM_LABEL}]: ${patFormUrl()}\n`,
   },
 ];
+
+/** The docs/ pages this generator writes, keyed by path: the same tables in their reference homes. */
+export const DOCS_PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
+  "docs/reference/sections.md": [sectionsTableRegion("sections-table", "# Sections")],
+  "docs/reference/inputs.md": [outputsListRegion("outputs-list", "## Outputs")],
+};
+
+/** The docs/ page at `path` with its regions checked for placement, then regenerated. */
+export function renderDocsPage(path: string, text: string): string {
+  const regions = DOCS_PAGE_REGIONS[path];
+  if (regions === undefined) {
+    throw new Error(`gen-docs: no generated regions are registered for ${path}`);
+  }
+  return regenerateRegions(text, regions, path);
+}
 
 // The README with every generated region rendered. The result must define the token-form label
 // exactly once and reference it exactly once (full, collapsed, or shortcut form), or a stale
@@ -430,10 +457,13 @@ export function renderCoverageFile(coverage: string): string {
 }
 
 if (import.meta.main) {
-  const pages = [
+  const pages: ReadonlyArray<readonly [string, (text: string) => string, string]> = [
     [README_PATH, renderReadme, `${SECTIONS.length} section rows`],
     [COVERAGE_PATH, renderCoverageFile, `${SECTIONS.length} sections`],
-  ] as const;
+    ...Object.keys(DOCS_PAGE_REGIONS).map(
+      (path) => [path, (text: string) => renderDocsPage(path, text), "reference page"] as const,
+    ),
+  ];
   for (const [file, render, summary] of pages) {
     const path = join(ROOT, file);
     const before = readFileSync(path, "utf8");
