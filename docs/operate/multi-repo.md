@@ -68,7 +68,7 @@ Discovery takes six filter inputs that apply only to `repos: "*"`; setting any o
 |---|---|
 | has `.github/settings.yml` (or a repos-dir file) | that file, as written; the defaults are ignored |
 | proven to have no settings file | the defaults document, whole |
-| file unreadable (the token lacks Contents: read, or the default branch has no commit yet) | nothing; the target fails, naming both causes |
+| file unreadable (the token lacks Contents: read, or the default branch has no commit yet) | nothing; the target fails, naming the missing Contents: read grant when the file read itself is denied, or both causes when the file read returns 404 and the default branch ref read is then denied or not found either |
 
 Absence is proven, not assumed: after the file read returns 404 the run reads the default branch ref, which needs Contents: read and succeeds whether or not the file exists. A target applied from the defaults prints this notice in check mode and apply mode alike:
 

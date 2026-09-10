@@ -14,6 +14,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 import { DecodingMode, decodeHTML } from "entities";
 import { parse as parseYaml } from "yaml";
+import { MERGE_REJECTED_INPUTS } from "../../src/action/inputs.js";
 import { type Layer, mergeLayers, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SECTION_KEYS } from "../../src/schema.js";
@@ -603,6 +604,20 @@ describe("docs/ guide pages", () => {
       });
     },
   );
+
+  test("the layering guide's inputs table names every input mode: merge rejects", () => {
+    // The rejected set is derived from the input declarations, so a new
+    // apply/check-time input is rejected by the merge the moment it is
+    // declared; the table must name it, or the page under-reports the refusal.
+    const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
+    const section = sectionLines(markdown, "Inputs in mode: merge", "docs/operate/layering.md");
+    const rejectedRow = section.find((line) => line.includes("| Rejected"));
+    if (rejectedRow === undefined) {
+      throw new Error('docs/operate/layering.md has no "Rejected" row in its inputs table');
+    }
+    const named = [...rejectedRow.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
+    expect(new Set(named)).toEqual(new Set(MERGE_REJECTED_INPUTS));
+  });
 
   test("the v2-to-v3 guide quotes the complete wrapper-key rename error the validator emits", () => {
     // The guide's text fence is the reader's search string, so it is held to

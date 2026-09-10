@@ -84,8 +84,12 @@ describe("importSpecifiers", () => {
   });
 
   test("a computed dynamic import throws rather than dropping the edge", () => {
+    // The whole message: the scanner is shared with changed-sections, so under
+    // lint:arch it must not blame that tool.
     expect(() => importSpecifiers('const m = "./a.js"; await import(m);', "x.ts")).toThrow(
-      "computed specifier",
+      new Error(
+        "x.ts:1 loads a module through a computed specifier, which the import graph cannot follow - use a string literal",
+      ),
     );
   });
 });

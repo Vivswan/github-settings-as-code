@@ -57,7 +57,8 @@ Mappings merged key by key, the two label lists unioned by name, and `labels` ca
 | `settings-file` | The ordered list of layer paths, newline- or comma-separated, lowest layer first |
 | `merged-file` | Required: where the merged document is written (parent directories are created) |
 | `layering` | `merge` (default) or `replace`: the run-wide default for the keyed list sections, see below |
-| `sections`, `repository`, `repos`, `repos-dir`, `defaults-file`, `required-sections`, the discovery filters, `private-report`, `report-public-key` | Rejected: a merge addresses no repository, fleet, or report, and writes every section its layers declare; a `sections` allowlist belongs on the step that runs the merged document |
+| `token` | Ignored: a merge makes no GitHub API call, so a token a workflow sets on every step does no harm |
+| `repository`, `repos`, `repos-dir`, `defaults-file`, `visibility`, `archived`, `forks`, `exclude`, `topics`, `affiliation`, `sections`, `required-sections`, `on-missing-permission`, `api-version`, `private-repos`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a merge addresses no repository, fleet, or report, calls no API, and writes every section its layers declare; a `sections` allowlist belongs on the step that runs the merged document |
 
 The step ends with `result: merged` and exit 0, or exit 1 with an error naming the layer that was refused.
 
@@ -252,7 +253,7 @@ The per-layer validation catches what a standalone settings file could not say, 
 
 | The layer has | Caught by |
 |---|---|
-| A list section that is not a list or an `{entries}` wrapper (`labels: oops`) | Validation: `labels: Invalid input: expected a list of entries, or a mapping with "entries" ...` |
+| A list section that is not a list or an `{entries}` wrapper (`labels: oops`) | Validation: `labels: Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "_undeclared" policy), but this section parsed as string` |
 | A keyed entry without its key (a label with no `name`, a rule with no `type`) | Validation: `labels[1].name: Invalid input: expected string, received undefined` |
 | A non-mapping entry (`milestones: [v2]`) | Validation: `milestones[0]: Invalid input: expected object, received string` |
 

@@ -89,7 +89,7 @@ export const INPUT_DECLS = {
   },
   mode: {
     description:
-      "apply (mutate), check (report drift, exit 1 on any), or merge (fold the settings-file layers into one document written to merged-file, with no token and no GitHub API call; merge reads only settings-file, merged-file, and layering, and rejects every other input set to a non-default value, since each controls an apply or check run). check makes no settings changes, though a private report may still be delivered.",
+      "apply (mutate), check (report drift, exit 1 on any), or merge (fold the settings-file layers into one document written to merged-file, with no token and no GitHub API call; merge reads only settings-file, merged-file, and layering, ignores token, and rejects every other input set to a non-default value, since each controls an apply or check run). check makes no settings changes, though a private report may still be delivered.",
     default: "apply",
     summary:
       "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `merge` folds the settings-file layers into merged-file without touching GitHub",
@@ -523,7 +523,12 @@ const MERGE_INPUTS = [
   "token",
 ] as const satisfies readonly InputName[];
 
-const MERGE_REJECTED_INPUTS: readonly InputName[] = (
+/**
+ * The inputs mode: merge rejects when set to a non-default value: every
+ * declared input MERGE_INPUTS does not list. Exported so the layering guide's
+ * table is pinned to the whole set.
+ */
+export const MERGE_REJECTED_INPUTS: readonly InputName[] = (
   Object.keys(INPUT_DECLS) as InputName[]
 ).filter((name) => !(MERGE_INPUTS as readonly string[]).includes(name));
 

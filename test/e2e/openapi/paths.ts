@@ -2,10 +2,11 @@
  * The complete set of REST path templates the action can reach, derived from
  * the section endpoint dictionary, the private-report issue-channel endpoint
  * dictionary, plus the handful of non-section "core" calls (repo probe,
- * settings-file fetch, multi-repo discovery). A later phase's OpenAPI trim
- * script imports USED_PATHS to slice the published spec down to exactly what the
- * mock must model, so this stays dependency-light: it pulls from the endpoint
- * declarations only, and re-derives nothing they already declare.
+ * settings-file fetch, multi-repo discovery). The OpenAPI trim script
+ * (.github/scripts/trim-openapi.ts) imports USED_PATHS to slice the published
+ * spec down to exactly what the mock must model, so this stays dependency-light:
+ * it pulls from the endpoint declarations only, and re-derives nothing they
+ * already declare.
  */
 
 import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";

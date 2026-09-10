@@ -154,13 +154,13 @@ function assertNoComputedImports(text: string, file: string): void {
   const [error] = errors;
   if (error) {
     throw new Error(
-      `changed-sections: ${file}:${lineOf(error.labels[0]?.start ?? 0)} does not parse: ${error.message}`,
+      `${file}:${lineOf(error.labels[0]?.start ?? 0)} does not parse: ${error.message}`,
     );
   }
   for (const node of nodesOf(program)) {
     if (isComputedModuleLoad(node)) {
       throw new Error(
-        `changed-sections: ${file}:${lineOf(node.start)} loads a module through a computed specifier, which the import graph cannot follow - use a string literal`,
+        `${file}:${lineOf(node.start)} loads a module through a computed specifier, which the import graph cannot follow - use a string literal`,
       );
     }
   }
@@ -169,7 +169,9 @@ function assertNoComputedImports(text: string, file: string): void {
 /**
  * The relative specifiers `file` loads at runtime. Type-only imports are not
  * edges (erased from the bundle) and neither are bare specifiers; a
- * computed specifier throws rather than dropping an edge.
+ * computed specifier throws rather than dropping an edge. Shared with
+ * arch-lint.ts, as is resolveImport, so their errors name the file and not
+ * this tool.
  */
 export function scanImports(text: string, file: string): string[] {
   assertNoComputedImports(text, file);
@@ -194,7 +196,7 @@ export function resolveImport(importer: string, specifier: string): string {
     }
   }
   throw new Error(
-    `changed-sections: ${importer} imports "${specifier}", which resolves to no file (tried ${candidates.join(" and ")})`,
+    `${importer} imports "${specifier}", which resolves to no file (tried ${candidates.join(" and ")})`,
   );
 }
 
