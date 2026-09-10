@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
+import { SECTION_KEYS } from "../../src/schema.js";
 import {
   ADMIN_OWNER,
   ADMIN_REPO,
@@ -17,6 +18,7 @@ import {
   loadScenarios,
   markerLabelFixtureMismatches,
   parseScenario,
+  scenarioRoots,
 } from "./schema.js";
 
 describe("prng", () => {
@@ -248,6 +250,45 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
         // loadScenarios is what run.ts and the coverage tripwire call, so the
         // failure must reach them through it.
         expect(() => loadScenarios([root])).toThrow(named);
+      });
+    },
+  );
+
+  test("scenarioRoots names every registered section's scenarios/ path, present or not", () => {
+    // existsSync is false for an absent AND for an unreadable directory, so a
+    // roots list filtered by it would hide the second as the first; the loader
+    // is the one place that tells them apart, so the roots are never filtered.
+    withTempRoot((sections) => {
+      const roots = scenarioRoots(sections);
+      expect(roots[0]).toBe(join(import.meta.dir, "scenarios"));
+      expect(roots.slice(1)).toEqual(SECTION_KEYS.map((key) => join(sections, key, "scenarios")));
+      // Every section path is absent here, and the corpus they form is empty.
+      expect(loadScenarios(roots.slice(1))).toEqual([]);
+    });
+  });
+
+  test.skipIf(runningAsRoot)(
+    "an unreadable section scenarios/ directory fails the whole corpus, naming it",
+    () => {
+      withTempRoot((sections) => {
+        const key = SECTION_KEYS[0];
+        const unreadable = join(sections, key, "scenarios");
+        mkdirSync(unreadable, { recursive: true });
+        writeFileSync(join(unreadable, "one.yml"), "name: one\n");
+        chmodSync(unreadable, 0o000);
+        try {
+          const roots = scenarioRoots(sections);
+          expect(roots).toContain(unreadable);
+          expect(() => loadScenarios(roots.slice(1))).toThrow(
+            new RegExp(
+              `^cannot read the scenario directory ${unreadable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: .*EACCES`,
+            ),
+          );
+        } finally {
+          // withTempRoot restores only the top of the tree; this nested
+          // directory needs its own restore before the recursive removal.
+          chmodSync(unreadable, 0o700);
+        }
       });
     },
   );

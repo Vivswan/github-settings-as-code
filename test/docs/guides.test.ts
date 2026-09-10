@@ -302,12 +302,34 @@ interface RefusalRow {
 }
 
 /**
+ * The cells of one GFM table row: the outer pipes are optional, so a row
+ * written without them (or with only one) is still a row and still pinned.
+ */
+function tableCells(line: string): string[] {
+  let body = line.trim();
+  if (body.startsWith("|")) {
+    body = body.slice(1);
+  }
+  if (body.endsWith("|")) {
+    body = body.slice(0, -1);
+  }
+  return body.split("|").map((cell) => cell.trim());
+}
+
+/** A GFM delimiter row (`|---|:--:|`), the one line that opens a table after its header. */
+function isDelimiterRow(line: string | undefined): boolean {
+  return line !== undefined && /^\s*\|?(\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$/.test(line);
+}
+
+/**
  * The rows of the layering guide's two refusal tables. The page is the single
  * source: a row's first cell ends with the layer that triggers it, as one code
  * span in parentheses (or several joined by "or" when the page names
  * alternatives), and its second cell quotes the message the engine emits, in
- * one code span. A row missing either fails here by name, so a new row cannot
- * land unpinned.
+ * one code span. Tables are read as GFM renders them: a header line followed
+ * by the delimiter row opens one, every non-blank line after that is a row
+ * (outer pipes optional), and a blank line closes it. A row missing its input
+ * or its message fails here by name, so a new row cannot land unpinned.
  */
 function refusalRows(section: readonly string[], source: string): RefusalRow[] {
   const GATES: Record<string, RefusalRow["gate"]> = {
@@ -316,35 +338,38 @@ function refusalRows(section: readonly string[], source: string): RefusalRow[] {
   };
   const rows: RefusalRow[] = [];
   let gate: RefusalRow["gate"] | null = null;
-  for (const raw of section) {
-    // Markdown admits up to three spaces before a row; an indented row is
-    // still a row, and must be pinned rather than skipped.
-    const line = raw.trim();
-    if (!line.startsWith("|")) {
+  for (let index = 0; index < section.length; index++) {
+    const line = section[index] ?? "";
+    if (line.trim() === "") {
       gate = null;
       continue;
     }
-    const cells = line
-      .split("|")
-      .slice(1, -1)
-      .map((cell) => cell.trim());
+    if (gate === null) {
+      if (!line.includes("|")) {
+        continue; // prose between the tables
+      }
+      // A piped line opens a table only when the delimiter row follows it;
+      // one that renders as prose is an authoring slip, not a row to skip.
+      if (!isDelimiterRow(section[index + 1])) {
+        throw new Error(`${source}: refusal table row outside a known table: ${line.trim()}`);
+      }
+      const header = tableCells(line);
+      if (header.length !== 2) {
+        throw new Error(`${source}: refusal table header is not two cells: ${line.trim()}`);
+      }
+      const [has = "", says = ""] = header;
+      gate = has === "The layer has" ? (GATES[says] ?? null) : null;
+      if (gate === null) {
+        throw new Error(`${source}: unknown refusal table header "${line.trim()}"`);
+      }
+      index++; // the delimiter row, the only line a table skips
+      continue;
+    }
+    const cells = tableCells(line);
     if (cells.length !== 2) {
-      throw new Error(`${source}: refusal table row is not two cells: ${line}`);
+      throw new Error(`${source}: refusal table row is not two cells: ${line.trim()}`);
     }
     const [has = "", says = ""] = cells;
-    if (has === "The layer has") {
-      gate = GATES[says] ?? null;
-      if (gate === null) {
-        throw new Error(`${source}: unknown refusal table header "${says}"`);
-      }
-      continue;
-    }
-    if (/^-+$/.test(has)) {
-      continue;
-    }
-    if (gate === null) {
-      throw new Error(`${source}: refusal table row outside a known table: ${line}`);
-    }
     const trigger = has.match(/\((`[^`]+`(?: or `[^`]+`)*)\)$/);
     if (!trigger) {
       throw new Error(
@@ -1017,6 +1042,27 @@ describe("refusal table parser (mutation checks)", () => {
     expect(rows.map((parsed) => parsed.inputs)).toEqual([["labels: oops"]]);
   });
 
+  test("a row without its outer pipes is parsed as a row, not prose", () => {
+    // GFM renders a row with no leading pipe (or no trailing one) as a row,
+    // so a last row appended that way must be pinned rather than skipped.
+    const unpiped = "New refusal (`_layering: union`) | `WRONG MESSAGE` |";
+    const bare = "Bare (`a: 1`) | `also wrong`";
+    const rows = refusalRows([...header, row("First (`labels: oops`)"), unpiped, bare], "page");
+    expect(rows.map((parsed) => [parsed.inputs, parsed.quoted])).toEqual([
+      [["labels: oops"], "the message"],
+      [["_layering: union"], "WRONG MESSAGE"],
+      [["a: 1"], "also wrong"],
+    ]);
+  });
+
+  test("a blank line closes a table; the next table needs its own header", () => {
+    const rows = refusalRows(
+      [...header, row("A (`a: 1`)"), "", "Prose with no pipes.", "", ...header, row("B (`b: 2`)")],
+      "page",
+    );
+    expect(rows.map((parsed) => parsed.inputs)).toEqual([["a: 1"], ["b: 2"]]);
+  });
+
   test("two alternatives joined by or are both inputs", () => {
     const rows = refusalRows([...header, row("Either (`a: 1` or `b: 2`)")], "page");
     expect(rows.map((parsed) => parsed.inputs)).toEqual([["a: 1", "b: 2"]]);
@@ -1029,17 +1075,37 @@ describe("refusal table parser (mutation checks)", () => {
       /does not end with its layer/,
     ],
     [
+      "a data row whose first cell is a dash run",
+      [...header, row("---", "`hidden message`")],
+      /refusal row "---" does not end with its layer/,
+    ],
+    [
       "a row whose message is prose, not one code span",
       [...header, row("X (`a: 1`)", "prose")],
       /does not quote one message/,
     ],
     ["a row with three cells", [...header, "| a | b | c |"], /is not two cells/],
     [
+      "a prose line run into the table without a blank line",
+      [...header, row("X (`a: 1`)"), "A paragraph GFM reads as a one-cell row."],
+      /is not two cells/,
+    ],
+    [
       "a table under an unknown header",
-      ["| The layer has | Something |"],
+      ["| The layer has | Something |", "|---|---|"],
       /unknown refusal table header/,
     ],
+    [
+      "a table whose header is not two cells",
+      ["| The layer has | The fold says | Extra |", "|---|---|---|"],
+      /header is not two cells/,
+    ],
     ["a row before any header", [row("X (`a: 1`)")], /outside a known table/],
+    [
+      "a piped line with no delimiter row after it (renders as prose)",
+      ["| The layer has | The fold says |", row("X (`a: 1`)")],
+      /outside a known table/,
+    ],
   ])("%s is rejected by name", (_case, section, error) => {
     expect(() => refusalRows(section, "page")).toThrow(error);
   });
