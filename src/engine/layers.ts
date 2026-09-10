@@ -233,8 +233,68 @@ export function stripNulls(doc: unknown): unknown {
   return out;
 }
 
-/** A layer the merge refuses at its boundary; the message names the layer and the site. */
+/**
+ * The kinds of problem the layer boundary refuses. Each carries only what
+ * its prose needs - an entry index, a module-declared field name, or a value
+ * to describe by SHAPE - so no string taken from the document has a way in.
+ */
+type Problem =
+  | { readonly kind: "cycle" }
+  | {
+      readonly kind: "wrong-shape";
+      readonly expected: string;
+      readonly actual: unknown;
+      readonly detail?: string;
+    }
+  | { readonly kind: "bad-directive"; readonly actual: unknown }
+  | { readonly kind: "no-layering-key" }
+  | { readonly kind: "no-key"; readonly keyField: string }
+  | {
+      readonly kind: "duplicate-key";
+      readonly keyField: string;
+      readonly first: number;
+      readonly second: number;
+    };
+
+/** A layer the merge refuses at its boundary; worded by describeRefusal alone. */
 class LayerRefusal extends Error {}
+
+/**
+ * The ONE place a refusal is worded, and with describeOptOut the only prose
+ * the merge produces. INVARIANT: a message names the layer as the layer list
+ * names it, the site's key path (section keys, mapping keys, module-declared
+ * field names, entry indices), and the kind of problem - never a value from
+ * the document. mode: merge has no private-repos redaction context, so a
+ * value echoed here (a label name, a rule type, a mis-shaped section body)
+ * could land a private repository's settings in a public log. A Problem
+ * carries indices, field names, and values described by shape only.
+ */
+function describeRefusal(layer: string, site: string, problem: Problem): string {
+  const at = `layer ${quote(layer)}: ${site}`;
+  switch (problem.kind) {
+    case "cycle":
+      return `${at} contains a reference cycle (a YAML anchor that includes itself); layers must be trees`;
+    case "wrong-shape":
+      return `${at} must be ${problem.expected}; got ${describeShape(problem.actual)}${problem.detail ?? ""}`;
+    case "bad-directive":
+      return `${at} must be "merge" or "replace"; got ${describeShape(problem.actual)}${typeof problem.actual === "string" ? " that is neither" : ""}`;
+    case "no-layering-key":
+      return `${at} has no layering key, so it cannot be layered by "merge"; declare ${LAYERING_KEY}: replace or drop the directive`;
+    case "no-key":
+      return `${at} carries no string ${quote(problem.keyField)}, which every entry needs to layer by`;
+    case "duplicate-key":
+      return `${at}[${problem.first}] and ${site}[${problem.second}] both claim one ${problem.keyField}; each ${problem.keyField} belongs to one entry within a layer`;
+  }
+}
+
+function refuse(layer: string, site: string, problem: Problem): never {
+  throw new LayerRefusal(describeRefusal(layer, site, problem));
+}
+
+/** An opt-out notice's prose; value-free under the same invariant as describeRefusal. */
+export function describeOptOut(notice: OptOutNotice): string {
+  return `${notice.layer}: null removed ${notice.path} declared by a lower layer`;
+}
 
 /** The fold state one layer's step reads and reports into. */
 interface Step {
@@ -286,9 +346,25 @@ function asMappings(list: readonly unknown[]): readonly Readonly<Record<string, 
   return list.every(isPlainObject) ? list : null;
 }
 
-/** The `keyField` of an entry as prose, for naming the entry in a path. */
-function displayKey(entry: Readonly<Record<string, unknown>>, keyed: KeyedListLayering): string {
-  return String(entry[keyed.keyField]);
+/**
+ * The entries as mappings, or a refusal naming the first that is not, by its
+ * index under `path` and its shape.
+ */
+function admitEntries(
+  layer: string,
+  path: string,
+  list: readonly unknown[],
+): readonly Readonly<Record<string, unknown>>[] {
+  const mappings = asMappings(list);
+  if (mappings !== null) {
+    return mappings;
+  }
+  const index = list.findIndex((entry) => !isPlainObject(entry));
+  return refuse(layer, `${path}[${index}]`, {
+    kind: "wrong-shape",
+    expected: "a mapping",
+    actual: list[index],
+  });
 }
 
 /**
@@ -305,37 +381,31 @@ function checkKeyed(
   keyed: KeyedListLayering,
   path: string,
 ): void {
-  const seen = new Map<string, Readonly<Record<string, unknown>>>();
+  const seen = new Map<string, number>();
   entries.forEach((entry, index) => {
     const keys = keyed.keys(entry);
     if (keys === null) {
-      throw new LayerRefusal(
-        `layer ${quote(layer)}: ${path}[${index}] carries no string ${quote(keyed.keyField)}, which every entry needs to layer by`,
-      );
+      refuse(layer, `${path}[${index}]`, { kind: "no-key", keyField: keyed.keyField });
     }
     for (const key of keys) {
       const first = seen.get(key);
       if (first !== undefined) {
-        const claimants = [first, entry].map((e) => JSON.stringify(displayKey(e, keyed)));
-        throw new LayerRefusal(
-          `layer ${quote(layer)}: ${path}: two entries, ${claimants.join(" and ")}, both claim the ${keyed.keyField} ${JSON.stringify(key)}; each ${keyed.keyField} belongs to one entry within a layer`,
-        );
+        refuse(layer, path, {
+          kind: "duplicate-key",
+          keyField: keyed.keyField,
+          first,
+          second: index,
+        });
       }
-      seen.set(key, entry);
+      seen.set(key, index);
     }
     for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
       const value = entry[field];
       if (!Array.isArray(value)) {
         continue;
       }
-      const nestedPath = `${path}[${displayKey(entry, keyed)}].${field}`;
-      const mappings = asMappings(value);
-      if (mappings === null) {
-        throw new LayerRefusal(
-          `layer ${quote(layer)}: ${nestedPath} must be a list of mappings; got ${describeShape(value)}`,
-        );
-      }
-      checkKeyed(layer, mappings, nested, nestedPath);
+      const nestedPath = `${path}[${index}].${field}`;
+      checkKeyed(layer, admitEntries(layer, nestedPath, value), nested, nestedPath);
     }
   });
 }
@@ -350,9 +420,7 @@ function fileLayering(layer: string, doc: Readonly<Record<string, unknown>>): La
     return undefined;
   }
   if (!isLayering(value)) {
-    throw new LayerRefusal(
-      `layer ${quote(layer)}: ${LAYERING_KEY} must be "merge" or "replace", got ${JSON.stringify(value)}`,
-    );
+    refuse(layer, LAYERING_KEY, { kind: "bad-directive", actual: value });
   }
   return value;
 }
@@ -365,29 +433,22 @@ function admitSection(
   fallback: { readonly file: Layering | undefined; readonly run: Layering },
 ): AdmittedSection {
   if (!isPlainObject(value) || !Array.isArray(value.entries)) {
-    throw new LayerRefusal(
-      `layer ${quote(layer)}: ${key} must be a list of mappings or an {undeclared, entries} wrapper; got ${describeShape(value)}${isPlainObject(value) ? " without an entries list" : ""}`,
-    );
+    refuse(layer, key, {
+      kind: "wrong-shape",
+      expected: "a list of mappings or an {undeclared, entries} wrapper",
+      actual: value,
+      detail: isPlainObject(value) ? " without an entries list" : "",
+    });
   }
-  const entries = asMappings(value.entries);
-  if (entries === null) {
-    const index = value.entries.findIndex((entry) => !isPlainObject(entry));
-    throw new LayerRefusal(
-      `layer ${quote(layer)}: ${key} entry ${index} is ${describeShape(value.entries[index])}, not a mapping`,
-    );
-  }
+  const entries = admitEntries(layer, key, value.entries);
   const { entries: _entries, [LAYERING_KEY]: directive, ...knobs } = value;
   if (directive !== undefined && !isLayering(directive)) {
-    throw new LayerRefusal(
-      `layer ${quote(layer)}: ${key}.${LAYERING_KEY} must be "merge" or "replace", got ${JSON.stringify(directive)}`,
-    );
+    refuse(layer, `${key}.${LAYERING_KEY}`, { kind: "bad-directive", actual: directive });
   }
   const explicit = directive ?? fallback.file;
   const keyed = sectionModule(key).layering;
   if (keyed === undefined && explicit === "merge") {
-    throw new LayerRefusal(
-      `layer ${quote(layer)}: ${key} has no layering key, so it cannot be layered by "merge"; declare ${LAYERING_KEY}: replace or drop the directive`,
-    );
+    refuse(layer, key, { kind: "no-layering-key" });
   }
   if (keyed !== undefined) {
     checkKeyed(layer, entries, keyed, key);
@@ -428,9 +489,7 @@ function hasCycle(value: unknown, descent: WeakSet<object>, walked: WeakSet<obje
  */
 function admit(layer: Layer, run: Layering): AdmittedLayer | null {
   if (hasCycle(layer.doc, new WeakSet(), new WeakSet())) {
-    throw new LayerRefusal(
-      `layer ${quote(layer.name)}: the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees`,
-    );
+    refuse(layer.name, "the document", { kind: "cycle" });
   }
   const doc = normalizeKnobbedSections(layer.doc);
   if (!isPlainObject(doc)) {
@@ -531,10 +590,15 @@ function mergeMappings(
   return out;
 }
 
-/** A higher entry's place in the union: at the slot of the first lower entry it matches, or appended. */
+/**
+ * A higher entry's place in the union: at the slot of the first lower entry it
+ * matches, or appended. `index` is its position in the higher list, which is
+ * how the layer's notices name it.
+ */
 type Placement =
   | {
       readonly item: Readonly<Record<string, unknown>>;
+      readonly index: number;
       readonly keys: readonly string[];
       readonly slot: number;
     }
@@ -563,11 +627,11 @@ function unionKeyed(
   const intersect = (a: readonly string[], b: readonly string[]): boolean =>
     a.some((key) => b.includes(key));
   const lowerKeys = lower.map((item) => (isPlainObject(item) ? keyed.keys(item) : null) ?? []);
-  const placements = higher.map((item): Placement => {
+  const placements = higher.map((item, index): Placement => {
     const keys = isPlainObject(item) ? keyed.keys(item) : null;
     const slot = keys === null ? -1 : lowerKeys.findIndex((claims) => intersect(claims, keys));
     return isPlainObject(item) && keys !== null && slot !== -1
-      ? { item, keys, slot }
+      ? { item, index, keys, slot }
       : { item, slot: undefined };
   });
   const placed = placements.flatMap((p) => (p.slot === undefined ? [] : [p]));
@@ -577,12 +641,12 @@ function unionKeyed(
       out.push(below);
       return;
     }
-    for (const { item, slot } of placed) {
-      if (slot === index) {
+    for (const placement of placed) {
+      if (placement.slot === index) {
         out.push(
           keyed.combine === "replace"
-            ? structuredClone(item)
-            : mergeValue(below, item, `${path}[${displayKey(item, keyed)}]`, step, keyed.nested),
+            ? structuredClone(placement.item)
+            : mergeValue(below, placement.item, `${path}[${placement.index}]`, step, keyed.nested),
         );
       }
     }

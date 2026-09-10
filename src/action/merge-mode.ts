@@ -8,6 +8,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
+import { describeOptOut } from "../engine/layers.js";
 import type { Io } from "../io.js";
 import { concludeMerge, failRun } from "./deliver.js";
 import type { MergeConfig } from "./inputs.js";
@@ -28,7 +29,7 @@ export function runMerge(cfg: MergeConfig, io: Io): number {
     return failRun(io, folded.error);
   }
   for (const notice of folded.notices) {
-    io.annotate("notice", `${notice.layer}: null removed ${notice.path} declared by a lower layer`);
+    io.annotate("notice", describeOptOut(notice));
   }
   try {
     mkdirSync(dirname(cfg.mergedFile), { recursive: true });

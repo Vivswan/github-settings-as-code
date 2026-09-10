@@ -727,7 +727,7 @@ describe("run in mode: merge", () => {
       rulesets: { undeclared: "keep", entries: [FLEET_RULESET] },
     });
     expect(captured).toEqual([
-      `notice: ${top}: null removed rulesets[main].bypass_actors declared by a lower layer`,
+      `notice: ${top}: null removed rulesets[0].bypass_actors declared by a lower layer`,
       `merged 2 layer(s) into ${mergedFile}`,
       "result: merged",
     ]);

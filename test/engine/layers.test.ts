@@ -445,7 +445,19 @@ describe("mergeLayers: keyed sections", () => {
     ]);
     expect(result).toEqual({
       settings: { rulesets: { undeclared: "keep", entries: [MAIN_RULESET] } },
-      notices: [{ layer: "repo", path: "rulesets[main].bypass_actors" }],
+      notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
+    });
+  });
+
+  test("a notice names the entry by its index in the layer it names, not by its name or its lower slot", () => {
+    const tags = { name: "tags", target: "tag" };
+    const result = merge([
+      layer("fleet", { rulesets: [tags, { ...MAIN_RULESET, bypass_actors: [{ actor_id: 1 }] }] }),
+      layer("repo", { rulesets: [{ name: "main", bypass_actors: null }] }),
+    ]);
+    expect(result).toEqual({
+      settings: { rulesets: { undeclared: "keep", entries: [tags, MAIN_RULESET] } },
+      notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
     });
   });
 
@@ -635,32 +647,37 @@ describe("mergeLayers: layer-boundary refusals", () => {
     [
       "a rule without a type",
       { rulesets: [{ name: "main", rules: [{ parameters: {} }] }] },
-      'layer "repo": rulesets[main].rules[0] carries no string "type", which every entry needs to layer by',
+      'layer "repo": rulesets[0].rules[0] carries no string "type", which every entry needs to layer by',
     ],
     [
       "a duplicate rule type in one ruleset",
       { rulesets: [{ name: "main", rules: [{ type: "deletion" }, { type: "deletion" }] }] },
-      'layer "repo": rulesets[main].rules: two entries, "deletion" and "deletion", both claim the type "deletion"; each type belongs to one entry within a layer',
+      'layer "repo": rulesets[0].rules[0] and rulesets[0].rules[1] both claim one type; each type belongs to one entry within a layer',
     ],
     [
       "a non-mapping rule",
       { rulesets: [{ name: "main", rules: ["deletion"] }] },
-      'layer "repo": rulesets[main].rules must be a list of mappings; got a list',
+      'layer "repo": rulesets[0].rules[0] must be a mapping; got a string',
+    ],
+    [
+      "a non-mapping rule in the second ruleset, after a mapping rule",
+      { rulesets: [{ name: "tags" }, { name: "main", rules: [{ type: "deletion" }, 7] }] },
+      'layer "repo": rulesets[1].rules[1] must be a mapping; got a number',
     ],
     [
       "duplicate label names, case-folded",
       { labels: [{ name: "Bug" }, { name: "bug" }] },
-      'layer "repo": labels: two entries, "Bug" and "bug", both claim the name "bug"; each name belongs to one entry within a layer',
+      'layer "repo": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer',
     ],
     [
       "a label renaming into a sibling's name in one layer",
-      { labels: [{ name: "bug", new_name: "Defect" }, { name: "defect" }] },
-      'layer "repo": labels: two entries, "bug" and "defect", both claim the name "defect"; each name belongs to one entry within a layer',
+      { labels: [{ name: "bug", new_name: "Defect" }, { name: "docs" }, { name: "defect" }] },
+      'layer "repo": labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer',
     ],
     [
       "duplicate ruleset names",
       { rulesets: [{ name: "main" }, { name: "main" }] },
-      'layer "repo": rulesets: two entries, "main" and "main", both claim the name "main"; each name belongs to one entry within a layer',
+      'layer "repo": rulesets[0] and rulesets[1] both claim one name; each name belongs to one entry within a layer',
     ],
     [
       "a nameless label",
@@ -685,17 +702,22 @@ describe("mergeLayers: layer-boundary refusals", () => {
     [
       "a non-mapping entry in a section without a layering key",
       { milestones: [{ title: "v1" }, "v2"] },
-      'layer "repo": milestones entry 1 is a string, not a mapping',
+      'layer "repo": milestones[1] must be a mapping; got a string',
     ],
     [
       "an invalid top-level directive",
       { _layering: "union", labels: [{ name: "mine" }] },
-      'layer "repo": _layering must be "merge" or "replace", got "union"',
+      'layer "repo": _layering must be "merge" or "replace"; got a string that is neither',
     ],
     [
       "an invalid wrapper directive",
       { labels: { _layering: "union", entries: [{ name: "mine" }] } },
-      'layer "repo": labels._layering must be "merge" or "replace", got "union"',
+      'layer "repo": labels._layering must be "merge" or "replace"; got a string that is neither',
+    ],
+    [
+      "a non-string wrapper directive",
+      { labels: { _layering: true, entries: [{ name: "mine" }] } },
+      'layer "repo": labels._layering must be "merge" or "replace"; got a boolean',
     ],
     [
       "a wrapper merge directive on a section without a layering key",
@@ -913,8 +935,8 @@ describe("stripNulls", () => {
         { layer: "repo", path: "b.c" },
         { layer: "repo", path: "b.e.f" },
         { layer: "repo", path: "labels.undeclared" },
-        { layer: "repo", path: "rulesets[main].bypass_actors" },
-        { layer: "repo", path: "rulesets[main].conditions.ref_name.include" },
+        { layer: "repo", path: "rulesets[0].bypass_actors" },
+        { layer: "repo", path: "rulesets[0].conditions.ref_name.include" },
       ],
     });
   });
@@ -932,7 +954,7 @@ describe("stripNulls", () => {
     const merged = merge([layer("fleet", lower), layer("repo", upper)]);
     expect(merged).toEqual({
       settings: { rulesets: { undeclared: "keep", entries: [MAIN_RULESET] } },
-      notices: [{ layer: "repo", path: "rulesets[main].bypass_actors" }],
+      notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
     });
     if ("error" in merged) {
       throw new Error(merged.error);
