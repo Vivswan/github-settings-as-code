@@ -45,10 +45,10 @@ jobs:
       issues: read
       vulnerability-alerts: read
     with:
-      modules: '["bun", "release-please", "issue-templates", "pr-title", "fuzzer", "nightly"]'
+      modules: '["bun", "docs-site", "release-please", "issue-templates", "pr-title", "fuzzer", "nightly"]'
       private: false
       codeql-languages: '["javascript-typescript"]'
-      tracking-labels: "fuzz-nightly,nightly-failure"
+      tracking-labels: "docs-link-rot,fuzz-nightly,nightly-failure"
 
   # THE gate: this job's own check run (named all-green, created by the
   # GitHub Actions app) is the ruleset's required check. It needs both
@@ -114,3 +114,31 @@ jobs:
     with:
       sha: ${{ github.sha }}
     secrets: inherit
+
+  # The docs deploy, in the SAME run as the gate (github.sha IS the judged
+  # commit): a red main never reaches the site. Ordered behind the
+  # repo-owned post-green hook and the release leg so the site picks up
+  # what they landed (a tag minted this run), and gated on the all-green
+  # result alone: !cancelled() keeps a red or skipped hook or release from
+  # holding the site back. docs-site.yml keeps the PR check, the nightly
+  # rebuild and the dispatch.
+  docs-site:
+    needs: [all-green, post-green, release]
+    if: >-
+      !cancelled() &&
+      needs.all-green.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    # The lane every deploy holds: the called docs-site.yml keys a called
+    # run per run and holds this group only on its nightly and dispatch runs.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      issues: write
+    uses: ./.github/workflows/docs-site.yml
+    with:
+      sha: ${{ github.sha }}
