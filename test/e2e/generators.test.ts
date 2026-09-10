@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { describeOptOut } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
@@ -1330,13 +1331,11 @@ describe("merge oracle against the curated merge scenarios", () => {
       expect(prediction.kind).toBe("merged");
       if (prediction.kind === "merged") {
         expect(prediction.merged).toEqual(scenario.expect.merged);
-        // Every notice the scenario pins on stdout is one the fold predicts.
-        for (const needle of scenario.expect.stdout_contains ?? []) {
-          const match = /^(.+): null removed (.+) declared by a lower layer$/.exec(needle);
-          if (match !== null) {
-            const [, layer, path] = match;
-            expect(prediction.notices).toContainEqual({ layer: String(layer), path: String(path) });
-          }
+        // Every notice the fold predicts is one the scenario pins on stdout,
+        // in the action's words (the e2e run itself catches the converse, a
+        // pinned line the engine never prints).
+        for (const notice of prediction.notices) {
+          expect(scenario.expect.stdout_contains ?? []).toContain(describeOptOut(notice));
         }
       }
     },

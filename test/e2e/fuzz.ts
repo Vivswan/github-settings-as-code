@@ -18,6 +18,7 @@
  * stack whose written document the oracle's own fold predicts whole).
  */
 
+import { describeOptOut } from "../../src/engine/layers.js";
 import { MAX_RETRIES } from "../../src/github/api.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
@@ -1308,10 +1309,10 @@ async function runMergePredicted(
           result: "merged",
           zero_requests: true,
           merged: prediction.merged,
-          // Each null deletion is announced by the layer that made it, on the path it removed.
-          stdout_contains: prediction.notices.map(
-            (notice) => `${notice.layer}: null removed ${notice.path} declared by a lower layer`,
-          ),
+          // Each null deletion is announced by the layer that made it, on the
+          // path it removed, in the action's own words: the oracle predicts the
+          // layer and the path, the engine's describeOptOut spells the line.
+          stdout_contains: prediction.notices.map(describeOptOut),
           summary_contains: ["Merged document written to "],
         };
   const report = await runScenario(scenario);
@@ -1332,8 +1333,16 @@ async function runMergePredicted(
     if (!errorNames("the merged settings document")) {
       problems.push("invalid fold: no ::error:: line names the merged settings document");
     }
-  } else if (prediction.notices.length === 0 && /null removed/.test(report.stdout)) {
-    problems.push("the run announced a null deletion the oracle did not predict");
+  } else {
+    // mode: merge annotates nothing else as a notice, so the run's notice
+    // lines are exactly its null deletions: each predicted one is matched by
+    // stdout_contains above; the count catches one the oracle did not predict.
+    const announced = report.stdout.split("\n").filter((line) => line.startsWith("::notice::"));
+    if (announced.length !== prediction.notices.length) {
+      problems.push(
+        `the run announced ${announced.length} null deletion(s); the oracle predicted ${prediction.notices.length}`,
+      );
+    }
   }
   const sections = new Set<SectionKey>();
   for (const layer of meta.layers) {

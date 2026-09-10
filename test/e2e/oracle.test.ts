@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { describeOptOut, mergeLayers, type OptOutNotice } from "../../src/engine/layers.js";
 import { UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { ADMIN_SLUG } from "./constants.js";
@@ -979,6 +980,15 @@ function stack(...docs: Record<string, unknown>[]): MergeLayer[] {
   }));
 }
 
+/** The notices the ENGINE's fold reports for a stack, to pin the oracle's paths against. */
+function engineNotices(layers: readonly MergeLayer[]): OptOutNotice[] {
+  const result = mergeLayers(layers, { layering: "merge" });
+  if ("error" in result) {
+    throw new Error(`the engine refused a stack the oracle folded: ${result.error}`);
+  }
+  return result.notices;
+}
+
 describe("foldMergeLayers (the oracle's own dialect)", () => {
   test("a null removes a lower declaration with a notice, and stays when nothing below declares the key", () => {
     const { merged, notices } = foldMergeLayers(
@@ -1139,7 +1149,106 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
         ],
       },
     });
-    expect(notices).toEqual([{ layer: "settings.yml", path: "rulesets[main].enforcement" }]);
+    expect(notices).toEqual([{ layer: "settings.yml", path: "rulesets[0].enforcement" }]);
+  });
+
+  test("a notice names a merged entry by its index in the higher layer's list, not its key or lower slot", () => {
+    // The higher entry sits at index 0 of its own list but pairs with the
+    // lower list's index 1: the notice carries the higher index.
+    const layers = stack(
+      {
+        rulesets: [
+          { name: "a", target: "branch" },
+          { name: "lock-1", target: "branch", conditions: { ref_name: { include: ["~ALL"] } } },
+        ],
+      },
+      { rulesets: [{ name: "lock-1", conditions: null }] },
+    );
+    const { merged, notices } = foldMergeLayers(layers, "merge");
+    expect(merged).toEqual({
+      rulesets: {
+        [UNDECLARED_KEY]: "keep",
+        entries: [
+          { name: "a", target: "branch" },
+          { name: "lock-1", target: "branch" },
+        ],
+      },
+    });
+    expect(notices).toEqual([{ layer: "settings.yml", path: "rulesets[0].conditions" }]);
+    expect(notices.map(describeOptOut)).toEqual([
+      "settings.yml: null removed rulesets[0].conditions declared by a lower layer",
+    ]);
+    // The engine's fold names the same site: the oracle's path is the one the
+    // action prints, not merely a consistent spelling of its own.
+    expect(engineNotices(layers)).toEqual(notices);
+  });
+
+  test("a nested null inside a merged entry is named under the higher index, rules included", () => {
+    // `main` is the lower list's first entry and the higher list's second; a
+    // null on its rules and on a key inside a conditions mapping both hang off
+    // rulesets[1]. Rules pair by type and replace, so a rule's own keys are
+    // never merged into and no notice path reaches below `.rules`.
+    const layers = stack(
+      {
+        rulesets: [
+          {
+            name: "main",
+            target: "branch",
+            rules: [{ type: "deletion" }],
+            conditions: { ref_name: { include: ["~ALL"], exclude: [] } },
+          },
+        ],
+      },
+      {
+        rulesets: [
+          { name: "tags", target: "tag" },
+          { name: "main", rules: null, conditions: { ref_name: { exclude: null } } },
+        ],
+      },
+    );
+    const { merged, notices } = foldMergeLayers(layers, "merge");
+    expect(merged).toEqual({
+      rulesets: {
+        [UNDECLARED_KEY]: "keep",
+        entries: [
+          { name: "main", target: "branch", conditions: { ref_name: { include: ["~ALL"] } } },
+          { name: "tags", target: "tag" },
+        ],
+      },
+    });
+    expect(notices).toEqual([
+      { layer: "settings.yml", path: "rulesets[1].rules" },
+      { layer: "settings.yml", path: "rulesets[1].conditions.ref_name.exclude" },
+    ]);
+    expect(notices.map(describeOptOut)).toEqual([
+      "settings.yml: null removed rulesets[1].rules declared by a lower layer",
+      "settings.yml: null removed rulesets[1].conditions.ref_name.exclude declared by a lower layer",
+    ]);
+    expect(engineNotices(layers)).toEqual(notices);
+  });
+
+  test("a replaced entry (labels) earns no notice for the nulls inside it", () => {
+    const layers = stack(
+      {
+        labels: [
+          { name: "a", color: "111111" },
+          { name: "b", description: "x" },
+        ],
+      },
+      { labels: [{ name: "b", description: null }] },
+    );
+    const { merged, notices } = foldMergeLayers(layers, "merge");
+    expect(merged).toEqual({
+      labels: {
+        [UNDECLARED_KEY]: "delete",
+        entries: [
+          { name: "a", color: "111111" },
+          { name: "b", description: null },
+        ],
+      },
+    });
+    expect(notices).toEqual([]);
+    expect(engineNotices(layers)).toEqual([]);
   });
 
   test("an unkeyed knobbed section replaces under the run's merge default", () => {

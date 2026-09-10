@@ -7,6 +7,7 @@
  * properties every run must satisfy.
  */
 
+import type { OptOutNotice } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import {
   SECTION_KEYS,
@@ -824,11 +825,12 @@ export function predictDiscovery(pool: DiscoveryRepo[], filters: DiscoveryFilter
 
 // --- mode: merge -------------------------------------------------------------
 
-/** A lower declaration a higher layer's null removed, as the merge announces it. */
-export interface MergeNotice {
-  layer: string;
-  path: string;
-}
+/**
+ * A lower declaration a higher layer's null removed: the engine's notice
+ * record, whose wording (describeOptOut) the fuzz shares with the action so
+ * the two cannot drift; the oracle computes the layer and the path itself.
+ */
+export type MergeNotice = OptOutNotice;
 
 /**
  * The merge oracle's verdict: the exact document a valid stack folds to, the
@@ -851,7 +853,7 @@ export type MergePrediction =
 interface KeyedList {
   /** Every identity the entry claims, folded; null when it carries none (refused at the boundary). */
   keysOf: (entry: Json) => readonly string[] | null;
-  /** The entry field the keys are read from, for naming an entry in a notice path. */
+  /** The entry field the keys are read from, for naming a keyless entry the fold cannot place. */
   keyField: string;
   combine: "replace" | "merge";
   nested?: Readonly<Record<string, KeyedList>>;
@@ -1019,6 +1021,8 @@ function sameResource(a: readonly string[], b: readonly string[]): boolean {
  * their order; higher entries matching nothing append in theirs. Matching
  * reads the lower list as it stood before this layer, so two higher entries
  * claiming one lower entry between them both take its slot, in their order.
+ * A notice from inside a merged entry names it by its INDEX in the higher
+ * layer's list (the list the null was written in), never by a key value.
  */
 function unionKeyed(
   lower: Json[],
@@ -1032,16 +1036,16 @@ function unionKeyed(
   const slotOf = higherKeys.map((keys) =>
     lowerKeys.findIndex((below) => sameResource(below, keys)),
   );
-  const combine = (below: Json, entry: Json): Json =>
+  const combine = (below: Json, entry: Json, h: number): Json =>
     keyed.combine === "replace"
       ? structuredClone(entry)
-      : mergeTrees(below, entry, `${path}[${String(entry[keyed.keyField])}]`, site, keyed.nested);
+      : mergeTrees(below, entry, `${path}[${h}]`, site, keyed.nested);
   const out = lower.flatMap((below, index) => {
     const keys = lowerKeys[index] as readonly string[];
     if (!higherKeys.some((claims) => sameResource(claims, keys))) {
       return [below];
     }
-    return higher.flatMap((entry, h) => (slotOf[h] === index ? [combine(below, entry)] : []));
+    return higher.flatMap((entry, h) => (slotOf[h] === index ? [combine(below, entry, h)] : []));
   });
   out.push(...higher.flatMap((entry, h) => (slotOf[h] === -1 ? [structuredClone(entry)] : [])));
   return out;
