@@ -152,8 +152,13 @@ export interface SectionPrediction {
   key: SectionKey;
   /**
    * The grades the section may run at (effectiveGrades); each contributes to
-   * `allowed`. EMPTY for an excluded section: it runs at no grade, so every
-   * fold over its grades (preflight, write-granted) is vacuous by construction.
+   * `allowed`. EMPTY for an excluded section (declared, but outside a
+   * non-empty `sections` allowlist): orchestrate.ts's disposition filter
+   * classifies it before the preflight list is built and before the section
+   * loop reads anything, so it runs at no grade, and every fold over these
+   * grades (preflightDeniable, writeGranted, and through them fullyGranted
+   * and writeDeniedSections) is vacuous for it by construction - no consumer
+   * recognizes "excluded" by hand.
    */
   grades: readonly MaskGrade[];
   /** The outcomes the section is allowed to report; the runner must see one. */
@@ -178,24 +183,17 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
  * Two folds precede the grades because they decide whether the mask is
  * consulted at all: exclusion (the section never runs) and the org-only
  * no-op on a personal account (the section runs, but never past its
- * ungated org probe). Each mints the whole prediction here, grades included,
- * so no consumer has to recognize either case: preflight and the
- * write-granted fold read the grades alone.
+ * ungated org probe). Each mints the whole prediction here, grades included.
  */
 export function predictSectionAt(
   key: SectionKey,
   meta: ScenarioMeta,
   gating: ReadGating,
 ): SectionPrediction {
-  // A declared section outside the `sections` allowlist never runs: the engine
-  // classifies it "excluded" before preflight and before any read
-  // (orchestrate.ts's disposition filter feeds both the preflight list and
-  // the section loop, which renders the excluded row), so exclusion folds
-  // before EVERYTHING - grades, denial semantics, and witnesses alike. It runs
-  // at NO grade: preflight probes nothing and no write happens, so its grades
-  // are empty and every fold over them is vacuously satisfied. An EMPTY
-  // allowlist means unrestricted, mirroring orchestrate.ts's size > 0 gate,
-  // so only a non-empty list excludes.
+  // Exclusion folds before EVERYTHING - grades, denial semantics, and
+  // witnesses alike (see SectionPrediction.grades). An EMPTY allowlist means
+  // unrestricted, mirroring orchestrate.ts's size > 0 gate, so only a
+  // non-empty list excludes.
   if (
     meta.onlySections !== undefined &&
     meta.onlySections.length > 0 &&
@@ -359,11 +357,7 @@ export interface RunPrediction {
   noWritesInCheck: boolean;
   /** Sections whose denied writes must never mutate state (mock rule 4). */
   writeDeniedSections: SectionKey[];
-  /**
-   * True when every section is write-granted (convergence expected). An
-   * excluded section runs at no grade, so it is vacuously write-granted and
-   * the quantifier effectively ranges over the sections that WILL run.
-   */
+  /** True when every section is write-granted (convergence expected). */
   fullyGranted: boolean;
   /**
    * Whether the run aborts at the preflight barrier (apply + fail policy, a denied
@@ -427,11 +421,7 @@ function foldPreflightAbort(verdicts: readonly PreflightAbort[]): PreflightAbort
   return verdicts.includes("possible") ? "possible" : "no";
 }
 
-/**
- * True when the section runs write-granted for certain (its only effective
- * grade is write). Vacuously true for an excluded section, which runs at no
- * grade: nothing it could do is denied.
- */
+/** True when every effective grade is write: the section runs write-granted for certain. */
 function writeGranted(section: SectionPrediction): boolean {
   return section.grades.every((grade) => grade === "write");
 }
@@ -440,8 +430,6 @@ function writeGranted(section: SectionPrediction): boolean {
  * Whether preflight (reads only) denies the section: grade none and the denial
  * reads as a permission error (403 style, or "denied" semantics). Two effective
  * grades make it "possible": the probe reaches the gated read only for some content.
- * An excluded section carries no grade at all, so it falls through to "no" like
- * any section preflight has nothing to deny on.
  */
 export function preflightDeniable(section: SectionPrediction, meta: ScenarioMeta): PreflightAbort {
   if (NO_READ_SECTIONS.has(section.key)) {
