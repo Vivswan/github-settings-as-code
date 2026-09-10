@@ -386,11 +386,16 @@ const PERMANENT: [string, string][] = [
   ],
   [
     "a ruleset declining the ref",
-    "remote: error: GH013: Repository rule violations found for refs/heads/build.\nremote:\nremote: - Cannot update this protected ref.\nremote:\nTo https://github.com/o/r.git\n ! [remote rejected] 0123abc -> build (push declined due to repository rule violations)\nerror: failed to push some refs to 'https://github.com/o/r.git'\n",
+    "remote: error: GH013: Repository rule violations found for refs/heads/build.\nremote:\n" +
+      "remote: - Cannot update this protected ref.\nremote:\nTo https://github.com/o/r.git\n" +
+      " ! [remote rejected] 0123abc -> build (push declined due to repository rule violations)\n" +
+      "error: failed to push some refs to 'https://github.com/o/r.git'\n",
   ],
   [
     "a hook quoting git's compare-and-set words on its own line",
-    "remote: pre-receive hook declined: cannot lock ref 'refs/heads/build': reference already exists\nTo https://github.com/o/r.git\n ! [remote rejected] 0123abc -> build (pre-receive hook declined)\nerror: failed to push some refs to 'https://github.com/o/r.git'\n",
+    "remote: pre-receive hook declined: cannot lock ref 'refs/heads/build': reference already exists\n" +
+      "To https://github.com/o/r.git\n ! [remote rejected] 0123abc -> build (pre-receive hook declined)\n" +
+      "error: failed to push some refs to 'https://github.com/o/r.git'\n",
   ],
 ];
 
@@ -809,7 +814,10 @@ describe("packageRelease", () => {
         "lib/index.js": "packaged-bundle-bytes-1\n",
       },
     );
-    const refusal = `refs/tags/v2.1.0 (${planted}) is chain-shaped but not on refs/heads/build (walked from its tip ${tip} to the chain's end without meeting it); the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.`;
+    const refusal =
+      `refs/tags/v2.1.0 (${planted}) is chain-shaped but not on refs/heads/build (walked from ` +
+      `its tip ${tip} to the chain's end without meeting it); the release-tags ruleset freezes ` +
+      "version tags, so no rerun can replace it - inspect it by hand.";
     let error: unknown;
     const pushes = withPushPlans(fx, [], () => {
       try {
@@ -1892,7 +1900,10 @@ describe("advanceBuild", () => {
     const actual = git(fx.origin, "rev-parse", `${planted}^{tree}`);
     const expected = rebuiltTree(fx, `rebuilt-${planted.slice(0, 8)}`, source);
     return new Error(
-      `refs/heads/build ${where} ${planted}, which names ${source} as its source but is not ${source} plus lib/index.js and the removal of .github/workflows/ alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ${source}: ${changed}); ${byHand}`,
+      `refs/heads/build ${where} ${planted}, which names ${source} as its source but is not ` +
+        `${source} plus lib/index.js and the removal of .github/workflows/ alone: its tree is ` +
+        `${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ` +
+        `${source}: ${changed}); ${byHand}`,
     );
   }
 
@@ -2001,7 +2012,14 @@ describe("advanceBuild", () => {
         return {
           planted,
           error: new Error(
-            `refs/heads/build holds ${planted}, which names ${fx.mergeSha} as its source but its tree ${plantedTree} is not the tree ${tree} this checkout's build of ${fx.mergeSha} packages, so the two differ in their lib/index.js entry (bytes or file mode): either the commit was not built from this source or the build is not reproducible, and the Source trailer cannot tell those apart. Diff the two trees by hand; a hand-pushed commit is left for the next green push to bury (the ruleset on build forbids moving it back), a build that differs between runs is fixed before build can be trusted.`,
+            `refs/heads/build holds ${planted}, which names ${fx.mergeSha} as its source but ` +
+              `its tree ${plantedTree} is not the tree ${tree} this checkout's build of ` +
+              `${fx.mergeSha} packages, so the two differ in their lib/index.js entry (bytes or ` +
+              "file mode): either the commit was not built from this source or the build is not " +
+              "reproducible, and the Source trailer cannot tell those apart. Diff the two trees " +
+              "by hand; a hand-pushed commit is left for the next green push to bury (the ruleset " +
+              "on build forbids moving it back), a build that differs between runs is fixed " +
+              "before build can be trusted.",
           ),
         };
       },

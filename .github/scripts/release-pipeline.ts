@@ -526,7 +526,13 @@ function assertSameBuild(cwd: string, packaged: string, sourceSha: string, tree:
   const packagedTree = git(cwd, "rev-parse", `${packaged}^{tree}`);
   if (packagedTree !== tree) {
     throw new Error(
-      `${BUILD_REF} holds ${packaged}, which names ${sourceSha} as its source but its tree ${packagedTree} is not the tree ${tree} this checkout's build of ${sourceSha} packages, so the two differ in their ${BUNDLE_FILE} entry (bytes or file mode): either the commit was not built from this source or the build is not reproducible, and the Source trailer cannot tell those apart. Diff the two trees by hand; a hand-pushed commit is left for the next green push to bury (the ruleset on build forbids moving it back), a build that differs between runs is fixed before build can be trusted.`,
+      `${BUILD_REF} holds ${packaged}, which names ${sourceSha} as its source but its tree ` +
+        `${packagedTree} is not the tree ${tree} this checkout's build of ${sourceSha} packages, ` +
+        `so the two differ in their ${BUNDLE_FILE} entry (bytes or file mode): either the commit ` +
+        "was not built from this source or the build is not reproducible, and the Source trailer " +
+        "cannot tell those apart. Diff the two trees by hand; a hand-pushed commit is left for the " +
+        "next green push to bury (the ruleset on build forbids moving it back), a build that " +
+        "differs between runs is fixed before build can be trusted.",
     );
   }
 }
