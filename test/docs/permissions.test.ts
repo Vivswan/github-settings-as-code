@@ -34,7 +34,7 @@ describe("branches Contents advice", () => {
     const label = repoLabels(override as SectionPermission).join(" or ");
     const level = overrideAdviceLevel(sectionModule("branches"), override as SectionPermission);
     const advice = `${label}: ${level}`;
-    const notes = DOCS.branches.readme.notes;
+    const notes = DOCS.branches.sections_table.notes;
     expect(
       notes.includes(`add ${advice}`),
       `the branches Notes cell (src/sections/branches/branches.docs.yml) must advise "add ${advice}" for the probe`,

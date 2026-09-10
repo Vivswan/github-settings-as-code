@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: Copilot agents variables CRUD
   notes: as `actions_variables`, over the Copilot agents variable store
 coverage:

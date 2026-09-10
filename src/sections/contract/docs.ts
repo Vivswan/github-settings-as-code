@@ -1,14 +1,15 @@
 /**
- * The prose a section contributes to the generated artifacts: its README Sections table cells,
- * its COVERAGE.md Supported rows, and the descriptions of its fields in the published JSON
- * Schema. Declared beside the section module as src/sections/<key>/<key>.docs.yml and loaded by
- * the docs registry. Documentation only: nothing bundled from src/main.ts may import this file or
- * the registry (a unit test walks the import graph).
+ * The prose a section contributes to the generated artifacts: its cells in the Sections table on
+ * docs/reference/sections.md, its COVERAGE.md Supported rows, and the descriptions of its fields
+ * in the published JSON Schema. Declared beside the section module as
+ * src/sections/<key>/<key>.docs.yml and loaded by the docs registry. Documentation only: nothing
+ * bundled from src/main.ts may import this file or the registry (a unit test walks the import graph).
  */
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
+import { renamedKeyError } from "../shared/renamed-key.js";
 
 /** One COVERAGE.md Supported row: the GitHub surface it covers and how the section handles it. */
 const CoverageRow = z
@@ -29,24 +30,35 @@ const CoverageRow = z
  */
 const SchemaDescriptions = z.record(z.string().min(1), z.string().min(1)).readonly();
 
+/** The docs shape's error map: a file still keyed `readme` fails with the rename in hand. */
+const sectionDocsKeyError = renamedKeyError(
+  "Sections table cells",
+  "readme",
+  "sections_table",
+  "(the table renders into docs/reference/sections.md, not the README)",
+);
+
 export const SectionDocs = z
-  .strictObject({
-    /** The section's two authored cells in the README Sections table. */
-    readme: z
-      .strictObject({
-        /** The Endpoints cell: the API surface the section calls, in prose. */
-        endpoints: z.string().min(1),
-        /** The Notes cell: semantics, caveats, and the knob in passing. */
-        notes: z.string().min(1),
-      })
-      .readonly(),
-    // The section's rows in the COVERAGE.md Supported table, in display order. At least one: a
-    // section with no coverage row does not exist to the inventory, so the shape (and the type it
-    // infers, a non-empty tuple) refuses [].
-    coverage: z.tuple([CoverageRow], CoverageRow).readonly(),
-    /** The section's own property on the document root and every definition its slice declares. */
-    schema: SchemaDescriptions,
-  })
+  .strictObject(
+    {
+      /** The section's two authored cells in the Sections table on docs/reference/sections.md. */
+      sections_table: z
+        .strictObject({
+          /** The Endpoints cell: the API surface the section calls, in prose. */
+          endpoints: z.string().min(1),
+          /** The Notes cell: semantics, caveats, and the knob in passing. */
+          notes: z.string().min(1),
+        })
+        .readonly(),
+      // The section's rows in the COVERAGE.md Supported table, in display order. At least one: a
+      // section with no coverage row does not exist to the inventory, so the shape (and the type it
+      // infers, a non-empty tuple) refuses [].
+      coverage: z.tuple([CoverageRow], CoverageRow).readonly(),
+      /** The section's own property on the document root and every definition its slice declares. */
+      schema: SchemaDescriptions,
+    },
+    { error: sectionDocsKeyError },
+  )
   .readonly();
 export type SectionDocs = z.infer<typeof SectionDocs>;
 

@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: direct collaborators + pending invitations
   notes: >-
     invitations for new users, pending ones reconciled (stale permission updated, expired re-sent,

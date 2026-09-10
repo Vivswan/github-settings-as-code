@@ -42,9 +42,11 @@ describe("renderSectionsTable", () => {
         },
       ],
       {
-        labels: { readme: { endpoints: "labels CRUD", notes: "upsert by name" } },
-        teams: { readme: { endpoints: "org team repo permissions", notes: "org repos only" } },
-        environments: { readme: { endpoints: "PUT environments", notes: "reviewers" } },
+        labels: { sections_table: { endpoints: "labels CRUD", notes: "upsert by name" } },
+        teams: {
+          sections_table: { endpoints: "org team repo permissions", notes: "org repos only" },
+        },
+        environments: { sections_table: { endpoints: "PUT environments", notes: "reviewers" } },
       },
     );
     expect(table).toBe(
@@ -61,7 +63,7 @@ describe("renderSectionsTable", () => {
   test("the Undeclared default column is rendered from undeclaredDefault for every policy", () => {
     // The single source the docs derive deletion claims from: each policy value has exactly one
     // display form, and the column never comes from authored prose.
-    const docs = { readme: { endpoints: "e", notes: "n" } };
+    const docs = { sections_table: { endpoints: "e", notes: "n" } };
     const column = (undeclaredDefault: "delete" | "keep" | "untouched"): string | undefined =>
       renderSectionsTable(
         [{ key: "labels", permission: { repo: ["issues"] }, undeclaredDefault }],
@@ -83,12 +85,12 @@ describe("renderSectionsTable", () => {
     expect(() => renderSectionsTable([row], {})).toThrow('section "labels" has no docs entry');
     expect(() =>
       renderSectionsTable([row], {
-        labels: { readme: { endpoints: "labels | CRUD", notes: "" } },
+        labels: { sections_table: { endpoints: "labels | CRUD", notes: "" } },
       }),
     ).toThrow('the labels Endpoints cell is blank or contains "|" or a line break');
     expect(() =>
       renderSectionsTable([row], {
-        labels: { readme: { endpoints: "labels CRUD", notes: "upsert\nby name" } },
+        labels: { sections_table: { endpoints: "labels CRUD", notes: "upsert\nby name" } },
       }),
     ).toThrow('the labels Notes cell is blank or contains "|" or a line break');
   });

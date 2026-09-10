@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: Actions variables CRUD
   notes: >-
     plain-text variables upserted by name (case-insensitive); values read back in full, so check

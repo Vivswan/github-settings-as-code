@@ -112,10 +112,10 @@ function cell(text: string, where: string): string {
 const TABLE_HEADER =
   "| Section | Endpoints | PAT permission | Undeclared default | Notes |\n|---|---|---|---|---|";
 
-/** The README Sections table, one row per section in the given order; a section without docs throws. */
+/** The Sections table, one row per section in the given order; a section without docs throws. */
 export function renderSectionsTable(
   sections: readonly SectionsTableRow[],
-  docs: Readonly<Record<string, Pick<SectionDocs, "readme">>>,
+  docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
 ): string {
   const rows = sections.map((section) => {
     const doc = docs[section.key];
@@ -124,10 +124,10 @@ export function renderSectionsTable(
     }
     return [
       `\`${section.key}\``,
-      cell(doc.readme.endpoints, `the ${section.key} Endpoints cell`),
+      cell(doc.sections_table.endpoints, `the ${section.key} Endpoints cell`),
       cell(renderPatCell(sectionGrant(section)), `the ${section.key} PAT permission cell`),
       UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault],
-      cell(doc.readme.notes, `the ${section.key} Notes cell`),
+      cell(doc.sections_table.notes, `the ${section.key} Notes cell`),
     ];
   });
   return [TABLE_HEADER, ...rows.map((cells) => `| ${cells.join(" | ")} |`)].join("\n");

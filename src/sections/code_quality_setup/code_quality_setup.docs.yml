@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: code-quality setup
   notes: >-
     `state`, `languages`, runner and AI-findings options; a 202 means GitHub rolls the change out in

@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: >-
     PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes,
     private-vulnerability-reporting, lfs, immutable-releases, GraphQL RepositoryFeatures +

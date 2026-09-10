@@ -1,14 +1,16 @@
 /**
  * Leaf schema helpers shared by the root src/schema.ts and the per-section
  * schema modules under src/sections/<key>/schema.ts. This module imports
- * ONLY zod: a section schema importing root schema.ts back would be a cycle
- * whose top-level const evaluation TDZ-crashes at import time, so everything
- * both sides need lives here. The smoke selector
+ * ONLY zod and its zod-only sibling renamed-key.ts: a section schema
+ * importing root schema.ts back would be a cycle whose top-level const
+ * evaluation TDZ-crashes at import time, so everything both sides need lives
+ * here. The smoke selector
  * (.github/scripts/changed-sections.ts) derives this file's section fan-out
  * from the import graph.
  */
 
 import { z } from "zod";
+import { renamedKeyError } from "./renamed-key.js";
 
 const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "UndeclaredPolicy" });
 
@@ -19,17 +21,13 @@ const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "Undeclared
  */
 export const LayeringSchema = z.enum(["merge", "replace"]);
 
-/** The wrapper's policy key before v3 renamed it; still the likeliest stray key on a wrapper. */
-const RENAMED_POLICY_KEY = "undeclared";
-
-/** The wrapper's error map: a v2 file fails with the rename in hand, not a bare unknown-key issue. */
-function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
-  if (issue.code !== "unrecognized_keys" || !issue.keys.includes(RENAMED_POLICY_KEY)) {
-    return undefined;
-  }
-  const keys = issue.keys.map((key) => JSON.stringify(key)).join(", ");
-  return `Unrecognized key${issue.keys.length === 1 ? "" : "s"}: ${keys}; the wrapper's policy key "undeclared" was renamed to "_undeclared" in v3 (a directive, like _layering) - write _undeclared: keep or _undeclared: delete`;
-}
+/** The wrapper's error map: a v2 file (policy key `undeclared`) fails with the rename in hand. */
+const wrapperKeyError = renamedKeyError(
+  "wrapper's policy",
+  "undeclared",
+  "_undeclared",
+  "in v3 (a directive, like _layering) - write _undeclared: keep or _undeclared: delete",
+);
 
 /**
  * The knobbed form of a list value: the plain entry array, or the strict

@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: POST/PUT/DELETE pages
   notes: >-
     `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`, `public` (GHEC site

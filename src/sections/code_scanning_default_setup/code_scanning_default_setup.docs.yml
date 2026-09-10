@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: code scanning default setup
   notes: >-
     `state`, `query_suite`, `languages`; needs Advanced Security on private repositories
