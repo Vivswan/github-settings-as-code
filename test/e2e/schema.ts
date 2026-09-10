@@ -635,7 +635,9 @@ export function parseScenario(raw: unknown, sourcePath: string): Scenario {
 
 /**
  * Recursively collect every .yml file under a directory. A directory that
- * does not exist yields [] (a section may have no scenarios/ yet). Any other
+ * does not exist yields [] (loadScenarios tolerates a section with no
+ * scenarios/ yet; test/schema-corpus.test.ts then rejects that root as an
+ * empty contribution, so the tolerance lasts until the corpus test runs). Any other
  * read failure (EACCES, ENOTDIR, ...) propagates naming the directory: an
  * unreadable corpus must never look like an empty one, because run.ts
  * reports an empty unfiltered corpus and exits 0.
@@ -673,7 +675,10 @@ export function collectYmlFiles(dir: string): string[] {
  * registered section, so a new section's first scenario is picked up without
  * touching a list. The paths are NOT filtered by existence: collectYmlFiles
  * alone decides that an absent directory is an empty corpus and an unreadable
- * one is a failure (existsSync is false for both, and would hide the second).
+ * one is a failure. An existsSync filter would have kept a mode-000
+ * scenarios/ (existsSync stats the path, which needs only the parent's search
+ * bit) but silently dropped a scenarios/ under a mode-000 <key>/, where
+ * existsSync is false exactly as it is for an absent directory.
  * ONLY scenarios/ directories count - any other .yml under a section
  * directory (a fixture, an example settings file) never loads as a scenario.
  * run.ts and the endpoint-coverage tripwire both call this, so the two can

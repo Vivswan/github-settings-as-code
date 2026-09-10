@@ -255,9 +255,13 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
   );
 
   test("scenarioRoots names every registered section's scenarios/ path, present or not", () => {
-    // existsSync is false for an absent AND for an unreadable directory, so a
-    // roots list filtered by it would hide the second as the first; the loader
-    // is the one place that tells them apart, so the roots are never filtered.
+    // existsSync is false for an absent scenarios/ and for one under a
+    // mode-000 <key>/ (it stats the path, so only the parent's search bit
+    // matters), so a roots list filtered by it would drop the second as the
+    // first; the loader is the one place that tells absent from unreadable,
+    // so the roots are never filtered. The unreadable case the next test
+    // builds is a mode-000 scenarios/ itself, which existsSync would have kept
+    // and readdir then refuses.
     withTempRoot((sections) => {
       const roots = scenarioRoots(sections);
       expect(roots[0]).toBe(join(import.meta.dir, "scenarios"));

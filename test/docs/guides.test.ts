@@ -326,10 +326,13 @@ function isDelimiterRow(line: string | undefined): boolean {
  * source: a row's first cell ends with the layer that triggers it, as one code
  * span in parentheses (or several joined by "or" when the page names
  * alternatives), and its second cell quotes the message the engine emits, in
- * one code span. Tables are read as GFM renders them: a header line followed
- * by the delimiter row opens one, every non-blank line after that is a row
- * (outer pipes optional), and a blank line closes it. A row missing its input
- * or its message fails here by name, so a new row cannot land unpinned.
+ * one code span. Rows are recognized more permissively than GFM renders them:
+ * a header line followed by a delimiter row opens a table (the delimiter's
+ * cell count is not checked, so `|---|` under a two-cell header opens one here
+ * and renders as prose), every non-blank line after that is a row (outer pipes
+ * optional; a list item shaped like a row counts), and a blank line closes it.
+ * Every divergence adds a pin, never loses one. A row missing its input or its
+ * message fails here by name, so a new row cannot land unpinned.
  */
 function refusalRows(section: readonly string[], source: string): RefusalRow[] {
   const GATES: Record<string, RefusalRow["gate"]> = {
