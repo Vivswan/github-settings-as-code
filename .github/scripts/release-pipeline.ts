@@ -184,7 +184,10 @@ function releaseMajor(tag: string): string {
  * Returns the entry so a caller can rebuild the tree it belongs in.
  */
 function assertCarriesBundle(cwd: string, treeish: string): { mode: string; blob: string } {
-  const entry = tryGit(cwd, "ls-tree", "-l", treeish, "--", BUNDLE_FILE) ?? "";
+  // ls-tree answers a missing path with empty output and exit 0; a failing
+  // call (an object this checkout lacks, a transport error) must propagate,
+  // never read as "no bundle".
+  const entry = git(cwd, "ls-tree", "-l", treeish, "--", BUNDLE_FILE);
   const [mode = "", , blob = "", size] = entry.split(/\s+/);
   const regularFile = mode === "100644" || mode === "100755";
   if (!regularFile || Number(size) === 0) {
@@ -349,33 +352,51 @@ function readBuildTip(cwd: string): BuildTip {
   return { tip, mainHead: git(cwd, "rev-parse", "FETCH_HEAD") };
 }
 
+/** Where a chain walk stopped without a match: at the chain's end (the
+ * root, whose parent is on main, or a commit without a Source trailer, not
+ * this pipeline's) or at the CHAIN_WALK bound, with the chain unread beyond. */
+type WalkEnd = { found: string } | { ended: true } | { exhausted: true };
+
 /**
- * The chain commit whose Source is sourceSha, or null when none is within
- * CHAIN_WALK commits of the tip. Walked one commit at a time, each fetched
- * by sha at depth 1 only when this checkout lacks it: a depth-N fetch of
- * build would mark main commits shallow whenever the chain is shorter than
- * N, and a shallow main falsifies every ancestry verdict below. The walk
- * ends at the chain's root (its parent is its source, on main), at a
- * commit without a Source trailer (not this pipeline's), or at the bound.
+ * Walk build from the tip, one commit at a time, each fetched by sha at
+ * depth 1 only when this checkout lacks it: a depth-N fetch of build would
+ * mark main commits shallow whenever the chain is shorter than N, and a
+ * shallow main falsifies every ancestry verdict below. Returns the first
+ * commit `wanted` accepts, or how the walk stopped: a caller that needs
+ * "not on the chain" gets it only from an ENDED walk, never from the bound.
  */
+function walkChain(
+  cwd: string,
+  tip: string,
+  mainHead: string,
+  wanted: (commit: string, source: string) => boolean,
+): WalkEnd {
+  let commit: string | null = tip;
+  for (let step = 0; step < CHAIN_WALK; step++) {
+    if (commit === null) {
+      return { ended: true };
+    }
+    const source = sourceTrailer(cwd, commit);
+    if (source === "") {
+      return { ended: true };
+    }
+    if (wanted(commit, source)) {
+      return { found: commit };
+    }
+    commit = chainParent(cwd, commit, mainHead);
+  }
+  return commit === null ? { ended: true } : { exhausted: true };
+}
+
+/** The chain commit whose Source is sourceSha, or null when none is within the walk. */
 function findPackaged(
   cwd: string,
   tip: string,
   sourceSha: string,
   mainHead: string,
 ): string | null {
-  let commit: string | null = tip;
-  for (let step = 0; commit !== null && step < CHAIN_WALK; step++) {
-    const source = sourceTrailer(cwd, commit);
-    if (source === sourceSha) {
-      return commit;
-    }
-    if (source === "") {
-      return null;
-    }
-    commit = chainParent(cwd, commit, mainHead);
-  }
-  return null;
+  const walk = walkChain(cwd, tip, mainHead, (_commit, source) => source === sourceSha);
+  return "found" in walk ? walk.found : null;
 }
 
 /** `commit`'s parent as its object records it (a depth-1 fetch grafts the
@@ -1012,8 +1033,9 @@ function advanceChain(
  * value build has held, so a tip read after the observation is that value
  * or a newer one, and a lease that goes stale means another run moved
  * latest - re-read both and retry. A latest that already names a newer
- * source than the target stays where it is (a stale rerun must not lease
- * it back) until the next green push appends past.
+ * source than the target, on a chain commit that checks out, stays where it
+ * is (a stale rerun must not lease it back) until the next green push
+ * appends past.
  */
 function publishLatest(
   cwd: string,
@@ -1037,27 +1059,11 @@ function publishLatest(
       return { sha: target, reason: `${LATEST_REF} already at ${target}` };
     }
     if (observed !== "") {
-      git(cwd, "fetch", "--quiet", "--depth=1", "origin", LATEST_REF);
-      // Absent (the tag moved between the two reads, or names no commit) or
-      // not this pipeline's (no trailer, a source off main): nothing newer
-      // to defer to, so the target takes over; the lease settles the race.
-      const latestSource =
-        tryGit(
-          cwd,
-          "log",
-          "-1",
-          "--format=%(trailers:key=Source,valueonly)",
-          `${observed}^{commit}`,
-        ) ?? "";
-      if (
-        latestSource !== "" &&
-        latestSource !== targetSource &&
-        isAncestor(cwd, latestSource, build.mainHead) &&
-        isAncestor(cwd, targetSource, latestSource)
-      ) {
+      const newer = newerChainCommit(cwd, observed, targetSource, build.tip, build.mainHead);
+      if (newer !== null) {
         return {
           sha: observed,
-          reason: `${LATEST_REF} stays at ${observed} (built from ${latestSource}), newer than ${target} (built from ${targetSource}); the next green push appends past it`,
+          reason: `${LATEST_REF} stays at ${observed} (built from ${newer}), newer than ${target} (built from ${targetSource}); the next green push appends past it`,
         };
       }
     }
@@ -1075,6 +1081,61 @@ function publishLatest(
   throw new Error(
     `could not move ${LATEST_REF} after ${attempts} compare-and-swap attempts; something keeps moving it concurrently - rerun this job once it settles.`,
   );
+}
+
+/**
+ * The source `observed` (what refs/tags/latest names) packages, when latest
+ * must be left there: a commit ON build whose source is on main and strictly
+ * newer than the target's, and whose tree is that source plus the bundle.
+ * Null otherwise - the tag moved between the two reads, or a hand push
+ * planted something with a newer Source trailer but a tampered tree or off
+ * the chain - and the target takes over; the lease settles the race. A walk
+ * that hits its bound before reaching the observed commit or the chain's
+ * end has not shown it off the chain, so latest is left alone then too.
+ */
+function newerChainCommit(
+  cwd: string,
+  observed: string,
+  targetSource: string,
+  tip: string,
+  mainHead: string,
+): string | null {
+  git(cwd, "fetch", "--quiet", "--depth=1", "origin", LATEST_REF);
+  // The tag can move between the ls-remote and this fetch, leaving the
+  // observed value unknown here: a plain "no", never a swallowed failure.
+  if (!gitYesNo(cwd, "rev-parse", "--verify", "--quiet", `${observed}^{commit}`)) {
+    return null;
+  }
+  const source = sourceTrailer(cwd, observed);
+  if (
+    source === "" ||
+    source === targetSource ||
+    !isAncestor(cwd, source, mainHead) ||
+    !isAncestor(cwd, targetSource, source)
+  ) {
+    return null;
+  }
+  if (!packages(cwd, observed, source)) {
+    return null;
+  }
+  const walk = walkChain(cwd, tip, mainHead, (commit) => commit === observed);
+  return "ended" in walk ? null : source;
+}
+
+/** assertPackages as a question, for a commit this pipeline may leave alone rather than stop on. */
+function packages(cwd: string, packaged: string, source: string): boolean {
+  try {
+    assertPackages(cwd, packaged, source, packaged, "");
+    return true;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      / is not .* plus |does not carry a non-empty/.test(error.message)
+    ) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 if (import.meta.main) {

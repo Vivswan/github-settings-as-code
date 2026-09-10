@@ -45,7 +45,7 @@ rulesets:
   # The vX.Y.Z tags stay immutable: each points at a commit on the `build`
   # branch (its release commit's tree plus the built bundle) that
   # template-sync workflow pins and release artifacts reference. The
-  # `latest` tag matches neither pattern, so post-green.yml can move it.
+  # `latest` tag matches neither pattern; its own ruleset is below.
   - name: release-tags
     conditions:
       ref_name:
@@ -71,6 +71,25 @@ rulesets:
       - actor_id: 5
         actor_type: RepositoryRole
         bypass_mode: always
+
+  # The moving `latest` tag: post-green.yml moves it to the newest packaged
+  # commit on `build` with a lease on every green push, so no update or
+  # non_fast_forward rule (either would refuse that move; the lease and the
+  # script's own checks keep it from going backward). Deletion is the one
+  # thing it must never suffer: a deleted latest bricks every @latest
+  # consumer at once. No bypass, like the build ruleset, so the apply heals
+  # an out-of-band bypass actor.
+  - name: latest-tag
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - latest
+        exclude: []
+    rules:
+      - type: deletion
+    bypass_actors: []
 
   # The `build` branch of packaged commits: post-green.yml appends a
   # packaged child of every green main commit with a plain push (the

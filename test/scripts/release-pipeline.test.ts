@@ -1435,6 +1435,119 @@ describe("advanceBuild", () => {
     expect(buildTip(fx)).toBe(tip);
   });
 
+  /** A hand-planted refs/tags/latest naming `source` in a Source trailer:
+   * `source`'s tree plus `files` over the planted bundle, parented on
+   * `parent`, force-pushed as the tag. */
+  function plantLatest(
+    fx: Fixture,
+    name: string,
+    source: string,
+    parent: string,
+    files: Record<string, string>,
+  ): string {
+    const planter = clone(fx.root, fx.origin, name);
+    git(planter, "checkout", "--quiet", source);
+    write(planter, "lib/index.js", "planted\n");
+    git(planter, "add", "-f", "lib/index.js");
+    for (const [file, content] of Object.entries(files)) {
+      write(planter, file, content);
+      git(planter, "add", "-f", file);
+    }
+    const planted = git(
+      planter,
+      "commit-tree",
+      git(planter, "write-tree"),
+      "-p",
+      parent,
+      "-m",
+      "build: by hand",
+      "-m",
+      `Source: ${source}`,
+    );
+    git(planter, "push", "--quiet", "--force", "origin", `${planted}:refs/tags/latest`);
+    return planted;
+  }
+
+  const plantedNewer: [string, (fx: Fixture, tip: string, newer: string) => string][] = [
+    [
+      "a tampered tree",
+      (fx, tip, newer) =>
+        plantLatest(fx, "latest-newer-tampered", newer, tip, {
+          "action.yml": "name: tampered\n",
+        }),
+    ],
+    [
+      "a pure package that is not on build",
+      (fx, _tip, newer) => plantLatest(fx, "latest-newer-detached", newer, newer, {}),
+    ],
+  ];
+  test.each(plantedNewer)(
+    "a hand-planted latest naming a newer source with %s is replaced by this run's target",
+    (_name, plant) => {
+      const fx = seedFixture();
+      const tip = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
+      // A newer main commit build has not packaged yet: its Source trailer
+      // alone would read as "newer, leave it".
+      const newer = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
+      const planted = plant(fx, tip, newer.sha);
+      expect(latestTag(fx)).toBe(planted);
+      const rerun = checkoutOf(fx, "latest-rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
+      let result: ReturnType<typeof advanceBuild> | undefined;
+      const pushes = withPushPlans(fx, [], () => {
+        result = advanceBuild({ cwd: rerun, sourceSha: fx.mergeSha });
+      });
+      expect(result).toEqual({
+        changed: false,
+        buildSha: tip,
+        latestSha: tip,
+        reason: `refs/heads/build already packages ${fx.mergeSha} at ${tip}; refs/tags/latest: moved to ${tip}`,
+      });
+      expect(pushes).toEqual([latestOf(planted, tip)]);
+      expect(latestTag(fx)).toBe(tip);
+    },
+  );
+
+  test("a latest beyond the chain walk's bound is left alone rather than read as off the chain", () => {
+    const fx = seedFixture();
+    const kept = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
+    // Fifty-one release backfills of an older source land after it, more than
+    // the walk reads: the observed latest is then neither found nor shown off
+    // the chain, and rolling it back to the older tip would be wrong.
+    const filler = clone(fx.root, fx.origin, "latest-filler");
+    git(filler, "checkout", "--quiet", fx.seedSha);
+    write(filler, "lib/index.js", "packaged-bundle-bytes-0\n");
+    git(filler, "add", "-f", "lib/index.js");
+    const tree = git(filler, "write-tree");
+    let tip = kept;
+    for (let n = 0; n < 51; n++) {
+      tip = git(
+        filler,
+        "commit-tree",
+        tree,
+        "-p",
+        tip,
+        "-m",
+        `build: backfill ${n}`,
+        "-m",
+        `Source: ${fx.seedSha}`,
+      );
+    }
+    git(filler, "push", "--quiet", "origin", `${tip}:refs/heads/build`);
+    const rerun = checkoutOf(fx, "latest-bounded", fx.seedSha, "packaged-bundle-bytes-0\n");
+    let result: ReturnType<typeof advanceBuild> | undefined;
+    const pushes = withPushPlans(fx, [], () => {
+      result = advanceBuild({ cwd: rerun, sourceSha: fx.seedSha });
+    });
+    expect(result).toEqual({
+      changed: false,
+      buildSha: tip,
+      latestSha: kept,
+      reason: `refs/heads/build already packages ${fx.seedSha} at ${tip}; refs/tags/latest stays at ${kept} (built from ${fx.mergeSha}), newer than ${tip} (built from ${fx.seedSha}); the next green push appends past it`,
+    });
+    expect(pushes).toEqual([]);
+    expect(latestTag(fx)).toBe(kept);
+  });
+
   test("a hand-moved latest is brought back to the tip by the next run", () => {
     const fx = seedFixture();
     const tip = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;

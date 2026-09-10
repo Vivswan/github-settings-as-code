@@ -525,6 +525,14 @@ describe("post-green.yml reaches the hook", () => {
       "jobs",
     ],
     [
+      "a shallow checkout, which advance-build refuses (fetch-depth gone)",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.[0];
+        delete must(must(step, "checkout step").with, "checkout with")["fetch-depth"];
+      },
+      "jobs",
+    ],
+    [
       "a checkout that never tries the caller's token",
       (w) => {
         const step = must(w.jobs.build, "build job").steps?.[0];
