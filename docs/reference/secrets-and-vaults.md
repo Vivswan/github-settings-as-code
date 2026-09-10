@@ -99,7 +99,7 @@ Every resolved plaintext is registered with the runner's secret masker before it
 
 ## Multi-repo: operator files only
 
-References are honored only in settings sources the OPERATOR authors: the single-repo settings file, `repos-dir` files, and the `defaults-file`. A settings.yml fetched from a target repository (the `repos` input) is target-authored, and a reference there is a hard error: a target repository must not be able to route the operator's environment - and its secrets - into itself. Declare secret-bearing sections centrally when you manage a fleet.
+References are honored only in settings sources the OPERATOR authors: the single-repo settings file, every `settings-file` layer of a `mode: merge` step, `repos-dir` files, and the `defaults-file` document. A settings.yml fetched from a target repository (the `repos` input) is target-authored, and a reference there is a hard error: a target repository must not be able to route the operator's environment - and its secrets - into itself. Declare secret-bearing sections centrally when you manage a fleet.
 
 ## Repository Actions secrets
 
@@ -155,4 +155,10 @@ Each environment is its own sealing scope with its own public key, so the same s
 
 ## Multi-repo fan-out
 
-In multi-repo mode a defaults file merges under every target the run processes. A defaults file that declares a secret section (`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, or environment secrets) therefore writes those secrets into EVERY discovered target - which is sometimes exactly the point (a fleet-wide deploy key), and sometimes a surprise (a token fanned out to repositories that should never hold it). Scope discovery deliberately before declaring secrets in a defaults file: prefer an explicit `repos` list or tight discovery filters over `repos: "*"`, and run `mode: check` first to see which repositories the run would process and which declared secrets are missing where. Check mode verifies existence only - apply re-writes every declared secret on every run regardless, so a "clean" check still means those values will be sealed and sent.
+In multi-repo mode the defaults file is applied whole to every `repos` target that has no settings file of its own. A defaults file that declares a secret section (`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, or environment secrets) therefore writes those secrets into EVERY fileless target the run discovers. Sometimes that is exactly the point (a fleet-wide deploy key), and sometimes a surprise (a token fanned out to repositories that should never hold it).
+
+Scope discovery deliberately before declaring secrets in a defaults file:
+
+- Prefer an explicit `repos` list or tight discovery filters over `repos: "*"`.
+- Run `mode: check` first to see which repositories would take the defaults and which declared secrets are missing where.
+- Check mode verifies existence only. Apply re-writes every declared secret on every run regardless, so a "clean" check still means those values will be sealed and sent.

@@ -509,7 +509,7 @@ describe("throwFor context enrichment", () => {
   test("override advice grades by the section's need: a read-only permission advises read", () => {
     // The real branch-policy list: its write siblings (create/remove) carry
     // Administration, a DIFFERENT permission, so the Actions grant is only
-    // ever read for this section and the advice matches the README PAT cell.
+    // ever read for this section and the advice matches the Sections table's PAT cell.
     let thrown: unknown;
     try {
       throwFor(

@@ -359,6 +359,7 @@ describe("the committed pages", () => {
     // a form parameter.
     expect(pages.sort()).toEqual([
       "README.md",
+      "docs/reference/architecture.md",
       "docs/reference/inputs.md",
       "docs/reference/sections.md",
       "docs/start/getting-started.md",

@@ -94,7 +94,7 @@ and two targets are in the run:
 
 The blast radius is the discovery set. With `repos: "*"`, every discovered repository proven to have no settings file receives the defaults, so before the first apply run `mode: check` and read the report: the notice above names each repository that would take the defaults.
 
-Layering documents, where a fleet file is merged under each target's own, is `mode: merge`'s job and is described in the layering guide (added with mode: merge).
+Layering documents, where a fleet file is merged under each target's own, is `mode: merge`'s job and is described in the [layering guide](layering.md).
 
 ## Fleet pattern: disabling Actions on satellite repositories
 

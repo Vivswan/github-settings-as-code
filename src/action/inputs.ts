@@ -40,7 +40,8 @@ export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
 
 /**
  * One action input: its action.yml entry (description, default) and its
- * README Inputs row (summary, shown default). The runner applies the
+ * row in the generated Inputs table (summary, shown default) on the inputs
+ * reference page, docs/reference/inputs.md. The runner applies the
  * defaults; parseConfig() falls back to them outside the runner.
  */
 export interface InputDecl {
@@ -48,10 +49,10 @@ export interface InputDecl {
   readonly description: string;
   /** The action.yml default, verbatim (an empty string means "unset"). */
   readonly default: string;
-  /** The README Inputs table's Meaning cell: the one-line gist. */
+  /** The Inputs table's Meaning cell: the one-line gist. */
   readonly summary: string;
   /**
-   * The README Default cell when the raw default is not what a reader should
+   * The Inputs table's Default cell when the raw default is not what a reader should
    * see: an expression, a prose fallback, or the effective value the code
    * supplies for an empty raw default (the discovery filters).
    */
@@ -59,8 +60,8 @@ export interface InputDecl {
 }
 
 /**
- * Every input parseConfig() reads, in the order the README and action.yml
- * list them: the single source both are generated from
+ * Every input parseConfig() reads, in the order the inputs reference page
+ * and action.yml list them: the single source both are generated from
  * (bun run build:action-docs), so adding an input here is the whole declaration.
  */
 export const INPUT_DECLS = {

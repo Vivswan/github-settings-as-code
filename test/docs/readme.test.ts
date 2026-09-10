@@ -93,6 +93,7 @@ describe("README front door", () => {
         "docs/start/examples.md",
         "docs/start/migrating-from-probot.md",
         "docs/reference/sections.md",
+        "docs/reference/architecture.md",
         "docs/reference/inputs.md",
         "docs/reference/semantics.md",
         "docs/reference/permissions.md",
@@ -100,9 +101,11 @@ describe("README front door", () => {
         "docs/reference/secrets-and-vaults.md",
         "docs/operate/check-mode.md",
         "docs/operate/multi-repo.md",
+        "docs/operate/layering.md",
         "docs/operate/private-repositories.md",
         "docs/operate/troubleshooting.md",
         "docs/playbooks/README.md",
+        "docs/upgrading/README.md",
       ].sort(),
     );
     for (const target of rows) {

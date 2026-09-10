@@ -26,8 +26,8 @@ describe("branches Contents advice", () => {
     // The advisory branch-existence probe carries a Contents permission
     // override (src/sections/branches/endpoints.ts), advised at the level the section
     // needs on that permission - the source both prose mentions restate. The
-    // README row renders from the section's authored docs, pinned here at
-    // their source.
+    // Sections table row renders from the section's authored docs, pinned
+    // here at their source.
     const probe = allEndpoints()["branches.branchProbe"];
     const override = probe?.permission;
     expect(override !== undefined && override !== "none").toBe(true);
