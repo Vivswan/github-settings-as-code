@@ -14,6 +14,7 @@ import {
   type DeclaredSecretValue,
   defaultUndeclaredPolicy,
   type EntryOf,
+  type KeyedListLayering,
   loosen,
   type SectionMeta,
   undeclaredDrift,
@@ -217,6 +218,8 @@ export interface ListSectionDecl<
   };
   /** The designated secret-field values of one entry, for the engine's up-front resolution. */
   readonly secretValues?: (entry: Entry<K>) => readonly DeclaredSecretValue[];
+  /** How entries layer across settings documents; omitted, the list always replaces. */
+  readonly layering?: KeyedListLayering;
 }
 
 /** The module listSection() mints: SectionModule<K, Ends> at the registry, plus its declaration. */
@@ -232,6 +235,7 @@ export interface ListSectionModule<
   readonly endpoints: Ends;
   readonly shape: z.ZodType;
   readonly secretValues?: (declared: Declared<K>) => DeclaredSecretValue[];
+  readonly layering?: KeyedListLayering;
   readonly plan: (
     ctx: PlanContext<Ends>,
     desired: Declared<K>,
@@ -550,6 +554,7 @@ export function listSection<
           secretValues: (declared: Declared<K>) =>
             secretValuesOf(erased, declared as unknown as ErasedDeclared),
         }),
+    ...(decl.layering === undefined ? {} : { layering: decl.layering }),
     plan: (ctx, desired) =>
       planList(
         erased,

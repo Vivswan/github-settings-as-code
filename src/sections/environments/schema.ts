@@ -6,7 +6,7 @@
  */
 
 import { z } from "zod";
-import { knobbed } from "../shared/schema-helpers.js";
+import { nestedKnobbed } from "../shared/schema-helpers.js";
 
 export const DeploymentBranchPolicyConfig = z
   .object({
@@ -68,10 +68,10 @@ export const EnvironmentConfig = z
       })
       .nullable()
       .optional(),
-    deployment_branch_policies: knobbed(DeploymentBranchPolicyConfig).optional(),
-    deployment_protection_rules: knobbed(DeploymentProtectionRuleConfig).optional(),
-    variables: knobbed(EnvironmentVariableConfig).optional(),
-    secrets: knobbed(EnvironmentSecretConfig).optional(),
+    deployment_branch_policies: nestedKnobbed(DeploymentBranchPolicyConfig).optional(),
+    deployment_protection_rules: nestedKnobbed(DeploymentProtectionRuleConfig).optional(),
+    variables: nestedKnobbed(EnvironmentVariableConfig).optional(),
+    secrets: nestedKnobbed(EnvironmentSecretConfig).optional(),
   })
   .superRefine((entry, refineCtx) => {
     // Secrets live under the plural `secrets` list; a singular entry-level

@@ -17,8 +17,8 @@ export type UndeclaredPolicy = "keep" | "delete";
  * one); this wrapper can set it explicitly, and with
  * `undeclared` omitted it behaves exactly like the plain array. The wrapper is
  * this action's own vocabulary (nothing here passes through to GitHub), so
- * its keys are strict: anything besides `undeclared` and `entries` is
- * rejected upfront as a typo.
+ * its keys are strict: anything besides `undeclared` and `entries` (plus
+ * `_layering` on a top-level section's wrapper) is rejected upfront as a typo.
  */
 export interface UndeclaredPolicyList<E> {
   /**
@@ -29,6 +29,16 @@ export interface UndeclaredPolicyList<E> {
   undeclared?: UndeclaredPolicy;
   /** The declared entries, exactly as the plain array form lists them. */
   entries: E[];
+  /**
+   * The same kind of knob on the lower-layer axis: how this list combines
+   * with the layers BELOW it in a layered merge (engine/layers.ts) - "merge"
+   * unions the entries by key, "replace" lets this layer's list win. Omitted,
+   * the run's layering applies; a single document never reads it, and the
+   * merged document never carries it. Only a TOP-LEVEL section's wrapper
+   * takes it: a list nested inside a section entry is replaced wholesale by
+   * a higher layer, so its wrapper rejects the key (see nestedKnobbed()).
+   */
+  _layering?: "merge" | "replace";
 }
 
 /**

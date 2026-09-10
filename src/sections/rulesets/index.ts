@@ -111,6 +111,19 @@ export const rulesetsSection = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(RulesetConfig)),
+  // Same-name rulesets merge key by key; their rules pair by type, a rule replacing wholesale.
+  layering: {
+    key: (entry) => (typeof entry.name === "string" ? entry.name : null),
+    keyField: "name",
+    combine: "merge",
+    nested: {
+      rules: {
+        key: (rule) => (typeof rule.type === "string" ? rule.type : null),
+        keyField: "type",
+        combine: "replace",
+      },
+    },
+  },
   async plan(ctx, declared) {
     const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     const desired = entries.map(normalizeRuleset);
