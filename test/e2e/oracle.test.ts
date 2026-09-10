@@ -1,20 +1,27 @@
 import { describe, expect, test } from "bun:test";
+import { UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import { sectionModule } from "../../src/sections/registry.js";
 import { ADMIN_SLUG } from "./constants.js";
-import type { MultiRepoTarget, MultiScenarioMeta, ScenarioMeta } from "./generators.js";
+import { UNDECLARED_KEY } from "./gen-support.js";
+import type { MergeLayer, MultiRepoTarget, MultiScenarioMeta, ScenarioMeta } from "./generators.js";
 import {
   type AbortVerdict,
   effectiveGrades,
+  foldMergeLayers,
   foldRepoResults,
   foldSectionOutcomes,
   judgePreflightAbort,
+  KEYED_MERGE_SECTIONS,
   NO_READ_SECTIONS,
   type PreflightAbort,
   predictDiscovery,
+  predictMerge,
   predictMulti,
   predictOutcomes,
   predictSection,
   predictSectionAt,
   preflightDeniable,
+  refusedMergeLayer,
   sectionGrade,
 } from "./oracle.js";
 import type { MaskGrade, MaskKey } from "./schema.js";
@@ -961,5 +968,405 @@ describe("result folds (self-consistency mirrors)", () => {
     // worstOf's empty-list defaults.
     expect(foldRepoResults([], true)).toBe("clean");
     expect(foldRepoResults([], false)).toBe("applied");
+  });
+});
+
+/** A layer stack for the merge fold tests: docs low to high, named the way the runner names them. */
+function stack(...docs: Record<string, unknown>[]): MergeLayer[] {
+  return docs.map((doc, i) => ({
+    name: i === docs.length - 1 ? "settings.yml" : `layer-${i}.yml`,
+    doc,
+  }));
+}
+
+describe("foldMergeLayers (the oracle's own dialect)", () => {
+  test("a null removes a lower declaration with a notice, and stays when nothing below declares the key", () => {
+    const { merged, notices } = foldMergeLayers(
+      stack(
+        { pages: { build_type: "workflow" }, repository: { description: "x", homepage: "h" } },
+        { pages: null, repository: { homepage: null }, interaction_limits: null },
+      ),
+      "merge",
+    );
+    expect(merged).toEqual({ repository: { description: "x" }, interaction_limits: null });
+    expect(notices.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { layer: "settings.yml", path: "pages" },
+      { layer: "settings.yml", path: "repository.homepage" },
+    ]);
+  });
+
+  test("a lower null is not a declaration: nulling it again earns no notice, declaring over it replaces", () => {
+    const twice = foldMergeLayers(stack({ pages: null }, { pages: null }), "merge");
+    expect(twice.merged).toEqual({ pages: null });
+    expect(twice.notices).toEqual([]);
+    const over = foldMergeLayers(
+      stack({ pages: null }, { pages: { build_type: "legacy" } }),
+      "merge",
+    );
+    expect(over.merged).toEqual({ pages: { build_type: "legacy" } });
+  });
+
+  test("mappings merge key by key at any depth; lists and scalars replace", () => {
+    const { merged } = foldMergeLayers(
+      stack(
+        {
+          repository: { description: "low", topics: ["a", "b"], has_issues: true },
+          branches: [{ name: "main", protection: null }],
+        },
+        {
+          repository: { description: "high", topics: ["c"] },
+          branches: [{ name: "dev", protection: null }],
+        },
+      ),
+      "merge",
+    );
+    expect(merged).toEqual({
+      repository: { description: "high", topics: ["c"], has_issues: true },
+      branches: [{ name: "dev", protection: null }],
+    });
+  });
+
+  test("labels union by case-folded name: a matched entry is replaced wholesale, lower order kept, new ones appended", () => {
+    const { merged } = foldMergeLayers(
+      stack(
+        { labels: [{ name: "Bug", color: "111111", description: "kept?" }, { name: "docs" }] },
+        { labels: [{ name: "infra" }, { name: "bug", color: "222222" }] },
+      ),
+      "merge",
+    );
+    expect(merged).toEqual({
+      labels: {
+        [UNDECLARED_KEY]: "delete",
+        entries: [{ name: "bug", color: "222222" }, { name: "docs" }, { name: "infra" }],
+      },
+    });
+  });
+
+  test("a label renaming into a name a higher entry declares is one resource: the higher entry stands in its slot", () => {
+    const { merged } = foldMergeLayers(
+      stack(
+        { labels: [{ name: "bug", new_name: "defect", color: "111111" }, { name: "docs" }] },
+        { labels: [{ name: "Defect", color: "222222" }] },
+      ),
+      "merge",
+    );
+    expect(merged).toEqual({
+      labels: {
+        [UNDECLARED_KEY]: "delete",
+        entries: [{ name: "Defect", color: "222222" }, { name: "docs" }],
+      },
+    });
+  });
+
+  test("a higher rename claiming two lower labels supersedes both at the first one's slot", () => {
+    const { merged } = foldMergeLayers(
+      stack(
+        { labels: [{ name: "a" }, { name: "docs" }, { name: "b" }] },
+        { labels: [{ name: "B", new_name: "A" }] },
+      ),
+      "merge",
+    );
+    expect(merged).toEqual({
+      labels: {
+        [UNDECLARED_KEY]: "delete",
+        entries: [{ name: "B", new_name: "A" }, { name: "docs" }],
+      },
+    });
+  });
+
+  test("two higher labels claiming one lower rename between them both take its slot, in their order", () => {
+    const { merged } = foldMergeLayers(
+      stack(
+        { labels: [{ name: "x" }, { name: "a", new_name: "b" }, { name: "y" }] },
+        {
+          labels: [
+            { name: "b", color: "222222" },
+            { name: "a", color: "111111" },
+          ],
+        },
+      ),
+      "merge",
+    );
+    expect(merged).toEqual({
+      labels: {
+        [UNDECLARED_KEY]: "delete",
+        entries: [
+          { name: "x" },
+          { name: "b", color: "222222" },
+          { name: "a", color: "111111" },
+          { name: "y" },
+        ],
+      },
+    });
+  });
+
+  test("rulesets union by name merge key by key, their rules pairing by type and replacing", () => {
+    const { merged, notices } = foldMergeLayers(
+      stack(
+        {
+          rulesets: [
+            {
+              name: "main",
+              target: "branch",
+              enforcement: "active",
+              rules: [{ type: "deletion" }, { type: "non_fast_forward", parameters: { a: 1 } }],
+            },
+          ],
+        },
+        {
+          rulesets: [
+            {
+              name: "main",
+              enforcement: null,
+              rules: [{ type: "non_fast_forward" }, { type: "x" }],
+            },
+            { name: "tags", target: "tag" },
+          ],
+        },
+      ),
+      "merge",
+    );
+    expect(merged).toEqual({
+      rulesets: {
+        [UNDECLARED_KEY]: "keep",
+        entries: [
+          {
+            name: "main",
+            target: "branch",
+            rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "x" }],
+          },
+          { name: "tags", target: "tag" },
+        ],
+      },
+    });
+    expect(notices).toEqual([{ layer: "settings.yml", path: "rulesets[main].enforcement" }]);
+  });
+
+  test("an unkeyed knobbed section replaces under the run's merge default", () => {
+    const { merged } = foldMergeLayers(
+      stack({ milestones: [{ title: "v1" }] }, { milestones: [{ title: "v2" }] }),
+      "merge",
+    );
+    expect(merged).toEqual({
+      milestones: { [UNDECLARED_KEY]: "keep", entries: [{ title: "v2" }] },
+    });
+  });
+
+  test("an omitted policy inherits the lower one, an explicit one wins, and the default resolves after the fold", () => {
+    const { merged } = foldMergeLayers(
+      stack(
+        {
+          labels: { [UNDECLARED_KEY]: "keep", entries: [{ name: "a" }] },
+          rulesets: { [UNDECLARED_KEY]: "delete", entries: [{ name: "r" }] },
+          autolinks: [{ key_prefix: "J-", url_template: "https://j/<num>" }],
+        },
+        { labels: [{ name: "b" }], rulesets: { [UNDECLARED_KEY]: "keep", entries: [] } },
+      ),
+      "merge",
+    );
+    expect(merged).toEqual({
+      labels: { [UNDECLARED_KEY]: "keep", entries: [{ name: "a" }, { name: "b" }] },
+      rulesets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "r" }] },
+      autolinks: {
+        [UNDECLARED_KEY]: "delete",
+        entries: [{ key_prefix: "J-", url_template: "https://j/<num>" }],
+      },
+    });
+  });
+
+  test("the wrapper directive wins over the file directive, which wins over the run; none reaches the document", () => {
+    const low = { labels: [{ name: "a" }], rulesets: [{ name: "r", target: "branch" }] };
+    const fileReplaceWrapperMerge = foldMergeLayers(
+      stack(low, {
+        _layering: "replace",
+        labels: [{ name: "b" }],
+        rulesets: { _layering: "merge", entries: [{ name: "s" }] },
+      }),
+      "merge",
+    );
+    expect(fileReplaceWrapperMerge.merged).toEqual({
+      labels: { [UNDECLARED_KEY]: "delete", entries: [{ name: "b" }] },
+      rulesets: {
+        [UNDECLARED_KEY]: "keep",
+        entries: [{ name: "r", target: "branch" }, { name: "s" }],
+      },
+    });
+    const runReplaceFileMerge = foldMergeLayers(
+      stack(low, { _layering: "merge", labels: [{ name: "b" }] }),
+      "replace",
+    );
+    expect(runReplaceFileMerge.merged).toEqual({
+      labels: { [UNDECLARED_KEY]: "delete", entries: [{ name: "a" }, { name: "b" }] },
+      rulesets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "r", target: "branch" }] },
+    });
+    const runReplace = foldMergeLayers(stack(low, { labels: [{ name: "b" }] }), "replace");
+    expect(runReplace.merged.labels).toEqual({
+      [UNDECLARED_KEY]: "delete",
+      entries: [{ name: "b" }],
+    });
+  });
+
+  test("a deleted keyed section declared again replaces: the lower entries are gone", () => {
+    const { merged, notices } = foldMergeLayers(
+      stack({ labels: [{ name: "a" }] }, { labels: null }, { labels: [{ name: "b" }] }),
+      "merge",
+    );
+    expect(merged).toEqual({ labels: { [UNDECLARED_KEY]: "delete", entries: [{ name: "b" }] } });
+    expect(notices).toEqual([{ layer: "layer-1.yml", path: "labels" }]);
+  });
+
+  test("only section keys survive: private underscore keys are not part of the written document", () => {
+    const { merged } = foldMergeLayers(stack({ _note: "private", pages: null }), "merge");
+    expect(merged).toEqual({ pages: null });
+  });
+});
+
+describe("refusedMergeLayer (the oracle's read of the layer boundary)", () => {
+  const admitted = { labels: [{ name: "a" }], rulesets: [{ name: "r", rules: [{ type: "t" }] }] };
+
+  test("admits a stack of well-formed layers, run-level merge on an unkeyed section included", () => {
+    expect(
+      refusedMergeLayer(stack(admitted, { milestones: [{ title: "v1" }], _layering: "replace" })),
+    ).toBeUndefined();
+  });
+
+  const refusals: Array<[string, Record<string, unknown>]> = [
+    [
+      "two rules of one type in a ruleset",
+      { rulesets: [{ name: "r", rules: [{ type: "t" }, { type: "t" }] }] },
+    ],
+    ["two labels under one case-folded name", { labels: [{ name: "Bug" }, { name: "bug" }] }],
+    ["two rulesets under one name", { rulesets: [{ name: "r" }, { name: "r" }] }],
+    ["a keyless label", { labels: [{ color: "abcdef" }] }],
+    [
+      "a label renaming into a sibling's name",
+      { labels: [{ name: "a", new_name: "b" }, { name: "B" }] },
+    ],
+    [
+      "two labels renaming into one name",
+      {
+        labels: [
+          { name: "a", new_name: "x" },
+          { name: "b", new_name: "X" },
+        ],
+      },
+    ],
+    ["a label whose rename target is not a string", { labels: [{ name: "a", new_name: 7 }] }],
+    ["merge on an unkeyed wrapper", { milestones: { _layering: "merge", entries: [] } }],
+    ["file-level merge over a plain unkeyed list", { _layering: "merge", milestones: [] }],
+    ["a wrapper directive outside merge|replace", { labels: { _layering: "union", entries: [] } }],
+    ["a file directive outside merge|replace", { _layering: "MERGE" }],
+    ["a wrapper without an entries list", { labels: { [UNDECLARED_KEY]: "keep" } }],
+    ["a non-mapping entry", { labels: ["bug"] }],
+  ];
+  test.each(refusals)("refuses %s, naming the layer", (_name, doc) => {
+    expect(refusedMergeLayer(stack(admitted, doc, admitted))).toBe("layer-1.yml");
+  });
+
+  test("a file-level merge is admitted when the unkeyed wrapper says replace", () => {
+    expect(
+      refusedMergeLayer(
+        stack({ _layering: "merge", milestones: { _layering: "replace", entries: [] } }),
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
+  // The oracle spells the keyed sections in its own words; this pins that
+  // spelling against the modules' layering declarations as DATA, so a module
+  // gaining or changing a layering key fails here instead of quietly making
+  // the fuzz predict a fold the engine no longer performs.
+  test("exactly the modules declaring a layering are keyed, with the same key field and combine", () => {
+    for (const key of UNDECLARED_POLICY_SECTIONS) {
+      const declared = sectionModule(key).layering;
+      const oracle = KEYED_MERGE_SECTIONS[key];
+      expect(oracle === undefined, `${key}`).toBe(declared === undefined);
+      if (declared === undefined || oracle === undefined) {
+        continue;
+      }
+      expect(oracle.keyField).toBe(declared.keyField);
+      expect(oracle.combine).toBe(declared.combine);
+      expect(Object.keys(oracle.nested ?? {}).sort()).toEqual(
+        Object.keys(declared.nested ?? {}).sort(),
+      );
+      for (const [field, nested] of Object.entries(oracle.nested ?? {})) {
+        const declaredNested = declared.nested?.[field];
+        if (declaredNested === undefined) {
+          throw new Error(`${key}.${field}: the module declares no nested layering`);
+        }
+        expect(nested.keyField).toBe(declaredNested.keyField);
+        expect(nested.combine).toBe(declaredNested.combine);
+      }
+    }
+  });
+
+  test("the key functions agree over the spellings the generators draw, renames included", () => {
+    const samples = [
+      { name: "Bug", type: "Deletion" },
+      { name: "with|pipe", type: "non_fast_forward" },
+      { name: "unicode-éñ中", type: "x" },
+      { name: "Bug", new_name: "Defect", type: "x" },
+      { name: "bug", new_name: "BUG", type: "x" },
+      { name: "bug", new_name: 7, type: "x" },
+      { name: 7, new_name: "x", type: "x" },
+      { name: 7, type: 7 },
+      {},
+    ];
+    for (const key of ["labels", "rulesets"] as const) {
+      const declared = sectionModule(key).layering;
+      const oracle = KEYED_MERGE_SECTIONS[key];
+      if (declared === undefined || oracle === undefined) {
+        throw new Error(`${key} lost its layering`);
+      }
+      for (const sample of samples) {
+        expect(oracle.keysOf(sample), `${key} ${JSON.stringify(sample)}`).toEqual(
+          declared.keys(sample),
+        );
+        const rules = declared.nested?.rules;
+        const oracleRules = oracle.nested?.rules;
+        if (rules !== undefined && oracleRules !== undefined) {
+          expect(oracleRules.keysOf(sample)).toEqual(rules.keys(sample));
+        }
+      }
+    }
+    // The alias union rests on these exact claims, spelled here so the
+    // lockstep above cannot pass on two functions that agree on returning null.
+    const labels = KEYED_MERGE_SECTIONS.labels;
+    if (labels === undefined) {
+      throw new Error("labels lost its layering");
+    }
+    expect(labels.keysOf({ name: "Bug", new_name: "Defect" })).toEqual(["defect", "bug"]);
+    expect(labels.keysOf({ name: "bug", new_name: "BUG" })).toEqual(["bug"]);
+    expect(labels.keysOf({ name: "bug", new_name: 7 })).toBeNull();
+  });
+});
+
+describe("predictMerge", () => {
+  test("a fold the validator rejects is predicted invalid, not merged", () => {
+    const prediction = predictMerge({
+      layers: stack(
+        {
+          actions: {
+            allowed_actions: "selected",
+            selected_actions: { github_owned_allowed: true },
+          },
+        },
+        { actions: { allowed_actions: "all" } },
+      ),
+      layering: "merge",
+      features: [],
+    });
+    expect(prediction.kind).toBe("invalid");
+  });
+
+  test("a refused layer is reported before any fold", () => {
+    expect(
+      predictMerge({
+        layers: stack({ labels: [{ name: "a" }, { name: "A" }] }, { pages: null }),
+        layering: "merge",
+        features: [],
+      }),
+    ).toEqual({ kind: "refused", layer: "layer-0.yml" });
   });
 });

@@ -19,8 +19,23 @@ import type { Rng } from "./prng.js";
 
 export type Json = Record<string, unknown>;
 
+/**
+ * The policy knob's key on a knobbed section's wrapper, named once so the
+ * merge-mode generators and oracle follow a rename with one edit.
+ */
+export const UNDECLARED_KEY = "_undeclared";
+
+/** The layering directive's key, on a knobbed wrapper or at a layer's top level. */
+export const LAYERING_KEY = "_layering";
+
+/** How a knobbed section combines with the layers below it in a layered merge. */
+export type LayeringDirective = "merge" | "replace";
+
+/** Both directive values, for draws and for the oracle's boundary check. */
+export const LAYERING_DIRECTIVES: readonly LayeringDirective[] = ["merge", "replace"];
+
 /** Either form a knobbed list section's generated value can take. */
-export type EntriesForm = Json[] | { _undeclared?: "keep" | "delete"; entries: Json[] };
+export type EntriesForm = Json[] | { [UNDECLARED_KEY]?: "keep" | "delete"; entries: Json[] };
 
 /**
  * Unwrap a generated section value into its entry list through the SAME
@@ -57,7 +72,7 @@ export function maybeWrapUndeclared(rng: Rng, entries: Json[]): EntriesForm {
     return entries;
   }
   return knobRng.bool(0.5)
-    ? { _undeclared: knobRng.pick(["keep", "delete"] as const), entries }
+    ? { [UNDECLARED_KEY]: knobRng.pick(["keep", "delete"] as const), entries }
     : { entries };
 }
 

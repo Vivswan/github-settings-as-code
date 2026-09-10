@@ -19,6 +19,7 @@
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import settingsSchema from "../../lib/settings.schema.json" with { type: "json" };
+import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import {
   SECTION_KEYS,
   type SectionKey,
@@ -55,15 +56,20 @@ import { genTeams } from "../../src/sections/teams/generators.js";
 import { genWebhooks } from "../../src/sections/webhooks/generators.js";
 import { genWorkflows } from "../../src/sections/workflows/generators.js";
 import type { MustBeNever } from "../../src/types.js";
+import { silentIo } from "../io-fake.js";
 import { ADMIN_SLUG } from "./constants.js";
 import {
   E2E_SECRET_ENV,
   type EntriesForm,
   entriesOf,
   type Json,
+  LAYERING_DIRECTIVES,
+  LAYERING_KEY,
+  type LayeringDirective,
   type LiveWitness,
   type LiveWitnessKind,
   maybeWrapUndeclared,
+  UNDECLARED_KEY,
 } from "./gen-support.js";
 import type { LiveState } from "./mock/state.js";
 import type { Rng } from "./prng.js";
@@ -635,8 +641,8 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
       const key = rng.pick(UNDECLARED_POLICY_SECTIONS);
       const entries = entriesOf(genSettings(rng.fork("valid"), key));
       return {
-        doc: { [key]: { _undeclared: rng.pick(["detele", "kep", true]), entries } },
-        offendingToken: `${key}._undeclared`,
+        doc: { [key]: { [UNDECLARED_KEY]: rng.pick(["detele", "kep", true]), entries } },
+        offendingToken: `${key}.${UNDECLARED_KEY}`,
       };
     },
   },
@@ -1772,4 +1778,968 @@ export function genDiscoveryScenario(
     expect: { exit_code: 0 },
   };
   return { scenario, meta: { pool, filters, privateRepos } };
+}
+
+// --- Layered merge scenarios (mode: merge fuzz) -----------------------------
+
+/** One settings layer as the runner files it: the file name the action reports, and the document. */
+export interface MergeLayer {
+  name: string;
+  doc: Json;
+}
+
+/**
+ * The refusal classes a generated layer can carry. Each is refused at the
+ * layer boundary with a message naming the layer: two entries of one keyed
+ * list sharing a key (a ruleset's rules by type, the labels by case-folded
+ * name), an explicit `merge` directive on a knobbed section that has no
+ * layering key (on the wrapper, or at the file level over a plain list), and
+ * a directive value outside merge|replace (on a wrapper, or at the file
+ * level). A reference cycle cannot be spelled in scenario JSON, so it is not
+ * generated.
+ */
+export const MERGE_REFUSAL_KINDS = [
+  "duplicate-rule-type",
+  "duplicate-label",
+  "merge-on-unkeyed-wrapper",
+  "merge-on-unkeyed-file",
+  "bad-wrapper-layering",
+  "bad-file-layering",
+] as const;
+type MergeRefusalKind = (typeof MERGE_REFUSAL_KINDS)[number];
+
+/**
+ * The merge axes a stack exercises, read off the FINAL layer documents by
+ * mergeFeaturesOf (never off the draws that produced them, which a later
+ * mutation can undo), so the fuzz histogram and the generator tests count
+ * shapes the run actually saw. A refused stack asserts no document, so it
+ * counts for "refused" alone.
+ */
+export const MERGE_FEATURES = [
+  /** A section declared non-null by a layer while the fold already holds it. */
+  "override",
+  /** Labels declared under an effective merge layering while the fold holds labels. */
+  "union-labels",
+  /** Rulesets declared under an effective merge layering while the fold holds rulesets. */
+  "union-rulesets",
+  /** A unioned label whose name differs only by case from the spelling the fold holds. */
+  "label-case-fold",
+  /** A unioned label pairing with a held label through a rename: one of the two claims the other's name as its rename target or current name. */
+  "label-rename-union",
+  /** A unioned ruleset re-declaring a held rule type with different parameters, so replacement is observable. */
+  "rule-parameters",
+  /** A top-level null over a section the fold holds. */
+  "null-deletes",
+  /** A null inside a mapping section (a nested key deletion). */
+  "null-nested",
+  /** A null field inside a ruleset entry. */
+  "null-entry-field",
+  /** A top-level null over a section the fold does not hold. */
+  "null-stays",
+  /** A knobbed wrapper carrying an explicit policy. */
+  "wrapper-undeclared",
+  /** A knobbed wrapper carrying `_layering: merge`. */
+  "wrapper-layering-merge",
+  /** A knobbed wrapper carrying `_layering: replace`. */
+  "wrapper-layering-replace",
+  /** A layer carrying a top-level `_layering`. */
+  "file-layering",
+  /** The run's `layering` input set to replace. */
+  "run-layering-replace",
+  /** The run's `layering` input set to merge explicitly. */
+  "run-layering-merge",
+  /** The run's `layering` input left at its default. */
+  "run-layering-default",
+  /** A layer declaring nothing at all. */
+  "empty-layer",
+  /** A stack carrying a refused layer. */
+  "refused",
+] as const;
+type MergeFeature = (typeof MERGE_FEATURES)[number];
+
+/**
+ * The generation facts the merge oracle consumes: the layers exactly as the
+ * runner files them (lowest first, settings.yml last) and the run's effective
+ * default layering. `refusal` names the one layer built to be refused, when
+ * the stack carries one, so tests can check the oracle's own boundary read
+ * against the generator's intent.
+ */
+export interface MergeScenarioMeta {
+  layers: MergeLayer[];
+  layering: LayeringDirective;
+  refusal?: { layer: string; kind: MergeRefusalKind };
+  features: MergeFeature[];
+}
+
+/**
+ * Battery construction for the merge family: a stack whose fold is a merged
+ * document for certain under a pinned run layering (every mapping section
+ * gets ONE contribution, so no cross-field rule can trip on a merge of two),
+ * or one whose named layer carries a given refusal. Constructed, never
+ * rejection-sampled, so every battery entry exists for every master seed.
+ */
+export type MergeForce =
+  | { kind: "valid"; layering: LayeringDirective }
+  | { kind: "refused"; refusal: MergeRefusalKind };
+
+/** The knobbed sections whose module declares a layering key: the only lists a merge unions. */
+const KEYED_MERGE_SECTIONS: ReadonlySet<SectionKey> = new Set(
+  SECTIONS.filter((section) => section.layering !== undefined).map((section) => section.key),
+);
+
+/** The knobbed sections a merge always replaces (no layering key). */
+const UNKEYED_KNOBBED_SECTIONS: readonly SectionKey[] = UNDECLARED_POLICY_SECTIONS.filter(
+  (key) => !KEYED_MERGE_SECTIONS.has(key),
+);
+
+/** The sections whose value may be null on its own (the clear/opt-out spelling). */
+const NULLABLE_SECTIONS = ["pages", "interaction_limits"] as const satisfies readonly SectionKey[];
+
+function isKnobbedSection(key: string): key is (typeof UNDECLARED_POLICY_SECTIONS)[number] {
+  return (UNDECLARED_POLICY_SECTIONS as readonly string[]).includes(key);
+}
+
+function isPlainMapping(value: unknown): value is Json {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A layer as its standalone validation sees it: every null the fold reads as
+ * a marker dropped - a null-valued key at the top level or in any plain
+ * mapping below a non-knobbed section, and a null field of a ruleset entry
+ * (the one keyed list this generator places nulls in). Lists are data, so a
+ * null inside one stays for the validator to judge.
+ */
+function markerNullsDropped(doc: Json): Json {
+  const dropDeep = (value: unknown): unknown => {
+    if (!isPlainMapping(value)) {
+      return value;
+    }
+    const out: Json = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (child !== null) {
+        out[key] = dropDeep(child);
+      }
+    }
+    return out;
+  };
+  const out: Json = {};
+  for (const [key, value] of Object.entries(doc)) {
+    if (value === null) {
+      continue;
+    }
+    if (key === "rulesets") {
+      const entries = entriesOf(value).map((entry) => dropDeep(entry) as Json);
+      out[key] = Array.isArray(value) ? entries : { ...(value as Json), entries };
+    } else {
+      out[key] = isKnobbedSection(key) ? value : dropDeep(value);
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether a layer passes the action's own validation on its standalone view.
+ * The published schema cannot spell the cross-field rules the zod shapes
+ * refine (interaction_limits needs one of its limits, an actions allowlist
+ * needs `allowed_actions: selected`), so a null placement is probed here.
+ */
+function standaloneValid(doc: Json): boolean {
+  return !("error" in validateSettingsDoc(markerNullsDropped(doc), "layer", new Set(), silentIo()));
+}
+
+/** The runner's file name for layer `index` of `count`: settings.yml is always the top. */
+function mergeLayerName(index: number, count: number): string {
+  return index === count - 1 ? "settings.yml" : `layer-${index}.yml`;
+}
+
+/**
+ * Every nested key path through the plain mappings of a non-knobbed section
+ * value, as [section, ...keys] with at least one nested key; lists are data
+ * to the merge, so the walk never enters one.
+ */
+function nestedMappingPaths(doc: Json): string[][] {
+  const paths: string[][] = [];
+  const walk = (value: unknown, path: string[]): void => {
+    if (!isPlainMapping(value)) {
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (child === null) {
+        continue;
+      }
+      paths.push([...path, key]);
+      walk(child, [...path, key]);
+    }
+  };
+  for (const [key, value] of Object.entries(doc)) {
+    if (!isKnobbedSection(key) && key !== LAYERING_KEY) {
+      walk(value, [key]);
+    }
+  }
+  return paths;
+}
+
+/** The value at a key path through plain mappings, or undefined when the path leaves them. */
+function valueAtPath(doc: Json, path: readonly string[]): unknown {
+  let value: unknown = doc;
+  for (const key of path) {
+    if (!isPlainMapping(value)) {
+      return undefined;
+    }
+    value = value[key];
+  }
+  return value;
+}
+
+/** A copy of the document with the key at `path` deleted (the parents are kept). */
+function withoutPath(doc: Json, path: readonly string[]): Json {
+  const out = structuredClone(doc);
+  const parent = valueAtPath(out, path.slice(0, -1));
+  if (isPlainMapping(parent)) {
+    delete parent[path[path.length - 1] as string];
+  }
+  return out;
+}
+
+/**
+ * Set `path` to `value`, creating the intermediate mappings a layer needs to
+ * address a nested key it does not otherwise declare.
+ */
+function setPath(doc: Json, path: readonly string[], value: unknown): void {
+  let node: Json = doc;
+  for (const key of path.slice(0, -1)) {
+    const next = node[key];
+    if (!isPlainMapping(next)) {
+      node[key] = {};
+    }
+    node = node[key] as Json;
+  }
+  node[path[path.length - 1] as string] = value;
+}
+
+/**
+ * A copy of the document that declares the parents of `path` (created empty
+ * where absent) but not the key itself: the standalone view of a layer whose
+ * null at `path` the validator strips.
+ */
+function withParentsOnly(doc: Json, path: readonly string[]): Json {
+  const out = structuredClone(doc);
+  setPath(out, path, null);
+  delete (valueAtPath(out, path.slice(0, -1)) as Json)[path[path.length - 1] as string];
+  return out;
+}
+
+/** The ruleset entries a layer declares, in either form, or an empty list. */
+function rulesetEntries(doc: Json): Json[] {
+  const value = doc.rulesets;
+  return value === undefined || value === null ? [] : entriesOf(value);
+}
+
+/**
+ * Ensure a layer declares a knobbed section and return its entry list by
+ * reference (creating an empty plain list when absent), so a mutation can
+ * append into whichever form the layer drew.
+ */
+function ensureEntries(doc: Json, key: SectionKey): Json[] {
+  const value = doc[key];
+  if (value === undefined || value === null) {
+    const entries: Json[] = [];
+    doc[key] = entries;
+    return entries;
+  }
+  return entriesOf(value);
+}
+
+/** Directive values the boundary refuses: a case-variant, a made-up word, a non-string. */
+const BAD_LAYERING_VALUES = ["MERGE", "union", "both", 1] as const;
+
+/** One layer under construction: its document plus the directive facts the mutations read. */
+interface LayerDraft {
+  doc: Json;
+  fileDirective: LayeringDirective | undefined;
+  /** The wrapper directive per knobbed section the layer declares in wrapper form. */
+  wrapperDirectives: Partial<Record<SectionKey, LayeringDirective>>;
+}
+
+/**
+ * The fields a label's identity is read from, spelled as the entry spells
+ * them, so one claims function serves the layer's entries and the held ones.
+ */
+interface LabelIdentity {
+  name: string;
+  new_name?: string;
+}
+
+/**
+ * What the fold holds of a keyed section's identities after the layers so
+ * far, for the mutations and the feature read that need to know what a
+ * higher layer's entry would meet: the labels with their spellings, and per
+ * ruleset name its rules by type (as JSON, so a parameters difference shows).
+ */
+interface HeldKeyed {
+  labels: LabelIdentity[];
+  rulesets: Map<string, Map<string, string>>;
+}
+
+/** A label entry's identity fields; undefined when its name is not a string (the boundary refuses it). */
+function labelIdentity(entry: Json): LabelIdentity | undefined {
+  if (typeof entry.name !== "string") {
+    return undefined;
+  }
+  return typeof entry.new_name === "string"
+    ? { name: entry.name, new_name: entry.new_name }
+    : { name: entry.name };
+}
+
+/**
+ * The identities a label claims, case-folded: its name and its rename target.
+ * Two labels are one resource when their claims intersect.
+ */
+function labelClaims(label: LabelIdentity): string[] {
+  const names = label.new_name === undefined ? [label.name] : [label.name, label.new_name];
+  return [...new Set(names.map((name) => name.toLowerCase()))];
+}
+
+function claimsIntersect(a: readonly string[], b: readonly string[]): boolean {
+  return a.some((claim) => b.includes(claim));
+}
+
+/** Every held label a layer's entry would pair with in a union (a rename can claim two). */
+function heldLabelsFor(held: HeldKeyed, entry: Json): LabelIdentity[] {
+  const identity = labelIdentity(entry);
+  if (identity === undefined) {
+    return [];
+  }
+  const claims = labelClaims(identity);
+  return held.labels.filter((label) => claimsIntersect(labelClaims(label), claims));
+}
+
+/** Advance the held identities past one layer's value for `key`, unioning or replacing as the fold would. */
+function advanceHeld(
+  held: HeldKeyed,
+  key: "labels" | "rulesets",
+  value: unknown,
+  unite: boolean,
+): void {
+  if (value === null || !unite) {
+    if (key === "labels") {
+      held.labels = [];
+    } else {
+      held.rulesets.clear();
+    }
+    if (value === null) {
+      return;
+    }
+  }
+  for (const entry of entriesOf(value)) {
+    if (typeof entry.name !== "string") {
+      continue;
+    }
+    if (key === "labels") {
+      // A higher label supersedes every held label it pairs with.
+      const identity = labelIdentity(entry) as LabelIdentity;
+      const claims = labelClaims(identity);
+      held.labels = held.labels.filter((label) => !claimsIntersect(labelClaims(label), claims));
+      held.labels.push(identity);
+      continue;
+    }
+    const rules = unite
+      ? (held.rulesets.get(entry.name) ?? new Map<string, string>())
+      : new Map<string, string>();
+    // A unioned entry's `rules: null` deletes the held rules like any nested null.
+    if (entry.rules === null) {
+      rules.clear();
+    }
+    for (const rule of Array.isArray(entry.rules) ? entry.rules : []) {
+      if (isPlainMapping(rule) && typeof rule.type === "string") {
+        rules.set(rule.type, JSON.stringify(rule));
+      }
+    }
+    held.rulesets.set(entry.name, rules);
+  }
+}
+
+/** A knobbed value's own directive, when it is a wrapper carrying one. */
+function wrapperDirective(value: unknown): unknown {
+  return Array.isArray(value) || !isPlainMapping(value) ? undefined : value[LAYERING_KEY];
+}
+
+/** Whether a mapping carries a null at any depth through plain mappings. */
+function hasNestedNull(value: Json): boolean {
+  return Object.values(value).some(
+    (child) => child === null || (isPlainMapping(child) && hasNestedNull(child)),
+  );
+}
+
+/**
+ * The merge axes a finished stack exercises, read off the layer documents the
+ * runner will file: the same walk over presence, directives, and held keyed
+ * identities the fold performs, reduced to the shapes each layer adds.
+ */
+export function mergeFeaturesOf(
+  layers: readonly MergeLayer[],
+  runInput: LayeringDirective | undefined,
+  refused: boolean,
+): MergeFeature[] {
+  const features = new Set<MergeFeature>();
+  if (refused) {
+    features.add("refused");
+    return MERGE_FEATURES.filter((feature) => features.has(feature));
+  }
+  features.add(
+    runInput === undefined
+      ? "run-layering-default"
+      : runInput === "merge"
+        ? "run-layering-merge"
+        : "run-layering-replace",
+  );
+  const run = runInput ?? "merge";
+  const present = new Set<string>();
+  const held: HeldKeyed = { labels: [], rulesets: new Map() };
+  for (const layer of layers) {
+    const doc = layer.doc;
+    const fileDirective = doc[LAYERING_KEY];
+    if (fileDirective !== undefined) {
+      features.add("file-layering");
+    }
+    const keys = Object.keys(doc).filter((key) => key !== LAYERING_KEY);
+    if (keys.length === 0) {
+      features.add("empty-layer");
+    }
+    for (const key of keys) {
+      const value = doc[key];
+      if (value === null) {
+        features.add(present.has(key) ? "null-deletes" : "null-stays");
+        present.delete(key);
+        if (key === "labels" || key === "rulesets") {
+          advanceHeld(held, key, null, false);
+        }
+        continue;
+      }
+      if (present.has(key)) {
+        features.add("override");
+      }
+      if (isKnobbedSection(key)) {
+        if (!Array.isArray(value)) {
+          const wrapper = value as Json;
+          if (wrapper[UNDECLARED_KEY] !== undefined) {
+            features.add("wrapper-undeclared");
+          }
+          if (wrapper[LAYERING_KEY] === "merge") {
+            features.add("wrapper-layering-merge");
+          }
+          if (wrapper[LAYERING_KEY] === "replace") {
+            features.add("wrapper-layering-replace");
+          }
+        }
+        if (key === "labels" || key === "rulesets") {
+          const effective = wrapperDirective(value) ?? fileDirective ?? run;
+          const unite = present.has(key) && effective === "merge";
+          if (unite) {
+            features.add(key === "labels" ? "union-labels" : "union-rulesets");
+            for (const entry of entriesOf(value)) {
+              if (typeof entry.name !== "string") {
+                continue;
+              }
+              if (key === "labels") {
+                const paired = heldLabelsFor(held, entry);
+                if (paired.length === 0) {
+                  continue;
+                }
+                const spellings = paired.flatMap((label) =>
+                  label.new_name === undefined ? [label.name] : [label.name, label.new_name],
+                );
+                const name = entry.name;
+                if (spellings.some((s) => s !== name && s.toLowerCase() === name.toLowerCase())) {
+                  features.add("label-case-fold");
+                }
+                if (
+                  entry.new_name !== undefined ||
+                  paired.some((label) => label.new_name !== undefined)
+                ) {
+                  features.add("label-rename-union");
+                }
+                continue;
+              }
+              const heldRules = held.rulesets.get(entry.name);
+              for (const rule of Array.isArray(entry.rules) ? entry.rules : []) {
+                if (!isPlainMapping(rule) || typeof rule.type !== "string") {
+                  continue;
+                }
+                const below = heldRules?.get(rule.type);
+                if (below !== undefined && below !== JSON.stringify(rule)) {
+                  features.add("rule-parameters");
+                }
+              }
+            }
+          }
+          if (key === "rulesets") {
+            for (const entry of entriesOf(value)) {
+              if (Object.values(entry).some((field) => field === null)) {
+                features.add("null-entry-field");
+              }
+            }
+          }
+          advanceHeld(held, key, value, unite);
+        }
+      } else if (isPlainMapping(value) && hasNestedNull(value)) {
+        features.add("null-nested");
+      }
+      present.add(key);
+    }
+  }
+  return MERGE_FEATURES.filter((feature) => features.has(feature));
+}
+
+/**
+ * A random mode: merge scenario: 2 to 5 layers, each drawn from the per-section
+ * generators and then mutated along the merge axes - sections dropped or
+ * redeclared across layers, knobbed sections rewrapped with a policy and a
+ * `_layering`, a top-level `_layering`, label names respelled in another
+ * case and rules given parameters (so a keyed union is distinguishable from
+ * a case-sensitive or merging one), nulls over declared keys (top-level,
+ * nested in a mapping section, and inside a ruleset entry combined by name)
+ * and over nothing (the nullable sections), the run's `layering` input drawn
+ * at random. About a fifth of the stacks carry ONE refused layer. Every
+ * layer is valid on its own by construction (each null placement is probed
+ * through the action's validator on both the layer and the layer below).
+ * The folded document is what the oracle predicts: usually a merged
+ * document, sometimes one the validator rejects, since two valid mapping
+ * sections can merge into a combination a cross-field rule forbids; the
+ * valid force rules that out by giving every mapping section one
+ * contribution.
+ */
+export function genMergeScenario(
+  rng: Rng,
+  options: GenScenarioOptions & { force?: MergeForce } = {},
+): { scenario: Scenario; meta: MergeScenarioMeta } {
+  const pool =
+    options.sections !== undefined && options.sections.length > 0 ? options.sections : SECTION_KEYS;
+  const count = rng.int(4) + 2;
+  const force = options.force;
+
+  const rolledLayering = rng.pick(["merge", "replace", undefined] as const);
+  const runLayering: LayeringDirective | undefined =
+    force?.kind === "valid" ? force.layering : rolledLayering;
+  const effectiveRunLayering: LayeringDirective = runLayering ?? "merge";
+
+  const rolledRefusal = rng.bool(0.2)
+    ? { index: rng.int(count), kind: rng.pick(MERGE_REFUSAL_KINDS) }
+    : undefined;
+  const refusal =
+    force === undefined
+      ? rolledRefusal
+      : force.kind === "refused"
+        ? { index: rng.fork("refused-index").int(count), kind: force.refusal }
+        : undefined;
+
+  const layers: MergeLayer[] = [];
+  const drafts: LayerDraft[] = [];
+  /** The top-level sections the fold holds (declared non-null) after the layers so far. */
+  const present = new Set<SectionKey>();
+  /** The non-knobbed sections the fold holds as mappings: under the valid force, declared once. */
+  const heldMappings = new Set<SectionKey>();
+  const held: HeldKeyed = { labels: [], rulesets: new Map() };
+
+  for (let i = 0; i < count; i++) {
+    const layerRng = rng.fork(`layer:${i}`);
+    const name = mergeLayerName(i, count);
+    const layerPool = force?.kind === "valid" ? pool.filter((key) => !heldMappings.has(key)) : pool;
+    const draft = drawLayer(layerRng, layerPool);
+    const lower = drafts[i - 1];
+    if (lower !== undefined) {
+      renameLabelsIntoHeld(layerRng.fork("rename"), draft, held, effectiveRunLayering, present);
+      respellLabels(layerRng.fork("case"), draft, held, effectiveRunLayering, present);
+      placeNulls(layerRng.fork("nulls"), draft, lower, present, pool, effectiveRunLayering);
+    }
+    if (!standaloneValid(draft.doc)) {
+      // Every placement above is probed, so an invalid layer here is a hole
+      // in the probes, not a scenario to run.
+      throw new Error(
+        `BUG: merge layer ${name} fails its standalone validation: ${JSON.stringify(draft.doc)}`,
+      );
+    }
+    if (refusal !== undefined && refusal.index === i) {
+      refuseLayer(layerRng.fork("refusal"), draft, refusal.kind, pool);
+    }
+    for (const [key, value] of Object.entries(draft.doc)) {
+      if (key === LAYERING_KEY) {
+        continue;
+      }
+      const section = key as SectionKey;
+      if (key === "labels" || key === "rulesets") {
+        advanceHeld(
+          held,
+          key,
+          value,
+          present.has(section) && effectiveLayering(draft, key, effectiveRunLayering) === "merge",
+        );
+      }
+      if (value === null) {
+        present.delete(section);
+        heldMappings.delete(section);
+        continue;
+      }
+      present.add(section);
+      if (!isKnobbedSection(key) && isPlainMapping(value)) {
+        heldMappings.add(section);
+      } else {
+        heldMappings.delete(section);
+      }
+    }
+    drafts.push(draft);
+    layers.push({ name, doc: draft.doc });
+  }
+
+  const top = layers[count - 1] as MergeLayer;
+  const scenario: Scenario = {
+    name: `fuzz-merge-${rng.seed}`,
+    tiers: ["mock"],
+    settings: top.doc,
+    settings_layers: layers.slice(0, -1).map((layer) => layer.doc),
+    inputs: { mode: "merge", ...(runLayering === undefined ? {} : { layering: runLayering }) },
+    denial_style: "fine_grained",
+    owner_kind: "org",
+    expect: { exit_code: 0 },
+  };
+  return {
+    scenario,
+    meta: {
+      layers,
+      layering: effectiveRunLayering,
+      ...(refusal === undefined
+        ? {}
+        : { refusal: { layer: mergeLayerName(refusal.index, count), kind: refusal.kind } }),
+      features: mergeFeaturesOf(layers, runLayering, refusal !== undefined),
+    },
+  };
+}
+
+/**
+ * One layer's document before nulls: a section subset (the keyed sections
+ * favored, so unions happen), rules sometimes given parameters, each knobbed
+ * section rewrapped at random with a policy and a directive, and sometimes a
+ * file-level directive. A file-level `merge` forces every unkeyed knobbed
+ * section into a wrapper saying `replace`, the one spelling the boundary
+ * admits for it. Validated against the published schema before any null is
+ * placed.
+ */
+function drawLayer(rng: Rng, pool: readonly SectionKey[]): LayerDraft {
+  const chosen = rng.bool(0.08)
+    ? []
+    : pool.filter((key) => rng.bool(KEYED_MERGE_SECTIONS.has(key) ? 0.6 : 0.3));
+  const doc: Json = {};
+  for (const key of chosen) {
+    doc[key] = genSettings(rng.fork(`settings:${key}`), key);
+  }
+  const parameterRng = rng.fork("rule-parameters");
+  for (const entry of rulesetEntries(doc)) {
+    for (const rule of Array.isArray(entry.rules) ? entry.rules : []) {
+      if (isPlainMapping(rule) && parameterRng.bool(0.4)) {
+        rule.parameters = { strict: parameterRng.bool() };
+      }
+    }
+  }
+  const fileDirective = rng.bool(0.2) ? rng.pick(LAYERING_DIRECTIVES) : undefined;
+  if (fileDirective !== undefined) {
+    doc[LAYERING_KEY] = fileDirective;
+  }
+  const wrapperDirectives: LayerDraft["wrapperDirectives"] = {};
+  for (const key of chosen) {
+    if (!isKnobbedSection(key)) {
+      continue;
+    }
+    const keyed = KEYED_MERGE_SECTIONS.has(key);
+    const mustWrap = fileDirective === "merge" && !keyed;
+    // The section generator's own form is discarded: the merge draws the
+    // plain list or a wrapper of its own, so both forms carry every knob.
+    const entries = entriesOf(doc[key]);
+    if (!mustWrap && !rng.bool(0.4)) {
+      doc[key] = entries;
+      continue;
+    }
+    const wrapper: Json = { entries };
+    if (rng.bool(0.5)) {
+      wrapper[UNDECLARED_KEY] = rng.pick(["keep", "delete"] as const);
+    }
+    const directive: LayeringDirective | undefined = mustWrap
+      ? "replace"
+      : keyed
+        ? rng.bool(0.5)
+          ? rng.pick(LAYERING_DIRECTIVES)
+          : undefined
+        : rng.bool(0.3)
+          ? "replace"
+          : undefined;
+    if (directive !== undefined) {
+      wrapper[LAYERING_KEY] = directive;
+      wrapperDirectives[key] = directive;
+    }
+    doc[key] = wrapper;
+  }
+  validateAgainstPublishedSchema(doc);
+  return { doc, fileDirective, wrapperDirectives };
+}
+
+/**
+ * Respell some of a layer's labels in another case when the fold holds the
+ * same name and this layer unions labels, so the union's case-folded
+ * matching is what keeps the list from growing. A name without letters has
+ * no other case and is left alone.
+ */
+function respellLabels(
+  rng: Rng,
+  draft: LayerDraft,
+  held: HeldKeyed,
+  run: LayeringDirective,
+  present: ReadonlySet<SectionKey>,
+): void {
+  const value = draft.doc.labels;
+  if (
+    value === undefined ||
+    value === null ||
+    !present.has("labels") ||
+    effectiveLayering(draft, "labels", run) !== "merge"
+  ) {
+    return;
+  }
+  for (const entry of entriesOf(value)) {
+    if (typeof entry.name !== "string" || heldLabelsFor(held, entry).length === 0) {
+      continue;
+    }
+    const flipped =
+      entry.name === entry.name.toUpperCase() ? entry.name.toLowerCase() : entry.name.toUpperCase();
+    if (flipped !== entry.name && rng.bool(0.5)) {
+      entry.name = flipped;
+    }
+  }
+}
+
+/**
+ * Whether a layer's labels union with what the fold holds: the fold holds
+ * labels, this layer declares some, and its effective layering says merge.
+ */
+function unionsLabels(
+  draft: LayerDraft,
+  run: LayeringDirective,
+  present: ReadonlySet<SectionKey>,
+): boolean {
+  const value = draft.doc.labels;
+  return (
+    value !== undefined &&
+    value !== null &&
+    present.has("labels") &&
+    effectiveLayering(draft, "labels", run) === "merge"
+  );
+}
+
+/**
+ * When the fold holds a label that renames and this layer unions labels,
+ * usually point one of the layer's labels at that rename target, so the
+ * union pairs the two through the alias (the lower's `new_name`) and the
+ * merged document carries one label where a name-only match would keep two.
+ * The retargeted entry keeps its own claims disjoint from its siblings, as
+ * the boundary demands of every layer.
+ */
+function renameLabelsIntoHeld(
+  rng: Rng,
+  draft: LayerDraft,
+  held: HeldKeyed,
+  run: LayeringDirective,
+  present: ReadonlySet<SectionKey>,
+): void {
+  const renamed = held.labels.flatMap((label) =>
+    label.new_name === undefined ? [] : [label.new_name],
+  );
+  if (!unionsLabels(draft, run, present) || renamed.length === 0 || !rng.bool(0.7)) {
+    return;
+  }
+  const entries = entriesOf(draft.doc.labels);
+  const target = rng.pick(renamed);
+  const claimsOf = (entry: Json): string[] => {
+    const identity = labelIdentity(entry);
+    return identity === undefined ? [] : labelClaims(identity);
+  };
+  const candidates = entries.filter((entry) => {
+    if (typeof entry.name !== "string") {
+      return false;
+    }
+    const siblings = entries.filter((other) => other !== entry).flatMap(claimsOf);
+    return !claimsIntersect(claimsOf({ ...entry, name: target }), siblings);
+  });
+  if (candidates.length > 0) {
+    rng.pick(candidates).name = target;
+  }
+}
+
+/** The layering a knobbed section combines under in this layer: wrapper, then file, then run. */
+function effectiveLayering(
+  draft: LayerDraft,
+  key: SectionKey,
+  run: LayeringDirective,
+): LayeringDirective {
+  return draft.wrapperDirectives[key] ?? draft.fileDirective ?? run;
+}
+
+/**
+ * Place up to two nulls in a layer: over a section the fold holds (deleted
+ * with a notice), over a nullable section it does not (stays as written),
+ * over a nested key of a mapping section the layer right below declares, or
+ * over a field of a ruleset entry the layer right below declares when this
+ * layer combines rulesets by name. The nested placements are probed against
+ * the published schema on both sides (the lower document without the key,
+ * this document with the key's parents but without the key) so neither the
+ * layer nor the folded document turns invalid.
+ */
+function placeNulls(
+  rng: Rng,
+  draft: LayerDraft,
+  lower: LayerDraft,
+  present: ReadonlySet<SectionKey>,
+  pool: readonly SectionKey[],
+  run: LayeringDirective,
+): void {
+  if (!rng.bool(0.6)) {
+    return;
+  }
+  const doc = draft.doc;
+  const attempts = rng.int(2) + 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const roll = rng.int(4);
+    if (roll === 0) {
+      const candidates = [...present];
+      if (candidates.length > 0) {
+        doc[rng.pick(candidates)] = null;
+      }
+      continue;
+    }
+    if (roll === 1) {
+      const candidates = NULLABLE_SECTIONS.filter(
+        (key) => pool.includes(key) && !present.has(key) && doc[key] === undefined,
+      );
+      if (candidates.length > 0) {
+        doc[rng.pick(candidates)] = null;
+      }
+      continue;
+    }
+    if (roll === 2) {
+      const candidates = nestedMappingPaths(lower.doc).filter((path) => {
+        const top = path[0] as string;
+        if (doc[top] === null || isKnobbedSection(top)) {
+          return false;
+        }
+        return (
+          standaloneValid(withoutPath(lower.doc, path)) &&
+          standaloneValid(withParentsOnly(doc, path))
+        );
+      });
+      if (candidates.length > 0) {
+        setPath(doc, rng.pick(candidates), null);
+      }
+      continue;
+    }
+    if (doc.rulesets === null || effectiveLayering(draft, "rulesets", run) !== "merge") {
+      continue;
+    }
+    const candidates = rulesetEntries(lower.doc).flatMap((entry) =>
+      typeof entry.name === "string"
+        ? Object.keys(entry)
+            .filter((field) => field !== "name" && entry[field] !== null)
+            .map((field) => ({ name: entry.name as string, field }))
+        : [],
+    );
+    const candidate = candidates.length > 0 ? rng.pick(candidates) : undefined;
+    if (candidate === undefined) {
+      continue;
+    }
+    const lowerProbe = structuredClone(lower.doc);
+    const lowerEntry = rulesetEntries(lowerProbe).find((entry) => entry.name === candidate.name);
+    if (lowerEntry !== undefined) {
+      delete lowerEntry[candidate.field];
+    }
+    if (!standaloneValid(lowerProbe)) {
+      continue;
+    }
+    const entries = ensureEntries(doc, "rulesets");
+    const own = entries.find((entry) => entry.name === candidate.name);
+    if (own !== undefined) {
+      own[candidate.field] = null;
+    } else {
+      entries.push({ name: candidate.name, [candidate.field]: null });
+    }
+  }
+}
+
+/**
+ * Rewrite one layer so the boundary refuses it for the named reason. A kind
+ * needs its section (labels, rulesets, an unkeyed knobbed one); when the
+ * layer declares none, one is created, outside the pool if need be, since
+ * the refusal is the point of the layer.
+ */
+function refuseLayer(
+  rng: Rng,
+  draft: LayerDraft,
+  kind: MergeRefusalKind,
+  pool: readonly SectionKey[],
+): void {
+  const doc = draft.doc;
+  const unkeyed = UNKEYED_KNOBBED_SECTIONS.filter((key) => pool.includes(key));
+  const unkeyedKey =
+    unkeyed.find((key) => doc[key] !== undefined && doc[key] !== null) ??
+    (unkeyed.length > 0 ? rng.pick(unkeyed) : undefined);
+  switch (kind) {
+    case "duplicate-rule-type": {
+      const entries = ensureEntries(doc, "rulesets");
+      const entry = entries[0] ?? { name: "dup-rules", target: "branch" };
+      if (entries.length === 0) {
+        entries.push(entry);
+      }
+      const type = rng.pick(["deletion", "non_fast_forward", "required_signatures"]);
+      entry.rules = [{ type }, { type }];
+      return;
+    }
+    case "duplicate-label": {
+      const entries = ensureEntries(doc, "labels");
+      const entry = entries[0] ?? { name: "bug", color: "d73a4a" };
+      if (entries.length === 0) {
+        entries.push(entry);
+      }
+      const name = String(entry.name);
+      const flipped = name.toUpperCase();
+      entries.push({ name: rng.bool(0.5) && flipped !== name ? flipped : name });
+      return;
+    }
+    case "merge-on-unkeyed-wrapper": {
+      const key = unkeyedKey ?? "milestones";
+      const entries = ensureEntries(doc, key);
+      doc[key] = { entries, [LAYERING_KEY]: "merge" };
+      return;
+    }
+    case "merge-on-unkeyed-file": {
+      const key = unkeyedKey ?? "milestones";
+      // The plain list inherits the file directive; a wrapper saying replace
+      // would override it and admit the layer.
+      doc[key] = ensureEntries(doc, key);
+      doc[LAYERING_KEY] = "merge";
+      return;
+    }
+    case "bad-wrapper-layering": {
+      const declared = UNDECLARED_POLICY_SECTIONS.filter(
+        (key) => doc[key] !== undefined && doc[key] !== null,
+      );
+      const key = declared.length > 0 ? rng.pick(declared) : "labels";
+      const entries = ensureEntries(doc, key);
+      doc[key] = { entries, [LAYERING_KEY]: rng.pick(BAD_LAYERING_VALUES) };
+      return;
+    }
+    case "bad-file-layering": {
+      doc[LAYERING_KEY] = rng.pick(BAD_LAYERING_VALUES);
+      return;
+    }
+    default: {
+      const never: never = kind;
+      throw new Error(`unknown merge refusal kind ${String(never)}`);
+    }
+  }
 }

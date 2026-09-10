@@ -7,7 +7,13 @@
  * properties every run must satisfy.
  */
 
-import type { SectionKey } from "../../src/schema.js";
+import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import {
+  SECTION_KEYS,
+  type SectionKey,
+  UNDECLARED_POLICY_SECTIONS,
+  type UndeclaredPolicySection,
+} from "../../src/schema.js";
 import {
   type DenialPosture,
   denialPosture,
@@ -17,7 +23,21 @@ import {
 } from "../../src/sections/contract/module.js";
 import type { SectionPermission } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { displayKeyOf, type MultiScenarioMeta, type ScenarioMeta } from "./generators.js";
+import { silentIo } from "../io-fake.js";
+import {
+  type Json,
+  LAYERING_DIRECTIVES,
+  LAYERING_KEY,
+  type LayeringDirective,
+  UNDECLARED_KEY,
+} from "./gen-support.js";
+import {
+  displayKeyOf,
+  type MergeLayer,
+  type MergeScenarioMeta,
+  type MultiScenarioMeta,
+  type ScenarioMeta,
+} from "./generators.js";
 import { GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
 
 /** A section outcome the step summary can report. */
@@ -800,4 +820,417 @@ export function predictDiscovery(pool: DiscoveryRepo[], filters: DiscoveryFilter
     kept.push(repo.slug);
   }
   return kept;
+}
+
+// --- mode: merge -------------------------------------------------------------
+
+/** A lower declaration a higher layer's null removed, as the merge announces it. */
+export interface MergeNotice {
+  layer: string;
+  path: string;
+}
+
+/**
+ * The merge oracle's verdict: the exact document a valid stack folds to, the
+ * layer the boundary refuses, or a fold whose result the post-merge validator
+ * rejects (two layers each valid on their own can combine into a document
+ * that is not - a lower `allowed_actions: selected` with its allowlist under
+ * a higher `allowed_actions: all`).
+ */
+export type MergePrediction =
+  | { kind: "merged"; merged: Json; notices: MergeNotice[] }
+  | { kind: "refused"; layer: string }
+  | { kind: "invalid"; error: string };
+
+/**
+ * A list the merge combines by identity: the keys one entry claims (two
+ * entries are one resource when their key sets intersect), whether a matched
+ * pair replaces or merges, and the fields of a merged entry that are keyed
+ * lists themselves.
+ */
+interface KeyedList {
+  /** Every identity the entry claims, folded; null when it carries none (refused at the boundary). */
+  keysOf: (entry: Json) => readonly string[] | null;
+  /** The entry field the keys are read from, for naming an entry in a notice path. */
+  keyField: string;
+  combine: "replace" | "merge";
+  nested?: Readonly<Record<string, KeyedList>>;
+}
+
+/** The keys a label claims: its rename target (or its name), plus its current name when it renames. */
+function labelKeys(entry: Json): readonly string[] | null {
+  const names = entry.new_name === undefined ? [entry.name] : [entry.new_name, entry.name];
+  if (!names.every((name): name is string => typeof name === "string")) {
+    return null;
+  }
+  return [...new Set(names.map((name) => name.toLowerCase()))];
+}
+
+/** The one key a field names, when it is a string. */
+function singleKey(field: string): KeyedList["keysOf"] {
+  return (entry) => (typeof entry[field] === "string" ? [entry[field]] : null);
+}
+
+/**
+ * The keyed sections in the oracle's OWN words, not read off the section
+ * modules: labels claim their case-folded name and rename target and replace
+ * wholesale, rulesets pair by exact name and merge key by key, their rules
+ * pairing by type and replacing. A module whose layering declaration drifts
+ * from this table is a disagreement the fuzz surfaces (oracle.test.ts pins
+ * the two against each other by hand, as data).
+ */
+export const KEYED_MERGE_SECTIONS: Readonly<Partial<Record<UndeclaredPolicySection, KeyedList>>> = {
+  labels: { keysOf: labelKeys, keyField: "name", combine: "replace" },
+  rulesets: {
+    keysOf: singleKey("name"),
+    keyField: "name",
+    combine: "merge",
+    nested: { rules: { keysOf: singleKey("type"), keyField: "type", combine: "replace" } },
+  },
+};
+
+/**
+ * The policy a knobbed section resolves to when no layer set one: the
+ * section's own undeclaredDefault declaration, the same data the README's
+ * Undeclared-default column renders.
+ */
+const UNDECLARED_DEFAULTS: Record<UndeclaredPolicySection, "keep" | "delete"> = Object.fromEntries(
+  UNDECLARED_POLICY_SECTIONS.map((key) => {
+    const section = SECTIONS.find((candidate) => candidate.key === key);
+    if (section === undefined || section.undeclaredDefault === "untouched") {
+      throw new Error(`${key} is knobbed but declares no keep/delete default`);
+    }
+    return [key, section.undeclaredDefault];
+  }),
+) as Record<UndeclaredPolicySection, "keep" | "delete">;
+
+function isMapping(value: unknown): value is Json {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isKnobbed(key: string): key is UndeclaredPolicySection {
+  return (UNDECLARED_POLICY_SECTIONS as readonly string[]).includes(key);
+}
+
+function isDirective(value: unknown): value is LayeringDirective {
+  return LAYERING_DIRECTIVES.some((directive) => directive === value);
+}
+
+/** A knobbed section's value in wrapper form: a plain list becomes `{entries}`, a wrapper stays. */
+function asWrapper(value: unknown): Json {
+  return Array.isArray(value) ? { entries: value } : (value as Json);
+}
+
+/** Where a notice attributes a deletion: the layer that made it and the path it removed. */
+interface Site {
+  layer: string;
+  notices: MergeNotice[];
+}
+
+/**
+ * A slot holding what the layers so far said about one key: nothing yet,
+ * a null that stayed as written, or a value. The fold is a reduction of a
+ * column of contributions (one per layer that mentions the key) into a slot.
+ */
+type Slot = unknown;
+
+/** The path of a nested key, for the notice that names it. */
+function at(path: string, key: string): string {
+  return path === "" ? key : `${path}.${key}`;
+}
+
+/**
+ * The dialect's one sentence about a higher value, applied to a slot:
+ * "Plain objects merge key by key; a higher scalar, array, or tagged value
+ * replaces; a higher null deletes what a lower layer declared (reported as a
+ * notice) and stays as written when nothing below declares the key."
+ * `keyedFields` names the fields of two mappings whose lists combine by key
+ * (a ruleset's rules) instead of replacing.
+ */
+function settle(
+  slot: Slot,
+  higher: unknown,
+  path: string,
+  site: Site,
+  keyedFields?: Readonly<Record<string, KeyedList>>,
+): Slot {
+  if (higher === null) {
+    if (slot !== undefined && slot !== null) {
+      site.notices.push({ layer: site.layer, path });
+      return undefined;
+    }
+    return null;
+  }
+  if (isMapping(slot) && isMapping(higher)) {
+    return mergeTrees(slot, higher, path, site, keyedFields);
+  }
+  return structuredClone(higher);
+}
+
+/**
+ * Key-by-key: every key either side names, in the lower mapping's order and
+ * then the higher's; a key only one side names is taken as is, a key both
+ * name is settled. A settled key that came out deleted is absent.
+ */
+function mergeTrees(
+  lower: Json,
+  higher: Json,
+  path: string,
+  site: Site,
+  keyedFields?: Readonly<Record<string, KeyedList>>,
+): Json {
+  const out: Json = {};
+  for (const key of new Set([...Object.keys(lower), ...Object.keys(higher)])) {
+    if (!(key in higher) || higher[key] === undefined) {
+      out[key] = lower[key];
+      continue;
+    }
+    const keyed = keyedFields?.[key];
+    const settled =
+      keyed !== undefined && Array.isArray(lower[key]) && Array.isArray(higher[key])
+        ? unionKeyed(lower[key] as Json[], higher[key] as Json[], keyed, at(path, key), site)
+        : settle(lower[key], higher[key], at(path, key), site, undefined);
+    if (settled !== undefined) {
+      out[key] = settled;
+    }
+  }
+  return out;
+}
+
+/** An entry's keys; the boundary refused every keyless entry before the fold runs. */
+function keysOrThrow(entry: Json, keyed: KeyedList): readonly string[] {
+  const keys = keyed.keysOf(entry);
+  if (keys === null) {
+    throw new Error(`a keyless ${keyed.keyField} entry reached the fold: ${JSON.stringify(entry)}`);
+  }
+  return keys;
+}
+
+/** Whether two entries are one resource: their key sets intersect. */
+function sameResource(a: readonly string[], b: readonly string[]): boolean {
+  return a.some((key) => b.includes(key));
+}
+
+/**
+ * "Unions its entries by identity": a higher entry supersedes every lower
+ * entry it matches and stands where the first of them stood, replaced
+ * wholesale or merged key by key into that first one with its own keyed
+ * fields, per the section's combine. Lower entries nothing matched keep
+ * their order; higher entries matching nothing append in theirs. Matching
+ * reads the lower list as it stood before this layer, so two higher entries
+ * claiming one lower entry between them both take its slot, in their order.
+ */
+function unionKeyed(
+  lower: Json[],
+  higher: Json[],
+  keyed: KeyedList,
+  path: string,
+  site: Site,
+): Json[] {
+  const lowerKeys = lower.map((entry) => keysOrThrow(entry, keyed));
+  const higherKeys = higher.map((entry) => keysOrThrow(entry, keyed));
+  const slotOf = higherKeys.map((keys) =>
+    lowerKeys.findIndex((below) => sameResource(below, keys)),
+  );
+  const combine = (below: Json, entry: Json): Json =>
+    keyed.combine === "replace"
+      ? structuredClone(entry)
+      : mergeTrees(below, entry, `${path}[${String(entry[keyed.keyField])}]`, site, keyed.nested);
+  const out = lower.flatMap((below, index) => {
+    const keys = lowerKeys[index] as readonly string[];
+    if (!higherKeys.some((claims) => sameResource(claims, keys))) {
+      return [below];
+    }
+    return higher.flatMap((entry, h) => (slotOf[h] === index ? [combine(below, entry)] : []));
+  });
+  out.push(...higher.flatMap((entry, h) => (slotOf[h] === -1 ? [structuredClone(entry)] : [])));
+  return out;
+}
+
+/** One layer's mention of a section: the value it wrote and the layer's own file directive. */
+interface Contribution {
+  layer: string;
+  value: unknown;
+  fileDirective: LayeringDirective | undefined;
+}
+
+/**
+ * A knobbed section's column: each contribution is read in wrapper form (a
+ * plain list is `{entries}`), its knobs settle over the knobs below (an
+ * omitted policy therefore inherits), and its entries union by key when the
+ * effective layering says merge and the section has a key and there are
+ * entries below to union with; otherwise they replace. A null contribution
+ * settles like any other value.
+ */
+function reduceKnobbed(
+  key: UndeclaredPolicySection,
+  column: readonly Contribution[],
+  run: LayeringDirective,
+  notices: MergeNotice[],
+): Slot {
+  const keyed = KEYED_MERGE_SECTIONS[key];
+  let slot: Slot;
+  for (const { layer, value, fileDirective } of column) {
+    const site: Site = { layer, notices };
+    if (value === null) {
+      slot = settle(slot, null, key, site);
+      continue;
+    }
+    const { entries, [LAYERING_KEY]: directive, ...knobs } = asWrapper(value);
+    const effective = (isDirective(directive) ? directive : undefined) ?? fileDirective ?? run;
+    const below = isMapping(slot) ? slot : {};
+    const { entries: belowEntries, ...belowKnobs } = below;
+    const unite = effective === "merge" && keyed !== undefined && Array.isArray(belowEntries);
+    slot = {
+      ...mergeTrees(belowKnobs, knobs, key, site),
+      entries: unite
+        ? unionKeyed(belowEntries as Json[], entries as Json[], keyed, key, site)
+        : structuredClone(entries),
+    };
+  }
+  if (isMapping(slot) && Array.isArray(slot.entries) && slot[UNDECLARED_KEY] === undefined) {
+    slot[UNDECLARED_KEY] = UNDECLARED_DEFAULTS[key];
+  }
+  return slot;
+}
+
+/**
+ * The oracle's own fold, written from the dialect's description rather than
+ * the engine: section by section, the column of the layers' contributions to
+ * that section (low to high) is reduced into one slot - knobbed sections by
+ * reduceKnobbed, every other section by settle - and a slot that ends
+ * deleted is absent from the result. `_layering` is a directive the fold
+ * consumes (a layer's top-level one governs its knobbed sections, a
+ * wrapper's governs its own section), so none survives; private underscore
+ * keys are not sections and are not part of the written document either.
+ * Assumes every layer is admitted (refusedMergeLayer said so).
+ */
+export function foldMergeLayers(
+  layers: readonly MergeLayer[],
+  layering: LayeringDirective,
+): { merged: Json; notices: MergeNotice[] } {
+  const notices: MergeNotice[] = [];
+  const merged: Json = {};
+  for (const key of SECTION_KEYS) {
+    const column: Contribution[] = layers.flatMap((layer) =>
+      layer.doc[key] === undefined
+        ? []
+        : [
+            {
+              layer: layer.name,
+              value: layer.doc[key],
+              fileDirective: isDirective(layer.doc[LAYERING_KEY])
+                ? layer.doc[LAYERING_KEY]
+                : undefined,
+            },
+          ],
+    );
+    if (column.length === 0) {
+      continue;
+    }
+    let slot: Slot;
+    if (isKnobbed(key)) {
+      slot = reduceKnobbed(key, column, layering, notices);
+    } else {
+      for (const { layer, value } of column) {
+        slot = settle(slot, value, key, { layer, notices });
+      }
+    }
+    if (slot !== undefined) {
+      merged[key] = slot;
+    }
+  }
+  return { merged, notices };
+}
+
+/**
+ * Whether a keyed list declares two entries claiming one key (a label renaming
+ * into a sibling's name included) or a keyless entry, at any nesting.
+ */
+function keyedListRefused(entries: readonly unknown[], keyed: KeyedList): boolean {
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (!isMapping(entry)) {
+      return true;
+    }
+    const keys = keyed.keysOf(entry);
+    if (keys === null || keys.some((key) => seen.has(key))) {
+      return true;
+    }
+    for (const key of keys) {
+      seen.add(key);
+    }
+    for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
+      const value = entry[field];
+      if (Array.isArray(value) && keyedListRefused(value, nested)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * The oracle's read of the layer boundary: the first layer (low to high)
+ * carrying a directive outside merge|replace (at the file level or on a
+ * wrapper), a knobbed section that is neither a list nor an `{entries}`
+ * wrapper of mappings, an explicit `merge` on a section without a layering
+ * key, or a keyed list with a duplicate or missing key. Undefined when every
+ * layer is admitted.
+ */
+export function refusedMergeLayer(layers: readonly MergeLayer[]): string | undefined {
+  for (const layer of layers) {
+    const fileDirective = layer.doc[LAYERING_KEY];
+    if (fileDirective !== undefined && !isDirective(fileDirective)) {
+      return layer.name;
+    }
+    for (const key of UNDECLARED_POLICY_SECTIONS) {
+      const value = layer.doc[key];
+      if (value === undefined || value === null) {
+        continue;
+      }
+      const wrapper = asWrapper(value);
+      if (!isMapping(wrapper) || !Array.isArray(wrapper.entries)) {
+        return layer.name;
+      }
+      if (!wrapper.entries.every(isMapping)) {
+        return layer.name;
+      }
+      const directive = wrapper[LAYERING_KEY];
+      if (directive !== undefined && !isDirective(directive)) {
+        return layer.name;
+      }
+      const keyed = KEYED_MERGE_SECTIONS[key];
+      if (keyed === undefined && (directive ?? fileDirective) === "merge") {
+        return layer.name;
+      }
+      if (keyed !== undefined && keyedListRefused(wrapper.entries, keyed)) {
+        return layer.name;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Predict a mode: merge run: a refused layer fails the run by name before
+ * anything is written, a fold the validator rejects fails it naming the
+ * merged document, otherwise the run writes exactly the folded document and
+ * announces each null deletion. In every case the mock sees no request.
+ */
+export function predictMerge(meta: MergeScenarioMeta): MergePrediction {
+  const refused = refusedMergeLayer(meta.layers);
+  if (refused !== undefined) {
+    return { kind: "refused", layer: refused };
+  }
+  const folded = foldMergeLayers(meta.layers, meta.layering);
+  // The fold is the oracle's own; whether its result is a valid settings
+  // document is the validator's question, the same one the run asks of the
+  // document it just folded (cross-field rules the published schema cannot
+  // spell, so the generator cannot avoid them by construction).
+  const validated = validateSettingsDoc(folded.merged, "merged", new Set(), silentIo());
+  if ("error" in validated) {
+    return { kind: "invalid", error: validated.error };
+  }
+  return { kind: "merged", ...folded };
 }

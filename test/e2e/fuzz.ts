@@ -13,8 +13,9 @@
  * fail before any API contact), chaos fuzz (a single corrupt response is retried
  * away so the run converges, OR a persistent corruption outlasts the retries and
  * the run fails loudly), multi-repo fuzz (per-target outcome classes plus the
- * worst-of rollup), and discovery fuzz (a `repos: "*"` pool filtered by the
- * independent predictDiscovery mirror).
+ * worst-of rollup), discovery fuzz (a `repos: "*"` pool filtered by the
+ * independent predictDiscovery mirror), and merge fuzz (a layered mode: merge
+ * stack whose written document the oracle's own fold predicts whole).
  */
 
 import { MAX_RETRIES } from "../../src/github/api.js";
@@ -29,10 +30,14 @@ import {
   genDiscoveryScenario,
   genInvalidSettings,
   genLiveWitness,
+  genMergeScenario,
   genMultiScenario,
   genScenario,
   genSettings,
   INVALID_SETTINGS_CASES,
+  MERGE_REFUSAL_KINDS,
+  type MergeForce,
+  type MergeScenarioMeta,
   type MultiRepoMeta,
   type MultiScenarioMeta,
   NON_MAPPING_YAML,
@@ -60,6 +65,7 @@ import {
   judgePreflightAbort,
   NO_READ_SECTIONS,
   predictDiscovery,
+  predictMerge,
   predictMulti,
   predictOutcomes,
 } from "./oracle.js";
@@ -170,6 +176,8 @@ interface IterationBase {
   faultClass?: string;
   /** The fixpoint re-run proof this iteration armed, for the stats counts. */
   proof?: "apply_idempotent" | "converges";
+  /** The merge axes a merge-mode iteration's stack exercised, for the merge histogram. */
+  mergeFeatures?: string[];
 }
 
 /** An iteration's verdict: a failing one always carries its failure text. */
@@ -1246,6 +1254,106 @@ async function runDiscoveryPredicted(
   );
 }
 
+// --- Merge-mode fuzz --------------------------------------------------------
+
+/**
+ * Merge fuzz: generate a layered mode: merge stack, predict the whole written
+ * document (or the refused layer) with the oracle's independent fold, run the
+ * bundle, and require the exact document the runner reads back. A merge never
+ * touches GitHub, so every iteration also pins zero requests.
+ */
+async function mergeFuzzIteration(
+  seed: number,
+  opts: { sections?: SectionKey[]; force?: MergeForce },
+): Promise<IterationResult> {
+  const { scenario, meta } = genMergeScenario(new Rng(seed), opts);
+  return runMergePredicted(scenario, meta);
+}
+
+/**
+ * Battery entry: a stack the valid force built to fold into a merged document
+ * for certain, so the whole-document comparison runs every soak under this
+ * run layering; a fold the oracle does not read as merged means the force and
+ * predictMerge drifted apart.
+ */
+async function mergeValidBatteryRun(
+  seed: number,
+  layering: "merge" | "replace",
+): Promise<IterationResult> {
+  const { scenario, meta } = genMergeScenario(new Rng(seed), {
+    force: { kind: "valid", layering },
+  });
+  const prediction = predictMerge(meta);
+  if (prediction.kind !== "merged") {
+    return {
+      ok: false,
+      failure: `the valid force produced a stack the oracle reads as ${prediction.kind} - the force and predictMerge drifted apart`,
+      sections: [],
+    };
+  }
+  return runMergePredicted(scenario, meta);
+}
+
+/** The merge run + assertion core (see mergeFuzzIteration). */
+async function runMergePredicted(
+  scenario: Scenario,
+  meta: MergeScenarioMeta,
+): Promise<IterationResult> {
+  const prediction = predictMerge(meta);
+  scenario.expect =
+    prediction.kind !== "merged"
+      ? { exit_code: 1, result: "failed", zero_requests: true }
+      : {
+          exit_code: 0,
+          result: "merged",
+          zero_requests: true,
+          merged: prediction.merged,
+          // Each null deletion is announced by the layer that made it, on the path it removed.
+          stdout_contains: prediction.notices.map(
+            (notice) => `${notice.layer}: null removed ${notice.path} declared by a lower layer`,
+          ),
+          summary_contains: ["Merged document written to "],
+        };
+  const report = await runScenario(scenario);
+  const problems = [...report.failures];
+  if (/\n\s+at\s+\S+ \(/.test(report.stderr)) {
+    problems.push("unhandled stack in stderr from a merge run");
+  }
+  // A failure must be an actionable error line NAMING its site - the refused
+  // layer, or the merged document - not a debug echo of the settings-file
+  // list that happens to contain a layer name.
+  const errorNames = (site: string): boolean =>
+    report.stdout.split("\n").some((line) => line.startsWith("::error::") && line.includes(site));
+  if (prediction.kind === "refused") {
+    if (!errorNames(prediction.layer)) {
+      problems.push(`refused stack: no ::error:: line names the refused layer ${prediction.layer}`);
+    }
+  } else if (prediction.kind === "invalid") {
+    if (!errorNames("the merged settings document")) {
+      problems.push("invalid fold: no ::error:: line names the merged settings document");
+    }
+  } else if (prediction.notices.length === 0 && /null removed/.test(report.stdout)) {
+    problems.push("the run announced a null deletion the oracle did not predict");
+  }
+  const sections = new Set<SectionKey>();
+  for (const layer of meta.layers) {
+    for (const key of Object.keys(layer.doc)) {
+      if ((SECTION_KEYS as readonly string[]).includes(key)) {
+        sections.add(key as SectionKey);
+      }
+    }
+  }
+  return iterationResult(
+    problems,
+    {
+      artifactDir: failureArtifacts(scenario, report, problems),
+      sections: [...sections],
+      mergeFeatures: meta.features,
+    },
+    `[merge ${prediction.kind}] `,
+  );
+}
+
 // --- Transport-fault fuzz ---------------------------------------------------
 
 /** The four transport fault kinds the mock injects (see FaultOption). */
@@ -1943,12 +2051,21 @@ async function main(): Promise<number> {
   // every run instead of silently vacuous; the fixpoint battery guarantees
   // each proof once per soak regardless.
   const proofCounts = new Map<string, number>();
+  // The merge axes the merge-mode stacks exercised (random stream + battery),
+  // so a generator that stops drawing a shape is visible in every run.
+  const mergeHistogram = new Map<string, number>();
+  const recordMergeFeatures = (features: string[] | undefined): void => {
+    for (const feature of features ?? []) {
+      mergeHistogram.set(feature, (mergeHistogram.get(feature) ?? 0) + 1);
+    }
+  };
 
   for (let i = 0; i < flags.iterations; i++) {
     const seed = replayOne ? master : iterationSeed(master, i);
     // Mode selection over an 8-way roll: ~1/4 multi-repo, 1/8 input fuzz,
     // 1/8 transport misbehavior (split 50/50 between response corruption and
-    // injected faults), 1/8 discovery, the rest standard single-repo.
+    // injected faults), 1/8 discovery, the rest single-repo, of which a
+    // quarter runs a layered merge instead of the engine.
     const roll = new Rng(seed ^ 0x5bd1e995).int(8);
     let result: IterationResult;
     let mode: string;
@@ -1969,6 +2086,10 @@ async function main(): Promise<number> {
     } else if (roll === 4) {
       mode = "discovery";
       result = await discoveryFuzzIteration(seed);
+    } else if (new Rng(seed ^ 0x27d4eb2f).int(4) === 0) {
+      // A quarter of the single-repo share: a layered mode: merge stack.
+      mode = "merge";
+      result = await mergeFuzzIteration(seed, { sections: flags.sections });
     } else {
       mode = "standard";
       result = await standardIteration(seed, { sections: flags.sections });
@@ -1978,6 +2099,7 @@ async function main(): Promise<number> {
     }
     recordCoverage(result.coverage);
     recordFaultClass(result.faultClass);
+    recordMergeFeatures(result.mergeFeatures);
     if (result.proof !== undefined) {
       const key = `${mode}:${result.proof}`;
       proofCounts.set(key, (proofCounts.get(key) ?? 0) + 1);
@@ -1985,11 +2107,14 @@ async function main(): Promise<number> {
     if (!result.ok) {
       failures++;
       failingSeeds.push(seed);
-      // Only the standard mode consumes --sections; when it is set, a faithful
-      // replay must pass the SAME flag, since the seed alone would draw from the
-      // full section pool and produce a different scenario. Echo it per failure.
+      // Only the standard and merge modes consume --sections; when it is set,
+      // a faithful replay must pass the SAME flag, since the seed alone would
+      // draw from the full section pool and produce a different scenario. Echo
+      // it per failure.
       const sectionsFlag =
-        mode === "standard" && flags.sections ? ` --sections ${flags.sections.join(",")}` : "";
+        (mode === "standard" || mode === "merge") && flags.sections
+          ? ` --sections ${flags.sections.join(",")}`
+          : "";
       const replay = `bun test/e2e/fuzz.ts --seed ${seed} --iterations 1${sectionsFlag}`;
       console.log(`  iter ${i} [${mode}] seed ${seed} FAIL: ${result.failure}`);
       console.log(`    replay: ${replay}`);
@@ -2031,6 +2156,7 @@ async function main(): Promise<number> {
         const result = await run(seed);
         recordCoverage(result.coverage);
         recordFaultClass(result.faultClass);
+        recordMergeFeatures(result.mergeFeatures);
         if (result.ok) {
           console.log(`  ${name} ok`);
           continue;
@@ -2154,6 +2280,25 @@ async function main(): Promise<number> {
       ["multi/apply-idempotent", multiIdempotenceBatteryRun],
       ["discovery/converges", discoveryConvergesBatteryRun],
     ]);
+
+    // Merge battery: one valid stack per run layering (the whole-document
+    // prediction under both defaults) and one stack per refusal kind, each
+    // CONSTRUCTED by a generator force so every soak exercises every boundary
+    // refusal instead of waiting on the ~1/5 x 1/6 random draw.
+    await runBattery("merge battery (directed layered merges)", 0x600000, [
+      ...(["merge", "replace"] as const).map(
+        (layering): BatteryEntry => [
+          `merge/valid/${layering}`,
+          (seed) => mergeValidBatteryRun(seed, layering),
+        ],
+      ),
+      ...MERGE_REFUSAL_KINDS.map(
+        (refusal): BatteryEntry => [
+          `merge/refused/${refusal}`,
+          (seed) => mergeFuzzIteration(seed, { force: { kind: "refused", refusal } }),
+        ],
+      ),
+    ]);
   }
 
   console.log("\ncoverage (sections exercised):");
@@ -2208,6 +2353,19 @@ async function main(): Promise<number> {
     }
   }
 
+  // The merge axes exercised (random stream + merge battery); the generator
+  // test pins that every axis is drawn, this is the per-soak visibility.
+  console.log("\nmerge-feature coverage (layered merge axes exercised):");
+  if (mergeHistogram.size === 0) {
+    console.log("  (none)");
+  } else {
+    for (const [feature, count] of [...mergeHistogram.entries()].sort(([a], [b]) =>
+      a.localeCompare(b),
+    )) {
+      console.log(`  ${feature}: ${count}`);
+    }
+  }
+
   // Fixpoint proofs the RANDOM stream armed (the battery adds one multi
   // idempotence + one discovery convergence on top, printed above).
   console.log("\nfixpoint-proof coverage (random stream, mode:proof):");
@@ -2222,7 +2380,7 @@ async function main(): Promise<number> {
   console.log(`\n${flags.iterations - failures}/${flags.iterations} iterations ok`);
   if (batteryFailures > 0) {
     console.log(
-      `directed battery failures (witness + input + fault + fixpoint): ${batteryFailures}`,
+      `directed battery failures (witness + input + fault + fixpoint + merge): ${batteryFailures}`,
     );
   }
   if (failingSeeds.length > 0) {
