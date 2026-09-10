@@ -55,7 +55,7 @@ Mappings merged key by key, the two label lists unioned by name, and `labels` ca
 |---|---|
 | `mode` | `merge` |
 | `settings-file` | The ordered list of layer paths, newline- or comma-separated, lowest layer first |
-| `merged-file` | Required: where the merged document is written (parent directories are created) |
+| `merged-file` | Required: where the merged document is written (parent directories are created). It must not name one of the `settings-file` layers, compared as resolved paths: the run refuses that, naming the layer's position, because the merge would overwrite the layer and the next run would fold the merged document as one |
 | `layering` | `merge` (default) or `replace`: the run-wide default for the keyed list sections, see below |
 | `token` | Ignored: a merge makes no GitHub API call, so a token a workflow sets on every step does no harm |
 | `repository`, `repos`, `repos-dir`, `defaults-file`, `visibility`, `archived`, `forks`, `exclude`, `topics`, `affiliation`, `sections`, `required-sections`, `on-missing-permission`, `api-version`, `private-repos`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a merge addresses no repository, fleet, or report, calls no API, and writes every section its layers declare; a `sections` allowlist belongs on the step that runs the merged document |
