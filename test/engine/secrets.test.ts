@@ -99,6 +99,17 @@ describe("secret provenance through the defaults merge", () => {
     expect(mergedValues(FLEET_DEFAULTS, targetDoc)).toEqual([]);
   });
 
+  test("no section layers its entries by key AND carries secret values", () => {
+    // Provenance attributes a target-declared section's values to the target
+    // wholesale; a keyed union (engine/layers.ts) would let a lower layer's
+    // secret survive into a higher-declared section under the wrong source.
+    expect(
+      SECTIONS.filter((s) => s.layering !== undefined && s.secretValues !== undefined).map(
+        (s) => s.key,
+      ),
+    ).toEqual([]);
+  });
+
   test("the wrapped undeclared-policy form attributes like the plain array", () => {
     const wrappedDefaults = {
       actions_secrets: {

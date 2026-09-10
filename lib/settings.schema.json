@@ -1417,7 +1417,7 @@
       ]
     },
     "UndeclaredPolicyList<ActionsSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1434,6 +1434,14 @@
           "items": {
             "$ref": "#/definitions/ActionsSecretConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1442,7 +1450,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<ActionsVariableConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1459,6 +1467,14 @@
           "items": {
             "$ref": "#/definitions/ActionsVariableConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1467,7 +1483,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<AgentsSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1484,6 +1500,14 @@
           "items": {
             "$ref": "#/definitions/AgentsSecretConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1492,7 +1516,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<AgentsVariableConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1509,6 +1533,14 @@
           "items": {
             "$ref": "#/definitions/AgentsVariableConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1517,7 +1549,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<AutolinkConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1534,6 +1566,14 @@
           "items": {
             "$ref": "#/definitions/AutolinkConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1542,7 +1582,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<CodespacesSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1559,6 +1599,14 @@
           "items": {
             "$ref": "#/definitions/CodespacesSecretConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1567,7 +1615,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<CollaboratorConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1584,6 +1632,14 @@
           "items": {
             "$ref": "#/definitions/CollaboratorConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1592,7 +1648,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<CustomPropertyConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1609,6 +1665,14 @@
           "items": {
             "$ref": "#/definitions/CustomPropertyConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1617,7 +1681,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<DependabotSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1634,6 +1698,14 @@
           "items": {
             "$ref": "#/definitions/DependabotSecretConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1642,7 +1714,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<DeployKeyConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1659,6 +1731,14 @@
           "items": {
             "$ref": "#/definitions/DeployKeyConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1667,7 +1747,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<DeploymentBranchPolicyConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1692,7 +1772,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<DeploymentProtectionRuleConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1717,7 +1797,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<EnvironmentSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1742,7 +1822,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<EnvironmentVariableConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1767,7 +1847,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<LabelConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1784,6 +1864,14 @@
           "items": {
             "$ref": "#/definitions/LabelConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1792,7 +1880,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<MilestoneConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1809,6 +1897,14 @@
           "items": {
             "$ref": "#/definitions/MilestoneConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1817,7 +1913,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<RulesetConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1834,6 +1930,14 @@
           "items": {
             "$ref": "#/definitions/RulesetConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1842,7 +1946,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<SecretScanningPatternConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1859,6 +1963,14 @@
           "items": {
             "$ref": "#/definitions/SecretScanningPatternConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [
@@ -1867,7 +1979,7 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<WebhookConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's wrapper) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "undeclared": {
@@ -1884,6 +1996,14 @@
           "items": {
             "$ref": "#/definitions/WebhookConfig"
           }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       },
       "required": [

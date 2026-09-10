@@ -110,6 +110,25 @@ export interface SectionMeta<
    * can never be reached for a section the merge does not normalize.
    */
   readonly undeclaredDefault: K extends UndeclaredPolicySection ? UndeclaredPolicy : "untouched";
+  /**
+   * How this section's entries layer across settings documents in a layered
+   * merge (engine/layers.ts): declared only by knobbed sections whose entries
+   * carry a matching key; a knobbed section without one always replaces.
+   * The conditional type makes it unrepresentable on a non-knobbed section.
+   */
+  readonly layering?: K extends UndeclaredPolicySection ? KeyedListLayering : never;
+}
+
+/** A list whose entries layer by key across settings documents (engine/layers.ts). */
+export interface KeyedListLayering {
+  /** The matching key of one entry, or null when it carries none (refused at the layer boundary). */
+  readonly key: (entry: Readonly<Record<string, unknown>>) => string | null;
+  /** The entry field the key comes from, for refusal prose ("name", "type"). */
+  readonly keyField: string;
+  /** A matched pair: "replace" (higher wins wholesale) or "merge" (key by key, nested keyed lists below). */
+  readonly combine: "replace" | "merge";
+  /** Fields of a merged entry that are themselves keyed lists (rulesets' `rules`). */
+  readonly nested?: Readonly<Record<string, KeyedListLayering>>;
 }
 
 /**

@@ -14,8 +14,15 @@ schema:
     environments[].variables has its own fixed default and never inherits one); this wrapper can set
     it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The
     wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are
-    strict: anything besides `undeclared` and `entries` is rejected upfront as a typo.
+    strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's
+    wrapper) is rejected upfront as a typo.
   UndeclaredPolicyList<*>.undeclared: >-
     What apply does to live resources `entries` does not declare: "delete" removes them, "keep"
     leaves them alone and surfaces each as a note. Omitted, the list's own default applies.
   UndeclaredPolicyList<*>.entries: The declared entries, exactly as the plain array form lists them.
+  UndeclaredPolicyList<*>._layering: >-
+    A merge-time directive: how this section combines with the layers BELOW it in a layered merge.
+    "merge" unions the entries by key, "replace" lets this layer's list win. Omitted, the run's
+    layering applies. It has no effect on a single document, the merged document never carries it,
+    and a list nested inside a section entry does not take it (a higher layer replaces such a list
+    wholesale).

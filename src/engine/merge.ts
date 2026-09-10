@@ -8,25 +8,12 @@
 
 import type { SettingsFile } from "../schema.js";
 import { UNDECLARED_POLICY_SECTIONS } from "../schema.js";
-import { defaultUndeclaredPolicy } from "../sections/contract/module.js";
-import { sectionModule } from "../sections/registry.js";
-import type { UndeclaredPolicy } from "../types.js";
-
-/**
- * A PLAIN mapping only: the prototype must be Object.prototype or null. A
- * YAML explicit tag (!!timestamp, !!set) parses to a Date or Set, which is
- * an object too - treating one as a mapping would spread it into `{}` and
- * quietly hand the merge (or a knobbed-section normalization) a document
- * nobody wrote. Non-plain objects REPLACE like scalars, surviving the merge
- * as written for post-merge validation to reject.
- */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
+import {
+  dropWrapperLayering,
+  isPlainObject,
+  normalizeKnobbedSections,
+  resolveUndeclaredPolicies,
+} from "./layers.js";
 
 export function deepMerge(base: unknown, override: unknown): unknown {
   if (override === undefined) {
@@ -40,53 +27,6 @@ export function deepMerge(base: unknown, override: unknown): unknown {
     out[key] = key in override ? deepMerge(base[key], override[key]) : structuredClone(base[key]);
   }
   return out;
-}
-
-/**
- * Step 1 of the knobbed-section merge: rewrite each UNDECLARED_POLICY_SECTIONS
- * value from the plain array form to the wrapped one, PRESERVING OMISSION of
- * the policy key - a plain array becomes `{entries}` with NO `undeclared`.
- * That omission is what lets deepMerge inherit a defaults-file policy: had
- * the plain form been resolved to its default here, the target's resolved
- * default would overwrite the defaults' explicit policy in the merge. Values
- * in neither form (null opt-outs, malformed declarations) pass through
- * untouched so the null semantics and post-merge validation see them as
- * written. Returns a shallow copy; the input is never mutated.
- */
-function normalizeKnobbedSections(settings: unknown): unknown {
-  // A document that is not a mapping (a raw list, a scalar) has no sections
-  // to normalize; hand it to deepMerge untouched so the top-level validator
-  // still sees exactly what was written.
-  if (!isPlainObject(settings)) {
-    return settings;
-  }
-  const out: Record<string, unknown> = { ...settings };
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
-    const value = out[key];
-    if (Array.isArray(value)) {
-      out[key] = { entries: value };
-    }
-  }
-  return out;
-}
-
-/** The section's own default policy, from its undeclaredDefault declaration. */
-function sectionDefaultPolicy(key: (typeof UNDECLARED_POLICY_SECTIONS)[number]): UndeclaredPolicy {
-  return defaultUndeclaredPolicy(sectionModule(key));
-}
-
-/**
- * Step 2, after the merge: a wrapped section that still carries no explicit
- * policy resolves to the section's default, so the merged document is
- * self-describing. Runs on the merged clone, so no input is touched.
- */
-function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
-    const value = merged[key];
-    if (isPlainObject(value) && Array.isArray(value.entries) && value.undeclared === undefined) {
-      value.undeclared = sectionDefaultPolicy(key);
-    }
-  }
 }
 
 /**
@@ -119,7 +59,7 @@ function isMalformedWrapper(value: unknown): boolean {
  * carry meaning of its own (pages: null disables GitHub Pages).
  *
  * Knobbed list sections merge in two steps (normalize, then resolve; see
- * the helpers above), so the wrapped `{undeclared, entries}` form and the
+ * the helpers in layers.ts), so the wrapped `{undeclared, entries}` form and the
  * plain array form inherit correctly across the layers: a target's plain
  * array inherits a defaults-file policy, a target's explicit policy wins,
  * and a still-unset policy resolves to the section default after the merge.
@@ -156,5 +96,8 @@ export function applyDefaults(
     }
   }
   resolveUndeclaredPolicies(merged);
+  // The wrapper's `_layering` addresses a layered merge, not this one; the
+  // engine never reads it.
+  dropWrapperLayering(merged);
   return { settings: merged, disabled };
 }

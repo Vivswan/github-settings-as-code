@@ -97,4 +97,9 @@ export const labelsSection = listSection({
     matchBy: {},
   },
   prose: { undeclaredAction: "DELETE it" },
+  layering: {
+    key: (entry) => (typeof entry.name === "string" ? nameKey(entry.name) : null),
+    keyField: "name",
+    combine: "replace",
+  },
 });
