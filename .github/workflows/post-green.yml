@@ -22,22 +22,14 @@ jobs:
       sha: ${{ inputs.sha }}
     secrets: inherit
 
-  # The `build` branch: every green main commit gets a packaged child (its
-  # tree plus the built lib/index.js) appended to refs/heads/build with a
-  # plain fast-forward push, and the `latest` tag is moved to the new tip
-  # with a lease, so `uses: ...@latest` runs main's newest green code before
-  # a release (main itself is source-only) and the release job that follows
-  # finds the chain commit it tags. Beside apply-settings, not behind it: the
-  # two share no state, and a settings skip must not hold build back.
-  # Idempotent: a rerun on the same sha verifies the chain commit and moves
-  # nothing, and a rerun of an older commit's run finds build already past it
-  # and leaves it there. No permissions key: the job inherits the caller's
-  # grant, and pushes with GITHUB_TOKEN when that grant is contents: write
-  # (the appended tree's .github/workflows/* blobs are byte-identical to
-  # main's, so no workflows permission is needed). REPO_PLATFORM_TOKEN, when
-  # set, is used instead; with neither able to push (today's ci.yml grants
-  # contents: read) the job warns and skips, and the release hook appends the
-  # release's chain commit itself.
+  # Appends the green commit's packaged child to the `build` branch and moves
+  # the `latest` tag (release-pipeline.ts advance-build). Beside
+  # apply-settings, not behind it: a settings skip must not hold build back.
+  # No permissions key: the job inherits the caller's grant and pushes with
+  # GITHUB_TOKEN when that is contents: write, which suffices because chain
+  # commits carry no .github/workflows/ (the same fact update-release.yml's
+  # append relies on); with a read ceiling and no PAT it warns and skips, and
+  # the release hook publishes the release's chain commit and latest itself.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -54,9 +46,7 @@ jobs:
       # access is refused; nothing is created. The target is a ref that never
       # exists, not build itself: HEAD is no descendant of build's tip, so a
       # dry run against build would be rejected locally as a non-fast-forward
-      # whatever the token. A PAT that cannot push is a misconfiguration and
-      # fails the job; a default token that cannot is the caller's ceiling,
-      # and the job skips with a warning.
+      # whatever the token.
       - name: Check the token can push to build
         id: token
         env:
@@ -68,8 +58,8 @@ jobs:
             echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository: $(tr '\n' ' ' <probe.err)"
             exit 1
           else
-            echo "::warning::this run's token cannot push (the caller grants contents: read); the build branch and the latest tag were not advanced." \
-              "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) and Workflows (write) on this repository, to publish @latest."
+            echo "::warning::this run's token cannot push (the caller grants contents: read); the build branch and the latest tag were not advanced here (the release hook advances them on each release)." \
+              "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) on this repository, to publish every green push to @latest."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
           rm -f probe.err

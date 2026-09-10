@@ -18,6 +18,7 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -136,6 +137,21 @@ function commitAll(cwd: string, subject: string): string {
   return git(cwd, "rev-parse", "HEAD");
 }
 
+/** Take the workflows directory out of a clone's index: what every
+ * chain-shaped tree lacks, so a planted chain commit deviates from the
+ * pipeline's only where the test means it to. */
+function stripWorkflows(cwd: string): void {
+  git(cwd, "rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".github/workflows");
+}
+
+/** Every path in a commit's tree. */
+function treePaths(cwd: string, sha: string): string[] {
+  return git(cwd, "ls-tree", "-r", "--name-only", sha).split("\n");
+}
+
+/** The paths a chain commit's diff against its source lists: the workflow removal and the bundle. */
+const PACKAGED_DIFF = ".github/workflows/ci.yml\nlib/index.js";
+
 const CHANGELOG_21 = `# Changelog
 
 ## [2.1.0](https://example.invalid/compare/v2.0.0...v2.1.0) (2026-08-14)
@@ -190,6 +206,10 @@ function seedFixture(): Fixture {
     )}\n`,
   );
   write(work, "CHANGELOG.md", CHANGELOG_21.replace(/## \[2\.1\.0\][\s\S]*?\n\n## /, "## "));
+  // A workflow (which no chain commit may carry) beside another .github
+  // file (which every chain commit keeps).
+  write(work, ".github/workflows/ci.yml", "name: ci\non: push\njobs: {}\n");
+  write(work, ".github/dependabot.yml", "version: 2\nupdates: []\n");
   write(work, "src/marker.ts", "export const marker = 1;\n");
   const seedSha = commitAll(work, "chore: seed the fixture at the 2.0.0 release");
   write(work, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.1.0" }, null, 2)}\n`);
@@ -236,7 +256,7 @@ const remoteRef = (fx: Fixture, ref: string): string => git(fx.work, "ls-remote"
 
 /**
  * A commit shaped like the pipeline's chain commits but minted by another
- * writer: `source`'s tree plus `bundle`, parented on `parent`, naming
+ * writer: `source`'s tree minus workflows plus `bundle`, parented on `parent`, naming
  * `source` in a Source trailer. Not pushed; the clone holding it is returned
  * for a competitor plan to push from.
  */
@@ -249,6 +269,7 @@ function rivalChainCommit(
 ): { from: string; sha: string } {
   const from = clone(fx.root, fx.origin, name);
   git(from, "checkout", "--quiet", source);
+  stripWorkflows(from);
   write(from, "lib/index.js", bundle);
   git(from, "add", "-f", "lib/index.js");
   const tree = git(from, "write-tree");
@@ -306,15 +327,16 @@ function withPushPlans(fx: Fixture, plans: (PushPlan | null)[], body: () => void
       process.env[PLANS_ENV] = before;
     }
   }
+  // No log means no push was attempted; any other trouble reading it must
+  // surface, or a no-push assertion could not tell the two apart.
   const log = join(plansDir, "pushes.log");
-  try {
-    return readFileSync(log, "utf8")
-      .split("\n")
-      .filter((line) => line !== "")
-      .map((line) => line.split(" "));
-  } catch {
+  if (!existsSync(log)) {
     return [];
   }
+  return readFileSync(log, "utf8")
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => line.split(" "));
 }
 
 const appendOf = (sha: string): string[] => ["push", "origin", `${sha}:refs/heads/build`];
@@ -401,25 +423,40 @@ describe("packageRelease", () => {
       });
     });
     const packaged = git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}");
-    expect(result).toEqual({ created: true, packagedSha: packaged });
-    expect(pushes).toEqual([appendOf(packaged), TAG_PUSH]);
-    // The chain's first commit is parented on its source; the tag sits on it.
+    expect(result).toEqual({ created: true, packagedSha: packaged, latestSha: packaged });
+    expect(pushes).toEqual([appendOf(packaged), TAG_PUSH, latestOf("", packaged)]);
+    // The chain's first commit is parented on its source; the tag and latest
+    // sit on it, and so does the major once it moves.
     expect(buildTip(fx)).toBe(packaged);
+    expect(latestTag(fx)).toBe(packaged);
+    retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
+    expect(git(fx.origin, "rev-parse", "refs/tags/v2^{}")).toBe(packaged);
     expect(git(fx.origin, "rev-parse", `${packaged}^`)).toBe(fx.mergeSha);
-    expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, packaged)).toBe("lib/index.js");
+    expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, packaged)).toBe(PACKAGED_DIFF);
+    expect(treePaths(fx.origin, packaged)).toEqual([
+      ".github/dependabot.yml",
+      ".gitignore",
+      ".release-please-manifest.json",
+      "CHANGELOG.md",
+      "lib/index.js",
+      "release-please-config.json",
+      "src/marker.ts",
+    ]);
     expect(git(fx.origin, "show", `${packaged}:lib/index.js`)).toBe("packaged-bundle-bytes-1");
     const body = git(fx.origin, "log", "-1", "--format=%B", packaged);
     expect(body).toContain(`build: main at ${git(fx.origin, "rev-parse", "--short", fx.mergeSha)}`);
     expect(body).toContain("Workflow-run: https://example.invalid/actions/runs/1");
     expect(sourceTrailer(fx.origin, packaged)).toBe(fx.mergeSha);
-    // The release hook does not move latest; post-green does.
-    expect(remoteRef(fx, "refs/tags/latest")).toBe("");
 
     // Idempotent rerun: a fresh checkout that rebuilt the same bytes
     // verifies the existing tag instead of recreating or moving it.
     const rerun = checkoutOf(fx, "rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
-    const verified = packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha });
-    expect(verified).toEqual({ created: false, packagedSha: packaged });
+    let verified: ReturnType<typeof packageRelease> | undefined;
+    const rerunPushes = withPushPlans(fx, [], () => {
+      verified = packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha });
+    });
+    expect(verified).toEqual({ created: false, packagedSha: packaged, latestSha: packaged });
+    expect(rerunPushes).toEqual([]);
     expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(packaged);
     expect(buildTip(fx)).toBe(packaged);
   });
@@ -432,7 +469,8 @@ describe("packageRelease", () => {
     const pushes = withPushPlans(fx, [], () => {
       result = packageRelease({ cwd: release, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    expect(result).toEqual({ created: true, packagedSha: chain });
+    // latest already sits where post-green put it, so no lease push.
+    expect(result).toEqual({ created: true, packagedSha: chain, latestSha: chain });
     expect(pushes).toEqual([TAG_PUSH]);
     expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(chain);
     expect(buildTip(fx)).toBe(chain);
@@ -448,10 +486,91 @@ describe("packageRelease", () => {
     const pushes = withPushPlans(fx, [], () => {
       result = packageRelease({ cwd: release, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    expect(result).toEqual({ created: true, packagedSha: chain });
+    // latest names the newer commit and stays there.
+    expect(result).toEqual({ created: true, packagedSha: chain, latestSha: tip });
     expect(pushes).toEqual([TAG_PUSH]);
     expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(chain);
     expect(buildTip(fx)).toBe(tip);
+    expect(latestTag(fx)).toBe(tip);
+  });
+
+  test("a first release whose latest move failed is healed by its rerun", () => {
+    const fx = seedFixture();
+    const stderr = PERMANENT[0]?.[1] ?? "";
+    let error: unknown;
+    const pushes = withPushPlans(fx, [null, null, { fail: { stderr, status: 128 } }], () => {
+      try {
+        packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
+      } catch (thrown) {
+        error = thrown;
+      }
+    });
+    const packaged = git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}");
+    expect(pushes).toEqual([appendOf(packaged), TAG_PUSH, latestOf("", packaged)]);
+    expect(error).toEqual(
+      new Error(
+        `git push --force-with-lease=refs/tags/latest: origin ${packaged}:refs/tags/latest failed: ${stderr.trim()}`,
+      ),
+    );
+    expect(remoteRef(fx, "refs/tags/latest")).toBe("");
+    // The rerun verifies the tag, then moves latest.
+    const rerun = checkoutOf(fx, "rerun-heal", fx.mergeSha, "packaged-bundle-bytes-1\n");
+    let result: ReturnType<typeof packageRelease> | undefined;
+    const rerunPushes = withPushPlans(fx, [], () => {
+      result = packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha });
+    });
+    expect(result).toEqual({ created: false, packagedSha: packaged, latestSha: packaged });
+    expect(rerunPushes).toEqual([latestOf("", packaged)]);
+    expect(latestTag(fx)).toBe(packaged);
+  });
+
+  test("a rerun of a release whose chain commit is followed by a backfill of an older source judges the backfill on main's full history", () => {
+    const fx = seedFixture();
+    // main: seed -> merge -> next. build: P(merge) with the tag, Q(next), then
+    // a backfill of the SEED after them; latest at Q.
+    const packaged = packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
+    const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
+    const newer = advanceBuild({ cwd: next.dir, sourceSha: next.sha }).buildSha;
+    const backfill = rivalChainCommit(
+      fx,
+      "seed-backfill",
+      fx.seedSha,
+      newer,
+      "packaged-bundle-bytes-0\n",
+    );
+    git(backfill.from, "push", "--quiet", "origin", `${backfill.sha}:refs/heads/build`);
+    // The rerun's checkout is a full clone at the merge commit; fetching the
+    // tag must not cut the seed out of main's history, or the backfill would
+    // read as off main.
+    const rerun = checkoutOf(fx, "rerun-backfilled", fx.mergeSha, "packaged-bundle-bytes-1\n");
+    let result: ReturnType<typeof packageRelease> | undefined;
+    const pushes = withPushPlans(fx, [], () => {
+      result = packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha });
+    });
+    expect(result).toEqual({ created: false, packagedSha: packaged.packagedSha, latestSha: newer });
+    expect(pushes).toEqual([]);
+    // The chain commits fetched at depth 1 are shallow by design; main's own
+    // history behind the merge commit is not.
+    execFileSync("git", ["merge-base", "--is-ancestor", fx.seedSha, fx.mergeSha], { cwd: rerun });
+    expect(latestTag(fx)).toBe(newer);
+  });
+
+  test("a release whose source is older than what latest names appends without moving latest", () => {
+    const fx = seedFixture();
+    // post-green skipped the merge commit; the next green commit was published.
+    const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
+    const newer = advanceBuild({ cwd: next.dir, sourceSha: next.sha }).buildSha;
+    const release = checkoutOf(fx, "release", fx.mergeSha, "packaged-bundle-bytes-1\n");
+    let result: ReturnType<typeof packageRelease> | undefined;
+    const pushes = withPushPlans(fx, [], () => {
+      result = packageRelease({ cwd: release, tag: "v2.1.0", sourceSha: fx.mergeSha });
+    });
+    const tip = buildTip(fx);
+    expect(result).toEqual({ created: true, packagedSha: tip, latestSha: newer });
+    expect(pushes).toEqual([appendOf(tip), TAG_PUSH]);
+    expect(git(fx.origin, "rev-parse", `${tip}^`)).toBe(newer);
+    expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(tip);
+    expect(latestTag(fx)).toBe(newer);
   });
 
   test("an append overtaken by a rival packaging the same source tags the rival's commit", () => {
@@ -471,9 +590,9 @@ describe("packageRelease", () => {
         result = packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
       },
     );
-    expect(result).toEqual({ created: true, packagedSha: rival.sha });
+    expect(result).toEqual({ created: true, packagedSha: rival.sha, latestSha: rival.sha });
     const rejected = appendedSha(pushes[0] ?? []);
-    expect(pushes).toEqual([appendOf(rejected), TAG_PUSH]);
+    expect(pushes).toEqual([appendOf(rejected), TAG_PUSH, latestOf("", rival.sha)]);
     expect(git(fx.work, "rev-parse", `${rejected}^`)).toBe(fx.mergeSha);
     expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(rival.sha);
     expect(buildTip(fx)).toBe(rival.sha);
@@ -497,9 +616,9 @@ describe("packageRelease", () => {
       },
     );
     const tip = buildTip(fx);
-    expect(result).toEqual({ created: true, packagedSha: tip });
+    expect(result).toEqual({ created: true, packagedSha: tip, latestSha: tip });
     const rejected = appendedSha(pushes[0] ?? []);
-    expect(pushes).toEqual([appendOf(rejected), appendOf(tip), TAG_PUSH]);
+    expect(pushes).toEqual([appendOf(rejected), appendOf(tip), TAG_PUSH, latestOf("", tip)]);
     expect(git(fx.work, "rev-parse", `${rejected}^`)).toBe(fx.mergeSha);
     expect(git(fx.origin, "rev-parse", `${tip}^`)).toBe(rival.sha);
     expect(sourceTrailer(fx.origin, tip)).toBe(fx.mergeSha);
@@ -525,9 +644,13 @@ describe("packageRelease", () => {
     message: string[],
     files: Record<string, string>,
     tags: string[] = ["v2.1.0"],
+    workflows: "stripped" | "kept" = "stripped",
   ): string {
     const planter = clone(fx.root, fx.origin, name);
     git(planter, "checkout", "--quiet", from);
+    if (workflows === "stripped") {
+      stripWorkflows(planter);
+    }
     for (const [file, content] of Object.entries(files)) {
       write(planter, file, content);
       git(planter, "add", "-f", file);
@@ -571,7 +694,23 @@ describe("packageRelease", () => {
       "src/marker.ts": "export const marker = 666;\n",
     });
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /is not .* plus lib\/index\.js alone/,
+      /is not .* plus lib\/index\.js and the removal of \.github\/workflows\/ alone: .*src\/marker\.ts/,
+    );
+  });
+
+  test("an existing chain-shaped tag that kept its workflows stops loudly, naming them", () => {
+    const fx = seedFixture();
+    plantTag(
+      fx,
+      "planter-workflows",
+      fx.mergeSha,
+      ["build: by hand", `Source: ${fx.mergeSha}`],
+      { "lib/index.js": "packaged-bundle-bytes-1\n" },
+      ["v2.1.0"],
+      "kept",
+    );
+    expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
+      /is not .* plus lib\/index\.js and the removal of \.github\/workflows\/ alone: .*: \.github\/workflows\/ci\.yml \(kept\)\)/,
     );
   });
 
@@ -586,6 +725,7 @@ describe("packageRelease", () => {
 
   test("a detached packaged child from before the build branch verifies by its recorded source", () => {
     const fx = seedFixture();
+    // The whole source tree, workflows included: the legacy shape.
     const planted = plantTag(
       fx,
       "legacy",
@@ -593,11 +733,14 @@ describe("packageRelease", () => {
       legacyMessage(fx.mergeSha),
       { "lib/index.js": "packaged-bundle-bytes-1\n" },
       ["v2.1.0", "v2"],
+      "kept",
     );
     expect(sourceTrailer(fx.origin, planted)).toBe("");
+    expect(treePaths(fx.origin, planted)).toContain(".github/workflows/ci.yml");
     expect(packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
       created: false,
       packagedSha: planted,
+      latestSha: null,
     });
     expect(retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
       major: "v2",
@@ -613,9 +756,15 @@ describe("packageRelease", () => {
 
   test("a detached packaged child recording another source is rejected the same way", () => {
     const fx = seedFixture();
-    plantTag(fx, "legacy-wrong", fx.mergeSha, legacyMessage(fx.seedSha), {
-      "lib/index.js": "packaged-bundle-bytes-1\n",
-    });
+    plantTag(
+      fx,
+      "legacy-wrong",
+      fx.mergeSha,
+      legacyMessage(fx.seedSha),
+      { "lib/index.js": "packaged-bundle-bytes-1\n" },
+      ["v2.1.0"],
+      "kept",
+    );
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
       `refs/tags/v2.1.0 exists but records ${fx.seedSha} as its source, not this release's merge commit ${fx.mergeSha}; the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.`,
     );
@@ -732,6 +881,7 @@ describe("retagMajor", () => {
     // carrying the WRONG bundle bytes; only the byte verification catches it.
     const planter = clone(fx.root, fx.origin, "planter-wrong-bytes");
     git(planter, "checkout", "--quiet", fx.mergeSha);
+    stripWorkflows(planter);
     git(planter, "config", "user.name", "planter");
     git(planter, "config", "user.email", "planter@example.invalid");
     write(planter, "lib/index.js", "planted-wrong-bytes\n");
@@ -883,11 +1033,12 @@ describe("verifyPublishedRefs", () => {
 
   test("a version tag that changes more than the bundle fails the confirmation", () => {
     const fx = seedFixture();
-    // The merge commit's tree plus the bundle plus a tampered action.yml,
+    // The merge commit's chain tree (minus workflows, plus the bundle) plus a tampered action.yml,
     // parented on the seed so nothing but the confirmation's own fetch can
     // bring the merge commit's tree to a shallow checkout.
     const planter = clone(fx.root, fx.origin, "verify-planter-extra");
     git(planter, "checkout", "--quiet", fx.mergeSha);
+    stripWorkflows(planter);
     write(planter, "lib/index.js", "packaged-bundle-bytes-1\n");
     write(planter, "action.yml", "name: tampered\n");
     git(planter, "add", "-f", "lib/index.js", "action.yml");
@@ -913,7 +1064,9 @@ describe("verifyPublishedRefs", () => {
     const checker = shallowChecker(fx, "verify-tampered");
     expect(() =>
       verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha }),
-    ).toThrow(/is not .* plus lib\/index\.js alone: .*action\.yml/);
+    ).toThrow(
+      /is not .* plus lib\/index\.js and the removal of \.github\/workflows\/ alone: .*action\.yml/,
+    );
   });
 
   test("a version tag recording another source fails the confirmation", () => {
@@ -1348,7 +1501,7 @@ describe("advanceBuild", () => {
     expect(pushes).toEqual([appendOf(tip), latestOf("", tip)]);
     expect(latestTag(fx)).toBe(tip);
     expect(git(fx.origin, "rev-parse", `${tip}^`)).toBe(fx.mergeSha);
-    expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, tip)).toBe("lib/index.js");
+    expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, tip)).toBe(PACKAGED_DIFF);
     expect(git(fx.origin, "show", `${tip}:lib/index.js`)).toBe("packaged-bundle-bytes-1");
     const body = git(fx.origin, "log", "-1", "--format=%B", tip);
     expect(body).toContain(`build: main at ${git(fx.origin, "rev-parse", "--short", fx.mergeSha)}`);
@@ -1391,7 +1544,7 @@ describe("advanceBuild", () => {
     expect(pushes).toEqual([appendOf(tip), latestOf(first, tip)]);
     expect(latestTag(fx)).toBe(tip);
     expect(git(fx.origin, "rev-parse", `${tip}^`)).toBe(first);
-    expect(git(fx.origin, "diff", "--name-only", next.sha, tip)).toBe("lib/index.js");
+    expect(git(fx.origin, "diff", "--name-only", next.sha, tip)).toBe(PACKAGED_DIFF);
     expect(git(fx.origin, "show", `${tip}:lib/index.js`)).toBe("packaged-bundle-bytes-2");
     expect(git(fx.origin, "show", `${tip}:src/marker.ts`)).toBe(
       'export const marker = "second-green";',
@@ -1415,6 +1568,34 @@ describe("advanceBuild", () => {
     expect(latestTag(fx)).toBe(tip);
   });
 
+  test("a chain commit carries the source without its workflows, and a workflow change between two appends pushes cleanly", () => {
+    const fx = seedFixture();
+    const first = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
+    const paths = treePaths(fx.origin, first);
+    expect(paths.filter((path) => path.startsWith(".github/workflows/"))).toEqual([]);
+    expect(paths).toContain(".github/dependabot.yml");
+    expect(paths).toContain("lib/index.js");
+    // main changes a workflow and adds another; the chain commit that follows
+    // carries neither (GitHub's refusal of workflow pushes to a token without
+    // the workflows grant is judged per push, so this is the shape the fixture
+    // can pin), and its diff against its own source is the removal plus the bundle.
+    const dir = clone(fx.root, fx.origin, "workflow-change");
+    write(dir, ".github/workflows/ci.yml", "name: ci\non: [push, pull_request]\njobs: {}\n");
+    write(dir, ".github/workflows/nightly.yml", "name: nightly\non: schedule\njobs: {}\n");
+    const sha = commitAll(dir, "ci: change the workflows");
+    git(dir, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+    write(dir, "lib/index.js", "packaged-bundle-bytes-2\n");
+    const second = advanceBuild({ cwd: dir, sourceSha: sha });
+    expect(second.changed).toBe(true);
+    expect(parentOf(fx.origin, second.buildSha)).toBe(first);
+    expect(
+      treePaths(fx.origin, second.buildSha).filter((path) => path.startsWith(".github/workflows/")),
+    ).toEqual([]);
+    expect(git(fx.origin, "diff", "--name-only", sha, second.buildSha)).toBe(
+      ".github/workflows/ci.yml\n.github/workflows/nightly.yml\nlib/index.js",
+    );
+  });
+
   test("a stale rerun of a commit build skipped finds build already past it and appends nothing", () => {
     const fx = seedFixture();
     advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
@@ -1436,8 +1617,8 @@ describe("advanceBuild", () => {
   });
 
   /** A hand-planted refs/tags/latest naming `source` in a Source trailer:
-   * `source`'s tree plus `files` over the planted bundle, parented on
-   * `parent`, force-pushed as the tag. */
+   * `source`'s tree minus workflows plus `files` over the planted bundle,
+   * parented on `parent`, force-pushed as the tag. */
   function plantLatest(
     fx: Fixture,
     name: string,
@@ -1447,6 +1628,7 @@ describe("advanceBuild", () => {
   ): string {
     const planter = clone(fx.root, fx.origin, name);
     git(planter, "checkout", "--quiet", source);
+    stripWorkflows(planter);
     write(planter, "lib/index.js", "planted\n");
     git(planter, "add", "-f", "lib/index.js");
     for (const [file, content] of Object.entries(files)) {
@@ -1515,6 +1697,7 @@ describe("advanceBuild", () => {
     // the chain, and rolling it back to the older tip would be wrong.
     const filler = clone(fx.root, fx.origin, "latest-filler");
     git(filler, "checkout", "--quiet", fx.seedSha);
+    stripWorkflows(filler);
     write(filler, "lib/index.js", "packaged-bundle-bytes-0\n");
     git(filler, "add", "-f", "lib/index.js");
     const tree = git(filler, "write-tree");
@@ -1579,6 +1762,7 @@ describe("advanceBuild", () => {
   ): string {
     const planter = clone(fx.root, fx.origin, name);
     git(planter, "checkout", "--quiet", from);
+    stripWorkflows(planter);
     for (const [file, content] of Object.entries(files)) {
       if (typeof content === "string") {
         write(planter, file, content);
@@ -1614,11 +1798,12 @@ describe("advanceBuild", () => {
   const foreign = (tip: string, source: string): string =>
     `refs/heads/build is at ${tip}, built from ${source}, which is not on main's history; refusing to append to a build branch this pipeline did not advance - inspect it by hand.`;
 
-  /** The tree `source` plus the planted bundle would have: what a tip that
-   * names `source` is held against. */
+  /** The tree `source` minus workflows plus the planted bundle would have:
+   * what a tip that names `source` is held against. */
   function rebuiltTree(fx: Fixture, name: string, source: string): string {
     const rebuild = clone(fx.root, fx.origin, name);
     git(rebuild, "checkout", "--quiet", source);
+    stripWorkflows(rebuild);
     write(rebuild, "lib/index.js", "planted\n");
     git(rebuild, "add", "-f", "lib/index.js");
     return git(rebuild, "write-tree");
@@ -1637,15 +1822,17 @@ describe("advanceBuild", () => {
     const actual = git(fx.origin, "rev-parse", `${planted}^{tree}`);
     const expected = rebuiltTree(fx, `rebuilt-${planted.slice(0, 8)}`, source);
     return new Error(
-      `refs/heads/build ${where} ${planted}, which names ${source} as its source but is not ${source} plus lib/index.js alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond the bundle changed relative to ${source}: ${changed}); ${byHand}`,
+      `refs/heads/build ${where} ${planted}, which names ${source} as its source but is not ${source} plus lib/index.js and the removal of .github/workflows/ alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ${source}: ${changed}); ${byHand}`,
     );
   }
 
-  /** A tip crafted with plumbing: `from`'s tree plus the planted bundle plus
-   * an EMPTY subtree at `empty/`, which a path diff cannot list. */
+  /** A tip crafted with plumbing: `from`'s tree minus workflows plus the
+   * planted bundle plus an EMPTY subtree at `empty/`, which a path diff
+   * cannot list. */
   function plantEmptySubtreeBuild(fx: Fixture, from: string): string {
     const planter = clone(fx.root, fx.origin, "build-empty-subtree");
     git(planter, "checkout", "--quiet", from);
+    stripWorkflows(planter);
     write(planter, "lib/index.js", "planted\n");
     git(planter, "add", "-f", "lib/index.js");
     const emptyTree = execFileSync("git", ["hash-object", "-w", "-t", "tree", "--stdin"], {
@@ -1866,6 +2053,7 @@ describe("advanceBuild", () => {
   ): { from: string; plans: PushPlan[]; shas: string[]; first: string; last: string } {
     const from = clone(fx.root, fx.origin, "build-competitor");
     git(from, "checkout", "--quiet", fx.seedSha);
+    stripWorkflows(from);
     write(from, "lib/index.js", "competitor-bundle\n");
     git(from, "add", "-f", "lib/index.js");
     const shas: string[] = [];
@@ -2034,6 +2222,7 @@ describe("advanceBuild", () => {
       // appends it, so the tip this run reads next is the backfill.
       const rival = clone(fx.root, fx.origin, "backfill");
       git(rival, "checkout", "--quiet", fx.mergeSha);
+      stripWorkflows(rival);
       write(rival, "lib/index.js", "packaged-bundle-bytes-1\n");
       git(rival, "add", "-f", "lib/index.js");
       const rivalTree = git(rival, "write-tree");

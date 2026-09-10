@@ -53,9 +53,9 @@ The [getting started guide](docs/start/getting-started.md) walks the same steps 
 ## Versioning
 
 - `@v2` is a moving major tag: <!-- x-release-please-major --> every release in that major line moves it, so fixes arrive without changing your pin. Stable within the line; pin it for production.
-- `@latest` is a moving tag on main's newest green commit, packaged with the built action and moved after every green push. Breaking changes arrive there unannounced, ahead of any release.
+- `@latest` is a moving tag on the newest packaged commit of the `build` branch: main's newest green commit with the built action, moved on every release and, where the repository's own CI can push, on every green push. Breaking changes arrive there unannounced, ahead of any release. The tag exists from the first release cut on the `build` branch.
 - Pin `@vX.Y.Z` (or a commit SHA) for byte-stable behavior. Every version tag points at a packaged commit carrying the built action, whose recorded source is the audited release commit on main. A ruleset freezes the tags.
-- Every packaged commit now lives on the `build` branch, one per green push; the tags of releases cut before that branch existed keep pointing at their detached packaged commits. `main` is source-only and not runnable as an action.
+- Packaged commits live on the `build` branch: each is its source commit's tree without `.github/workflows/`, plus the built action (consumers run the action, not this repository's workflows). The tags of releases cut before that branch existed keep pointing at their detached packaged commits. `main` is source-only and not runnable as an action.
 - v2 activates settings keys that were inert on v1: `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos`, and `branches[].protection.required_signatures`. Audit them in your files before moving a `@v1` pin; a stale `required_signatures: false` would remove a hand-enabled requirement.
 - Only the latest release is supported; fixes are not backported (see [SECURITY.md](.github/SECURITY.md)).
 
