@@ -67,6 +67,8 @@ jobs:
 
 Each trigger earns its place. The push trigger runs the action on every reviewed change to the settings file: a check while `mode: check` is set, an apply once step 5 removes it. `workflow_dispatch` lets you run the action by hand from the Actions tab, which is how the first run happens. The schedule catches drift: in check mode a weekly run turns red when the live settings diverge from the file, and after the switch to apply it re-asserts the declared keys and reverts anything changed through the UI in the meantime (apply is convergent, see [Semantics](../reference/semantics.md)).
 
+The `@v2` pin <!-- x-release-please-major --> is the moving major tag, stable within its line; `@latest` runs main's newest green commit instead, where breaking changes arrive unannounced, so keep production on the major pin.
+
 ## 4. Run check mode first
 
 `mode: check` compares the declared settings against the live repository, makes no settings changes, and exits 1 when anything differs. Trigger the workflow from the Actions tab. On a repository with existing labels the run will fail with drift, and that is the point: the report lists exactly what an apply would change or delete. The log shows one line per difference:

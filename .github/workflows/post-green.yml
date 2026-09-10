@@ -21,3 +21,56 @@ jobs:
     with:
       sha: ${{ inputs.sha }}
     secrets: inherit
+
+  # The moving `latest` branch: every green main commit gets a packaged child
+  # (its tree plus the built lib/index.js) appended to refs/heads/latest with
+  # a plain fast-forward push, so `uses: ...@latest` runs main's newest green
+  # code before a release (main itself is source-only). Beside apply-settings,
+  # not behind it: the two share no state, and a settings skip must not hold
+  # latest back. Idempotent: a rerun on the same sha verifies the tip and
+  # pushes nothing, and a rerun of an older commit's run finds latest already
+  # past it and leaves it there. The push needs contents: write and this
+  # workflow's ceiling is the caller's contents: read (ci.yml), so it pushes
+  # with REPO_PLATFORM_TOKEN via inherit and skips with a warning until that
+  # secret exists.
+  latest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve token
+        id: token
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          if [ -n "$PAT" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::REPO_PLATFORM_TOKEN is not set; the latest ref was not advanced. Add a PAT secret" \
+              "with Contents (read and write) on this repository to publish @latest."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.token.outputs.proceed == 'true'
+        with:
+          ref: ${{ inputs.sha }}
+          # The script judges whether latest's recorded source lies on this
+          # commit's history; a shallow checkout cannot answer that.
+          fetch-depth: 0
+          token: ${{ secrets.REPO_PLATFORM_TOKEN }}
+      - uses: oven-sh/setup-bun@v2
+        if: steps.token.outputs.proceed == 'true'
+        with:
+          bun-version-file: .bun-version
+      - name: Build the bundle
+        if: steps.token.outputs.proceed == 'true'
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build:bundle
+      - name: Advance latest to this commit's packaged child
+        if: steps.token.outputs.proceed == 'true'
+        env:
+          SOURCE_SHA: ${{ inputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts advance-latest

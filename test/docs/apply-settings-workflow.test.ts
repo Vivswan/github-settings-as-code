@@ -273,7 +273,9 @@ interface CallerContract {
   /** The whole workflow_call interface ci.yml must satisfy. */
   inputs: Record<string, { required: boolean; type: string | undefined; hasDefault: boolean }>;
   secrets: string[];
-  /** Every job, with its exact key set: nothing may gate, lane, or extend the call. */
+  /** Every job, with its exact key set: nothing may gate, lane, or extend the call,
+   * and the only job beside it is the latest-branch publisher (self-contained steps,
+   * no call of its own). */
   jobs: Array<{ id: string; keys: string[]; uses: unknown; with: unknown; secrets: unknown }>;
 }
 
@@ -289,6 +291,13 @@ const CALLER_EXPECTED: CallerContract = {
       uses: "./.github/workflows/apply-settings.yml",
       with: { sha: `\${{ inputs.sha }}` },
       secrets: "inherit",
+    },
+    {
+      id: "latest",
+      keys: ["permissions", "runs-on", "steps", "timeout-minutes"],
+      uses: undefined,
+      with: undefined,
+      secrets: undefined,
     },
   ],
 };
@@ -352,7 +361,7 @@ describe("post-green.yml reaches the hook", () => {
       "jobs",
     ],
     [
-      "a second job beside the call",
+      "an undeclared job beside the call",
       (w) => (w.jobs.extra = { "runs-on": "ubuntu-latest", steps: [{ run: "echo" }] }),
       "jobs",
     ],

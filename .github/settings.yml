@@ -70,3 +70,23 @@ rulesets:
       - actor_id: 5
         actor_type: RepositoryRole
         bypass_mode: always
+
+  # The moving `latest` branch: post-green.yml appends a packaged child of
+  # every green main commit with a plain push, so @latest may only ever move
+  # forward along main's history - no force-push can rewrite what a consumer
+  # already ran, and no deletion can brick every @latest consumer at once.
+  # Declared with NO bypass, like the fleet's non-bypassable ruleset: an
+  # omitted key is invisible to drift detection, so the empty list is what
+  # lets the apply heal an out-of-band bypass actor.
+  - name: latest
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - latest
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+    bypass_actors: []
