@@ -42,11 +42,12 @@ rulesets:
   # every release. A same-name ruleset merges key by key and an array
   # replaces wholesale, so this entry swaps only the include list and
   # inherits everything else (rules, enforcement, bypass) from the fleet.
-  # The vX.Y.Z tags stay immutable: each points at a commit on the `build`
-  # branch (its release commit's tree without its workflows, plus the built
-  # bundle) that template-sync workflow pins and release artifacts
-  # reference. The `latest` tag matches neither pattern; its own ruleset is
-  # below.
+  # The vX.Y.Z tags stay immutable: each points at a packaged commit that
+  # template-sync workflow pins and release artifacts reference - on the
+  # `build` branch (the release commit's tree without its workflows, plus
+  # the built bundle) for releases cut since that branch exists, detached
+  # with the whole tree for the ones before. The `latest` tag matches
+  # neither pattern; its own ruleset is below.
   - name: release-tags
     conditions:
       ref_name:

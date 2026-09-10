@@ -657,7 +657,8 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
  * shape its record implies (chain: minus workflows plus the bundle; legacy:
  * plus the bundle; a planted commit that keeps the expected bundle but
  * edits action.yml fails either way), and it carries exactly the bytes the
- * fresh build in the worktree produced. Returns the commit and its shape.
+ * fresh build in the worktree produced; a chain-shaped one must also sit on
+ * build. Returns the commit and its shape.
  */
 function verifyPackagedTag(
   cwd: string,
@@ -686,6 +687,9 @@ function verifyPackagedTag(
     throw new Error(
       `refs/tags/${tag} carries a ${BUNDLE_FILE} that is not a build of ${sourceSha}'s source; ${frozen}`,
     );
+  }
+  if (recorded.shape === "chain") {
+    assertOnChain(cwd, packagedSha, `refs/tags/${tag} (${packagedSha})`, frozen);
   }
   return { sha: packagedSha, shape: recorded.shape };
 }
@@ -785,7 +789,7 @@ export interface VerifyOptions {
  * version tag and its major - must point at a packaged commit recording
  * this release's merge commit as its source, and that commit's tree must
  * be the merge commit's package in the shape its record implies and
- * nothing else.
+ * nothing else; a chain-shaped one must sit on build.
  */
 export function verifyPublishedRefs(options: VerifyOptions): {
   major: string;
@@ -820,6 +824,14 @@ export function verifyPublishedRefs(options: VerifyOptions): {
     `origin's refs/tags/${tag} (${packagedSha})`,
     "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.",
   );
+  if (recorded.shape === "chain") {
+    assertOnChain(
+      cwd,
+      packagedSha,
+      `origin's refs/tags/${tag} (${packagedSha})`,
+      "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.",
+    );
+  }
   const majorSha = git(cwd, "rev-parse", `refs/verify/${major}^{}`);
   if (majorSha !== packagedSha) {
     throw new Error(
@@ -1221,6 +1233,31 @@ function newerChainCommit(
   }
   const walk = walkChain(cwd, tip, mainHead, (commit) => commit === observed);
   return "ended" in walk ? null : source;
+}
+
+/**
+ * A chain-shaped commit is trusted only ON build: the ruleset-protected
+ * chain is the trust boundary, and a detached commit with the right tree,
+ * bytes, and Source trailer must not be blessed as a release or become what
+ * latest names. Walked from build's tip; a walk that hits its bound has
+ * proven nothing either way and stops loudly rather than guess.
+ */
+function assertOnChain(cwd: string, packaged: string, ref: string, remedy: string): void {
+  const build = readBuildTip(cwd);
+  if (build.tip === null) {
+    throw new Error(`${ref} is chain-shaped but ${BUILD_REF} does not exist on origin; ${remedy}`);
+  }
+  const walk = walkChain(cwd, build.tip, build.mainHead, (commit) => commit === packaged);
+  if ("ended" in walk) {
+    throw new Error(
+      `${ref} is chain-shaped but not on ${BUILD_REF} (walked from its tip ${build.tip} to the chain's end without meeting it); ${remedy}`,
+    );
+  }
+  if ("exhausted" in walk) {
+    throw new Error(
+      `${ref} was not met within ${CHAIN_WALK} commits of ${BUILD_REF}'s tip ${build.tip}, so whether it is on the chain is unproven; ${remedy}`,
+    );
+  }
 }
 
 /** assertPackages as a question, for a commit this pipeline may leave alone rather than stop on. */

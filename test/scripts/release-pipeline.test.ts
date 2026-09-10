@@ -245,6 +245,26 @@ function sourceTrailer(cwd: string, sha: string): string {
   return git(cwd, "log", "-1", "--format=%(trailers:key=Source,valueonly)", sha);
 }
 
+/** The verify job's checkout: main's head at depth 1, made after main
+ * moved past the merge commit, so the merge commit's tree is not local
+ * and only the confirmation's own fetch can supply it. */
+function shallowChecker(fx: Fixture, name: string): string {
+  pushGreenCommit(fx, `${name}-after-release`, "packaged-bundle-bytes-9\n");
+  const checker = join(fx.root, name);
+  execFileSync("git", ["clone", "--quiet", "--depth", "1", `file://${fx.origin}`, checker]);
+  let known = true;
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${fx.mergeSha}^{commit}`], {
+      cwd: checker,
+      stdio: "ignore",
+    });
+  } catch {
+    known = false;
+  }
+  expect(known).toBe(false);
+  return checker;
+}
+
 const buildTip = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/heads/build");
 /** A commit's first parent as its object records it: `rev-parse <sha>^` fails
  * once the pipeline's depth-1 fetch of the tip has marked that commit shallow
@@ -770,6 +790,62 @@ describe("packageRelease", () => {
     );
   });
 
+  test("a chain-shaped tag on a commit that is not on build is refused, even with the right tree and bytes", () => {
+    const fx = seedFixture();
+    // build holds the seed's package; the planted tag has the merge commit's
+    // exact chain tree, its bundle bytes, and a Source trailer, but is
+    // parented on the merge commit itself, off the chain.
+    advanceBuild({
+      cwd: checkoutOf(fx, "seed-run", fx.seedSha, "packaged-bundle-bytes-0\n"),
+      sourceSha: fx.seedSha,
+    });
+    const tip = buildTip(fx);
+    const planted = plantTag(
+      fx,
+      "planter-detached",
+      fx.mergeSha,
+      ["build: by hand", `Source: ${fx.mergeSha}`],
+      {
+        "lib/index.js": "packaged-bundle-bytes-1\n",
+      },
+    );
+    const refusal = `refs/tags/v2.1.0 (${planted}) is chain-shaped but not on refs/heads/build (walked from its tip ${tip} to the chain's end without meeting it); the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.`;
+    let error: unknown;
+    const pushes = withPushPlans(fx, [], () => {
+      try {
+        packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
+      } catch (thrown) {
+        error = thrown;
+      }
+    });
+    expect(error).toEqual(new Error(refusal));
+    expect(pushes).toEqual([]);
+    // latest stays on the seed's package: the detached commit never becomes what it names.
+    expect(latestTag(fx)).toBe(tip);
+    expect(() => retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
+      refusal,
+    );
+    expect(remoteRef(fx, "refs/tags/v2")).toBe("");
+    git(fx.work, "push", "--quiet", "origin", `${planted}:refs/tags/v2`);
+    expect(() =>
+      verifyPublishedRefs({
+        cwd: shallowChecker(fx, "verify-detached"),
+        tag: "v2.1.0",
+        sourceSha: fx.mergeSha,
+      }),
+    ).toThrow(`origin's ${refusal}`);
+  });
+
+  test("a chain-shaped tag with no build branch at all is refused", () => {
+    const fx = seedFixture();
+    plantTag(fx, "planter-nobuild", fx.mergeSha, ["build: by hand", `Source: ${fx.mergeSha}`], {
+      "lib/index.js": "packaged-bundle-bytes-1\n",
+    });
+    expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
+      /is chain-shaped but refs\/heads\/build does not exist on origin/,
+    );
+  });
+
   test("a checkout that is not the merge commit refuses to package", () => {
     const fx = seedFixture();
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.seedSha })).toThrow(
@@ -970,26 +1046,6 @@ describe("retagMajor", () => {
 });
 
 describe("verifyPublishedRefs", () => {
-  /** The verify job's checkout: main's head at depth 1, made after main
-   * moved past the merge commit, so the merge commit's tree is not local
-   * and only the confirmation's own fetch can supply it. */
-  function shallowChecker(fx: Fixture, name: string): string {
-    pushGreenCommit(fx, `${name}-after-release`, "packaged-bundle-bytes-9\n");
-    const checker = join(fx.root, name);
-    execFileSync("git", ["clone", "--quiet", "--depth", "1", `file://${fx.origin}`, checker]);
-    let known = true;
-    try {
-      execFileSync("git", ["rev-parse", "--verify", "--quiet", `${fx.mergeSha}^{commit}`], {
-        cwd: checker,
-        stdio: "ignore",
-      });
-    } catch {
-      known = false;
-    }
-    expect(known).toBe(false);
-    return checker;
-  }
-
   test("the version tag and the major point at the same packaged, bundle-carrying chain commit", () => {
     const fx = seedFixture();
     // The seed's package comes first, so the release's chain commit is not
@@ -1005,6 +1061,20 @@ describe("verifyPublishedRefs", () => {
     const verified = verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha });
     expect(verified).toEqual({ major: "v2", packagedSha });
     expect(packagedSha).toBe(buildTip(fx));
+    // Later green pushes move the tip past the tag; the confirmation from a
+    // fresh shallow checkout still finds the tag's commit on the chain.
+    for (const name of ["third-green", "fourth-green"]) {
+      const next = pushGreenCommit(fx, name, `packaged-bundle-${name}\n`);
+      advanceBuild({ cwd: next.dir, sourceSha: next.sha });
+    }
+    expect(buildTip(fx)).not.toBe(packagedSha);
+    expect(
+      verifyPublishedRefs({
+        cwd: shallowChecker(fx, "verify-behind"),
+        tag: "v2.1.0",
+        sourceSha: fx.mergeSha,
+      }),
+    ).toEqual({ major: "v2", packagedSha });
   });
 
   test("a major left on a different commit fails the confirmation", () => {
