@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type Layer, type Layering, mergeLayers, stripNulls } from "../../src/engine/layers.js";
-import { applyDefaults } from "../../src/engine/merge.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { SettingsFile } from "../../src/schema.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { silentIo } from "../io-fake.js";
@@ -719,33 +717,6 @@ describe("mergeLayers: layer-boundary refusals", () => {
         milestones: { undeclared: "keep", entries: [{ title: "v1" }] },
       },
       notices: [],
-    });
-  });
-});
-
-describe("applyDefaults and the wrapper directive", () => {
-  const defaults = {
-    labels: { undeclared: "keep", entries: [{ name: "fleet" }] },
-  } as SettingsFile;
-
-  test.each([
-    ["a recognized directive is dropped from the result", "merge", {}],
-    ["an unrecognized value survives for validation", "union", { _layering: "union" }],
-  ])("%s, nothing else changes", (_name, directive, survivor) => {
-    const repo = { labels: { _layering: directive, entries: [{ name: "mine" }] } };
-    expect(applyDefaults(defaults, deepFreeze(repo))).toEqual({
-      settings: { labels: { ...survivor, undeclared: "keep", entries: [{ name: "mine" }] } },
-      disabled: [],
-    });
-  });
-
-  test("an unrecognized directive reaches the validator, which names the key", () => {
-    const repo = { labels: { _layering: "union", entries: [] } };
-    const { settings } = applyDefaults(defaults, deepFreeze(repo));
-    expect(validateSettingsDoc(settings, "repo", new Set(), silentIo())).toEqual({
-      error: expect.stringContaining(
-        'labels._layering: Invalid option: expected one of "merge"|"replace"',
-      ),
     });
   });
 });

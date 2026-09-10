@@ -148,12 +148,15 @@ export const INPUT_DECLS = {
   },
   "defaults-file": {
     description:
-      "YAML file deep-merged UNDER every multi-repo target's settings. Target keys win; " +
-      "objects merge, arrays and scalars replace; a target section set to null opts that " +
-      "repository out of the defaults section. Multi-repo mode only; fails when set without " +
-      "repos or repos-dir.",
+      "YAML settings document applied to every multi-repo target that has no settings file of " +
+      "its own (a repos target without .github/settings.yml, which is otherwise skipped). A " +
+      "target with its own file is applied as written; the defaults are never merged into it. " +
+      'With repos: "*" every discovered repository without a settings file receives the ' +
+      "defaults; run mode: check first. Multi-repo mode only; fails when set without repos or " +
+      "repos-dir.",
     default: "",
-    summary: "YAML merged under every multi-repo target's settings (multi-repo mode only)",
+    summary:
+      "YAML applied to every multi-repo target without a settings file (multi-repo mode only)",
   },
   layering: {
     description:
@@ -743,7 +746,7 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   if (defaultsFile) {
     return {
       error:
-        'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never be merged. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode',
+        'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never apply. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode',
     };
   }
   // Only a merge folds a list; the engine modes read exactly one file, so

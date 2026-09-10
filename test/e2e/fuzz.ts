@@ -736,9 +736,10 @@ async function persistentChaosIteration(
  * Multi-repo fuzz: generate a 2-5 repo scenario, predict each target's outcome
  * class + the worst-of rollup, run it through the multi-repo path, and assert
  * the per-target results and the run exit code fall in the predicted classes.
- * A missing-settings target, or one whose `contents` read is denied, is
- * settings-gated (skipped, or failed under the 403 style); the oracle carries
- * each target's allowed repo-level result, so this only checks membership.
+ * A missing-settings target runs the defaults document; one whose `contents`
+ * read is denied fails at the settings gate (the action cannot prove the file
+ * absent); the oracle carries each target's allowed repo-level result, so this
+ * only checks membership.
  */
 async function multiRepoFuzzIteration(seed: number): Promise<IterationResult> {
   const { scenario, meta } = genMultiScenario(new Rng(seed));

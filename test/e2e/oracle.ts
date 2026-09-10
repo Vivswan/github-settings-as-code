@@ -18,7 +18,7 @@ import {
 import type { SectionPermission } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { displayKeyOf, type MultiScenarioMeta, type ScenarioMeta } from "./generators.js";
-import { type DenialStyle, GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
+import { GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
 
 /** A section outcome the step summary can report. */
 type Outcome = "applied" | "clean" | "drift" | "skipped" | "failed" | "excluded";
@@ -472,16 +472,17 @@ interface RepoPrediction {
   /** True when this target is hidden from the public view (drives the leak check). */
   redacted: boolean;
   /**
-   * null when this target produces no per-section run: either it has no settings
-   * file, or its settings file is unreadable because `contents` is denied. In
-   * both cases `allowedResults` carries the repo-level outcome the action reports.
+   * null when this target produces no per-section run: it has no settings file
+   * and the scenario has no defaults document (skipped), or its settings read
+   * is denied (failed). In both cases `allowedResults` carries the repo-level
+   * outcome the action reports.
    */
   run: RunPrediction | null;
   /**
-   * The repo-level result strings this target may report. For a normal target it
-   * is the union of its sections' outcomes (plus the multi "partial" alias); for
-   * a skipped/unreadable target it is the settings-gate outcome (skipped, or
-   * failed under the 403 style / fail policy).
+   * The repo-level result strings this target may report. For a target that
+   * runs (its own document, or the defaults document) it is the union of its
+   * sections' outcomes (plus the multi "partial" alias); for a settings-gated
+   * target it is the gate outcome (skipped, or failed).
    */
   allowedResults: Set<string>;
 }
@@ -601,30 +602,12 @@ function runResultClass(run: RunPrediction): Set<string> {
 }
 
 /**
- * The repo-level result when a target's settings file cannot be read because
- * `contents` is denied. The action reads .github/settings.yml through the
- * contents endpoint before any section runs (src/github/repo-file.ts). A denied
- * contents read 404s; the action then probes the repo (an administration-gated
- * GET /repos/{slug}) to disambiguate:
- *   - 403 style: the contents read fails outright, so the target FAILS.
- *   - fine_grained + administration readable: the repo probe succeeds with
- *     pull:true, so the 404 reads as a missing file and the target is SKIPPED.
- *   - fine_grained + administration denied: the repo probe ALSO 404s, so the
- *     read is "visible but unreadable" and the target FAILS.
- */
-function settingsGateResult(denialStyle: DenialStyle, adminGrade: MaskGrade): Set<string> {
-  if (denialStyle === 403) {
-    return new Set(["failed"]);
-  }
-  return adminGrade === "none" ? new Set(["failed"]) : new Set(["skipped"]);
-}
-
-/**
  * Predict a multi-repo run: predict each target independently, then apply the
- * mechanical rollup. A target is settings-gated (no per-section run) when it has
- * no settings file (skipped) or its `contents` grade is none, so the settings
- * file itself is unreadable. The run exits 1 when any target fails, or in check
- * mode when any target drifts; skipped targets do not raise the exit alone.
+ * mechanical rollup. A target without a settings file runs the defaults
+ * document when the scenario has one (meta.defaults) and is skipped otherwise.
+ * A target is settings-gated (no per-section run) when it is skipped or its
+ * settings read fails. The run exits 1 when any target fails, or in check mode
+ * when any target drifts; skipped targets do not raise the exit alone.
  */
 export function predictMulti(meta: MultiScenarioMeta): MultiPrediction {
   const repos: RepoPrediction[] = meta.repos.map((repo) => {
@@ -634,8 +617,15 @@ export function predictMulti(meta: MultiScenarioMeta): MultiPrediction {
       redacted: repo.redaction.kind === "redacted",
     };
     if (repo.target.kind === "missing") {
-      // No settings file: the contents read 404s and the target is skipped.
-      return { ...common, run: null, allowedResults: new Set(["skipped"]) };
+      // No settings file: the contents read 404s and the default branch's ref
+      // read proves the file absent. With a defaults document the target runs
+      // it under this slug's mask (none is set: the mock grades it at the
+      // default write grade); without one it is skipped.
+      if (meta.defaults === undefined) {
+        return { ...common, run: null, allowedResults: new Set(["skipped"]) };
+      }
+      const run = predictOutcomes(meta.defaults);
+      return { ...common, run, allowedResults: runResultClass(run) };
     }
     if (repo.target.kind === "raw-invalid") {
       // Raw settings text FAILS before any section runs: an unparseable body
@@ -644,16 +634,14 @@ export function predictMulti(meta: MultiScenarioMeta): MultiPrediction {
       return { ...common, run: null, allowedResults: new Set(["failed"]) };
     }
     const repoMeta = repo.target.meta;
-    // The settings file read itself needs contents; a denied contents read
-    // gates the whole target before any section runs.
-    const contentsGrade = repoMeta.mask.contents ?? "write";
-    if (contentsGrade === "none") {
-      const adminGrade = repoMeta.mask.administration ?? "write";
-      return {
-        ...common,
-        run: null,
-        allowedResults: settingsGateResult(repoMeta.denialStyle, adminGrade),
-      };
+    // The settings file read itself needs contents, and a denied read gates
+    // the whole target before any section runs. The action reads a missing
+    // file as such only once the default branch's Contents-gated ref read
+    // succeeds (src/github/repo-file.ts); a Contents-denied token fails that
+    // proof under every denial style (403 outright, fine_grained on the ref),
+    // so the target FAILS - it never reads as fileless and never falls back.
+    if ((repoMeta.mask.contents ?? "write") === "none") {
+      return { ...common, run: null, allowedResults: new Set(["failed"]) };
     }
     const run = predictOutcomes(repoMeta);
     return { ...common, run, allowedResults: runResultClass(run) };

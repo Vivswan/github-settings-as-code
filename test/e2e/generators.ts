@@ -683,10 +683,9 @@ export const UNPARSEABLE_YAML = [
 /**
  * Raw bodies that PARSE fine but not to a mapping, so they pass the yaml
  * parser and fail validateSettingsDoc's top-level check ("must be a YAML
- * mapping ... parsed as a list/string") instead. In multi mode the
- * defaults merge passes a non-mapping through wholesale (engine/merge.ts
- * deepMerge replaces on a non-object override), so the same wording fires
- * there with the slug as the source label.
+ * mapping ... parsed as a list/string") instead. In multi mode a target's
+ * document is validated as written, so the same wording fires there with
+ * the slug as the source label.
  */
 export const NON_MAPPING_YAML = ["- a\n- b", "just a string"] as const;
 
@@ -1148,7 +1147,8 @@ export interface MultiRepoMeta {
   slug: string;
   /**
    * The target's kind plus its kind-specific facts: "normal" runs sections
-   * under its meta, "missing" has no settings file (the action skips it),
+   * under its meta, "missing" has no settings file (the action applies the
+   * defaults document to it, or skips it when the scenario has none),
    * "raw-invalid" serves settings_raw that fails before any section runs.
    */
   target: MultiRepoTarget;
@@ -1235,21 +1235,21 @@ export interface MultiScenarioMeta {
    */
   coreFault?: { key: "core.contentsGet"; fatal: boolean };
   /**
-   * The slug of the target that opted out of the defaults' milestones section
-   * (set milestones: null), or undefined when no target opted out. Recorded so
-   * the oracle and tests can reason about the inherited-section fold.
+   * The ScenarioMeta a target WITHOUT a settings file runs under: the
+   * defaults document's sections with an empty per-slug mask, sharing the
+   * run's mode, policy, and denial style. Present exactly when the scenario
+   * has a defaults_file; absent, a fileless target is skipped.
    */
-  milestonesOptOutSlug?: string;
+  defaults?: ScenarioMeta;
 }
 
 /**
  * A random multi-repo scenario: 2 to 5 target repos, each with its own
  * generated settings, live state, and permission mask. One repo is randomly
- * left without a settings file, which the action skips, and one may serve raw
- * invalid settings text instead. A defaults file merged under every target may
- * null out one section (the opt-out path). The returned meta records each
- * repo's target kind (normal with its ScenarioMeta, missing, or raw-invalid)
- * for the per-repo oracle plus the worst-of rollup.
+ * left without a settings file, so the action applies the defaults document
+ * to it, and one may serve raw invalid settings text instead. The returned
+ * meta records each repo's target kind (normal with its ScenarioMeta,
+ * missing, or raw-invalid) for the per-repo oracle plus the worst-of rollup.
  */
 /**
  * Battery-construction forces: pin specific rolls so a directed battery entry
@@ -1324,16 +1324,12 @@ export function genMultiScenario(
   if (globalMaskRng.bool(0.3) && force !== "idempotence-eligible") {
     globalMask.org_members = globalMaskRng.pick(["none", "read", "write"] as const);
   }
-  // One repo (chosen up front) is missing its settings file, so it is skipped.
+  // One repo (chosen up front) is missing its settings file, so the defaults
+  // document below is applied to it.
   const missingIndex = rng.int(count);
 
   const repos: Record<string, MultiRepo> = {};
   const repoMetas: MultiRepoMeta[] = [];
-  // The normal targets' settings mappings, collected by the branch that builds
-  // them: only these can take the milestones: null opt-out below (the missing
-  // target has no settings file and the raw one no mapping to null a section
-  // in).
-  const optOutCandidates: Array<{ slug: string; settings: Json }> = [];
   // Under redact, force ONE non-missing target private so the run always has a
   // redacted target: otherwise a run where every target rolled public would give
   // an empty forbidden set and a vacuous leak check. Pick any index != missing
@@ -1381,9 +1377,9 @@ export function genMultiScenario(
         ? rng.pick(["private", "internal"] as const)
         : rng.pick(["public", "public", "private", "internal"] as const);
     if (i === missingIndex) {
-      // No settings file: the action reads a 404 and skips the target. It is
-      // still visibility-probed and can still be redacted (the placeholder key
-      // is assigned before the target loop runs).
+      // No settings file: the action reads a 404 and applies the defaults
+      // document instead. It is still visibility-probed and can still be
+      // redacted (the placeholder key is assigned before the target loop runs).
       const probeDenied = false;
       const redacted =
         privateRepos === "redact" && slug !== selfSlug && (visibility !== "public" || probeDenied);
@@ -1560,7 +1556,6 @@ export function genMultiScenario(
       ...(hasLive ? { live_state: live } : {}),
       ...(Object.keys(mask).length > 0 ? { permissions: mask } : {}),
     };
-    optOutCandidates.push({ slug, settings });
     repoMetas.push({
       slug,
       visibility,
@@ -1585,47 +1580,25 @@ export function genMultiScenario(
     });
   }
 
-  // A defaults file merged under every target. It DECLARES a shared milestones
-  // section; a target opts out by setting milestones: null in ITS OWN settings
-  // (the null-section opt-out only applies to a section the defaults declare,
-  // and the defaults file itself must be schema-valid, so the null lives on a
-  // target, never in the defaults file). Pick one non-missing target to opt out.
+  // The defaults document: applied WHOLE to the fileless target and never to
+  // a target with its own file, so the fileless target's oracle meta is
+  // exactly the defaults' sections (under the default write mask: the missing
+  // repoSpec carries no per-slug permissions) and every other target's meta
+  // stays exactly its own declarations.
   const defaultsFile: Json = {
     labels: [{ name: "shared-default", color: "cccccc" }],
     milestones: [{ title: "shared-milestone", state: "open" }],
   };
-  let optedOutSlug: string | undefined;
-  if (optOutCandidates.length > 0 && rng.bool(0.3)) {
-    const optedOut = rng.pick(optOutCandidates);
-    optedOutSlug = optedOut.slug;
-    optedOut.settings.milestones = null;
-  }
-
-  // Fold the defaults-inherited sections into each target's oracle meta: every
-  // target runs the defaults' labels and milestones (merged under its own
-  // settings) UNLESS it opted that section out with a null. The oracle predicts
-  // from meta.sections, so a target that inherits labels but never declared it
-  // must still have labels predicted - otherwise a denied inherited section
-  // (e.g. labels under issues:read) is an unpredicted failure. The opt-out
-  // works both ways: the null overwrites even a SELF-declared milestones on
-  // that target, so the section must also be REMOVED from its meta, not just
-  // skipped when adding.
-  const DEFAULTS_SECTIONS: SectionKey[] = ["labels", "milestones"];
-  for (const repoMeta of repoMetas) {
-    if (repoMeta.target.kind !== "normal") {
-      continue;
-    }
-    const repoScenarioMeta = repoMeta.target.meta;
-    const optedOut = repoMeta.slug === optedOutSlug ? ["milestones"] : [];
-    repoScenarioMeta.sections = repoScenarioMeta.sections.filter(
-      (s) => !optedOut.includes(s),
-    ) as SectionKey[];
-    for (const inherited of DEFAULTS_SECTIONS) {
-      if (!repoScenarioMeta.sections.includes(inherited) && !optedOut.includes(inherited)) {
-        repoScenarioMeta.sections.push(inherited);
-      }
-    }
-  }
+  const defaults: ScenarioMeta = {
+    sections: Object.keys(defaultsFile) as SectionKey[],
+    mask: {},
+    mode,
+    policy,
+    ownerKind: "org",
+    denialStyle,
+    requiredSections: [],
+    orgMask: globalMask,
+  };
 
   const scenario: Scenario = {
     name: `fuzz-multi-${rng.seed}`,
@@ -1663,7 +1636,7 @@ export function genMultiScenario(
       ...(forcedPrivateIndex >= 0
         ? { forcedPrivateSlug: `e2e-owner/repo-${forcedPrivateIndex}` }
         : {}),
-      milestonesOptOutSlug: optedOutSlug,
+      defaults,
     },
   };
 }

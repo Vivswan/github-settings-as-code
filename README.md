@@ -93,7 +93,7 @@ The guides live in [docs/](docs/README.md), in four groups:
 | `secret_scanning_custom_patterns` | secret-scanning custom patterns: paginated list + bulk POST + PATCH by id + bulk DELETE | Secret scanning alerts: write | kept (settable) | matched by name (immutable upstream); `state` and `push_protection_enabled` are not declarable; deletes always resolve alerts |
 <!-- END GENERATED: readme-sections-table -->
 
-The Undeclared default column says what happens to live resources the settings file does not declare; `(settable)` means the wrapped `undeclared:` form can override it per file. [The undeclared policy](docs/reference/undeclared-policy.md) covers the knob and how it layers with a multi-repo defaults file.
+The Undeclared default column says what happens to live resources the settings file does not declare; `(settable)` means the wrapped `undeclared:` form can override it per file. [The undeclared policy](docs/reference/undeclared-policy.md) covers the knob; in multi-repo mode a defaults file carries its policy only to repositories without a settings file.
 
 The model in three lines: the engine is stateless and declared-keys-only (a key you do not declare is never touched or compared), applies are convergent (a check right after an apply reports clean), and every failure is loud, carrying the API's message verbatim. [Semantics](docs/reference/semantics.md) is the full model: softenable errors, retries, and the preflight barrier.
 
@@ -136,7 +136,7 @@ The [examples cookbook](docs/start/examples.md) is the full tour: a full-feature
 | `api-version` | `2022-11-28` | `X-GitHub-Api-Version` header; override to opt into a newer REST API version |
 | `repos` | (empty) | Multi-repo remote mode: `owner/name` list (comma/newline), or `*` to discover owned repos |
 | `repos-dir` | (empty) | Multi-repo central mode: directory of per-repo settings files in this repo |
-| `defaults-file` | (empty) | YAML merged under every multi-repo target's settings (multi-repo mode only) |
+| `defaults-file` | (empty) | YAML applied to every multi-repo target without a settings file (multi-repo mode only) |
 | `layering` | `merge` | `mode: merge` only: `merge` unions the keyed list sections (labels, rulesets) by key across layers, `replace` lets the higher layer's list win; a layer's `_layering` overrides it |
 | `private-repos` | `redact` | `redact` hides private and internal targets from public logs, summary, and outputs; `show` reveals them |
 | `private-report` | `none` | `issue` delivers each redacted target's full report to a reused issue on that target repository; `issue-on-failure` writes that issue only when the target fails or drifts, closing it once healthy; `artifact` uploads all reports as one age-encrypted workflow artifact; rejected with `private-repos: show` |
@@ -153,7 +153,7 @@ Outputs: `result` (<!-- BEGIN GENERATED: readme-outputs (bun run build:docs; der
 
 ## Multi-repo mode
 
-One run in an admin repository can manage a whole fleet. Two sourcing modes are usable together: `repos-dir` names a directory of per-repo settings files in the admin repository, and `repos` lists targets applied from their own `.github/settings.yml` (`repos: "*"` discovers them). When both name the same repository, the central file wins. A `defaults-file` merges under every target, and a target's `null` section opts out of a section the defaults declare. Targets run independently and sequentially; one failure never stops the rest. The [multi-repo guide](docs/operate/multi-repo.md) owns the rules: sourcing precedence, the discovery filters, the merge, and the fleet patterns.
+One run in an admin repository can manage a whole fleet. Two sourcing modes are usable together: `repos-dir` names a directory of per-repo settings files in the admin repository, and `repos` lists targets applied from their own `.github/settings.yml` (`repos: "*"` discovers them). When both name the same repository, the central file wins. A `defaults-file` is applied whole to every target that has no settings file of its own, and ignored for targets that have one. Targets run independently and sequentially; one failure never stops the rest. The [multi-repo guide](docs/operate/multi-repo.md) owns the rules: sourcing precedence, the discovery filters, the fallback, and the fleet patterns.
 
 ## Private repositories
 
@@ -173,10 +173,10 @@ This action started as a replacement for the Probot Settings app (repository-set
 | Rulesets | Experimental upstream feature; schema may change | First class: branch, tag, and push targets, upsert by name; undeclared rulesets kept by default, `undeclared: delete` opts into deletion |
 | Partial success policy | None | on-missing-permission: fail or warn, plus required-sections as a minimum-requirements floor |
 | Token | App installation token; its scope is invisible in the repo | A PAT you mint and scope yourself; permission errors name the exact missing permission |
-| Org-level shared config | Yes (org _settings repo with extends) | Yes, as multi-repo mode: an admin repo with a defaults-file plus per-repo files (repos-dir) or each repo's own settings.yml (repos input); no hosted app needed |
+| Org-level shared config | Yes (org _settings repo with extends) | Partly, as multi-repo mode: an admin repo applies per-repo files (repos-dir) or each repo's own settings.yml (repos input), and a defaults-file stands in for repos that have neither; no hosted app needed |
 | Call transparency | None | Every API call is traced as a debug line (method, path, payload, status, timing) when debug logging is on |
 
-The one Probot-family feature without a direct equivalent is suborg-level grouping (safe-settings' .github/suborgs layer); here the layers are the defaults-file and per-repo files. Everything else in Probot's schema is supported, plus the rows above.
+The one Probot-family feature without a direct equivalent is suborg-level grouping (safe-settings' .github/suborgs layer); here a repository is covered by its own file, or by the defaults-file when it has none; the two never combine. Everything else in Probot's schema is supported, plus the rows above.
 
 Your existing `settings.yml` works as-is for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones` (for the list sections among them, the plain-array form remains Probot-compatible; the object-shaped sections keep their original Probot shapes). Uninstall the app, add the workflow above, and optionally move branch protection to `rulesets`. Differences: applies run visibly in Actions (loud failures instead of silent skips), rulesets are supported, and nothing except labels/autolinks/collaborators/Actions variables/Copilot agents variables - plus, WITHIN a declared per-environment key, that environment's variables and deployment branch-policy patterns, and WITHIN a declared `pull_request_creation_bypass` key, that list's undeclared logins - is ever deleted implicitly.
 

@@ -9,12 +9,22 @@ export function restoreFetch(): void {
   globalThis.fetch = realFetch;
 }
 
-/** Stub fetch with a fixed response sequence (last one repeats); count calls. */
-export function stubFetch(responses: Array<() => Response>): { calls: number } {
-  const state = { calls: 0 };
-  globalThis.fetch = (async () => {
+/**
+ * Stub fetch with a fixed response sequence (one per call, in order; the last
+ * one repeats, so a retried failure keeps failing). Counts the calls and
+ * records each call's pathname, so a test can pin WHICH routes were touched
+ * and in what order, not just how many.
+ */
+export function stubFetch(responses: Array<() => Response>): {
+  calls: number;
+  paths: string[];
+} {
+  const state = { calls: 0, paths: [] as string[] };
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const make = responses[Math.min(state.calls, responses.length - 1)];
     state.calls++;
+    state.paths.push(new URL(href).pathname);
     if (!make) {
       throw new Error("no stubbed response");
     }

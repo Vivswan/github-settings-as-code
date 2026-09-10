@@ -1,0 +1,57 @@
+# The defaults file is a fallback, never a merge layer. svc-own-file has its own
+# settings.yml, so exactly that file is applied: its label is created and the
+# defaults' Pages section never touches it (no pages call at all). svc-no-file
+# has no settings.yml, so the whole defaults document is applied to it instead
+# of skipping it: Pages is enabled (POST /pages) and the defaults' label is
+# created, with a notice saying the defaults file is in use. A check re-run
+# against the mutated state converges.
+name: multi-defaults-fallback
+settings: {}
+defaults_file:
+  pages:
+    build_type: workflow
+    source:
+      branch: main
+      path: /
+  labels:
+    - name: shared-default
+      color: "cccccc"
+repos:
+  e2e-owner/svc-own-file:
+    settings:
+      labels:
+        - name: kept
+          color: "0000ff"
+    live_state:
+      pages: null
+    expect:
+      result: applied
+  e2e-owner/svc-no-file:
+    settings: null
+    live_state:
+      pages: null
+    expect:
+      result: applied
+token_permissions:
+  issues: write
+  pages: write
+expect:
+  exit_code: 0
+  result: applied
+  repos_result:
+    e2e-owner/svc-own-file: applied
+    e2e-owner/svc-no-file: applied
+  mutations:
+    - "POST /repos/e2e-owner/svc-own-file/labels"
+    - "POST /repos/e2e-owner/svc-no-file/labels"
+    - "POST /repos/e2e-owner/svc-no-file/pages"
+  never:
+    - "POST /repos/e2e-owner/svc-own-file/pages"
+    - "PUT /repos/e2e-owner/svc-own-file/pages"
+    - "DELETE /repos/e2e-owner/svc-own-file/pages"
+  stdout_contains:
+    - "svc-no-file: applying the defaults file: the repository has no .github/settings.yml on its default branch"
+  stdout_lacks:
+    - "svc-own-file: applying the defaults file"
+    - "skipped - the repository has no .github/settings.yml"
+  converges: true

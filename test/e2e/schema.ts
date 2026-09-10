@@ -295,7 +295,8 @@ const TokenPermissionsSchema = z.partialRecord(MaskKeySchema, MaskGradeSchema);
 /**
  * One target repo in a multi-repo scenario. `settings` is that repo's
  * settings.yml body, or null when the repo has NO settings file (the
- * contents-404 -> skipped path). `settings_raw` serves that exact string as the
+ * contents-404 path: the defaults document applies, or the target is skipped
+ * without one). `settings_raw` serves that exact string as the
  * settings.yml content instead (for a genuine YAML PARSE failure, which a
  * serialized object cannot produce); exactly one of `settings`/`settings_raw`
  * is set. `live_state` and `permissions` scope the mock's per-slug state and
@@ -457,7 +458,7 @@ const ScenarioSchema = z
     repos: z.record(z.string(), MultiRepoSchema).optional(),
     /** Multi-repo repos: "*" discovery: the pool plus the filter inputs. */
     discovery: DiscoverySchema.optional(),
-    /** The defaults-file body merged under every target (INPUT_DEFAULTS-FILE). */
+    /** The defaults-file body applied to every target without a settings file (INPUT_DEFAULTS-FILE). */
     defaults_file: SettingsSchema.optional(),
     /** Transport-level faults injected on the first matching requests. */
     faults: z.array(FaultSchema).optional(),

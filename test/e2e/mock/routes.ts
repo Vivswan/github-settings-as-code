@@ -33,6 +33,8 @@ import {
 import {
   contentsResponse,
   contentsSlug,
+  gitRefRequest,
+  gitRefResponse,
   handleIssueReport,
   handleUserRepos,
   PROBE_RETRY_BUDGET,
@@ -500,6 +502,31 @@ export function runPipeline(
     // The raw settings-file body skips response-body validation, but that is
     // decided by the request's raw Accept media type in server.ts (so every
     // raw endpoint inherits it), not marked here per-endpoint.
+    return { response, log: { ...baseLog, status: response.status } };
+  }
+
+  // 3b1. The Contents-readability proof (a git ref read) the settings-file
+  // fetch issues after a contents 404. Not a section endpoint, but gated on
+  // the same Contents: read grade as the contents route, so a Contents-denied
+  // slug is denied here too and can never be mistaken for a fileless one.
+  const refRequest = gitRefRequest(pathname);
+  if (refRequest !== null) {
+    if (!multi) {
+      return violation("git ref read is not implemented in single-repo mode");
+    }
+    if (request.method !== "GET") {
+      return violation(`git ref read must be GET, got ${request.method}`);
+    }
+    const mask = effectiveMask(
+      scenario.token_permissions ?? {},
+      multi.permissions.get(refRequest.slug),
+    );
+    const grading = gradeResource(mask, "contents", "read");
+    if (!grading.allowed) {
+      const response = denialResponse(scenario.denial_style, "read");
+      return { response, log: { ...baseLog, status: response.status, deniedBy: grading.deniedBy } };
+    }
+    const response = gitRefResponse(multi, refRequest.slug, refRequest.ref);
     return { response, log: { ...baseLog, status: response.status } };
   }
 

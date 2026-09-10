@@ -69,7 +69,7 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
  * validation see them as written; a wrapper keeps every key it carries,
  * `_layering` included. Returns a shallow copy; the input is never mutated.
  */
-export function normalizeKnobbedSections(settings: unknown): unknown {
+function normalizeKnobbedSections(settings: unknown): unknown {
   // A document that is not a mapping (a raw list, a scalar) has no sections
   // to normalize; hand it on untouched so the top-level validator still sees
   // exactly what was written.
@@ -96,26 +96,11 @@ function sectionDefaultPolicy(key: UndeclaredPolicySection): UndeclaredPolicy {
  * resolves to the section's default, so the merged document is
  * self-describing. Runs on the merged document the caller owns.
  */
-export function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
+function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
   for (const key of UNDECLARED_POLICY_SECTIONS) {
     const value = merged[key];
     if (isPlainObject(value) && Array.isArray(value.entries) && value.undeclared === undefined) {
       value.undeclared = sectionDefaultPolicy(key);
-    }
-  }
-}
-
-/**
- * Drop a recognized `_layering` directive from every knobbed wrapper of a
- * merged document the caller owns: the directive addresses the merge that
- * produced the document, never the engine that applies it. Any other value
- * under the key stays in place for post-merge validation to name.
- */
-export function dropWrapperLayering(merged: Record<string, unknown>): void {
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
-    const value = merged[key];
-    if (isPlainObject(value) && isLayering(value[LAYERING_KEY])) {
-      delete value[LAYERING_KEY];
     }
   }
 }
