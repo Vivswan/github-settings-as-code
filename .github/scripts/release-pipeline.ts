@@ -66,6 +66,42 @@ function gitFailure(args: string[], error: unknown): Error {
   return new Error(`git ${args.join(" ")} failed${detail}`);
 }
 
+/** git's words for the one push failure a retry can win: the remote ref moved
+ * after this run observed it. Either the client saw it (the `[rejected]` status
+ * line: a plain push no longer a fast-forward, a lease whose expected value went
+ * stale) or the server did between advertising the ref and updating it (its
+ * compare-and-set diagnostic: the ref is at another value than advertised, or
+ * was created since; GitHub puts it in the status line, stock git on a
+ * `remote: error:` line above the rejection). The `[remote rejected]` line a
+ * hook or ruleset produces matches neither. */
+const OVERTAKEN_PUSH =
+  /^\s*!\s+\[rejected\]\s.*\((?:fetch first|non-fast-forward|stale info)\)|cannot lock ref '[^']+': (?:is at [0-9a-f]+ but expected [0-9a-f]+|reference already exists)/m;
+
+/**
+ * Push, telling the one failure worth retrying apart from every other, and
+ * deciding that HERE from git's stderr so no caller matches strings itself.
+ * Overtaken (another writer moved the ref after this run observed it) is
+ * returned with the stderr; a token without write access, a ruleset or
+ * protected-ref decline, a transport error, and anything else are permanent
+ * and thrown unchanged, git's stderr in the message.
+ */
+function pushUnlessOvertaken(
+  cwd: string,
+  ...pushArgs: string[]
+): { landed: true } | { landed: false; stderr: string } {
+  const args = ["push", ...pushArgs];
+  try {
+    execFileSync("git", args, { cwd, encoding: "utf8" });
+    return { landed: true };
+  } catch (error) {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    if (typeof stderr === "string" && OVERTAKEN_PUSH.test(stderr)) {
+      return { landed: false, stderr: stderr.trim() };
+    }
+    throw gitFailure(args, error);
+  }
+}
+
 /** A yes/no git question: exit 0 is yes, exit 1 is no, anything else is a failure and throws. */
 function gitYesNo(cwd: string, ...args: string[]): boolean {
   try {
@@ -724,13 +760,12 @@ export function advanceLatest(options: AdvanceLatestOptions): AdvanceLatestResul
       parent = tip;
     }
     const latestSha = commitPackaged(cwd, tree, parent, [subject, trailers.join("\n")]);
-    try {
-      git(cwd, "push", "origin", `${latestSha}:${LATEST_REF}`);
+    const push = pushUnlessOvertaken(cwd, "origin", `${latestSha}:${LATEST_REF}`);
+    if (push.landed) {
       return { changed: true, latestSha, reason: `${LATEST_REF}: advanced to ${latestSha}` };
-    } catch (error) {
-      // Another run appended in between; re-evaluate on the new tip.
-      console.error(`latest push attempt ${attempt}/${attempts} lost: ${String(error)}`);
     }
+    // Another run appended in between; re-evaluate on the new tip.
+    console.error(`latest push attempt ${attempt}/${attempts} overtaken: ${push.stderr}`);
   }
   throw new Error(
     `could not advance ${LATEST_REF} after ${attempts} attempts; something keeps moving it concurrently - rerun this job once it settles.`,

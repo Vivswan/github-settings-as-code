@@ -1037,6 +1037,244 @@ describe("advanceLatest", () => {
     );
     expect(git(fx.work, "ls-remote", "origin", "refs/heads/latest")).toBe("");
   });
+
+  /** What the shim does to the pipeline's n-th push, before real git sees it. */
+  type PushPlan =
+    /** Push `sha` to latest first from `from`; real git then rejects the pipeline's push. */
+    | { competitor: { from: string; sha: string } }
+    /** Replay a remote a file:// origin cannot play: this stderr, this exit status. */
+    | { fail: { stderr: string; status: number } };
+
+  /** Run `body` with a `git` shim first on PATH: the real git for everything
+   * but push, and every push appended to a log before its plan (by ordinal;
+   * none lets it through) runs. Returns the push argument lists. */
+  function withPushPlans(fx: Fixture, plans: PushPlan[], body: () => void): string[][] {
+    const shim = join(fx.root, "git-shim");
+    const plansDir = join(shim, "plans");
+    mkdirSync(plansDir, { recursive: true });
+    const realGit = Bun.which("git");
+    if (realGit === null) {
+      throw new Error("no git on PATH");
+    }
+    for (const [index, plan] of plans.entries()) {
+      const file = join(plansDir, String(index + 1));
+      if ("competitor" in plan) {
+        writeFileSync(file, `competitor ${plan.competitor.from} ${plan.competitor.sha}\n`);
+      } else {
+        writeFileSync(file, `fail ${plan.fail.status}\n`);
+        writeFileSync(`${file}.stderr`, plan.fail.stderr);
+      }
+    }
+    const script = [
+      "#!/bin/sh",
+      `if [ "$1" != "push" ]; then exec "${realGit}" "$@"; fi`,
+      `printf '%s\\n' "$*" >> "${shim}/pushes.log"`,
+      `n=$(wc -l < "${shim}/pushes.log" | tr -d ' ')`,
+      `plan="${plansDir}/$n"`,
+      'if [ -f "$plan" ]; then',
+      '  read -r kind a b < "$plan"',
+      '  case "$kind" in',
+      `    competitor) "${realGit}" -C "$a" push --quiet origin "$b:refs/heads/latest" ;;`,
+      '    fail) cat "$plan.stderr" >&2; exit "$a" ;;',
+      "  esac",
+      "fi",
+      `exec "${realGit}" "$@"`,
+      "",
+    ].join("\n");
+    writeFileSync(join(shim, "git"), script, { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${shim}:${path}`;
+    try {
+      body();
+    } finally {
+      process.env.PATH = path;
+    }
+    return readFileSync(join(shim, "pushes.log"), "utf8")
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line) => line.split(" "));
+  }
+
+  /** `count` packaged commits of the seed, chained, in a clone that has not
+   * pushed them: what other runs would append to latest, as the plans that
+   * land one ahead of each of this run's pushes. */
+  function competitors(
+    fx: Fixture,
+    count: number,
+  ): { from: string; plans: PushPlan[]; shas: string[]; first: string; last: string } {
+    const from = clone(fx.root, fx.origin, "latest-competitor");
+    git(from, "checkout", "--quiet", fx.seedSha);
+    write(from, "lib/index.js", "competitor-bundle\n");
+    git(from, "add", "-f", "lib/index.js");
+    const shas: string[] = [];
+    let first = "";
+    let last = "";
+    for (let n = 1; n <= count; n++) {
+      git(
+        from,
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        `build(latest): competitor ${n}`,
+        "-m",
+        `Source: ${fx.seedSha}`,
+      );
+      last = git(from, "rev-parse", "HEAD");
+      first = first === "" ? last : first;
+      shas.push(last);
+    }
+    return { from, plans: shas.map((sha) => ({ competitor: { from, sha } })), shas, first, last };
+  }
+
+  const pushOf = (sha: string): string[] => ["push", "origin", `${sha}:refs/heads/latest`];
+  /** The commit a logged push carried (its objects exist in the pushing clone). */
+  const pushedSha = (push: string[]): string =>
+    push.join(" ").replace(/^push origin (\w+):.*$/, "$1");
+
+  /** The retried outcome after one overtaken push: latest landed as the
+   * child of the rival's tip, and the two pushes carried a child of `before`
+   * (the tip this run first observed, rejected) and then the child of the
+   * rival's tip. */
+  function expectRetriedOnto(
+    fx: Fixture,
+    before: string,
+    rivalTip: string,
+    result: ReturnType<typeof advanceLatest> | undefined,
+    pushes: string[][],
+  ): void {
+    const tip = git(fx.origin, "rev-parse", "refs/heads/latest");
+    expect(result).toEqual({
+      changed: true,
+      latestSha: tip,
+      reason: `refs/heads/latest: advanced to ${tip}`,
+    });
+    expect(git(fx.origin, "rev-parse", `${tip}^`)).toBe(rivalTip);
+    expect(sourceTrailer(fx.origin, tip)).toBe(fx.mergeSha);
+    const shas = pushes.map(pushedSha);
+    expect(pushes).toEqual(shas.map(pushOf));
+    expect(shas.map((sha) => git(fx.work, "rev-parse", `${sha}^`))).toEqual([before, rivalTip]);
+    expect(shas).toContain(tip);
+  }
+
+  test("a push overtaken by another run is retried on the new tip", () => {
+    const fx = seedFixture();
+    const rival = competitors(fx, 1);
+    let result: ReturnType<typeof advanceLatest> | undefined;
+    const pushes = withPushPlans(fx, rival.plans, () => {
+      result = advanceLatest({ cwd: fx.work, sourceSha: fx.mergeSha });
+    });
+    expectRetriedOnto(fx, fx.mergeSha, rival.first, result, pushes);
+  });
+
+  // The rival lands DURING the pipeline's push: origin's update hook moves
+  // latest once receive-pack has advertised it, so the update itself fails
+  // its compare-and-set with git's own words for a ref created since
+  // ("reference already exists") or moved since ("is at ... but expected").
+  const raced: [string, boolean][] = [
+    ["created", false],
+    ["moved", true],
+  ];
+  test.each(raced)(
+    "a push whose ref the server finds %s since advertising it is retried",
+    (_name, preexisting) => {
+      const fx = seedFixture();
+      const rival = competitors(fx, preexisting ? 2 : 1);
+      git(rival.from, "push", "--quiet", "origin", `${rival.last}:refs/heads/rival`);
+      if (preexisting) {
+        git(rival.from, "push", "--quiet", "origin", `${rival.first}:refs/heads/latest`);
+      }
+      const hooks = join(fx.origin, "hooks");
+      mkdirSync(hooks, { recursive: true });
+      writeFileSync(
+        join(hooks, "update"),
+        `#!/bin/sh\n[ "$1" = refs/heads/latest ] || exit 0\ngit update-ref refs/heads/latest ${rival.last}\n`,
+        { mode: 0o755 },
+      );
+      git(fx.origin, "config", "core.hooksPath", hooks);
+      let result: ReturnType<typeof advanceLatest> | undefined;
+      const pushes = withPushPlans(fx, [], () => {
+        result = advanceLatest({ cwd: fx.work, sourceSha: fx.mergeSha });
+      });
+      expectRetriedOnto(fx, preexisting ? rival.first : fx.mergeSha, rival.last, result, pushes);
+    },
+  );
+
+  test("GitHub's wording of that server-side compare-and-set loss is retried too", () => {
+    const fx = seedFixture();
+    const stderr = `To https://github.com/o/r.git\n ! [remote rejected] 0123abc -> latest (cannot lock ref 'refs/heads/latest': is at ${fx.seedSha} but expected ${fx.mergeSha})\nerror: failed to push some refs to 'https://github.com/o/r.git'\n`;
+    let result: ReturnType<typeof advanceLatest> | undefined;
+    // The scripted loss lands nothing, so the retry finds no latest and
+    // pushes the source's own child again, this time for real.
+    const pushes = withPushPlans(fx, [{ fail: { stderr, status: 1 } }], () => {
+      result = advanceLatest({ cwd: fx.work, sourceSha: fx.mergeSha });
+    });
+    const tip = git(fx.origin, "rev-parse", "refs/heads/latest");
+    expect(result).toEqual({
+      changed: true,
+      latestSha: tip,
+      reason: `refs/heads/latest: advanced to ${tip}`,
+    });
+    const shas = pushes.map(pushedSha);
+    expect(pushes).toEqual(shas.map(pushOf));
+    expect(shas.map((sha) => git(fx.work, "rev-parse", `${sha}^`))).toEqual([
+      fx.mergeSha,
+      fx.mergeSha,
+    ]);
+    expect(shas.at(-1)).toBe(tip);
+  });
+
+  test("a push overtaken on every attempt gives up naming the concurrent mover", () => {
+    const fx = seedFixture();
+    const rival = competitors(fx, 3);
+    const pushes = withPushPlans(fx, rival.plans, () => {
+      expect(() => advanceLatest({ cwd: fx.work, sourceSha: fx.mergeSha })).toThrow(
+        "could not advance refs/heads/latest after 3 attempts; something keeps moving it concurrently - rerun this job once it settles.",
+      );
+    });
+    // Each attempt re-read the tip and built on it before being overtaken again.
+    const shas = pushes.map(pushedSha);
+    expect(pushes).toEqual(shas.map(pushOf));
+    expect(shas.map((sha) => git(fx.work, "rev-parse", `${sha}^`))).toEqual([
+      fx.mergeSha,
+      ...rival.shas.slice(0, -1),
+    ]);
+    expect(git(fx.origin, "rev-parse", "refs/heads/latest")).toBe(rival.last);
+  });
+
+  const permanent: [string, string][] = [
+    [
+      "a token without write access",
+      "remote: Write access to repository not granted.\nfatal: unable to access 'https://github.com/o/r/': The requested URL returned error: 403\n",
+    ],
+    [
+      "a ruleset declining the ref",
+      "remote: error: GH013: Repository rule violations found for refs/heads/latest.\nremote:\nremote: - Cannot update this protected ref.\nremote:\nTo https://github.com/o/r.git\n ! [remote rejected] 0123abc -> latest (push declined due to repository rule violations)\nerror: failed to push some refs to 'https://github.com/o/r.git'\n",
+    ],
+  ];
+  test.each(permanent)(
+    "%s fails the first push for good, with git's own words",
+    (_name, stderr) => {
+      const fx = seedFixture();
+      let error: unknown;
+      const pushes = withPushPlans(fx, [{ fail: { stderr, status: 128 } }], () => {
+        try {
+          advanceLatest({ cwd: fx.work, sourceSha: fx.mergeSha });
+        } catch (thrown) {
+          error = thrown;
+        }
+      });
+      // One push, of the source's own packaged child, then the failure as git
+      // worded it: no retry, no "moving it concurrently".
+      const shas = pushes.map(pushedSha);
+      expect(pushes).toEqual(shas.map(pushOf));
+      expect(shas.map((sha) => git(fx.work, "rev-parse", `${sha}^`))).toEqual([fx.mergeSha]);
+      expect(error).toEqual(
+        new Error(`git push origin ${shas.join()}:refs/heads/latest failed: ${stderr.trim()}`),
+      );
+      expect(git(fx.work, "ls-remote", "origin", "refs/heads/latest")).toBe("");
+    },
+  );
 });
 
 describe("release configuration contract", () => {
