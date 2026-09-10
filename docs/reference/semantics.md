@@ -14,9 +14,9 @@ Apply is convergent: re-running preserves the declared state (some sections diff
 
 Three sections illustrate the range of default policies:
 
-- Labels: declared labels are upserted (rename via `new_name`); undeclared labels are DELETED by default (Probot parity), loudly. The [`undeclared` policy](undeclared-policy.md) can soften this to keep.
-- Rulesets: upserted by name with the full payload; undeclared rulesets are never deleted by default, since removing protection stays a human action. The [`undeclared` policy](undeclared-policy.md) can opt into deletion.
-- Milestones: upserted by title; undeclared ones are kept by default (deleting a milestone detaches it from every issue carrying it) and listed as notices. The [`undeclared` policy](undeclared-policy.md) can opt into deletion.
+- Labels: declared labels are upserted (rename via `new_name`); undeclared labels are DELETED by default (Probot parity), loudly. The [`_undeclared` policy](undeclared-policy.md) can soften this to keep.
+- Rulesets: upserted by name with the full payload; undeclared rulesets are never deleted by default, since removing protection stays a human action. The [`_undeclared` policy](undeclared-policy.md) can opt into deletion.
+- Milestones: upserted by title; undeclared ones are kept by default (deleting a milestone detaches it from every issue carrying it) and listed as notices. The [`_undeclared` policy](undeclared-policy.md) can opt into deletion.
 
 Every section's own default is stated in the [Sections table](sections.md)'s Undeclared default column, and the [undeclared policy](undeclared-policy.md) page covers the knob that overrides it.
 

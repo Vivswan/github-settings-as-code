@@ -61,7 +61,7 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 /**
  * Rewrite each UNDECLARED_POLICY_SECTIONS value from the plain array form to
  * the wrapped one, PRESERVING OMISSION of the policy key - a plain array
- * becomes `{entries}` with NO `undeclared`. That omission is what lets a
+ * becomes `{entries}` with NO `_undeclared`. That omission is what lets a
  * merge inherit a lower layer's policy: had the plain form been resolved to
  * its default here, the higher layer's resolved default would overwrite the
  * lower's explicit policy. Values in neither form (null opt-outs, malformed
@@ -99,8 +99,8 @@ function sectionDefaultPolicy(key: UndeclaredPolicySection): UndeclaredPolicy {
 function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
   for (const key of UNDECLARED_POLICY_SECTIONS) {
     const value = merged[key];
-    if (isPlainObject(value) && Array.isArray(value.entries) && value.undeclared === undefined) {
-      value.undeclared = sectionDefaultPolicy(key);
+    if (isPlainObject(value) && Array.isArray(value.entries) && value._undeclared === undefined) {
+      value._undeclared = sectionDefaultPolicy(key);
     }
   }
 }
@@ -229,7 +229,7 @@ interface Step {
 
 /** A knobbed section of one admitted layer, ready to combine. */
 interface AdmittedSection {
-  /** The wrapper's keys besides `entries` and `_layering` (`undeclared`, or a typo for validation). */
+  /** The wrapper's keys besides `entries` and `_layering` (`_undeclared`, or a typo for validation). */
   readonly knobs: Readonly<Record<string, unknown>>;
   readonly entries: readonly Readonly<Record<string, unknown>>[];
   /** How this section combines with the layers below it in this step. */
@@ -351,7 +351,7 @@ function admitSection(
 ): AdmittedSection {
   if (!isPlainObject(value) || !Array.isArray(value.entries)) {
     throw new LayerRefusal(
-      `layer ${quote(layer)}: ${key} must be a list of mappings or an {undeclared, entries} wrapper; got ${describeShape(value)}${isPlainObject(value) ? " without an entries list" : ""}`,
+      `layer ${quote(layer)}: ${key} must be a list of mappings or an {_undeclared, entries} wrapper; got ${describeShape(value)}${isPlainObject(value) ? " without an entries list" : ""}`,
     );
   }
   const entries = asMappings(value.entries);
@@ -582,7 +582,7 @@ function unionKeyed(
 
 /**
  * One knobbed section over the accumulated document: the knobs merge key by
- * key (an omitted `undeclared` inherits the lower one), the entries combine
+ * key (an omitted `_undeclared` inherits the lower one), the entries combine
  * per the section's layering in this step. A lower value that is not a
  * wrapper (absent, or a null that stayed as written) declares nothing.
  */

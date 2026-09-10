@@ -27,7 +27,7 @@ The one Probot-family feature without a direct equivalent is suborg-level groupi
 
 ## What carries over as-is
 
-Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped `{undeclared, entries}` form is this action's own extension on top. The [README's migration paragraph](https://github.com/Vivswan/github-settings-as-code#migrating-from-the-probot-settings-app) is the pinned statement of this parity. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
+Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped `{_undeclared, entries}` form is this action's own extension on top. The [README's migration paragraph](https://github.com/Vivswan/github-settings-as-code#migrating-from-the-probot-settings-app) is the pinned statement of this parity. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
 
 ## What changed on purpose
 
@@ -37,7 +37,7 @@ Failures are loud. An unknown top-level key in the settings file is a hard error
 
 The engine is stateless. There is no state file and nothing is stored between runs; resources are matched by their natural names, and only declared keys are ever applied or compared. Removing a section from the file stops managing it; it does not revert anything.
 
-Rulesets are first class. Your `branches` section keeps working, and you can optionally move protection to `rulesets`, which cover branch, tag, and push targets. Undeclared rulesets are kept by default - deleting them is an explicit opt-in (`undeclared: delete`), so removing protection stays a deliberate action.
+Rulesets are first class. Your `branches` section keeps working, and you can optionally move protection to `rulesets`, which cover branch, tag, and push targets. Undeclared rulesets are kept by default - deleting them is an explicit opt-in (`_undeclared: delete`), so removing protection stays a deliberate action.
 
 Deletions still exist where the app had them: undeclared labels are deleted by default (Probot parity), and so are undeclared autolinks, collaborators, Actions variables, and Copilot agents variables - plus, within a declared per-environment key, that environment's variables and deployment branch-policy patterns. Nothing else is ever deleted implicitly; the [Sections table](../reference/sections.md) states each section's default in its Undeclared default column, and the check run lists everything an apply would delete before you let it.
 

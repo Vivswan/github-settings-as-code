@@ -9,7 +9,7 @@ coverage:
       GET/POST /repos/{owner}/{repo}/hooks, PATCH/DELETE .../hooks/{hook_id}, and PATCH
       .../hooks/{hook_id}/config. At most ONE hook per config.url (the natural key); a declared url
       matching several live hooks fails loudly naming their ids, and a changed url is a NEW hook
-      (the old one turns undeclared: kept and noted by default, deleted under `undeclared: delete`).
+      (the old one turns _undeclared: kept and noted by default, deleted under `_undeclared: delete`).
       Config-field drift goes through the config sub-endpoint, which updates named fields without
       the general PATCH's whole-config replacement, so a live secret the file does not declare is
       never removed; events/active drift rides the general PATCH with no config key. config.secret
@@ -24,7 +24,7 @@ schema:
   SettingsFile.webhooks: >-
     Repository webhooks, managed one per config.url; undeclared hooks are kept by default and
     surfaced as notes, since integrations create their own hooks (the wrapped form can set
-    `undeclared: delete`).
+    `_undeclared: delete`).
   WebhookConfig: >-
     One repository webhook, matched to the live repo by config.url. Hook URLs are configuration, not
     credentials: they appear in drift lines and notes on purpose. The secret never does.

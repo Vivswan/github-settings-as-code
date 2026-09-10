@@ -1,7 +1,7 @@
 /**
  * `labels:` section - Probot parity: upsert declared labels by
  * case-insensitive name (with `new_name` rename support) and DELETE
- * undeclared labels, loudly. The wrapped `undeclared: keep` form softens
+ * undeclared labels, loudly. The wrapped `_undeclared: keep` form softens
  * the deletion to notes. A list section: everything but the lens and the
  * identity fold derives from the declaration (see ../shared/list-section.ts).
  */

@@ -64,7 +64,7 @@ describe("labels", () => {
   test("a matching label plans nothing: color case and '#' fold, and a live null description reads as empty", async () => {
     const api = new MockApi({ [LIST]: { data: liveLabels } });
     const result = await plan(api, {
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [
         { name: "BUG", new_name: "bug", color: "#D73A4A", description: "Something isn't working" },
         { name: "stale", description: "" },
@@ -115,11 +115,11 @@ describe("labels", () => {
     ]
   >([
     [
-      "wrapped undeclared:keep",
-      { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
+      "wrapped _undeclared:keep",
+      { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
       [],
       [
-        'label "stale" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it',
+        'label "stale" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
       ],
     ],
     [

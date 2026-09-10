@@ -7,7 +7,7 @@
  * Codespaces public key; GitHub cannot return a value, so check mode
  * verifies that each declared secret exists and apply re-seals every
  * declared value on each run. Undeclared secrets are kept by default (their
- * values are unrecoverable); the wrapped `undeclared: delete` form opts into
+ * values are unrecoverable); the wrapped `_undeclared: delete` form opts into
  * deletion.
  *
  * The fine-grained "Codespaces secrets" PAT permission gates every endpoint

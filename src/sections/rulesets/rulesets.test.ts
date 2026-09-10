@@ -129,7 +129,7 @@ describe("rulesets", () => {
         },
       ],
       notes: [
-        'ruleset "legacy" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it',
+        'ruleset "legacy" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
       ],
       drift: [],
     });
@@ -297,7 +297,7 @@ describe("rulesets", () => {
     expect(api.calls).toHaveLength(0);
   });
 
-  test("wrapped undeclared:delete plans the DELETE after the declared upserts", async () => {
+  test("wrapped _undeclared:delete plans the DELETE after the declared upserts", async () => {
     const api = writable({
       [listRoute]: {
         data: [
@@ -310,7 +310,7 @@ describe("rulesets", () => {
       },
     });
     const result = await plan(api, {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [{ name: "main", target: "branch", rules: [{ type: "deletion" }] }],
     });
     expect(result).toEqual({
@@ -336,7 +336,7 @@ describe("rulesets", () => {
           params: { ruleset_id: "7" },
           describe: 'deleting undeclared ruleset "legacy"',
           drift: [
-            'rulesets[legacy]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
+            'rulesets[legacy]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
           ],
           change: 'DELETED undeclared ruleset "legacy"',
         },
@@ -347,7 +347,7 @@ describe("rulesets", () => {
     expect(api.mutations()).toEqual([]);
   });
 
-  test("undeclared:delete never deletes a ruleset without an explicit Repository source", async () => {
+  test("_undeclared:delete never deletes a ruleset without an explicit Repository source", async () => {
     // source_type is optional in the API type; a missing field is not proof
     // of repository ownership, and deletion cannot be undone. Organization
     // and enterprise rulesets never enter the managed list at all.
@@ -361,14 +361,14 @@ describe("rulesets", () => {
         ],
       },
     });
-    expect(await plan(api, { undeclared: "delete", entries: [] })).toEqual({
+    expect(await plan(api, { _undeclared: "delete", entries: [] })).toEqual({
       ops: [
         {
           role: "remove",
           params: { ruleset_id: "10" },
           describe: 'deleting undeclared ruleset "repo-owned"',
           drift: [
-            'rulesets[repo-owned]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
+            'rulesets[repo-owned]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
           ],
           change: 'DELETED undeclared ruleset "repo-owned"',
         },
@@ -390,7 +390,7 @@ describe("rulesets", () => {
     expect(await plan(api, { entries: [] })).toEqual({
       ops: [],
       notes: [
-        'ruleset "legacy" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it',
+        'ruleset "legacy" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
       ],
       drift: [],
     });
@@ -403,7 +403,7 @@ describe("rulesets", () => {
       { id: 900, name: "org-baseline", source_type: "Organization", enforcement: "active" },
     ]);
     const { first, second, changes } = await provePlanIdempotent(rulesetsSection, api, {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [
         { name: "main", target: "branch", enforcement: "active", rules: [{ type: "deletion" }] },
         { name: "tags", target: "tag", conditions: { ref_name: { include: ["v*"] } } },

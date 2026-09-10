@@ -62,7 +62,7 @@ type NestedEntry<K extends NestedKey> = EntryOf<NestedDeclared[K]>;
 
 /**
  * The EnvironmentConfig keys whose type takes the wrapped
- * `{undeclared, entries}` form. Taking the wrapper is a rule this section
+ * `{_undeclared, entries}` form. Taking the wrapper is a rule this section
  * commits to for every nested sub-resource list (plain-array PUT fields
  * like `reviewers` never take it), and the guarantee below rests on it:
  * the lockstep types pin NESTED_KEYS to the wrapped keys in both

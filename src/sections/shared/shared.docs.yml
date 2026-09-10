@@ -12,11 +12,11 @@ schema:
     The plain array form keeps the list's own default policy (for a top-level section that is the
     section default, and a multi-repo defaults file can set it; a nested list such as
     environments[].variables has its own fixed default and never inherits one); this wrapper can set
-    it explicitly, and with `undeclared` omitted it behaves exactly like the plain array. The
+    it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The
     wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are
-    strict: anything besides `undeclared` and `entries` (plus `_layering` on a top-level section's
-    wrapper) is rejected upfront as a typo.
-  UndeclaredPolicyList<*>.undeclared: >-
+    strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the
+    underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.
+  UndeclaredPolicyList<*>._undeclared: >-
     What apply does to live resources `entries` does not declare: "delete" removes them, "keep"
     leaves them alone and surfaces each as a note. Omitted, the list's own default applies.
   UndeclaredPolicyList<*>.entries: The declared entries, exactly as the plain array form lists them.

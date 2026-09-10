@@ -617,7 +617,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     },
   },
   {
-    // The {undeclared, entries} wrapper is this action's own strict
+    // The {_undeclared, entries} wrapper is this action's own strict
     // vocabulary, so a typo'd wrapper key must fail upfront, named.
     name: "wrapper-unknown-key",
     build: (rng) => {
@@ -635,8 +635,8 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
       const key = rng.pick(UNDECLARED_POLICY_SECTIONS);
       const entries = entriesOf(genSettings(rng.fork("valid"), key));
       return {
-        doc: { [key]: { undeclared: rng.pick(["detele", "kep", true]), entries } },
-        offendingToken: `${key}.undeclared`,
+        doc: { [key]: { _undeclared: rng.pick(["detele", "kep", true]), entries } },
+        offendingToken: `${key}._undeclared`,
       };
     },
   },

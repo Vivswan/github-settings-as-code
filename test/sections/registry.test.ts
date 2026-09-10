@@ -139,7 +139,7 @@ describe("section permissions", () => {
         `${key}: wrapper without a policy must parse`,
       ).toBe(true);
       expect(
-        module.shape.safeParse({ undeclared: "keep", entries: [] }).success,
+        module.shape.safeParse({ _undeclared: "keep", entries: [] }).success,
         `${key}: wrapper with a policy must parse`,
       ).toBe(true);
       const policy = defaultUndeclaredPolicy(sectionModule(key));

@@ -19,7 +19,7 @@
  *   (passthrough-first forward compatibility) and loosen() turns it into a
  *   passthrough looseObject for the runtime.
  * - z.strictObject only where the runtime rejects unknown keys in the shape
- *   itself - the {undeclared, entries} wrapper and the nested shapes whose
+ *   itself - the {_undeclared, entries} wrapper and the nested shapes whose
  *   endpoints offer no passthrough destination: it emits
  *   additionalProperties: false and loosen() keeps it strict.
  * - z.looseObject where the config type carries an index signature (the
@@ -147,7 +147,7 @@ export const SECTION_KEYS = [
 export type SectionKey = (typeof SECTION_KEYS)[number];
 
 /**
- * The sections that take the `undeclared` policy knob: their SettingsFile
+ * The sections that take the `_undeclared` policy knob: their SettingsFile
  * value is a union of the plain entry array and UndeclaredPolicyList. The
  * lockstep types below pin the list to the SettingsFile declarations in
  * both directions.
@@ -170,7 +170,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "secret_scanning_custom_patterns",
 ] as const satisfies readonly SectionKey[];
 
-/** A section key that takes the `undeclared` policy knob. */
+/** A section key that takes the `_undeclared` policy knob. */
 export type UndeclaredPolicySection = (typeof UNDECLARED_POLICY_SECTIONS)[number];
 
 /**
@@ -198,7 +198,7 @@ type _KnobListSound = MustBeNever<
 /**
  * The sections whose plain-array settings.yml form matches the Probot
  * Settings app schema, so an existing Probot config applies to them as-is
- * (the wrapped `undeclared` form is this action's own addition on top). The
+ * (the wrapped `_undeclared` form is this action's own addition on top). The
  * single source the README's "Migrating from the Probot Settings app"
  * paragraph is pinned against. `satisfies` keeps every entry a real section
  * key.

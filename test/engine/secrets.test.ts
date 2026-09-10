@@ -165,7 +165,7 @@ describe("secret provenance of a fallback-applied defaults document", () => {
   test("the wrapped undeclared-policy form is the operator's", () => {
     const wrappedDefaults = {
       actions_secrets: {
-        undeclared: "delete",
+        _undeclared: "delete",
         entries: [{ name: "FLEET_TOKEN", value: "$FLEET_TOKEN" }],
       },
     } as SettingsFile;

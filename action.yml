@@ -47,7 +47,7 @@ inputs:
       mode: merge only, and required there: the path the merged settings
       document is written to (parent directories are created). The file holds
       exactly what apply would run: every section validated, each list section
-      in its {undeclared, entries} form with the policy resolved, and private
+      in its {_undeclared, entries} form with the policy resolved, and private
       underscore keys and the _layering directives dropped. Feed it to a later
       apply or check step as its settings-file. Fails when set in apply or
       check.

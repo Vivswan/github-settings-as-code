@@ -605,7 +605,7 @@ describe("run in mode: merge", () => {
   const THREE_LAYERS_MERGED = {
     repository: { has_wiki: false, description: "mine" },
     labels: {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [
         { name: "bug", color: "d73a4a" },
         { name: "docs", color: "ffffff" },
@@ -613,7 +613,7 @@ describe("run in mode: merge", () => {
       ],
     },
     rulesets: {
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [{ ...FLEET_RULESET, rules: [{ type: "deletion" }, { type: "non_fast_forward" }] }],
     },
   };
@@ -676,8 +676,8 @@ describe("run in mode: merge", () => {
     expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
     expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
       repository: { has_wiki: false, has_projects: false, description: "mine" },
-      labels: { undeclared: "delete", entries: [{ name: "docs", color: "ffffff" }] },
-      rulesets: { undeclared: "keep", entries: [FLEET_RULESET] },
+      labels: { _undeclared: "delete", entries: [{ name: "docs", color: "ffffff" }] },
+      rulesets: { _undeclared: "keep", entries: [FLEET_RULESET] },
     });
   });
 
@@ -690,8 +690,8 @@ describe("run in mode: merge", () => {
     expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
     expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
       repository: { has_wiki: false, has_projects: false },
-      labels: { undeclared: "delete", entries: [{ name: "only", color: "000000" }] },
-      rulesets: { undeclared: "keep", entries: [FLEET_RULESET, { name: "tags", target: "tag" }] },
+      labels: { _undeclared: "delete", entries: [{ name: "only", color: "000000" }] },
+      rulesets: { _undeclared: "keep", entries: [FLEET_RULESET, { name: "tags", target: "tag" }] },
       pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
     });
   });
@@ -706,9 +706,9 @@ describe("run in mode: merge", () => {
     expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
     expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
       repository: { has_wiki: false, has_projects: false },
-      labels: { undeclared: "delete", entries: [{ name: "only", color: "000000" }] },
+      labels: { _undeclared: "delete", entries: [{ name: "only", color: "000000" }] },
       rulesets: {
-        undeclared: "keep",
+        _undeclared: "keep",
         entries: [{ name: "main", rules: [{ type: "non_fast_forward" }] }],
       },
       pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
@@ -724,7 +724,7 @@ describe("run in mode: merge", () => {
     setMergeEnv([fleet, top]);
     expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
     expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
-      rulesets: { undeclared: "keep", entries: [FLEET_RULESET] },
+      rulesets: { _undeclared: "keep", entries: [FLEET_RULESET] },
     });
     expect(captured).toEqual([
       `notice: ${top}: null removed rulesets[main].bypass_actors declared by a lower layer`,

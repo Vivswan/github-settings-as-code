@@ -235,7 +235,7 @@ describe("README migration paragraph", () => {
     // clause runs from "works as-is for" up to its "(for the list sections
     // among them, the plain-array form remains Probot-compatible" marker -
     // the array-form claim is scoped to the list sections, since the
-    // object-shaped sections have no array form and the wrapped `undeclared`
+    // object-shaped sections have no array form and the wrapped `_undeclared`
     // form is this action's own addition.
     const clause = paragraph.match(
       /works as-is for\s+(.*?)\(for the list sections among them, the plain-array form remains Probot-compatible/s,
@@ -331,7 +331,7 @@ describe("SettingsFile deletion claims", () => {
   test("the description of delete/keep sections claims its own policy and never the opposite", () => {
     // Each knobbed section's published description (its <key>.docs.yml
     // `SettingsFile.<key>` entry) states its default in a "... by default"
-    // clause and may mention the opposite word elsewhere (the `undeclared:`
+    // clause and may mention the opposite word elsewhere (the `_undeclared:`
     // opt-in it documents). The claim windows, families, and negator handling
     // live in ./claims.ts, shared with the COVERAGE sweep.
     for (const section of SECTIONS) {

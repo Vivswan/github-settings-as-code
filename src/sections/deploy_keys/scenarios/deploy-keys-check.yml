@@ -45,7 +45,7 @@ expect:
     - "deploy_keys[mirror-pull].read_only: declared true != live false"
   stdout_contains:
     - "deploy key \"retired-service\" exists on the repo but is not declared"
-    - "kept under \"undeclared: keep\""
+    - "kept under \"_undeclared: keep\""
   never:
     - "POST /repos/{repo}/keys"
     - "DELETE /repos/{repo}/keys"
