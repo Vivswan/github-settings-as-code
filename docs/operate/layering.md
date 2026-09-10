@@ -261,7 +261,7 @@ The fold itself refuses what only a merge can judge (`layer ".github/settings/re
 
 That guarantee covers the fold alone. The per-layer validation prints the same messages an apply or check run prints, and these message families can name what they find:
 
-- An unrecognized key in a strict object: `actions.cache: Unrecognized key: "cache_ttl"`.
+- An unrecognized key in a strict object: `actions.cache: Unrecognized key: "cache_ttl"`. A type mismatch prints only the type received, except a non-finite number, which prints as itself: `actions.cache.max_cache_size_gb: .inf` gives `Invalid input: expected number, received Infinity` (the vocabulary is Infinity, -Infinity, and NaN).
 - An unknown top-level section, by its name: `unknown top-level section(s) in repo.yml: lables`.
 - A key path through keys you chose, wherever a section accepts arbitrary ones: `repository.private_project is not plain YAML data`, and under `interaction_limits` the unknown keys themselves: `interaction_limits.limit: key(s) [private_project] ride the base interaction-limits PUT`.
 - A closed section's entry, by its identity, with the key it does not know: `collaborators[octocat]: declares "permision", which this section does not recognize`.
@@ -273,7 +273,8 @@ That guarantee covers the fold alone. The per-layer validation prints the same m
   - `branches` wildcard entries, by name with the scalar declared where a mapping belongs, the widest echo in the set: `branches[0].protection.required_status_checks: the wildcard entry "release/*" declares protection.required_status_checks as "strict", but on a wildcard rule it must be a mapping`.
   - `environments` entries, by name: `environments[0].deployment_branch_policies: the "prod" entry declares deployment_branch_policies, so it must also declare deployment_branch_policy`.
   - `actions.selected_actions` repeats the declared `allowed_actions`, which has already passed its enum, so only `all`, `local_only`, or `selected` can appear there.
-- A YAML syntax error, quoting the offending source line with a caret under the column; an unresolved alias names the alias instead. A parser warning (an unresolved tag, an unknown directive, an ambiguous anchor) leaves the parse successful, but the parser still prints the offending source line, values included, to the step's log; a collection used as a key warns with the stringified key.
+- A YAML syntax error, quoting the offending source line with a caret under the column; an unresolved alias names the alias instead.
+- A YAML parser warning (an unresolved tag, an unknown directive, an ambiguous anchor) leaves the parse successful, but the parser still prints the offending source line, values included, to the step's log; a collection used as a key warns with the stringified key.
 
 A merge-mode log can therefore show your settings file's structure and, through these messages, a value from it: treat it like any log that prints a parse error for a file the runner holds.
 
