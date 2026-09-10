@@ -40,9 +40,11 @@ function parseFlags(argv: string[]): Flags {
 
 /**
  * Every section a scenario touches: the top-level `settings` keys plus each
- * multi-repo target's `repos.<slug>.settings` keys and the `defaults_file`
- * keys. A multi-repo scenario declares its sections per target, not at the top
- * level, so filtering on `settings` alone would drop it from a --sections run.
+ * multi-repo target's `repos.<slug>.settings` keys, the `defaults_file` keys,
+ * and every merge layer's keys. A multi-repo scenario declares its sections
+ * per target, not at the top level, and a merge scenario may declare one only
+ * in a lower layer, so filtering on `settings` alone would drop either from a
+ * --sections run.
  */
 function scenarioSections(scenario: Scenario): Set<string> {
   const keys = new Set<string>(Object.keys(scenario.settings ?? {}));
@@ -53,15 +55,17 @@ function scenarioSections(scenario: Scenario): Set<string> {
       }
     }
   }
-  for (const key of Object.keys(scenario.defaults_file ?? {})) {
-    keys.add(key);
+  for (const doc of [scenario.defaults_file ?? {}, ...(scenario.settings_layers ?? [])]) {
+    for (const key of Object.keys(doc)) {
+      keys.add(key);
+    }
   }
   return keys;
 }
 
 /**
  * A scenario "touches" a section when that section appears in its settings, in
- * any multi-repo target's settings, or in its defaults file. --sections keeps
+ * any multi-repo target's settings, in its defaults file, or in a merge layer. --sections keeps
  * scenarios touching any listed section; --scenario matches an exact name.
  */
 function selectScenarios(all: Scenario[], flags: Flags): Scenario[] {

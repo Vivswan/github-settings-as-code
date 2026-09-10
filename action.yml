@@ -22,18 +22,37 @@ inputs:
     default: ""
   settings-file:
     description: >-
-      Path to the settings YAML file. Single-repo mode only; multi-repo
-      targets read repos-dir files or each repository's own
-      .github/settings.yml, so overriding it alongside repos or repos-dir
-      fails the run.
+      Path to the settings YAML file: exactly one in apply and check. In mode:
+      merge, the ordered list of settings files to fold instead, newline- or
+      comma-separated, lowest layer first. Newlines and commas are list
+      separators in every mode, so a settings-file path can never contain a
+      comma. Single-repo and merge modes only; multi-repo targets read
+      repos-dir files or each repository's own .github/settings.yml, so
+      overriding it alongside repos or repos-dir fails the run.
     required: false
     default: ".github/settings.yml"
   mode:
     description: >-
-      apply (mutate) or check (report drift, exit 1 on any). check makes no
-      settings changes, though a private report may still be delivered.
+      apply (mutate), check (report drift, exit 1 on any), or merge (fold the
+      settings-file layers into one document written to merged-file, with no
+      token and no GitHub API call; merge reads only settings-file,
+      merged-file, and layering, and rejects every other input set to a
+      non-default value, since each controls an apply or check run). check
+      makes no settings changes, though a private report may still be
+      delivered.
     required: false
     default: "apply"
+  merged-file:
+    description: >-
+      mode: merge only, and required there: the path the merged settings
+      document is written to (parent directories are created). The file holds
+      exactly what apply would run: every section validated, each list section
+      in its {undeclared, entries} form with the policy resolved, and private
+      underscore keys and the _layering directives dropped. Feed it to a later
+      apply or check step as its settings-file. Fails when set in apply or
+      check.
+    required: false
+    default: ""
   on-missing-permission:
     description: >-
       fail (default) or warn. Under warn, sections the token cannot access are
@@ -51,7 +70,10 @@ inputs:
     default: ""
   sections:
     description: >-
-      Optional comma-separated allowlist of sections to process.
+      Optional comma-separated allowlist of sections to process. apply and
+      check only: mode: merge writes every section its layers declare, so the
+      allowlist belongs on the step that runs the merged document and fails
+      the merge when set.
     required: false
     default: ""
   api-version:
@@ -83,6 +105,16 @@ inputs:
       keys win; objects merge, arrays and scalars replace; a target section
       set to null opts that repository out of the defaults section. Multi-repo
       mode only; fails when set without repos or repos-dir.
+    required: false
+    default: ""
+  layering:
+    description: >-
+      mode: merge only: merge (default) or replace, the run-wide default for
+      how the keyed list sections (labels, rulesets) combine with the layers
+      below them; a layer's own _layering directive, at its top level or on a
+      section's {entries} wrapper, overrides it per file or per section. Every
+      other list is replaced by the higher layer's. Fails when set in apply or
+      check.
     required: false
     default: ""
   private-repos:
@@ -182,7 +214,8 @@ outputs:
   result:
     description: >-
       applied | partial | clean | drift | failed (worst-of across all targets
-      in multi-repo mode, where skipped can also appear).
+      in multi-repo mode, where skipped can also appear), or merged in mode:
+      merge.
   skipped-sections:
     description: >-
       Comma-separated sections skipped for missing permissions (deduped union

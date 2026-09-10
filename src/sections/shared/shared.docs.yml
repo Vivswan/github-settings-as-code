@@ -22,7 +22,9 @@ schema:
   UndeclaredPolicyList<*>.entries: The declared entries, exactly as the plain array form lists them.
   UndeclaredPolicyList<*>._layering: >-
     A merge-time directive: how this section combines with the layers BELOW it in a layered merge.
-    "merge" unions the entries by key, "replace" lets this layer's list win. Omitted, the run's
-    layering applies. It has no effect on a single document, the merged document never carries it,
-    and a list nested inside a section entry does not take it (a higher layer replaces such a list
-    wholesale).
+    "replace" lets this layer's list win. "merge" unions the entries by identity and is accepted
+    only on a section whose entries have one (labels by name, rulesets by name with their rules by
+    type); on any other section it is refused, so declare "replace" or omit the key. Omitted, the
+    run's layering applies. It has no effect on a single document, the merged document never
+    carries it, and a list nested inside a section entry does not take it (a higher layer replaces
+    such a list wholesale).

@@ -113,12 +113,12 @@ export const rulesetsSection = {
   shape: loosen(knobbed(RulesetConfig)),
   // Same-name rulesets merge key by key; their rules pair by type, a rule replacing wholesale.
   layering: {
-    key: (entry) => (typeof entry.name === "string" ? entry.name : null),
+    keys: (entry) => (typeof entry.name === "string" ? [entry.name] : null),
     keyField: "name",
     combine: "merge",
     nested: {
       rules: {
-        key: (rule) => (typeof rule.type === "string" ? rule.type : null),
+        keys: (rule) => (typeof rule.type === "string" ? [rule.type] : null),
         keyField: "type",
         combine: "replace",
       },

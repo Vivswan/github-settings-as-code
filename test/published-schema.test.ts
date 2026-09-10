@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
 import { validateSectionShapes } from "../src/engine/validate.js";
-import { UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
+import { SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
 import { FLAG_PAIRING_FIXTURES } from "./fixtures/environment-flag-pairing.js";
 
 const ROOT = join(import.meta.dir, "..");
@@ -271,5 +271,34 @@ describe("published schema wrapper strictness", () => {
         true,
       );
     });
+  });
+});
+
+describe("the document-level _layering directive", () => {
+  const ajv = new Ajv({ strict: false, allErrors: true });
+  const validate: ValidateFunction = ajv.compile(schema);
+
+  test("the published schema and the zod document both accept a supported value", () => {
+    const doc: SettingsFile = { _layering: "replace", labels: [{ name: "bug" }] };
+    expect(validate(doc)).toBe(true);
+    expect(SettingsFile.safeParse(doc)).toEqual({ success: true, data: doc });
+  });
+
+  test("both reject an unsupported value with the enum error, naming the key", () => {
+    const doc = { _layering: "union", labels: [{ name: "bug" }] };
+    expect(validate(doc)).toBe(false);
+    expect((validate.errors ?? []).map((e) => [e.instancePath, e.keyword, e.params])).toEqual([
+      ["/_layering", "enum", { allowedValues: ["merge", "replace"] }],
+    ]);
+    const parsed = SettingsFile.safeParse(doc);
+    expect(parsed.success ? [] : parsed.error.issues.map((i) => [i.path, i.code])).toEqual([
+      [["_layering"], "invalid_value"],
+    ]);
+  });
+
+  test("the apply-path shape validation copies only sections, so the directive never reaches the engine", () => {
+    expect(
+      validateSectionShapes({ _layering: "replace", labels: [{ name: "bug" }] }, "settings.yml"),
+    ).toEqual({ settings: { labels: [{ name: "bug" }] } });
   });
 });

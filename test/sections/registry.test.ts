@@ -39,7 +39,11 @@ import type { MustBeNever } from "../../src/types.js";
 
 /** The identity facet of a list section's declaration, as the erased registry view exposes it. */
 interface ListDeclView {
-  readonly identity: { readonly field: string; readonly fold?: (name: string) => string };
+  readonly identity: {
+    readonly field: string;
+    readonly fold?: (name: string) => string;
+    readonly aliases?: (entry: object) => readonly string[];
+  };
 }
 
 // The caveat code-scanning appends to its derived grant. Kept here so the
@@ -180,25 +184,35 @@ describe("section permissions", () => {
 
   test("the layering declarations sit on knobbed sections and agree with the list identities", () => {
     // A `layering` only makes sense where the layered merge combines entries
-    // (the knobbed sections), and a list section's layering key must fold a
-    // name exactly as its identity does, or the merge would pair entries the
-    // planner treats as distinct (or the reverse).
+    // (the knobbed sections), and a list section's layering keys must be the
+    // identities its planner folds and claims - the written name plus every
+    // alias - or the merge would pair entries the planner treats as distinct
+    // (or the reverse, leaving a merged document the planner refuses).
     const layered = SECTIONS.flatMap((module) =>
       module.layering === undefined ? [] : [{ module, layering: module.layering }],
     );
     const knobbed: readonly string[] = UNDECLARED_POLICY_SECTIONS;
+    const plain = { name: "Bug" };
+    const renaming = { name: "Bug", new_name: "Defect" };
     expect(
       layered.map(({ module, layering }) => {
         const identity = "decl" in module ? (module.decl as ListDeclView).identity : undefined;
+        const fold = identity?.fold ?? ((n: string) => n);
         return {
           key: module.key,
           knobbed: knobbed.includes(module.key),
           keyField: layering.keyField,
-          keyOfBug: layering.key({ [layering.keyField]: "Bug" }),
+          keysOfPlain: layering.keys(plain),
+          keysOfRenaming: layering.keys(renaming),
           identity:
             identity === undefined
               ? undefined
-              : { field: identity.field, foldOfBug: (identity.fold ?? ((n) => n))("Bug") },
+              : {
+                  field: identity.field,
+                  foldOfBug: fold("Bug"),
+                  aliasesOfPlain: identity.aliases?.(plain).map(fold),
+                  aliasesOfRenaming: identity.aliases?.(renaming).map(fold),
+                },
         };
       }),
     ).toEqual([
@@ -206,10 +220,23 @@ describe("section permissions", () => {
         key: "labels",
         knobbed: true,
         keyField: "name",
-        keyOfBug: "bug",
-        identity: { field: "name", foldOfBug: "bug" },
+        keysOfPlain: ["bug"],
+        keysOfRenaming: ["defect", "bug"],
+        identity: {
+          field: "name",
+          foldOfBug: "bug",
+          aliasesOfPlain: [],
+          aliasesOfRenaming: ["bug"],
+        },
       },
-      { key: "rulesets", knobbed: true, keyField: "name", keyOfBug: "Bug", identity: undefined },
+      {
+        key: "rulesets",
+        knobbed: true,
+        keyField: "name",
+        keysOfPlain: ["Bug"],
+        keysOfRenaming: ["Bug"],
+        identity: undefined,
+      },
     ]);
   });
 

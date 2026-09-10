@@ -13,12 +13,13 @@ import { z } from "zod";
 const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "UndeclaredPolicy" });
 
 /**
- * The merge-time directive on a top-level knobbed wrapper: how this section
- * combines with the layers BELOW it in a layered merge (engine/layers.ts) -
- * "merge" unions the entries by key, "replace" lets this layer's list win. It
- * has no effect on a single document and never reaches the merged result.
+ * The merge-time directive, on a top-level knobbed wrapper or at the document
+ * root: how the section (or every keyed section of the document) combines
+ * with the layers BELOW it in a layered merge (engine/layers.ts) - "merge"
+ * unions the entries by key, "replace" lets this layer's list win. It has no
+ * effect on a single document and never reaches the merged result.
  */
-const LayeringSchema = z.enum(["merge", "replace"]);
+export const LayeringSchema = z.enum(["merge", "replace"]);
 
 /**
  * The knobbed form of a list value: the plain entry array, or the strict

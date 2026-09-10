@@ -4,6 +4,7 @@
 // prose from the docs registry + coverage-data.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { MERGE_RESULT } from "../../src/action/deliver.js";
 import { REPO_RESULTS, type RepoResult } from "../../src/engine/orchestrate.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import {
@@ -255,8 +256,10 @@ const RESULT_DISPLAY: Record<RepoResult, "any mode" | "multi-repo only"> = {
 /** The outputs enumeration's fixed phrases, as rendered and as the region shape expects them. */
 const WORST_OF = "; worst-of across targets in multi-repo mode";
 const CAN_ALSO_APPEAR = " can also appear";
+/** The merge-mode result, a value outside RepoResult, closes the enumeration. */
+const MERGE_ONLY = `; \`${MERGE_RESULT}\` in mode: merge`;
 
-/** The `result` output's value enumeration: the any-mode values, then the multi-repo-only ones. */
+/** The `result` output's value enumeration: the any-mode values, the multi-repo-only ones, then the merge result. */
 export function renderOutputsList(results: readonly RepoResult[]): string {
   const ordered = (Object.keys(RESULT_DISPLAY) as RepoResult[]).filter((value) =>
     results.includes(value),
@@ -267,9 +270,9 @@ export function renderOutputsList(results: readonly RepoResult[]): string {
     .filter((value) => RESULT_DISPLAY[value] === "multi-repo only")
     .map(code);
   const lead = `${anyMode.join(" / ")}${WORST_OF}`;
-  return multiOnly.length === 0
-    ? lead
-    : `${lead}, where ${multiOnly.join(" and ")}${CAN_ALSO_APPEAR}`;
+  const withMulti =
+    multiOnly.length === 0 ? lead : `${lead}, where ${multiOnly.join(" and ")}${CAN_ALSO_APPEAR}`;
+  return `${withMulti}${MERGE_ONLY}`;
 }
 
 /** A section operation tagged with its section, as patFormParameters reads it. */
@@ -358,7 +361,7 @@ function outputsListRegion(name: string, heading: string): GeneratedRegion {
     name,
     placement: { kind: "under-heading", heading },
     body: new RegExp(
-      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where \x60[a-z]+\x60(?: and \x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?)?$`,
+      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where \x60[a-z]+\x60(?: and \x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?(?:${escapeRe(MERGE_ONLY)})?)?$`,
     ),
     render: () => renderOutputsList(REPO_RESULTS),
   };

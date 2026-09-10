@@ -6,7 +6,8 @@
  * below declares the key, so `pages: null` keeps its engine meaning. The
  * knobbed list sections (UNDECLARED_POLICY_SECTIONS) are the one place lists
  * combine: under "merge", a section whose module declares a `layering` unions
- * its entries by key; every other list is replaced by the higher layer's.
+ * its entries by identity (two entries whose key sets intersect are one);
+ * every other list is replaced by the higher layer's.
  * A layer that refers back into itself (a YAML anchor aliased inside its own
  * node) is refused at the boundary: layers are trees.
  * Pure: no Io, no GitHub. The helpers merge.ts shares live here too.
@@ -292,8 +293,11 @@ function displayKey(entry: Readonly<Record<string, unknown>>, keyed: KeyedListLa
 
 /**
  * Refuse a keyed list a layer declares with an entry that carries no key or
- * two entries under one key, at any nesting the declaration names; each
- * entry's nested keyed lists are checked the same way.
+ * two entries claiming one key (a label renaming into a sibling's name), at
+ * any nesting the declaration names; each entry's nested keyed lists are
+ * checked the same way. Past this check, every entry of the list has keys
+ * and no two claim one, so a layer's entries never collide among themselves
+ * in the union.
  */
 function checkKeyed(
   layer: string,
@@ -303,23 +307,22 @@ function checkKeyed(
 ): void {
   const seen = new Map<string, Readonly<Record<string, unknown>>>();
   entries.forEach((entry, index) => {
-    const key = keyed.key(entry);
-    if (key === null) {
+    const keys = keyed.keys(entry);
+    if (keys === null) {
       throw new LayerRefusal(
         `layer ${quote(layer)}: ${path}[${index}] carries no string ${quote(keyed.keyField)}, which every entry needs to layer by`,
       );
     }
-    const first = seen.get(key);
-    if (first !== undefined) {
-      const spellings = [displayKey(first, keyed), displayKey(entry, keyed)];
-      const spelled = spellings.every((s) => s === key)
-        ? ""
-        : ` (spelled ${spellings.map((s) => JSON.stringify(s)).join(", ")})`;
-      throw new LayerRefusal(
-        `layer ${quote(layer)}: ${path}: two entries share the ${keyed.keyField} ${JSON.stringify(key)}${spelled}; each ${keyed.keyField} must be unique within one layer`,
-      );
+    for (const key of keys) {
+      const first = seen.get(key);
+      if (first !== undefined) {
+        const claimants = [first, entry].map((e) => JSON.stringify(displayKey(e, keyed)));
+        throw new LayerRefusal(
+          `layer ${quote(layer)}: ${path}: two entries, ${claimants.join(" and ")}, both claim the ${keyed.keyField} ${JSON.stringify(key)}; each ${keyed.keyField} belongs to one entry within a layer`,
+        );
+      }
+      seen.set(key, entry);
     }
-    seen.set(key, entry);
     for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
       const value = entry[field];
       if (!Array.isArray(value)) {
@@ -528,12 +531,27 @@ function mergeMappings(
   return out;
 }
 
+/** A higher entry's place in the union: at the slot of the first lower entry it matches, or appended. */
+type Placement =
+  | {
+      readonly item: Readonly<Record<string, unknown>>;
+      readonly keys: readonly string[];
+      readonly slot: number;
+    }
+  | { readonly item: unknown; readonly slot: undefined };
+
 /**
- * The keyed union: lower order preserved, a higher entry matching a lower one
- * combined in place (replaced wholesale, or merged key by key with its own
- * nested keyed lists), higher-only entries appended in their order. Total
- * over whatever the lists hold: an item without a key pairs only with
- * another keyless item, and a non-mapping pair replaces like any value.
+ * The keyed union. A higher entry supersedes every lower entry it matches
+ * (their key sets intersect) and stands where the first of them stood: under
+ * "replace" as written, under "merge" merged key by key into that first one,
+ * with its own nested keyed lists. Unmatched lower entries keep their order;
+ * higher-only entries append in theirs. Matching reads the lower list as it
+ * stood before this layer, so which entries result does not depend on the
+ * higher entries' order (only their order within one slot does): a lower
+ * entry two higher entries claim between them is superseded by both, and
+ * since the boundary keeps a layer's entries key-disjoint, the result is one
+ * the section's planner accepts. Total over whatever the lists hold: an item
+ * without keys pairs with nothing.
  */
 function unionKeyed(
   lower: readonly unknown[],
@@ -542,28 +560,37 @@ function unionKeyed(
   path: string,
   step: Step,
 ): unknown[] {
-  const keyOf = (item: unknown): string | null => (isPlainObject(item) ? keyed.key(item) : null);
-  const out: unknown[] = [...lower];
-  const at = new Map<string | null, number>();
-  lower.forEach((item, index) => {
-    const key = keyOf(item);
-    if (!at.has(key)) {
-      at.set(key, index);
+  const intersect = (a: readonly string[], b: readonly string[]): boolean =>
+    a.some((key) => b.includes(key));
+  const lowerKeys = lower.map((item) => (isPlainObject(item) ? keyed.keys(item) : null) ?? []);
+  const placements = higher.map((item): Placement => {
+    const keys = isPlainObject(item) ? keyed.keys(item) : null;
+    const slot = keys === null ? -1 : lowerKeys.findIndex((claims) => intersect(claims, keys));
+    return isPlainObject(item) && keys !== null && slot !== -1
+      ? { item, keys, slot }
+      : { item, slot: undefined };
+  });
+  const placed = placements.flatMap((p) => (p.slot === undefined ? [] : [p]));
+  const out: unknown[] = [];
+  lower.forEach((below, index) => {
+    if (!placed.some((p) => intersect(lowerKeys[index] ?? [], p.keys))) {
+      out.push(below);
+      return;
+    }
+    for (const { item, slot } of placed) {
+      if (slot === index) {
+        out.push(
+          keyed.combine === "replace"
+            ? structuredClone(item)
+            : mergeValue(below, item, `${path}[${displayKey(item, keyed)}]`, step, keyed.nested),
+        );
+      }
     }
   });
-  for (const item of higher) {
-    const key = keyOf(item);
-    const index = at.get(key);
-    if (index === undefined) {
-      at.set(key, out.length);
+  for (const { item, slot } of placements) {
+    if (slot === undefined) {
       out.push(structuredClone(item));
-      continue;
     }
-    const label = isPlainObject(item) ? `${path}[${displayKey(item, keyed)}]` : path;
-    out[index] =
-      keyed.combine === "replace"
-        ? structuredClone(item)
-        : mergeValue(out[index], item, label, step, keyed.nested);
   }
   return out;
 }
