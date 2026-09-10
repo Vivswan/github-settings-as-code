@@ -259,6 +259,8 @@ The per-layer validation catches what a standalone settings file could not say, 
 
 The fold itself refuses what only a merge can judge (`layer ".github/settings/repo.yml": ...`). A fold refusal names the key path (entries by index) and the kind of problem, never a value from the document: the merge runs without a repository's redaction context, so a label name or rule type echoed here could put a private repository's settings into a public log.
 
+That guarantee covers the fold alone. The per-layer validation prints the same messages an apply or check run prints, and those can name what they find: an unrecognized key in a strict object (`actions.cache: Unrecognized key: "cache_ttl"`), an unknown top-level section by its name, a closed section's entry by its identity with the key it does not know (`collaborators[octocat]: declares "permision", which this section does not recognize`), and, where a section words its own error, the rejected value itself (`repository.enable_vulnerability_alerts: "yes" is not a boolean`; `interaction_limits.pull_request_creation_bypass: "Octocat" and "octocat" name the same login`; a duplicate environment or bypass actor under `branches`; the name of an `environments` entry missing its branch-policy flag). A YAML syntax error quotes the offending source line. A merge-mode log can therefore show your settings file's structure and, from those messages, a value from it: treat it like any log that prints a parse error for a file the runner holds.
+
 | The layer has | The fold says |
 |---|---|
 | Two entries under one key in one list (`labels: [{name: bug}, {name: docs}, {name: Bug}]`) | `labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer` |

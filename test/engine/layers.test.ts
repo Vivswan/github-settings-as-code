@@ -744,6 +744,58 @@ describe("mergeLayers: layer-boundary refusals", () => {
       notices: [],
     });
   });
+
+  test("no refusal, of any kind, echoes a value or key taken from the document", () => {
+    // Every identity the documents below declare (names, titles, logins, a
+    // wrapper knob, a directive), every malformed value, and every private
+    // key holds the marker; the recognized keys (labels, color) are structure
+    // the prose may name. A refusal that printed one would print the marker.
+    const M = "ZZ_MARKER";
+    const cyclic: Record<string, unknown> = { [M]: M };
+    cyclic[`${M}_self`] = cyclic;
+    const shaped: [string, unknown, string][] = [
+      [
+        "a scalar section",
+        { labels: M },
+        'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a string',
+      ],
+      [
+        "a wrapper without entries",
+        { labels: { _undeclared: M, [M]: M } },
+        'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
+      ],
+      [
+        "a scalar entry",
+        { rulesets: [{ name: M, rules: [M] }] },
+        'layer "repo": rulesets[0].rules[0] must be a mapping; got a string',
+      ],
+      [
+        "a directive that is a marker",
+        { labels: { _layering: M, entries: [{ name: M }] } },
+        'layer "repo": labels._layering must be "merge" or "replace"; got a string that is neither',
+      ],
+    ];
+    const kinded: [string, unknown][] = [
+      ["a top-level directive that is a marker", { _layering: M, labels: [{ name: M }] }],
+      [
+        "a merge directive on a section without a layering key",
+        { milestones: { _layering: "merge", entries: [{ title: M }] } },
+      ],
+      ["an entry without its key", { labels: [{ color: M, [M]: M }] }],
+      ["two entries claiming one key", { labels: [{ name: M }, { name: M.toLowerCase() }] }],
+      ["a cycle", { repository: cyclic }],
+    ];
+    for (const [, doc, error] of shaped) {
+      expect(merge([fleet, layer("repo", doc)])).toEqual({ error });
+    }
+    for (const [name, doc] of [...shaped, ...kinded]) {
+      const result = merge([fleet, layer("repo", doc)]);
+      if (!("error" in result)) {
+        throw new Error(`expected a refusal for ${name}`);
+      }
+      expect(result.error.toLowerCase()).not.toContain(M.toLowerCase());
+    }
+  });
 });
 
 /** A cyclic document: a section aliased inside itself, with a marker null beside the alias. */

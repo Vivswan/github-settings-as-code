@@ -220,16 +220,18 @@ export function stripNulls(doc: unknown): unknown {
 
 /**
  * The kinds of problem the layer boundary refuses. Each carries only what
- * its prose needs - an entry index, a module-declared field name, or a value
- * to describe by SHAPE - so no string taken from the document has a way in.
+ * its prose needs: the prose fragments are literal unions, the positions are
+ * numbers, and a document value enters only as `actual`, which the prose
+ * describes by SHAPE. The one free string, `keyField`, is passed from the
+ * module's declared key field, never read from a document.
  */
 type Problem =
   | { readonly kind: "cycle" }
   | {
       readonly kind: "wrong-shape";
-      readonly expected: string;
+      readonly expected: "a mapping" | "a list of mappings or an {_undeclared, entries} wrapper";
       readonly actual: unknown;
-      readonly detail?: string;
+      readonly detail?: " without an entries list";
     }
   | { readonly kind: "bad-directive"; readonly actual: unknown }
   | { readonly kind: "no-layering-key" }
@@ -247,12 +249,18 @@ class LayerRefusal extends Error {}
 /**
  * The ONE place a refusal is worded, and with describeOptOut the only prose
  * the merge produces. INVARIANT: a message names the layer as the layer list
- * names it, the site's key path (section keys, mapping keys, module-declared
- * field names, entry indices), and the kind of problem - never a value from
+ * names it, the site's key path, and the kind of problem - never a value from
  * the document. mode: merge has no private-repos redaction context, so a
  * value echoed here (a label name, a rule type, a mis-shaped section body)
- * could land a private repository's settings in a public log. A Problem
- * carries indices, field names, and values described by shape only.
+ * could land a private repository's settings in a public log.
+ * What the types enforce: a Problem's prose fragments are literal unions and
+ * its positions are numbers, so `actual` and `keyField` are the only fields
+ * that could carry a document string. What stays the code's invariant,
+ * pinned by the marker test in test/engine/layers.test.ts: `actual` reaches
+ * the prose only through describeShape; `keyField` is the module's declared
+ * key field; `site` is built from section keys, entry indices,
+ * module-declared field names, LAYERING_KEY, and the fixed phrase "the
+ * document".
  */
 function describeRefusal(layer: string, site: string, problem: Problem): string {
   const at = `layer ${quote(layer)}: ${site}`;
@@ -422,7 +430,7 @@ function admitSection(
       kind: "wrong-shape",
       expected: "a list of mappings or an {_undeclared, entries} wrapper",
       actual: value,
-      detail: isPlainObject(value) ? " without an entries list" : "",
+      detail: isPlainObject(value) ? " without an entries list" : undefined,
     });
   }
   const entries = admitEntries(layer, key, value.entries);
