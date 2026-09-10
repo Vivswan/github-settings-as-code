@@ -1,0 +1,78 @@
+# mode: merge folds an ordered layer stack into one document without touching
+# GitHub: a fleet layer declares labels, a `main` ruleset, and Pages; the repo
+# layer on top recolors one label, adds another, appends a rule type to `main`,
+# and opts out of Pages with null. The written document is exactly what apply
+# would run (list sections in their resolved {undeclared, entries} form), the
+# null opt-out is announced, and the mock sees ZERO requests.
+name: merge-union-optout
+inputs:
+  mode: merge
+settings_layers:
+  - labels:
+      - name: bug
+        color: d73a4a
+        description: Something isn't working
+      - name: docs
+        color: "0075ca"
+    rulesets:
+      - name: main
+        target: branch
+        enforcement: active
+        conditions:
+          ref_name:
+            include: ["~DEFAULT_BRANCH"]
+            exclude: []
+        rules:
+          - type: deletion
+    pages:
+      build_type: workflow
+      source:
+        branch: main
+        path: /
+settings:
+  labels:
+    - name: docs
+      color: ffffff
+    - name: infra
+      color: "111111"
+  rulesets:
+    - name: main
+      rules:
+        - type: non_fast_forward
+  pages: null
+expect:
+  exit_code: 0
+  result: merged
+  zero_requests: true
+  stdout_contains:
+    - "settings.yml: null removed pages declared by a lower layer"
+  summary_contains:
+    - "| 1 | "
+    - "layer-0.yml |"
+    - "| 2 | "
+    - "settings.yml |"
+    - "Merged document written to "
+  merged:
+    labels:
+      undeclared: delete
+      entries:
+        - name: bug
+          color: d73a4a
+          description: Something isn't working
+        - name: docs
+          color: ffffff
+        - name: infra
+          color: "111111"
+    rulesets:
+      undeclared: keep
+      entries:
+        - name: main
+          target: branch
+          enforcement: active
+          conditions:
+            ref_name:
+              include: ["~DEFAULT_BRANCH"]
+              exclude: []
+          rules:
+            - type: deletion
+            - type: non_fast_forward

@@ -3,7 +3,11 @@ import { type Layer, type Layering, mergeLayers, stripNulls } from "../../src/en
 import { applyDefaults } from "../../src/engine/merge.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import type { SettingsFile } from "../../src/schema.js";
+import { planContext } from "../../src/sections/contract/plan.js";
+import { labelsSection } from "../../src/sections/labels/index.js";
 import { silentIo } from "../io-fake.js";
+import { MockApi } from "../mock-api.js";
+import { REPO } from "../sections/section-run.js";
 
 /**
  * Every input document is frozen to the leaves: a fold step that touched one
@@ -272,6 +276,106 @@ describe("mergeLayers: keyed sections", () => {
     });
   });
 
+  /**
+   * The labels planner over an empty repository: it rejects two entries that
+   * claim one label before any write, so a merged document it plans is one
+   * apply accepts. The ops are the creates, one per entry.
+   */
+  async function planLabels(entries: readonly Record<string, unknown>[]) {
+    const api = new MockApi({ "GET /repos/o/r/labels?per_page=100&page=1": { data: [] } });
+    const plan = await labelsSection.plan(
+      planContext(labelsSection, api, REPO),
+      entries as Parameters<typeof labelsSection.plan>[1],
+    );
+    return plan.ops.map((op) => op.describe);
+  }
+
+  test.each([
+    [
+      "the plain label above the rename",
+      {
+        lower: [{ name: "bug", new_name: "defect" }],
+        higher: [{ name: "defect", color: "ffffff" }],
+      },
+      [{ name: "defect", color: "ffffff" }],
+    ],
+    [
+      "the rename above the plain label",
+      {
+        lower: [{ name: "defect", color: "ffffff" }],
+        higher: [{ name: "bug", new_name: "defect" }],
+      },
+      [{ name: "bug", new_name: "defect" }],
+    ],
+  ])(
+    "a label renaming into a name another layer declares is one label, the higher entry (%s)",
+    async (_order, { lower, higher }, entries) => {
+      // Under "replace" the higher entry wins wholesale: a lower `new_name`
+      // does not survive (the merged document declares "defect" outright and
+      // no longer renames "bug" into it), a higher one is kept as written.
+      const result = merge([layer("fleet", { labels: lower }), layer("repo", { labels: higher })]);
+      expect(result).toEqual({
+        settings: { labels: { undeclared: "delete", entries } },
+        notices: [],
+      });
+      expect(await planLabels(entries)).toEqual(['creating label "defect"']);
+    },
+  );
+
+  test("a higher entry claiming two lower labels supersedes both: the merged document is one entry", async () => {
+    const result = merge([
+      layer("fleet", { labels: [{ name: "defect" }, { name: "bug" }] }),
+      layer("repo", { labels: [{ name: "Bug", new_name: "Defect" }] }),
+    ]);
+    const entries = [{ name: "Bug", new_name: "Defect" }];
+    expect(result).toEqual({
+      settings: { labels: { undeclared: "delete", entries } },
+      notices: [],
+    });
+    expect(await planLabels(entries)).toEqual(['creating label "Defect"']);
+  });
+
+  test.each([
+    ["rename first", [{ name: "bug", new_name: "defect" }, { name: "docs" }]],
+    ["rename last", [{ name: "docs" }, { name: "bug", new_name: "defect" }]],
+  ])(
+    "the result does not depend on the higher entries' order (%s): a lower rename two higher entries claim between them is superseded by both",
+    async (_order, higher) => {
+      const result = merge([
+        layer("fleet", { labels: [{ name: "bug" }, { name: "docs", new_name: "defect" }] }),
+        layer("repo", { labels: higher }),
+      ]);
+      // Each higher entry stands where the first lower entry it matches stood:
+      // the rename at "bug", "docs" at the superseded lower rename.
+      const entries = [{ name: "bug", new_name: "defect" }, { name: "docs" }];
+      expect(result).toEqual({
+        settings: { labels: { undeclared: "delete", entries } },
+        notices: [],
+      });
+      expect(await planLabels(entries)).toEqual([
+        'creating label "defect"',
+        'creating label "docs"',
+      ]);
+    },
+  );
+
+  test("a higher rename onto an untouched lower label keeps the other lower labels distinct", async () => {
+    const result = merge([
+      layer("fleet", { labels: [{ name: "bug" }, { name: "docs" }] }),
+      layer("repo", { labels: [{ name: "bug", new_name: "defect" }, { name: "infra" }] }),
+    ]);
+    const entries = [{ name: "bug", new_name: "defect" }, { name: "docs" }, { name: "infra" }];
+    expect(result).toEqual({
+      settings: { labels: { undeclared: "delete", entries } },
+      notices: [],
+    });
+    expect(await planLabels(entries)).toEqual([
+      'creating label "defect"',
+      'creating label "docs"',
+      'creating label "infra"',
+    ]);
+  });
+
   test("same-name rulesets merge key by key; a partial higher ruleset keeps the lower conditions and rules append by type", () => {
     const result = merge([
       layer("fleet", { rulesets: [MAIN_RULESET] }),
@@ -536,7 +640,7 @@ describe("mergeLayers: layer-boundary refusals", () => {
     [
       "a duplicate rule type in one ruleset",
       { rulesets: [{ name: "main", rules: [{ type: "deletion" }, { type: "deletion" }] }] },
-      'layer "repo": rulesets[main].rules: two entries share the type "deletion"; each type must be unique within one layer',
+      'layer "repo": rulesets[main].rules: two entries, "deletion" and "deletion", both claim the type "deletion"; each type belongs to one entry within a layer',
     ],
     [
       "a non-mapping rule",
@@ -546,12 +650,17 @@ describe("mergeLayers: layer-boundary refusals", () => {
     [
       "duplicate label names, case-folded",
       { labels: [{ name: "Bug" }, { name: "bug" }] },
-      'layer "repo": labels: two entries share the name "bug" (spelled "Bug", "bug"); each name must be unique within one layer',
+      'layer "repo": labels: two entries, "Bug" and "bug", both claim the name "bug"; each name belongs to one entry within a layer',
+    ],
+    [
+      "a label renaming into a sibling's name in one layer",
+      { labels: [{ name: "bug", new_name: "Defect" }, { name: "defect" }] },
+      'layer "repo": labels: two entries, "bug" and "defect", both claim the name "defect"; each name belongs to one entry within a layer',
     ],
     [
       "duplicate ruleset names",
       { rulesets: [{ name: "main" }, { name: "main" }] },
-      'layer "repo": rulesets: two entries share the name "main"; each name must be unique within one layer',
+      'layer "repo": rulesets: two entries, "main" and "main", both claim the name "main"; each name belongs to one entry within a layer',
     ],
     [
       "a nameless label",

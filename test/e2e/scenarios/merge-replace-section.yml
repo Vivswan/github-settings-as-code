@@ -1,0 +1,41 @@
+# Under the default merge layering, a wrapper's `_layering: replace` lets the
+# top layer's labels win outright while its rulesets still union with the
+# fleet's; the directive itself never reaches the written document.
+name: merge-replace-section
+inputs:
+  mode: merge
+settings_layers:
+  - labels:
+      - name: bug
+        color: d73a4a
+      - name: docs
+        color: "0075ca"
+    rulesets:
+      - name: main
+        target: branch
+settings:
+  labels:
+    _layering: replace
+    entries:
+      - name: infra
+        color: "111111"
+  rulesets:
+    - name: tags
+      target: tag
+expect:
+  exit_code: 0
+  result: merged
+  zero_requests: true
+  merged:
+    labels:
+      undeclared: delete
+      entries:
+        - name: infra
+          color: "111111"
+    rulesets:
+      undeclared: keep
+      entries:
+        - name: main
+          target: branch
+        - name: tags
+          target: tag

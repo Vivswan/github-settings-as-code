@@ -1388,6 +1388,14 @@
               "$ref": "#/definitions/UndeclaredPolicyList%3CSecretScanningPatternConfig%3E"
             }
           ]
+        },
+        "_layering": {
+          "description": "mode: merge only: a layer-level default for how this document's keyed list sections (labels, rulesets) combine with the layers below it, overriding the run's layering input; a section's own wrapper-level `_layering` overrides it again. `merge` reaches every section of this document that takes the `{undeclared, entries}` wrapper, and only the keyed ones accept it, so a document declaring `merge` with a section whose entries have no layering identity (milestones, autolinks) is refused unless that section's wrapper says `_layering: replace`. Consumed by the merge, never applied: the merged document carries no `_layering`, and apply and check ignore it like any `_` key.",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
         }
       }
     },
@@ -1436,7 +1444,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1469,7 +1477,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1502,7 +1510,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1535,7 +1543,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1568,7 +1576,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1601,7 +1609,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1634,7 +1642,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1667,7 +1675,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1700,7 +1708,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1733,7 +1741,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1866,7 +1874,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1899,7 +1907,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1932,7 +1940,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1965,7 +1973,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",
@@ -1998,7 +2006,7 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"merge\" unions the entries by key, \"replace\" lets this layer's list win. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
           "type": "string",
           "enum": [
             "merge",

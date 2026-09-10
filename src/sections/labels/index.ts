@@ -97,9 +97,6 @@ export const labelsSection = listSection({
     matchBy: {},
   },
   prose: { undeclaredAction: "DELETE it" },
-  layering: {
-    key: (entry) => (typeof entry.name === "string" ? nameKey(entry.name) : null),
-    keyField: "name",
-    combine: "replace",
-  },
+  // Entries layer by the identity above; a higher same-label entry wins wholesale.
+  layering: { combine: "replace" },
 });

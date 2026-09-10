@@ -113,17 +113,26 @@ export interface SectionMeta<
   /**
    * How this section's entries layer across settings documents in a layered
    * merge (engine/layers.ts): declared only by knobbed sections whose entries
-   * carry a matching key; a knobbed section without one always replaces.
+   * carry a matching identity; a knobbed section without one always replaces.
    * The conditional type makes it unrepresentable on a non-knobbed section.
    */
   readonly layering?: K extends UndeclaredPolicySection ? KeyedListLayering : never;
 }
 
-/** A list whose entries layer by key across settings documents (engine/layers.ts). */
+/**
+ * A list whose entries layer by identity across settings documents
+ * (engine/layers.ts). Two entries are one resource when their key sets
+ * intersect, which is the same test the section's planner applies to a
+ * single document, so a merged document is always one the planner accepts.
+ */
 export interface KeyedListLayering {
-  /** The matching key of one entry, or null when it carries none (refused at the layer boundary). */
-  readonly key: (entry: Readonly<Record<string, unknown>>) => string | null;
-  /** The entry field the key comes from, for refusal prose ("name", "type"). */
+  /**
+   * Every identity one entry claims, folded as the planner folds it: a
+   * ruleset's name; a label's name, plus its current name when it renames.
+   * Null when the entry carries none (refused at the layer boundary).
+   */
+  readonly keys: (entry: Readonly<Record<string, unknown>>) => readonly string[] | null;
+  /** The entry field the keys come from, for refusal prose ("name", "type"). */
   readonly keyField: string;
   /** A matched pair: "replace" (higher wins wholesale) or "merge" (key by key, nested keyed lists below). */
   readonly combine: "replace" | "merge";

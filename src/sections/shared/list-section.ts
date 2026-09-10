@@ -173,7 +173,9 @@ export interface ListSectionDecl<
     readonly aliases?: (entry: Entry<K>) => readonly string[];
     /**
      * The update body's key for the name when GitHub renames through another
-     * one (labels' `new_name`); omitted, the name travels under `field`.
+     * one (labels' `new_name`); omitted, the name travels under `field`. An
+     * entry declaring a value under it is renaming: that value is the name it
+     * writes (the lens carries it under `field`), and `field` its current one.
      */
     readonly renameKey?: string;
   };
@@ -218,8 +220,13 @@ export interface ListSectionDecl<
   };
   /** The designated secret-field values of one entry, for the engine's up-front resolution. */
   readonly secretValues?: (entry: Entry<K>) => readonly DeclaredSecretValue[];
-  /** How entries layer across settings documents; omitted, the list always replaces. */
-  readonly layering?: KeyedListLayering;
+  /**
+   * How two entries the layered merge pairs combine; omitted, the list always
+   * replaces. The pairing itself is not declared here: the factory derives it
+   * from `identity`, the very claims the planner's duplicate check reads, so
+   * the merge and the planner cannot disagree about which entries are one.
+   */
+  readonly layering?: Pick<KeyedListLayering, "combine">;
 }
 
 /** The module listSection() mints: SectionModule<K, Ends> at the registry, plus its declaration. */
@@ -303,6 +310,27 @@ const RECREATE_REMEDIES: Remedies = {
   phantom: "this delete-and-recreate will repeat",
 };
 
+/**
+ * Every identity one entry claims, folded: the name it writes (its rename
+ * key's value when it declares one, else its identity field) and each alias.
+ * The ONE derivation behind both the planner's duplicate check and the
+ * layered merge's pairing. Total over raw records because the merge reads
+ * layers before validation: null when a claimed name is not a string, which
+ * the merge refuses at its boundary and a validated entry never is.
+ */
+function identityClaims(
+  identity: ErasedDecl["identity"],
+  entry: Readonly<Record<string, unknown>>,
+): readonly string[] | null {
+  const { field, renameKey, fold = (name: string) => name } = identity;
+  const written = renameKey === undefined ? undefined : entry[renameKey];
+  const names = [written ?? entry[field], ...(identity.aliases?.(entry) ?? [])];
+  if (!names.every((name): name is string => typeof name === "string")) {
+    return null;
+  }
+  return [...new Set(names.map(fold))];
+}
+
 /** The identity field of a write or comparable: typed string by the declaration, checked once in the erased view. */
 function nameOf(record: Readonly<Record<string, unknown>>, field: string): string {
   const value = record[field];
@@ -378,7 +406,12 @@ async function planList(
   const writes = entries.map((entry) => {
     const write = lens.toWrite(entry);
     const name = nameOf(write, identity.field);
-    const claims = [...new Set([fold(name), ...(identity.aliases?.(entry) ?? []).map(fold)])];
+    const claims = identityClaims(identity, entry as Readonly<Record<string, unknown>>);
+    if (claims === null) {
+      throw new Error(
+        `BUG: the validated ${noun} entry ${JSON.stringify(entry)} claims a non-string name; the slice must type the identity fields as strings`,
+      );
+    }
     return { write, name, claims };
   });
   // Every identity an entry claims must be its alone: two entries resolving
@@ -554,7 +587,15 @@ export function listSection<
           secretValues: (declared: Declared<K>) =>
             secretValuesOf(erased, declared as unknown as ErasedDeclared),
         }),
-    ...(decl.layering === undefined ? {} : { layering: decl.layering }),
+    ...(decl.layering === undefined
+      ? {}
+      : {
+          layering: {
+            keys: (entry) => identityClaims(erased.identity, entry),
+            keyField: decl.identity.field,
+            combine: decl.layering.combine,
+          },
+        }),
     plan: (ctx, desired) =>
       planList(
         erased,

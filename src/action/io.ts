@@ -15,7 +15,7 @@ import { type Io, maskRegistry, type OutputName } from "../io.js";
 export const OUTPUT_DECLS = {
   result: {
     description:
-      "applied | partial | clean | drift | failed (worst-of across all targets in multi-repo mode, where skipped can also appear).",
+      "applied | partial | clean | drift | failed (worst-of across all targets in multi-repo mode, where skipped can also appear), or merged in mode: merge.",
   },
   "skipped-sections": {
     description:

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { MERGE_RESULT } from "../../src/action/deliver.js";
 import {
   FILTER_INPUTS,
   INPUT_DECLS,
@@ -81,16 +82,17 @@ describe("input declarations <-> discovery defaults", () => {
 });
 
 describe("output declarations", () => {
-  test("the result description mentions every RepoResult value", () => {
+  test("the result description mentions every RepoResult value and the merge result", () => {
     // REPO_RESULTS is the canonical value list exported next to worstOf() in
     // src/engine/orchestrate.ts; a new RepoResult value added there but left
-    // out of the output docs fails here.
-    const missing = REPO_RESULTS.filter(
+    // out of the output docs fails here. MERGE_RESULT is the one value outside
+    // that list (a merge has no target), documented the same way.
+    const missing = [...REPO_RESULTS, MERGE_RESULT].filter(
       (value) => !OUTPUT_DECLS.result.description.includes(value),
     );
     expect(
       missing,
-      `the "result" output description omits RepoResult value(s): ${missing.join(", ")}`,
+      `the "result" output description omits result value(s): ${missing.join(", ")}`,
     ).toEqual([]);
   });
 });
