@@ -755,11 +755,12 @@ describe("predictMulti rollup", () => {
     expect(p.repos[0]?.allowedResults.has("skipped")).toBe(false);
   });
 
-  test("contents:none gates the settings read - fine_grained target is skipped", () => {
+  test("contents:none under fine_grained fails the target even with administration granted", () => {
     // The settings file is read through the contents endpoint before any
-    // section runs; a denied contents read 404s (fine_grained), and with
-    // administration still granted the repo probe succeeds (pull:true), so the
-    // 404 reads as a missing file and the whole target is skipped.
+    // section runs; a denied contents read 404s (fine_grained), the repo probe
+    // succeeds, and the default branch's ref read - the Contents-gated proof
+    // of a missing file - is denied too, so the target FAILS instead of
+    // reading as fileless. Mirrors repo-file.ts.
     const gated = meta({
       sections: ["labels", "collaborators"],
       mask: { contents: "none" },
@@ -767,14 +768,13 @@ describe("predictMulti rollup", () => {
     });
     const p = predictMulti(multiMeta([normal(gated)]));
     expect(p.repos[0]?.run).toBeNull();
-    expect([...(p.repos[0]?.allowedResults ?? [])]).toEqual(["skipped"]);
-    expect(p.allowedExitCodes.has(0)).toBe(true);
+    expect([...(p.repos[0]?.allowedResults ?? [])]).toEqual(["failed"]);
+    expect([...p.allowedExitCodes]).toEqual([1]);
   });
 
   test("contents:none AND administration:none under fine_grained fails the target", () => {
-    // With administration also denied, the repo probe the action falls back to
-    // ALSO 404s, so the read is "visible but unreadable" and the target FAILS
-    // (not skipped) even under fine_grained. Mirrors repo-file.ts.
+    // With administration also denied, the repo probe ALSO 404s, so the read
+    // is "visible but unreadable" and the target FAILS before any ref read.
     const gated = meta({
       sections: ["labels"],
       mask: { contents: "none", administration: "none" },

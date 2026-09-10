@@ -11,9 +11,9 @@
  * Multi-repo mode (repos / repos-dir / defaults-file inputs): one run in an
  * admin repo applies settings to many repositories - from per-repo files
  * checked into the admin repo (central), or from each target's own
- * .github/settings.yml (remote), with an optional defaults layer merged
- * under every target. Targets run independently; the run fails at the end
- * if any target failed.
+ * .github/settings.yml (remote), or the defaults-file document for a
+ * remote target that has no file. Targets run independently; the run fails
+ * at the end if any target failed.
  *
  * mode: merge folds an ordered list of settings files into one document
  * written to merged-file, for a later apply or check step to run; it never

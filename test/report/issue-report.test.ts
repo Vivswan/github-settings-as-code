@@ -386,11 +386,9 @@ describe("injectMarkerLabel", () => {
 
   test("a bare wrapper (no policy key) stays bare - omission is preserved", () => {
     // Injection must not change the SHAPE of the operator's declaration: a
-    // bare wrapper stays bare. In multi-repo mode the merge has already
-    // resolved the policy before injection runs; in single-repo mode there
-    // is no merge and the section handler resolves the default itself.
-    // Materializing the key here would rewrite a declaration the user
-    // wrote, for no gain on either path.
+    // bare wrapper stays bare; the section handler resolves the default
+    // policy itself. Materializing the key here would rewrite a declaration
+    // the user wrote, for no gain.
     const settings: SettingsFile = { labels: { entries: [{ name: "bug" }] } };
     const result = injectMarkerLabel(settings);
     expect(result.outcome).toBe("injected");

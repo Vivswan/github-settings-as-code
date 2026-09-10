@@ -347,7 +347,7 @@ export async function deliverIssueReport(
 
 /**
  * Marker-label injection, closing the undeclaredDefault hole: when the
- * merged settings declare a `labels` section, an apply would DELETE the
+ * settings declare a `labels` section, an apply would DELETE the
  * undeclared marker label right after report delivery created it. Appending
  * the marker to the declared set (when no entry already manages it) lets the
  * labels section manage it like any other label.

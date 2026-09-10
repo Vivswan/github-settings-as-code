@@ -281,12 +281,19 @@ describe("undocumented-route exemption", () => {
   });
 });
 
-describe("pathMatches greedy contents param", () => {
+describe("pathMatches greedy trailing params", () => {
   const contents = "/repos/{owner}/{repo}/contents/{path}";
+  const gitRef = "/repos/{owner}/{repo}/git/ref/{ref}";
 
   test("{path} absorbs a multi-segment file path", () => {
     expect(pathMatches(contents, "/repos/o/r/contents/.github/settings.yml")).toBe(true);
     expect(pathMatches(contents, "/repos/o/r/contents/README.md")).toBe(true);
+  });
+
+  test("{ref} absorbs a fully qualified ref", () => {
+    expect(pathMatches(gitRef, "/repos/o/r/git/ref/heads/main")).toBe(true);
+    expect(pathMatches(gitRef, "/repos/o/r/git/ref/heads/release/1.x")).toBe(true);
+    expect(pathMatches(gitRef, "/repos/o/r/git/ref")).toBe(false);
   });
 
   test("{path} requires at least one trailing segment", () => {

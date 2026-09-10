@@ -1,8 +1,9 @@
 /**
  * The core-path handlers: the non-section routes the action calls, served by
  * the pipeline (routes.ts) before section matching - the multi-repo discovery
- * listing (GET /user/repos), the settings-file contents fetch, and the
- * private-report issue channel - plus the redaction visibility probe model
+ * listing (GET /user/repos), the settings-file contents fetch and the git ref
+ * read that proves a settings file absent, and the private-report issue
+ * channel - plus the redaction visibility probe model
  * that both the report delivery rule and the pipeline's denial-barrier
  * exemption read.
  */
@@ -111,8 +112,8 @@ export const RAW_CONTENTS_ACCEPT = "application/vnd.github.raw+json";
  * caller has graded the `contents` read permission. A configured slug returns
  * its raw YAML body (the client sent the raw accept header, so the body is the
  * file text verbatim); a slug whose settings are null - or one the multi-state
- * does not know - returns 404, which the action reads as "no settings file" and
- * disambiguates via the repo probe.
+ * does not know - returns 404, which the action must then prove is a missing
+ * FILE by reading the default branch's git ref (gitRefResponse).
  */
 export function contentsResponse(multi: MultiMockState, slug: string): MockResponse {
   const yaml = multi.settings.get(slug);
@@ -126,6 +127,47 @@ export function contentsResponse(multi: MultiMockState, slug: string): MockRespo
 export function contentsSlug(pathname: string): string | null {
   const match = pathname.match(/^\/repos\/([^/]+\/[^/]+)\/contents\//);
   return match ? decodeURIComponent(match[1] ?? "") : null;
+}
+
+/**
+ * The Contents-readability proof the settings-file fetch issues after a
+ * contents 404: GET /repos/{owner}/{repo}/git/ref/{ref}, a Contents-gated read
+ * whose success does not depend on the file. Parsed as the target slug plus
+ * the fully qualified ref ("heads/main"), or null when the path is not one.
+ */
+export function gitRefRequest(pathname: string): { slug: string; ref: string } | null {
+  const match = pathname.match(/^\/repos\/([^/]+\/[^/]+)\/git\/ref\/(.+)$/);
+  if (!match) {
+    return null;
+  }
+  return { slug: decodeURIComponent(match[1] ?? ""), ref: decodeURIComponent(match[2] ?? "") };
+}
+
+/** The commit sha every mock default-branch head points at. */
+const MOCK_HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
+
+/**
+ * Serve a git ref read for a target slug, AFTER the caller has graded the
+ * `contents` read permission. The default branch's head ref exists for every
+ * known slug whether or not it has a settings file - a fileless slug answers
+ * 200 here and 404 on the contents route, the pair that proves the file
+ * absent - while any other ref, or an unknown slug, is 404.
+ */
+export function gitRefResponse(multi: MultiMockState, slug: string, ref: string): MockResponse {
+  const defaultBranch = multi.repos.get(slug)?.repo.default_branch;
+  if (typeof defaultBranch !== "string" || ref !== `heads/${defaultBranch}`) {
+    return { status: 404, body: { message: "Not Found" } };
+  }
+  return ok({
+    ref: `refs/${ref}`,
+    node_id: Buffer.from(`MOCKREF:${slug}:${ref}`, "utf8").toString("base64"),
+    url: `https://api.github.com/repos/${slug}/git/refs/${ref}`,
+    object: {
+      type: "commit",
+      sha: MOCK_HEAD_SHA,
+      url: `https://api.github.com/repos/${slug}/git/commits/${MOCK_HEAD_SHA}`,
+    },
+  });
 }
 
 // --- Private-report issue channel (core paths, not a section) --------------

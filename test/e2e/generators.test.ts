@@ -660,16 +660,16 @@ describe("genScenario", () => {
 });
 
 describe("genMultiScenario", () => {
-  test("builds 2 to 5 valid targets with exactly one skipped", () => {
+  test("builds 2 to 5 valid targets with exactly one fileless", () => {
     for (let i = 0; i < 100; i++) {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       expect(() => parseScenario(scenario, `m-${i}`)).not.toThrow();
       expect(meta.repos.length).toBeGreaterThanOrEqual(2);
       expect(meta.repos.length).toBeLessThanOrEqual(5);
-      // Exactly one missing-settings target per scenario (a raw-invalid one
-      // is a separate kind and may or may not exist).
-      const skipped = meta.repos.filter((r) => r.target.kind === "missing");
-      expect(skipped.length).toBe(1);
+      // Exactly one fileless target per scenario (a raw-invalid one is a
+      // separate kind and may or may not exist).
+      const fileless = meta.repos.filter((r) => r.target.kind === "missing");
+      expect(fileless.length).toBe(1);
     }
   });
 
@@ -709,9 +709,7 @@ describe("genMultiScenario", () => {
             false,
           );
         }
-        // Never the milestones opt-out target (there is no mapping to null a
-        // section in) and never the guaranteed leak-canary target.
-        expect(meta.milestonesOptOutSlug).not.toBe(repo.slug);
+        // Never the guaranteed leak-canary target.
         expect(canariesOf(repo)).toEqual([]);
       }
     }
@@ -719,23 +717,38 @@ describe("genMultiScenario", () => {
     expect(sawNonMapping).toBeGreaterThan(0);
   });
 
-  test("defaults file declares milestones; a target sometimes nulls it (the opt-out)", () => {
-    // The null-section opt-out lives on a TARGET (nulling a section the defaults
-    // declare), never in the defaults file itself - a defaults file with a null
-    // section fails the action's schema validation. So the defaults file always
-    // declares milestones as a real array, and some targets set milestones: null.
-    let targetOptOut = 0;
+  test("the fileless target runs exactly the defaults' sections; every other target exactly its own", () => {
+    // The defaults document is applied whole to the target without a settings
+    // file and never merged into one that has a file: the recorded defaults
+    // meta names the defaults_file keys under an empty mask, and no normal
+    // target's meta gains (or nulls) a section it did not declare itself.
     for (let i = 0; i < 100; i++) {
-      const { scenario } = genMultiScenario(new Rng(i));
-      expect(Array.isArray(scenario.defaults_file?.milestones)).toBe(true);
-      for (const spec of Object.values(scenario.repos ?? {})) {
-        const settings = (spec as { settings: Record<string, unknown> | null }).settings;
-        if (settings && settings.milestones === null) {
-          targetOptOut++;
+      const { scenario, meta } = genMultiScenario(new Rng(i));
+      expect(meta.defaults).toEqual({
+        sections: Object.keys(scenario.defaults_file ?? {}) as SectionKey[],
+        mask: {},
+        mode: meta.mode,
+        policy: meta.policy,
+        ownerKind: "org",
+        denialStyle: scenario.denial_style ?? "fine_grained",
+        requiredSections: [],
+        orgMask: meta.globalMask,
+      });
+      for (const repo of meta.repos) {
+        const spec = scenario.repos?.[repo.slug] as { settings?: Record<string, unknown> | null };
+        if (repo.target.kind === "missing") {
+          expect(spec.settings, `seed ${i}: ${repo.slug}`).toBeNull();
+          continue;
         }
+        if (repo.target.kind !== "normal") {
+          continue;
+        }
+        expect(
+          [...repo.target.meta.sections].sort() as string[],
+          `seed ${i}: ${repo.slug}`,
+        ).toEqual(Object.keys(spec.settings ?? {}).sort());
       }
     }
-    expect(targetOptOut).toBeGreaterThan(0);
   });
 
   test("the redaction flag follows the mechanical rule per target", () => {

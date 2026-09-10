@@ -149,9 +149,8 @@ export type SectionKey = (typeof SECTION_KEYS)[number];
 /**
  * The sections that take the `undeclared` policy knob: their SettingsFile
  * value is a union of the plain entry array and UndeclaredPolicyList. The
- * defaults merge (engine/merge.ts) normalizes and resolves exactly these
- * sections; the lockstep types below pin the list to the SettingsFile
- * declarations in both directions.
+ * lockstep types below pin the list to the SettingsFile declarations in
+ * both directions.
  */
 export const UNDECLARED_POLICY_SECTIONS = [
   "labels",
