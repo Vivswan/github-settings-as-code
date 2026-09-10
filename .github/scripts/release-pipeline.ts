@@ -1201,9 +1201,10 @@ function newerChainCommit(
   mainHead: string,
 ): string | null {
   git(cwd, "fetch", "--quiet", "--depth=1", "origin", LATEST_REF);
-  // The tag can move between the ls-remote and this fetch, leaving the
-  // observed value unknown here: a plain "no", never a swallowed failure.
-  if (!gitYesNo(cwd, "rev-parse", "--verify", "--quiet", `${observed}^{commit}`)) {
+  // The tag can move between the ls-remote and this fetch: then the value
+  // judged here is not the value origin holds, so nothing is deferred to and
+  // the lease on the observed value settles it (overtaken, re-read, retry).
+  if (git(cwd, "rev-parse", "FETCH_HEAD") !== observed) {
     return null;
   }
   const source = sourceTrailer(cwd, observed);
