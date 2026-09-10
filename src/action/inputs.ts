@@ -5,6 +5,7 @@
  * execution code never touches raw inputs.
  */
 
+import { resolve } from "node:path";
 import * as core from "@actions/core";
 import {
   AFFILIATIONS,
@@ -96,7 +97,7 @@ export const INPUT_DECLS = {
   },
   "merged-file": {
     description:
-      "mode: merge only, and required there: the path the merged settings document is written to (parent directories are created). The file holds exactly what apply would run: every section validated, each section that takes an undeclared policy in its policy-wrapper form with the policy made explicit, the other sections in their own shape, and private underscore keys and the _layering directives dropped. Feed it to a later apply or check step as its settings-file. Fails when set in apply or check.",
+      "mode: merge only, and required there: the path the merged settings document is written to (parent directories are created). The file holds exactly what apply would run: every section validated, each section that takes an undeclared policy in its policy-wrapper form with the policy made explicit, the other sections in their own shape, and private underscore keys and the _layering directives dropped. Feed it to a later apply or check step as its settings-file. Must not name one of the settings-file layers (the merge would overwrite it). Fails when set in apply or check.",
     default: "",
     summary:
       "`mode: merge` only (required there): where the merged document is written, exactly what `apply` would run",
@@ -558,6 +559,17 @@ function parseMergeConfig(): { config: MergeConfig } | { error: string } {
   if (settingsFiles.length === 0) {
     return {
       error: `the "settings-file" input is "${inputOrDefault("settings-file")}", which lists no file. In mode: merge it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file`,
+    };
+  }
+  // The merge reads every layer, then writes the folded document to
+  // merged-file: a merged-file that names a layer would overwrite that layer,
+  // and the next run would fold the merged document as if it were a layer.
+  // Paths are compared resolved, so "./a.yml" and "a.yml" collide.
+  const mergedPath = resolve(mergedFile);
+  const collision = settingsFiles.findIndex((layer) => resolve(layer) === mergedPath);
+  if (collision !== -1) {
+    return {
+      error: `the "merged-file" input "${mergedFile}" is layer ${collision + 1} of the "settings-file" list ("${settingsFiles[collision]}"): the merge would overwrite that layer with the folded document, and the next run would fold the merged document as a layer. Write the merged document to a path outside the layer list`,
     };
   }
   return { config: { kind: "merge", settingsFiles, mergedFile, layering } };
