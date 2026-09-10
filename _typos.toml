@@ -5,13 +5,15 @@
 
 [files]
 extend-exclude = [
-  # release-please output: short commit SHAs such as ba04830 read as words.
+  # release-please output assembled from already-merged PR titles, so a typo in
+  # it has no fix path here and would fail every release-PR refresh. The fleet
+  # config's hex-digest ignore already covers its short SHAs under CI layering.
   "CHANGELOG.md",
 ]
 
 [default]
 extend-ignore-re = [
-  # the hyphenated prefix in mis-route, mis-shaped, mis-scoped, mis-diff is a
+  # the hyphenated prefix in mis-route, mis-routed, mis-scoped, mis-diff is a
   # word-forming prefix, not a truncated "miss".
   '\bmis-',
   # regex stems in test/docs/claims.ts (delet\w*, preserv\w*) are cut short on
@@ -35,7 +37,7 @@ R_kgDOnotOurs = "R_kgDOnotOurs"
 
 [default.extend-words]
 # valid spelling (the dictionary prefers "unparsable"); the harness's
-# UNPARSEABLE_YAML fixture pool, its comments, and the report wording use it.
+# UNPARSEABLE_YAML fixture pool and comments in src and test use it.
 unparseable = "unparseable"
 # "look-alikes": the near-miss fixtures in test/scripts/generated-regions.test.ts
 # and test/docs/guides.test.ts.
@@ -57,7 +59,7 @@ permision = "permision"     # unrecognized entry key, rejected: validate.test.ts
 entires = "entires"         # unrecognized list-section key, rejected: validate, environments and published-schema tests, the fuzz generator
 enforcemant = "enforcemant" # phantom ruleset key: drift and phantom-key note pinned in rulesets.test.ts
 vaule = "vaule"             # phantom variable key: drift and phantom-key note pinned in actions_variables.test.ts
-detele = "detele"           # unknown _undeclared policy value, rejected: validate.test.ts, the fuzz generator
+detele = "detele"           # unknown value for a section's undeclared policy key, rejected: validate.test.ts, the fuzz generator
 reslut = "reslut"           # output name the Io port rejects at compile time (@ts-expect-error): test/action/io.test.ts
 
 # The Probot migration guide walks through a misspelled key as its example.
