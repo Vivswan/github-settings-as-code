@@ -462,10 +462,12 @@ describe("predictSection rules", () => {
     expect(p.mayWrite).toBe(false);
   });
 
-  test("exclusion folds before grades and witnesses", () => {
+  test("exclusion folds before grades and witnesses: the section predicts at NO grade", () => {
     // A declared section outside the `sections` allowlist never runs: the
     // engine reports it "excluded" before any read, so neither the denied
-    // grade nor the seeded witness may tighten the prediction.
+    // grade nor the seeded witness may tighten the prediction, and the grades
+    // are empty - the section runs at no grade, so preflight and the
+    // write-granted fold are vacuous over it without recognizing "excluded".
     const p = predictSection(
       "labels",
       meta({
@@ -477,45 +479,85 @@ describe("predictSection rules", () => {
         liveKinds: { labels: "drift-update" },
       }),
     );
-    expect([...p.allowed]).toEqual(["excluded"]);
-    expect(p.mayWrite).toBe(false);
-    // An undefined allowlist keeps today's behavior: every section runs.
-    const unrestricted = predictSection("labels", meta({ mode: "check" }));
-    expect(unrestricted.allowed.has("excluded")).toBe(false);
+    expect(p).toEqual({
+      key: "labels",
+      grades: [],
+      allowed: new Set(["excluded"]),
+      mayWrite: false,
+    });
+    // An undefined allowlist keeps today's behavior: every section runs, and
+    // the denied grade with its 403 style reads as a check-mode failure.
+    const unrestricted = predictSection(
+      "labels",
+      meta({ mask: { issues: "none" }, denialStyle: 403, mode: "check" }),
+    );
+    expect(unrestricted).toEqual({
+      key: "labels",
+      grades: ["none"],
+      allowed: new Set(["failed"]),
+      mayWrite: false,
+    });
   });
 
-  test("an excluded section does not flip fullyGranted", () => {
-    // The fixpoint gates (converges / apply_idempotent) quantify over the
-    // sections that WILL run; a denied-but-excluded section must not block
-    // them.
-    const p = predictOutcomes(
+  test("an excluded NO_READ section in check mode is excluded, not the read-free clean", () => {
+    // check_suite_preferences makes no request in check mode and is otherwise
+    // exactly clean; exclusion folds before that rule too, and the read-free
+    // preflight exemption does not need to see the section since it has no grade.
+    const p = predictSection(
+      "check_suite_preferences",
       meta({
-        sections: ["labels", "pages"],
-        onlySections: ["pages"],
-        mask: { issues: "none" },
-        mode: "apply",
-        policy: "warn",
+        sections: ["check_suite_preferences", "labels"],
+        onlySections: ["labels"],
+        mask: { checks: "none" },
+        mode: "check",
       }),
     );
-    expect(p.fullyGranted).toBe(true);
-    expect(p.preflightAborts).toBe("no");
+    expect(p).toEqual({
+      key: "check_suite_preferences",
+      grades: [],
+      allowed: new Set(["excluded"]),
+      mayWrite: false,
+    });
   });
 
-  test("an excluded denied section never arms the preflight barrier", () => {
-    // Preflight probes only ACTIVE sections, so a permission-denied section
-    // that the allowlist excludes cannot abort the run.
-    const p = predictOutcomes(
-      meta({
-        sections: ["labels"],
-        onlySections: ["pages"],
-        mask: { issues: "none" },
-        denialStyle: 403,
-        mode: "apply",
-        policy: "fail",
-      }),
-    );
-    expect(p.preflightAborts).toBe("no");
-    expect([...p.allowedExitCodes]).toEqual([0]);
+  test("an excluded denied section beside an active one: the run follows the active one alone", () => {
+    // apply + fail + 403 with the excluded section's read denied: preflight
+    // probes only the active section, so the barrier never arms, the excluded
+    // section is not write-denied (it writes nothing), and the fixpoint gate
+    // (fullyGranted) quantifies over the section that WILL run.
+    const excludedDenied = meta({
+      sections: ["labels", "pages"],
+      onlySections: ["pages"],
+      mask: { issues: "none" },
+      denialStyle: 403,
+      mode: "apply",
+      policy: "fail",
+    });
+    expect(predictOutcomes(excludedDenied)).toEqual({
+      sections: [
+        { key: "labels", grades: [], allowed: new Set(["excluded"]), mayWrite: false },
+        { key: "pages", grades: ["write"], allowed: new Set(["applied"]), mayWrite: true },
+      ],
+      allowedExitCodes: new Set([0]),
+      noWritesInCheck: false,
+      writeDeniedSections: [],
+      fullyGranted: true,
+      preflightAborts: "no",
+    });
+
+    // The control: the same meta with labels ACTIVE reaches the denied read,
+    // and the barrier aborts the run.
+    expect(predictOutcomes({ ...excludedDenied, onlySections: undefined })).toEqual({
+      sections: [
+        { key: "labels", grades: ["none"], allowed: new Set(["failed"]), mayWrite: false },
+        { key: "pages", grades: ["write"], allowed: new Set(["applied"]), mayWrite: true },
+      ],
+      allowedExitCodes: new Set([1]),
+      noWritesInCheck: false,
+      writeDeniedSections: ["labels"],
+      fullyGranted: false,
+      preflightAborts: "yes",
+    });
   });
 
   test("an EMPTY allowlist is unrestricted, mirroring the engine's size > 0 gate", () => {
@@ -575,8 +617,8 @@ describe("predictSection rules", () => {
 
   test("exclusion folds before the personal-account no-op", () => {
     // Both folds precede the grades; an excluded org-only section on a user
-    // owner is excluded, not applied, and keeps the mask's grades like every
-    // other excluded section.
+    // owner is excluded, not applied, and like every other excluded section
+    // runs at no grade - neither the mask's denial nor the no-op's write grade.
     const p = predictSection(
       "teams",
       meta({
@@ -589,7 +631,7 @@ describe("predictSection rules", () => {
     );
     expect(p).toEqual({
       key: "teams",
-      grades: ["none"],
+      grades: [],
       allowed: new Set(["excluded"]),
       mayWrite: false,
     });
