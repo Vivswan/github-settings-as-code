@@ -632,14 +632,26 @@ export function parseScenario(raw: unknown, sourcePath: string): Scenario {
   return result.data as Scenario;
 }
 
-/** Recursively collect every .yml file under a directory (empty if absent). */
+/**
+ * Recursively collect every .yml file under a directory. A directory that
+ * does not exist yields [] (a section may have no scenarios/ yet). Any other
+ * read failure (EACCES, ENOTDIR, ...) propagates naming the directory: an
+ * unreadable corpus must never look like an empty one, because run.ts
+ * reports an empty unfiltered corpus and exits 0.
+ */
 export function collectYmlFiles(dir: string): string[] {
   const out: string[] = [];
   let entries: Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return out;
+    }
+    throw new Error(
+      `cannot read the scenario directory ${dir}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
   }
   for (const entry of entries) {
     const full = join(dir, entry.name);

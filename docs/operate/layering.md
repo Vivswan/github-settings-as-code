@@ -254,19 +254,19 @@ The per-layer validation catches what a standalone settings file could not say, 
 | The layer has | Caught by |
 |---|---|
 | A list section that is not a list or an `{entries}` wrapper (`labels: oops`) | Validation: `labels: Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "_undeclared" policy), but this section parsed as string` |
-| A keyed entry without its key (a label with no `name`, a rule with no `type`) | Validation: `labels[1].name: Invalid input: expected string, received undefined` |
+| A keyed entry without its key, here a label with no `name` (`labels: [{name: bug}, {color: d73a4a}]`) | Validation: `labels[1].name: Invalid input: expected string, received undefined` |
 | A non-mapping entry (`milestones: [v2]`) | Validation: `milestones[0]: Invalid input: expected object, received string` |
 
 The fold itself refuses what only a merge can judge (`layer ".github/settings/repo.yml": ...`). A fold refusal names the key path (entries by index) and the kind of problem, never a value from the document: the merge runs without a repository's redaction context, so a label name or rule type echoed here could put a private repository's settings into a public log.
 
 | The layer has | The fold says |
 |---|---|
-| Two entries under one key in one list | `labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer` |
-| Two rules of one type in one ruleset | `rulesets[0].rules[0] and rulesets[0].rules[1] both claim one type; each type belongs to one entry within a layer` |
-| `_layering: merge` on a section with no layering key, on its wrapper or reached from the file level | `milestones has no layering key, so it cannot be layered by "merge"; declare _layering: replace or drop the directive` |
-| An unknown `_layering` value on a wrapper | `labels._layering must be "merge" or "replace"; got a string that is neither` |
-| An unknown `_layering` value at the file's top level | `_layering must be "merge" or "replace"; got a string that is neither` |
-| A YAML anchor aliased inside its own node | `the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees` |
+| Two entries under one key in one list (`labels: [{name: bug}, {name: docs}, {name: Bug}]`) | `labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer` |
+| Two rules of one type in one ruleset (`rulesets: [{name: main, rules: [{type: deletion}, {type: deletion}]}]`) | `rulesets[0].rules[0] and rulesets[0].rules[1] both claim one type; each type belongs to one entry within a layer` |
+| `_layering: merge` on a section with no layering key, on its wrapper or reached from the file level (`milestones: {_layering: merge, entries: [{title: v1}]}` or `{_layering: merge, milestones: [{title: v1}]}`) | `milestones has no layering key, so it cannot be layered by "merge"; declare _layering: replace or drop the directive` |
+| An unknown `_layering` value on a wrapper (`labels: {_layering: union, entries: [{name: bug}]}`) | `labels._layering must be "merge" or "replace"; got a string that is neither` |
+| An unknown `_layering` value at the file's top level (`_layering: union`) | `_layering must be "merge" or "replace"; got a string that is neither` |
+| A YAML anchor aliased inside its own node (`_notes: &loop {self: *loop}`) | `the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees` |
 
 ## Where to go next
 

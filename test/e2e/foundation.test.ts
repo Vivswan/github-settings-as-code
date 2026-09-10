@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import {
@@ -10,7 +12,12 @@ import {
   VIOLATION_PREFIX,
 } from "./constants.js";
 import { mulberry32, Rng } from "./prng.js";
-import { markerLabelFixtureMismatches, parseScenario } from "./schema.js";
+import {
+  collectYmlFiles,
+  loadScenarios,
+  markerLabelFixtureMismatches,
+  parseScenario,
+} from "./schema.js";
 
 describe("prng", () => {
   test("mulberry32 is deterministic for a seed", () => {
@@ -193,6 +200,57 @@ describe("scenario schema", () => {
     );
     expect(s.denial_style).toBe(403);
   });
+});
+
+describe("scenario corpus loader (collectYmlFiles)", () => {
+  /** A fresh temp root, removed on every path once `body` returns or throws. */
+  function withTempRoot(body: (root: string) => void): void {
+    const root = mkdtempSync(join(tmpdir(), "e2e-corpus-"));
+    try {
+      body(root);
+    } finally {
+      // The unreadable-root test leaves the directory at 000; restore it so
+      // the removal can descend into it.
+      chmodSync(root, 0o700);
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  test("a root that does not exist yields [] (a section may have no scenarios/ yet)", () => {
+    withTempRoot((root) => {
+      expect(collectYmlFiles(join(root, "absent"))).toEqual([]);
+    });
+  });
+
+  test("a readable empty root yields []", () => {
+    withTempRoot((root) => {
+      expect(collectYmlFiles(root)).toEqual([]);
+    });
+  });
+
+  // chmod 000 does not bar root from reading a directory, so as root there is
+  // no unreadable root to test against; the skip names that rather than
+  // asserting on a read that would succeed.
+  const runningAsRoot = process.getuid?.() === 0;
+  test.skipIf(runningAsRoot)(
+    "an unreadable root fails naming it and the error, never passing as an empty corpus",
+    () => {
+      withTempRoot((root) => {
+        // A real file inside: were the permission bits ignored, the walk would
+        // return this file rather than [], so the assertion cannot pass by
+        // the read silently succeeding.
+        writeFileSync(join(root, "one.yml"), "name: one\n");
+        chmodSync(root, 0o000);
+        const named = new RegExp(
+          `^cannot read the scenario directory ${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: .*EACCES`,
+        );
+        expect(() => collectYmlFiles(root)).toThrow(named);
+        // loadScenarios is what run.ts and the coverage tripwire call, so the
+        // failure must reach them through it.
+        expect(() => loadScenarios([root])).toThrow(named);
+      });
+    },
+  );
 });
 
 describe("marker-label fixture pin (markerLabelFixtureMismatches)", () => {
