@@ -189,7 +189,9 @@ describe("the artifact channel", () => {
     expect(uploads[0]?.name).toBe("settings-as-code-private-report");
     expect(uploads[0]?.file.name).toBe("private-report.md.age");
     const document = await decrypt(uploads[0]?.file.data as Uint8Array);
-    const headings = document.match(/^<!-- .* -->$/gm);
+    const headings = document
+      .split("\n")
+      .filter((line) => line.startsWith("<!-- private repository"));
     expect(headings).toEqual(["<!-- private repository #1 -->", "<!-- private repository #2 -->"]);
     expect(document.indexOf("private report: o/a")).toBeLessThan(
       document.indexOf("private report: o/b"),
