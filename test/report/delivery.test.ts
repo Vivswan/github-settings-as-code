@@ -121,14 +121,11 @@ describe("the issue channel", () => {
     });
     const { io, annotations } = recordingIo();
     await open(api, "issue", io)?.deliver(target("o/priv", 1));
-    expect(annotations).toHaveLength(1);
-    const warning = annotations[0] ?? "";
-    expect(warning).toStartWith(
-      "warning: private repository #1: could not deliver the private report",
-    );
-    expect(warning).toContain("HTTP 403");
-    expect(warning).not.toContain("o/priv");
-    expect(warning).not.toContain("Resource not accessible");
+    expect(annotations).toEqual([
+      "warning: private repository #1: could not deliver the private report (HTTP 403). To fix, " +
+        'grant "Issues" (read and write) under the PAT\'s Repository permissions for the target ' +
+        "repository, or set private-report: none",
+    ]);
   });
 
   test("a target whose slug did not parse gets one safe warning and no API traffic", async () => {
@@ -223,11 +220,11 @@ describe("the artifact channel", () => {
     const channel = openReportChannel(new MockApi({}), "artifact", META, recipient, io, uploader);
     await channel?.deliver(target("o/priv", 1));
     await channel?.flush();
-    expect(annotations).toHaveLength(1);
-    expect(annotations[0]).toStartWith("warning: could not upload the private report artifact");
-    expect(annotations[0]).toContain("ACTIONS_RUNTIME_TOKEN");
-    expect(annotations[0]).not.toContain("o/priv");
-    expect(annotations[0]).not.toContain("CANARY");
+    expect(annotations).toEqual([
+      "warning: could not upload the private report artifact: Unable to get the " +
+        "ACTIONS_RUNTIME_TOKEN env variable. Re-run the workflow, or set private-report: none if " +
+        "it persists",
+    ]);
   });
 });
 

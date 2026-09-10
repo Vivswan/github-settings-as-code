@@ -81,7 +81,7 @@ describe("tryGraphql errors[] mapping", () => {
       throw new Error("expected an error result");
     }
     expect(result.error.status).toBe(404);
-    expect(result.error.message).toContain("Could not resolve");
+    expect(result.error.message).toBe("Could not resolve to a Repository");
     expect(result.error.graphqlTypes).toEqual(["NOT_FOUND"]);
     expect(isPermissionError(result.error)).toBe(true);
   });
@@ -124,7 +124,10 @@ describe("tryGraphql errors[] mapping", () => {
     }
     expect(result.error.status).toBe(422);
     expect(result.error.message).toBe("first problem; second problem");
-    expect(result.error.body).toContain("UNPROCESSABLE");
+    // The body is the errors[] array alone, never the whole envelope.
+    expect(result.error.body).toBe(
+      '[{"type":"UNPROCESSABLE","message":"first problem"},{"message":"second problem"}]',
+    );
     // A partially-typed response carries NO graphqlTypes: the untyped entry
     // must make the whole response untolerable, not hide behind its typed
     // sibling.
@@ -256,8 +259,11 @@ describe("tryGraphql tracing and redaction", () => {
       { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
       "o/secretrepo",
     );
+    // The client's line is the constant alone (an exact element, not a fragment):
+    // no operation name, slug, or variable survives anywhere in the trace. The
+    // other lines are octokit's own timed chatter, so they are not pinned.
+    expect(dbg.lines).toContain("<redacted>");
     const trace = dbg.lines.join("\n");
-    expect(trace).toContain("<redacted>");
     expect(trace).not.toContain("RepoToggles");
     expect(trace).not.toContain("secretrepo");
     expect(trace).not.toContain("CANARY-live");
@@ -425,10 +431,9 @@ describe("tryGraphql tracing and redaction", () => {
       );
     // The withholding marker replaces the reason wholesale: neither the raw
     // transport text nor the slug survives into the thrown message.
-    expect(thrown).toContain("details withheld: the repository is redacted");
-    expect(thrown).not.toContain(rawReason);
-    expect(thrown).not.toContain("socket hang up");
-    expect(thrown).not.toContain("secretrepo");
+    expect(thrown).toBe(
+      "Error: GRAPHQL RepoToggles failed: the transport failed before an HTTP response arrived (details withheld: the repository is redacted). Check network connectivity from the runner to https://api.test, then re-run the workflow",
+    );
   });
 
   test("a secret-named variable is masked in the trace and its error body withheld", async () => {

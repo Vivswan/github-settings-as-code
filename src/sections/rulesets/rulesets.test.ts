@@ -445,8 +445,7 @@ describe("rulesets", () => {
     // is built first and assigned on one line, so the directive anchors to
     // the assignment whichever property the compiler blames.
     type Op = PlannedOp<typeof rulesetsSection.endpoints>;
-    const create: Op = { role: "create", payload: { name: "x" }, drift: ["missing"], change: "" };
-    expect(create.role).toBe("create");
+    const _create: Op = { role: "create", payload: { name: "x" }, drift: ["missing"], change: "" };
     const read = { role: "get", params: { ruleset_id: "1" }, drift: ["x"], change: "" } as const;
     // @ts-expect-error the get role is a read, not a plannable write
     const _read: Op = read;

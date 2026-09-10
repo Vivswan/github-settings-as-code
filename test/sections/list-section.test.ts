@@ -91,7 +91,11 @@ describe("listSection", () => {
     });
     await expect(
       labelsSection.plan(planContext(labelsSection, api, REPO), [{ name: "bug" }]),
-    ).rejects.toThrow(/"bug" matches 2 separate live labels \("bug", "BUG"\)/);
+    ).rejects.toThrow(
+      new Error(
+        'labels: the entry "bug" matches 2 separate live labels ("bug", "BUG"), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry',
+      ),
+    );
     // Unclaimed, both are undeclared and both are removed.
     const unclaimed = await labelsSection.plan(planContext(labelsSection, api, REPO), []);
     expect(unclaimed.ops.map((op) => [op.role, op.params?.name])).toEqual([
@@ -170,7 +174,11 @@ describe("listSection", () => {
         { name: "a", new_name: "b" },
         { name: "B" },
       ]),
-    ).rejects.toThrow(/name the same labels entry: "b" and "B"/);
+    ).rejects.toThrow(
+      new Error(
+        'labels: the settings file declares entries that name the same labels entry: "b" and "B". Keep exactly one entry per resource',
+      ),
+    );
     expect(api.calls).toEqual([]);
   });
 
@@ -287,10 +295,15 @@ describe("listSection without an update role", () => {
 
   test("the derived mock fragment serves no update handler, and the record type has no such key", () => {
     const fragment = mockFragmentFor(immutable, LABELS_MOCK);
-    expect(Object.keys(fragment)).toEqual(["labels.list", "labels.create", "labels.remove"]);
+    expect(Object.keys(fragment).sort()).toEqual(["labels.create", "labels.list", "labels.remove"]);
     // @ts-expect-error no update role, no update handler key
     fragment["labels.update"];
-    expect(Object.keys(mockFragmentFor(labelsSection, LABELS_MOCK))).toContain("labels.update");
+    expect(Object.keys(mockFragmentFor(labelsSection, LABELS_MOCK)).sort()).toEqual([
+      "labels.create",
+      "labels.list",
+      "labels.remove",
+      "labels.update",
+    ]);
   });
 
   test("the derived create rejects what the spec declares unique: the folded identity, or the declared key", async () => {

@@ -114,7 +114,7 @@ describe("Private<T>", () => {
       expect(isPrivate(plain)).toBe(false);
     }
     // The box neither stringifies nor serializes to its content.
-    expect(`${sealed}`).not.toContain("o/priv");
+    expect(`${sealed}`).toBe("[object Object]");
     expect(JSON.stringify(sealed)).toBe("{}");
   });
 

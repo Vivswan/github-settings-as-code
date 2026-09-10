@@ -228,7 +228,14 @@ describe("discoverRepos", () => {
       },
     });
     const discovered = await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS);
-    expect("error" in discovered && discovered.error).toContain("Discovery needs a user PAT");
+    expect(discovered).toEqual({
+      error:
+        'cannot discover repositories for repos: "*": GET /user/repos?affiliation=owner failed: ' +
+        "403 Resource not accessible. " +
+        "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
+        "cannot enumerate a user's repositories. List the target repositories explicitly in the " +
+        '"repos" input',
+    });
   });
 
   test("a rate-limit 403 gets re-run advice, not PAT advice", async () => {
@@ -241,8 +248,12 @@ describe("discoverRepos", () => {
       },
     });
     const discovered = await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS);
-    expect("error" in discovered && discovered.error).toContain("re-run the workflow");
-    expect("error" in discovered && discovered.error).not.toContain("Discovery needs a user PAT");
+    expect(discovered).toEqual({
+      error:
+        'cannot discover repositories for repos: "*": GET /user/repos?affiliation=owner failed: ' +
+        "403 API rate limit exceeded for user. " +
+        "This is not a permission problem; re-run the workflow, and retry later if it persists",
+    });
   });
 
   test("an expired-token 401 explains the PAT requirement", async () => {
@@ -252,7 +263,14 @@ describe("discoverRepos", () => {
       },
     });
     const discovered = await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS);
-    expect("error" in discovered && discovered.error).toContain("Discovery needs a user PAT");
+    expect(discovered).toEqual({
+      error:
+        'cannot discover repositories for repos: "*": GET /user/repos?affiliation=owner failed: ' +
+        "401 Bad credentials. " +
+        "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
+        "cannot enumerate a user's repositories. List the target repositories explicitly in the " +
+        '"repos" input',
+    });
   });
 
   test("a server error gets re-run advice, not PAT advice", async () => {
@@ -262,8 +280,12 @@ describe("discoverRepos", () => {
       },
     });
     const discovered = await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS);
-    expect("error" in discovered && discovered.error).toContain("re-run the workflow");
-    expect("error" in discovered && discovered.error).not.toContain("Discovery needs a user PAT");
+    expect(discovered).toEqual({
+      error:
+        'cannot discover repositories for repos: "*": GET /user/repos?affiliation=owner failed: ' +
+        "500 boom. " +
+        "This is not a permission problem; re-run the workflow, and retry later if it persists",
+    });
   });
 });
 
@@ -286,9 +308,9 @@ describe("formatSkipNotice", () => {
 
   test("without redaction, only the first 20 slugs are listed", () => {
     const repos = Array.from({ length: 23 }, (_, i) => ref(`o/r${i}`));
-    const notice = formatSkipNotice({ reason: "forks=exclude", repos }, false);
-    expect(notice).toContain("o/r19, and 3 more");
-    expect(notice).not.toContain("o/r20");
+    expect(formatSkipNotice({ reason: "forks=exclude", repos }, false)).toBe(
+      'repos: "*" discovery skipped 23 repositories by forks=exclude: o/r0, o/r1, o/r2, o/r3, o/r4, o/r5, o/r6, o/r7, o/r8, o/r9, o/r10, o/r11, o/r12, o/r13, o/r14, o/r15, o/r16, o/r17, o/r18, o/r19, and 3 more',
+    );
   });
 
   test("redaction lists public slugs and counts the rest", () => {
@@ -344,6 +366,5 @@ describe("formatSkipNotice", () => {
         (_, i) => `o/pub${i}`,
       ).join(", ")}, and 2 more, and 1 private or internal repository`,
     );
-    expect(notice).not.toContain("o/secret");
   });
 });

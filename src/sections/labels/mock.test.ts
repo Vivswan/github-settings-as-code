@@ -35,13 +35,18 @@ describe("labels.create identity minting", () => {
     );
     create(state, { name: "bug", color: "d73a4a" });
     create(state, { name: "docs", color: "0075ca" });
-    for (const label of state.labels) {
+    // The pool starts at 90_000_000 and each label, seeded or created, takes
+    // the next id; its node_id encodes that same id.
+    const identity = (label: unknown) => {
       const body = label as Record<string, unknown>;
-      expect(body.node_id).toBe(`MDU6TGFiZWw${body.id}`);
-    }
-    // No two labels (seeded or created) share a node_id.
-    const nodeIds = state.labels.map((label) => (label as Record<string, unknown>).node_id);
-    expect(new Set(nodeIds).size).toBe(nodeIds.length);
+      return [body.name, body.id, body.node_id];
+    };
+    expect(state.labels.map(identity)).toEqual([
+      ["area-1", 90_000_000, "MDU6TGFiZWw90000000"],
+      ["area-2", 90_000_001, "MDU6TGFiZWw90000001"],
+      ["bug", 90_000_002, "MDU6TGFiZWw90000002"],
+      ["docs", 90_000_003, "MDU6TGFiZWw90000003"],
+    ]);
   });
 
   test("the created label's url names the state slug", () => {

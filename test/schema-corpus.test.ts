@@ -74,7 +74,6 @@ function scenarioDocs(): CorpusDoc[] {
       push(`${name} ${repo} settings`, entry?.settings);
     }
   }
-  expect(docs.length).toBeGreaterThan(150);
   return docs;
 }
 

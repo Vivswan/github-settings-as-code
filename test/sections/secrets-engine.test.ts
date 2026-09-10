@@ -93,31 +93,43 @@ describe("sealing", () => {
     expect(unsealSecretValue(sealed)).toBe(hostile);
   });
 
+  const WHERE =
+    "actions_secrets: GET /repos/{owner}/{repo}/actions/secrets/public-key (the actions_secrets sealing key) returned ";
+  const ADVICE =
+    ', so no value can be sealed. Check the "api-version" input against the GitHub REST docs for this endpoint';
   test.each([
-    ["a missing key_id", { key: MOCK_SECRETS_PUBLIC_KEY }, /pair \(key_id is missing\)/],
-    ["a key that is not base64", { key_id: "k", key: "not base64!" }, /is not valid base64/],
+    [
+      "a missing key_id",
+      { key: MOCK_SECRETS_PUBLIC_KEY },
+      `${WHERE}no usable {key_id, key} pair (key_id is missing)${ADVICE}`,
+    ],
+    [
+      "a key that is not base64",
+      { key_id: "k", key: "not base64!" },
+      `${WHERE}a key that is not valid base64${ADVICE}`,
+    ],
     [
       "a key of the wrong length",
       { key_id: "k", key: Buffer.from("short").toString("base64") },
-      /decodes to 5 bytes where an X25519 public key has 32/,
+      `${WHERE}a key that decodes to 5 bytes where an X25519 public key has 32${ADVICE}`,
     ],
     [
       "a right-sized key that is not a usable point",
       { key_id: "k", key: Buffer.alloc(32).toString("base64") },
-      /is not a usable X25519 public key/,
+      `${WHERE}a key that is not a usable X25519 public key${ADVICE}`,
     ],
-  ])("parseSealingKey rejects %s, naming the scope and the defect", async (_what, body, defect) => {
-    const attempt = parseSealingKey(
-      section,
-      { label: "actions_secrets" },
-      PUBLIC_KEY_ENDPOINT,
-      body,
-    );
-    await expect(attempt).rejects.toThrow(
-      /^actions_secrets: GET \/repos\/\{owner\}\/\{repo\}\/actions\/secrets\/public-key \(the actions_secrets sealing key\) returned /,
-    );
-    await expect(attempt).rejects.toThrow(defect);
-  });
+  ])(
+    "parseSealingKey rejects %s, naming the scope and the defect",
+    async (_what, body, message) => {
+      const attempt = parseSealingKey(
+        section,
+        { label: "actions_secrets" },
+        PUBLIC_KEY_ENDPOINT,
+        body,
+      );
+      await expect(attempt).rejects.toThrow(new Error(message));
+    },
+  );
 
   test("a parsed sealing key seals synchronously into the {encrypted_value, key_id} body, fresh per seal", async () => {
     // Sealed boxes use a fresh ephemeral key per seal, so the ciphertexts
@@ -150,7 +162,11 @@ describe("secretKey and duplicates", () => {
         { name: "Deploy_Token", value: "$A" },
         { name: "DEPLOY_TOKEN", value: "$B" },
       ]),
-    ).toThrow(/same actions_secrets entry.*"Deploy_Token" and "DEPLOY_TOKEN"/s);
+    ).toThrow(
+      new Error(
+        'actions_secrets: the settings file declares entries that name the same actions_secrets entry: "Deploy_Token" and "DEPLOY_TOKEN". Keep exactly one entry per resource',
+      ),
+    );
   });
 });
 
@@ -252,7 +268,7 @@ describe("planSecrets and the execution-time resolver", () => {
     expect(typeof payload).toBe("function");
     if (typeof payload === "function") {
       expect(() => payload({ resolveSecret: resolver({}) })).toThrow(
-        /no value for \$NEVER_RESOLVED/,
+        new Error("test resolver has no value for $NEVER_RESOLVED"),
       );
     }
   });

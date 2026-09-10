@@ -350,9 +350,11 @@ describe("environments pinned check mode", () => {
         'environments.pinned: apply will also move "b" to position 2 in that reordering',
       ],
     ]);
-    expect(planDrift(planned).some((line) => /environments\[[abc]\]\.pinned/.test(line))).toBe(
-      false,
-    );
+    // No per-environment pin drift joins the two order lines.
+    expect(planDrift(planned)).toEqual([
+      "environments.pinned: the declared pin order is [a, b, c] but the live pinned order is [c, b, a]; apply will reorder the pins so the declared ones lead in declaration order",
+      'environments.pinned: apply will also move "b" to position 2 in that reordering',
+    ]);
   });
 
   test("clean when the declared pins lead in declaration order; trailing undeclared pins earn nothing", async () => {

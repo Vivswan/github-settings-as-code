@@ -6,7 +6,6 @@ import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
 import { PermissionDenied } from "../contract/errors.js";
-import { grantFor } from "../contract/permissions.js";
 import { interactionLimitsSection } from "./index.js";
 import type { InteractionLimitsConfig } from "./schema.js";
 
@@ -211,7 +210,9 @@ describe("interaction_limits", () => {
     const denied = thrown as PermissionDenied;
     expect(denied.section).toBe("interaction_limits");
     expect(denied.status).toBe(404);
-    expect(denied.detail).toContain(grantFor({ repo: ["administration"] }));
+    expect(denied.detail).toContain(
+      'grant "Administration" (read and write) under the PAT\'s Repository permissions',
+    );
   });
 
   test("executing the plan converges: the base limit re-arms on every apply, nothing else recurs", async () => {
@@ -276,8 +277,8 @@ describe("interaction_limits", () => {
     const silent = { role: "remove", drift: [], change: "" } as const;
     // @ts-expect-error the DELETE is not alwaysRewrite, so it must carry drift
     const _silent: Op = silent;
-    const rearm: Op = { role: "put", drift: [], change: "re-armed" };
-    expect(rearm.drift).toEqual([]);
+    // The PUT is alwaysRewrite, so a driftless re-arm is a valid plan.
+    const _rearm: Op = { role: "put", drift: [], change: "re-armed" };
     const undeclared = {
       role: "remove",
       drift: ["x"],

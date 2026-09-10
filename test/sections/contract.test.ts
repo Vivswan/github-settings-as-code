@@ -9,19 +9,13 @@ import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.j
 import { type GraphqlOpDecl, graphqlOp } from "../../src/sections/contract/graphql.js";
 import {
   denialPosture,
-  endpointPermission,
   planningReads,
   readGating,
   type SectionMeta,
-  sectionGrant,
   sectionOperations,
   writeGatedReads,
 } from "../../src/sections/contract/module.js";
-import {
-  grantFor,
-  type SectionPermission,
-  samePermission,
-} from "../../src/sections/contract/permissions.js";
+import { type SectionPermission, samePermission } from "../../src/sections/contract/permissions.js";
 import { hasDrift, plainData, planContext } from "../../src/sections/contract/plan.js";
 import {
   declaredTolerance,
@@ -69,30 +63,40 @@ describe("sectionOperations", () => {
   test("every REST endpoint and GraphQL operation of a real section appears exactly once", () => {
     // repositorySection carries BOTH dictionaries, so the GraphQL half of
     // the flattening binds (a section without `graphql` would prove only the
-    // REST half). Content equality over the role-keyed dictionaries is the
-    // exactly-once claim: `role` carries each operation's identity, so a
-    // duplicated entry canceling an omitted one with the SAME
+    // REST half). The rows are spelled out: `role` carries each operation's
+    // identity, so a duplicated entry canceling an omitted one with the SAME
     // {wire, grade, permission} tuple still fails on content. No repository
     // endpoint overrides accessGrade, so wire and grade coincide here; the
-    // override split is pinned by the overrides test below.
+    // override split is pinned by the overrides test below. Declaration order
+    // is not part of the contract, so both sides are compared sorted by role.
     expect(Object.keys(repositorySection.graphql ?? {}).length).toBeGreaterThan(0);
-    const phaseOf = (op: EndpointDecl | GraphqlOpDecl): "plan" | "execution" => op.phase ?? "plan";
-    expect(sectionOperations(repositorySection)).toEqual([
-      ...Object.entries(repositorySection.endpoints).map(([role, op]) => ({
-        role,
-        wire: endpointKind(op),
-        grade: endpointKind(op),
-        permission: endpointPermission(repositorySection, op),
-        phase: phaseOf(op),
-      })),
-      ...Object.entries(repositorySection.graphql ?? {}).map(([role, op]) => ({
-        role,
-        wire: op.kind,
-        grade: op.kind,
-        permission: endpointPermission(repositorySection, op),
-        phase: phaseOf(op),
-      })),
-    ]);
+    const admin = { repo: ["administration"] } as const;
+    const row = (role: string, kind: "read" | "write") =>
+      ({ role, wire: kind, grade: kind, permission: admin, phase: "plan" }) as const;
+    const byRole = (a: { role: string }, b: { role: string }) => a.role.localeCompare(b.role);
+    expect([...sectionOperations(repositorySection)].sort(byRole)).toEqual(
+      [
+        row("get", "read"),
+        row("update", "write"),
+        row("topics", "write"),
+        row("vulnerabilityAlertsGet", "read"),
+        row("vulnerabilityAlertsPut", "write"),
+        row("vulnerabilityAlertsRemove", "write"),
+        row("automatedSecurityFixesGet", "read"),
+        row("automatedSecurityFixesPut", "write"),
+        row("automatedSecurityFixesRemove", "write"),
+        row("privateVulnerabilityReportingGet", "read"),
+        row("privateVulnerabilityReportingPut", "write"),
+        row("privateVulnerabilityReportingRemove", "write"),
+        row("immutableReleasesGet", "read"),
+        row("immutableReleasesPut", "write"),
+        row("immutableReleasesRemove", "write"),
+        row("lfsPut", "write"),
+        row("lfsRemove", "write"),
+        row("featuresQuery", "read"),
+        row("updateFeatures", "write"),
+      ].sort(byRole),
+    );
   });
 
   test("resolves per-operation permission overrides and accessGrade write-gating", () => {
@@ -172,7 +176,9 @@ describe("sectionOperations", () => {
       },
     };
     expect(() => denialPosture(postured)).toThrow(
-      /BUG: repository declares primaryRead on the execution-phase read GET \/apps\/\{app_slug\}/,
+      new Error(
+        "BUG: repository declares primaryRead on the execution-phase read GET /apps/{app_slug}; plan() never issues it, so no denied first read can be classified from it",
+      ),
     );
   });
 });
@@ -297,7 +303,9 @@ describe("throwFor context enrichment", () => {
 
   test("generic rejection without context keeps the classic shape", () => {
     expect(() => throwFor(section, "POST", "/repos/o/r/rulesets", rejection)).toThrow(
-      /rulesets: POST \/repos\/o\/r\/rulesets: 422 .*fix the "rulesets" values/,
+      new Error(
+        'rulesets: POST /repos/o/r/rulesets: 422 Validation Failed ([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
+      ),
     );
   });
 
@@ -306,7 +314,11 @@ describe("throwFor context enrichment", () => {
       throwFor(section, "POST", "/repos/o/r/rulesets", rejection, {
         operation: 'creating ruleset "quality"',
       }),
-    ).toThrow(/creating ruleset "quality" failed - POST \/repos\/o\/r\/rulesets: 422/);
+    ).toThrow(
+      new Error(
+        'rulesets: creating ruleset "quality" failed - POST /repos/o/r/rulesets: 422 Validation Failed ([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
+      ),
+    );
   });
 
   test("a GraphQL rejection appends the declared outcome prose of each observed error type; undeclared types add nothing", () => {
@@ -346,8 +358,12 @@ describe("throwFor context enrichment", () => {
         "settings file to satisfy the message above. The pinned list is full; unpin one in the " +
         "GitHub UI",
     );
-    expect(message(["FORBIDDEN"])).toMatch(/message above$/);
-    expect(message([])).toMatch(/message above$/);
+    const undeclared =
+      'rulesets: pinning environment "prod" failed - GRAPHQL PinEnvironment: 422 Repositories ' +
+      'may only have 10 pinned. The API rejected the request; fix the "rulesets" values in the ' +
+      "settings file to satisfy the message above";
+    expect(message(["FORBIDDEN"])).toBe(undeclared);
+    expect(message([])).toBe(undeclared);
   });
 
   test("the status-matched hint and documentation_url are appended to the generic branch", () => {
@@ -360,23 +376,26 @@ describe("throwFor context enrichment", () => {
         { op: endpoint({ hints: { 422: "Usually this means a typo" } }) },
       ),
     ).toThrow(
-      /message above\. Usually this means a typo\. The fields and values this endpoint accepts are documented at https:\/\/docs\.github\.com\/rest\/repos\/rules$/,
+      new Error(
+        'rulesets: POST /repos/o/r/rulesets: 422 Validation Failed ([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above. Usually this means a typo. The fields and values this endpoint accepts are documented at https://docs.github.com/rest/repos/rules',
+      ),
     );
   });
 
   test("a hint keyed to a different status is not rendered", () => {
-    try {
+    expect(() =>
       throwFor(
         section,
         "POST",
         "/repos/o/r/rulesets",
         { status: 409, message: "Conflict", body: "" },
         { op: endpoint({ hints: { 422: "never rendered on a 409" } }) },
-      );
-    } catch (error) {
-      expect(String(error)).toContain("409");
-      expect(String(error)).not.toContain("never rendered on a 409");
-    }
+      ),
+    ).toThrow(
+      new Error(
+        'rulesets: POST /repos/o/r/rulesets: 409 Conflict. The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
+      ),
+    );
   });
 
   test("permission errors keep the grant advice and gain the operation label", () => {
@@ -396,10 +415,9 @@ describe("throwFor context enrichment", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
-    const denied = thrown as PermissionDenied;
-    expect(denied.detail).toContain('creating ruleset "quality" failed - POST');
-    expect(denied.detail).toContain(sectionGrant(section));
-    expect(denied.detail).not.toContain("never rendered here");
+    expect((thrown as PermissionDenied).detail).toBe(
+      'the token was denied creating ruleset "quality" failed - POST /repos/o/r/rulesets: 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
+    );
   });
 
   test("denialHint is appended to the permission branch, and only there", () => {
@@ -420,10 +438,8 @@ describe("throwFor context enrichment", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
-    const denied = thrown as PermissionDenied;
-    expect(denied.detail).toContain(sectionGrant(section));
-    expect(denied.detail).toContain(
-      ". Note: a 403 here can also mean LFS is disabled account-wide",
+    expect((thrown as PermissionDenied).detail).toBe(
+      'the token was denied PUT /repos/o/r/lfs: 403 Git LFS is globally disabled. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions. Note: a 403 here can also mean LFS is disabled account-wide',
     );
     // The generic branch never renders it.
     expect(() =>
@@ -434,32 +450,43 @@ describe("throwFor context enrichment", () => {
         { status: 422, message: "nope", body: "" },
         { op: endpoint({ denialHint: "not for 422s" }) },
       ),
-    ).toThrow(/^(?!.*not for 422s).*fix the "rulesets" values/);
+    ).toThrow(
+      new Error(
+        'rulesets: PUT /repos/o/r/lfs: 422 nope. The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
+      ),
+    );
   });
 
-  test("rate-limit and 5xx branches do not render the hint", () => {
+  test("the rate-limit and 5xx branches render their own advice without the hint", () => {
     // A 5xx-keyed hint is unrepresentable (HintableStatus), so the fixture
-    // carries a 422 one; the 500 branch must throw its own advice without it.
+    // carries a 422 one; each branch throws its own advice without it.
+    const hinted = { op: endpoint({ hints: { 422: "never rendered here" } }) };
     expect(() =>
       throwFor(
         section,
         "GET",
         "/repos/o/r/rulesets",
         { status: 500, message: "Server Error", body: "" },
-        { op: endpoint({ hints: { 422: "never rendered here" } }) },
+        hinted,
       ),
-    ).toThrow(/server error/);
-    try {
+    ).toThrow(
+      new Error(
+        "rulesets: GET /repos/o/r/rulesets: 500 Server Error. GitHub returned a server error; re-run the workflow, and retry later if it persists",
+      ),
+    );
+    expect(() =>
       throwFor(
         section,
         "GET",
         "/repos/o/r/rulesets",
-        { status: 500, message: "Server Error", body: "" },
-        { op: endpoint({ hints: { 422: "never rendered here" } }) },
-      );
-    } catch (error) {
-      expect(String(error)).not.toContain("never rendered here");
-    }
+        { status: 403, message: "API rate limit exceeded", body: "", rateLimited: true },
+        hinted,
+      ),
+    ).toThrow(
+      new Error(
+        "rulesets: GET /repos/o/r/rulesets: 403 API rate limit exceeded. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
+      ),
+    );
   });
 
   test("a permission override renders the endpoint's own grant, not the section's", () => {
@@ -476,13 +503,13 @@ describe("throwFor context enrichment", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
-    const denied = thrown as PermissionDenied;
     // The synthetic override has no sibling in the rulesets section carrying
     // the same permission, so the sibling scan finds no write and the advice
     // asks for read - what matters here is the RESOURCE: the endpoint's own
     // grant renders, never the section's.
-    expect(denied.detail).toContain(grantFor({ repo: ["actions"] }, undefined, "read"));
-    expect(denied.detail).not.toContain(sectionGrant(section));
+    expect((thrown as PermissionDenied).detail).toBe(
+      'the token was denied POST /repos/o/r/actions/oidc/customization/sub: 403 Resource not accessible. To fix, grant "Actions" (read) under the PAT\'s Repository permissions',
+    );
   });
 
   test("override advice grades by the section's need: a write sibling on the same permission advises write", () => {
@@ -503,7 +530,9 @@ describe("throwFor context enrichment", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toContain(grantFor({ repo: ["actions"] }));
+    expect((thrown as PermissionDenied).detail).toBe(
+      'the token was denied GET /repos/o/r/actions/oidc/customization/sub: 403 Resource not accessible. To fix, grant "Actions" (read and write) under the PAT\'s Repository permissions',
+    );
   });
 
   test("override advice grades by the section's need: a read-only permission advises read", () => {
@@ -523,9 +552,9 @@ describe("throwFor context enrichment", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
-    const denied = thrown as PermissionDenied;
-    expect(denied.detail).toContain(grantFor({ repo: ["actions"] }, undefined, "read"));
-    expect(denied.detail).not.toContain("read and write");
+    expect((thrown as PermissionDenied).detail).toBe(
+      'the token was denied GET /repos/o/r/environments/prod/deployment-branch-policies: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Actions" (read) under the PAT\'s Repository permissions. Note: a 404 here can also mean the environment does not exist, or that its deployment_branch_policy does not set custom_branch_policies: true',
+    );
   });
 
   test('a public endpoint ("none") cannot be a missing-grant failure', () => {
@@ -545,7 +574,9 @@ describe("throwFor context enrichment", () => {
       thrown = error;
     }
     expect(thrown).not.toBeInstanceOf(PermissionDenied);
-    expect(String(thrown)).toContain('fix the "rulesets" values');
+    expect((thrown as Error).message).toBe(
+      'rulesets: GET /repos/o/r/rulesets: 403 Forbidden. The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
+    );
   });
 
   test("a no-override denial keeps the section grant's caveat", () => {
@@ -572,9 +603,8 @@ describe("throwFor context enrichment", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
-    const denied = thrown as PermissionDenied;
-    expect(denied.detail).toContain(
-      'the "oidc_customization_sub" key alone instead needs "Actions"',
+    expect((thrown as PermissionDenied).detail).toBe(
+      'the token was denied GET /repos/o/r/actions/permissions: 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
     );
   });
 });
@@ -611,13 +641,16 @@ describe("denialPosture", () => {
   });
 
   test("a reading section without a posture, or with two, is a BUG rather than a guess", () => {
-    expect(() => denialPosture(meta({ get: get(), put }))).toThrow(/declares no primaryRead/);
-    // A GraphQL read is a read the posture must cover too.
-    expect(() => denialPosture(meta({ put }, { probe: readOp }))).toThrow(
-      /declares no primaryRead/,
+    const unpostured = new Error(
+      "BUG: interaction_limits reads but declares no primaryRead posture, so a denied first read cannot be classified",
     );
+    expect(() => denialPosture(meta({ get: get(), put }))).toThrow(unpostured);
+    // A GraphQL read is a read the posture must cover too.
+    expect(() => denialPosture(meta({ put }, { probe: readOp }))).toThrow(unpostured);
     expect(() => denialPosture(meta({ get: get("denied"), other: get("absent"), put }))).toThrow(
-      /primaryRead on 2 endpoints/,
+      new Error(
+        "BUG: interaction_limits declares primaryRead on 2 endpoints; at most one read carries the 404 posture",
+      ),
     );
   });
 });
@@ -723,7 +756,11 @@ describe("planContext read port", () => {
     });
     // The control: the same status on a plain read classifies through throwFor.
     expect(typeof ctx.read.plain.call).toBe("function");
-    await expect(ctx.read.plain.tryCall()).rejects.toThrow(/500/);
+    await expect(ctx.read.plain.tryCall()).rejects.toThrow(
+      new Error(
+        "branches: GET /repos/o/r/branches: 500 Internal Server Error. GitHub returned a server error; re-run the workflow, and retry later if it persists",
+      ),
+    );
   });
 
   test("advisory wins over a primaryRead posture on the same declaration", () => {
@@ -825,48 +862,65 @@ describe("plainData", () => {
     expect(plainData([1, "two", null, { three: 3 }])).toEqual([1, "two", null, { three: 3 }]);
   });
 
-  test.each<[what: string, value: unknown, path: string, reason: RegExp]>([
-    ["a function", { rules: [{ check: () => true }] }, "rules[0].check", /a function/],
-    ["a bigint", { limit: 10n }, "limit", /a bigint/],
-    ["a class instance", { when: new Date(0) }, "when", /a non-plain object/],
-    ["a symbol", [Symbol("s")], "[0]", /a symbol/],
-    ["a non-finite number", { ratio: Number.NaN }, "ratio", /non-finite/],
-    ["an undefined list item", { list: [undefined] }, "list[0]", /undefined list item/],
-    ["undefined at the root", undefined, "(root)", /has no JSON form/],
+  const BUG = "BUG: a planned payload carries a value JSON cannot carry at ";
+  const PLAIN = "; request data must be plain";
+  test.each<[what: string, value: unknown, message: string]>([
+    ["a function", { rules: [{ check: () => true }] }, `${BUG}rules[0].check: a function${PLAIN}`],
+    ["a bigint", { limit: 10n }, `${BUG}limit: a bigint${PLAIN}`],
+    ["a class instance", { when: new Date(0) }, `${BUG}when: a non-plain object${PLAIN}`],
+    ["a symbol", [Symbol("s")], `${BUG}[0]: a symbol${PLAIN}`],
+    [
+      "a non-finite number",
+      { ratio: Number.NaN },
+      `${BUG}ratio: a non-finite number, which JSON would turn into null${PLAIN}`,
+    ],
+    [
+      "an undefined list item",
+      { list: [undefined] },
+      `${BUG}list[0]: an undefined list item, which JSON would turn into null${PLAIN}`,
+    ],
+    ["undefined at the root", undefined, `${BUG}(root): undefined, which has no JSON form${PLAIN}`],
     // Keys that are not bare identifiers render bracketed, so a dotted key
     // and a nested key cannot read the same.
-    ["a value under a dotted key", { "a.b": { c: 1n } }, '["a.b"].c', /a bigint/],
-    ["a value under an empty key", { "": 1n }, '[""]', /a bigint/],
-    ["a symbol-keyed property", { ok: true, [Symbol("hidden")]: 1n }, "(root)", /symbol-keyed/],
+    ["a value under a dotted key", { "a.b": { c: 1n } }, `${BUG}["a.b"].c: a bigint${PLAIN}`],
+    ["a value under an empty key", { "": 1n }, `${BUG}[""]: a bigint${PLAIN}`],
+    [
+      "a symbol-keyed property",
+      { ok: true, [Symbol("hidden")]: 1n },
+      `${BUG}(root): a symbol-keyed property, which JSON drops${PLAIN}`,
+    ],
     [
       "a symbol-keyed list",
       { list: Object.assign([1], { [Symbol("hidden")]: 1n }) },
-      "list",
-      /symbol-keyed/,
+      `${BUG}list: a symbol-keyed property, which JSON drops${PLAIN}`,
     ],
     [
       "a list with named properties",
       { list: Object.assign([1], { extra: 2 }) },
-      "list",
-      /named properties/,
+      `${BUG}list: a list carrying named properties, which JSON drops${PLAIN}`,
     ],
     [
       "a list with a non-enumerable named property",
       { list: Object.defineProperty([1], "extra", { value: 2 }) },
-      "list",
-      /named properties/,
+      `${BUG}list: a list carrying named properties, which JSON drops${PLAIN}`,
     ],
-    ["a list of a subclass", { list: new (class Tagged extends Array {})() }, "list", /a subclass/],
+    [
+      "a list of a subclass",
+      { list: new (class Tagged extends Array {})() },
+      `${BUG}list: a list of a subclass, which JSON serializes as a plain list${PLAIN}`,
+    ],
     [
       "a list with a non-enumerable item",
       { list: Object.defineProperty([1], "0", { enumerable: false }) },
-      "list",
-      /non-enumerable item/,
+      `${BUG}list: a list with a hole or a non-enumerable item, which JSON reads as null${PLAIN}`,
     ],
-    ["a list with a hole", { list: Object.assign(new Array(3), { 0: 1, 2: 3 }) }, "list", /a hole/],
-  ])("rejects %s, naming its path", (_what, value, path, reason) => {
-    expect(() => plainData(value)).toThrow(reason);
-    expect(() => plainData(value)).toThrow(`at ${path}:`);
+    [
+      "a list with a hole",
+      { list: Object.assign(new Array(3), { 0: 1, 2: 3 }) },
+      `${BUG}list: a list with a hole or a non-enumerable item, which JSON reads as null${PLAIN}`,
+    ],
+  ])("rejects %s, naming its path", (_what, value, message) => {
+    expect(() => plainData(value)).toThrow(new Error(message));
   });
 
   test("rejects a cycle, and only a cycle: a shared sibling reference is plain", () => {
@@ -875,7 +929,9 @@ describe("plainData", () => {
     const cyclic: Record<string, unknown> = { name: "loop" };
     cyclic.self = cyclic;
     expect(() => plainData(cyclic)).toThrow(
-      /at self: a reference back to one of its own containers/,
+      new Error(
+        "BUG: a planned payload carries a value JSON cannot carry at self: a reference back to one of its own containers (a cycle); request data must be plain",
+      ),
     );
   });
 });
@@ -888,7 +944,7 @@ describe("hasDrift", () => {
     if (hasDrift(lines)) {
       // Under the guard the head is a string, not string | undefined.
       const [head] = lines;
-      expect(head.startsWith("labels[bug]")).toBe(true);
+      expect(head).toBe("labels[bug]: color d73a4a != live ffffff");
     }
   });
 });
@@ -909,8 +965,8 @@ describe("declaredTolerance", () => {
     // request could leave, naming the offending status.
     for (const status of [422, 200, 401, 500]) {
       expect(() => declaredTolerance(endpoint, [status])).toThrow(
-        new RegExp(
-          `BUG: GET .*branches/\\{branch\\} was asked to tolerate status\\(es\\) ${status}, which it does not declare`,
+        new Error(
+          `BUG: GET /repos/{owner}/{repo}/branches/{branch} was asked to tolerate status(es) ${status}, which it does not declare as a tolerable error status; a tolerance may only name declared 4xx statuses other than 401 and 429`,
         ),
       );
     }
@@ -980,7 +1036,11 @@ describe("tryCallDeclared", () => {
         endpoint,
         { tolerated, describe: "arming the setup" },
       ),
-    ).rejects.toThrow(/arming the setup failed - PATCH .*: 422 Unprocessable/);
+    ).rejects.toThrow(
+      new Error(
+        'actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 Unprocessable. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above',
+      ),
+    );
   });
 
   test("a rate limit is never a tolerated outcome, even under a tolerated 403", async () => {
@@ -996,6 +1056,9 @@ describe("tryCallDeclared", () => {
         error: { status: 403, message: "API rate limit exceeded", body: "", rateLimited: true },
       },
     });
+    const limitHit = new Error(
+      "actions: GET /repos/o/r/pages: 403 API rate limit exceeded. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
+    );
     await expect(
       tryCallDeclared(
         { ...ctx, api: limited, resolveSecret: () => "" },
@@ -1005,10 +1068,10 @@ describe("tryCallDeclared", () => {
           tolerated: declaredTolerance(declares403),
         },
       ),
-    ).rejects.toThrow(/rate limit was hit/);
+    ).rejects.toThrow(limitHit);
     await expect(
       probeAbsent({ ...ctx, api: limited, check: true }, actionsSection, declares403),
-    ).rejects.toThrow(/rate limit was hit/);
+    ).rejects.toThrow(limitHit);
     const plain = new MockApi({
       "GET /repos/o/r/pages": { error: { status: 403, message: "Forbidden", body: "" } },
     });
@@ -1035,7 +1098,11 @@ describe("tryCallDeclared", () => {
       probeAbsent({ ...ctx, api, check: true }, actionsSection, probe, {
         tolerate: [422 as unknown as 404],
       }),
-    ).rejects.toThrow(/BUG: GET .*pages was asked to tolerate status\(es\) 422/);
+    ).rejects.toThrow(
+      new Error(
+        "BUG: GET /repos/{owner}/{repo}/pages was asked to tolerate status(es) 422, which it does not declare as a tolerable error status; a tolerance may only name declared 4xx statuses other than 401 and 429",
+      ),
+    );
     expect(api.calls).toEqual([]);
   });
 });
@@ -1094,8 +1161,8 @@ describe("samePermission", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toContain(
-      `To fix, ${sectionGrant(actionsSection)}`,
+    expect((thrown as PermissionDenied).detail).toBe(
+      'the token was denied GET /repos/o/r/actions/permissions: 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
     );
   });
 });

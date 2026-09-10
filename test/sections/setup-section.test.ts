@@ -34,7 +34,9 @@ interface SetupFacts<K extends SetupKey> {
   /** A declared document for the verbatim-PATCH case. */
   applyPayload: Declared<K>;
   changeLine: string;
-  denied403: RegExp;
+  /** The whole failure messages a 409 and a 403 on the PATCH produce. */
+  conflict409: string;
+  denied403: string;
 }
 
 /** Exhaustive by type: a setup key without a row fails to compile. */
@@ -51,7 +53,10 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
     driftLine: 'code_scanning_default_setup.query_suite: "extended" != "default"',
     applyPayload: { state: "configured", query_suite: "extended" },
     changeLine: "applied code scanning default setup",
-    denied403: /Advanced Security/,
+    conflict409:
+      "code_scanning_default_setup: PATCH /repos/o/r/code-scanning/default-setup: 409 Conflict. A code scanning default setup configuration run is already in progress on the repository; re-run the workflow after it finishes",
+    denied403:
+      'code_scanning_default_setup: the token was denied PATCH /repos/o/r/code-scanning/default-setup: 403 Forbidden. To fix, grant "Administration" or "Code scanning alerts" (read and write) under the PAT\'s Repository permissions; a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived',
   },
   code_quality_setup: {
     section: codeQualitySetupSection,
@@ -66,7 +71,10 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
       'code_quality_setup.ai_findings_option: declared "on_push" but the API response has no such field (new or write-only field?)',
     applyPayload: { state: "configured", ai_findings_option: "disabled" },
     changeLine: "applied code quality setup",
-    denied403: /code quality is unavailable/,
+    conflict409:
+      "code_quality_setup: PATCH /repos/o/r/code-quality/setup: 409 Conflict. A code quality setup configuration run is already in progress on the repository; re-run the workflow after it finishes",
+    denied403:
+      'code_quality_setup: the token was denied PATCH /repos/o/r/code-quality/setup: 403 Forbidden. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions; a 403 on this endpoint can also mean code quality is unavailable on the repository, or the repository is archived',
   },
 };
 
@@ -135,7 +143,16 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
   (_key, facts) => {
     // The erased view: one plan() signature over either section's declared value.
     const section: SectionModule<SetupKey> = facts.section;
-    const { path, live, driftDeclared, driftLine, applyPayload, changeLine, denied403 } = facts;
+    const {
+      path,
+      live,
+      driftDeclared,
+      driftLine,
+      applyPayload,
+      changeLine,
+      conflict409,
+      denied403,
+    } = facts;
     const plan = (api: GithubClient, declared: Declared) =>
       section.plan(planContext(section, api, REPO), declared);
 
@@ -144,10 +161,9 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
       // Planning reads through the GET port alone, and never writes.
       expect(Object.keys(planContext(section, api, REPO).read)).toEqual(["get"]);
       const drifted = await plan(api, driftDeclared);
-      expect(drifted.ops).toHaveLength(1);
-      expect(drifted.ops[0]?.role).toBe("update");
-      expect(drifted.ops[0]?.payload as unknown).toEqual(driftDeclared);
-      expect(drifted.ops[0]?.drift).toEqual([driftLine]);
+      expect(drifted.ops.map((op) => [op.role, op.payload, op.drift])).toEqual([
+        ["update", driftDeclared, [driftLine]],
+      ]);
       expect(drifted.notes).toEqual([]);
       expect(drifted.drift).toEqual([]);
       const reordered = await plan(api, { languages: [...live.languages].reverse() });
@@ -181,12 +197,7 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
     });
 
     test.each([
-      [
-        "409",
-        409,
-        "Conflict",
-        new RegExp(`${section.key}: PATCH ${path}: 409 Conflict\\. .*already in progress`),
-      ],
+      ["409", 409, "Conflict", conflict409],
       ["403", 403, "Forbidden", denied403],
     ])(
       "a %s on the PATCH fails with the section's own advice",
@@ -205,7 +216,7 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
           tools,
         );
         expect(execution.status).toBe("failed");
-        expect(String((execution as { error: unknown }).error)).toMatch(advice);
+        expect((execution as { error: Error }).error.message).toBe(advice);
       },
     );
   },

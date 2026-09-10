@@ -22,8 +22,13 @@ describe("dedupeTargets", () => {
       (m) => notices.push(m),
       (slug) => slug,
     );
-    expect(merged.map((t) => t.slug)).toEqual(["o/x", "o/z"]);
-    expect(notices[0]).toContain("using the central file repos/x.yml");
+    expect(merged).toEqual([
+      { slug: "o/x", source: "central", origin: "repos/x.yml", filePath: "repos/x.yml" },
+      { slug: "o/z", source: "remote", origin: 'the "repos" input' },
+    ]);
+    expect(notices).toEqual([
+      'O/X: using the central file repos/x.yml; the entry for the same repository from the "repos" input is ignored',
+    ]);
   });
 
   test("the notice renders the slug through display; a non-redacted origin stays verbatim", () => {
@@ -34,16 +39,15 @@ describe("dedupeTargets", () => {
       (m) => notices.push(m),
       () => "private repository #1",
     );
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).toStartWith("private repository #1: using the central file repos/x.yml");
-    expect(notices[0]).toContain('the entry for the same repository from the "repos" input');
-    // no doubled article from wrapping the origin noun phrase
-    expect(notices[0]).not.toContain("the the ");
-    expect(notices[0]?.toLowerCase()).not.toContain("o/x");
+    // The whole notice: the placeholder replaces the slug everywhere, the
+    // origin noun phrase is wrapped without a doubled article.
+    expect(notices).toEqual([
+      'private repository #1: using the central file repos/x.yml; the entry for the same repository from the "repos" input is ignored',
+    ]);
   });
 
   test("a redacted target's central origin is rendered generically, never the file path", () => {
-    // The central file path (repos/x.yml) can embed the real repo name, so for
+    // The central file path (repos/secret.yml) can embed the real repo name, so for
     // a redacted target it must not appear next to the placeholder.
     const notices: string[] = [];
     dedupeTargets(
@@ -60,11 +64,8 @@ describe("dedupeTargets", () => {
       () => "private repository #1",
       () => true,
     );
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).toStartWith(
-      "private repository #1: using the central file a repos-dir file",
-    );
-    expect(notices[0]).not.toContain("repos/secret.yml");
-    expect(notices[0]).not.toContain("secret");
+    expect(notices).toEqual([
+      'private repository #1: using the central file a repos-dir file; the entry for the same repository from the "repos" input is ignored',
+    ]);
   });
 });

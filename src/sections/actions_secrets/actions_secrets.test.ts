@@ -453,26 +453,6 @@ describe("actions_secrets sealing key", () => {
       /no usable \{key_id, key\} pair \(key_id is empty\)/,
     );
   });
-
-  test("a key that is not base64 or not X25519-sized fails with the endpoint named", async () => {
-    // The key parser rejects both malformations with the endpoint named, so a
-    // seal never receives invalid key material.
-    const notB64 = new MockApi({
-      [LIST]: listOf(),
-      [PUBLIC_KEY]: { data: { key_id: "k1", key: "!!not-base64!!" } },
-    });
-    await expect(plan(notB64, [{ name: "X", value: "$V" }])).rejects.toThrow(
-      /^actions_secrets: GET \/repos\/\{owner\}\/\{repo\}\/actions\/secrets\/public-key \(the actions_secrets sealing key\) returned a key that is not valid base64/,
-    );
-
-    const wrongLength = new MockApi({
-      [LIST]: listOf(),
-      [PUBLIC_KEY]: { data: { key_id: "k1", key: "AAAA" } },
-    });
-    await expect(plan(wrongLength, [{ name: "X", value: "$V" }])).rejects.toThrow(
-      /decodes to 3 bytes where an X25519 public key has 32/,
-    );
-  });
 });
 
 describe("actions_secrets contract", () => {

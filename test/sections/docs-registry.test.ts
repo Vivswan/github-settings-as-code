@@ -194,16 +194,23 @@ describe("section docs completeness", () => {
           "coverage: []",
         ].join("\n"),
       );
-      // Zod reports the issues in its own order, so each is pinned on its own.
+      // The report body is zod's own prettified issue list (its wording, glyphs, and order), so
+      // only our header and each issue's path are pinned; the missing schema map is reported too.
       for (const issue of [
         `${malformed} is not a valid docs document:`,
         'Unrecognized key: "extra"',
+        "at sections_table",
+        "at schema",
         "at sections_table.notes",
-        "at coverage",
+        "at coverage[0]",
       ]) {
         expect(() => readDocsYaml(malformed, SectionDocs)).toThrow(new RegExp(escapeRe(issue)));
       }
-      expect(() => readDocsYaml(join(dir, "absent.yml"), SectionDocs)).toThrow(/absent\.yml/);
+      // The tail of a missing-file error is the runtime's ENOENT prose, so only our prefix is pinned.
+      const absent = join(dir, "absent.yml");
+      expect(() => readDocsYaml(absent, SectionDocs)).toThrow(
+        new RegExp(`^${escapeRe(`${absent} is not valid YAML: `)}`),
+      );
       // YAML that does not even parse (a duplicated key, which the loader refuses) names the file too.
       writeFileSync(malformed, ["sections_table:", "  endpoints: a", "  endpoints: b"].join("\n"));
       expect(() => readDocsYaml(malformed, SectionDocs)).toThrow(

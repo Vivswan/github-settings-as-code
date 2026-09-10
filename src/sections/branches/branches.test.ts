@@ -143,6 +143,9 @@ const NULL_FILLED = {
   required_pull_request_reviews: null,
   restrictions: null,
 };
+/** The whole failure for a user actor whose GraphQL lookup answers `user: null`. */
+const GHOST_ACTOR_ERROR =
+  'branches: force_push_bypassers actor "ghost": the GraphQL lookup succeeded but returned no node id, so the allowance cannot be applied; re-run the workflow, and report this if it persists';
 
 describe("branches", () => {
   const declared: Desired = [{ name: "main", protection: { enforce_admins: true } }];
@@ -866,9 +869,7 @@ describe("branches GraphQL-routed keys", () => {
     expect(api.calls.filter((c) => c.path.startsWith("BranchProtectionActor"))).toHaveLength(0);
     const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
     expect(execution.status).toBe("failed");
-    expect(String((execution as { error: Error }).error.message)).toMatch(
-      /GraphQL lookup succeeded but returned no node id/,
-    );
+    expect(String((execution as { error: Error }).error.message)).toBe(GHOST_ACTOR_ERROR);
     expect(execution.landed).toBe(0);
     expect(api.mutations()).toHaveLength(0);
   });
@@ -901,11 +902,8 @@ describe("branches GraphQL-routed keys", () => {
       changes: [],
       notes: [],
       landed: 0,
-      error: expect.any(Error),
+      error: new Error(GHOST_ACTOR_ERROR),
     });
-    expect(String((execution as { error: Error }).error.message)).toMatch(
-      /force_push_bypassers actor "ghost".*returned no node id/,
-    );
     expect(api.mutations()).toHaveLength(0);
   });
 

@@ -36,8 +36,11 @@ describe("deliverIssueReport", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "the report body", true, "always");
     expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/7" });
-    const lookups = api.calls.filter((c) => c.method === "GET");
-    expect(lookups).toHaveLength(1);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      LABEL_CREATE,
+      LABEL_LOOKUP,
+      "PATCH /repos/o/private-repo/issues/7",
+    ]);
     const patch = api.calls.find((c) => c.method === "PATCH");
     expect(patch?.payload).toEqual({ body: "the report body", state: "open" });
   });
@@ -83,7 +86,13 @@ describe("deliverIssueReport", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/3" });
-    expect(api.calls.some((c) => `${c.method} ${c.path}` === ISSUE_CREATE)).toBe(false);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      LABEL_CREATE,
+      LABEL_LOOKUP,
+      "GET /user",
+      CREATOR_SCAN,
+      "PATCH /repos/o/private-repo/issues/3",
+    ]);
   });
 
   test("a fallback-scan hit without the marker reattaches it on the upsert PATCH", async () => {
@@ -152,7 +161,13 @@ describe("deliverIssueReport", () => {
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/150" });
     // A full page came back, but the match stops the walk: no page=2 request.
-    expect(api.calls.filter((c) => c.path.includes("page=2"))).toHaveLength(0);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      LABEL_CREATE,
+      LABEL_LOOKUP,
+      "GET /user",
+      CREATOR_SCAN,
+      "PATCH /repos/o/private-repo/issues/150",
+    ]);
   });
 
   test("nothing anywhere: POST with the marker label, then close when healthy", async () => {
@@ -166,10 +181,14 @@ describe("deliverIssueReport", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "body", false, "always");
     expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/9" });
-    const scanAt = api.calls.findIndex((c) => `${c.method} ${c.path}` === CREATOR_SCAN);
-    const createAt = api.calls.findIndex((c) => `${c.method} ${c.path}` === ISSUE_CREATE);
-    expect(scanAt).toBeGreaterThanOrEqual(0);
-    expect(scanAt).toBeLessThan(createAt);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      LABEL_CREATE,
+      LABEL_LOOKUP,
+      "GET /user",
+      CREATOR_SCAN,
+      ISSUE_CREATE,
+      "PATCH /repos/o/private-repo/issues/9",
+    ]);
     const close = api.calls.find((c) => c.method === "PATCH");
     expect(close?.payload).toEqual({ state: "closed" });
   });
@@ -184,7 +203,13 @@ describe("deliverIssueReport", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/9" });
-    expect(api.calls.some((c) => c.method === "PATCH")).toBe(false);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      LABEL_CREATE,
+      LABEL_LOOKUP,
+      "GET /user",
+      CREATOR_SCAN,
+      ISSUE_CREATE,
+    ]);
   });
 
   test("a denied marker-label create is a safe warning and stops everything", async () => {
@@ -194,13 +219,12 @@ describe("deliverIssueReport", () => {
       },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    if (!("warning" in result)) {
-      throw new Error("expected a warning");
-    }
-    expect(result.warning).toContain("HTTP 403");
-    expect(result.warning).toContain('"Issues" (read and write)');
-    expect(result.warning).not.toContain(SLUG.slug);
-    expect(api.calls).toHaveLength(1);
+    expect(result).toEqual({
+      warning:
+        'could not deliver the private report (HTTP 403). To fix, grant "Issues" (read and write) ' +
+        "under the PAT's Repository permissions for the target repository, or set private-report: none",
+    });
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LABEL_CREATE]);
   });
 
   test("a non-permission failure gets re-run advice, no grant prose", async () => {
@@ -212,13 +236,11 @@ describe("deliverIssueReport", () => {
       },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    if (!("warning" in result)) {
-      throw new Error("expected a warning");
-    }
-    expect(result.warning).toContain("HTTP 500");
-    expect(result.warning).toContain("Re-run the workflow");
-    expect(result.warning).not.toContain("Issues");
-    expect(result.warning).not.toContain(SLUG.slug);
+    expect(result).toEqual({
+      warning:
+        "could not deliver the private report (HTTP 500). Re-run the workflow, or set " +
+        "private-report: none if it persists",
+    });
   });
 
   test("a throwing transport never escapes; the warning stays slug-free", async () => {
@@ -226,11 +248,11 @@ describe("deliverIssueReport", () => {
     // failure (GithubApi throws those with the path in the message).
     const api = new MockApi({});
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    if (!("warning" in result)) {
-      throw new Error("expected a warning");
-    }
-    expect(result.warning).toContain("could not deliver the private report");
-    expect(result.warning).not.toContain(SLUG.slug);
+    expect(result).toEqual({
+      warning:
+        "could not deliver the private report: the request failed before an HTTP response " +
+        "arrived. Re-run the workflow, or set private-report: none if it persists",
+    });
   });
 
   test("a non-list lookup response is a warning, not a crash", async () => {
@@ -239,10 +261,11 @@ describe("deliverIssueReport", () => {
       [LABEL_LOOKUP]: { data: { message: "unexpected" } },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    if (!("warning" in result)) {
-      throw new Error("expected a warning");
-    }
-    expect(result.warning).toContain("the report-issue lookup returned a non-list response");
+    expect(result).toEqual({
+      warning:
+        "could not deliver the private report: the report-issue lookup returned a non-list " +
+        'response. Check the "api-version" input, or set private-report: none',
+    });
   });
 });
 
@@ -281,11 +304,11 @@ describe("deliverIssueReport under mode: on-failure", () => {
       [OPEN_LOOKUP]: { error: { status: 500, message: "boom o/private-repo", body: "" } },
     });
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
-    if (!("warning" in result)) {
-      throw new Error("expected a warning");
-    }
-    expect(result.warning).toContain("HTTP 500");
-    expect(result.warning).not.toContain(SLUG.slug);
+    expect(result).toEqual({
+      warning:
+        "could not deliver the private report (HTTP 500). Re-run the workflow, or set " +
+        "private-report: none if it persists",
+    });
   });
 
   test("a failing close-PATCH is a safe warning too", async () => {
@@ -296,20 +319,21 @@ describe("deliverIssueReport under mode: on-failure", () => {
       },
     });
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
-    if (!("warning" in result)) {
-      throw new Error("expected a warning");
-    }
-    expect(result.warning).toContain("HTTP 403");
-    expect(result.warning).not.toContain(SLUG.slug);
+    expect(result).toEqual({
+      warning:
+        'could not deliver the private report (HTTP 403). To fix, grant "Issues" (read and write) ' +
+        "under the PAT's Repository permissions for the target repository, or set private-report: none",
+    });
   });
 
   test("a non-list quiet-path response is a warning, not a crash", async () => {
     const api = new MockApi({ [OPEN_LOOKUP]: { data: { message: "unexpected" } } });
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
-    if (!("warning" in result)) {
-      throw new Error("expected a warning");
-    }
-    expect(result.warning).toContain("the open-issue lookup returned a non-list response");
+    expect(result).toEqual({
+      warning:
+        "could not deliver the private report: the open-issue lookup returned a non-list " +
+        'response. Check the "api-version" input, or set private-report: none',
+    });
   });
 
   test("needs-attention requests are identical to always, on both upsert paths", async () => {
@@ -347,7 +371,7 @@ describe("injectMarkerLabel", () => {
     const { settings: injected, outcome } = injectMarkerLabel(settings);
     expect(outcome).toBe("injected");
     expect(injected.labels).toEqual([{ name: "bug", color: "d73a4a" }, MARKER_LABEL_CONFIG]);
-    expect(settings.labels).toHaveLength(1);
+    expect(settings.labels).toEqual([{ name: "bug", color: "d73a4a" }]);
   });
 
   test("a wrapped labels section stays wrapped, keeping its undeclared policy", () => {

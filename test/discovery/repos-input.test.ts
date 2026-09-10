@@ -15,7 +15,9 @@ describe("parseReposInput", () => {
 
   test("* mixed with slugs is an error", () => {
     expect(parseReposInput("*, o/a")).toEqual({
-      error: expect.stringContaining('Use "*" alone to discover every repository'),
+      error:
+        'the "repos" input mixes "*" with explicit repositories. Use "*" alone to discover every ' +
+        "repository the token owns, or list the repositories without it",
     });
   });
 
