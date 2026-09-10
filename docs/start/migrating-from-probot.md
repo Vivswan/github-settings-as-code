@@ -1,14 +1,33 @@
+---
+order: 20
+---
+
 # Migrating from the Probot Settings app
 
-This page walks through moving a repository from the [Probot Settings app](https://github.com/repository-settings/app) to this action. The short version, and the claim the contract tests pin, is the [README's migration paragraph](../../README.md#migrating-from-the-probot-settings-app); the full side-by-side comparison sits right next to it, under [Compared to the Probot Settings app](../../README.md#compared-to-the-probot-settings-app). If this page and the README ever disagree, the README wins. What this page adds is the walkthrough: what to expect, in what order to do things, and how to read the first check run.
+This page walks through moving a repository from the [Probot Settings app](https://github.com/repository-settings/app) to this action. The short version is the [comparison table](#compared-to-the-probot-settings-app) below; the [README's migration paragraph](https://github.com/Vivswan/github-settings-as-code#migrating-from-the-probot-settings-app) is the claim the contract tests pin, and it wins if this page ever disagrees. What this page adds is the walkthrough: what to expect, in what order to do things, and how to read the first check run.
 
 ## Why migrate
 
-The app applies settings from a hosted GitHub App installation, and when something goes wrong it does nothing: there is no run log a repository owner can open, so a misconfigured or uninstalled app looks exactly like a healthy one. This action is a step in your own workflow instead. Every apply is a visible run with a log, annotations, a step summary, and a red X on failure, and `mode: check` reports drift between the file and the live repository without changing any settings. On top of that you get rulesets, a partial-success policy, a token you scope yourself, and per-call debug tracing. The [comparison table in the README](../../README.md#compared-to-the-probot-settings-app) lists the differences one by one.
+The app applies settings from a hosted GitHub App installation, and when something goes wrong it does nothing: there is no run log a repository owner can open, so a misconfigured or uninstalled app looks exactly like a healthy one. This action is a step in your own workflow instead. Every apply is a visible run with a log, annotations, a step summary, and a red X on failure, and `mode: check` reports drift between the file and the live repository without changing any settings. On top of that you get rulesets, a partial-success policy, a token you scope yourself, and per-call debug tracing. The [comparison table](#compared-to-the-probot-settings-app) below lists the differences one by one.
+
+## Compared to the Probot Settings app
+
+| | Probot Settings app | This action |
+|---|---|---|
+| Delivery | GitHub App you install (hosted by a third party, or self-hosted) | A step in your own workflow; no app installation, no third party |
+| Failure visibility | Silent: no run log a repo owner can open; a misconfigured or uninstalled app just does nothing | Every apply is a workflow run with a log, annotations, a step summary, and a red X on failure |
+| Drift detection | None | mode: check reports drift between the file and the live repo, exits 1 when it finds any, changes no settings |
+| Rulesets | Experimental upstream feature; schema may change | First class: branch, tag, and push targets, upsert by name; undeclared rulesets kept by default, `undeclared: delete` opts into deletion |
+| Partial success policy | None | on-missing-permission: fail or warn, plus required-sections as a minimum-requirements floor |
+| Token | App installation token; its scope is invisible in the repo | A PAT you mint and scope yourself; permission errors name the exact missing permission |
+| Org-level shared config | Yes (org _settings repo with extends) | Yes, as multi-repo mode: an admin repo with a defaults-file plus per-repo files (repos-dir) or each repo's own settings.yml (repos input); no hosted app needed |
+| Call transparency | None | Every API call is traced as a debug line (method, path, payload, status, timing) when debug logging is on |
+
+The one Probot-family feature without a direct equivalent is suborg-level grouping (safe-settings' .github/suborgs layer); here the layers are the defaults-file and per-repo files. Everything else in Probot's schema is supported, plus the rows above.
 
 ## What carries over as-is
 
-Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped `{undeclared, entries}` form is this action's own extension on top. The [README's migration paragraph](../../README.md#migrating-from-the-probot-settings-app) is the pinned statement of this parity. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
+Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped `{undeclared, entries}` form is this action's own extension on top. The [README's migration paragraph](https://github.com/Vivswan/github-settings-as-code#migrating-from-the-probot-settings-app) is the pinned statement of this parity. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
 
 ## What changed on purpose
 
@@ -20,7 +39,7 @@ The engine is stateless. There is no state file and nothing is stored between ru
 
 Rulesets are first class. Your `branches` section keeps working, and you can optionally move protection to `rulesets`, which cover branch, tag, and push targets. Undeclared rulesets are kept by default - deleting them is an explicit opt-in (`undeclared: delete`), so removing protection stays a deliberate action.
 
-Deletions still exist where the app had them: undeclared labels are deleted by default (Probot parity), and so are undeclared autolinks, collaborators, Actions variables, and Copilot agents variables - plus, within a declared per-environment key, that environment's variables and deployment branch-policy patterns. Nothing else is ever deleted implicitly; the README's [Sections table](../../README.md#sections) states each section's default in its Undeclared default column, and the check run lists everything an apply would delete before you let it.
+Deletions still exist where the app had them: undeclared labels are deleted by default (Probot parity), and so are undeclared autolinks, collaborators, Actions variables, and Copilot agents variables - plus, within a declared per-environment key, that environment's variables and deployment branch-policy patterns. Nothing else is ever deleted implicitly; the [Sections table](../reference/sections.md) states each section's default in its Undeclared default column, and the check run lists everything an apply would delete before you let it.
 
 ## Step by step
 
@@ -78,7 +97,7 @@ An organization with two hundred repositories should not migrate them one at a t
 
 1. Inventory the existing files into a `repos-dir`: each repository's `.github/settings.yml` copied to `.github/repos/<name>.yml` in the admin repository (a `gh api` loop over the repo list does it in one pass).
 2. Run the whole directory in `mode: check` while the app is still installed. Validation errors surface before any section runs, so one fleet check finds every misspelled key in every file at once.
-3. Read the results. A clean target means this action and the app agree on that repository; drift means either the app was not actually enforcing the file or the file uses something outside the [parity set](../../README.md#migrating-from-the-probot-settings-app). Fix files until the remaining drift is intended.
+3. Read the results. A clean target means this action and the app agree on that repository; drift means either the app was not actually enforcing the file or the file uses something outside the [parity set](#what-carries-over-as-is). Fix files until the remaining drift is intended.
 4. Uninstall the app, then flip cohorts to apply in stages rather than all at once; the [playbooks](../playbooks/README.md) page shows a ring-based rollout that fits here directly.
 
 Two writers must never race on the same settings, so the uninstall in step 4 comes before the first apply, and the check-only shadow period is what makes that safe.

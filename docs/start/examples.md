@@ -1,8 +1,12 @@
+---
+order: 30
+---
+
 # Examples
 
-A cookbook of settings.yml files. Every settings example on this page runs through the real document validation in CI, so the shapes stay current. What each section manages, which token permission it needs, and whether its undeclared entries are deleted or kept is specified in the [README Sections table](../../README.md#sections); the cross-section rules live under [Semantics](../reference/semantics.md). This page shows shapes, not behavior.
+A cookbook of settings.yml files. Every settings example on this page runs through the real document validation in CI, so the shapes stay current. What each section manages, which token permission it needs, and whether its undeclared entries are deleted or kept is specified in the [Sections table](../reference/sections.md); the cross-section rules live under [Semantics](../reference/semantics.md). This page shows shapes, not behavior.
 
-One rule frames everything below: only declared keys are applied or compared. A section, or a field inside one, that the file does not mention is never touched. The rule has edges worth knowing. Some list entries are one full payload: a declared ruleset is applied with a full-payload PUT, so a partial ruleset entry silently narrows the live one; declare each ruleset completely. Labels and milestones work the other way: only the fields you declare are sent, so an omitted description or state is left alone. And two sections bend the rule where the API forces their hand, as the [Sections table](../../README.md#sections) notes: inside a declared `protection` object the classic API requires all four core keys, so apply fills the ones you omit with `null` (see [Classic branch protection](#classic-branch-protection) below), and in the `actions` section, declaring any base permissions key (or `selected_actions`, which infers `allowed_actions: selected`) makes the base PUT carry `enabled: true` unless the file says otherwise, while retention-, cache-, workflow-token-, or access-only declarations leave the base policy alone.
+One rule frames everything below: only declared keys are applied or compared. A section, or a field inside one, that the file does not mention is never touched. The rule has edges worth knowing. Some list entries are one full payload: a declared ruleset is applied with a full-payload PUT, so a partial ruleset entry silently narrows the live one; declare each ruleset completely. Labels and milestones work the other way: only the fields you declare are sent, so an omitted description or state is left alone. And two sections bend the rule where the API forces their hand, as the [Sections table](../reference/sections.md) notes: inside a declared `protection` object the classic API requires all four core keys, so apply fills the ones you omit with `null` (see [Classic branch protection](#classic-branch-protection) below), and in the `actions` section, declaring any base permissions key (or `selected_actions`, which infers `allowed_actions: selected`) makes the base PUT carry `enabled: true` unless the file says otherwise, while retention-, cache-, workflow-token-, or access-only declarations leave the base policy alone.
 
 ## A minimal file
 
@@ -276,7 +280,7 @@ branches:
     protection: null
 ```
 
-Under a multi-repo defaults file, a target's `null` section can instead mean "opt out of the defaults for this repository"; the rules for that merge are in the [multi-repo guide](../operate/multi-repo.md). A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](../../lib/settings.schema.json) marks those.
+Under a multi-repo defaults file, a target's `null` section can instead mean "opt out of the defaults for this repository"; the rules for that merge are in the [multi-repo guide](../operate/multi-repo.md). A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/main/lib/settings.schema.json) marks those.
 
 ## Private notes
 

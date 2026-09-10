@@ -1,3 +1,7 @@
+---
+order: 360
+---
+
 # Trust tiers: read-only preview, gated apply
 
 A repository secret is readable from any workflow that anyone with push access can edit, so on a fleet admin repository the write token deserves a higher bar than push. Split the trust in two: previews run with a read-only PAT stored as a repository secret (as in [Preview the blast radius](preview-blast-radius.md)), and the apply job runs with the write PAT stored as an environment secret on an environment with required reviewers, so the write token only materializes after a human approves the run.

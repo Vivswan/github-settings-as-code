@@ -1,3 +1,7 @@
+---
+order: 210
+---
+
 # Check mode
 
 `mode: check` runs the whole pipeline read-only. Each declared section reads the live state and reports how it differs from the settings file instead of writing anything. The same declared-keys-only rule as apply holds: a key you do not declare is never compared (see [Semantics](../reference/semantics.md)). Check mode changes no settings; the one write it can still perform is delivery of a private report when the `private-report` input is enabled. The issue channels update a marker-labelled issue on the target (`issue` on every run, `issue-on-failure` only to open it on failure or drift, or close it on recovery), and on their first delivery that writes - which for `issue-on-failure` means the first drifting run, never a healthy one - they create that marker label; the artifact channel uploads an encrypted artifact. None of them touches anything else (see the [private repositories guide](private-repositories.md)).

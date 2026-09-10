@@ -1,3 +1,7 @@
+---
+order: 220
+---
+
 # Multi-repo mode
 
 One workflow in an admin repository can manage settings for a whole fleet, in the spirit of [safe-settings](https://github.com/github-community-projects/safe-settings) but without a hosted app. This page owns the rules of that mode - the two sourcing modes and their precedence, the discovery filters, the defaults merge, and what `null` means in it - and walks through choosing targets, layering a defaults file, opting a single repository out, and one worked fleet pattern.
@@ -43,7 +47,7 @@ jobs:
 
 Targets run independently and sequentially. One repository's failure never stops the rest; the run exits 1 at the end if any target failed (or drifted, in check mode). The step summary shows a fleet rollup table plus one section table per target, and the `repos-result` output carries the per-repo results as JSON.
 
-The `sections` and `required-sections` inputs apply to all targets alike, and the token needs the same per-section permissions (see the README's [Sections table](../../README.md#sections)) on every target repository.
+The `sections` and `required-sections` inputs apply to all targets alike, and the token needs the same per-section permissions (see the [Sections table](../reference/sections.md)) on every target repository.
 
 ## Discovery filters
 

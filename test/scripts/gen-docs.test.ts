@@ -1,15 +1,17 @@
 // Unit tests for the docs generator (.github/scripts/gen-docs.ts): each renderer pinned on a small
 // synthetic input, the loud failures, and the whole-file regeneration over the committed README and
-// COVERAGE, which must be a no-op (build:check's contract, so drift fails here with a diff first).
+// COVERAGE and reference pages, which must be a no-op (build:check's contract, so drift fails here with a diff first).
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CoverageData } from "../../.github/scripts/coverage-data.js";
 import {
+  DOCS_PAGE_REGIONS,
   patFormParameters,
   renderCoverage,
   renderCoverageFile,
+  renderDocsPage,
   renderOutputsList,
   renderPatCell,
   renderPatFormUrl,
@@ -439,6 +441,67 @@ describe("the committed README", () => {
     // Each page regenerates cleanly without the placement check and reads wrong with it skipped,
     // so the committed README's specs are pinned here (the mechanics in generated-regions.test.ts).
     expect(() => renderReadme(mutate(readme))).toThrow(error);
+  });
+});
+
+describe("the committed reference pages", () => {
+  const pages = Object.keys(DOCS_PAGE_REGIONS);
+
+  test("are exactly what the generator renders, and both are registered", () => {
+    expect(pages.sort()).toEqual(["docs/reference/inputs.md", "docs/reference/sections.md"]);
+    for (const path of pages) {
+      const text = readFileSync(join(ROOT, path), "utf8");
+      expect(renderDocsPage(path, text), path).toBe(text);
+    }
+    expect(() => renderDocsPage("docs/README.md", "")).toThrow(
+      "gen-docs: no generated regions are registered for docs/README.md",
+    );
+  });
+
+  test.each<[label: string, path: string, mutate: (page: string) => string, error: string]>([
+    [
+      "the Sections table moved under the column explanation",
+      "docs/reference/sections.md",
+      (page) =>
+        relocatedRegion(page, "sections-table", "html", "\n## The Undeclared default column\n\n"),
+      'the sections-table region must sit under "# Sections" in docs/reference/sections.md; "## The Undeclared default column" is the heading above its BEGIN marker',
+    ],
+    [
+      "the Sections table markers around the column table",
+      "docs/reference/sections.md",
+      (page) => {
+        const columnTable = page.match(/\| Value \| Meaning \|\n[\s\S]*?\n\n/)?.[0] ?? "";
+        expect(columnTable).not.toBe("");
+        return page.replace(
+          /(<!-- BEGIN GENERATED: sections-table[^\n]*\n)[\s\S]*?(<!-- END GENERATED: sections-table -->)/,
+          `$1${columnTable.trimEnd()}\n$2`,
+        );
+      },
+      "the sections-table region in docs/reference/sections.md encloses content the generator would not write",
+    ],
+    [
+      "the outputs list moved under Inputs",
+      "docs/reference/inputs.md",
+      (page) => relocatedRegion(page, "outputs-list", "html", "\n## Inputs\n\n"),
+      'the outputs-list region must sit under "## Outputs" in docs/reference/inputs.md; "## Inputs" is the heading above its BEGIN marker',
+    ],
+    [
+      "the outputs list markers around the bullet's prose",
+      "docs/reference/inputs.md",
+      (page) => {
+        const begin = page.match(/<!-- BEGIN GENERATED: outputs-list[^\n]*?-->/)?.[0] ?? "";
+        const end = "<!-- END GENERATED: outputs-list -->";
+        expect(begin).not.toBe("");
+        return page
+          .replace(begin, "")
+          .replace(end, "")
+          .replace("- `skipped-sections`: the", `- ${begin}\`skipped-sections\`: the${end}`);
+      },
+      "the outputs-list region in docs/reference/inputs.md encloses content the generator would not write",
+    ],
+  ])("refuses to regenerate with %s", (_label, path, mutate, error) => {
+    const page = readFileSync(join(ROOT, path), "utf8");
+    expect(() => renderDocsPage(path, mutate(page))).toThrow(error);
   });
 });
 

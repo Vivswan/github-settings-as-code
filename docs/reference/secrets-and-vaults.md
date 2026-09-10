@@ -1,3 +1,7 @@
+---
+order: 170
+---
+
 # Secrets and vaults
 
 Some settings are secrets. The first one this action manages is the webhook delivery secret (`webhooks[].config.secret`), and the problem it raises is general: `settings.yml` is a committed file, so a secret value can never be written into it, yet the API needs the real value at apply time.
@@ -22,7 +26,7 @@ A reference is the ENTIRE field value: a dollar sign followed by an environment 
 - An embedded fragment like `prefix-$TOKEN` is rejected too. There is no interpolation; shipping the value as a partial literal would be worse than failing.
 - Reserved runner variables are refused: a reference may not name anything starting with `INPUT_`, `GITHUB_`, `ACTIONS_`, `RUNNER_`, or `NODE_`, because routing workflow inputs or runner context into a settings value would turn the settings file into an exfiltration channel.
 
-GitHub does not interpolate `${{ secrets }}` inside repository files, which is why the reference names an env var rather than a workflow expression.
+GitHub does not interpolate <span v-pre>`${{ secrets }}`</span> inside repository files, which is why the reference names an env var rather than a workflow expression.
 
 ## Wiring the environment
 

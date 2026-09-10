@@ -1,16 +1,20 @@
+---
+order: 140
+---
+
 # Token permissions
 
 Every API call runs on the token you pass, so the grants on that token decide what the action can manage. This page is the permissions model: which grant each section needs, how to scope a PAT, what a denial looks like, and the policy inputs that decide whether a denial fails the run or skips the section.
 
 ## What to grant
 
-The PAT permission column in the README's [Sections table](../../README.md#sections) names the grant each section needs. Grant only the permissions for the sections your settings file declares, plus the two cross-cutting grants that belong to no section: Contents at read when the action must fetch a settings file it does not have checked out (remote multi-repo targets), and Issues at read and write only when a `private-report` issue channel (`issue` or `issue-on-failure`) is enabled (see [private repositories](../operate/private-repositories.md)). The Contents grant earns its keep twice: as the Sections table notes, it also lets `branches` tell a missing branch from an unprotected one in check mode. Beyond those the action never needs more. In multi-repo mode the token needs the same permissions on every target repository.
+The PAT permission column in the [Sections table](sections.md) names the grant each section needs. Grant only the permissions for the sections your settings file declares, plus the two cross-cutting grants that belong to no section: Contents at read when the action must fetch a settings file it does not have checked out (remote multi-repo targets), and Issues at read and write only when a `private-report` issue channel (`issue` or `issue-on-failure`) is enabled (see [private repositories](../operate/private-repositories.md)). The Contents grant earns its keep twice: as the Sections table notes, it also lets `branches` tell a missing branch from an unprotected one in check mode. Beyond those the action never needs more. In multi-repo mode the token needs the same permissions on every target repository.
 
 <!-- BEGIN GENERATED: permissions-grant-sentence (bun run build:action-docs; derived from the section modules' permission declarations) -->
 To manage everything in one PAT, grant Administration, Issues, Environments, Actions, Secrets, Dependabot secrets, Codespaces secrets, Agent secrets, Checks, Pages, Variables, Agent variables, Webhooks, Custom properties, and Secret scanning alerts at write, plus Contents at read and (for org repos) the Members organization permission at read.
 <!-- END GENERATED: permissions-grant-sentence -->
 
-The pre-filled token form linked under the README's [Usage](../../README.md#usage) grants exactly the repository half of that set.
+The pre-filled token form linked from [Getting started](../start/getting-started.md) grants exactly the repository half of that set.
 
 The default `GITHUB_TOKEN` can never hold most of these grants (Administration in particular), so plan on a fine-grained PAT.
 

@@ -1,3 +1,7 @@
+---
+order: 160
+---
+
 # Forward compatibility
 
 GitHub ships new settings fields faster than any wrapper can track them, so this action is passthrough-first by design: payloads are sent to the API verbatim except for documented normalizations (ref prefixes, topics splitting, vocabulary mapping), and new fields and rule types GitHub ships work the day they exist - declare them in `settings.yml`, no action update needed. This page draws the line: where the passthrough tenet holds, and where the surface is deliberately closed.

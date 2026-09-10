@@ -1,3 +1,7 @@
+---
+order: 390
+---
+
 # Incident freeze and unfreeze
 
 During an incident, merges must stop in minutes and be restored just as fast, with both directions on the record. Two profile files and one dispatch workflow do it. The freeze:

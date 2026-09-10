@@ -397,3 +397,6 @@ dist
 .tern-port
 
 # END REPO-PLATFORM MANAGED
+
+# Finder metadata, kept ignored even if the managed macOS block above changes.
+.DS_Store

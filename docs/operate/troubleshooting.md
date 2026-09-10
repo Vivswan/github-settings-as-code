@@ -1,3 +1,7 @@
+---
+order: 240
+---
+
 # Troubleshooting
 
 Errors from this action are written to carry their own fix: the failing request, the API's message verbatim, and what to change. The step summary table shows the outcome per section, so start there. This page covers the symptoms where the message alone benefits from context: denials that are not what they look like, limits, validation errors, and runs that do not match the code you think they are running.
@@ -6,7 +10,7 @@ Errors from this action are written to carry their own fix: the failing request,
 
 What you see: an error annotation naming the section, the denied request with its HTTP status, and advice starting "To fix, grant" that names the exact fine-grained PAT permission the section needs.
 
-What it means: the token lacks that section's grant. Each section's permission is listed in the [Sections table](../../README.md#sections). The default `GITHUB_TOKEN` cannot hold most of them (Administration in particular), so a missing or under-scoped PAT is the usual cause.
+What it means: the token lacks that section's grant. Each section's permission is listed in the [Sections table](../reference/sections.md). The default `GITHUB_TOKEN` cannot hold most of them (Administration in particular), so a missing or under-scoped PAT is the usual cause.
 
 What to do: edit the PAT's permissions as the message says (see [Token permissions](../reference/permissions.md)). If you would rather skip sections the token cannot reach, set `on-missing-permission: warn`: denied sections are skipped with a warning instead of failing the run, and when nothing else drifts or fails the result is `partial` and the run stays green. The `required-sections` input names sections that must still fully apply even under `warn`.
 
@@ -26,7 +30,7 @@ What to do: re-run the workflow. The fresh run reads the current versions and co
 
 ## A 403 that is not about a grant
 
-Two other things arrive as 403. First, rate limiting: both the primary limit and secondary (abuse) limits can be delivered as 403. The action recognizes these by the API's own message and reports them as rate limits, never as missing permissions. Second, feature policies: on a few endpoints a 403 means something other than the token. An org- or enterprise-managed policy can lock the Actions cache limits, code scanning default setup needs Advanced Security on private repositories, and Git LFS can be disabled account-wide. For Git LFS the denial message itself carries a note saying so; for the others the caveat lives in that section's row of the [COVERAGE.md Supported table](../../COVERAGE.md#supported).
+Two other things arrive as 403. First, rate limiting: both the primary limit and secondary (abuse) limits can be delivered as 403. The action recognizes these by the API's own message and reports them as rate limits, never as missing permissions. Second, feature policies: on a few endpoints a 403 means something other than the token. An org- or enterprise-managed policy can lock the Actions cache limits, code scanning default setup needs Advanced Security on private repositories, and Git LFS can be disabled account-wide. For Git LFS the denial message itself carries a note saying so; for the others the caveat lives in that section's row of the [COVERAGE.md Supported table](https://github.com/Vivswan/github-settings-as-code/blob/main/COVERAGE.md#supported).
 
 ## Rate limited
 

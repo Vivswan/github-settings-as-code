@@ -1,10 +1,14 @@
+---
+order: 150
+---
+
 # The undeclared policy
 
 <!-- BEGIN GENERATED: policy-count-sentence (bun run build:action-docs; derived from UNDECLARED_POLICY_SECTIONS) -->
 Fifteen sections list the live resources sitting next to the declared ones: `labels`, `autolinks`, `collaborators`, `actions_variables`, `agents_variables`, `rulesets`, `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`, and `secret_scanning_custom_patterns`.
 <!-- END GENERATED: policy-count-sentence -->
 
-Each has a default answer for a live resource the settings file does not declare, and each accepts a wrapped form that overrides it per file. This page is the normative statement of that policy: the knob, the defaults per section, and how it layers with a multi-repo defaults file. The README's [Sections table](../../README.md#sections) states each section's default in its Undeclared default column; this page says what the defaults mean and how to change them.
+Each has a default answer for a live resource the settings file does not declare, and each accepts a wrapped form that overrides it per file. This page is the normative statement of that policy: the knob, the defaults per section, and how it layers with a multi-repo defaults file. The [Sections table](sections.md) states each section's default in its Undeclared default column; this page says what the defaults mean and how to change them.
 
 ## The two forms
 
