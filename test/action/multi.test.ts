@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { runMulti } from "../../src/action/multi.js";
 import type { TargetOutcome } from "../../src/action/redact.js";
@@ -77,19 +80,79 @@ function cfg(overrides: Partial<Parameters<typeof runMulti>[1]> = {}) {
 }
 
 describe("runMulti", () => {
-  test("a remote target's settings cannot carry a $NAME secret reference (target provenance)", async () => {
+  // Secret provenance is one source per DOCUMENT, decided where the document
+  // is chosen. The same $NAME webhook reference lands in each of the three
+  // document kinds a target can run; check mode reads no environment, so the
+  // outcome is purely the provenance verdict: a target-authored document is
+  // refused (failed, nothing called), an operator-authored one is admitted
+  // and diffed (drift against an empty live hook list).
+  const HOOK_WITH_REF =
+    "webhooks:\n  - config:\n      url: https://x.test/h\n      secret: $OPERATOR_SECRET\n";
+  /** Run one target with `layout` on disk in a scratch dir, removed on every path. */
+  async function withScratch<T>(
+    layout: Record<string, string>,
+    body: (dir: string) => Promise<T>,
+  ): Promise<T> {
+    const dir = mkdtempSync(join(tmpdir(), "sac-multi-"));
+    try {
+      for (const [rel, content] of Object.entries(layout)) {
+        mkdirSync(join(dir, rel, ".."), { recursive: true });
+        writeFileSync(join(dir, rel), content);
+      }
+      return await body(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("a remote target's own settings.yml is target-authored: its $NAME reference is refused", async () => {
     const api = new MockApi({
       "GET /repos/o/a": { data: {} },
-      "GET /repos/o/a/contents/.github/settings.yml": {
-        data: "webhooks:\n  - config:\n      url: https://x.test/h\n      secret: $OPERATOR_SECRET\n",
-      },
+      "GET /repos/o/a/contents/.github/settings.yml": { data: HOOK_WITH_REF },
     });
     const { io, annotations } = captureIo();
-    const { fatal, targets } = await runMulti(api, cfg({ reposInput: "o/a" }), io);
+    const { fatal, targets } = await runMulti(api, cfg({ reposInput: "o/a", mode: "check" }), io);
     expect(fatal).toBeNull();
-    expect(targets[0]?.result).toBe("failed");
-    expect(api.mutations()).toEqual([]);
+    expect(targets.map((t) => [t.display, t.result])).toEqual([["o/a", "failed"]]);
+    expect(api.calls.filter((c) => c.path.includes("/hooks"))).toEqual([]);
     expect(annotations.some((a) => a.includes("target-fetched settings file"))).toBe(true);
+  });
+
+  test("the defaults document applied to a fileless target is operator-authored: its $NAME reference is admitted", async () => {
+    await withScratch({ "defaults.yml": HOOK_WITH_REF }, async (dir) => {
+      const api = new MockApi({
+        "GET /repos/o/c": { data: { default_branch: "main" } },
+        "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
+        "GET /repos/o/c/hooks?per_page=100&page=1": { data: [] },
+      });
+      const { io, annotations } = captureIo();
+      const { fatal, targets } = await runMulti(
+        api,
+        cfg({ reposInput: "o/c", defaultsFile: join(dir, "defaults.yml"), mode: "check" }),
+        io,
+      );
+      expect(fatal).toBeNull();
+      expect(targets.map((t) => [t.display, t.result])).toEqual([["o/c", "drift"]]);
+      expect(annotations.filter((a) => a.includes("target-fetched"))).toEqual([]);
+    });
+  });
+
+  test("a central per-repo file is operator-authored: its $NAME reference is admitted", async () => {
+    await withScratch({ "repos/api.yml": HOOK_WITH_REF }, async (dir) => {
+      const api = new MockApi({
+        "GET /repos/o/api": { data: {} },
+        "GET /repos/o/api/hooks?per_page=100&page=1": { data: [] },
+      });
+      const { io, annotations } = captureIo();
+      const { fatal, targets } = await runMulti(
+        api,
+        cfg({ reposDir: join(dir, "repos"), adminOwner: "o", mode: "check" }),
+        io,
+      );
+      expect(fatal).toBeNull();
+      expect(targets.map((t) => [t.display, t.result])).toEqual([["o/api", "drift"]]);
+      expect(annotations.filter((a) => a.includes("target-fetched"))).toEqual([]);
+    });
   });
 
   test("one failing repo never stops the others; worst-of is failed", async () => {
