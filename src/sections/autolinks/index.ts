@@ -1,7 +1,7 @@
 /**
  * `autolinks:` section - autolinks cannot be edited, so a changed one is
  * deleted and recreated. Undeclared autolinks are DELETED by default; the
- * wrapped `undeclared: keep` form softens that to notes.
+ * wrapped `_undeclared: keep` form softens that to notes.
  */
 
 import { z } from "zod";

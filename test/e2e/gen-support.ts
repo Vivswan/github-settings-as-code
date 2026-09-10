@@ -20,7 +20,7 @@ import type { Rng } from "./prng.js";
 export type Json = Record<string, unknown>;
 
 /** Either form a knobbed list section's generated value can take. */
-export type EntriesForm = Json[] | { undeclared?: "keep" | "delete"; entries: Json[] };
+export type EntriesForm = Json[] | { _undeclared?: "keep" | "delete"; entries: Json[] };
 
 /**
  * Unwrap a generated section value into its entry list through the SAME
@@ -35,17 +35,17 @@ export function entriesOf(value: unknown): Json[] {
 }
 
 /**
- * Sometimes rewrap a generated entry list in the `{undeclared, entries}`
+ * Sometimes rewrap a generated entry list in the `{_undeclared, entries}`
  * form, so the fuzz corpus exercises the knob's parsing, merging, and
  * schema surface alongside the plain form. The policy draw is skewed toward
- * OMITTING `undeclared` (the wrapper alone), because with the mock's empty
+ * OMITTING `_undeclared` (the wrapper alone), because with the mock's empty
  * live baselines an explicit policy changes no outcome - the delete/keep
  * behavior itself is pinned by curated scenarios (labels-undeclared-keep,
  * rulesets-undeclared-delete, milestones-undeclared-delete).
  *
  * The WITNESS sections (WITNESS_SECTIONS in generators.ts) must never call
  * this: the oracle refines their predictions from the seeded witness alone,
- * so a generated `undeclared: keep` over an extra-undeclared labels witness
+ * so a generated `_undeclared: keep` over an extra-undeclared labels witness
  * would flip the engine's outcome (a kept note instead of drift/deletion)
  * and fail the iteration, and the keep-default sections' delete path has no
  * witness modeling it. New draws live on a forked stream so the pre-existing
@@ -57,7 +57,7 @@ export function maybeWrapUndeclared(rng: Rng, entries: Json[]): EntriesForm {
     return entries;
   }
   return knobRng.bool(0.5)
-    ? { undeclared: knobRng.pick(["keep", "delete"] as const), entries }
+    ? { _undeclared: knobRng.pick(["keep", "delete"] as const), entries }
     : { entries };
 }
 
@@ -143,7 +143,7 @@ export const E2E_SECRET_ENV = {
  *   so check must report drift and apply must issue an update.
  * - "extra-undeclared" (delete-default sections only): a live item the settings do not declare,
  *   so check reports undeclared drift and apply DELETEs it. A keep-default section keeps it as a
- *   note; its wrapped `undeclared: delete` path is pinned by a curated scenario, not a witness kind.
+ *   note; its wrapped `_undeclared: delete` path is pinned by a curated scenario, not a witness kind.
  */
 export type LiveWitnessKind = "matching" | "drift-update" | "extra-undeclared";
 

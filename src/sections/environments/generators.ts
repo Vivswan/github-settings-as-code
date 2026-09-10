@@ -34,7 +34,7 @@ export function genEnvironments(rng: Rng): Json[] {
     if (variablesRng.bool(0.35)) {
       // Names are unique per environment by the suffix even after the
       // case-insensitive uppercase match, and mixed-case picks exercise it.
-      // The empty live baseline means an explicit `undeclared` policy would
+      // The empty live baseline means an explicit `_undeclared` policy would
       // change no outcome, so the wrapped draw omits it (the keep-note and
       // delete paths are pinned by curated scenarios); the bare `{entries}`
       // wrapper still exercises the nested knob's parsing and schema surface.
@@ -77,7 +77,7 @@ export function genEnvironments(rng: Rng): Json[] {
       // App slugs come ONLY from the shared PROTECTION_RULE_APPS fixture (the
       // mock's available-Apps listing serves the same objects), so a declared
       // rule can always resolve and enable. The slice keeps slugs unique per
-      // environment. The empty live baseline means an explicit `undeclared`
+      // environment. The empty live baseline means an explicit `_undeclared`
       // policy would change no outcome, so the wrapped draw omits it (the
       // keep-note and disable paths are pinned by curated scenarios).
       const slugs = PROTECTION_RULE_APPS.map((app) => String(app.slug));

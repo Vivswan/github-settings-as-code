@@ -1,13 +1,13 @@
 name: agents-variables-undeclared-keep
 description: >-
-  The wrapped agents_variables form with "undeclared: keep" softens the
+  The wrapped agents_variables form with "_undeclared: keep" softens the
   section's delete default: a live variable the settings file does not
   declare is KEPT and surfaced as a note instead of being deleted. The
   declared variable still updates, apply stays green, and a check rerun
   converges (the kept variable is a note, not drift).
 settings:
   agents_variables:
-    undeclared: keep
+    _undeclared: keep
     entries:
       - name: AGENT_MODEL
         value: extended
@@ -31,6 +31,6 @@ expect:
   never:
     - "DELETE /repos/{repo}/agents/variables"
   stdout_contains:
-    - "kept under \"undeclared: keep\""
+    - "kept under \"_undeclared: keep\""
     - RETIRED_FLAG
   converges: true

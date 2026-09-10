@@ -2,7 +2,7 @@
  * `milestones:` section - upsert by title. Divergence from Probot:
  * undeclared milestones are kept by default (deleting a milestone detaches
  * it from every issue carrying it) and surfaced as notes. The wrapped
- * `undeclared: delete` form hardens that to deletion, detachment included.
+ * `_undeclared: delete` form hardens that to deletion, detachment included.
  */
 
 import { z } from "zod";

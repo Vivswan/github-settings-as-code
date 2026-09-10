@@ -13,19 +13,30 @@ import { z } from "zod";
 const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "UndeclaredPolicy" });
 
 /**
- * The merge-time directive, on a top-level knobbed wrapper or at the document
- * root: how the section (or every keyed section of the document) combines
- * with the layers BELOW it in a layered merge (engine/layers.ts) - "merge"
- * unions the entries by key, "replace" lets this layer's list win. It has no
- * effect on a single document and never reaches the merged result.
+ * The merge-time directive on a top-level knobbed wrapper or at the document
+ * root; consumed by engine/layers.ts. Described once in shared.docs.yml
+ * (`UndeclaredPolicyList<*>._layering`) and src/schema.docs.yml.
  */
 export const LayeringSchema = z.enum(["merge", "replace"]);
 
+/** The wrapper's policy key before v3 renamed it; still the likeliest stray key on a wrapper. */
+const RENAMED_POLICY_KEY = "undeclared";
+
+/** The wrapper's error map: a v2 file fails with the rename in hand, not a bare unknown-key issue. */
+function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
+  if (issue.code !== "unrecognized_keys" || !issue.keys.includes(RENAMED_POLICY_KEY)) {
+    return undefined;
+  }
+  const keys = issue.keys.map((key) => JSON.stringify(key)).join(", ");
+  return `Unrecognized key${issue.keys.length === 1 ? "" : "s"}: ${keys}; the wrapper's policy key "undeclared" was renamed to "_undeclared" in v3 (a directive, like _layering) - write _undeclared: keep or _undeclared: delete`;
+}
+
 /**
  * The knobbed form of a list value: the plain entry array, or the strict
- * {undeclared, entries} wrapper (published under the definition name
- * "UndeclaredPolicyList<Entry>", matching the UndeclaredPolicyList type).
- * loosen() recognizes this union and rewraps it with the routed check that
+ * {_undeclared, entries} wrapper (published under the definition name
+ * "UndeclaredPolicyList<Entry>", matching the UndeclaredPolicyList type;
+ * each key's meaning is its `UndeclaredPolicyList<*>.<key>` description in
+ * shared.docs.yml, which the generator attaches). loosen() recognizes this union and rewraps it with the routed check that
  * keeps precise per-entry issue paths. The wrapper's definition name derives
  * from the entry schema's own .meta({id}), so the document composition and a
  * section's runtime derivation can never label the same entry differently -
@@ -36,12 +47,12 @@ export const LayeringSchema = z.enum(["merge", "replace"]);
  * z.globalRegistry's id map would see only the last-registered wrapper -
  * keep the published schema on the single-schema path.
  */
-function knobbedList<T extends z.ZodType, W extends z.ZodObject>(
+function knobbedList<T extends z.ZodType, S extends z.core.$ZodShape>(
   entry: T,
-  wrap: (knobs: {
-    undeclared: z.ZodOptional<typeof UndeclaredPolicySchema>;
+  shape: (knobs: {
+    _undeclared: z.ZodOptional<typeof UndeclaredPolicySchema>;
     entries: z.ZodArray<T>;
-  }) => W,
+  }) => S,
 ) {
   const entryName = z.globalRegistry.get(entry)?.id;
   if (entryName === undefined) {
@@ -49,10 +60,12 @@ function knobbedList<T extends z.ZodType, W extends z.ZodObject>(
       "knobbed(): the entry schema carries no .meta({id}) name to derive the wrapper's definition name from; give the entry config a .meta({id})",
     );
   }
-  const wrapper = wrap({
-    undeclared: UndeclaredPolicySchema.optional(),
-    entries: z.array(entry),
-  }).meta({ id: `UndeclaredPolicyList<${entryName}>` });
+  const wrapper = z
+    .strictObject(
+      shape({ _undeclared: UndeclaredPolicySchema.optional(), entries: z.array(entry) }),
+      { error: wrapperKeyError },
+    )
+    .meta({ id: `UndeclaredPolicyList<${entryName}>` });
   return z.union([z.array(entry), wrapper]);
 }
 
@@ -62,9 +75,7 @@ function knobbedList<T extends z.ZodType, W extends z.ZodObject>(
  * section-level wrapper has layers below it to address.
  */
 export function knobbed<T extends z.ZodType>(entry: T) {
-  return knobbedList(entry, (knobs) =>
-    z.strictObject({ ...knobs, _layering: LayeringSchema.optional() }),
-  );
+  return knobbedList(entry, (knobs) => ({ ...knobs, _layering: LayeringSchema.optional() }));
 }
 
 /**
@@ -73,7 +84,7 @@ export function knobbed<T extends z.ZodType>(entry: T) {
  * a higher layer, so the directive would be accepted and never act.
  */
 export function nestedKnobbed<T extends z.ZodType>(entry: T) {
-  return knobbedList(entry, (knobs) => z.strictObject(knobs));
+  return knobbedList(entry, (knobs) => knobs);
 }
 
 /** A repository-scope sealed secret entry (name + `$NAME` reference value). */

@@ -354,17 +354,17 @@ describe("injectMarkerLabel", () => {
     // Injection must rebuild the operator's chosen shape: losing the wrapper
     // here would silently restore the labels default (delete) on the next run.
     const settings: SettingsFile = {
-      labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
+      labels: { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
     };
     const result = injectMarkerLabel(settings);
     expect(result.outcome).toBe("injected");
     expect(result.settings.labels).toEqual({
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [{ name: "bug", color: "d73a4a" }, MARKER_LABEL_CONFIG],
     });
     // input is not mutated
     expect(settings.labels).toEqual({
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [{ name: "bug", color: "d73a4a" }],
     });
   });
@@ -372,14 +372,14 @@ describe("injectMarkerLabel", () => {
   test("a rename-refusal in a wrapped labels section rebuilds the wrapped form", () => {
     const settings: SettingsFile = {
       labels: {
-        undeclared: "keep",
+        _undeclared: "keep",
         entries: [{ name: MARKER_LABEL, new_name: "something-else", color: "0e2a47" }],
       },
     };
     const result = injectMarkerLabel(settings);
     expect(result.outcome).toBe("rename-refused");
     expect(result.settings.labels).toEqual({
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [{ name: MARKER_LABEL, new_name: undefined, color: "0e2a47" }],
     });
   });
@@ -453,7 +453,7 @@ describe("injectMarkerLabel", () => {
     const cases: Array<{ doc: SettingsFile; expected: string }> = [
       { doc: { labels: [{ name: "bug", color: "d73a4a" }] }, expected: "injected" },
       {
-        doc: { labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] } },
+        doc: { labels: { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] } },
         expected: "injected",
       },
       { doc: { labels: [{ name: MARKER_LABEL, color: "0e2a47" }] }, expected: "unchanged" },
@@ -464,7 +464,7 @@ describe("injectMarkerLabel", () => {
       {
         doc: {
           labels: {
-            undeclared: "keep",
+            _undeclared: "keep",
             entries: [{ name: MARKER_LABEL, new_name: "elsewhere", color: "0e2a47" }],
           },
         },

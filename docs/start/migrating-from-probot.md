@@ -17,7 +17,7 @@ The app applies settings from a hosted GitHub App installation, and when somethi
 | Delivery | GitHub App you install (hosted by a third party, or self-hosted) | A step in your own workflow; no app installation, no third party |
 | Failure visibility | Silent: no run log a repo owner can open; a misconfigured or uninstalled app just does nothing | Every apply is a workflow run with a log, annotations, a step summary, and a red X on failure |
 | Drift detection | None | mode: check reports drift between the file and the live repo, exits 1 when it finds any, changes no settings |
-| Rulesets | Experimental upstream feature; schema may change | First class: branch, tag, and push targets, upsert by name; undeclared rulesets kept by default, `undeclared: delete` opts into deletion |
+| Rulesets | Experimental upstream feature; schema may change | First class: branch, tag, and push targets, upsert by name; undeclared rulesets kept by default, `_undeclared: delete` opts into deletion |
 | Partial success policy | None | on-missing-permission: fail or warn, plus required-sections as a minimum-requirements floor |
 | Token | App installation token; its scope is invisible in the repo | A PAT you mint and scope yourself; permission errors name the exact missing permission |
 | Org-level shared config | Yes (org _settings repo with extends) | Yes, as multi-repo mode: an admin repo with a defaults-file plus per-repo files (repos-dir) or each repo's own settings.yml (repos input); no hosted app needed |
@@ -27,7 +27,7 @@ The one Probot-family feature without a direct equivalent is suborg-level groupi
 
 ## What carries over as-is
 
-Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped `{undeclared, entries}` form is this action's own extension on top. This list is the parity claim the contract tests pin. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
+Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped `{_undeclared, entries}` form is this action's own extension on top. This list is the parity claim the contract tests pin. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
 
 ## What changed on purpose
 
@@ -37,7 +37,7 @@ Failures are loud. An unknown top-level key in the settings file is a hard error
 
 The engine is stateless. There is no state file and nothing is stored between runs; resources are matched by their natural names, and only declared keys are ever applied or compared. Removing a section from the file stops managing it; it does not revert anything.
 
-Rulesets are first class. Your `branches` section keeps working, and you can optionally move protection to `rulesets`, which cover branch, tag, and push targets. Undeclared rulesets are kept by default - deleting them is an explicit opt-in (`undeclared: delete`), so removing protection stays a deliberate action.
+Rulesets are first class. Your `branches` section keeps working, and you can optionally move protection to `rulesets`, which cover branch, tag, and push targets. Undeclared rulesets are kept by default - deleting them is an explicit opt-in (`_undeclared: delete`), so removing protection stays a deliberate action.
 
 Deletions still exist where the app had them: undeclared labels are deleted by default (Probot parity), and so are undeclared autolinks, collaborators, Actions variables, and Copilot agents variables - plus, within a declared per-environment key, that environment's variables and deployment branch-policy patterns. Nothing else is ever deleted implicitly; the [Sections table](../reference/sections.md) states each section's default in its Undeclared default column, and the check run lists everything an apply would delete before you let it.
 

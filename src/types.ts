@@ -9,35 +9,17 @@
 export type UndeclaredPolicy = "keep" | "delete";
 
 /**
- * The wrapped form of a list, overriding what happens to live resources the
- * file does not declare. The plain array form keeps the list's own default
- * policy (for a top-level section that is the section default, and a
- * multi-repo defaults file can set it; a nested list such as
- * environments[].variables has its own fixed default and never inherits
- * one); this wrapper can set it explicitly, and with
- * `undeclared` omitted it behaves exactly like the plain array. The wrapper is
- * this action's own vocabulary (nothing here passes through to GitHub), so
- * its keys are strict: anything besides `undeclared` and `entries` (plus
- * `_layering` on a top-level section's wrapper) is rejected upfront as a typo.
+ * The wrapped form of a list: the strict {_undeclared, entries, _layering}
+ * wrapper knobbed() and nestedKnobbed() build (src/sections/shared/
+ * schema-helpers.ts). The two underscored keys are this action's DIRECTIVES,
+ * never GitHub settings; each key's meaning is the published description
+ * under `UndeclaredPolicyList<*>.<key>` in src/sections/shared/shared.docs.yml,
+ * the one source the JSON Schema and the docs render from.
  */
 export interface UndeclaredPolicyList<E> {
-  /**
-   * What apply does to live resources `entries` does not declare: "delete"
-   * removes them, "keep" leaves them alone and surfaces each as a note.
-   * Omitted, the list's own default applies.
-   */
-  undeclared?: UndeclaredPolicy;
-  /** The declared entries, exactly as the plain array form lists them. */
+  _undeclared?: UndeclaredPolicy;
   entries: E[];
-  /**
-   * The same kind of knob on the lower-layer axis: how this list combines
-   * with the layers BELOW it in a layered merge (engine/layers.ts) - "merge"
-   * unions the entries by key, "replace" lets this layer's list win. Omitted,
-   * the run's layering applies; a single document never reads it, and the
-   * merged document never carries it. Only a TOP-LEVEL section's wrapper
-   * takes it: a list nested inside a section entry is replaced wholesale by
-   * a higher layer, so its wrapper rejects the key (see nestedKnobbed()).
-   */
+  /** Only a TOP-LEVEL section's wrapper takes it (see nestedKnobbed()). */
   _layering?: "merge" | "replace";
 }
 

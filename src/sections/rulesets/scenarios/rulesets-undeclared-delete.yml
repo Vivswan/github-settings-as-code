@@ -1,12 +1,12 @@
 name: rulesets-undeclared-delete
 description: >-
-  The wrapped rulesets form with "undeclared: delete" hardens the section's
+  The wrapped rulesets form with "_undeclared: delete" hardens the section's
   keep default: a live ruleset the settings file does not declare is DELETED
   instead of noted. The declared ruleset is created, apply stays green, and
   a check rerun converges.
 settings:
   rulesets:
-    undeclared: delete
+    _undeclared: delete
     entries:
       - name: protect-main
         target: branch

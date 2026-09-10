@@ -58,7 +58,7 @@ describe("three-way drift detection", () => {
           );
         }
         // 4. A witness section is drawn as the bare list its live witness
-        //    mirrors entry by entry, never the wrapped {undeclared, entries} form.
+        //    mirrors entry by entry, never the wrapped {_undeclared, entries} form.
         if ((WITNESS_SECTIONS as readonly string[]).includes(key) && !Array.isArray(value)) {
           offenders.push(
             `${key} seed ${i}: witness section drew the wrapped form ${JSON.stringify(value)}`,
@@ -199,9 +199,9 @@ describe("generator couplings and pools", () => {
           plain++;
           continue;
         }
-        const wrapper = value as { undeclared?: string; entries: unknown[] };
+        const wrapper = value as { _undeclared?: string; entries: unknown[] };
         expect(Array.isArray(wrapper.entries)).toBe(true);
-        const policy = wrapper.undeclared ?? "(omitted)";
+        const policy = wrapper._undeclared ?? "(omitted)";
         wrapped.set(policy, (wrapped.get(policy) ?? 0) + 1);
       }
       expect(plain).toBeGreaterThan(0);
@@ -332,7 +332,7 @@ describe("genLiveWitness", () => {
       expect(live.length).toBe(declared.length + 1);
       const extra = live[live.length - 1] as Label;
       // The extra label matches no declared identity (case-insensitively), so
-      // the handler must classify it as undeclared: delete in apply, drift in
+      // the handler must classify it as _undeclared: delete in apply, drift in
       // check.
       expect(declared.some((l) => l.name.toLowerCase() === extra.name.toLowerCase())).toBe(false);
     }

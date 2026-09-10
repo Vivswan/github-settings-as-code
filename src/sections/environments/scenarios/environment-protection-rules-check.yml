@@ -1,7 +1,7 @@
 # Check mode reports protection-rule drift without writing: production's
 # declared deploy-gate rule is missing (apply would enable it) while its
 # undeclared change-window rule is kept as a note (the default), staging's
-# wrapped "undeclared: delete" form turns ITS undeclared rule into drift
+# wrapped "_undeclared: delete" form turns ITS undeclared rule into drift
 # (apply would disable it), and the qa environment does not exist, so its
 # declared rules are not verifiable - a note, while the missing environment
 # itself is drift. The available-Apps listing is an apply-time resolver and
@@ -15,7 +15,7 @@ settings:
         - app: region-guard
     - name: staging
       deployment_protection_rules:
-        undeclared: delete
+        _undeclared: delete
         entries: []
     - name: qa
       deployment_protection_rules:

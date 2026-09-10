@@ -170,7 +170,7 @@ describe("runForRepo", () => {
   test("a knobbed list section receives zod's parsed copy in both forms: own __proto__ dropped on the list and each entry, rejected on the strict wrapper", async () => {
     const plain = JSON.parse('{"rulesets":[{"name":"r","__proto__":{"planted":1}}]}');
     const wrapped = JSON.parse(
-      '{"rulesets":{"undeclared":"keep","entries":[{"name":"r","__proto__":{"planted":1}}]}}',
+      '{"rulesets":{"_undeclared":"keep","entries":[{"name":"r","__proto__":{"planted":1}}]}}',
     );
     expect(Object.hasOwn(plain.rulesets[0], "__proto__")).toBe(true);
     expect(Object.hasOwn(wrapped.rulesets.entries[0], "__proto__")).toBe(true);
@@ -181,10 +181,10 @@ describe("runForRepo", () => {
     prototypeClean(plainDesired[0] as object);
 
     const [wrappedDesired] = (await receivedBy(rulesetsSection, wrapped)) as [
-      { undeclared: string; entries: object[] },
+      { _undeclared: string; entries: object[] },
     ];
     expect(wrappedDesired).not.toBe(wrapped.rulesets);
-    expect(wrappedDesired).toEqual({ undeclared: "keep", entries: [{ name: "r" }] });
+    expect(wrappedDesired).toEqual({ _undeclared: "keep", entries: [{ name: "r" }] });
     prototypeClean(wrappedDesired);
     prototypeClean(wrappedDesired.entries[0] as object);
 

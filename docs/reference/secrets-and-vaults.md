@@ -113,7 +113,7 @@ actions_secrets:
     value: $PUBLISH_TOKEN
 ```
 
-GitHub never returns a secret's value, only names and timestamps, so check mode reconciles EXISTENCE: a declared-but-missing secret is drift, and the declared values get one cannot-verify note. Apply seals every declared value client-side against the repository's public key and re-writes it on every run, which is also how a rotated vault value propagates. Undeclared secrets are kept by default - a deleted secret's value is unrecoverable - and the wrapped `undeclared: delete` form opts into deletion.
+GitHub never returns a secret's value, only names and timestamps, so check mode reconciles EXISTENCE: a declared-but-missing secret is drift, and the declared values get one cannot-verify note. Apply seals every declared value client-side against the repository's public key and re-writes it on every run, which is also how a rotated vault value propagates. Undeclared secrets are kept by default - a deleted secret's value is unrecoverable - and the wrapped `_undeclared: delete` form opts into deletion.
 
 Unlike the variables sections, a secret entry accepts ONLY `name` and `value` - an unknown key is rejected upfront rather than passed through. That is not an inconsistency: a variables entry's body goes to GitHub verbatim, so an extra key rides along and GitHub decides; a secret's PUT body is built from the sealed value alone, so an extra key has no destination and would "apply" successfully forever while doing nothing.
 
@@ -133,7 +133,7 @@ agents_secrets:
     value: $AGENT_TOKEN
 ```
 
-Everything said about `actions_secrets` applies: existence-only checks, one cannot-verify note, re-seal on every apply, undeclared secrets kept unless the wrapped `undeclared: delete` form says otherwise.
+Everything said about `actions_secrets` applies: existence-only checks, one cannot-verify note, re-seal on every apply, undeclared secrets kept unless the wrapped `_undeclared: delete` form says otherwise.
 
 ## Environment secrets
 
@@ -151,7 +151,7 @@ environments:
         value: $PROD_DEPLOY_TOKEN
 ```
 
-Each environment is its own sealing scope with its own public key, so the same secret name can carry a different value per environment, as above. Reconciliation runs after the environment itself is applied; in check mode against an environment that does not exist yet, the declared secrets cannot be listed, so a note says they are unverifiable until apply creates it. Within a declared `secrets` key, live secrets the entries do not declare are kept by default (their values are unrecoverable); the wrapped `{undeclared: delete, entries}` form opts into deletion. The endpoints ride the same "Environments" PAT permission as the rest of the section.
+Each environment is its own sealing scope with its own public key, so the same secret name can carry a different value per environment, as above. Reconciliation runs after the environment itself is applied; in check mode against an environment that does not exist yet, the declared secrets cannot be listed, so a note says they are unverifiable until apply creates it. Within a declared `secrets` key, live secrets the entries do not declare are kept by default (their values are unrecoverable); the wrapped `{_undeclared: delete, entries}` form opts into deletion. The endpoints ride the same "Environments" PAT permission as the rest of the section.
 
 ## Multi-repo fan-out
 

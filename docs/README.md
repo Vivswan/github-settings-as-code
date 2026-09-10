@@ -35,7 +35,7 @@ The documentation for GitHub Settings as Code, in four groups. Start here if the
 - [Inputs and outputs](reference/inputs.md): every `with:` input with its default, and the `result`, `skipped-sections`, and `repos-result` outputs.
 - [Semantics](reference/semantics.md): stateless, declared-keys-only, convergent applies, softenable errors, retries, and the preflight barrier.
 - [Token permissions](reference/permissions.md): which grant each section needs, how a denial surfaces, and the `on-missing-permission` / `required-sections` policy.
-- [The undeclared policy](reference/undeclared-policy.md): the `undeclared` knob on the list sections, per-section defaults, the milestone-deletion caveat, and how the policy layers with a defaults file.
+- [The undeclared policy](reference/undeclared-policy.md): the `_undeclared` knob on the list sections, per-section defaults, the milestone-deletion caveat, and how the policy layers with a defaults file.
 - [Forward compatibility](reference/forward-compatibility.md): where payloads pass through verbatim and which sections are deliberately closed.
 - [Secrets and vaults](reference/secrets-and-vaults.md): the `$NAME` references secret fields take, wiring them from GitHub Secrets or a vault action, and what check mode can and cannot verify.
 
