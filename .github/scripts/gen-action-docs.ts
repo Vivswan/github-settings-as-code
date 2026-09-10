@@ -1,7 +1,7 @@
 /**
- * Regenerate the declaration-derived regions of action.yml, the README, the
- * inputs, policy, and permissions references, and the check-mode guide between
- * their BEGIN/END GENERATED markers: pure renderers plus a CLI (`bun run build:action-docs`).
+ * Regenerate the declaration-derived regions of action.yml, the inputs, policy,
+ * and permissions references, and the check-mode guide between their BEGIN/END
+ * GENERATED markers: pure renderers plus a CLI (`bun run build:action-docs`).
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -116,7 +116,7 @@ function row(cells: readonly string[]): string {
   return `| ${cells.map(cell).join(" | ")} |`;
 }
 
-/** The README Default cell: the shown default, else the raw one (empty reads "(empty)"). */
+/** The Inputs table's Default cell: the shown default, else the raw one (empty reads "(empty)"). */
 function shownDefault(decl: Pick<InputDecl, "default" | "shownDefault">): string {
   if (decl.shownDefault !== undefined) {
     return decl.shownDefault;
@@ -418,7 +418,6 @@ function inputsTableRegion(name: string, heading: string, path: string): Generat
   };
 }
 
-const README_PATH = "README.md";
 const INPUTS_PAGE_PATH = "docs/reference/inputs.md";
 
 /**
@@ -443,7 +442,6 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
       render: block(() => renderActionOutputs(OUTPUT_DECLS)),
     },
   ],
-  [README_PATH]: [inputsTableRegion("readme-inputs-table", "## Inputs", README_PATH)],
   [INPUTS_PAGE_PATH]: [inputsTableRegion("inputs-table", "## Inputs", INPUTS_PAGE_PATH)],
   "docs/reference/undeclared-policy.md": [
     {

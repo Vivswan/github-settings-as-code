@@ -1,7 +1,7 @@
 # Coverage
 
-<!-- BEGIN GENERATED: coverage (bun run build:docs; edit src/sections/<key>/docs.ts and .github/scripts/coverage-data.ts) -->
-The tenet: this action can control everything about a repository and nothing about the user. This page is the honest inventory: what works today, what is repo-scoped but not built yet, and what is out of scope because it belongs to a user or organization account. The side-by-side comparison with the Probot Settings app lives in the README, under [Compared to the Probot Settings app](README.md#compared-to-the-probot-settings-app).
+<!-- BEGIN GENERATED: coverage (bun run build:docs; edit src/sections/<key>/<key>.docs.yml and .github/scripts/coverage-data.yml) -->
+The tenet: this action can control everything about a repository and nothing about the user. This page is the honest inventory: what works today, what is repo-scoped but not built yet, and what is out of scope because it belongs to a user or organization account. The side-by-side comparison with the Probot Settings app lives in the migration guide, under [Compared to the Probot Settings app](docs/start/migrating-from-probot.md#compared-to-the-probot-settings-app).
 
 ## Supported
 

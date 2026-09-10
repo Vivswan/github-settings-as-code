@@ -413,7 +413,7 @@ describe("generated files", () => {
     }
     accepts("action-outputs", renderActionOutputs({ result: { description: "A | B." } }));
     accepts(
-      "readme-inputs-table",
+      "inputs-table",
       renderInputsTable({ x: { default: "", shownDefault: "a", summary: "b | c" } }, "."),
     );
     const knobbed = [

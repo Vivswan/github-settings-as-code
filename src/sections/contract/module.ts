@@ -93,7 +93,7 @@ export interface SectionMeta<
    */
   readonly graphql?: G;
   /**
-   * The section's undeclared-entry policy; the generated README and COVERAGE tables and the docs
+   * The section's undeclared-entry policy; the generated Sections and COVERAGE tables and the docs
    * registry's contradiction tests derive their deletion claims from it. Which sections sit in each
    * bucket is read off ./registry.ts; the wrapped `{undeclared, entries}` form overrides it per run:
    * - "delete": the section lists live resources and DELETES undeclared ones
@@ -115,8 +115,8 @@ export interface SectionMeta<
 /**
  * A section's fine-grained-PAT grant advice, used verbatim in permission
  * errors: the prose grantFor derives from the section's permission, plus its
- * caveat when one is declared. The README's "Sections" table mirrors these
- * in its PAT permission column.
+ * caveat when one is declared. The docs/reference/sections.md "Sections" table
+ * mirrors these in its PAT permission column.
  */
 export function sectionGrant(section: Pick<SectionMeta, "permission" | "grantCaveat">): string {
   return grantFor(section.permission, section.grantCaveat);

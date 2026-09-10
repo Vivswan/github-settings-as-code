@@ -19,7 +19,7 @@
     "build:schema": "bun .github/scripts/gen-settings-schema.ts",
     "build:docs": "bun .github/scripts/gen-docs.ts",
     "build:action-docs": "bun .github/scripts/gen-action-docs.ts",
-    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep . && bun run build:docs && bun run build:action-docs && git diff --exit-code README.md COVERAGE.md action.yml docs/reference/sections.md docs/reference/inputs.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md && ! git ls-files --others --exclude-standard README.md COVERAGE.md action.yml docs/reference/sections.md docs/reference/inputs.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md | grep .",
+    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep . && bun run build:docs && bun run build:action-docs && git diff --exit-code README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md && ! git ls-files --others --exclude-standard README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md | grep .",
     "prepare": "lefthook install"
   },
   "dependencies": {
@@ -42,6 +42,7 @@
     "@types/node": "26.4.1",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
+    "entities": "8.1.0",
     "graphql": "17.0.2",
     "knip": "6.34.0",
     "lefthook": "2.1.12",
