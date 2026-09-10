@@ -528,7 +528,10 @@ describe("predictSection rules", () => {
     expect(p.preflightAborts).toBe("yes");
   });
 
-  test("teams + owner_kind user no-ops: applied in apply, clean in check", () => {
+  test("teams + owner_kind user no-ops: applied in apply, clean in check, at grade write", () => {
+    // The handler stops at its ungated org probe, so the mask's administration
+    // "none" is never reached: the section runs write-granted with nothing to
+    // write, and its grades must not carry the denial the run never met.
     const applyP = predictSection(
       "teams",
       meta({
@@ -538,8 +541,12 @@ describe("predictSection rules", () => {
         mode: "apply",
       }),
     );
-    expect([...applyP.allowed]).toEqual(["applied"]);
-    expect(applyP.mayWrite).toBe(false);
+    expect(applyP).toEqual({
+      key: "teams",
+      grades: ["write"],
+      allowed: new Set(["applied"]),
+      mayWrite: false,
+    });
 
     const checkP = predictSection(
       "teams",
@@ -550,12 +557,76 @@ describe("predictSection rules", () => {
         mode: "check",
       }),
     );
-    expect([...checkP.allowed]).toEqual(["clean"]);
-    expect(checkP.mayWrite).toBe(false);
+    expect(checkP).toEqual({
+      key: "teams",
+      grades: ["write"],
+      allowed: new Set(["clean"]),
+      mayWrite: false,
+    });
+  });
+
+  test("exclusion folds before the personal-account no-op", () => {
+    // Both folds precede the grades; an excluded org-only section on a user
+    // owner is excluded, not applied, and keeps the mask's grades like every
+    // other excluded section.
+    const p = predictSection(
+      "teams",
+      meta({
+        sections: ["teams", "labels"],
+        onlySections: ["labels"],
+        ownerKind: "user",
+        mask: { org_members: "none" },
+        mode: "apply",
+      }),
+    );
+    expect(p).toEqual({
+      key: "teams",
+      grades: ["none"],
+      allowed: new Set(["excluded"]),
+      mayWrite: false,
+    });
   });
 });
 
 describe("predictOutcomes run level", () => {
+  test("teams on a personal account never arms the preflight barrier, whatever org_members says", () => {
+    // Seed 3388244810 of the fuzz stream: apply + fail + 403 with org_members
+    // denied, on a personal account. The action's teams handler stops at the
+    // ungated org probe, so preflight meets no denial and the run proceeds.
+    const personal = meta({
+      sections: ["teams", "labels"],
+      mode: "apply",
+      policy: "fail",
+      denialStyle: 403,
+      ownerKind: "user",
+      mask: { org_members: "none" },
+    });
+    expect(predictOutcomes(personal)).toEqual({
+      sections: [
+        { key: "teams", grades: ["write"], allowed: new Set(["applied"]), mayWrite: false },
+        { key: "labels", grades: ["write"], allowed: new Set(["applied"]), mayWrite: true },
+      ],
+      allowedExitCodes: new Set([0]),
+      noWritesInCheck: false,
+      writeDeniedSections: [],
+      fullyGranted: true,
+      preflightAborts: "no",
+    });
+
+    // The control: under an organization owner the same token reaches the
+    // org_members-gated team probe, and the barrier aborts the run.
+    expect(predictOutcomes({ ...personal, ownerKind: "org" })).toEqual({
+      sections: [
+        { key: "teams", grades: ["none"], allowed: new Set(["failed"]), mayWrite: false },
+        { key: "labels", grades: ["write"], allowed: new Set(["applied"]), mayWrite: true },
+      ],
+      allowedExitCodes: new Set([1]),
+      noWritesInCheck: false,
+      writeDeniedSections: ["teams"],
+      fullyGranted: false,
+      preflightAborts: "yes",
+    });
+  });
   test("fully granted apply predicts exit 0 and flags convergence", () => {
     const p = predictOutcomes(meta({ sections: ["labels", "pages"], mode: "apply", mask: {} }));
     expect(p.allowedExitCodes.has(0)).toBe(true);
