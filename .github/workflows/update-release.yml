@@ -2,43 +2,34 @@
 # managed release.yml between release-please cutting the DRAFT release and
 # the attested publish. This repository's stage is the single-tag scheme:
 # main is source-only (lib/index.js is never committed there), yet every
-# ref a consumer can name - the vX.Y.Z release tags and the moving major
-# vX - must point at a packaged commit carrying the built bundle. So this
-# hook, not release-please, mints the tag: release-please-config.json sets
-# `draft` and pins the fleet's `force-tag-creation` OFF, so the draft
-# release exists but no tag does until this workflow
-#   1. resolves the release's merge commit from the draft's target
-#      commitish - NOT this run's ambient GITHUB_SHA, because the managed
-#      pipeline lets a newer push's run recover an older merge's pending
-#      release - and rebuilds the bundle from it, verifying the committed
-#      schema byte-for-byte (a divergent regeneration stops the release),
-#   2. commits lib/index.js as a CHILD of the merge commit and creates
-#      vX.Y.Z once, directly on that child: the tag is born runnable and
-#      never moves (the release-tags ruleset freezes it; only deliberate
-#      repository-admin action can override, which SECURITY.md states),
-#   3. force-moves the major tag to the same packaged commit and uploads
-#      bundle and schema to the draft (draft-first because published
-#      releases freeze their assets),
-#   4. confirms origin's refs and the draft's assets before the managed
-#      publish stage attests every asset (attestation.json; public
-#      repositories only, by fleet policy) and flips the release live.
-#      When the draft is published, GitHub binds it to the existing
-#      vX.Y.Z tag, so the release lands on the packaged commit.
-# Only release-please can reach this workflow: the managed release.yml
-# calls it with the tag of a release release-please just cut from its own
-# merged PR, so a hand-edited manifest can never mint a tag.
-#
-# A rerun of a failed run converges instead of failing while this release
-# is still its line's newest: package verifies an existing vX.Y.Z (parent,
-# whole tree, bundle bytes) rather than recreating it, and assets
-# re-upload with --clobber while the release is a draft. Once a NEWER
-# release has shipped, a rerun of the older release's jobs stops at the
-# major move by design (major-pinned consumers never step backward);
-# finish the abandoned draft by hand or delete it.
-# Finish a dead run by re-running its FAILED jobs. The same steps by hand
-# (<merge sha> is the draft release's target commitish; a hand-packaged
-# commit carries no workflow-run trailer, and a hand-finished release no
-# attestation.json - both need the workflow's identity):
+# ref a consumer can name - the vX.Y.Z tags and the moving major vX - must
+# point at a packaged commit carrying the built bundle. So this hook, not
+# release-please, mints the tag (release-please-config.json sets `draft`
+# and pins the fleet's `force-tag-creation` OFF):
+#   1. resolve the merge commit from the draft's target commitish - NOT
+#      this run's GITHUB_SHA: the managed pipeline lets a newer push's run
+#      recover an older merge's pending release - and rebuild the bundle
+#      from it, verifying the committed schema byte-for-byte;
+#   2. commit lib/index.js as a CHILD of the merge commit and create
+#      vX.Y.Z once, on that child: born runnable, never moved (the
+#      release-tags ruleset freezes it, as SECURITY.md states);
+#   3. force-move the major tag there and upload bundle and schema to the
+#      draft (published releases freeze their assets);
+#   4. confirm origin's refs and the draft's assets; the managed publish
+#      stage then attests every asset and flips the release live, binding
+#      it to the existing vX.Y.Z tag.
+# Only release.yml reaches this workflow, with the tag release-please just
+# cut from its own merged PR, so a hand-edited manifest never mints a tag.
+# A rerun converges while this release is its line's newest (package
+# byte-verifies an existing tag; assets re-upload with --clobber); once a
+# NEWER release shipped, the major move stops by design.
+
+# Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand
+# run has no run trailer and no attestation.json). <merge sha> is the
+# draft's target commitish. NEVER publish before `package` has minted the
+# tag: a tagless draft makes GitHub create vX.Y.Z lazily at the merge
+# commit on main, which has no bundle (the managed release.yml's generic
+# recovery notes assume force-tag-creation and do not apply here).
 #   git checkout <merge sha>
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts package
@@ -46,18 +37,7 @@
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts verify
 #   gh release upload vX.Y.Z lib/settings.schema.json lib/index.js --clobber
 #   gh release edit vX.Y.Z --draft=false
-# The provenance attestation cannot be produced by hand: the bundle needs
-# the workflow's OIDC identity. NEVER publish the draft before `package`
-# has minted the tag: publishing a tagless draft makes GitHub create
-# vX.Y.Z lazily at the merge commit on main, which has no bundle (the
-# managed release.yml header's generic recovery notes assume the fleet's
-# force-tag-creation and do not apply to this repository).
-#
-# The git topology these steps call is unit-tested against fixture
-# repositories (test/scripts/release-pipeline.test.ts), so a script change
-# that could tag an unpackaged commit or move a frozen tag fails on every
-# push, not on release day (the workflow wiring itself is reviewed, not
-# unit-tested).
+# comment-cap: ignore a hand-recovery runbook whose seven commands mirror the steps below and must stay beside them
 
 name: Update Release
 

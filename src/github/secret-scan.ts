@@ -54,37 +54,22 @@ function renderKeyPath(path: readonly string[]): string {
 }
 
 /**
- * Build the normalized plain-data tree BY HAND, never handing the input to
- * JSON.stringify: stringify honors toJSON, and a toJSON can return a
- * different container that hides a secret under no field name at all
- * ({secret, toJSON: () => [value]} traces the value with no key to match).
+ * Build the normalized plain-data tree BY HAND, never via JSON.stringify: it
+ * honors toJSON, and a toJSON can return a different container that hides a
+ * secret under no field name ({secret, toJSON: () => [value]} has no key to match).
  * No payload-supplied code EVER runs: properties are read through their
- * descriptors and an enumerable accessor property is rejected UNREAD (a
- * getter is code, not data - and a getter that ran could sabotage the
- * globals the rest of the pipeline uses), toJSON is never invoked, methods
- * are never dispatched. Non-enumerable and symbol-keyed properties are
- * ignored entirely, never inspected - the set stringify would serialize is
- * exactly the set walked, and only the normalized COPY is ever sent, so
- * ignored code can neither execute nor reach the wire. Anything else that
- * is not JSON plain data - a function, a bigint,
- * a symbol, a class instance, a non-plain prototype, an accessor - THROWS
- * into the caller's fail-closed catch. Cycles exhaust the stack and are
- * caught the same way.
- *
- * For plain JSON data the output stringifies byte-identically to the
- * input: undefined-valued object keys are dropped, undefined array items,
- * holes, and non-finite numbers become null - exactly JSON.stringify's own
- * rules.
- * Note YAML can step OUTSIDE plain data through explicit tags
- * (!!timestamp parses to a Date, !!binary to a Uint8Array); those throw
- * here and abort the request with a message naming the offending field's
- * key path and value class, which beats the garbage their old
- * stringification produced.
+ * descriptors, an enumerable accessor is rejected UNREAD (a getter is code that
+ * could sabotage the pipeline's globals), toJSON is never invoked. Non-enumerable
+ * and symbol-keyed properties are never inspected, and only the normalized COPY
+ * is sent, so they cannot reach the wire.
  */
 function normalizePlainData(value: unknown, path: string[] = []): unknown {
   if (value === null) {
     return null;
   }
+  // For plain JSON data the output stringifies byte-identically to the input:
+  // undefined object keys are dropped; undefined array items, holes, and
+  // non-finite numbers become null - JSON.stringify's own rules.
   switch (typeof value) {
     case "string":
     case "boolean":
@@ -96,6 +81,11 @@ function normalizePlainData(value: unknown, path: string[] = []): unknown {
     default:
       throw new NotPlainDataError(path, nonPlainKind(value));
   }
+  // Anything that is not JSON plain data - a class instance, a non-plain
+  // prototype, a function, a bigint - THROWS into the caller's fail-closed
+  // catch, naming the field's key path and value class (cycles exhaust the
+  // stack and are caught the same way). YAML reaches this through explicit
+  // tags: !!timestamp parses to a Date, !!binary to a Uint8Array.
   if (!isPlainJsonContainer(value)) {
     throw new NotPlainDataError(path, nonPlainKind(value));
   }
@@ -138,23 +128,14 @@ function normalizePlainData(value: unknown, path: string[] = []): unknown {
 }
 
 /**
- * The scan entry point: normalize, then walk. The hand-rolled
- * normalization (see normalizePlainData) reads the input once into a pure
- * plain-data tree; redactSecretPayload walks that tree, the trace prints
- * it (masked), and the request SENDS it - one read, one truth, and no
- * exotic object can make the scan, the trace, and the wire disagree.
- * YAML-derived payloads are plain data apart from the explicit-tag escape
- * hatch normalizePlainData documents; this is the runtime enforcement of
- * that boundary, and nothing payload-supplied is ever executed on the way.
- *
- * Primitives pass through untouched - they carry no named fields for the
- * scan, and a bare-value secret is unsupported by design. Any other
- * non-plain payload (a Buffer, a typed array, a stream, anything carrying
- * a function or exotic prototype anywhere in its graph) fails `ok: false`
- * and is never sent: octokit would pass a non-plain body to fetch
- * verbatim, so normalizing it would silently change the wire, and sending
- * it unscanned would be a blind spot. The caller aborts instead of
- * sending what it could not inspect.
+ * The scan entry point: normalize, then walk. normalizePlainData reads the
+ * input once into a pure plain-data tree; redactSecretPayload walks it, the
+ * trace prints it (masked), and the request SENDS it - one read, one truth, so
+ * no exotic object can make the scan, the trace, and the wire disagree.
+ * Primitives pass through untouched (no named fields; a bare-value secret is
+ * unsupported by design). Any other non-plain payload (a Buffer, a stream, an
+ * exotic prototype anywhere in its graph) fails `ok: false` and is never sent:
+ * octokit hands such a body to fetch verbatim, so normalizing it would change the wire.
  */
 export function redactSecretPayloadSafe(
   payload: unknown,
@@ -211,21 +192,14 @@ function describeNotPlain(error: NotPlainDataError): string {
 const SECRET_FIELD_NAMES = new Set(["secret", "encrypted_value"]);
 
 /**
- * Structural redaction of secret-bearing request fields before tracing.
- * The scan is recursive over objects and arrays and keys on the FIELD
- * NAMES alone (`secret`, `encrypted_value`), so a consumer nesting one
- * level deeper - or a new consumer entirely - is covered without declaring
- * anything here; an unenforced "declare your shape here" contract is how a
- * leak happens. Field-name keying cannot cover an UNNAMED value: a bare
- * string body has no key to match, so a future consumer must never send a
- * secret as the whole payload.
- * Copy-on-write: when no secret field is present the input is returned
- * unchanged (the trace is byte-identical); on a hit, `traced`
- * is a structural copy with only the secret fields masked - the request
- * sends the unmasked tree - and `carriesSecret` flags the request for
- * fail-closed error handling.
- * Over-matching an innocent field that happens to be named `secret` costs
- * a masked trace line and a withheld error body, never a wrong request.
+ * Structural redaction of secret-bearing request fields before tracing. The
+ * scan recurses over objects and arrays and keys on the FIELD NAMES alone, so a
+ * consumer nesting one level deeper - or a new consumer entirely - is covered
+ * without declaring anything here (an unenforced "declare your shape" contract
+ * is how a leak happens). It cannot cover an UNNAMED value: a bare string body
+ * has no key, so a secret must never be sent as the whole payload. Copy-on-write:
+ * with no secret field the input is returned unchanged; on a hit `traced` is a
+ * copy with only the secret fields masked (the request sends the unmasked tree).
  */
 function redactSecretPayload(payload: unknown): { traced: unknown; carriesSecret: boolean } {
   if (typeof payload !== "object" || payload === null) {

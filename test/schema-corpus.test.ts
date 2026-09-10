@@ -99,11 +99,10 @@ function generatedDocs(): CorpusDoc[] {
  * - "schema-looser": the runtime invariant is a zod superRefine or a
  *   closedSurface declaration, which JSON Schema cannot (or must not)
  *   express - the run still rejects the document upfront.
- * - "schema-stricter": would mean the published schema rejects documents the
- *   action applies; none are tolerated (the deferral enums, e.g. deployment
- *   branch-policy `type`, document upstream vocabulary the runtime
- *   deliberately leaves to GitHub - a corpus doc hitting one would surface
- *   here and needs a decision, not an allowlist entry).
+ * - "schema-stricter": the published schema would reject documents the action
+ *   applies; none are tolerated. The deferral enums (e.g. deployment
+ *   branch-policy `type`) document upstream vocabulary the runtime leaves to
+ *   GitHub, so a corpus doc hitting one needs a decision, not an allowlist entry.
  */
 const KNOWN_DIVERGENCES: Record<string, string> = {
   "actions-selected-contradiction-rejected.yml settings":
@@ -144,8 +143,11 @@ describe("published schema agrees with the runtime over the corpus", () => {
         ).toBe(true);
         continue;
       }
+      const schemaVerdict = schemaAccepts ? "accepts" : "REJECTS";
+      const runtimeVerdict = runtimeAccepts ? "accepts" : "REJECTS";
+      const errors = schemaAccepts ? "" : ` (${JSON.stringify(validate.errors?.slice(0, 2))})`;
       disagreements.push(
-        `${label}: schema ${schemaAccepts ? "accepts" : "REJECTS"} but runtime ${runtimeAccepts ? "accepts" : "REJECTS"}${schemaAccepts ? "" : ` (${JSON.stringify(validate.errors?.slice(0, 2))})`}`,
+        `${label}: schema ${schemaVerdict} but runtime ${runtimeVerdict}${errors}`,
       );
     }
     expect(disagreements, disagreements.join("\n")).toEqual([]);

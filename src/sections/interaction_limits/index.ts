@@ -265,7 +265,8 @@ export const interactionLimitsSection = {
         describe: "clearing the interaction limit",
         drift: [
           live.kind === "inherited"
-            ? `interaction_limits: declared null but a live "${live.limit}" limit is set at the ${live.origin} level; apply cannot remove it from the repository`
+            ? `interaction_limits: declared null but a live "${live.limit}" limit is set at the ${live.origin} level; ` +
+              "apply cannot remove it from the repository"
             : `interaction_limits: declared null but a live "${live.limit}" limit is set; apply will remove it`,
         ],
         tolerate: {
@@ -364,7 +365,9 @@ export const interactionLimitsSection = {
                 note: `interaction_limits.pull_request_creation_cap: ${CAP_UNAVAILABLE}, so the declared cap was not applied (${error.status})`,
               }),
             },
-            change: `set the pull request creation cap (enabled: ${cap.enabled}${cap.max_open_pull_requests !== undefined ? `, max_open_pull_requests: ${cap.max_open_pull_requests}` : ""})`,
+            change:
+              `set the pull request creation cap (enabled: ${cap.enabled}` +
+              `${cap.max_open_pull_requests !== undefined ? `, max_open_pull_requests: ${cap.max_open_pull_requests}` : ""})`,
           });
         }
       }

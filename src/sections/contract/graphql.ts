@@ -46,7 +46,18 @@ interface GraphqlConnectionDecl {
  * request helpers type-check call-site variables against the declaration.
  */
 interface GraphqlOpCommon<V extends Record<string, unknown>> {
+  /**
+   * The wire dispatch key (the operationName on every call) and the query's
+   * operation name, globally unique across sections (allGraphqlOps asserts
+   * it): the mock, the coverage tripwire, and the scenario expectations
+   * address the operation by it without parsing the query.
+   */
   readonly name: string;
+  /**
+   * As EndpointDecl.statuses: "ok" documents the success meaning, and each
+   * declared error type is a TOLERATED outcome (tryCallGraphql returns it as
+   * { error } instead of throwing).
+   */
   readonly outcomes: Readonly<{ ok: string } & Partial<Record<GraphqlTolerableError, string>>>;
   /**
    * Overrides the section's permission for this one operation, exactly like
@@ -77,38 +88,14 @@ interface GraphqlOpCommon<V extends Record<string, unknown>> {
 }
 
 /**
- * One GraphQL operation a section may issue, the sibling of EndpointDecl.
- * Extends the transport-level GraphqlOp structurally, so a declaration passes
- * straight to GithubClient.tryGraphql.
- *
- * `name` is the wire dispatch key - the operationName sent with every call,
- * globally unique across sections (allGraphqlOps asserts it), which is what
- * lets the mock, the coverage tripwire, and the scenario expectations address
- * the operation without parsing the query. `kind` is declared explicitly and
- * NEVER derived from the POST method every GraphQL call shares: it drives the
- * preflight read-only guard, the mock's permission gate, and the fuzz oracle -
- * and the union pins each kind to its operation type (`query ...` /
- * `mutation ...`), so a mutation declared "read" does not compile. The query
- * is a single named operation whose name equals `name`; a repo-addressed READ
- * must take $owner/$repo variables (the mock routes multi-repo reads by
- * them), and a mutation addresses its target through self-describing node
- * ids. `outcomes` mirrors EndpointDecl.statuses: "ok" documents the success
- * meaning, and each declared error type is a TOLERATED outcome
- * (tryCallGraphql returns it as { error } instead of throwing). Only a read
- * may declare a `connection` (pagination is a read concern), and the
- * paginated arm's query type requires the $cursor variable the loop feeds -
- * a connection op that cannot page does not compile.
- *
- * Declare each operation with the graphqlOp constructor
- * (`const OP = graphqlOp<{owner: string; repo: string}>()({...})`): the
- * curried call carries `V` (via the type-only `_variables` marker) while the
- * `const` type parameter preserves the LITERAL declaration - the query's
- * template shape and the exact `outcomes` keys - so a call site with missing
- * or misnamed variables, or a tolerate naming an undeclared outcome, fails
- * to compile. A declaration reached through a widened dictionary
- * (`section.graphql.role`) erases `V` to the permissive default - the same
- * erasure a widened EndpointDecl record applies to its statuses - so helpers
- * must be fed the consts, not dictionary lookups.
+ * One GraphQL operation a section may issue, the sibling of EndpointDecl;
+ * structurally a transport-level GraphqlOp, so it passes straight to
+ * GithubClient.tryGraphql. `kind` is declared, NEVER derived from the POST
+ * every GraphQL call shares: it drives the preflight read-only guard, the
+ * mock's permission gate, and the fuzz oracle, and the union pins each kind
+ * to its operation type, so a mutation declared "read" does not compile. A
+ * repo-addressed READ takes $owner/$repo variables (the mock routes
+ * multi-repo reads by them); a mutation addresses its target by node id.
  */
 export type GraphqlOpDecl<V extends Record<string, unknown> = Record<string, unknown>> =
   | (GraphqlOpCommon<V> & {
@@ -122,6 +109,7 @@ export type GraphqlOpDecl<V extends Record<string, unknown> = Record<string, unk
   | (GraphqlOpCommon<V> & {
       readonly kind: "write";
       readonly query: `mutation ${string}`;
+      /** Pagination is a read concern. */
       readonly connection?: never;
       readonly phase?: never;
     });
@@ -160,7 +148,9 @@ export function graphqlOp<V extends Record<string, unknown>>() {
  * The variables shape a declaration carries (via the `_variables` marker),
  * recovered from the concrete declaration type so the request helpers infer
  * it from the `op` argument alone - inferring from the variables argument
- * would let a typo'd call site WIDEN the shape instead of failing.
+ * would let a typo'd call site WIDEN the shape instead of failing. A
+ * declaration reached through a widened dictionary (`section.graphql.role`)
+ * erases to the permissive default, so helpers must be fed the consts.
  */
 export type GraphqlVariablesOf<O extends GraphqlOpDecl> = O extends {
   readonly _variables?: infer V;

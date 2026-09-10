@@ -2,48 +2,26 @@
  * The single-tag release pipeline's git topology, called step by step from
  * the repo-owned workflows (update-release.yml for the release chain,
  * checks.yml and update-release-pr.yml for the bookkeeping) and unit-tested
- * against local fixture repositories (test/scripts/release-pipeline.test.ts),
- * so "the next release tags the right commits" is proven on every push
- * instead of on release day.
+ * against fixture repositories (test/scripts/release-pipeline.test.ts), so
+ * "the next release tags the right commits" is proven on every push.
  *
  * The scheme: main is source-only, and every ref a consumer can name - the
  * vX.Y.Z release tags and the moving major vX - points ONLY at a packaged
  * commit, a child of the release-please merge commit that adds the built
  * lib/index.js. release-please cuts the DRAFT release itself (no tag: the
- * config sets `draft` without `force-tag-creation`), and only then do these
- * subcommands run, one per workflow step:
- *
- *   package      Create the packaged child of GITHUB_SHA and tag it ONCE,
- *                or byte-verify an existing tag (idempotent rerun). No path
- *                moves a tag.
- *   retag-major  Re-verify the version tag against origin, then force-move
- *                the major tag to its packaged commit - never backward to an
- *                older release than the line already shipped.
- *   verify       Confirm origin's ACTUAL refs: the version tag and its major
- *                both point at the packaged child of the merge commit, and
- *                that commit's tree carries a non-empty lib/index.js.
- *   anchor       Advance last-release-sha in release-please-config.json on
- *                the release PR branch to the merge parent. Load-bearing:
- *                version tags live on packaged children that are NOT on
- *                main, and release-please's commit walk only sees main, so
- *                without the anchor the next release PR would count every
- *                commit since the previous boundary - stale changelog,
- *                wrong version.
- *   boundary-check
- *                Fail unless last-release-sha matches the newest release
- *                merge on the checked-out history: a failed anchor (or a
- *                release merge that slipped past the pipeline) stays loud on
- *                EVERY push, and release-please stays gated, instead of
- *                quietly building garbage release PRs from a stale boundary.
- *   anchor-check Fail unless the checked-out release PR carries the anchor
- *                (last-release-sha equals origin's main tip): the managed
- *                release-freshness gate proves ancestry only, so without
- *                this PR-side half an unanchored release PR could merge and
- *                land a stale boundary on main.
- *
- * Env: TAG and GITHUB_SHA (package/retag-major/anchor), RUN_URL (package,
- * optional provenance trailer). Node builtins only, so `bun` runs it before
- * any install.
+ * config sets `draft` without `force-tag-creation`); these subcommands then
+ * run, one per workflow step:
+ *   package         packageRelease: tag the packaged child ONCE, or
+ *                   byte-verify an existing tag. No path moves a tag.
+ *   retag-major     retagMajor: force-move the major tag, never backward.
+ *   verify          verifyPublishedRefs: origin's actual refs and tree.
+ *   anchor          anchorReleasePr: advance last-release-sha on the
+ *                   release PR branch (version tags live off main, so
+ *                   release-please's boundary is recorded config).
+ *   boundary-check  boundaryCheck: main's recorded boundary is fresh.
+ *   anchor-check    anchorCheck: the release PR carries the anchor.
+ * Env: TAG and GITHUB_SHA (package/retag-major/anchor), RUN_URL (package's
+ * optional provenance trailer). Node builtins only: `bun` runs it pre-install.
  */
 
 import { execFileSync } from "node:child_process";
@@ -397,14 +375,13 @@ export interface AnchorResult {
 
 /**
  * Carry the boundary INSIDE the release PR: append a commit to the
- * release-please branch setting last-release-sha to main's current head -
- * the future merge commit's PARENT, known now, unlike the merge SHA. The
- * squash merge then lands the correct boundary on main as part of the
- * release itself: no push to main, no admin credential. Correctness rides
- * on the release-freshness gate (a release PR must contain main's tip to
- * merge, so the recorded parent cannot be stale at merge time). The parent
- * is as good a boundary as the merge commit: the walk then includes the
- * merge itself, a chore commit the changelog hides.
+ * release-please branch setting last-release-sha to main's current head,
+ * the future merge commit's PARENT (known now, unlike the merge SHA). The
+ * squash merge lands it on main as part of the release: no push to main,
+ * no admin credential. The release-freshness gate keeps it correct (a PR
+ * must contain main's tip to merge, so the parent cannot be stale), and
+ * the parent is as good a boundary as the merge: the walk then includes
+ * the merge itself, a chore commit the changelog hides.
  */
 export function anchorReleasePr(options: AnchorOptions): AnchorResult {
   const { cwd, sourceSha, attempts = 3 } = options;

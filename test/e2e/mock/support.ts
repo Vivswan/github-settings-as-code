@@ -98,13 +98,11 @@ export type SectionGraphqlHandlers<K extends SectionKey> = Readonly<
 /**
  * Slice a full list the way src/github/paginate.ts asks for it: the client
  * sends per_page (100, or the endpoint's declared smaller pageSize) and
- * page=N, stopping when a chunk is shorter than requested. `cap`, when
- * given, is the endpoint's own documented maximum: GitHub clamps an
- * oversized per_page rather than honoring it, so a capped endpoint serves
- * at most `cap` items per page no matter what the client asks - mirroring
- * that here is what keeps the mock's paging indistinguishable from
- * GitHub's. A page past the end yields an empty slice, which ends the
- * client's loop.
+ * page=N, stopping when a chunk is shorter than requested. `cap`, when given,
+ * is the endpoint's own documented maximum: GitHub clamps an oversized
+ * per_page rather than honoring it, so a capped endpoint serves at most `cap`
+ * items per page whatever the client asks. A page past the end yields an
+ * empty slice, which ends the client's loop.
  */
 export function slicePage<T>(
   items: readonly T[],
@@ -250,14 +248,12 @@ export function secretRemove(
 // --- The secret/variable family factories -----------------------------------
 //
 // The repository secret and variable sections come in FAMILIES that differ
-// only in which MockState list they read (the section modules are the same
-// way: one repoSecretsSection()/repoVariablesSection() call each). Their mock
-// fragments are minted here from the section key. Compile-time completeness
-// survives the factoring in two halves: the annotated per-role record below
-// rejects a missing or typo'd role at the factory, and the fragment's
-// SectionRestHandlers<K> annotation rejects a declared endpoint the factory
-// does not serve; assertHandlerCompleteness() remains the construction-time
-// backstop.
+// only in which MockState list they read (mirroring the one-call-per-family
+// section modules); their mock fragments are minted here from the section key.
+// Compile-time completeness survives the factoring in two halves: the annotated
+// per-role record rejects a missing or typo'd role at the factory, and the
+// fragment's SectionRestHandlers<K> annotation rejects a declared endpoint the
+// factory does not serve; assertHandlerCompleteness() remains the backstop.
 
 /**
  * Build one "<key>.<role>" handler record from per-role handlers. The

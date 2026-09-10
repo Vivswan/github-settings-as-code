@@ -168,18 +168,16 @@ export async function startMockServer(
         },
       );
 
-      // Mark responses that are deliberately off the OpenAPI contract so the
-      // validator skips them ENTIRELY (status and body):
-      //   - ANY wire override (chaos raw text, the connection drop): derived
-      //     from `wire` presence here, not the constructor's offSpecBody flag,
-      //     so a future wire kind cannot forget to opt out of validation;
-      //   - synthetic transport faults (rate-limit 403 / 429 / connection drop),
-      //     whose statuses no per-endpoint spec lists;
-      //   - any response to a request that asked for a RAW media type: the raw
-      //     Accept header (e.g. the settings-file fetch) returns file TEXT, not
-      //     the JSON content-object the spec documents. Keying this on the
-      //     REQUEST media type - not an endpoint name - means every future raw
-      //     endpoint inherits the exemption automatically.
+      // Mark responses deliberately off the OpenAPI contract so the validator
+      // skips them ENTIRELY (status and body):
+      //   - ANY wire override (chaos raw text, the connection drop): derived from
+      //     `wire` presence, not the constructor's offSpecBody flag, so a future
+      //     wire kind cannot forget to opt out;
+      //   - synthetic transport faults (403 / 429 / drop), whose statuses no
+      //     per-endpoint spec lists;
+      //   - any request that asked for a RAW media type (e.g. the settings-file
+      //     fetch) gets file TEXT, not the spec's JSON content-object. Keying on
+      //     the REQUEST media type means every future raw endpoint inherits this.
       const rawMediaType = (headers.get("accept") ?? "").includes(".raw");
       const offSpec = result.wire !== undefined || result.offSpecBody || rawMediaType;
       result.log.offSpec = offSpec;
@@ -193,17 +191,15 @@ export async function startMockServer(
         violations.push(result.violation);
       }
 
-      // connection_drop: destroy the raw socket before ANY response bytes
-      // leave - no status line, no headers. The client sees a genuine
-      // socket-level network failure (undici rejects the fetch itself), which
-      // its retry machinery treats as retryable; a fault budget that outlasts
-      // the retries surfaces as a hard connectivity failure. Destroying
-      // pre-response is deliberate: bytes flushed before the destroy would
-      // let the client resolve the response head and then silently deliver
-      // the truncated (here: empty) body as a SUCCESS - octokit swallows the
-      // body-read failure - so a mid-body drop would not fail at all, let
-      // alone retry. The intent line labels the trace; nothing else of this
-      // fault is observable in-process.
+      // connection_drop: destroy the raw socket before ANY response bytes leave
+      // (no status line, no headers), so the client sees a genuine socket-level
+      // failure (undici rejects the fetch) its retry machinery treats as
+      // retryable; a fault budget outlasting the retries surfaces as a hard
+      // connectivity failure. Pre-response is deliberate: bytes flushed before
+      // the destroy would let the client resolve the response head, and octokit
+      // swallows the body-read failure, delivering the truncated (empty) body as
+      // a SUCCESS - a mid-body drop would neither fail nor retry. The intent
+      // line labels the trace; nothing else of this fault is observable.
       if (result.wire?.kind === "drop") {
         console.log(
           `[mock] injecting connection drop (intentional fault, expected in passing runs) for ${req.method} ${url.pathname}`,

@@ -154,9 +154,9 @@ type ClassifiedEntry =
   | { kind: "literal"; branch: BranchConfig; routed: { graphqlRun: GraphqlRun } | null };
 
 const WILDCARD_KEY_ERROR = (name: string, key: string): string =>
-  `the wildcard entry "${name}" declares protection.${key}, which this section does not manage on wildcard rules; only the keys it can round-trip through the GraphQL rule mutations apply here: [${WILDCARD_KEYS.join(
-    ", ",
-  )}]. For actor lists and richer controls, prefer the rulesets section (the modern successor of classic protection)`;
+  `the wildcard entry "${name}" declares protection.${key}, which this section does not manage on wildcard rules; ` +
+  `only the keys it can round-trip through the GraphQL rule mutations apply here: [${WILDCARD_KEYS.join(", ")}]. ` +
+  "For actor lists and richer controls, prefer the rulesets section (the modern successor of classic protection)";
 
 export const branchesSection = {
   key: "branches",

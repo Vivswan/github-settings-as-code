@@ -457,9 +457,8 @@ interface ErasedPlannedOp extends PlannedOpBase {
  * REST op's `params` carry exactly the route's path params, and a GraphQL
  * op's `variables` match its declaration. The GraphQL arm exists only for a
  * LITERAL `G`: under the wide default (a REST-only section, or one that
- * forgot to pass `typeof GRAPHQL`) it collapses to never, so no role outside
- * the REST dictionary is plannable. Against the erased dictionaries (the
- * engine's view) the whole type widens to ErasedPlannedOp.
+ * forgot `typeof GRAPHQL`) it collapses to never. Against the erased
+ * dictionaries (the engine's view) the type widens to ErasedPlannedOp.
  */
 export type PlannedOp<
   E extends EndpointDict = EndpointDict,

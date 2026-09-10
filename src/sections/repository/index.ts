@@ -348,11 +348,9 @@ const WRITE_ONLY_TOGGLES: readonly WriteOnlyToggle[] = [
  * repo PATCH answers 200 and silently ignores an issue_creation_policy
  * field, and no REST GET returns one); the sponsor button has no REST field
  * at all. One read serves every declared key AND supplies the node id the
- * mutation addresses, so neither mode needs an extra round trip.
- *
- * SPECIAL_KEYS, the compare, and the mutate-and-verify operation all
- * iterate GRAPHQL_ROUTED_KEYS, so a new key cannot compile into a
- * stripped-but-never-applied no-op; value validation lives in schema.ts.
+ * mutation addresses, so neither mode needs an extra round trip. SPECIAL_KEYS,
+ * the compare, and the mutate-and-verify operation all iterate this list, so
+ * a new key cannot compile into a stripped-but-never-applied no-op.
  */
 interface RoutedKey {
   /** The settings-file key. */
@@ -571,7 +569,8 @@ export const repositorySection = {
         role,
         drift: [
           enforced
-            ? `repository.${toggle.key}: declared ${want} != live ${enabled}; the repository owner enforces ${toggle.label}, so apply cannot change it from the repository`
+            ? `repository.${toggle.key}: declared ${want} != live ${enabled}; the repository owner enforces ${toggle.label}, ` +
+              "so apply cannot change it from the repository"
             : `repository.${toggle.key}: declared ${want} != live ${enabled}; apply will set the declared value`,
         ],
         tolerate: {

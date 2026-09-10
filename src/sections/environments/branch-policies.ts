@@ -81,7 +81,8 @@ export function validateBranchPolicies(
   }
   if (duplicates.size > 0) {
     throw new Error(
-      `environments: the "${env.name}" entry declares deployment branch polic${duplicates.size === 1 ? "y" : "ies"} ${[...duplicates].map((name) => `"${name}"`).join(", ")} more than once. Keep exactly one entry per pattern`,
+      `environments: the "${env.name}" entry declares deployment branch polic${duplicates.size === 1 ? "y" : "ies"} ` +
+        `${[...duplicates].map((name) => `"${name}"`).join(", ")} more than once. Keep exactly one entry per pattern`,
     );
   }
 }

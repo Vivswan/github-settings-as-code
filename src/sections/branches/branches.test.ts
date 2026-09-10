@@ -716,49 +716,53 @@ describe("branches GraphQL-routed keys", () => {
     expect(api.calls.filter((c) => c.path.startsWith("BranchProtectionActor"))).toHaveLength(0);
   });
 
-  test("a planned PUT re-applies matching routed keys through the update, with the re-apply as its drift, and resolves the actors ahead of the PUT", async () => {
-    const api = new MockApi(
-      {
-        [PROTECTION]: { data: { enforce_admins: { enabled: false } } },
-        "GRAPHQL BranchProtectionRules": rulesData([
-          ruleNode("main", {}, [{ actor: { __typename: "User", login: "octocat" } }]),
-        ]),
-        "GRAPHQL BranchProtectionActorUser": {
-          data: { repository: { id: "R_1" }, user: { id: "U_1" } },
+  test(
+    "a planned PUT re-applies matching routed keys through the update, with the re-apply as its drift, " +
+      "and resolves the actors ahead of the PUT",
+    async () => {
+      const api = new MockApi(
+        {
+          [PROTECTION]: { data: { enforce_admins: { enabled: false } } },
+          "GRAPHQL BranchProtectionRules": rulesData([
+            ruleNode("main", {}, [{ actor: { __typename: "User", login: "octocat" } }]),
+          ]),
+          "GRAPHQL BranchProtectionActorUser": {
+            data: { repository: { id: "R_1" }, user: { id: "U_1" } },
+          },
         },
-      },
-      { unroutedMutations: "succeed" },
-    );
-    const result = await plan(api, [
-      { name: "main", protection: { enforce_admins: true, force_push_bypassers: ["octocat"] } },
-    ]);
-    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
-      ["putProtection", ["branches[main].protection.enforce_admins: true != false"]],
-      [
-        "updateRule",
+        { unroutedMutations: "succeed" },
+      );
+      const result = await plan(api, [
+        { name: "main", protection: { enforce_admins: true, force_push_bypassers: ["octocat"] } },
+      ]);
+      expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+        ["putProtection", ["branches[main].protection.enforce_admins: true != false"]],
         [
-          "branches[main].protection: force_push_bypassers re-applied after the protection PUT (GitHub does not document whether the PUT preserves them)",
+          "updateRule",
+          [
+            "branches[main].protection: force_push_bypassers re-applied after the protection PUT (GitHub does not document whether the PUT preserves them)",
+          ],
         ],
-      ],
-    ]);
-    // The PUT carries the actor resolution, so a bad actor fails before the
-    // live protection is replaced; the update's variables seal the ids.
-    expect(typeof result.ops[0]?.before).toBe("function");
-    expect(typeof result.ops[1]?.variables).toBe("function");
+      ]);
+      // The PUT carries the actor resolution, so a bad actor fails before the
+      // live protection is replaced; the update's variables seal the ids.
+      expect(typeof result.ops[0]?.before).toBe("function");
+      expect(typeof result.ops[1]?.variables).toBe("function");
 
-    const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
-    expect(execution.status).toBe("applied");
-    // One lookup, ahead of the PUT; the update finds the id in the per-run cache.
-    expect(
-      api.calls
-        .filter((c) => c.method === "PUT" || c.path.startsWith("BranchProtectionActor"))
-        .map((c) => (c.method === "PUT" ? "PUT" : c.path)),
-    ).toEqual(["BranchProtectionActorUser", "PUT"]);
-    expect(api.mutations().map((m) => m.payload)).toEqual([
-      NULL_FILLED,
-      { input: { branchProtectionRuleId: "RULE:main", bypassForcePushActorIds: ["U_1"] } },
-    ]);
-  });
+      const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
+      expect(execution.status).toBe("applied");
+      // One lookup, ahead of the PUT; the update finds the id in the per-run cache.
+      expect(
+        api.calls
+          .filter((c) => c.method === "PUT" || c.path.startsWith("BranchProtectionActor"))
+          .map((c) => (c.method === "PUT" ? "PUT" : c.path)),
+      ).toEqual(["BranchProtectionActorUser", "PUT"]);
+      expect(api.mutations().map((m) => m.payload)).toEqual([
+        NULL_FILLED,
+        { input: { branchProtectionRuleId: "RULE:main", bypassForcePushActorIds: ["U_1"] } },
+      ]);
+    },
+  );
 
   test("declared null turns a live requirement off through the update, verified by the read-back", async () => {
     const api = liveRepo({
