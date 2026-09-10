@@ -35,10 +35,12 @@ async function captureOutput<T>(
 const MARKER = "MARKER_VALUE_MUST_NOT_PRINT";
 
 /**
- * Every document the yaml library parses successfully while emitting a
- * warning at its default log level; each warning quotes the offending source
- * line, so each document carries the marker on that line. The parse result is
- * the one the library produced before the warnings were silenced.
+ * A representative set of documents the yaml library parses successfully
+ * while emitting a warning at its default log level (others exist, such as
+ * an unsupported %YAML version); each warning quotes the offending source
+ * line (the collection key, its stringified key), so each document carries
+ * the marker there. The parse result is the one the library produced before
+ * the warnings were silenced.
  */
 const WARNING_DOCUMENTS: Array<{ name: string; raw: string; doc: unknown }> = [
   {
