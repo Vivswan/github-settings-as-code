@@ -12,6 +12,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
+import { DecodingMode, decodeHTML } from "entities";
 import { parse as parseYaml } from "yaml";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
@@ -155,22 +156,13 @@ function linesOutsideFences(markdown: string, source: string): string[] {
   return lines;
 }
 
-/** The named entities an attribute value can carry: the ones Bun's HTML renderer writes. */
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  "&amp;": "&",
-  "&lt;": "<",
-  "&gt;": ">",
-  "&quot;": '"',
-};
-
-/** An attribute value with its numeric character references (semicolon optional, as HTML parses them) decoded first, then the named entities. */
+/**
+ * An attribute value as a browser reads it: HTMLRewriter hands back the source text, so every
+ * character reference (numeric, or any of the HTML5 named entities, semicolon-less legacy forms
+ * included) is decoded here under the spec's attribute-value rules.
+ */
 function decodeAttribute(raw: string): string {
-  return raw
-    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    )
-    .replace(/&#(\d+);?/g, (_, decimal: string) => String.fromCodePoint(Number(decimal)))
-    .replace(/&(?:amp|lt|gt|quot);/g, (entity) => NAMED_ENTITIES[entity] ?? entity);
+  return decodeHTML(raw, DecodingMode.Attribute);
 }
 
 /**
@@ -724,6 +716,12 @@ describe("links-leaving-docs guard (mutation checks)", () => {
     "",
     '<iframe src="../../embed.html"></iframe> <link href="../../style.css"> <link href="../assets/style.css">',
     "",
+    '<a href="&period;&period;/&period;&period;/GOVERNANCE.md">named</a> <a href="&period;&period;&sol;&period;&period;&sol;CODEOWNERS.md">named slashes</a> <a href="../&amp/../../LEGACY.md">legacy bare</a>',
+    "",
+    // The control: a browser decodes a semicolon-less entity only from the legacy list, so
+    // `&period` stays literal and this link resolves inside docs/, escaping nothing.
+    '<a href="&period&period/&period&period/MAINTAINERS.md">non-legacy bare</a>',
+    "",
   ].join("\n");
   test("names each escaping link by page and line", async () => {
     expect(await linksLeavingDocs(page, "start/getting-started.md")).toEqual([
@@ -750,6 +748,9 @@ describe("links-leaving-docs guard (mutation checks)", () => {
       "docs/start/getting-started.md:35: (../../demo.webm) leaves docs/",
       "docs/start/getting-started.md:37: (../../embed.html) leaves docs/",
       "docs/start/getting-started.md:37: (../../style.css) leaves docs/",
+      "docs/start/getting-started.md:39: (../../GOVERNANCE.md) leaves docs/",
+      "docs/start/getting-started.md:39: (../../CODEOWNERS.md) leaves docs/",
+      "docs/start/getting-started.md:39: (../&/../../LEGACY.md) leaves docs/",
     ]);
     expect(
       await linksLeavingDocs("[README](../README.md) and [ok](start/x.md)", "README.md"),

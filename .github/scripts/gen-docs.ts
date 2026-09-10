@@ -1,7 +1,8 @@
-// Emits the generated regions of README.md, COVERAGE.md, and the sections and inputs reference
-// pages (build:docs), each between `<!-- BEGIN/END GENERATED: <name> -->` markers: the Sections
-// table, the `result` list, the README's token-form link, and COVERAGE's whole body. Authored
-// prose from the docs registry + coverage-data.
+// Emits the generated regions of COVERAGE.md, the sections and inputs reference pages, and the two
+// pages carrying the token-form link (README.md and the getting-started guide), each between
+// `<!-- BEGIN/END GENERATED: <name> -->` markers (build:docs): the Sections table, the `result`
+// list, the token-form link definition, and COVERAGE's whole body. Authored prose from the docs
+// registry + coverage-data.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_RESULTS, type RepoResult } from "../../src/engine/orchestrate.js";
@@ -25,10 +26,9 @@ import {
 } from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
-const README_PATH = "README.md";
 const COVERAGE_PATH = "COVERAGE.md";
 
-/** The repository the README documents; the token form's name and description derive from it. */
+/** The repository these pages document; the token form's name and description derive from it. */
 const REPO_SLUG = "Vivswan/github-settings-as-code";
 
 /** The Undeclared default column's display form of each undeclaredDefault. */
@@ -111,7 +111,7 @@ function cell(text: string, where: string): string {
 const TABLE_HEADER =
   "| Section | Endpoints | PAT permission | Undeclared default | Notes |\n|---|---|---|---|---|";
 
-/** The README Sections table, one row per section in the given order; a section without docs throws. */
+/** The Sections table, one row per section in the given order; a section without docs throws. */
 export function renderSectionsTable(
   sections: readonly SectionsTableRow[],
   docs: Readonly<Record<string, Pick<SectionDocs, "readme">>>,
@@ -323,7 +323,7 @@ export function renderPatFormUrl(
   return `https://github.com/settings/personal-access-tokens/new?${query}`;
 }
 
-/** The reference label the README's token-form link resolves through; the generated definition carries it. */
+/** The reference label a page's token-form link resolves through; the generated definition carries it. */
 const PAT_FORM_LABEL = "pat-form";
 
 /** The pre-filled token-form link for this repository over every section operation's permission. */
@@ -364,50 +364,46 @@ function outputsListRegion(name: string, heading: string): GeneratedRegion {
   };
 }
 
-// Each README region: its home, its renderer, and its body shape; the token-form link definition
-// closes the file.
-const README_REGIONS: readonly GeneratedRegion[] = [
-  sectionsTableRegion("readme-sections-table", "## Sections"),
-  outputsListRegion("readme-outputs", "## Inputs"),
-  {
-    name: "readme-pat-url",
+/** The token-form link definition as tail region `name`: the page's `[...][pat-form]` reference resolves through it. */
+function patUrlRegion(name: string): GeneratedRegion {
+  return {
+    name,
     placement: { kind: "tail" },
     body: new RegExp(String.raw`^\n(?:\[${escapeRe(PAT_FORM_LABEL)}\]: \S+\n)?$`),
     render: () => `\n[${PAT_FORM_LABEL}]: ${patFormUrl()}\n`,
-  },
-];
+  };
+}
 
-/** The docs/ pages this generator writes, keyed by path: the same tables in their reference homes. */
-export const DOCS_PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
+// Every page this generator writes besides COVERAGE.md, keyed by path: the reference tables in
+// their homes, and the token-form link definition closing the README and the getting-started guide.
+export const PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
+  "README.md": [patUrlRegion("readme-pat-url")],
+  "docs/start/getting-started.md": [patUrlRegion("pat-url")],
   "docs/reference/sections.md": [sectionsTableRegion("sections-table", "# Sections")],
   "docs/reference/inputs.md": [outputsListRegion("outputs-list", "## Outputs")],
 };
 
-/** The docs/ page at `path` with its regions checked for placement, then regenerated. */
-export function renderDocsPage(path: string, text: string): string {
-  const regions = DOCS_PAGE_REGIONS[path];
+// The page at `path` with its regions checked for placement, then regenerated. The result must
+// reference the token-form label exactly as often as it defines it (full, collapsed, or shortcut
+// form), and at most once: a renamed reference, a second one, or a stale definition ahead of the
+// generated one (it wins) would leave the page wrong while regeneration stays a no-op.
+export function renderPage(path: string, text: string): string {
+  const regions = PAGE_REGIONS[path];
   if (regions === undefined) {
     throw new Error(`gen-docs: no generated regions are registered for ${path}`);
   }
-  return regenerateRegions(text, regions, path);
-}
-
-// The README with every generated region rendered. The result must define the token-form label
-// exactly once and reference it exactly once (full, collapsed, or shortcut form), or a stale
-// definition or renamed reference would leave the page wrong while regeneration stays a no-op.
-export function renderReadme(readme: string): string {
-  const out = regenerateRegions(readme, README_REGIONS, README_PATH);
-  // CommonMark trims and case-folds labels and lets the first definition
-  // win, so every spelling counts: a mention opening a line and ending in
-  // ":" is a definition, any other bracketed mention is a reference.
+  const out = regenerateRegions(text, regions, path);
+  // CommonMark trims and case-folds labels and lets the first definition win, so every spelling
+  // counts: a mention opening a line and ending in ":" is a definition, any other bracketed
+  // mention is a reference.
   const mentions = [...out.matchAll(/^ {0,3}\[([^\]]+)\]:|\[([^\]]+)\]/gm)].filter(
     (match) => (match[1] ?? match[2] ?? "").trim().toLowerCase() === PAT_FORM_LABEL,
   );
   const definitions = mentions.filter((match) => match[1] !== undefined).length;
   const references = mentions.length - definitions;
-  if (references !== 1 || definitions !== 1) {
+  if (references !== definitions || definitions > 1) {
     throw new Error(
-      `gen-docs: README.md must reference [${PAT_FORM_LABEL}] exactly once and define it exactly once, found ${references} and ${definitions}`,
+      `gen-docs: ${path} must reference [${PAT_FORM_LABEL}] exactly as often as it defines it, at most once; found ${references} and ${definitions}`,
     );
   }
   return out;
@@ -457,18 +453,17 @@ export function renderCoverageFile(coverage: string): string {
 }
 
 if (import.meta.main) {
-  const pages: ReadonlyArray<readonly [string, (text: string) => string, string]> = [
-    [README_PATH, renderReadme, `${SECTIONS.length} section rows`],
-    [COVERAGE_PATH, renderCoverageFile, `${SECTIONS.length} sections`],
-    ...Object.keys(DOCS_PAGE_REGIONS).map(
-      (path) => [path, (text: string) => renderDocsPage(path, text), "reference page"] as const,
+  const pages: ReadonlyArray<readonly [string, (text: string) => string]> = [
+    [COVERAGE_PATH, renderCoverageFile],
+    ...Object.keys(PAGE_REGIONS).map(
+      (path) => [path, (text: string) => renderPage(path, text)] as const,
     ),
   ];
-  for (const [file, render, summary] of pages) {
+  for (const [file, render] of pages) {
     const path = join(ROOT, file);
     const before = readFileSync(path, "utf8");
     const after = render(before);
     writeFileSync(path, after);
-    console.log(`gen-docs: wrote ${path} (${summary}${after === before ? ", unchanged" : ""})`);
+    console.log(`gen-docs: wrote ${path}${after === before ? " (unchanged)" : ""}`);
   }
 }

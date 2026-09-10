@@ -76,8 +76,8 @@ export const RESOURCE_LABEL_ORG: Record<NonNullable<SectionPermission["org"]>, s
   members: "Members",
 };
 
-// Each PAT resource's query parameter on GitHub's pre-filled token form (the README link, in this
-// order); total over PatResource, so a new resource names its parameter or records a null exemption.
+// Each PAT resource's query parameter on GitHub's pre-filled token form (the generated token-form
+// link, in this order); total over PatResource, so a new resource names its parameter or records a null exemption.
 export const RESOURCE_SLUGS: Record<PatResource, string | null> = {
   // The parameter names follow the App-permissions schema where they differ from ours; every
   // non-null slug below was verified against the live token form on 2026-07-28 (each pre-selects
@@ -121,7 +121,7 @@ export const RESOURCE_SLUGS: Record<PatResource, string | null> = {
  * section can use - nor a narrower one than it will need next. The default
  * output is user-facing error prose: the EXPECTED_GRANT snapshot in
  * test/sections/registry.test.ts pins every section's grant character for
- * character, and the README's Sections table mirrors those grants.
+ * character, and the docs/reference/sections.md "Sections" table mirrors those grants.
  */
 export function grantFor(
   permission: SectionPermission,

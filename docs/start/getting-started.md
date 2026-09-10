@@ -10,7 +10,7 @@ This walkthrough takes one repository from nothing to a settings file that is ap
 
 The action authenticates with a fine-grained personal access token. Many sections need the Administration permission, which the default workflow `GITHUB_TOKEN` can never hold, so plan on a PAT.
 
-The [pre-filled token form linked in the README](https://github.com/Vivswan/github-settings-as-code#usage) starts you off with every repository permission the Sections table can need. Pick the resource owner and the repositories the token may touch. If the owner is an organization and you plan to manage the `teams` section, also add the Members organization permission at read; the form only offers organization permissions once an organization is selected.
+The [pre-filled token form][pat-form] starts you off with every repository permission the Sections table can need. Pick the resource owner and the repositories the token may touch. If the owner is an organization and you plan to manage the `teams` section, also add the Members organization permission at read; the form only offers organization permissions once an organization is selected.
 
 You can also grant less. The token only needs the permissions for the sections your settings file declares, and [Token permissions](../reference/permissions.md) explains which grant maps to which section.
 
@@ -100,3 +100,7 @@ The action also sets a `result` output for downstream steps; the [Inputs and out
 ## Where to go next
 
 The [examples cookbook](examples.md) has a full-featured settings file and the null semantics. [Multi-repo mode](../operate/multi-repo.md) scales this setup from one repository to a fleet. When a run fails, [troubleshooting](../operate/troubleshooting.md) covers the common failure shapes.
+
+<!-- BEGIN GENERATED: pat-url (bun run build:docs; derived from RESOURCE_SLUGS in src/sections/contract/permissions.ts) -->
+[pat-form]: https://github.com/settings/personal-access-tokens/new?name=github-settings-as-code&description=Token+for+Vivswan%2Fgithub-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&checks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read
+<!-- END GENERATED: pat-url -->

@@ -1,6 +1,6 @@
 /**
- * The prose a section contributes to the generated artifacts: its README Sections table cells,
- * its COVERAGE.md Supported rows, and the descriptions of its fields in the published JSON
+ * The prose a section contributes to the generated artifacts: its cells in the Sections table of
+ * docs/reference/sections.md, its COVERAGE.md Supported rows, and the descriptions of its fields in the published JSON
  * Schema. Declared beside the section module as src/sections/<key>/<key>.docs.yml and loaded by
  * the docs registry. Documentation only: nothing bundled from src/main.ts may import this file or
  * the registry (a unit test walks the import graph).
@@ -31,7 +31,7 @@ const SchemaDescriptions = z.record(z.string().min(1), z.string().min(1)).readon
 
 export const SectionDocs = z
   .strictObject({
-    /** The section's two authored cells in the README Sections table. */
+    /** The section's two authored cells in the Sections table (docs/reference/sections.md). */
     readme: z
       .strictObject({
         /** The Endpoints cell: the API surface the section calls, in prose. */

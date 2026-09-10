@@ -4,7 +4,7 @@ order: 20
 
 # Migrating from the Probot Settings app
 
-This page walks through moving a repository from the [Probot Settings app](https://github.com/repository-settings/app) to this action. The short version is the [comparison table](#compared-to-the-probot-settings-app) below; the [README's migration paragraph](https://github.com/Vivswan/github-settings-as-code#migrating-from-the-probot-settings-app) is the claim the contract tests pin, and it wins if this page ever disagrees. What this page adds is the walkthrough: what to expect, in what order to do things, and how to read the first check run.
+This page walks through moving a repository from the [Probot Settings app](https://github.com/repository-settings/app) to this action. The short version is the [comparison table](#compared-to-the-probot-settings-app) below. What this page adds is the walkthrough: what to expect, in what order to do things, and how to read the first check run.
 
 ## Why migrate
 
@@ -27,7 +27,7 @@ The one Probot-family feature without a direct equivalent is suborg-level groupi
 
 ## What carries over as-is
 
-Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped `{undeclared, entries}` form is this action's own extension on top. The [README's migration paragraph](https://github.com/Vivswan/github-settings-as-code#migrating-from-the-probot-settings-app) is the pinned statement of this parity. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
+Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped `{undeclared, entries}` form is this action's own extension on top. This list is the parity claim the contract tests pin. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
 
 ## What changed on purpose
 

@@ -1,21 +1,20 @@
 // Unit tests for the docs generator (.github/scripts/gen-docs.ts): each renderer pinned on a small
-// synthetic input, the loud failures, and the whole-file regeneration over the committed README and
-// COVERAGE and reference pages, which must be a no-op (build:check's contract, so drift fails here with a diff first).
+// synthetic input, the loud failures, and the whole-file regeneration over the committed COVERAGE
+// and the registered pages, which must be a no-op (build:check's contract, so drift fails here with a diff first).
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CoverageData } from "../../.github/scripts/coverage-data.js";
 import {
-  DOCS_PAGE_REGIONS,
+  PAGE_REGIONS,
   patFormParameters,
   renderCoverage,
   renderCoverageFile,
-  renderDocsPage,
   renderOutputsList,
+  renderPage,
   renderPatCell,
   renderPatFormUrl,
-  renderReadme,
   renderSectionsTable,
 } from "../../.github/scripts/gen-docs.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
@@ -349,116 +348,99 @@ describe("patFormParameters and renderPatFormUrl", () => {
   });
 });
 
-describe("the committed README", () => {
-  const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+describe("the committed pages", () => {
+  const pages = Object.keys(PAGE_REGIONS);
 
-  test("is exactly what the generator renders from the declarations", () => {
-    // The strongest pin: every generated region is fresh (build:check's
-    // contract), which also proves each renderer parses every real grant
-    // prose and every real permission has a form parameter.
-    expect(renderReadme(readme)).toBe(readme);
-  });
-
-  test("must end up with exactly one reference to and one definition of the token-form label", () => {
-    // Negative controls, each a page that renders wrong yet regenerates as a no-op: a renamed
-    // reference, a second reference in any CommonMark form or spelling, a stale definition ahead
-    // of the generated one (it wins), and the sole definition moved outside the region.
-    expect(readme).toContain("][pat-form]");
-    const before = (text: string): string =>
-      readme.replace("\n## Contributing\n", `\n${text}\n\n## Contributing\n`);
-    expect(() => renderReadme(readme.replace("][pat-form]", "][token-form]"))).toThrow(
-      "exactly once, found 0 and 1",
-    );
-    expect(() => renderReadme(before("see the [form][pat-form] again"))).toThrow("found 2 and 1");
-    expect(() => renderReadme(before("see the [form][ Pat-Form ] again"))).toThrow("found 2 and 1");
-    expect(() => renderReadme(before("see [pat-form] and [pat-form][] too"))).toThrow(
-      "found 3 and 1",
-    );
-    expect(() => renderReadme(`[Pat-Form]: https://example.com\n\n${readme}`)).toThrow(
-      "found 1 and 2",
-    );
-    const definition = readme.split("\n").find((line) => line.startsWith("[pat-form]: "));
-    expect(definition).toBeDefined();
-    const moved = readme
-      .replace(`${definition}\n`, "")
-      .replace("\n## Contributing\n", `\n${definition}\n\n## Contributing\n`);
-    expect(() => renderReadme(moved)).toThrow("found 1 and 2");
-  });
-
-  test.each<[label: string, mutate: (readme: string) => string, error: string]>([
-    [
-      "the Sections table moved under Inputs",
-      (readme) => relocatedRegion(readme, "readme-sections-table", "html", "\n## Inputs\n\n"),
-      'the readme-sections-table region must sit under "## Sections" in README.md; "## Inputs" is the heading above its BEGIN marker',
-    ],
-    [
-      "the Outputs sentence moved under Sections",
-      (readme) => relocatedRegion(readme, "readme-outputs", "html", "\n## Sections\n\n"),
-      'the readme-outputs region must sit under "## Inputs" in README.md; "## Sections" is the heading above its BEGIN marker',
-    ],
-    [
-      "the Outputs sentence quoted",
-      (readme) => readme.replace("\nOutputs: `result` (", "\n> Outputs: `result` ("),
-      "the readme-outputs region sits inside a blockquote in README.md",
-    ],
-    [
-      "prose after the link definitions",
-      (readme) => `${readme}\ntrailing prose\n`,
-      "the readme-pat-url region must close README.md",
-    ],
-    [
-      "the Sections table markers around the Inputs table",
-      (readme) => {
-        const inputsTable =
-          readme.match(/\| Input \| Default \| Meaning \|\n[\s\S]*?\n\n/)?.[0] ?? "";
-        expect(inputsTable).not.toBe("");
-        return readme.replace(
-          /(<!-- BEGIN GENERATED: readme-sections-table[^\n]*\n)[\s\S]*?(<!-- END GENERATED: readme-sections-table -->)/,
-          `$1${inputsTable.trimEnd()}\n$2`,
-        );
-      },
-      "the readme-sections-table region in README.md encloses content the generator would not write",
-    ],
-    [
-      "the Outputs markers around the Inputs table header",
-      (readme) => {
-        const begin = readme.match(/<!-- BEGIN GENERATED: readme-outputs[^\n]*?-->/)?.[0] ?? "";
-        const end = "<!-- END GENERATED: readme-outputs -->";
-        expect(begin).not.toBe("");
-        return readme
-          .replace(begin, "")
-          .replace(end, "")
-          .replace("| Input | Default | Meaning |", `| ${begin}Input | Default | Meaning${end} |`);
-      },
-      "the readme-outputs region in README.md encloses content the generator would not write",
-    ],
-    [
-      "the link markers around another definition",
-      (readme) => readme.replace(/^\[pat-form\]: /m, "[other]: "),
-      "the readme-pat-url region in README.md encloses content the generator would not write",
-    ],
-  ])("refuses to regenerate with %s", (_label, mutate, error) => {
-    // Each page regenerates cleanly without the placement check and reads wrong with it skipped,
-    // so the committed README's specs are pinned here (the mechanics in generated-regions.test.ts).
-    expect(() => renderReadme(mutate(readme))).toThrow(error);
-  });
-});
-
-describe("the committed reference pages", () => {
-  const pages = Object.keys(DOCS_PAGE_REGIONS);
-
-  test("are exactly what the generator renders, and both are registered", () => {
-    expect(pages.sort()).toEqual(["docs/reference/inputs.md", "docs/reference/sections.md"]);
+  test("are exactly what the generator renders, and every page is registered", () => {
+    // The strongest pin: every generated region is fresh (build:check's contract), which also
+    // proves the Sections renderer parses every real grant prose and every real permission has
+    // a form parameter.
+    expect(pages.sort()).toEqual([
+      "README.md",
+      "docs/reference/inputs.md",
+      "docs/reference/sections.md",
+      "docs/start/getting-started.md",
+    ]);
     for (const path of pages) {
       const text = readFileSync(join(ROOT, path), "utf8");
-      expect(renderDocsPage(path, text), path).toBe(text);
+      expect(renderPage(path, text), path).toBe(text);
     }
-    expect(() => renderDocsPage("docs/README.md", "")).toThrow(
+    expect(() => renderPage("docs/README.md", "")).toThrow(
       "gen-docs: no generated regions are registered for docs/README.md",
     );
   });
 
+  test.each(["README.md", "docs/start/getting-started.md"])(
+    "%s must reference the token-form label exactly once and define it exactly once",
+    (path) => {
+      // Negative controls, each a page that renders wrong yet regenerates as a no-op: a renamed
+      // reference, a second reference in any CommonMark form or spelling, a stale definition
+      // ahead of the generated one (it wins), and the sole definition moved outside the region.
+      const page = readFileSync(join(ROOT, path), "utf8");
+      expect(page).toContain("][pat-form]");
+      const lastHeading = page.match(/^## .*$/gm)?.at(-1) ?? "";
+      expect(lastHeading).not.toBe("");
+      const before = (text: string): string =>
+        page.replace(`\n${lastHeading}\n`, `\n${text}\n\n${lastHeading}\n`);
+      expect(() => renderPage(path, page.replace("][pat-form]", "][token-form]"))).toThrow(
+        "at most once; found 0 and 1",
+      );
+      expect(() => renderPage(path, before("see the [form][pat-form] again"))).toThrow(
+        "found 2 and 1",
+      );
+      expect(() => renderPage(path, before("see the [form][ Pat-Form ] again"))).toThrow(
+        "found 2 and 1",
+      );
+      expect(() => renderPage(path, before("see [pat-form] and [pat-form][] too"))).toThrow(
+        "found 3 and 1",
+      );
+      expect(() => renderPage(path, `[Pat-Form]: https://example.com\n\n${page}`)).toThrow(
+        "found 1 and 2",
+      );
+      const definition = page.split("\n").find((line) => line.startsWith("[pat-form]: "));
+      expect(definition).toBeDefined();
+      const moved = page
+        .replace(`${definition}\n`, "")
+        .replace(`\n${lastHeading}\n`, `\n${definition}\n\n${lastHeading}\n`);
+      expect(() => renderPage(path, moved)).toThrow("found 1 and 2");
+    },
+  );
+
+  test("a page without the token-form region may not reference the label", () => {
+    // A `[...][pat-form]` reference on a page whose tail carries no generated definition would
+    // render as literal brackets; the equality check catches it without a region to anchor to.
+    const path = "docs/reference/sections.md";
+    const page = readFileSync(join(ROOT, path), "utf8");
+    expect(() => renderPage(path, `${page}\nsee the [form][pat-form]\n`)).toThrow(
+      "at most once; found 1 and 0",
+    );
+  });
+
   test.each<[label: string, path: string, mutate: (page: string) => string, error: string]>([
+    [
+      "prose after the link definition",
+      "README.md",
+      (page) => `${page}\ntrailing prose\n`,
+      "the readme-pat-url region must close README.md",
+    ],
+    [
+      "the link markers around another definition",
+      "README.md",
+      (page) => page.replace(/^\[pat-form\]: /m, "[other]: "),
+      "the readme-pat-url region in README.md encloses content the generator would not write",
+    ],
+    [
+      "prose after the link definition",
+      "docs/start/getting-started.md",
+      (page) => `${page}\ntrailing prose\n`,
+      "the pat-url region must close docs/start/getting-started.md",
+    ],
+    [
+      "the link markers around another definition",
+      "docs/start/getting-started.md",
+      (page) => page.replace(/^\[pat-form\]: /m, "[other]: "),
+      "the pat-url region in docs/start/getting-started.md encloses content the generator would not write",
+    ],
     [
       "the Sections table moved under the column explanation",
       "docs/reference/sections.md",
@@ -486,6 +468,12 @@ describe("the committed reference pages", () => {
       'the outputs-list region must sit under "## Outputs" in docs/reference/inputs.md; "## Inputs" is the heading above its BEGIN marker',
     ],
     [
+      "the outputs list quoted",
+      "docs/reference/inputs.md",
+      (page) => page.replace("\n- `result`: <!-- BEGIN", "\n> - `result`: <!-- BEGIN"),
+      "the outputs-list region sits inside a blockquote in docs/reference/inputs.md",
+    ],
+    [
       "the outputs list markers around the bullet's prose",
       "docs/reference/inputs.md",
       (page) => {
@@ -499,9 +487,11 @@ describe("the committed reference pages", () => {
       },
       "the outputs-list region in docs/reference/inputs.md encloses content the generator would not write",
     ],
-  ])("refuses to regenerate with %s", (_label, path, mutate, error) => {
+  ])("refuses to regenerate %s in %s", (_label, path, mutate, error) => {
+    // Each page regenerates cleanly without the placement check and reads wrong with it skipped,
+    // so the committed pages' specs are pinned here (the mechanics in generated-regions.test.ts).
     const page = readFileSync(join(ROOT, path), "utf8");
-    expect(() => renderDocsPage(path, mutate(page))).toThrow(error);
+    expect(() => renderPage(path, mutate(page))).toThrow(error);
   });
 });
 

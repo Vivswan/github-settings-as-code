@@ -1,13 +1,14 @@
 /**
  * README contract tests: pin the schema link, the example settings.yml
- * blocks, the migration paragraph, and the version pins to their single
- * sources, so a prose claim cannot drift from what the code does. The
- * Sections table, the outputs list, and the token-form link are generated
- * (.github/scripts/gen-docs.ts) and pinned by that generator's tests.
+ * block, the quick-start warning, and the version pins to their single
+ * sources, so a prose claim cannot drift from what the code does; the
+ * migration guide's parity clause is pinned here too. The token-form link
+ * is generated (.github/scripts/gen-docs.ts) and pinned by that generator's
+ * tests, as are the reference pages' tables.
  */
 
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { countWord } from "../../.github/scripts/lib/count-word.js";
@@ -46,6 +47,75 @@ function assertBacktickedEnumeration(
   const listed = [...(parenthesized ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
   expect(listed.sort()).toEqual([...expected].sort());
 }
+
+describe("README front door", () => {
+  // The README is the front door to docs/: a pitch, a three-step quick start, the versioning
+  // note, and a table into the guides. Each pin here is a shape the reference content would
+  // break if it grew back: the tables live on the reference pages now.
+  const prose = readme.replace(/```[\s\S]*?```/g, "");
+
+  test("carries exactly the front-door headings, in order", () => {
+    expect(prose.match(/^#{1,6} .*$/gm)).toEqual([
+      "# GitHub Settings as Code",
+      "## Quick start",
+      "## Versioning",
+      "## Docs",
+      "## Contributing",
+    ]);
+  });
+
+  test("the token-form link is its only generated region", () => {
+    // The Sections and Inputs tables and the outputs list render on the reference pages only;
+    // a marker of theirs reappearing here would regenerate silently.
+    const regions = [...readme.matchAll(/<!-- BEGIN GENERATED: ([a-z-]+)/g)].map((m) => m[1]);
+    expect(regions).toEqual(["readme-pat-url"]);
+  });
+
+  test("the quick-start workflow runs in check mode", () => {
+    const workflow = fencedBlocks(readme, "yaml").find((block) => block.includes("uses:"));
+    expect(workflow, "README lost its workflow example").toBeDefined();
+    const doc = parseYaml(workflow ?? "") as {
+      jobs: Record<string, { steps: Array<{ uses?: string; with?: Record<string, string> }> }>;
+    };
+    const step = Object.values(doc.jobs)
+      .flatMap((job) => job.steps)
+      .find((candidate) => candidate.uses?.startsWith("Vivswan/github-settings-as-code@"));
+    expect(step?.with?.mode).toBe("check");
+  });
+
+  test("the Docs table links every guide the front door promises, and each resolves", () => {
+    const rows = sectionLines(readme, "Docs", "README.md")
+      .map((line) => line.match(/^\| [^|]+ \| \[[^\]]+\]\(([^)]+)\) \|$/)?.[1])
+      .filter((target): target is string => target !== undefined);
+    expect(rows.sort()).toEqual(
+      [
+        "docs/start/getting-started.md",
+        "docs/start/examples.md",
+        "docs/start/migrating-from-probot.md",
+        "docs/reference/sections.md",
+        "docs/reference/inputs.md",
+        "docs/reference/semantics.md",
+        "docs/reference/permissions.md",
+        "docs/reference/undeclared-policy.md",
+        "docs/reference/secrets-and-vaults.md",
+        "docs/operate/check-mode.md",
+        "docs/operate/multi-repo.md",
+        "docs/operate/private-repositories.md",
+        "docs/operate/troubleshooting.md",
+        "docs/playbooks/README.md",
+      ].sort(),
+    );
+    for (const target of rows) {
+      expect(existsSync(join(ROOT, target)), `README Docs table links ${target}`).toBe(true);
+    }
+  });
+
+  test("stays a front door in size", () => {
+    // The budget is the tripwire against the reference tables growing back; the full
+    // reference is docs/.
+    expect(readme.split("\n").length).toBeLessThanOrEqual(100);
+  });
+});
 
 describe("README example settings.yml blocks", () => {
   test("every settings.yml example validates and its repository keys are known", () => {
@@ -117,23 +187,18 @@ describe("README version pins", () => {
 });
 
 describe("delete-by-default enumeration", () => {
-  // Both prose spots enumerate the sections whose undeclared entries an
-  // apply deletes; the set is derived from the registry so a new
+  // The quick-start warning enumerates the sections whose undeclared entries
+  // an apply deletes; the set is derived from the registry so a new
   // delete-by-default section fails here until the prose (and the display
   // map in claims.ts) follows. This list drifted once already - the
-  // quick-start warning named three of five sections.
+  // quick-start warning named three of five sections. The guides' two
+  // enumerations are pinned the same way in guides.test.ts.
   const deleteKeys = SECTIONS.filter((s) => s.undeclaredDefault === "delete").map((s) => s.key);
 
   test("the quick-start first-run warning names every delete-by-default section", () => {
-    const step = readme.match(/\n4\. Add the workflow\.[\s\S]*?\n\n/)?.[0] ?? "";
-    expect(step, "README lost its '4. Add the workflow.' quick-start step").not.toBe("");
+    const step = readme.match(/\n3\. Add the workflow[\s\S]*?\n\n/)?.[0] ?? "";
+    expect(step, "README lost its '3. Add the workflow' quick-start step").not.toBe("");
     expect(deleteEnumerationProblems(step, deleteKeys)).toEqual([]);
-  });
-
-  test("the migration paragraph's implicit-deletion list names every delete-by-default section", () => {
-    const paragraph = readme.split("\n\n").find((p) => p.includes("nothing except"));
-    expect(paragraph, 'README lost its "nothing except ..." migration paragraph').toBeDefined();
-    expect(deleteEnumerationProblems(paragraph ?? "", deleteKeys)).toEqual([]);
   });
 });
 
@@ -160,11 +225,11 @@ describe("schema $schema hints and $id", () => {
     const idUrl = new URL(id);
     const [owner, repo, , ...rest] = idUrl.pathname.split("/").filter(Boolean);
     const expectedHint = `${idUrl.origin}/${owner}/${repo}/${pins?.major}/${rest.join("/")}`;
-    // Per-file counts, pinned: a global total would let one of the README's
-    // two hints disappear while the guides' hint keeps the sum positive.
-    // Adding a hint to a new page is a conscious edit here.
+    // Per-file counts, pinned: a global total would let the README's hint
+    // disappear while the guides' hint keeps the sum positive. Adding a hint
+    // to a new page is a conscious edit here.
     const EXPECTED_HINTS: Record<string, number> = {
-      "README.md": 2, // the Usage step and the example block
+      "README.md": 1, // the quick-start settings example
       "docs/start/getting-started.md": 1,
     };
     for (const page of hintPages()) {
@@ -223,26 +288,25 @@ describe("schema $schema hints and $id", () => {
   });
 });
 
-describe("README migration paragraph", () => {
+describe("migration guide parity paragraph", () => {
   test("lists exactly the Probot-parity sections", () => {
     const paragraph = sectionLines(
-      readme,
-      "Migrating from the Probot Settings app",
-      "README.md",
+      readFileSync(join(ROOT, "docs", "start", "migrating-from-probot.md"), "utf8"),
+      "What carries over as-is",
+      "docs/start/migrating-from-probot.md",
     ).join(" ");
-    // Isolate the parity clause precisely so later mentions (e.g. "move to
-    // `rulesets`") cannot leak in and a filename dot cannot truncate it: the
-    // clause runs from "works as-is for" up to its "(for the list sections
-    // among them, the plain-array form remains Probot-compatible" marker -
-    // the array-form claim is scoped to the list sections, since the
-    // object-shaped sections have no array form and the wrapped `undeclared`
-    // form is this action's own addition.
+    // Isolate the parity clause precisely so later mentions (the sections
+    // outside the guarantee) cannot leak in: the clause runs from "keeps
+    // working for" up to its "their original Probot shapes remain compatible"
+    // marker; the paragraph goes on to scope the plain-array claim to the
+    // list sections, since the object-shaped sections have no array form and
+    // the wrapped `undeclared` form is this action's own addition.
     const clause = paragraph.match(
-      /works as-is for\s+(.*?)\(for the list sections among them, the plain-array form remains Probot-compatible/s,
+      /keeps working for\s+(.*?): their original Probot shapes remain compatible/s,
     );
     expect(
       clause,
-      'README migration paragraph must name the parity sections in a "works as-is for ... (for the list sections among them, the plain-array form remains Probot-compatible" clause',
+      'the migration guide must name the parity sections in a "keeps working for ...: their original Probot shapes remain compatible" clause',
     ).not.toBeNull();
     const listed = new Set(
       [...(clause?.[1] ?? "").matchAll(/`([a-z_]+)`/g)]
@@ -256,11 +320,11 @@ describe("README migration paragraph", () => {
     const extra = [...listed].filter((key) => !parity.has(key));
     expect(
       missing,
-      `README migration parity clause omits Probot-parity section(s): ${missing.join(", ")}`,
+      `the migration guide's parity clause omits Probot-parity section(s): ${missing.join(", ")}`,
     ).toEqual([]);
     expect(
       extra,
-      `README migration parity clause claims parity for non-parity section(s): ${extra.join(", ")}`,
+      `the migration guide's parity clause claims parity for non-parity section(s): ${extra.join(", ")}`,
     ).toEqual([]);
   });
 });
@@ -381,40 +445,53 @@ describe("schema.ts file-header additions claim", () => {
   });
 });
 
-describe("section-contract README-heading references", () => {
+describe("section-contract references to the Sections page's headings", () => {
+  const SECTIONS_PAGE = "docs/reference/sections.md";
   const contractDir = join(ROOT, "src", "sections", "contract");
   const contractSrc = readdirSync(contractDir)
     .filter((file) => file.endsWith(".ts"))
     .map((file) => readFileSync(join(contractDir, file), "utf8"))
     .join("\n");
-  // Headings count only outside fenced code blocks: the README carries a
-  // "# yaml-language-server:" line inside a yaml fence that is not a heading.
-  const readmeProse = readme.replace(/```[\s\S]*?```/g, "");
+  // Headings count only outside fenced code blocks.
+  const pageProse = readFileSync(join(ROOT, ...SECTIONS_PAGE.split("/")), "utf8").replace(
+    /```[\s\S]*?```/g,
+    "",
+  );
 
-  test('every README "..." name quoted in the JSDoc is a real README heading', () => {
-    // Every quoted name following a README mention must exist as a markdown
-    // heading, so a heading rename (or a JSDoc typo) fails here. All quoted
-    // names on the mention's line count, not just the first.
+  test('every "..." name quoted beside a docs/reference/sections.md mention is a heading of that page', () => {
+    // The Sections table's home is the reference page, so the contract's
+    // JSDoc points there; every quoted name on a line naming the page must
+    // exist as one of its markdown headings, so a heading rename (or a
+    // JSDoc typo) fails here. All quoted names on the line count.
     const named: string[] = [];
     for (const line of contractSrc.split("\n")) {
-      const mention = line.search(/README'?s?\b/);
+      const mention = line.indexOf(SECTIONS_PAGE);
       if (mention === -1) {
         continue;
       }
       named.push(...[...line.slice(mention).matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? ""));
     }
-    // Zero extracted names while the contract still mentions the README means
-    // the extraction went blind (e.g. a rewrap split a mention from its
+    // Zero extracted names while the contract still names the page means the
+    // extraction went blind (e.g. a rewrap split the mention from its
     // quotes); fail loudly rather than pass on an empty list.
     expect(
       named.length,
-      "the section contract mentions the README but no quoted heading name was extracted; fix the JSDoc line wrap or this extraction",
+      `the section contract names ${SECTIONS_PAGE} but no quoted heading name was extracted; fix the JSDoc line wrap or this extraction`,
     ).toBeGreaterThan(0);
+    // A README mention beside table wording is the stale pointer this test replaced; a README
+    // mention on its own (the quick start, the repository front door) is fine.
+    const stale = contractSrc
+      .split("\n")
+      .filter((line) => /README/.test(line) && /\b(?:Sections|table)\b/.test(line));
+    expect(
+      stale,
+      `the section contract still points at the README for the Sections table; it lives on ${SECTIONS_PAGE}`,
+    ).toEqual([]);
     for (const name of named) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       expect(
-        new RegExp(`^#{1,6} ${escaped}\\s*$`, "m").test(readmeProse),
-        `a section-contract JSDoc names the README's "${name}", but README.md has no such heading`,
+        new RegExp(`^#{1,6} ${escaped}\\s*$`, "m").test(pageProse),
+        `a section-contract JSDoc names the Sections page's "${name}", but ${SECTIONS_PAGE} has no such heading`,
       ).toBe(true);
     }
   });
