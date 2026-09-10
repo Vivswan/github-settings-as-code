@@ -67,7 +67,7 @@ jobs:
       # past it (the newer commit's own run applies). A dispatch has no
       # judged commit and checks out the default branch, which is what the
       # freshness check compares against, so its drift report always runs.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.token.outputs.proceed == 'true'
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || inputs.sha }}
@@ -95,7 +95,7 @@ jobs:
 
       - name: Check out repo-platform
         if: steps.token.outputs.proceed == 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Vivswan/repo-platform
           ref: ${{ steps.scripts.outputs.ref }}
@@ -103,7 +103,7 @@ jobs:
 
       # The platform's scripts run on the platform's own bun pin; this
       # repository's bundle builds on its own pin further down.
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         if: steps.token.outputs.proceed == 'true'
         with:
           bun-version-file: platform/.bun-version
@@ -165,7 +165,7 @@ jobs:
 
       # The bundle the action runs is not committed; build it from this
       # checkout so `uses: ./` executes the code at HEAD.
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         if: steps.freshness.outputs.moved == 'false'
         with:
           bun-version-file: .bun-version

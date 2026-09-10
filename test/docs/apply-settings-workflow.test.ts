@@ -367,7 +367,7 @@ const CALLER_EXPECTED: CallerContract = {
         {
           name: undefined,
           id: undefined,
-          uses: "actions/checkout@v7",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
           if: undefined,
           run: undefined,
           env: undefined,
@@ -389,7 +389,7 @@ const CALLER_EXPECTED: CallerContract = {
         {
           name: undefined,
           id: undefined,
-          uses: "oven-sh/setup-bun@v2",
+          uses: "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
           if: PROCEED,
           run: undefined,
           env: undefined,
