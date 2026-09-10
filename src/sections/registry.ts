@@ -103,18 +103,14 @@ type ExpectedPlanDeclarations<K extends SectionKey, M> = {
 type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 /**
- * Plan modules whose handler was typed over anything but its own
- * declarations. Comparing the dictionaries as PROPERTIES is what makes the
- * comparison strict: reaching them through the context itself would compare
- * the bound read helpers, whose METHOD parameters TypeScript checks
- * bivariantly, so a wider endpoint dictionary (roles erased to strings), a
- * phantom role planContext never binds (undefined at runtime), a widened
- * GraphQL variables shape, or a narrowed declared value would all measure
- * as equal.
- */
-/**
- * `K` when module `M`'s plan() is typed over anything but its own declarations, never when it is
- * exact. Exported for its negative control (test/sections/registry.test.ts).
+ * `K` when module `M`'s plan() is typed over anything but its own
+ * declarations, never when it is exact. Comparing the dictionaries as
+ * PROPERTIES is what makes the comparison strict: reaching them through the
+ * context would compare the bound read helpers, whose METHOD parameters
+ * TypeScript checks bivariantly, so a wider endpoint dictionary, a phantom
+ * role planContext never binds, a widened GraphQL variables shape, or a
+ * narrowed declared value would all measure as equal. Exported for its
+ * negative control (test/sections/registry.test.ts).
  */
 export type MisdeclaredPlanModule<K extends SectionKey, M> =
   Invariant<PlanTypedOver<M>, ExpectedPlanDeclarations<K, M>> extends true ? never : K;
@@ -200,22 +196,13 @@ function assertScopeFree(kind: "section key" | "role", value: string): void {
 
 /**
  * Every section's endpoints flattened into one dictionary keyed
- * `${sectionKey}.${role}` ("labels.update", "teams.org", ...). Keys are
- * globally unique by construction (section key + local role), and the
- * record is keyed by the exact SectionEndpointKey union, so a consumer
- * looking up a key no section declares does not compile. This is the
- * merge-ready single view downstream consumers (the e2e mock's route table,
- * USED_PATHS derivation) iterate, without renaming any section's local roles.
- *
- * The returned record, each tagged entry, and the nested statuses/permission
- * objects are frozen: they are (or reference) the section declarations, which
- * must never mutate at runtime, so a consumer cannot corrupt the source
- * dictionaries through this view.
- *
- * `sections` is injectable so the scope-free assert is directly testable;
- * production callers take the registry default, whose record is keyed by
- * the exact SectionEndpointKey union (an injected synthetic list keeps
- * string keys) - the allGraphqlOps overload shape.
+ * `${sectionKey}.${role}` ("labels.update", "teams.org", ...): the single
+ * view the e2e mock's route table and the USED_PATHS derivation iterate,
+ * keyed by the exact SectionEndpointKey union so a lookup no section declares
+ * does not compile. The record, each tagged entry, and the nested
+ * statuses/permission objects are frozen: they reference the section
+ * declarations, which must never mutate at runtime. `sections` is injectable
+ * so the scope-free assert is testable; an injected list keeps string keys.
  */
 export function allEndpoints(): Readonly<Record<SectionEndpointKey, TaggedEndpoint>>;
 export function allEndpoints(
@@ -249,23 +236,12 @@ export type TaggedGraphqlOp = GraphqlOpDecl & {
 /**
  * Every section's GraphQL operations flattened into one dictionary keyed
  * `${sectionKey}.${role}`, the allEndpoints() sibling the e2e mock's dispatch
- * table, the coverage tripwire, and the fault-key universe iterate. Frozen
- * for the same reason: the declarations must never mutate at runtime.
- *
- * Two shapes are asserted here, at construction, because the rest of the
- * system depends on them:
- *   - operation NAMES are globally unique: the name is the wire dispatch key
- *     (the operationName on every request), so a duplicate would make the
- *     mock's dispatch and the coverage attribution ambiguous;
- *   - a role never collides with a REST endpoint role in the same section:
- *     fault/corruption directives address both dictionaries through one
- *     "section.role" key space.
- * A declared `connection`'s cursor contract needs no assert here: the
- * GraphqlPaginatedReadDecl query type makes a paginated operation that
- * cannot page uncompilable at its declaration.
- * `sections` is injectable so the asserts are directly testable; production
- * callers take the registry default, whose record is keyed by the exact
- * SectionGraphqlKey union (an injected synthetic list keeps string keys).
+ * table, the coverage tripwire, and the fault-key universe iterate; frozen
+ * for the same reason. Asserted at construction: operation NAMES are globally
+ * unique (the name is the wire dispatch key, so a duplicate makes the mock's
+ * dispatch ambiguous), and a role never collides with a REST role in the same
+ * section (fault directives address both dictionaries through one
+ * "section.role" key space). `sections` is injectable for the tests.
  */
 export function allGraphqlOps(): Readonly<Record<SectionGraphqlKey, TaggedGraphqlOp>>;
 export function allGraphqlOps(

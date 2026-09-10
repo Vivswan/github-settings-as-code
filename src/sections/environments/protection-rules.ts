@@ -154,7 +154,8 @@ export function validateProtectionRules(
   }
   if (duplicates.size > 0) {
     throw new Error(
-      `environments: the "${env.name}" entry declares the deployment protection rule App${duplicates.size === 1 ? "" : "s"} ${[...duplicates].map((app) => `"${app}"`).join(", ")} more than once. Keep exactly one entry per App`,
+      `environments: the "${env.name}" entry declares the deployment protection rule App${duplicates.size === 1 ? "" : "s"} ` +
+        `${[...duplicates].map((app) => `"${app}"`).join(", ")} more than once. Keep exactly one entry per App`,
     );
   }
 }

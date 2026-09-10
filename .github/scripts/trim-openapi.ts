@@ -169,8 +169,12 @@ async function main(): Promise<number> {
     // the pin must move first.
     const remedy =
       REF === UPSTREAM_REF
-        ? "Retire the owning gap in src/upstream-gaps/ (delete the spec-only file, or flip documentedInSpec to true on an octokit-kind one), regenerate the index (bun .github/scripts/gen-gaps-index.ts), and re-run, so the validator covers them"
-        : `The probe ref documents them but the pinned ${UPSTREAM_REF} may not: bump UPSTREAM_REF in this script first, then retire the gap and regenerate the index`;
+        ? "Retire the owning gap in src/upstream-gaps/ (delete the spec-only file, " +
+          "or flip documentedInSpec to true on an octokit-kind one), " +
+          "regenerate the index (bun .github/scripts/gen-gaps-index.ts), and re-run, " +
+          "so the validator covers them"
+        : `The probe ref documents them but the pinned ${UPSTREAM_REF} may not: ` +
+          "bump UPSTREAM_REF in this script first, then retire the gap and regenerate the index";
     throw new Error(
       `the upstream descriptor at ${REF} now documents: ${nowDocumented.join(", ")}. ${remedy}`,
     );

@@ -148,28 +148,11 @@ export function takeCorruption(
 const SERVER_ERROR_ROTATION = [500, 502, 503] as const;
 
 /**
- * Turn a fault kind into its wire behavior:
- *   - rate_limit_403: 403 with "rate limit" in the message, so the client's
- *     classifier reads it as throttling (isRateLimitError), NOT a permission
- *     denial. This is the one place a 403 body is ALLOWED to say "rate limit".
- *   - 429_then_200: the REAL secondary-rate-limit wire shape - the documented
- *     "secondary rate limit" message body plus a small positive Retry-After.
- *     Both details are load-bearing for production parity: octokit's
- *     throttling plugin (production's ONLY 429 recovery path; the retry
- *     plugin's doNotRetry includes 429 there) retries a 429 only when the
- *     error message contains "secondary rate", and it honors Retry-After only
- *     when POSITIVE (a 0 is falsy and falls back to the plugin's 60s default).
- *     A bare 429 + Retry-After: 0 matches neither throttle branch and would
- *     fail immediately in production while the RETRY_BASE_MS test path
- *     absorbed it in e2e.
- *   - server_error: a 5xx with a JSON message body, rotating 500/502/503 on the
- *     fault's fire count (`fired`). The client's retry plugin retries 5xx, so a
- *     single firing is retried away and `times` >= 3 exhausts the retries.
- *   - connection_drop: signal the server to destroy the socket before any
- *     response bytes leave, a true network failure the client's fetch rejects
- *     on and its retry plugin retries.
- * The log records the attempt; the fault status (403/429/5xx) or 0 (drop) is
- * set. All are deliberately off the OpenAPI contract (offSpecBody).
+ * Turn a fault kind into its wire behavior. The log records the attempt with
+ * the fault status (403/429/5xx) or 0 for a drop; every kind is deliberately
+ * off the OpenAPI contract (offSpecBody). The client's retry plugin retries
+ * 5xx and drops, so a single firing is retried away and `times` >= 3
+ * exhausts the retries.
  */
 export function applyFault(
   kind: FaultOption["kind"],
@@ -177,6 +160,9 @@ export function applyFault(
   fired: number,
 ): PipelineResult {
   if (kind === "rate_limit_403") {
+    // "rate limit" in the body makes the client's classifier read the 403 as
+    // throttling (isRateLimitError), NOT a permission denial - the one place a
+    // 403 body is allowed to say it.
     const response: MockResponse = {
       status: 403,
       body: { message: "API rate limit exceeded for this token" },
@@ -184,6 +170,12 @@ export function applyFault(
     return { response, log: { ...log, status: 403 }, offSpecBody: true };
   }
   if (kind === "429_then_200") {
+    // Production's ONLY 429 recovery path is octokit's throttling plugin (the
+    // retry plugin's doNotRetry includes 429). It retries only when the message
+    // contains "secondary rate" and honors Retry-After only when POSITIVE (0 is
+    // falsy and falls back to its 60s default). A bare 429 + Retry-After: 0
+    // would fail immediately in production while e2e's RETRY_BASE_MS path
+    // absorbed it, so both details are load-bearing for parity.
     const response: MockResponse = {
       status: 429,
       body: {
@@ -201,7 +193,8 @@ export function applyFault(
     const response: MockResponse = { status, body: { message: "Server Error" } };
     return { response, log: { ...log, status }, offSpecBody: true };
   }
-  // connection_drop
+  // connection_drop: the server destroys the socket before any response bytes
+  // leave (see server.ts), a true network failure the client's fetch rejects on.
   return {
     response: { status: 0, body: null },
     log: { ...log, status: 0 },

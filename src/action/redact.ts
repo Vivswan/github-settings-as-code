@@ -33,10 +33,9 @@ export type PrivateReposPolicy = (typeof PRIVATE_REPOS_POLICIES)[number];
  * GitHub-ACL-private channel a public run has); `issue-on-failure` is the
  * quiet variant of `issue` - it writes the issue only when the run needs
  * attention (failed, or check-mode drift) and closes it on recovery, so a
- * healthy repo never sees an issue at all; `artifact` uploads every redacted
+ * healthy repo never sees an issue; `artifact` uploads every redacted
  * target's report as one age-encrypted workflow artifact, for readers who
- * hold the key but no GitHub access to the targets. The single source its
- * type derives from.
+ * hold the key but no GitHub access to the targets.
  */
 export const PRIVATE_REPORT_CHANNELS = ["none", "issue", "issue-on-failure", "artifact"] as const;
 

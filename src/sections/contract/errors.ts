@@ -28,13 +28,11 @@ export class PermissionDenied extends Error {
  * The access level denial advice should ask for on an override permission:
  * "write" when ANY of the section's endpoints or GraphQL operations carrying
  * that same effective permission is write-graded, else "read". Grading by
- * the SECTION's need rather than the failing operation keeps the fix to one
- * round trip: the apply-mode preflight probes with reads, so a read-level
- * advice on a permission the section also writes with (the OIDC GET/PUT
- * pair) would have the user grant read, pass preflight, and then fail again
- * on the write. A permission the section only reads with (the branch-policy
- * list; its write siblings live on a different permission) still advises
- * read.
+ * the SECTION's need keeps the fix to one round trip: apply-mode preflight
+ * probes with reads, so read-level advice on a permission the section also
+ * writes with (the OIDC GET/PUT pair) would pass preflight and fail again on
+ * the write. A permission the section only reads with (the branch-policy
+ * list; its write siblings use another permission) still advises read.
  */
 export function overrideAdviceLevel(
   section: SectionMeta,

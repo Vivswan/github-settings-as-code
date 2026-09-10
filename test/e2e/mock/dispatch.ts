@@ -180,25 +180,14 @@ export function slugFromPath(pathname: string): string | null {
 }
 
 /**
- * The status-realism rule a handler must obey, and the reason it is not simply
- * "declared statuses only": a handler may answer any status the endpoint
- * DECLARES, plus any UNdeclared error status (>= 400). GitHub itself returns
- * error statuses an endpoint's happy-path docs never enumerate (a 404 for a
- * missing label on update/remove, a 409 for a conflicting create), and every
- * such error classifies through the engine's generic throwFor path, so the
- * mock modeling them is realism, not a contract break. What a handler must
- * NEVER invent is an undeclared SUCCESS/redirect (2xx/3xx): those drive the
- * section's success branches, so an undeclared one would exercise a code path
- * the endpoint declaration says cannot happen. Declaring the error status
- * instead is deliberately avoided - a declared >= 400 status feeds
- * toleratedStatuses(), so declaring e.g. 404 on labels.update would silently
- * make that error tolerated if the call site ever moved to tryCall.
- *
- * This rule governs HANDLER responses only. Transport-level faults (the fault
- * barrier's rate-limit 403 / 429, the server_error 5xx rotation, and the
- * connection_drop status 0) fire BEFORE any handler and deliberately bypass
- * this invariant: they model wire failures GitHub returns on any endpoint
- * regardless of its declared statuses.
+ * The status-realism rule for HANDLER responses: any status the endpoint
+ * DECLARES, plus any undeclared error (>= 400). GitHub returns errors the docs
+ * never enumerate (404 updating a missing label, 409 on a conflicting create),
+ * so modeling them is realism; an undeclared SUCCESS/redirect (2xx/3xx) would
+ * drive a section branch the declaration rules out. Declaring the error is
+ * avoided: a declared >= 400 feeds toleratedStatuses(), so a declared 404 on
+ * labels.update would turn tolerated if its call site moved to tryCall.
+ * Transport faults fire before any handler and bypass this rule by design.
  */
 export function statusAllowed(key: string, status: number): boolean {
   return declaredStatuses(key).has(status) || status >= 400;

@@ -141,22 +141,13 @@ function pinKey(name: string): string {
 
 /**
  * The complete mutation plan for the declared pin states against one live
- * pinned list - a PURE computation, shared by both modes: check renders its
- * drift lines from the plan and apply executes exactly the plan's mutations,
- * so the two cannot disagree about what apply would do. Semantics: the
- * entries declaring `pinned: true` must LEAD the pinned list in declaration
- * order (compared by rank - live position numbers may carry holes);
- * `pinned: false` unpins; pins with no declared pin state are never
- * unpinned, and when one sits among the leading ranks the declared block
- * claims, apply moves it after them (`interleaved`, surfaced as a note in
- * both modes).
- *
- * The reorders are simulated here against the post-unpin, post-append order:
- * pins append at the TAIL (verified live behavior), and each reorder pulls
- * desired[i] LEFT into rank i+1 - by the time rank i is considered, ranks
- * 0..i-1 already hold desired[0..i-1], so the target can only sit further
- * right, making remove-then-insert semantics unambiguous and one mutation
- * per out-of-place pin sufficient.
+ * pinned list - a PURE computation shared by both modes: check renders its
+ * drift lines from the plan and apply executes exactly its mutations, so the
+ * two cannot disagree. Semantics: entries declaring `pinned: true` must LEAD
+ * the pinned list in declaration order (compared by rank - live position
+ * numbers may carry holes); `pinned: false` unpins; pins with no declared pin
+ * state are never unpinned, and one sitting among the leading ranks the
+ * declared block claims is moved after them (`interleaved`, noted in both modes).
  */
 function planPins(
   declarations: readonly PinDeclaration[],
@@ -188,7 +179,7 @@ function planPins(
   const pins = desired.filter((name) => !liveKeys.has(pinKey(name)));
 
   // The rank order once the unpins are gone and the missing pins have
-  // appended at the tail - the exact state the reorder loop starts from.
+  // appended at the tail (verified live) - the state the reorder loop starts from.
   const postUnpin = live
     .filter((pin) => !unpinKeys.has(pinKey(pin.name)))
     .map((pin) => pinKey(pin.name));
@@ -204,6 +195,9 @@ function planPins(
     .map((pin) => pin.name);
 
   const reorders: Array<{ name: string; rank: number }> = [];
+  // Each reorder pulls desired[i] LEFT into rank i+1: ranks 0..i-1 already
+  // hold desired[0..i-1], so the target can only sit further right, which
+  // makes remove-then-insert unambiguous and one mutation per pin sufficient.
   desired.forEach((name, index) => {
     const key = pinKey(name);
     if (order[index] === key) {
@@ -280,7 +274,8 @@ export async function planPinned(
 
   if (plan.interleaved.length > 0) {
     notes.push(
-      `pinned environment(s) ${plan.interleaved.map((name) => `"${name}"`).join(", ")} have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins`,
+      `pinned environment(s) ${plan.interleaved.map((name) => `"${name}"`).join(", ")} have no pinned declaration in the settings file; ` +
+        "they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins",
     );
   }
   const overflow =
@@ -344,7 +339,8 @@ export async function planPinned(
       variables: () => ({ environmentId: idOf(name), position: rank }),
       drift: [
         index === 0
-          ? `environments.pinned: the declared pin order is [${desired.join(", ")}] but the live pinned order is [${plan.liveOrder.join(", ")}]; apply will reorder the pins so the declared ones lead in declaration order`
+          ? `environments.pinned: the declared pin order is [${desired.join(", ")}] but the live pinned order is ` +
+            `[${plan.liveOrder.join(", ")}]; apply will reorder the pins so the declared ones lead in declaration order`
           : `environments.pinned: apply will also move "${name}" to position ${rank} in that reordering`,
       ],
       change: `moved pinned environment "${name}" to position ${rank}`,

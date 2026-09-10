@@ -54,12 +54,11 @@ export function parseRepoSlug(raw: string): RepoRef | null {
  * Merge central and remote target lists. A central file wins over a
  * repos-input entry for the same repository (noticed, not an error).
  * The notice renders the repository slug through `display` so a redacted
- * target's placeholder is what lands in the log. Origins are operator-authored
- * paths and input names; the remote origin already reads as a generic noun
- * phrase (`the "repos" input`, `repos: "*" discovery`), but a CENTRAL origin is
- * a repos-dir FILE PATH that can embed the real repository name - so for a
- * redacted target it is rendered generically ("a repos-dir file") to avoid
- * leaking the name right next to its placeholder.
+ * target's placeholder is what lands in the log. The remote origin already
+ * reads as a generic noun phrase (`the "repos" input`, `repos: "*"
+ * discovery`), but a CENTRAL origin is a repos-dir FILE PATH that can embed
+ * the real repository name - so for a redacted target it is rendered
+ * generically ("a repos-dir file") to keep the name away from its placeholder.
  */
 export function dedupeTargets(
   central: CentralTarget[],

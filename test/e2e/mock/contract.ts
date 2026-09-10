@@ -83,14 +83,12 @@ export interface CorruptOption {
 
 /**
  * A transport-level fault applied to the first `times` (default 1) requests
- * matching `key` (a "section.role" endpoint or a CORE_FAULT_KEYS core route).
- * Mirrors the Fault schema; the fault barrier in runPipeline (and the core-route
- * hooks) turn each kind into its wire behavior. Every kind is retried by the
- * client (throttled 403/429 via the throttling path, drops and 5xx via the retry
- * plugin), so `times: 1` is a transient the run recovers from and `times` >= 3
- * (1 + MAX_RETRIES) exhausts the retries and surfaces as a hard failure;
- * "always" faults every matching request (CorruptOption's counting), for a
- * route that must fail however often the run retries or revisits it.
+ * matching `key` (a "section.role" endpoint or a CORE_FAULT_KEYS core route);
+ * the fault barrier in runPipeline and the core-route hooks turn each kind
+ * into its wire behavior. The client retries every kind (403/429 via the
+ * throttling path, drops and 5xx via the retry plugin), so `times: 1` is a
+ * transient the run recovers from and `times` >= 3 (1 + MAX_RETRIES) surfaces
+ * as a hard failure; "always" faults every matching request.
  */
 export interface FaultOption {
   key: string;
@@ -124,19 +122,17 @@ export interface PipelineRunState {
    * The redaction visibility probe's window, per slug, so its denial never arms
    * the repository-section barrier while a LATER repository.get still does. The
    * probe is a `repository.get` issued during visibility resolution, before the
-   * target loop. Two facts bound its window (both mutated in place):
-   *   - `probeGetFaults`: how many of a slug's repository.get attempts FAULTED at
-   *     the transport barrier. The probe retries a fault up to the client's
-   *     budget (1 + MAX_RETRIES); once that many faults have fired, the probe has
-   *     given up, so the next repository.get is a section read, not a retry.
-   *   - `probeGetDelivered`: whether a repository.get for the slug has already
-   *     DELIVERED a real response (granted or denied). The probe delivers at most
-   *     once; any repository.get after that is the section's own check-mode read.
-   * A repository.get is the probe iff a probe is expected for the slug, none has
-   * delivered yet, and the fault budget is not spent - so an all-faulting probe
-   * cannot keep the exemption open past its retries.
+   * target loop; a repository.get is the probe iff one is expected for the slug,
+   * none has delivered yet (`probeGetDelivered`), and the fault budget is not
+   * spent: this counts a slug's repository.get attempts that FAULTED at the
+   * transport barrier, and the probe retries up to 1 + MAX_RETRIES of them.
    */
   probeGetFaults: Map<string, number>;
+  /**
+   * Slugs whose repository.get has DELIVERED a real response (granted or
+   * denied). The probe delivers at most once, so any later repository.get is
+   * the section's own check-mode read. Both fields are mutated in place.
+   */
   probeGetDelivered: Set<string>;
 }
 
@@ -230,14 +226,13 @@ export function violationFor(baseLog: LoggedRequest): (message: string) => Pipel
 
 /**
  * Render a logged request to the string the runner's expectations match
- * against. The mock logs pathname and query separately, so both match rules
+ * against. Pathname and query are logged separately so both match rules
  * compose here: mutations/never match a "METHOD /pathname" PREFIX (query
- * omitted), and requests_contain matches a substring of
- * "METHOD /pathname?query". A GraphQL request renders as "GRAPHQL <opName>" -
- * every GraphQL call shares POST /graphql, so the operation name is the only
- * spelling that lets a scenario pin one operation. Lives beside LoggedRequest
- * so every consumer (the runner's assertions, the apply-idempotence proof)
- * renders the log one way.
+ * omitted), requests_contain a substring of "METHOD /pathname?query". A
+ * GraphQL request renders as "GRAPHQL <opName>": every GraphQL call shares
+ * POST /graphql, so the operation name is the only spelling that pins one
+ * operation. Every consumer (the runner's assertions, the apply-idempotence
+ * proof) renders the log through here.
  */
 export function renderRequest(request: LoggedRequest, includeQuery: boolean): string {
   if (request.graphql) {

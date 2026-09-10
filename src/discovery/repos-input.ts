@@ -39,12 +39,16 @@ export function parseReposInput(
     const parts: string[] = [];
     if (invalid.size > 0) {
       parts.push(
-        `${[...invalid].map((item) => `"${item}"`).join(", ")} ${invalid.size === 1 ? "is not an owner/name slug" : "are not owner/name slugs"} (use values like "octocat/hello-world", comma- or newline-separated)`,
+        `${[...invalid].map((item) => `"${item}"`).join(", ")} ` +
+          `${invalid.size === 1 ? "is not an owner/name slug" : "are not owner/name slugs"} ` +
+          '(use values like "octocat/hello-world", comma- or newline-separated)',
       );
     }
     if (duplicated.size > 0) {
       parts.push(
-        `${[...duplicated].map((item) => `"${item}"`).join(", ")} ${duplicated.size === 1 ? "is" : "are"} listed more than once (keep exactly one entry per repository)`,
+        `${[...duplicated].map((item) => `"${item}"`).join(", ")} ` +
+          `${duplicated.size === 1 ? "is" : "are"} listed more than once ` +
+          "(keep exactly one entry per repository)",
       );
     }
     return {

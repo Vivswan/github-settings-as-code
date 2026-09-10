@@ -97,7 +97,8 @@ jobs:
               echo "::error::@octokit/types@latest fires upstream-gap tripwires; run bun .github/scripts/graduate-upstream-gaps.ts for these files:"
               echo "$tripped"
             else
-              echo "::error::typecheck against @octokit/types@latest failed outside the upstream-gap tripwires; a types major may have broken the build (see log above)"
+              echo "::error::typecheck against @octokit/types@latest failed outside the upstream-gap tripwires;" \
+                "a types major may have broken the build (see log above)"
             fi
             exit 1
           fi

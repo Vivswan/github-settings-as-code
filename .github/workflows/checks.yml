@@ -36,17 +36,13 @@ jobs:
   # The freshness tripwire behind the single-tag scheme's boundary (the
   # anchor half lives in update-release-pr.yml): last-release-sha in
   # release-please-config.json must be the newest release merge on main or
-  # its parent - version tags live on packaged children that are NOT on
-  # main, so release-please cannot find the boundary by tag, and a lost
-  # anchor would have every release PR refresh computed from a stale one.
-  # Gating here parks the release job (it needs all-green) BEFORE
-  # release-please can build a garbage release PR, loudly on every push.
-  # The skip lives on the STEPS, per side: the main-side check judges only
-  # main (a dispatch against another branch would judge that branch's
-  # config, and the release PR deliberately carries the anchored NEXT
-  # boundary, which the main-side check would call stale - the PR-side
-  # anchor-check below validates that instead), and all-green treats a
-  # skipped needed job as failure.
+  # its parent - version tags live off main, so a lost anchor would have
+  # every release PR refresh computed from a stale boundary. Gating here
+  # parks the release job (it needs all-green) before release-please can
+  # build a garbage release PR. The skip lives on the STEPS, per side:
+  # all-green treats a skipped needed job as failure, and the main-side
+  # check must judge only main (the release PR deliberately carries the
+  # anchored NEXT boundary, which anchor-check below validates instead).
   boundary-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5

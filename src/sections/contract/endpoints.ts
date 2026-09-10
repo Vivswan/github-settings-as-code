@@ -26,13 +26,12 @@ type GetRoute = Extract<Route, `GET ${string}`>;
 /**
  * One REST endpoint a section may call. `route` is octokit's canonical
  * "METHOD /path/{param}" string. `statuses` maps each HTTP status the handler
- * treats as a normal (non-throwing) outcome to a short plain-prose meaning;
- * the tolerable 4xx keys are the tolerated errors (see toleratedStatuses:
- * 401 and 429 never are, nor is any 5xx, being transport failures), and the
- * meanings are consumable by the e2e mock and its violation messages.
- * Handlers pass these declarations to the request helpers, which build the
- * concrete path via expand(), so a section can never call a path it has not
- * declared. Three arms: a plain read, a write with its recurrence, or a read gated at write.
+ * treats as a normal (non-throwing) outcome to a plain-prose meaning the e2e
+ * mock's violation messages reuse; its tolerable 4xx keys are the tolerated
+ * errors (toleratedStatuses; 401, 429, and 5xx are transport failures, never
+ * tolerated). The request helpers build paths from these declarations via
+ * expand(), so a section can never call a path it has not declared. Three
+ * arms: a plain read, a write with its recurrence, or a read gated at write.
  */
 export type EndpointDecl =
   | (EndpointDeclFields & {

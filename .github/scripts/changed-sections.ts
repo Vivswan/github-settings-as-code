@@ -53,12 +53,11 @@ const SECTION_KEY_SET: ReadonlySet<string> = new Set(SECTION_KEYS);
  * Path prefixes/files that select every section: the shared engine, transport,
  * action layer, discovery, reporting, the io seam, the entrypoint and schema,
  * and the e2e harness itself (a harness change can change every scenario).
- * `lib/` is deliberately NOT here: the only committed file under it is the
- * generated settings.schema.json, which carries no runnable code and mirrors
- * a `src/schema.ts` change when one exists; the schema-check job gates schema
- * drift on its own. A unit test checks every top-level `src/` entry other
- * than `sections/` is listed, so a new top-level module cannot be silently
- * skipped.
+ * `lib/` is deliberately NOT here: its only committed file is the generated
+ * settings.schema.json, which mirrors a `src/schema.ts` change and is gated
+ * by the schema-check job on its own. A unit test checks every top-level
+ * `src/` entry other than `sections/` is listed, so a new module cannot be
+ * silently skipped.
  */
 export const ALL_SELECTING_PREFIXES = [
   // The contract's layered modules: every section is written against them,
@@ -301,13 +300,12 @@ function siblingResolution(sharedPath: string): string {
 /**
  * Resolve one src/sections/ path (below the ALL_SELECTING_PREFIXES check, so
  * src/sections/contract/ never reaches here) to the sections it selects:
- * - src/sections/<key>/... (the section key spelled verbatim) selects <key>,
- *   whatever the file under it is - module, mock, schema, test, or scenario;
+ * - src/sections/<key>/... (the key spelled verbatim) selects <key>, whatever
+ *   the file under it is - module, mock, schema, test, or scenario;
  * - src/sections/shared/<file> fans out through the derived import graph;
  * - the flat files select all (registry.ts) or none (docs-registry.ts).
  * Anything else throws: a silently ignored section path would let a PR skip
- * the very scenarios its change needs, so an unrecognized file must either
- * get a rule or move under a recognized directory.
+ * the very scenarios its change needs.
  */
 function sectionsForSectionsPath(
   { path, deleted }: ChangedFile,
@@ -364,11 +362,9 @@ function sectionsForSectionsPath(
  * every src/sections/ path is still resolved through sectionsForSectionsPath,
  * which throws on an unrecognized one - a stale flat path cannot ride along
  * unnoticed behind a cross-cutting change. Files that touch nothing
- * settings-related are ignored, so a purely docs/config PR yields "none".
- * `lib/` contributes no section either - the only committed file under it is
- * the generated settings.schema.json, which the schema-check job gates on its
- * own - so a lib-only diff selects "none". `sharedFanOut` is the derived
- * map to consult, the real tree's unless a test hands in a synthetic one.
+ * settings-related (docs, config, `lib/`) are ignored, so such a PR yields
+ * "none". `sharedFanOut` is the derived map to consult, the real tree's
+ * unless a test hands in a synthetic one.
  */
 export function sectionsForFiles(
   files: readonly ChangedFile[],

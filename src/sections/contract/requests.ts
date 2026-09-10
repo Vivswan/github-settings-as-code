@@ -22,14 +22,13 @@ import type { SectionContext, SectionMeta } from "./module.js";
 
 /**
  * The trailing options argument for a request helper, whose optionality
- * depends on the route. When the route has no path params (owner/repo
- * aside), the options object is optional and `params` is forbidden. When
- * the route has params, the options object is REQUIRED and must carry
- * `params` with exactly the route's keys. Modeling this as a rest tuple
- * (not an optional object param) is what makes omitting the whole argument
- * a compile error for a route that needs params - the `[never]` trick alone
- * cannot forbid an omitted argument. `Extra` carries per-helper extras
- * (query/payload/tolerate/accept).
+ * depends on the route. With no path params (owner/repo aside) the options
+ * object is optional and `params` is forbidden; with params it is REQUIRED
+ * and must carry `params` with exactly the route's keys. Modeling this as a
+ * rest tuple (not an optional object param) is what makes omitting the whole
+ * argument a compile error for a route that needs params - the `[never]`
+ * trick alone cannot forbid an omitted argument. `Extra` carries per-helper
+ * extras (query/payload/tolerate/accept).
  */
 export type OptsArg<E extends EndpointDecl, Extra> = [PathParams<E["route"]>] extends [never]
   ? [opts?: { params?: undefined } & Extra]
@@ -354,20 +353,13 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
 
 /**
  * Collect every node of a GraphQL connection, the sibling of listAll: the
- * cursor loop lives here so paging behavior cannot drift between sections.
- * The operation must declare its `connection` (the type requires it), whose
- * `path` walks from the data root to the connection field selecting
- * `nodes { ... }` and `pageInfo { hasNextPage endCursor }`; the loop owns the
- * `$cursor` variable, passing null first and the previous page's endCursor
- * after, so the caller's variables must not carry one. The operation's
- * DECLARED error outcomes are tolerated exactly as tryCallGraphql tolerates
- * them, coming back as { error } for the caller to interpret (the
- * environments pins read declares NOT_FOUND, so a fine-grained denial reads
- * as an absent resource - the probeAbsent posture) - but only on the FIRST
- * page: absence describes the whole resource, and a tolerated type arriving
- * mid-walk means the connection vanished under the loop, a broken walk that
- * classifies through throwFor like any other error. An operation declaring
- * no error outcomes always resolves { items }.
+ * cursor loop lives here so paging cannot drift between sections. The loop
+ * owns `$cursor` (null first, then each page's endCursor) and walks the
+ * declared `connection.path` to the nodes. The operation's DECLARED error
+ * outcomes come back as { error }, as tryCallGraphql tolerates them (the
+ * pins read declares NOT_FOUND, so a fine-grained denial reads as absence),
+ * but only on the FIRST page: absence describes the whole resource, and a
+ * tolerated type mid-walk means the connection vanished under the loop.
  */
 export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
   ctx: SectionContext,

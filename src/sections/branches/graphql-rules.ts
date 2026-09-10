@@ -326,14 +326,12 @@ export function bypassActorStrings(node: RuleNode): string[] {
 /**
  * Project a live rule node back into the classic snake_case vocabulary, the
  * inverse of translateWildcardProtection: check mode diffs declared keys
- * against this view, and the e2e state test proves the mock's projection of
- * REST state round-trips through it. The two structured keys collapse to
- * null when their umbrella boolean is off - the declared PUT vocabulary's
- * spelling of "off". The real REST GET OMITS an off control entirely
- * (probe-verified on a GraphQL-created minimal rule) rather than nulling
- * it; subsetDiff reads null, absent, and "" as the same empty value, so
- * the two spellings compare identically and null is kept here for the
- * clearer drift message.
+ * against this view, and the e2e state test proves the mock's REST-state
+ * projection round-trips through it. The two structured keys collapse to
+ * null when their umbrella boolean is off (the PUT vocabulary's spelling);
+ * the real REST GET omits an off control instead (probe-verified), but
+ * subsetDiff reads null, absent, and "" as one empty value, so null stays
+ * for the clearer drift message.
  */
 export function classicViewOfRule(node: RuleNode): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -448,15 +446,13 @@ function sameNamesFold(declared: readonly string[], live: readonly string[]): bo
 type MutationPayloadKey = "createBranchProtectionRule" | "updateBranchProtectionRule";
 
 /**
- * The silent-drop check and its siblings: GitHub accepts
- * requiredDeploymentEnvironments names of environments that do not exist and
- * DROPS them without failing the mutation (verified live), so the mutation
- * payload's re-read is compared against the declaration - a dropped name
- * fails the run loudly with the fix, and any other divergence (the re-read
- * is authoritative) fails with its own message rather than reporting the
- * apply as converged. Names compare case-insensitively (GitHub environment
- * names are). The environments section runs before this one, so environments
- * declared in the same settings file exist by the time this check runs.
+ * GitHub accepts requiredDeploymentEnvironments names of environments that
+ * do not exist and DROPS them without failing the mutation (verified live),
+ * so the payload's re-read is compared against the declaration: a dropped
+ * name fails the run with the fix, and any other divergence (the re-read is
+ * authoritative) fails with its own message instead of reporting the apply
+ * as converged. Names compare case-insensitively (GitHub's are). The
+ * environments section runs first, so same-file environments exist here.
  */
 function verifyDeploymentReadback(
   entryName: string,
@@ -489,16 +485,18 @@ function verifyDeploymentReadback(
   const dropped = declared.environments.filter((name) => !echoedFold.has(name.toLowerCase()));
   if (dropped.length > 0) {
     throw new Error(
-      `branches[${entryName}].protection.required_deployments: GitHub silently dropped [${dropped.join(
-        ", ",
-      )}] from the required deployment environments because no environment with that name exists on the repository. Declare the environment in this settings file's environments: section (it applies before branches), or create it on the repository first`,
+      `branches[${entryName}].protection.required_deployments: GitHub silently dropped [${dropped.join(", ")}] ` +
+        "from the required deployment environments because no environment with that name exists on the repository. " +
+        "Declare the environment in this settings file's environments: section (it applies before branches), " +
+        "or create it on the repository first",
     );
   }
   if (rule.requiresDeployments !== true || !sameNamesFold(declared.environments, echoed)) {
     throw new Error(
-      `branches[${entryName}].protection.required_deployments: the settings file requires deployments to [${declared.environments.join(
-        ", ",
-      )}] but after the mutation the rule ${rule.requiresDeployments === true ? `requires [${echoed.join(", ")}]` : "does not require deployments"}; re-run the workflow, and report this if it persists`,
+      `branches[${entryName}].protection.required_deployments: the settings file requires deployments to ` +
+        `[${declared.environments.join(", ")}] but after the mutation the rule ` +
+        `${rule.requiresDeployments === true ? `requires [${echoed.join(", ")}]` : "does not require deployments"}; ` +
+        "re-run the workflow, and report this if it persists",
     );
   }
 }
