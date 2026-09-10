@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: >-
     classic branch protection + required-signatures sub-endpoint + app-by-slug actor lookup +
     GraphQL BranchProtectionRules + BranchProtectionRepository + BranchProtectionActorUser +

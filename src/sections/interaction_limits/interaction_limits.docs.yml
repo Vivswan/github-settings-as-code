@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: interaction-limits + pulls creation-cap/bypass-list
   notes: >-
     re-arms the self-expiring limit every apply run; `null` clears it (base limit only); a 409

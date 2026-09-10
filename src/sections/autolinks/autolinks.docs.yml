@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: autolinks CRUD
   notes: immutable upstream, so changed entries are replaced
 coverage:

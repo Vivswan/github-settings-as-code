@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: repo rulesets CRUD
   notes: >-
     branch, tag, and push targets; short ref names auto-prefixed (`staging` ->

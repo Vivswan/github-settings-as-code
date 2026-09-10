@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: GET/PATCH properties/values; probes GET /orgs/{owner}
   notes: >-
     values of org-defined properties (definitions are org-scoped); org repos only, skipped with a
