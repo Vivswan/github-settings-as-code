@@ -1,0 +1,50 @@
+# Configuration for the typos spell checker (crate-ci/typos), which the fleet
+# CI runs as a blocking gate. typos discovers this file on its own. Every entry
+# below says why the flagged token is not a typo; a token with no entry here is
+# one the gate should keep catching.
+
+[files]
+extend-exclude = [
+  # release-please output: short commit SHAs such as ba04830 read as words.
+  "CHANGELOG.md",
+]
+
+[default]
+extend-ignore-re = [
+  # the hyphenated prefix in mis-route, mis-shaped, mis-scoped, mis-diff is a
+  # word-forming prefix, not a truncated "miss".
+  '\bmis-',
+  # regex stems in test/docs/claims.ts (delet\w*, preserv\w*) are cut short on
+  # purpose so one stem matches every inflection.
+  '(delet|preserv)\\w\*',
+]
+
+[default.extend-identifiers]
+# HTTP verbs kept upper-case inside an English inflection; typos splits PATCHed
+# into PATC + Hed and DELETEd into DELET + Ed.
+PATCHed = "PATCHed"
+DELETEd = "DELETEd"
+DELETEs = "DELETEs"
+DELETEing = "DELETEing"
+# the class age-encryption exports, and the variable that holds one.
+Encrypter = "Encrypter"
+encrypter = "encrypter"
+# fixture GraphQL node id in test/e2e/mock/graphql-pipeline.test.ts; the
+# camel-case split yields "Onot".
+R_kgDOnotOurs = "R_kgDOnotOurs"
+
+[default.extend-words]
+# valid spelling (the dictionary prefers "unparsable"); the harness's
+# UNPARSEABLE_YAML fixture pool, its comments, and the report wording use it.
+unparseable = "unparseable"
+# "look-alikes": the near-miss fixtures in test/scripts/generated-regions.test.ts
+# and test/docs/guides.test.ts.
+alikes = "alikes"
+# Deliberate misspellings that are negative test input. Each must stay
+# misspelled or its test stops exercising the case it covers.
+permision = "permision"     # unrecognized entry key, rejected: validate.test.ts, the collaborators scenario, the Probot migration guide's example
+entires = "entires"         # unrecognized list-section key, rejected: validate, environments and published-schema tests, the fuzz generator
+enforcemant = "enforcemant" # phantom ruleset key: drift and phantom-key note pinned in rulesets.test.ts
+vaule = "vaule"             # phantom variable key: drift and phantom-key note pinned in actions_variables.test.ts
+detele = "detele"           # unknown _undeclared policy value, rejected: validate.test.ts, the fuzz generator
+reslut = "reslut"           # output name the Io port rejects at compile time (@ts-expect-error): test/action/io.test.ts
