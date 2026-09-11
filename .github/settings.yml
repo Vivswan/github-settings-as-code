@@ -1,8 +1,8 @@
 ---
 # This repository's OWN settings. Two writers are built to apply the SAME six-layer
-# merge of this file with the fleet layers: Vivswan/repo-platform's central
+# merge of this file with the fleet layers: the fleet's central
 # settings-repos heal, and this repo's own apply-settings.yml, the hook for
-# ci.yml's post-green slot: it renders the merge with repo-platform's
+# ci.yml's post-green slot: it renders the merge with the fleet's
 # scripts and applies it with the action at HEAD (dogfooding,
 # APPLY_SETTING_TOKEN).
 # Rendered once, repo-owned: template sync never rewrites it. Fleet defaults
