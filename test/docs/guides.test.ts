@@ -15,6 +15,7 @@ import { join, posix } from "node:path";
 import { DecodingMode, decodeHTML } from "entities";
 import { parse as parseYaml } from "yaml";
 import { MERGE_REJECTED_INPUTS } from "../../src/action/inputs.js";
+import { foldLayers } from "../../src/action/layers.js";
 import { type Layer, mergeLayers, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SECTION_KEYS } from "../../src/schema.js";
@@ -286,6 +287,125 @@ function headingSlugs(markdown: string, source: string): Set<string> {
     slugs.add(slug);
   }
   return slugs;
+}
+
+/** One row of the layering guide's refusal tables, with the layer(s) that trigger it. */
+interface RefusalRow {
+  /** Which gate the table documents, from its header's second cell. */
+  readonly gate: "validation" | "fold";
+  /** The first cell, the row's name in a failure. */
+  readonly has: string;
+  /** The refused layer(s), flow YAML, one document each. */
+  readonly inputs: string[];
+  /** The message the second cell quotes, whole. */
+  readonly quoted: string;
+}
+
+/**
+ * The cells of one GFM table row: the outer pipes are optional, so a row
+ * written without them (or with only one) is still a row and still pinned.
+ */
+function tableCells(line: string): string[] {
+  let body = line.trim();
+  if (body.startsWith("|")) {
+    body = body.slice(1);
+  }
+  if (body.endsWith("|")) {
+    body = body.slice(0, -1);
+  }
+  return body.split("|").map((cell) => cell.trim());
+}
+
+/** A GFM delimiter row (`|---|:--:|`), the one line that opens a table after its header. */
+function isDelimiterRow(line: string | undefined): boolean {
+  return line !== undefined && /^\s*\|?(\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$/.test(line);
+}
+
+/**
+ * The rows of the layering guide's two refusal tables. The page is the single
+ * source: a row's first cell ends with the layer that triggers it, as one code
+ * span in parentheses (or several joined by "or" when the page names
+ * alternatives), and its second cell quotes the message the engine emits, in
+ * one code span. Rows are recognized more permissively than GFM renders them:
+ * a header line followed by a delimiter row opens a table (the delimiter's
+ * cell count is not checked, so `|---|` under a two-cell header opens one here
+ * and renders as prose), every non-blank line after that is a row (outer pipes
+ * optional; a list item shaped like a row counts), and a blank line closes it.
+ * Every divergence adds a pin, never loses one. A row missing its input or its
+ * message fails here by name, so a new row cannot land unpinned.
+ */
+function refusalRows(section: readonly string[], source: string): RefusalRow[] {
+  const GATES: Record<string, RefusalRow["gate"]> = {
+    "Caught by": "validation",
+    "The fold says": "fold",
+  };
+  const rows: RefusalRow[] = [];
+  let gate: RefusalRow["gate"] | null = null;
+  for (let index = 0; index < section.length; index++) {
+    const line = section[index] ?? "";
+    if (line.trim() === "") {
+      gate = null;
+      continue;
+    }
+    if (gate === null) {
+      if (!line.includes("|")) {
+        continue; // prose between the tables
+      }
+      // A piped line opens a table only when the delimiter row follows it;
+      // one that renders as prose is an authoring slip, not a row to skip.
+      if (!isDelimiterRow(section[index + 1])) {
+        throw new Error(`${source}: refusal table row outside a known table: ${line.trim()}`);
+      }
+      const header = tableCells(line);
+      if (header.length !== 2) {
+        throw new Error(`${source}: refusal table header is not two cells: ${line.trim()}`);
+      }
+      const [has = "", says = ""] = header;
+      gate = has === "The layer has" ? (GATES[says] ?? null) : null;
+      if (gate === null) {
+        throw new Error(`${source}: unknown refusal table header "${line.trim()}"`);
+      }
+      index++; // the delimiter row, the only line a table skips
+      continue;
+    }
+    const cells = tableCells(line);
+    if (cells.length !== 2) {
+      throw new Error(`${source}: refusal table row is not two cells: ${line.trim()}`);
+    }
+    const [has = "", says = ""] = cells;
+    const trigger = has.match(/\((`[^`]+`(?: or `[^`]+`)*)\)$/);
+    if (!trigger) {
+      throw new Error(
+        `${source}: refusal row "${has}" does not end with its layer in parentheses as a code span (or code spans joined by "or"), so it cannot be reproduced`,
+      );
+    }
+    const quoted = says.match(/^(?:Validation: )?`([^`]+)`$/);
+    if (!quoted) {
+      throw new Error(`${source}: refusal row "${has}" does not quote one message in a code span`);
+    }
+    rows.push({
+      gate,
+      has,
+      inputs: [...(trigger[1] ?? "").matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? ""),
+      quoted: quoted[1] ?? "",
+    });
+  }
+  return rows;
+}
+
+/**
+ * The validator's wrapper around its problem list. The page quotes the problem
+ * alone ("with the same messages a standalone file gets"); holding the whole
+ * error to the wrapper around ONE quoted problem proves the row's layer raises
+ * that problem and nothing else.
+ */
+function malformedSectionEntries(layer: string, problem: string): string {
+  return (
+    `${layer} has malformed section entries: ${problem}. Fix these values in ` +
+    `the settings file (only the named keys are validated; extra fields pass through, except ` +
+    `in closed sections and strict nested objects like actions.cache, which reject ` +
+    `unrecognized keys)`
+  );
 }
 
 describe("docs/ guide pages", () => {
@@ -619,6 +739,53 @@ describe("docs/ guide pages", () => {
     expect(new Set(named)).toEqual(new Set(MERGE_REJECTED_INPUTS));
   });
 
+  describe("the layering guide's refusal tables quote the messages the merge step emits", () => {
+    // Each row's layer runs through the merge step's own gates in the page's
+    // order (per-layer validation, then the fold), and the row's quoted
+    // message must equal the whole error, so neither table can drift from the
+    // engine and no row can quote a message its own layer does not raise.
+    const PAGE = "docs/operate/layering.md";
+    const section = sectionLines(
+      readFileSync(join(DOCS, "operate", "layering.md"), "utf8"),
+      "Refusals",
+      PAGE,
+    );
+    // The page names the refused layer in the fold's prefix it quotes
+    // (`layer "<name>": ...`); every row's layer is folded under that name.
+    const prefix = section.join("\n").match(/`layer "([^"`]+)": \.\.\.`/);
+    if (!prefix) {
+      throw new Error(
+        `${PAGE}'s Refusals section no longer quotes the fold's \`layer "<name>": ...\` prefix`,
+      );
+    }
+    const layerName = prefix[1] ?? "";
+    const rows = refusalRows(section, PAGE);
+
+    test("both tables are present and populated", () => {
+      expect(rows.filter((row) => row.gate === "validation").length).toBeGreaterThan(0);
+      expect(rows.filter((row) => row.gate === "fold").length).toBeGreaterThan(0);
+    });
+
+    test.each(rows.map((row) => [row.has, row] as const))("%s", (_has, row) => {
+      for (const input of row.inputs) {
+        const doc = parseYaml(input);
+        const expected =
+          row.gate === "validation"
+            ? malformedSectionEntries(layerName, row.quoted)
+            : `layer "${layerName}": ${row.quoted}`;
+        const folded = foldLayers([{ name: layerName, doc }], "merged", "merge", silentIo());
+        expect("error" in folded ? folded.error : null, `layer ${input}`).toBe(expected);
+        if (row.gate === "validation") {
+          // "with the same messages a standalone file gets"
+          const standalone = validateSettingsDoc(doc, layerName, new Set(), silentIo());
+          expect("error" in standalone ? standalone.error : null, `standalone ${input}`).toBe(
+            expected,
+          );
+        }
+      }
+    });
+  });
+
   test("the v2-to-v3 guide quotes the complete wrapper-key rename error the validator emits", () => {
     // The guide's text fence is the reader's search string, so it is held to
     // the error the validator emits for a v2 wrapper, not to a source substring.
@@ -864,6 +1031,86 @@ describe("links-leaving-docs guard (mutation checks)", () => {
     expect(await linksLeavingDocs("[up and back](../../docs/start/x.md)", "start/y.md")).toEqual([
       "docs/start/y.md:1: (../../docs/start/x.md) leaves docs/",
     ]);
+  });
+});
+
+describe("refusal table parser (mutation checks)", () => {
+  // Each mutation is a realistic authoring slip on the layering guide's
+  // refusal tables; the parser must pin or reject every one, never skip a row.
+  const header = ["| The layer has | The fold says |", "|---|---|"];
+  const row = (has: string, says = "`the message`"): string => `| ${has} | ${says} |`;
+
+  test("an indented row is parsed as a row, not skipped", () => {
+    const rows = refusalRows([...header, `   ${row("Indented (`labels: oops`)")}`], "page");
+    expect(rows.map((parsed) => parsed.inputs)).toEqual([["labels: oops"]]);
+  });
+
+  test("a row without its outer pipes is parsed as a row, not prose", () => {
+    // GFM renders a row with no leading pipe (or no trailing one) as a row,
+    // so a last row appended that way must be pinned rather than skipped.
+    const unpiped = "New refusal (`_layering: union`) | `WRONG MESSAGE` |";
+    const bare = "Bare (`a: 1`) | `also wrong`";
+    const rows = refusalRows([...header, row("First (`labels: oops`)"), unpiped, bare], "page");
+    expect(rows.map((parsed) => [parsed.inputs, parsed.quoted])).toEqual([
+      [["labels: oops"], "the message"],
+      [["_layering: union"], "WRONG MESSAGE"],
+      [["a: 1"], "also wrong"],
+    ]);
+  });
+
+  test("a blank line closes a table; the next table needs its own header", () => {
+    const rows = refusalRows(
+      [...header, row("A (`a: 1`)"), "", "Prose with no pipes.", "", ...header, row("B (`b: 2`)")],
+      "page",
+    );
+    expect(rows.map((parsed) => parsed.inputs)).toEqual([["a: 1"], ["b: 2"]]);
+  });
+
+  test("two alternatives joined by or are both inputs", () => {
+    const rows = refusalRows([...header, row("Either (`a: 1` or `b: 2`)")], "page");
+    expect(rows.map((parsed) => parsed.inputs)).toEqual([["a: 1", "b: 2"]]);
+  });
+
+  test.each<[string, string[], RegExp]>([
+    [
+      "a row without its layer in parentheses",
+      [...header, row("No input here")],
+      /does not end with its layer/,
+    ],
+    [
+      "a data row whose first cell is a dash run",
+      [...header, row("---", "`hidden message`")],
+      /refusal row "---" does not end with its layer/,
+    ],
+    [
+      "a row whose message is prose, not one code span",
+      [...header, row("X (`a: 1`)", "prose")],
+      /does not quote one message/,
+    ],
+    ["a row with three cells", [...header, "| a | b | c |"], /is not two cells/],
+    [
+      "a prose line run into the table without a blank line",
+      [...header, row("X (`a: 1`)"), "A paragraph GFM reads as a one-cell row."],
+      /is not two cells/,
+    ],
+    [
+      "a table under an unknown header",
+      ["| The layer has | Something |", "|---|---|"],
+      /unknown refusal table header/,
+    ],
+    [
+      "a table whose header is not two cells",
+      ["| The layer has | The fold says | Extra |", "|---|---|---|"],
+      /header is not two cells/,
+    ],
+    ["a row before any header", [row("X (`a: 1`)")], /outside a known table/],
+    [
+      "a piped line with no delimiter row after it (renders as prose)",
+      ["| The layer has | The fold says |", row("X (`a: 1`)")],
+      /outside a known table/,
+    ],
+  ])("%s is rejected by name", (_case, section, error) => {
+    expect(() => refusalRows(section, "page")).toThrow(error);
   });
 });
 
