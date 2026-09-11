@@ -1,12 +1,12 @@
 /**
  * CI structural contract: the single required check `all-green` must `needs:`
  * every other job in ci.yml. Branch protection points at all-green, so a new
- * job it forgets would pass CI while never being required. Jobs that
- * themselves need all-green (the release job) are exempt: they run downstream
- * of the gate and cannot also be inside it. Informational jobs are exempt on
- * BOTH sides of the comparison: template sync flips ci.yml independently of
- * this test, so it must pass whether the job is still in the needs list or
- * already out of it.
+ * job it forgets would pass CI while never being required. Jobs that need
+ * all-green, directly or through another job (the release job and everything
+ * that needs it), are exempt: they run downstream of the gate and cannot also
+ * be inside it. Informational jobs are exempt on BOTH sides of the comparison:
+ * template sync flips ci.yml independently of this test, so it must pass
+ * whether the job is still in the needs list or already out of it.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -32,6 +32,22 @@ function needsOf(job: { needs?: string | string[] } | undefined): string[] {
   return Array.isArray(raw) ? raw : [raw];
 }
 
+/** Every job reachable from `gate` by following `needs` edges away from it, however many hops. */
+function downstreamOf(jobs: Workflow["jobs"], gate: string): Set<string> {
+  const downstream = new Set<string>();
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [name, job] of Object.entries(jobs)) {
+      if (downstream.has(name)) continue;
+      if (needsOf(job).some((dep) => dep === gate || downstream.has(dep))) {
+        downstream.add(name);
+        grew = true;
+      }
+    }
+  }
+  return downstream;
+}
+
 describe("ci.yml all-green gate", () => {
   const ci = parseYaml(
     readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8"),
@@ -40,11 +56,9 @@ describe("ci.yml all-green gate", () => {
   test("all-green needs every job that is not downstream of it", () => {
     const jobs = Object.keys(ci.jobs);
     expect(jobs, "ci.yml has no all-green job").toContain("all-green");
-    const downstream = jobs.filter((name) => needsOf(ci.jobs[name]).includes("all-green"));
+    const downstream = downstreamOf(ci.jobs, "all-green");
     const others = jobs
-      .filter(
-        (name) => name !== "all-green" && !downstream.includes(name) && !INFORMATIONAL.has(name),
-      )
+      .filter((name) => name !== "all-green" && !downstream.has(name) && !INFORMATIONAL.has(name))
       .sort();
     const needs = needsOf(ci.jobs["all-green"])
       .filter((name) => !INFORMATIONAL.has(name))
