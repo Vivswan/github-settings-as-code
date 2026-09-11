@@ -69,14 +69,12 @@ export interface RepoRunOptions {
   requiredSections: ReadonlySet<SectionKey>;
   onlySections: ReadonlySet<SectionKey>;
   /**
-   * Provenance of one section's secret-field values: which source DOCUMENT
-   * declared the section. Omitted, every value is "operator" (single-repo
-   * settings, central files, and the defaults document are operator-authored).
-   * The multi-repo remote flow passes targetSecretSource(), built from the
-   * target-fetched document, so a target-declared section's references are
-   * refused.
+   * Who authored the settings document. Omitted, "operator" (the single-repo
+   * settings file, central files, and the defaults document are all
+   * operator-authored). The multi-repo flow passes "target" for a target
+   * repository's own settings.yml, so its secret references are refused.
    */
-  secretSource?: (section: SectionKey) => SettingsSource;
+  secretSource?: SettingsSource;
   /**
    * The environment secret references resolve from in apply mode. Tests
    * inject a record; production omits it and process.env applies.
@@ -250,11 +248,7 @@ export async function runForRepo(
   // its references must not fail the run) and validate syntax and provenance
   // in BOTH modes, before the preflight barrier. No environment is read here:
   // check mode and preflight see syntax only.
-  const secretValues = collectSecretValues(
-    settings,
-    active,
-    opts.secretSource ?? (() => "operator"),
-  );
+  const secretValues = collectSecretValues(settings, active, opts.secretSource ?? "operator");
   const secretFailure = (errorsBySection: Map<SectionKey, string[]>): RepoRunResult => {
     const outcomes: SectionOutcome[] = [];
     for (const [key, errors] of errorsBySection) {

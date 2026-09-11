@@ -30,7 +30,6 @@ import {
   type Target,
 } from "../discovery/targets.js";
 import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
-import { targetSecretSource } from "../engine/secrets.js";
 import { type GithubClient, isPermissionError, RERUN_ADVICE } from "../github/api.js";
 import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
@@ -58,6 +57,7 @@ import {
   type TargetChannel,
   type TargetOutcome,
 } from "./redact.js";
+import type { SettingsSource } from "./secret-refs.js";
 import { parseSettingsDoc, readSettingsFile } from "./settings-read.js";
 
 export interface MultiConfig {
@@ -109,13 +109,13 @@ async function processTarget(ctx: {
   const { api, target, defaults, cfg, injectMarker, channel } = ctx;
   const fail = (richMessage: string): TargetResult => targetFailure(channel.io, richMessage);
 
-  // Run one admitted document. Marker injection is validity-preserving (it
-  // appends the constant marker label config, or strips a rename), so it
-  // happens after validation and keeps the brand. Without a provenance
-  // lookup every secret value is operator-sourced.
+  // Run one admitted document under the provenance decided where it was
+  // chosen. Marker injection is validity-preserving (it appends the constant
+  // marker label config, or strips a rename), so it happens after validation
+  // and keeps the brand.
   const run = async (
     settings: ValidatedSettings,
-    secretSource?: ReturnType<typeof targetSecretSource>,
+    secretSource: SettingsSource,
   ): Promise<TargetResult> => {
     const injected = applyMarkerInjection(settings, injectMarker);
     if (injected.notice) {
@@ -130,7 +130,7 @@ async function processTarget(ctx: {
         onMissingPermission: cfg.onMissingPermission,
         requiredSections: cfg.requiredSections,
         onlySections: cfg.onlySections,
-        ...(secretSource === undefined ? {} : { secretSource }),
+        secretSource,
       },
       channel.io,
     );
@@ -160,21 +160,13 @@ async function processTarget(ctx: {
       "notice",
       `applying the defaults file: the repository has no ${DEFAULT_SETTINGS_FILE} on its default branch`,
     );
-    return run(defaults);
+    return run(defaults, "operator");
   }
 
   const parsed = parseSettingsDoc(read.raw);
   if ("error" in parsed) {
     return fail(`cannot parse ${read.sourceLabel}: ${parsed.error}. Fix the YAML in that file`);
   }
-
-  // A remote target's settings.yml is authored by the TARGET repository and
-  // is applied as written, so every value in a section it declares came from
-  // that target: those sections are sourced "target" (where a $NAME reference
-  // is refused - a target must not route the operator's environment into
-  // itself). Central files are operator-authored, so they keep the
-  // "operator" default.
-  const secretSource = target.source === "remote" ? targetSecretSource(parsed.doc) : undefined;
 
   // validateSettingsDoc names sourceLabel (the slug for remote targets) in
   // its own warnings, so they go through the unprefixed sink. Its branded
@@ -188,7 +180,7 @@ async function processTarget(ctx: {
   if ("error" in validated) {
     return fail(validated.error);
   }
-  return run(validated.settings, secretSource);
+  return run(validated.settings, read.source);
 }
 
 /**
@@ -213,18 +205,26 @@ function openTarget(
 
 /**
  * Read a target's raw settings: from the checked-in central file, or from the
- * target repo's own default-branch settings.yml. Returns `{raw, sourceLabel}`,
- * `{missing: true}` when a remote target is proven to have no file, or
- * `{error}` when the read failed or the absence could not be proven.
+ * target repo's own default-branch settings.yml. The document's provenance is
+ * decided here, with the document: a central file is operator-authored, a
+ * target's own file is target-authored (its $NAME references are refused - a
+ * target must not route the operator's environment into itself). Returns
+ * `{raw, sourceLabel, source}`, `{missing: true}` when a remote target is
+ * proven to have no file, or `{error}` when the read failed or the absence
+ * could not be proven.
  */
 async function readTargetSettings(
   api: GithubClient,
   target: Target,
-): Promise<{ raw: string; sourceLabel: string } | { missing: true } | { error: string }> {
+): Promise<
+  | { raw: string; sourceLabel: string; source: SettingsSource }
+  | { missing: true }
+  | { error: string }
+> {
   if (target.source === "central") {
     const sourceLabel = target.filePath;
     try {
-      return { raw: readFileSync(target.filePath, "utf8"), sourceLabel };
+      return { raw: readFileSync(target.filePath, "utf8"), sourceLabel, source: "operator" };
     } catch (error) {
       return {
         error: `cannot read settings from ${sourceLabel}: ${String(error)}. Fix the file, or delete it to stop managing this repository`,
@@ -248,7 +248,7 @@ async function readTargetSettings(
         : `reading ${sourceLabel} failed: ${file.error.status} ${file.error.message}. ${RERUN_ADVICE}`,
     };
   }
-  return { raw: file.content, sourceLabel };
+  return { raw: file.content, sourceLabel, source: "target" };
 }
 
 /**
