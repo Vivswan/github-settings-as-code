@@ -1,0 +1,26 @@
+# A selected_actions allowlist declared together with allowed_actions: "all"
+# is a contradiction (the allowlist only applies under "selected"), rejected
+# by upfront document validation - BEFORE any section writes, in either mode.
+# The repository section here pins that ordering, mirroring
+# environment-branch-policies-flag-required: were the check inside the actions
+# handler, repository would have PATCHed first.
+name: actions-selected-contradiction-rejected
+settings:
+  repository:
+    description: should never be written
+  actions:
+    allowed_actions: all
+    selected_actions:
+      github_owned_allowed: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  never:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/actions/permissions"
+    - "PUT /repos/{repo}/actions/permissions/selected-actions"
+  stdout_contains:
+    - "actions.selected_actions"
+    - 'an allowlist only applies under allowed_actions: "selected"'

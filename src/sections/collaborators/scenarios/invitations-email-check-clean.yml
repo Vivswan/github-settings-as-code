@@ -1,0 +1,31 @@
+name: invitations-email-check-clean
+description: >-
+  Check mode over an email-only pending invitation stays CLEAN at exit 0:
+  no username can declare an email invitation, so it surfaces as a note,
+  never drift, while the declared collaborator reads back converged.
+settings:
+  collaborators:
+    - username: e2e-keeper
+      permission: push
+inputs:
+  mode: check
+live_state:
+  collaborators:
+    - login: e2e-keeper
+      role_name: write
+  invitations:
+    - id: 950
+      invitee: null
+      permissions: read
+expect:
+  exit_code: 0
+  result: clean
+  outcomes:
+    collaborators: clean
+  never:
+    - "PUT /repos/{repo}/collaborators/"
+    - "DELETE /repos/{repo}/collaborators/"
+    - "PATCH /repos/{repo}/invitations/"
+    - "DELETE /repos/{repo}/invitations/"
+  stdout_contains:
+    - "invitation 950 was sent by email"

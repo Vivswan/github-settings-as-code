@@ -1,0 +1,8 @@
+# Repo-owned typography exemptions, read by check-typography alongside the
+# template-managed .typography-allow (which sync replaces).
+
+# Generated artifacts, never hand-edited: the bundle carries third-party
+# unicode, and the schema's descriptions are checked at source in src/ (the
+# per-section src/sections/<key>/schema.ts slices and src/schema.ts's
+# document wrappers).
+lib/

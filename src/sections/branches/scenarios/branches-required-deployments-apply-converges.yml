@@ -1,0 +1,44 @@
+# required_deployments rides the rule mutation, never the protection PUT:
+# main turns the requirement ON for an environment that exists (the read-back
+# keeps it), dev declares null against a live requirement and turns it OFF
+# without a PUT (its REST protection already matches).
+name: branches-required-deployments-apply-converges
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        required_deployments:
+          environments: ["prod"]
+    - name: dev
+      protection:
+        enforce_admins: true
+        required_deployments: null
+live_state:
+  branches: ["main", "dev"]
+  environments:
+    prod:
+      name: prod
+  branch_protection:
+    dev:
+      enforce_admins:
+        enabled: true
+  branch_protection_graphql:
+    dev:
+      requiresDeployments: true
+      requiredDeploymentEnvironments: ["staging"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  mutations:
+    - "PUT /repos/{repo}/branches/main/protection"
+    - "GRAPHQL UpdateBranchProtectionRule"
+    - "GRAPHQL UpdateBranchProtectionRule"
+  never:
+    - "PUT /repos/{repo}/branches/dev/protection"
+  apply_idempotent: true

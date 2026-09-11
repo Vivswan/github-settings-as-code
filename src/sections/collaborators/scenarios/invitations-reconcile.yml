@@ -1,0 +1,34 @@
+name: invitations-reconcile
+description: >-
+  A declared user's pending invitation carries a stale permission (apply
+  PATCHes the invitation in place, never a fresh PUT) and an undeclared user
+  has a pending invitation (apply CANCELS it). A second apply is a fixpoint:
+  the PATCHed invitation now matches the declaration.
+settings:
+  collaborators:
+    - username: e2e-pending
+      permission: admin
+live_state:
+  invitations:
+    - id: 501
+      invitee:
+        login: e2e-pending
+      permissions: write
+    - id: 502
+      invitee:
+        login: e2e-uninvited
+      permissions: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    collaborators: applied
+  mutations:
+    - "PATCH /repos/{repo}/invitations/501"
+    - "DELETE /repos/{repo}/invitations/502"
+  never:
+    - "PUT /repos/{repo}/collaborators/"
+  stdout_contains:
+    - "updated pending invitation for \"e2e-pending\" (admin)"
+    - "CANCELLED undeclared invitation for \"e2e-uninvited\""
+  apply_idempotent: true

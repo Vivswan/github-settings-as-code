@@ -1,0 +1,46 @@
+name: webhooks-check-drift
+description: >-
+  Check mode reports webhook drift without writing: a config field
+  (content_type), the events set (compared order-insensitively), and the
+  active flag. The declared secret is a $NAME reference whose variable is
+  deliberately NOT set - check validates syntax only and never reads the
+  environment - and the live "********" echo never enters the diff (the
+  secret gets a cannot-verify note instead). insecure_ssl declared as the
+  number 0 against GitHub's stored string "0" is NOT drift.
+settings:
+  webhooks:
+    - config:
+        url: https://ci.example.com/hook
+        content_type: json
+        insecure_ssl: 0
+        secret: $WEBHOOK_SECRET
+      events: [release, push]
+      active: false
+live_state:
+  hooks:
+    - id: 611
+      active: true
+      events: [push]
+      config:
+        url: https://ci.example.com/hook
+        content_type: form
+        insecure_ssl: "0"
+        secret: "********"
+inputs:
+  mode: check
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    webhooks: drift
+  stdout_contains:
+    - 'drift: webhooks["https://ci.example.com/hook"].config.content_type'
+    - compared order-insensitively
+    - 'webhooks["https://ci.example.com/hook"].active: declared false'
+    - cannot be verified
+  stdout_lacks:
+    - insecure_ssl
+  never:
+    - POST /repos/{repo}/hooks
+    - PATCH /repos/{repo}/hooks
+    - DELETE /repos/{repo}/hooks

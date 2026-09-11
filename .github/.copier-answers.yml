@@ -1,0 +1,25 @@
+# This file is managed by Vivswan/repo-platform.
+# Copier uses it to track the template source and version - do not delete.
+_commit: ad3183f5ded6b763f760b8274a413498771b53d6
+_src_path: gh:Vivswan/repo-platform
+copyright_holder: Vivswan Shah (https://github.com/Vivswan)
+description: 'GitHub Action applying declarative repository settings: rulesets, labels,
+    branch protection, and more. A loud, stateless Probot Settings replacement.'
+docs_site_label: docs-link-rot
+docs_site_path: docs
+fuzzer_label: fuzz-nightly
+github_username: Vivswan
+homepage: ''
+modules:
+- bun
+- docs-site
+- release-please
+- issue-templates
+- pr-title
+- fuzzer
+- nightly
+nightly_label: nightly-failure
+private: false
+project_name: GitHub Settings as Code
+project_slug: github-settings-as-code
+topics: ''

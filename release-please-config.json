@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
+  "include-component-in-tag": false,
+  "last-release-sha": "046adf3b24454f26f569850630809bcf481f8b84",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "initial-version": "1.0.0",
+      "draft": true,
+      "force-tag-creation": false,
+      "extra-files": [
+        "README.md",
+        "docs/start/getting-started.md",
+        "docs/operate/check-mode.md",
+        "docs/operate/multi-repo.md",
+        "docs/operate/layering.md",
+        "docs/start/migrating-from-probot.md",
+        "docs/playbooks/drift-attestation.md",
+        "docs/playbooks/fleet-baseline-rings.md",
+        "docs/playbooks/incident-freeze.md",
+        "docs/playbooks/preview-blast-radius.md",
+        "docs/playbooks/trust-tiers.md",
+        "docs/reference/secrets-and-vaults.md",
+        "docs/upgrading/README.md",
+        ".github/ISSUE_TEMPLATE/bug_report.yml"
+      ]
+    }
+  }
+}

@@ -1,0 +1,24 @@
+# Check mode reads the artifact-and-log-retention window from its own
+# endpoint and reports the mismatch as drift without writing anything.
+name: actions-retention-check-drift
+settings:
+  actions:
+    artifact_and_log_retention:
+      days: 30
+inputs:
+  mode: check
+live_state:
+  actions_retention:
+    days: 90
+    maximum_allowed_days: 400
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    actions: drift
+  never:
+    - "PUT /repos/{repo}/actions/permissions/artifact-and-log-retention"
+  summary_contains:
+    - "actions.artifact_and_log_retention.days"

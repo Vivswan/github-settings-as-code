@@ -1,0 +1,29 @@
+# The silent-drop trap, mimicked from live GitHub: the mutation ACCEPTS a
+# required-deployment environment name that does not exist and quietly drops
+# it while succeeding. The section's read-back verification is what catches
+# it, failing the run loudly with the dropped name and the fix (declare the
+# environment; the environments section applies before branches).
+name: branches-required-deployments-dropped-env-error
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        required_deployments:
+          environments: ["ghost"]
+live_state:
+  branches: ["main"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    branches: failed
+  mutations:
+    - "PUT /repos/{repo}/branches/main/protection"
+    - "GRAPHQL UpdateBranchProtectionRule"
+  stdout_contains:
+    - "branches[main].protection.required_deployments: GitHub silently dropped [ghost]"
+    - "environments: section"

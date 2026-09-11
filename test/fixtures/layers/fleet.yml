@@ -1,0 +1,19 @@
+repository:
+  has_wiki: false
+  has_projects: false
+labels:
+  - name: bug
+    color: d73a4a
+  - name: docs
+    color: "0075ca"
+rulesets:
+  - name: main
+    target: branch
+    enforcement: active
+    rules:
+      - type: deletion
+pages:
+  build_type: workflow
+  source:
+    branch: main
+    path: /

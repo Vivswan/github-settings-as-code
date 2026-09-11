@@ -1,0 +1,31 @@
+# Check mode reads both GraphQL-only settings through the one
+# RepositoryFeatures query and reports exact per-key drift (a boolean and a
+# two-value enum, both fully readable back) without writing anything - the
+# never list pins check mode to zero GraphQL writes. The live state seeds
+# the sponsor button ON so its drift runs in the enabled-to-disabled
+# direction while the policy drifts the other way.
+name: repository-toggles-check-drift
+settings:
+  repository:
+    enable_sponsorships: false
+    issue_creation_policy: collaborators_only
+inputs:
+  mode: check
+token_permissions:
+  administration: write
+live_state:
+  repo:
+    has_sponsorships_enabled: true
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    repository: drift
+  never:
+    - "GRAPHQL UpdateRepositoryFeatures"
+    - "PATCH /repos/{repo}"
+  requests_contain:
+    - "GRAPHQL RepositoryFeatures"
+  summary_contains:
+    - "repository.enable_sponsorships: declared false != live true"
+    - "repository.issue_creation_policy: declared collaborators_only != live all"

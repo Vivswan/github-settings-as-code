@@ -1,0 +1,48 @@
+# Check mode reads the pins connection and compares RANK order (live
+# position numbers are a sort key that may carry holes, never literal
+# slots): the declared pins (api, then web) must lead the pinned list in
+# declaration order, but legacy leads live, so ONE order-drift line names
+# both sequences. legacy itself is pinned live with no pinned declaration,
+# so it is never drift - only the note saying it stays pinned and apply will
+# move it after the declared block. No write is attempted in check mode.
+name: environment-pins-check-drift
+settings:
+  environments:
+    - name: api
+      pinned: true
+    - name: web
+      pinned: true
+inputs:
+  mode: check
+live_state:
+  environments:
+    api:
+      name: api
+      protection_rules: []
+    web:
+      name: web
+      protection_rules: []
+    legacy:
+      name: legacy
+      protection_rules: []
+  pinned_environments: [legacy, web, api]
+token_permissions:
+  environments: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    environments: drift
+  summary_contains:
+    - "environments.pinned: the declared pin order is [api, web] but the live pinned order is [legacy, web, api]"
+  summary_lacks:
+    - "environments[web].pinned"
+    - "environments[api].pinned"
+  stdout_contains:
+    - 'pinned environment(s) "legacy" have no pinned declaration'
+  requests_contain:
+    - "GRAPHQL EnvironmentPins"
+  never:
+    - "GRAPHQL PinEnvironment"
+    - "GRAPHQL ReorderEnvironment"
+    - "PUT /repos/{repo}/environments"

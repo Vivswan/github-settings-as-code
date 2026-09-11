@@ -1,0 +1,33 @@
+# Both fork pull request workflow policies against a private repository (the
+# fork-pr-workflows-private-repos pair is documented for private repos, so
+# the repo is private here). Live state carries GitHub's defaults, the file
+# declares different policies, so apply PUTs each object verbatim to its own
+# endpoint. The convergence rerun reads both back (GET fork-pr-contributor-
+# approval, GET fork-pr-workflows-private-repos) and finds them matching; the
+# file declares the complete four-toggle policy, so the mock's verbatim
+# store reads back exactly what was written.
+name: actions-fork-pr-apply-converges
+settings:
+  actions:
+    fork_pr_contributor_approval:
+      approval_policy: first_time_contributors
+    fork_pr_workflows_private_repos:
+      run_workflows_from_fork_pull_requests: true
+      send_write_tokens_to_workflows: false
+      send_secrets_and_variables: false
+      require_approval_for_fork_pr_workflows: true
+live_state:
+  repo:
+    private: true
+    visibility: private
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    actions: applied
+  mutations:
+    - "PUT /repos/{repo}/actions/permissions/fork-pr-contributor-approval"
+    - "PUT /repos/{repo}/actions/permissions/fork-pr-workflows-private-repos"
+  converges: true

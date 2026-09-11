@@ -1,0 +1,33 @@
+# The protection GET omits required_signatures when signed commits are not
+# required, so check mode normalizes the absent live field to false: declared
+# true against a live protection without the field is drift (true != false),
+# and no write is attempted.
+name: branches-required-signatures-check-drift
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        required_signatures: true
+inputs:
+  mode: check
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+token_permissions:
+  administration: read
+  contents: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    branches: drift
+  summary_contains:
+    - "branches[main].protection.required_signatures: true != false"
+  never:
+    - "PUT /repos/{repo}/branches/main/protection"
+    - "POST /repos/{repo}/branches/main/protection/required_signatures"
+    - "DELETE /repos/{repo}/branches/main/protection/required_signatures"

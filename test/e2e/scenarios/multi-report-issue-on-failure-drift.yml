@@ -1,0 +1,64 @@
+# The issue-on-failure channel on a run that NEEDS ATTENTION behaves exactly
+# like the issue channel. svc-onfail is private and runs in check mode with an
+# undeclared live label (ONFAILLEAK-sentinel), so it drifts. The action creates
+# ONE issue on svc-onfail titled with ISSUE_TITLE, attaches the marker label,
+# and writes the full detail - INCLUDING the sentinel and the placeholder-free
+# slug - into the issue body. Because check-mode drift fails the run, the issue
+# is opened. The public surfaces (summary, stdout, outputs) stay leak-free: the
+# sentinel and the real slug appear ONLY in the issue body (a GitHub-ACL-private
+# channel), never in the public log.
+name: multi-report-issue-on-failure-drift
+settings: {}
+inputs:
+  mode: check
+  private_report: issue-on-failure
+repos:
+  e2e-owner/svc-onfail:
+    settings:
+      labels:
+        - name: declared
+          color: "00ff00"
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: ONFAILLEAK-sentinel
+          color: "abcdef"
+    permissions:
+      issues: write
+      contents: read
+      administration: read
+expect:
+  exit_code: 1
+  result: drift
+  repos_result:
+    "private repository #1": drift
+  # The report issue is created (POST) with the marker label ensured first -
+  # the same delivery the issue channel makes on a failing run.
+  mutations:
+    - "POST /repos/e2e-owner/svc-onfail/labels"
+    - "POST /repos/e2e-owner/svc-onfail/issues"
+  summary_contains:
+    - "private repository #1"
+  # The real slug and the private live label leak into NO public surface.
+  summary_lacks:
+    - "svc-onfail"
+    - "ONFAILLEAK-sentinel"
+  stdout_lacks:
+    - "svc-onfail"
+    - "ONFAILLEAK-sentinel"
+  # The full unredacted detail lands in the target repo's own issue: exactly one
+  # report issue, titled with ISSUE_TITLE, opened (drift needs attention), body
+  # carrying both the real slug and the private sentinel.
+  issue_report:
+    slug: e2e-owner/svc-onfail
+    title: "[automated] settings-as-code: private settings report"
+    created_count: 1
+    state: open
+    lookup_by_label: true
+    body_contains:
+      - "e2e-owner/svc-onfail"
+      - "ONFAILLEAK-sentinel"

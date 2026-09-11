@@ -1,0 +1,26 @@
+# A GraphQL denial is an HTTP 200 whose errors[] carries FORBIDDEN (the
+# fine-grained write-denial shape), never an HTTP 403: the read grade
+# passes preflight and the RepositoryFeatures read, so the denial surfaces
+# at the UpdateRepositoryFeatures mutation and must classify as a
+# permission failure naming the Administration grant - the 200+errors path
+# folding into the same PermissionDenied policy as a REST denial.
+name: repository-toggles-graphql-denied
+settings:
+  repository:
+    enable_sponsorships: true
+denial_style: fine_grained
+token_permissions:
+  administration: read
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    repository: failed
+  requests_contain:
+    - "GRAPHQL RepositoryFeatures"
+    - "GRAPHQL UpdateRepositoryFeatures"
+  stdout_contains:
+    - '"Administration" (read and write)'
+    - "GRAPHQL UpdateRepositoryFeatures"

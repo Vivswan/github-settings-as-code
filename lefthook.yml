@@ -1,0 +1,11 @@
+# Git hooks, installed by `bun install` (the prepare script). The hook is
+# deliberately cheap: staged lint plus a whole-project typecheck (~0.5s);
+# builds, tests, and schema freshness are CI's job behind the all-green
+# gate.
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome (staged)
+      run: bun x biome check --staged --no-errors-on-unmatched
+    - name: typecheck
+      run: bun run typecheck

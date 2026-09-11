@@ -1,0 +1,23 @@
+# The artifact-and-log-retention actions endpoint. Live retention is 90 days,
+# the declared window is 30, so apply PUTs the retention body verbatim. The
+# convergence rerun reads it back (GET artifact-and-log-retention) and finds it
+# matching.
+name: actions-retention-apply-converges
+settings:
+  actions:
+    artifact_and_log_retention:
+      days: 30
+live_state:
+  actions_retention:
+    days: 90
+    maximum_allowed_days: 400
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    actions: applied
+  mutations:
+    - "PUT /repos/{repo}/actions/permissions/artifact-and-log-retention"
+  converges: true

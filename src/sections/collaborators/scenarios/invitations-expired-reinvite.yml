@@ -1,0 +1,27 @@
+name: invitations-expired-reinvite
+description: >-
+  A declared user's pending invitation has expired: apply cancels it and
+  sends a fresh invitation via the collaborator PUT. The fresh invitation
+  matches the declaration, so a check rerun converges.
+settings:
+  collaborators:
+    - username: e2e-expired
+      permission: push
+live_state:
+  invitations:
+    - id: 801
+      invitee:
+        login: e2e-expired
+      permissions: write
+      expired: true
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    collaborators: applied
+  mutations:
+    - "DELETE /repos/{repo}/invitations/801"
+    - "PUT /repos/{repo}/collaborators/e2e-expired"
+  stdout_contains:
+    - "re-invited collaborator \"e2e-expired\" (push)"
+  converges: true

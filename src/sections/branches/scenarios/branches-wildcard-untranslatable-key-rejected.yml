@@ -1,0 +1,25 @@
+# A wildcard entry declares restrictions, which has no GraphQL twin on
+# classic protection rules - upfront shape validation rejects the document
+# BEFORE any request, naming the supported key set and pointing at rulesets.
+# The repository section pins the nothing-was-written ordering.
+name: branches-wildcard-untranslatable-key-rejected
+settings:
+  repository:
+    description: should never be written
+  branches:
+    - name: "release/*"
+      protection:
+        enforce_admins: true
+        restrictions:
+          users: []
+          teams: []
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    - 'the wildcard entry "release/*" declares protection.restrictions'
+    - "prefer the rulesets section"
+  never:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/branches"
+    - "GRAPHQL"

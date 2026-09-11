@@ -1,0 +1,41 @@
+name: invitations-check-drift
+description: >-
+  Check mode reports a pending invitation at a stale permission, an expired
+  invitation apply would cancel and re-send, and an undeclared pending
+  invitation apply would cancel - one extra GET, exits 1, writes nothing.
+settings:
+  collaborators:
+    - username: e2e-pending
+      permission: admin
+    - username: e2e-lapsed
+      permission: push
+inputs:
+  mode: check
+live_state:
+  invitations:
+    - id: 701
+      invitee:
+        login: e2e-pending
+      permissions: write
+    - id: 702
+      invitee:
+        login: e2e-uninvited
+      permissions: write
+    - id: 703
+      invitee:
+        login: e2e-lapsed
+      permissions: write
+      expired: true
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    collaborators: drift
+  never:
+    - "PUT /repos/{repo}/collaborators/"
+    - "PATCH /repos/{repo}/invitations/"
+    - "DELETE /repos/{repo}/invitations/"
+  summary_contains:
+    - "collaborators[e2e-pending]"
+    - "collaborators[e2e-lapsed]"
+    - "collaborators[e2e-uninvited]"

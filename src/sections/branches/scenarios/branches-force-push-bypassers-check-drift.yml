@@ -1,0 +1,36 @@
+# Check mode reads the live force-push allowance list through the rules
+# query (fired because an entry declares the routed key) and reports the
+# divergence as drift, writing nothing: the live rule allows octocat, the
+# settings file wants release-bot.
+name: branches-force-push-bypassers-check-drift
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        force_push_bypassers:
+          - release-bot
+inputs:
+  mode: check
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+  branch_protection_graphql:
+    main:
+      bypassForcePushActors: ["octocat"]
+token_permissions:
+  administration: read
+  contents: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    branches: drift
+  summary_contains:
+    - "branches[main].protection.force_push_bypassers: the settings file declares [release-bot] but the live rule allows [octocat]; apply will replace the allowance list"
+  never:
+    - "PUT /repos/{repo}/branches"
+    - "GRAPHQL UpdateBranchProtectionRule"

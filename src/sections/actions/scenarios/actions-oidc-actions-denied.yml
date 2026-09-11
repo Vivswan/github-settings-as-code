@@ -1,0 +1,20 @@
+# The inverse override proof: Actions is denied while Administration is
+# granted, so the OIDC read is refused and the section fails even though the
+# section-level permission is satisfied. The denial advice names the
+# "Actions" grant the override requires (asserted at unit level).
+name: actions-oidc-actions-denied
+settings:
+  actions:
+    oidc_customization_sub:
+      use_default: true
+inputs:
+  mode: check
+denial_style: fine_grained
+token_permissions:
+  administration: write
+  actions: none
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    actions: failed

@@ -1,0 +1,70 @@
+# The issue-on-failure channel resolving a previous failure: svc-resolve still
+# has the OPEN report issue from an earlier needs-attention run (seeded with the
+# marker label). This run is clean, so the healthy path's single lookup finds
+# the open issue and closes it with the fresh report body - one PATCH, never a
+# second POST, and none of the create-guard machinery (no marker-label ensure,
+# no fallback creator scan).
+name: multi-report-issue-on-failure-resolves
+settings: {}
+inputs:
+  mode: check
+  private_report: issue-on-failure
+repos:
+  e2e-owner/svc-resolve:
+    settings:
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: settings-as-code-report
+          color: "0e2a47"
+          description: "managed by settings-as-code private reporting - do not remove"
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: settings-as-code-report
+          color: "0e2a47"
+          description: "managed by settings-as-code private reporting - do not remove"
+      issues:
+        - number: 7
+          title: "[automated] settings-as-code: private settings report"
+          body: "OLD REPORT BODY"
+          state: open
+          labels:
+            - name: settings-as-code-report
+          user:
+            login: e2e-token-user
+          html_url: "https://github.com/e2e-owner/svc-resolve/issues/7"
+    permissions:
+      issues: write
+      contents: read
+      administration: read
+expect:
+  exit_code: 0
+  result: clean
+  repos_result:
+    "private repository #1": clean
+  summary_lacks:
+    - "svc-resolve"
+  stdout_lacks:
+    - "svc-resolve"
+  # The open issue is found by the marker lookup and closed in place: zero
+  # creates, the body replaced via PATCH, and the healthy run closes it.
+  issue_report:
+    slug: e2e-owner/svc-resolve
+    created_count: 0
+    state: closed
+    lookup_by_label: true
+    body_contains:
+      - "e2e-owner/svc-resolve"
+  # No new issue POST and no create-guard traffic; the PATCH closes the
+  # existing issue.
+  never:
+    - "POST /repos/e2e-owner/svc-resolve/issues"
+    - "POST /repos/e2e-owner/svc-resolve/labels"
+    - "GET /user"
+  requests_contain:
+    - "PATCH /repos/e2e-owner/svc-resolve/issues/7"

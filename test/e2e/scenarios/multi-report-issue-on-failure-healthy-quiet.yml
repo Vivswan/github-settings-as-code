@@ -1,0 +1,59 @@
+# The issue-on-failure channel on a HEALTHY run: total quiet. svc-quiet is
+# private and clean (the declared labels, marker included, match live), so the
+# channel performs exactly one read - the open-issue lookup by the marker
+# label - finds no open report issue, and writes NOTHING: no marker-label
+# ensure-create, no issue create or update, no fallback creator scan. A healthy
+# repo never sees a report issue at all.
+name: multi-report-issue-on-failure-healthy-quiet
+settings: {}
+inputs:
+  mode: check
+  private_report: issue-on-failure
+repos:
+  e2e-owner/svc-quiet:
+    settings:
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: settings-as-code-report
+          color: "0e2a47"
+          description: "managed by settings-as-code private reporting - do not remove"
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: settings-as-code-report
+          color: "0e2a47"
+          description: "managed by settings-as-code private reporting - do not remove"
+    permissions:
+      issues: write
+      contents: read
+      administration: read
+expect:
+  exit_code: 0
+  result: clean
+  repos_result:
+    "private repository #1": clean
+  summary_lacks:
+    - "svc-quiet"
+  stdout_lacks:
+    - "svc-quiet"
+  # Zero report issues created; the one request the channel made was the
+  # marker-label lookup.
+  issue_report:
+    slug: e2e-owner/svc-quiet
+    created_count: 0
+    lookup_by_label: true
+  # The healthy path writes nothing at all: no issue create or update, no
+  # marker-label ensure, and no fallback creator scan.
+  never:
+    - "POST /repos/e2e-owner/svc-quiet/issues"
+    - "PATCH /repos/e2e-owner/svc-quiet/issues"
+    - "POST /repos/e2e-owner/svc-quiet/labels"
+    - "GET /user"
+  # The single read: an indexed lookup for an OPEN report issue by the marker.
+  requests_contain:
+    - "GET /repos/e2e-owner/svc-quiet/issues?state=open&labels=settings-as-code-report&per_page=100"

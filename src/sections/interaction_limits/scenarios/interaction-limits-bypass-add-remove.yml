@@ -1,0 +1,29 @@
+# The bypass list reconciles instead of replacing: the undeclared login is
+# DELETEd first (the list holds at most 100 users, so removals precede
+# additions), then the missing login is PUT; the kept login matches its live
+# entry case-insensitively (declared "Keeper" vs live "keeper"), so it rides
+# neither write. The convergence rerun reads the reconciled list as clean.
+name: interaction-limits-bypass-add-remove
+settings:
+  interaction_limits:
+    pull_request_creation_bypass:
+      - Keeper
+      - newcomer
+live_state:
+  pull_bypass_list:
+    - login: keeper
+    - login: goner
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    interaction_limits: applied
+  mutations:
+    - "DELETE /repos/{repo}/interaction-limits/pulls/bypass-list"
+    - "PUT /repos/{repo}/interaction-limits/pulls/bypass-list"
+  stdout_contains:
+    - "removed [goner]"
+    - "added [newcomer]"
+  converges: true

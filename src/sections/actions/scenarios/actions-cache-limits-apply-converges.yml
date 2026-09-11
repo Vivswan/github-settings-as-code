@@ -1,0 +1,25 @@
+# The two cache-limit endpoints route independently: each declared key is the
+# whole body of its own PUT. Both live limits differ, so apply PUTs both, and
+# the convergence rerun reads each back and finds it matching.
+name: actions-cache-limits-apply-converges
+settings:
+  actions:
+    cache:
+      max_cache_retention_days: 3
+      max_cache_size_gb: 25
+live_state:
+  cache_retention_limit:
+    max_cache_retention_days: 7
+  cache_storage_limit:
+    max_cache_size_gb: 10
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    actions: applied
+  mutations:
+    - "PUT /repos/{repo}/actions/cache/retention-limit"
+    - "PUT /repos/{repo}/actions/cache/storage-limit"
+  converges: true

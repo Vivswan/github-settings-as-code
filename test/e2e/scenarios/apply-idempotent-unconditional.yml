@@ -1,0 +1,47 @@
+# Corpus witness for the alwaysRewrite endpoints no other apply_idempotent scenario writes: run.ts
+# fails (unwitnessedExemptEndpoints) when a flagged endpoint is never written by a first apply. The
+# LFS PUT, the check suite PATCH, and the interaction-limit PUT recur byte-stably; the rest stay quiet.
+name: apply-idempotent-unconditional
+settings:
+  repository:
+    description: unconditional PATCH witness
+    enable_git_lfs: true
+  actions:
+    default_workflow_permissions: read
+  pages:
+    cname: docs.example.com
+    https_enforced: true
+  code_scanning_default_setup:
+    state: configured
+    languages:
+      - python
+  code_quality_setup:
+    state: configured
+    languages:
+      - python
+  check_suite_preferences:
+    auto_trigger_checks:
+      - app_id: 15368
+        setting: false
+  teams:
+    - name: platform
+      permission: push
+  interaction_limits:
+    limit: collaborators_only
+    expiry: one_week
+owner_kind: org
+live_state:
+  # A live Pages site, so the first apply takes the update PUT (a create
+  # would be a POST whose body needs source and build_type instead).
+  pages:
+    url: https://api.github.com/repos/e2e-owner/e2e-repo/pages
+    build_type: workflow
+    cname: old.example.com
+    https_enforced: true
+    source:
+      branch: main
+      path: /
+expect:
+  exit_code: 0
+  result: applied
+  apply_idempotent: true

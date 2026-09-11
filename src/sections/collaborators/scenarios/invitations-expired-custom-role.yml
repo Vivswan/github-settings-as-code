@@ -1,0 +1,29 @@
+name: invitations-expired-custom-role
+description: >-
+  A declared CUSTOM org role's pending invitation has expired: apply cancels
+  it and sends a fresh invitation via the collaborator PUT (which does take
+  custom role names). The fresh invitation reports only a standard-enum
+  permission, so the second apply proves the fixpoint: the unverifiable
+  custom role is noted and left untouched instead of re-invited forever.
+settings:
+  collaborators:
+    - username: e2e-custom
+      permission: security-team
+live_state:
+  invitations:
+    - id: 901
+      invitee:
+        login: e2e-custom
+      permissions: write
+      expired: true
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    collaborators: applied
+  mutations:
+    - "DELETE /repos/{repo}/invitations/901"
+    - "PUT /repos/{repo}/collaborators/e2e-custom"
+  stdout_contains:
+    - "re-invited collaborator \"e2e-custom\" (security-team)"
+  apply_idempotent: true

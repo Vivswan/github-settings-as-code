@@ -1,0 +1,28 @@
+# Check mode against an organization-set live limit that differs from the
+# declaration: declared != effective IS drift (check stays red even though
+# apply cannot fix it from the repository), and the note explains that the
+# org is the place to change it.
+name: interaction-limits-check-org-override
+settings:
+  interaction_limits:
+    limit: collaborators_only
+inputs:
+  mode: check
+live_state:
+  interaction_limits:
+    limit: existing_users
+    origin: organization
+    expires_at: "2027-07-01T00:00:00Z"
+  interaction_limits_org_override: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    interaction_limits: drift
+  never:
+    - "PUT /repos/{repo}/interaction-limits"
+    - "DELETE /repos/{repo}/interaction-limits"
+  stdout_contains:
+    - "apply cannot change it from the repository"

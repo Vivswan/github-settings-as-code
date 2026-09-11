@@ -1,0 +1,9 @@
+repository:
+  has_projects: null
+labels:
+  - name: team
+    color: "00ff00"
+rulesets:
+  - name: main
+    rules:
+      - type: non_fast_forward

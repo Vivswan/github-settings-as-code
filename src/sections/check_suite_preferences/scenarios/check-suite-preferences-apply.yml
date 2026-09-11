@@ -1,0 +1,22 @@
+name: check-suite-preferences-apply
+description: >-
+  Apply PATCHes the declared per-app auto_trigger_checks toggles verbatim
+  and logs the change from the echoed preferences. Nothing can be read back
+  upstream, so a check rerun converges trivially (a note, zero requests).
+settings:
+  check_suite_preferences:
+    auto_trigger_checks:
+      - app_id: 15368
+        setting: false
+      - app_id: 29310
+        setting: true
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    check_suite_preferences: applied
+  mutations:
+    - "PATCH /repos/{repo}/check-suites/preferences"
+  stdout_contains:
+    - "applied check suite preferences (2 auto_trigger_checks entries)"
+  converges: true

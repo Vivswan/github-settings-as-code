@@ -1,0 +1,19 @@
+# Enabling immutable releases from a disabled live state. Apply PUTs
+# immutable-releases; the convergence rerun reads the toggle back (GET returns
+# {enabled: true, enforced_by_owner: false}) and finds it matching.
+name: repository-immutable-releases-enable
+settings:
+  repository:
+    enable_immutable_releases: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    repository: applied
+  mutations:
+    - "PUT /repos/{repo}/immutable-releases"
+  summary_contains:
+    - immutable releases
+  converges: true

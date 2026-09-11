@@ -1,0 +1,33 @@
+# The rules query (fired here by the declared force_push_bypassers key)
+# finds a live WILDCARD rule the settings file does not declare. That is a
+# NOTE, never drift and never a deletion - the run stays clean.
+name: branches-undeclared-glob-note-check
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        force_push_bypassers: []
+inputs:
+  mode: check
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+  branch_protection_rules:
+    - pattern: "legacy/*"
+      isAdminEnforced: true
+token_permissions:
+  administration: read
+  contents: read
+expect:
+  exit_code: 0
+  result: clean
+  outcomes:
+    branches: clean
+  stdout_contains:
+    - 'undeclared classic protection rule "legacy/*" exists on the repo - declare it to manage it (this action never deletes undeclared rules)'
+  never:
+    - "GRAPHQL DeleteBranchProtectionRule"

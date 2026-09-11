@@ -1,0 +1,51 @@
+# Multi-repo Contents denial and the 404-disambiguation path. svc-locked's token
+# is denied the Contents permission, so the settings fetch answers a fine-grained
+# read 404; the action then probes GET /repos/{slug} (which succeeds via
+# Administration) for the default branch and tries to prove the file absent by
+# reading that branch's git ref - a Contents-gated read - which is denied too.
+# The file cannot be proven absent, so the target FAILS with the Contents: read
+# grant advice: it is neither skipped nor handed any defaults. svc-ok fetches,
+# reads, and applies normally, proving the denial is isolated.
+name: multi-contents-denied
+settings: {}
+inputs:
+  on_missing_permission: fail
+repos:
+  e2e-owner/svc-locked:
+    settings:
+      labels:
+        - name: unreachable
+          color: "888888"
+    permissions:
+      contents: none
+      administration: read
+    expect:
+      result: failed
+  e2e-owner/svc-ok:
+    settings:
+      labels:
+        - name: healthy
+          color: "00ff00"
+    permissions:
+      issues: write
+      contents: read
+    expect:
+      result: applied
+expect:
+  exit_code: 1
+  result: failed
+  repos_result:
+    e2e-owner/svc-locked: failed
+    e2e-owner/svc-ok: applied
+  mutations:
+    - "POST /repos/e2e-owner/svc-ok/labels"
+  never:
+    - "POST /repos/e2e-owner/svc-locked/labels"
+  requests_contain:
+    # The proof was attempted: the default branch ref read follows the 404.
+    - "GET /repos/e2e-owner/svc-locked/git/ref/heads/main"
+  stdout_contains:
+    - "svc-locked: cannot prove .github/settings.yml is absent: reading the default branch ref heads/main returned 404. Grant the token Contents: read on this repository, or initialize its default branch; a repository whose file cannot be read never receives the defaults. To stop managing it instead, remove e2e-owner/svc-locked from the \"repos\" input"
+  stdout_lacks:
+    - "applying the defaults file"
+    - "skipped - the repository has no"

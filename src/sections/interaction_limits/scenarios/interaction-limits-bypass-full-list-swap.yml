@@ -1,0 +1,125 @@
+# The bypass list holds at most 100 users, and the mock 422s any add that
+# would overflow it. Seeding a FULL live list and declaring one fresh login
+# makes the remove-before-add ordering load-bearing: an add-first regression
+# would push the list to 101 and fail here with the mock 422, instead of
+# surviving as an untested comment.
+name: interaction-limits-bypass-full-list-swap
+settings:
+  interaction_limits:
+    pull_request_creation_bypass:
+      - fresh-user
+live_state:
+  pull_bypass_list:
+    - login: old-user-0
+    - login: old-user-1
+    - login: old-user-2
+    - login: old-user-3
+    - login: old-user-4
+    - login: old-user-5
+    - login: old-user-6
+    - login: old-user-7
+    - login: old-user-8
+    - login: old-user-9
+    - login: old-user-10
+    - login: old-user-11
+    - login: old-user-12
+    - login: old-user-13
+    - login: old-user-14
+    - login: old-user-15
+    - login: old-user-16
+    - login: old-user-17
+    - login: old-user-18
+    - login: old-user-19
+    - login: old-user-20
+    - login: old-user-21
+    - login: old-user-22
+    - login: old-user-23
+    - login: old-user-24
+    - login: old-user-25
+    - login: old-user-26
+    - login: old-user-27
+    - login: old-user-28
+    - login: old-user-29
+    - login: old-user-30
+    - login: old-user-31
+    - login: old-user-32
+    - login: old-user-33
+    - login: old-user-34
+    - login: old-user-35
+    - login: old-user-36
+    - login: old-user-37
+    - login: old-user-38
+    - login: old-user-39
+    - login: old-user-40
+    - login: old-user-41
+    - login: old-user-42
+    - login: old-user-43
+    - login: old-user-44
+    - login: old-user-45
+    - login: old-user-46
+    - login: old-user-47
+    - login: old-user-48
+    - login: old-user-49
+    - login: old-user-50
+    - login: old-user-51
+    - login: old-user-52
+    - login: old-user-53
+    - login: old-user-54
+    - login: old-user-55
+    - login: old-user-56
+    - login: old-user-57
+    - login: old-user-58
+    - login: old-user-59
+    - login: old-user-60
+    - login: old-user-61
+    - login: old-user-62
+    - login: old-user-63
+    - login: old-user-64
+    - login: old-user-65
+    - login: old-user-66
+    - login: old-user-67
+    - login: old-user-68
+    - login: old-user-69
+    - login: old-user-70
+    - login: old-user-71
+    - login: old-user-72
+    - login: old-user-73
+    - login: old-user-74
+    - login: old-user-75
+    - login: old-user-76
+    - login: old-user-77
+    - login: old-user-78
+    - login: old-user-79
+    - login: old-user-80
+    - login: old-user-81
+    - login: old-user-82
+    - login: old-user-83
+    - login: old-user-84
+    - login: old-user-85
+    - login: old-user-86
+    - login: old-user-87
+    - login: old-user-88
+    - login: old-user-89
+    - login: old-user-90
+    - login: old-user-91
+    - login: old-user-92
+    - login: old-user-93
+    - login: old-user-94
+    - login: old-user-95
+    - login: old-user-96
+    - login: old-user-97
+    - login: old-user-98
+    - login: old-user-99
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    interaction_limits: applied
+  mutations:
+    - "DELETE /repos/{repo}/interaction-limits/pulls/bypass-list"
+    - "PUT /repos/{repo}/interaction-limits/pulls/bypass-list"
+  stdout_contains:
+    - "added [fresh-user]"
+  converges: true

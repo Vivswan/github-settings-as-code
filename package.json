@@ -1,0 +1,53 @@
+{
+  "name": "github-settings-as-code",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
+  "description": "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more.",
+  "type": "module",
+  "scripts": {
+    "check": "bun run lint && bun run lint:yaml && bun run lint:arch && bun run typecheck && bun run knip && bun run test && bun run build:check",
+    "lint": "bun x biome ci --error-on-warnings .",
+    "lint:yaml": "if command -v yamllint >/dev/null 2>&1; then git ls-files -z '*.yml' '*.yaml' | xargs -0 yamllint -s; else echo 'lint:yaml: yamllint not installed, skipping (CI enforces it; install with pip install yamllint or brew install yamllint)'; fi",
+    "lint:fix": "bun x biome check --write .",
+    "lint:arch": "bun .github/scripts/arch-lint.ts",
+    "typecheck": "bun x tsc -p .",
+    "knip": "knip",
+    "test": "bun test",
+    "test:e2e": "bun test/e2e/run.ts",
+    "fuzz": "bun test/e2e/fuzz.ts",
+    "build": "bun run build:bundle && bun run build:schema && bun run build:docs && bun run build:action-docs",
+    "build:bundle": "bun build src/main.ts --target=node --outfile lib/index.js",
+    "build:schema": "bun .github/scripts/gen-settings-schema.ts",
+    "build:docs": "bun .github/scripts/gen-docs.ts",
+    "build:action-docs": "bun .github/scripts/gen-action-docs.ts",
+    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep . && bun run build:docs && bun run build:action-docs && git diff --exit-code README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/architecture.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md && ! git ls-files --others --exclude-standard README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/architecture.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md | grep .",
+    "prepare": "lefthook install"
+  },
+  "dependencies": {
+    "@actions/artifact": "6.2.1",
+    "@actions/core": "3.0.1",
+    "@octokit/plugin-retry": "8.1.1",
+    "@octokit/plugin-throttling": "11.0.5",
+    "@octokit/rest": "22.0.1",
+    "age-encryption": "0.3.1",
+    "bottleneck": "2.19.5",
+    "libsodium-wrappers": "0.8.4",
+    "yaml": "2.9.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.11",
+    "@octokit/openapi-types": "29.0.1",
+    "@octokit/types": "18.0.0",
+    "@types/bun": "1.4.0",
+    "@types/node": "26.4.1",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "entities": "8.1.0",
+    "graphql": "17.0.2",
+    "knip": "6.34.0",
+    "lefthook": "2.1.12",
+    "oxc-parser": "0.147.0",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,21 @@
+# The OIDC endpoints carry a permission override: they need the Actions
+# grant, not the section's Administration. With Administration explicitly
+# denied and only the oidc key declared, check must still read the template
+# and come back clean - proof that the override, not the section permission,
+# gates these routes.
+name: actions-oidc-administration-denied-still-reads
+settings:
+  actions:
+    oidc_customization_sub:
+      use_default: true
+inputs:
+  mode: check
+denial_style: fine_grained
+token_permissions:
+  administration: none
+  actions: write
+expect:
+  exit_code: 0
+  result: clean
+  outcomes:
+    actions: clean

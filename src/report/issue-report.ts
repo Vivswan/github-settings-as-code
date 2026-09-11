@@ -1,0 +1,408 @@
+/**
+ * The `issue` private-report channel: the full unredacted report lands as
+ * a deterministically-titled issue on the private target repo itself - the
+ * one GitHub-ACL-private channel a public run has under PAT auth. One issue
+ * per repo, reused every run: the body is REPLACED (prior reports stay in
+ * the issue-body edit history) and the state mirrors the run's exit
+ * semantics (open = needs attention, closed = latest report inside, all
+ * well).
+ *
+ * Two delivery modes, one per channel value: `always` (the `issue` channel)
+ * writes the issue on every run; `on-failure` (the `issue-on-failure`
+ * channel) writes only when the run needs attention - a healthy run does one
+ * read-only lookup and closes a still-open issue from a previous failure, or
+ * touches nothing at all.
+ *
+ * Shaped like a SectionModule where it matters - an ENDPOINTS dictionary
+ * and a permission declaration - so the mock route table, USED_PATHS, and
+ * the PAT grant prose pick it up through the existing machinery. It is NOT
+ * a settings section (never registered in sections/registry.ts): report
+ * delivery is infrastructure that writes even in check mode.
+ */
+
+import type { RepoRef } from "../discovery/targets.js";
+import type { ApiError, GithubClient } from "../github/api.js";
+import { isPermissionError } from "../github/api.js";
+import { paginate } from "../github/paginate.js";
+import type { SettingsFile } from "../schema.js";
+import { type EndpointDecl, expand } from "../sections/contract/endpoints.js";
+import { grantFor, type SectionPermission } from "../sections/contract/permissions.js";
+import { nameKey } from "../sections/labels/index.js";
+import type { LabelConfig } from "../sections/labels/schema.js";
+import type { UndeclaredPolicyList } from "../types.js";
+
+/** The lookup key: one exact-titled report issue per repo, forever reused. */
+export const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
+
+/**
+ * The marker label that makes the lookup one indexed, database-consistent
+ * request (the search API is eventually consistent and separately
+ * throttled, so it is not used at all).
+ */
+export const MARKER_LABEL = "settings-as-code-report";
+
+/** The marker label as the labels section (and ensure-create) declares it. */
+export const MARKER_LABEL_CONFIG = {
+  name: MARKER_LABEL,
+  color: "0e2a47",
+  description: "managed by settings-as-code private reporting - do not remove",
+} as const satisfies LabelConfig;
+
+export const ISSUE_REPORT_PERMISSION: SectionPermission = { repo: ["issues"] };
+
+export const ISSUE_REPORT_ENDPOINTS = {
+  list: {
+    route: "GET /repos/{owner}/{repo}/issues",
+    statuses: { 200: "the issue list (pull requests included)" },
+  },
+  create: {
+    route: "POST /repos/{owner}/{repo}/issues",
+    statuses: { 201: "report issue created" },
+  },
+  update: {
+    route: "PATCH /repos/{owner}/{repo}/issues/{issue_number}",
+    statuses: { 200: "report issue updated" },
+  },
+  createLabel: {
+    route: "POST /repos/{owner}/{repo}/labels",
+    statuses: { 201: "marker label created", 422: "the marker label already exists" },
+  },
+  user: {
+    route: "GET /user",
+    statuses: { 200: "the token's user, for the fallback creator scan" },
+    permission: "none",
+  },
+} as const satisfies Record<string, EndpointDecl>;
+
+/**
+ * When to write the report issue: `always` mirrors every run into it;
+ * `on-failure` writes only on needs-attention runs, closing (never creating)
+ * on healthy ones.
+ */
+export type IssueReportMode = "always" | "on-failure";
+
+/**
+ * Success carries the issue URL for the run summary; failure a safe warning;
+ * `skipped` is the on-failure mode's healthy path when no open issue needed
+ * closing - nothing was written, by design.
+ */
+export type IssueDelivery = { url: string } | { skipped: true } | { warning: string };
+
+/**
+ * The one failure surface, and it must stay public-safe: the warning names
+ * the HTTP status and generic advice only - never the slug, the request
+ * path, or the API's message, all of which would leak into public logs.
+ */
+function deliveryWarning(error: ApiError): { warning: string } {
+  const advice = isPermissionError(error)
+    ? `To fix, ${grantFor(ISSUE_REPORT_PERMISSION)} for the target repository, or set private-report: none`
+    : "Re-run the workflow, or set private-report: none if it persists";
+  return { warning: `could not deliver the private report (HTTP ${error.status}). ${advice}` };
+}
+
+/**
+ * The malformed-response twin of deliveryWarning, equally public-safe: `what`
+ * names the failing request as a route template or a structural fact (never
+ * the slug, the expanded path, or response content), so the operator can
+ * tell WHICH of the channel's requests answered off-contract.
+ */
+function malformedWarning(what: string): { warning: string } {
+  return {
+    warning: `could not deliver the private report: ${what}. Check the "api-version" input, or set private-report: none`,
+  };
+}
+
+/**
+ * The report issue in a page of issue-list entries: skips pull requests
+ * (the issues list includes them) and demands the exact title. Carries the
+ * issue's current label names so a fallback-scan hit can reattach the
+ * stripped marker without clobbering human-added labels.
+ */
+function reportIssueIn(items: unknown[]): { number: number; url: string; labels: string[] } | null {
+  for (const item of items) {
+    if (typeof item !== "object" || item === null) {
+      continue;
+    }
+    const issue = item as Record<string, unknown>;
+    if (issue.pull_request !== undefined || issue.title !== ISSUE_TITLE) {
+      continue;
+    }
+    if (typeof issue.number !== "number") {
+      continue;
+    }
+    const labels = Array.isArray(issue.labels)
+      ? issue.labels.flatMap((label) => {
+          if (typeof label === "string") {
+            return [label];
+          }
+          const name = (label as { name?: unknown } | null)?.name;
+          return typeof name === "string" ? [name] : [];
+        })
+      : [];
+    return {
+      number: issue.number,
+      url: typeof issue.html_url === "string" ? issue.html_url : "",
+      labels,
+    };
+  }
+  return null;
+}
+
+/**
+ * The fallback lookup for when a human stripped the marker label: an
+ * early-exit scan of the token user's own issues in creation order. It runs
+ * BEFORE any create, so a stripped label can never cause a duplicate.
+ */
+async function fallbackScan(
+  api: GithubClient,
+  ref: { repo: RepoRef },
+): Promise<{ found: ReturnType<typeof reportIssueIn> } | { warning: string }> {
+  const user = await api.tryRequest("GET", expand(ISSUE_REPORT_ENDPOINTS.user, ref));
+  if ("error" in user) {
+    return deliveryWarning(user.error);
+  }
+  const login = (user.data as { login?: unknown } | null)?.login;
+  if (typeof login !== "string" || login === "") {
+    return malformedWarning("GET /user returned a response without the token user's login");
+  }
+  const path = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, {
+    state: "all",
+    creator: login,
+    sort: "created",
+    direction: "asc",
+  });
+  const page = await paginate(api, path, undefined, (items) => reportIssueIn(items) !== null);
+  if ("error" in page) {
+    return deliveryWarning(page.error);
+  }
+  if ("malformed" in page) {
+    return malformedWarning("the issue list (creator scan) returned a non-list page");
+  }
+  return { found: reportIssueIn(page.items) };
+}
+
+/**
+ * The on-failure mode's healthy path: one indexed lookup for an OPEN report
+ * issue (a previous failure), closed with the healthy report when found;
+ * otherwise nothing is written at all. The label ensure-create and the
+ * fallback creator scan are skipped on purpose - both exist only to keep a
+ * CREATE from duplicating, and this path never creates. The trade-off: a
+ * human-stripped marker label leaves a stale open issue until the next
+ * needs-attention run repairs the label.
+ */
+async function closeIfOpen(
+  api: GithubClient,
+  ref: { repo: RepoRef },
+  body: string,
+): Promise<IssueDelivery> {
+  const listPath = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, {
+    state: "open",
+    labels: MARKER_LABEL,
+    per_page: "100",
+  });
+  const listed = await api.tryRequest("GET", listPath);
+  if ("error" in listed) {
+    return deliveryWarning(listed.error);
+  }
+  if (!Array.isArray(listed.data)) {
+    return malformedWarning("the open-issue lookup returned a non-list response");
+  }
+  const found = reportIssueIn(listed.data);
+  if (!found) {
+    return { skipped: true };
+  }
+  const closed = await api.tryRequest(
+    "PATCH",
+    expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
+    { body, state: "closed" },
+  );
+  if ("error" in closed) {
+    return deliveryWarning(closed.error);
+  }
+  return { url: found.url };
+}
+
+async function deliver(
+  api: GithubClient,
+  repo: RepoRef,
+  body: string,
+  needsAttention: boolean,
+  mode: IssueReportMode,
+): Promise<IssueDelivery> {
+  const ref = { repo };
+  if (mode === "on-failure" && !needsAttention) {
+    return closeIfOpen(api, ref, body);
+  }
+  // Ensure the marker label exists so lookup stays one indexed request;
+  // a 422 means it already does.
+  const label = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.createLabel, ref), {
+    name: MARKER_LABEL_CONFIG.name,
+    color: MARKER_LABEL_CONFIG.color,
+    description: MARKER_LABEL_CONFIG.description,
+  });
+  if ("error" in label && label.error.status !== 422) {
+    return deliveryWarning(label.error);
+  }
+  const listPath = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, {
+    state: "all",
+    labels: MARKER_LABEL,
+    per_page: "100",
+  });
+  const listed = await api.tryRequest("GET", listPath);
+  if ("error" in listed) {
+    return deliveryWarning(listed.error);
+  }
+  if (!Array.isArray(listed.data)) {
+    return malformedWarning("the report-issue lookup returned a non-list response");
+  }
+  let found = reportIssueIn(listed.data);
+  // The PATCH normally leaves labels alone (a human may have added their own).
+  // But when the label lookup missed and the creator scan hit, the marker was
+  // stripped from the issue; without reattaching it here, every future
+  // label-filtered lookup - including the on-failure healthy close - misses
+  // this issue forever.
+  let relabel: string[] | undefined;
+  if (!found) {
+    const scanned = await fallbackScan(api, ref);
+    if ("warning" in scanned) {
+      return scanned;
+    }
+    found = scanned.found;
+    if (found && !found.labels.includes(MARKER_LABEL)) {
+      relabel = [...found.labels, MARKER_LABEL];
+    }
+  }
+  const state = needsAttention ? "open" : "closed";
+  if (found) {
+    const updated = await api.tryRequest(
+      "PATCH",
+      expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
+      relabel ? { body, state, labels: relabel } : { body, state },
+    );
+    if ("error" in updated) {
+      return deliveryWarning(updated.error);
+    }
+    return { url: found.url };
+  }
+  const created = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.create, ref), {
+    title: ISSUE_TITLE,
+    body,
+    labels: [MARKER_LABEL],
+  });
+  if ("error" in created) {
+    return deliveryWarning(created.error);
+  }
+  const issue = created.data as { number?: unknown; html_url?: unknown } | null;
+  const url = typeof issue?.html_url === "string" ? issue.html_url : "";
+  if (state === "closed") {
+    // Creation cannot set the state, so a healthy first run closes right after.
+    if (typeof issue?.number !== "number") {
+      return malformedWarning(
+        "the report issue was created but carried no issue number, so it could not be closed for this healthy run",
+      );
+    }
+    const closed = await api.tryRequest(
+      "PATCH",
+      expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(issue.number) }),
+      { state },
+    );
+    if ("error" in closed) {
+      return deliveryWarning(closed.error);
+    }
+  }
+  return { url };
+}
+
+/**
+ * Upsert the report issue on the target repo: ensure the marker label, find
+ * the issue by label (one request) or by the early-exit creator scan, then
+ * PATCH the body and state - or POST it with the marker label attached.
+ * `needsAttention` opens the issue (failed / check-mode drift, exactly the
+ * results that fail the run) and anything else closes it. Under the
+ * `on-failure` mode a healthy run only closes an already-open issue (or does
+ * nothing); a needs-attention run behaves exactly like `always`. Never
+ * throws: report delivery is auxiliary, so every failure comes back as a
+ * safe warning and the run's result stays untouched. `repo` is the parsed
+ * owner/name pair from the run flows' boundary, so this module never
+ * re-splits a slug.
+ */
+export async function deliverIssueReport(
+  api: GithubClient,
+  repo: RepoRef,
+  body: string,
+  needsAttention: boolean,
+  mode: IssueReportMode,
+): Promise<IssueDelivery> {
+  try {
+    return await deliver(api, repo, body, needsAttention, mode);
+  } catch {
+    // A throw is a network-level failure whose message embeds the request
+    // path (the private slug), so nothing from it may escape.
+    return {
+      warning:
+        "could not deliver the private report: the request failed before an HTTP response arrived. Re-run the workflow, or set private-report: none if it persists",
+    };
+  }
+}
+
+/**
+ * Marker-label injection, closing the undeclaredDefault hole: when the
+ * settings declare a `labels` section, an apply would DELETE the
+ * undeclared marker label right after report delivery created it. Appending
+ * the marker to the declared set (when no entry already manages it) lets the
+ * labels section manage it like any other label.
+ *
+ * A declared entry whose name OR new_name resolves to the marker already
+ * manages it, so no injection is needed. But an entry that RENAMES the marker
+ * AWAY (name is the marker, new_name is something else) would break the
+ * next run's marker lookup, so its rename is refused: the new_name is stripped
+ * and the outcome is "rename-refused". Pure: the input settings object is
+ * never mutated.
+ */
+export function injectMarkerLabel(settings: SettingsFile): {
+  settings: SettingsFile;
+  outcome: "unchanged" | "injected" | "rename-refused";
+} {
+  // The labels section takes the undeclared-policy knob, so the declaration
+  // is either the plain entry array or the wrapped {_undeclared, entries}
+  // form; unwrap here and rebuild in the SAME form below, so the injection
+  // never rewrites the operator's chosen shape (or their policy).
+  const declaration = settings.labels;
+  const wrapped = !Array.isArray(declaration);
+  const labels = wrapped
+    ? declaration !== undefined && Array.isArray(declaration?.entries)
+      ? declaration.entries
+      : null
+    : declaration;
+  if (labels === null || !Array.isArray(labels)) {
+    return { settings, outcome: "unchanged" };
+  }
+  const rebuild = (entries: LabelConfig[]): SettingsFile["labels"] =>
+    wrapped ? { ...(declaration as UndeclaredPolicyList<LabelConfig>), entries } : entries;
+  const marker = nameKey(MARKER_LABEL);
+  // An entry that renames the marker to a different name: keep the entry but
+  // drop the rename so the marker label keeps its name.
+  const renamesMarkerAway = (label: LabelConfig): boolean =>
+    nameKey(label.name) === marker &&
+    label.new_name !== undefined &&
+    nameKey(label.new_name) !== marker;
+  if (labels.some(renamesMarkerAway)) {
+    const guarded = labels.map((label) =>
+      renamesMarkerAway(label) ? { ...label, new_name: undefined } : label,
+    );
+    return {
+      settings: { ...settings, labels: rebuild(guarded) },
+      outcome: "rename-refused",
+    };
+  }
+  const declared = labels.some(
+    (label) => nameKey(label.name) === marker || nameKey(label.new_name ?? label.name) === marker,
+  );
+  if (declared) {
+    return { settings, outcome: "unchanged" };
+  }
+  return {
+    settings: { ...settings, labels: rebuild([...labels, MARKER_LABEL_CONFIG]) },
+    outcome: "injected",
+  };
+}
