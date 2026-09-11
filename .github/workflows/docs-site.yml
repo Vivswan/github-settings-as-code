@@ -1,11 +1,13 @@
 # This file is managed by Vivswan/repo-platform.
-# Local edits may be replaced during template updates.
+# Local edits are replaced on the next sync.
 #
 # The docs site: this repository's docs/ markdown rendered under the
 # central fleet theme (repo-platform's actions/pages-site) - layout,
 # versioning, locales, and conventions in repo-platform's docs/docs-site.md.
 # The check job builds docs/ strictly on every PR touching it (dead
-# internal links fail there instead of at deploy time); paths-filtered by
+# internal links fail there instead of at deploy time) over the mounts the
+# plan resolves from the registration, the same list the deploy builds, so
+# a link into an included root is judged on both; paths-filtered by
 # design, so it is never in the all-green roster and never a required
 # check. The push deploy is ci.yml's `docs-site` job (or its `pages` job
 # where that module carries the docs as a mount), downstream of the
@@ -37,9 +39,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Vivswan/repo-platform/actions/plan@build
+        id: plan
+        with:
+          mode: pages
       - uses: Vivswan/repo-platform/actions/pages-site@build
         with:
           check: "true"
+          mounts: ${{ steps.plan.outputs.mounts }}
+          docs-dir: ${{ steps.plan.outputs.docs_dir }}
+          site-title: ${{ steps.plan.outputs.site_title }}
 
   deploy:
     if: github.event_name != 'pull_request'
