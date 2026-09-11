@@ -297,7 +297,7 @@ describe("runForRepo secret references", () => {
       api,
       opts({
         settings: webhookSettings("$WEBHOOK_SECRET"),
-        secretSource: () => "target",
+        secretSource: "target",
         secretEnv: { WEBHOOK_SECRET: "present-but-irrelevant" },
       }),
       io,

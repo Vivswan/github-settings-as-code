@@ -138,7 +138,7 @@ Two kinds of document reach the engine:
 - Operator-authored: the settings-file layers, the `repos-dir` files, and the `defaults-file`. They live in the repository that runs the workflow.
 - Target-authored: a repository's own `.github/settings.yml`, fetched from the target itself.
 
-A `$NAME` secret reference resolves from the workflow step's environment, so it is honored only in operator documents. A target repository must never be able to route the operator's secrets into itself. Provenance is a property of the source document and travels with each section.
+A `$NAME` secret reference resolves from the workflow step's environment, so it is honored only in operator documents. A target repository must never be able to route the operator's secrets into itself. Provenance is a property of the source document, decided once where the document is chosen, and every value in it shares that one source.
 
 Demonstrated by: [test/action/secret-refs.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/action/secret-refs.test.ts), [test/engine/secrets.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/secrets.test.ts), [test/e2e/scenarios/multi-secrets-target-ref-rejected.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/multi-secrets-target-ref-rejected.yml).
 

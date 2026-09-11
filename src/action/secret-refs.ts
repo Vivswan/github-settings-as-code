@@ -100,10 +100,10 @@ export type SecretRefsResolution =
 
 /**
  * One designated secret field's value, tagged with the provenance of the
- * DOCUMENT that declared it. Provenance is captured when the source document
- * is read: the per-SECTION lookup (engine/secrets.ts targetSecretSource) says
- * whether a target-fetched document declared the section, so a target's
- * references are refused while an operator document's resolve.
+ * DOCUMENT that declared it. Provenance is decided once, where the document
+ * is chosen (action/multi.ts readTargetSettings): a target-fetched document
+ * is "target", so its references are refused, and every other document is
+ * "operator", so its references resolve.
  */
 export interface SourcedSecretValue {
   readonly value: string;
