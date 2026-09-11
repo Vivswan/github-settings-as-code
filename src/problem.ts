@@ -348,13 +348,22 @@ export function describeProblem(problem: Problem): string {
     case "input-report-key-invalid":
       return `the "report-public-key" input is not a valid age recipient: ${problem.reason}. It must be an "age1..." public key from "age-keygen" (the recipient line, not the AGE-SECRET-KEY identity)`;
     case "input-rejected-in-merge":
-      return `the ${quoteList(problem.inputs)} input(s) do not apply to mode: merge, which only folds the settings-file layers into merged-file: it never targets a repository, calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input(s), or move them to the apply or check step that runs the merged document`;
+      return (
+        `the ${quoteList(problem.inputs)} input(s) do not apply to mode: merge, which only folds ` +
+        "the settings-file layers into merged-file: it never targets a repository, calls the GitHub " +
+        "API, delivers a report, or narrows the sections it writes. Remove the input(s), or move " +
+        "them to the apply or check step that runs the merged document"
+      );
     case "input-merged-file-missing":
       return 'mode: merge needs a "merged-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file';
     case "input-settings-file-empty":
       return `the "settings-file" input is "${problem.value}", which lists no file. In mode: merge it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file`;
     case "input-merge-only":
-      return `the ${quoteList(problem.inputs)} input(s) only apply to mode: merge, but this run is in ${problem.mode} mode, so ${problem.inputs.length === 1 ? "it" : "they"} would never be used. Remove the input(s), or set mode: merge to fold settings files`;
+      return (
+        `the ${quoteList(problem.inputs)} input(s) only apply to mode: merge, but this run is in ` +
+        `${problem.mode} mode, so ${problem.inputs.length === 1 ? "it" : "they"} would never be ` +
+        "used. Remove the input(s), or set mode: merge to fold settings files"
+      );
     case "input-token-missing":
       return 'cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)';
     case "input-report-without-redaction":
@@ -376,7 +385,12 @@ export function describeProblem(problem: Problem): string {
     case "input-defaults-file-without-multi":
       return 'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never apply. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode';
     case "input-settings-file-is-list":
-      return `the "settings-file" input is "${problem.value}", which contains a list separator: ${problem.mode} mode reads exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file, or set mode: merge to fold the list into one document`;
+      return (
+        `the "settings-file" input is "${problem.value}", which contains a list separator: ` +
+        `${problem.mode} mode reads exactly one settings file, and only mode: merge takes a ` +
+        "newline- or comma-separated list. Name one file, or set mode: merge to fold the list into " +
+        "one document"
+      );
     case "input-repository-not-slug":
       return `cannot target a repository: "${problem.value}" is not an owner/name slug. Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"`;
     case "settings-not-mapping":
@@ -406,7 +420,12 @@ export function describeProblem(problem: Problem): string {
     case "artifact-uploader-missing":
       return "private-report: artifact needs an artifact uploader, and none was supplied: the action supplies its own; a library caller passes one as the uploader argument, or picks another private-report channel";
     case "merged-file-is-layer":
-      return `the "merged-file" input "${problem.mergedFile}" is layer ${problem.index + 1} of the "settings-file" list ("${problem.layer}"): the merge would overwrite that layer with the folded document, and the next run would fold the merged document as a layer. Write the merged document to a path outside the layer list`;
+      return (
+        `the "merged-file" input "${problem.mergedFile}" is layer ${problem.index + 1} of the ` +
+        `"settings-file" list ("${problem.layer}"): the merge would overwrite that layer with the ` +
+        "folded document, and the next run would fold the merged document as a layer. Write the " +
+        "merged document to a path outside the layer list"
+      );
     case "merged-file-unwritable":
       return `cannot write the merged document to ${problem.path}: ${problem.reason}. Check that the "merged-file" input names a writable path`;
     case "no-targets":

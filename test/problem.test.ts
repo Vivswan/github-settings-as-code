@@ -41,12 +41,12 @@ const SPECIMENS = {
       code: "input-unknown-sections",
       unknown: [
         { input: "required-sections", names: ["nope"] },
-        { input: "sections", names: ["typo", "tpyo"] },
+        { input: "sections", names: ["typo", "nope"] },
       ],
       known: SECTION_KEYS,
     },
     `unknown section "nope" in the "required-sections" input; it matches none of: ${KNOWN}. Fix the name in the workflow's input list; ` +
-      `unknown sections "typo", "tpyo" in the "sections" input; each matches none of: ${KNOWN}. Fix the names in the workflow's input list`,
+      `unknown sections "typo", "nope" in the "sections" input; each matches none of: ${KNOWN}. Fix the names in the workflow's input list`,
   ],
   "input-required-sections-excluded": [
     { code: "input-required-sections-excluded", excluded: ["labels", "milestones"] },
@@ -58,7 +58,9 @@ const SPECIMENS = {
   ],
   "input-report-key-missing": [
     { code: "input-report-key-missing" },
-    'private-report: artifact needs a "report-public-key" input: the age recipient every report is encrypted to. Generate a keypair with "age-keygen -o key.txt", keep key.txt secret, and set report-public-key to the printed "age1..." recipient (safe to commit)',
+    'private-report: artifact needs a "report-public-key" input: the age recipient every report ' +
+      'is encrypted to. Generate a keypair with "age-keygen -o key.txt", keep key.txt secret, and ' +
+      'set report-public-key to the printed "age1..." recipient (safe to commit)',
   ],
   "input-report-key-invalid": [
     { code: "input-report-key-invalid", reason: "invalid recipient" },
@@ -66,7 +68,10 @@ const SPECIMENS = {
   ],
   "input-rejected-in-merge": [
     { code: "input-rejected-in-merge", inputs: ["repos", "repos-dir"] },
-    'the "repos", "repos-dir" input(s) do not apply to mode: merge, which only folds the settings-file layers into merged-file: it never targets a repository, calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input(s), or move them to the apply or check step that runs the merged document',
+    'the "repos", "repos-dir" input(s) do not apply to mode: merge, which only folds the ' +
+      "settings-file layers into merged-file: it never targets a repository, calls the GitHub API, " +
+      "delivers a report, or narrows the sections it writes. Remove the input(s), or move them to " +
+      "the apply or check step that runs the merged document",
   ],
   "input-merged-file-missing": [
     { code: "input-merged-file-missing" },
@@ -118,7 +123,9 @@ const SPECIMENS = {
   ],
   "input-settings-file-is-list": [
     { code: "input-settings-file-is-list", value: "a.yml,b.yml", mode: "apply" },
-    'the "settings-file" input is "a.yml,b.yml", which contains a list separator: apply mode reads exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file, or set mode: merge to fold the list into one document',
+    'the "settings-file" input is "a.yml,b.yml", which contains a list separator: apply mode ' +
+      "reads exactly one settings file, and only mode: merge takes a newline- or comma-separated " +
+      "list. Name one file, or set mode: merge to fold the list into one document",
   ],
   "input-repository-not-slug": [
     { code: "input-repository-not-slug", value: "nope" },
@@ -201,7 +208,9 @@ const SPECIMENS = {
   ],
   "merged-file-is-layer": [
     { code: "merged-file-is-layer", mergedFile: "./repo.yml", index: 1, layer: "repo.yml" },
-    'the "merged-file" input "./repo.yml" is layer 2 of the "settings-file" list ("repo.yml"): the merge would overwrite that layer with the folded document, and the next run would fold the merged document as a layer. Write the merged document to a path outside the layer list',
+    'the "merged-file" input "./repo.yml" is layer 2 of the "settings-file" list ("repo.yml"): ' +
+      "the merge would overwrite that layer with the folded document, and the next run would fold " +
+      "the merged document as a layer. Write the merged document to a path outside the layer list",
   ],
   "merged-file-unwritable": [
     { code: "merged-file-unwritable", path: "out/merged.yml", reason: "EACCES" },
@@ -221,7 +230,9 @@ const SPECIMENS = {
   ],
   "repos-input-invalid-entries": [
     { code: "repos-input-invalid-entries", invalid: ["bad", "worse"], duplicated: ["O/A"] },
-    'the "repos" input has 3 invalid entries: "bad", "worse" are not owner/name slugs (use values like "octocat/hello-world", comma- or newline-separated); "O/A" is listed more than once (keep exactly one entry per repository). Or use "*" alone to discover repositories',
+    'the "repos" input has 3 invalid entries: "bad", "worse" are not owner/name slugs (use values ' +
+      'like "octocat/hello-world", comma- or newline-separated); "O/A" is listed more than once ' +
+      '(keep exactly one entry per repository). Or use "*" alone to discover repositories',
   ],
   "repos-dir-missing": [
     { code: "repos-dir-missing", reposDir: "repos" },
