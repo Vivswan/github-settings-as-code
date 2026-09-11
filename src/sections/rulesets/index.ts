@@ -71,6 +71,26 @@ const LiveRulesetSummary = z.looseObject({
 const permission: SectionPermission = { repo: ["administration"] };
 
 /**
+ * GitHub returns a ruleset's bypass_actors only to a token with write access to the ruleset
+ * (Administration at write); any other GET omits the KEY (never `[]`). The declared list is then
+ * unobservable: it leaves the comparison
+ * so it reads as neither drift nor a phantom key. The write payload stays the full declaration.
+ * Returns the input itself when nothing is hidden, so the caller can tell the two apart.
+ */
+function observableRuleset(ruleset: RulesetConfig, live: unknown): RulesetConfig {
+  const hidden =
+    Object.hasOwn(ruleset, "bypass_actors") &&
+    typeof live === "object" &&
+    live !== null &&
+    !Object.hasOwn(live, "bypass_actors");
+  if (!hidden) {
+    return ruleset;
+  }
+  const { bypass_actors: _hidden, ...visible } = ruleset;
+  return visible;
+}
+
+/**
  * Rules and bypass_actors pass through verbatim (future rule types included),
  * so a typo'd rules[].type reaches GitHub unchanged and comes back as a 422.
  * The hint names that failure class; the valid types live in the endpoint
@@ -167,11 +187,17 @@ export const rulesetsSection = {
         continue;
       }
       const live = await ctx.read.get.call({ params: { ruleset_id: String(id) } });
-      const drift = subsetDiff(ruleset, live, `rulesets[${ruleset.name}]`);
+      const compared = observableRuleset(ruleset, live);
+      if (compared !== ruleset) {
+        plan.notes.push(
+          `rulesets[${ruleset.name}]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), so drift on it cannot be judged here; grant Administration write to check it`,
+        );
+      }
+      const drift = subsetDiff(compared, live, `rulesets[${ruleset.name}]`);
       if (!hasDrift(drift)) {
         continue;
       }
-      const phantom = phantomKeys(ruleset, live);
+      const phantom = phantomKeys(compared, live);
       if (phantom.length > 0) {
         plan.notes.push(
           phantomNote(`rulesets[${ruleset.name}]`, phantom, "ruleset", "this update will re-run"),

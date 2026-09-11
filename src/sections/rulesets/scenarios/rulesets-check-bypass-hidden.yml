@@ -1,0 +1,76 @@
+# GitHub returns a ruleset's bypass_actors only to a token with write access
+# to the ruleset: a read-grade token's GET omits the key entirely (never `[]`),
+# and the list never carries it. A declared bypass_actors - empty or not - is then not
+# observable, so check mode reports the ruleset converged with one notice per
+# ruleset instead of a false "expected list, live has undefined" drift plus a
+# phantom-key note. The live rulesets hold exactly the declared lists.
+name: rulesets-check-bypass-hidden
+settings:
+  rulesets:
+    - name: build
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["refs/heads/build"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors: []
+    - name: main-protection
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
+inputs:
+  mode: check
+live_state:
+  rulesets:
+    - id: 41
+      name: build
+      source_type: Repository
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["refs/heads/build"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors: []
+    - id: 42
+      name: main-protection
+      source_type: Repository
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
+token_permissions:
+  administration: read
+expect:
+  exit_code: 0
+  result: clean
+  outcomes:
+    rulesets: clean
+  stdout_contains:
+    - "rulesets[build]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), so drift on it cannot be judged here; grant Administration write to check it"
+    - "rulesets[main-protection]: bypass_actors is not visible to this token"
+  never:
+    - "PUT /repos/{repo}/rulesets/41"
+    - "PUT /repos/{repo}/rulesets/42"
