@@ -282,7 +282,8 @@ const remoteRef = (fx: Fixture, ref: string): string => git(fx.work, "ls-remote"
 
 /**
  * A commit shaped like the pipeline's chain commits but minted by another
- * writer: `source`'s tree minus workflows plus `bundle`, parented on `parent`, naming
+ * writer: `source`'s tree minus workflows plus `bundle`, parented on `parent`
+ * (null for the chain's first commit, a root like the pipeline's own), naming
  * `source` in a Source trailer. Not pushed; the clone holding it is returned
  * for a competitor plan to push from.
  */
@@ -290,7 +291,7 @@ function rivalChainCommit(
   fx: Fixture,
   name: string,
   source: string,
-  parent: string,
+  parent: string | null,
   bundle: string,
 ): { from: string; sha: string } {
   const from = clone(fx.root, fx.origin, name);
@@ -303,8 +304,7 @@ function rivalChainCommit(
     from,
     "commit-tree",
     tree,
-    "-p",
-    parent,
+    ...(parent === null ? [] : ["-p", parent]),
     "-m",
     "build: by another run",
     "-m",
@@ -620,7 +620,7 @@ describe("packageRelease", () => {
       fx,
       "rival-same",
       fx.mergeSha,
-      fx.mergeSha,
+      null,
       "packaged-bundle-bytes-1\n",
     );
     let result: ReturnType<typeof packageRelease> | undefined;
@@ -641,13 +641,7 @@ describe("packageRelease", () => {
 
   test("an append overtaken by a rival packaging another source is retried after it", () => {
     const fx = seedFixture();
-    const rival = rivalChainCommit(
-      fx,
-      "rival-other",
-      fx.seedSha,
-      fx.seedSha,
-      "competitor-bundle\n",
-    );
+    const rival = rivalChainCommit(fx, "rival-other", fx.seedSha, null, "competitor-bundle\n");
     let result: ReturnType<typeof packageRelease> | undefined;
     const pushes = withPushPlans(
       fx,
@@ -1617,7 +1611,7 @@ describe("advanceBuild", () => {
   const advanced = (tip: string): string =>
     `refs/heads/build: advanced to ${tip}; refs/tags/latest: moved to ${tip}`;
 
-  test("the first advance creates build as a packaged child of the green commit and tags it latest; a rerun verifies both", () => {
+  test("the first advance creates build as the green commit's packaged commit, a root, and tags it latest; a rerun verifies both", () => {
     const fx = seedFixture();
     let result: ReturnType<typeof advanceBuild> | undefined;
     const pushes = withPushPlans(fx, [], () => {
@@ -2219,7 +2213,8 @@ describe("advanceBuild", () => {
     expect(remoteRef(fx, "refs/heads/build")).toBe("");
   });
 
-  /** `count` packaged commits of the seed, chained, in a clone that has not
+  /** `count` packaged commits of the seed, chained from a root (the shape
+   * the pipeline mints while build does not exist), in a clone that has not
    * pushed them: what other runs would append to build, as the plans that
    * land one ahead of each of this run's pushes. */
   function competitors(
@@ -2231,21 +2226,21 @@ describe("advanceBuild", () => {
     stripWorkflows(from);
     write(from, "lib/index.js", "competitor-bundle\n");
     git(from, "add", "-f", "lib/index.js");
+    const tree = git(from, "write-tree");
     const shas: string[] = [];
     let first = "";
     let last = "";
     for (let n = 1; n <= count; n++) {
-      git(
+      last = git(
         from,
-        "commit",
-        "--quiet",
-        "--allow-empty",
+        "commit-tree",
+        tree,
+        ...(last === "" ? [] : ["-p", last]),
         "-m",
         `build: competitor ${n}`,
         "-m",
         `Source: ${fx.seedSha}`,
       );
-      last = git(from, "rev-parse", "HEAD");
       first = first === "" ? last : first;
       shas.push(last);
     }

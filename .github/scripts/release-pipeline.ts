@@ -11,7 +11,7 @@
  * workflows, plus the built lib/index.js, and nothing else - on the `build`
  * branch (the tags cut before that branch existed point at main commits
  * that still carried the committed bundle). post-green appends a green main
- * commit's packaged child to refs/heads/build when it can publish, the
+ * commit's packaged commit to refs/heads/build when it can publish, the
  * release hook appends the release's when post-green did not (parent: the
  * previous tip; the first chain commit is a ROOT, with no parent, so the
  * chain never links into main's history), each naming its source in
@@ -31,7 +31,7 @@
  *                   release-please's boundary is recorded config).
  *   boundary-check  boundaryCheck: main's recorded boundary is fresh.
  *   anchor-check    anchorCheck: the release PR carries the anchor.
- *   advance-build   advanceBuild: append a green commit's packaged child to
+ *   advance-build   advanceBuild: append a green commit's packaged commit to
  *                   build and point latest at the chain commit of the
  *                   newest main source.
  * Env: TAG and GITHUB_SHA (package/retag-major/anchor), GITHUB_SHA
@@ -392,7 +392,12 @@ function readBuildTip(cwd: string): BuildTip {
   return { tip, mainHead: fetchMainHead(cwd) };
 }
 
-/** Origin's main head, freshly fetched (its history lands with it). */
+/** Origin's main head, freshly fetched. On a full clone its history lands
+ * with it; a shallow clone keeps its shallow boundary (a plain fetch does
+ * not deepen), so an ancestry verdict against it holds only on a full
+ * checkout - the callers that judge one run on fetch-depth 0 (advance-build
+ * refuses a shallow checkout outright), and the verify job's depth-1 clone
+ * reads main's head without judging ancestry against it. */
 function fetchMainHead(cwd: string): string {
   git(cwd, "fetch", "--quiet", "origin", "refs/heads/main");
   return git(cwd, "rev-parse", "FETCH_HEAD");
@@ -974,7 +979,7 @@ export interface AdvanceBuildResult {
 }
 
 /**
- * Append the packaged child of a green main commit to refs/heads/build and
+ * Append a green main commit's packaged commit to refs/heads/build and
  * point the `latest` tag at the chain commit of the newest main source.
  * Every commit on build is its source's tree minus workflows plus the bundle
  * and names that source in a Source trailer; the next commit is parented on
