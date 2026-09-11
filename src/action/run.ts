@@ -93,7 +93,7 @@ export async function run(overrides?: {
   if (cfg.kind === "merge") {
     return runMerge(cfg, io);
   }
-  const api = overrides?.api ?? new GithubApi(cfg.token, io, undefined, cfg.apiVersion);
+  const api = overrides?.api ?? new GithubApi({ token: cfg.token, io, apiVersion: cfg.apiVersion });
 
   if (cfg.kind === "multi") {
     const { fatal, targets } = await runMulti(api, cfg, io, overrides?.uploader);

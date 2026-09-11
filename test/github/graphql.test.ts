@@ -169,7 +169,12 @@ describe("tryGraphql errors[] mapping", () => {
     );
     process.env.RETRY_BASE_MS = "1";
     try {
-      const knobApi = new GithubApi("t", traceIo().io, "https://api.test", "2022-11-28");
+      const knobApi = new GithubApi({
+        token: "t",
+        io: traceIo().io,
+        baseUrl: "https://api.test",
+        apiVersion: "2022-11-28",
+      });
       stubFetch([
         () => graphql({ data: { repository: { id: "R_1" } }, errors: { type: "NOT_FOUND" } }),
       ]);

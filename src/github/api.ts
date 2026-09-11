@@ -1,18 +1,23 @@
 /**
- * GitHub REST client on @octokit/rest with the retry and throttling
+ * GitHub REST client on @octokit/core with the retry and throttling
  * plugins: rate limits (429 and secondary 403s) and transient 5xx/network
  * failures are retried with backoff automatically, honoring Retry-After.
+ * Only `octokit.request` is used; the endpoint-method and paginate plugins
+ * @octokit/rest adds on top of core have no call site here. Its request-log
+ * plugin stays: it is the source of the per-attempt trace line carrying
+ * GitHub's request id, which support asks for.
  * Paths are built by the sections, and payloads pass through with every
  * field intact: the JSON body is the payload's own serialization (a
  * byte-identical round-trip for plain data - see redactSecretPayloadSafe),
  * never an endpoint typing that could drop an unknown field.
  */
 
+import { Octokit } from "@octokit/core";
+import { requestLog } from "@octokit/plugin-request-log";
 import { retry } from "@octokit/plugin-retry";
 import { throttling } from "@octokit/plugin-throttling";
-import { Octokit } from "@octokit/rest";
 import Bottleneck from "bottleneck/light.js";
-import type { Io } from "../io.js";
+import { type Io, maskRegistry } from "../io.js";
 import { redactSecretPayloadSafe } from "./secret-scan.js";
 
 export interface ApiError {
@@ -269,7 +274,7 @@ function throttleCallback(
 }
 
 /**
- * The `log` implementation passed to Octokit. Octokit-core and its retry and
+ * The `log` implementation passed to Octokit. The request-log, retry, and
  * throttling plugins log every request line - method, URL, status - through
  * this sink; the default sink is `console`, which writes those lines (carrying
  * private slugs and live-state segments like branch names and collaborator
@@ -304,7 +309,7 @@ export const MAX_RETRY_WAIT_S = 60;
 // semantics guide's retry count to it.
 export const MAX_RETRIES = 2; // total attempts = 1 + MAX_RETRIES
 
-const ActionOctokit = Octokit.plugin(retry, throttling);
+const ActionOctokit = Octokit.plugin(requestLog, retry, throttling);
 
 interface OctokitHttpError {
   status: number;
@@ -442,26 +447,46 @@ const SECRET_TRANSPORT_WITHHELD =
 const REDACTED_TRANSPORT_WITHHELD =
   "the transport failed before an HTTP response arrived (details withheld: the repository is redacted)";
 
+export interface GithubApiOptions {
+  token: string;
+  /** Trace sink for redacted request lines; defaults to a silent trace with nothing masked. */
+  io?: TraceIo;
+  /** Defaults to GITHUB_API_URL, then the public API. */
+  baseUrl?: string;
+  apiVersion?: string;
+  /**
+   * Test knob override: an explicit value forces the RETRY_BASE_MS scale
+   * (used by unit tests that construct the client directly); left undefined,
+   * the knob is read once from the environment.
+   */
+  retryBaseMs?: number;
+  /** Passed to octokit verbatim; octokit-core's own agent string when omitted. */
+  userAgent?: string;
+}
+
+/** The default trace: nothing is written and nothing is masked. */
+const SILENT_TRACE: TraceIo = { debug() {}, masked: maskRegistry(() => {}).masked };
+
+/**
+ * The production GithubClient. The Octokit instance is built here and never
+ * injected: a consumer that needs full control over transport or plugins
+ * implements GithubClient directly instead.
+ */
 export class GithubApi implements GithubClient {
   private readonly octokit: InstanceType<typeof ActionOctokit>;
   private readonly trace: TraceRedaction;
-  constructor(
-    token: string,
-    io: TraceIo,
-    private readonly baseUrl = process.env.GITHUB_API_URL ?? "https://api.github.com",
-    private readonly apiVersion = DEFAULT_API_VERSION,
-    // Test knob override: an explicit value forces the RETRY_BASE_MS scale
-    // (used by unit tests that construct the client directly); left undefined,
-    // the knob is read once from the environment below.
-    retryBaseMsOverride?: number,
-  ) {
-    this.trace = new TraceRedaction(io);
+  private readonly baseUrl: string;
+  private readonly apiVersion: string;
+  constructor(options: GithubApiOptions) {
+    this.baseUrl = options.baseUrl ?? process.env.GITHUB_API_URL ?? "https://api.github.com";
+    this.apiVersion = options.apiVersion ?? DEFAULT_API_VERSION;
+    this.trace = new TraceRedaction(options.io ?? SILENT_TRACE);
     // Read the test knob ONCE. `retryBaseMs` scales the plugin waits (1000 =
     // real seconds in production, small under RETRY_BASE_MS). `underTestKnob`
     // is true when the environment sets the knob - the two derive from the one
     // read so it is never consulted twice.
     const envKnob = testRetryBaseMs();
-    const retryBaseMs = retryBaseMsOverride ?? envKnob ?? 1000;
+    const retryBaseMs = options.retryBaseMs ?? envKnob ?? 1000;
     const underTestKnob = envKnob !== undefined;
     // The throttling plugin routes every request through Bottleneck's job
     // scheduler, which paces mutations (its "write" limiter) at 1000ms and adds
@@ -485,8 +510,9 @@ export class GithubApi implements GithubClient {
       (s) => s !== 408 && !(underTestKnob && s === 429),
     );
     this.octokit = new ActionOctokit({
-      auth: token,
+      auth: options.token,
       baseUrl: this.baseUrl,
+      userAgent: options.userAgent,
       // Octokit's default logger is `console`, which writes request lines
       // (method + URL + status, carrying private slugs and live-state segments
       // like branch names) to stdout/stderr with no redaction, bypassing our
