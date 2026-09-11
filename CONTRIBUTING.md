@@ -6,7 +6,7 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 
 `src/` is TypeScript built with [bun](https://bun.com); `lib/` holds one committed generated artifact, `settings.schema.json`, the published settings.yml schema. `bun run build:schema` regenerates it; CI's schema-check job fails on drift. The bundle the action executes, `lib/index.js`, is not committed: `bun run build:bundle` builds it where it is needed (the CI workflows that run the action build it first, and a release ships it on a packaged commit on the `build` branch, which is what every `vX.Y.Z` tag cut since that branch exists, the moving major, and the `latest` tag point at).
 
-Runtime dependencies (such as @octokit/rest with the retry and throttling plugins, @actions/core, zod, and yaml) are compiled into that single bundle.
+Runtime dependencies (such as @octokit/core with the retry and throttling plugins, @actions/core, zod, and yaml) are compiled into that single bundle.
 
 Run `bun run check` for lint + YAML lint + import-layering lint + typecheck + dead-code check (knip) + tests + freshness of the generated artifacts (the schema and the generated docs). The pre-commit hook runs staged lint and typecheck only.
 

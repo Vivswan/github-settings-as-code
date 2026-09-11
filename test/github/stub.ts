@@ -47,4 +47,10 @@ export function traceIo(): { io: TraceIo & Pick<Io, "mask">; lines: string[] } {
 
 // retryAfterBaseValue: 1 turns every plugin wait into milliseconds.
 export const api = (io: TraceIo = traceIo().io) =>
-  new GithubApi("t", io, "https://api.test", "2022-11-28", 1);
+  new GithubApi({
+    token: "t",
+    io,
+    baseUrl: "https://api.test",
+    apiVersion: "2022-11-28",
+    retryBaseMs: 1,
+  });
