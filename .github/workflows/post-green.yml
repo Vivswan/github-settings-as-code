@@ -22,7 +22,7 @@ jobs:
       sha: ${{ inputs.sha }}
     secrets: inherit
 
-  # Appends the green commit's packaged child to the `build` branch and moves
+  # Appends the green commit's packaged commit to the `build` branch and moves
   # the `latest` tag (release-pipeline.ts advance-build). Beside
   # apply-settings, not behind it: a settings skip must not hold build back.
   # No permissions key: the job inherits the caller's grant and pushes with
@@ -85,7 +85,7 @@ jobs:
         run: |
           bun install --frozen-lockfile --ignore-scripts
           bun run build:bundle
-      - name: Append this commit's packaged child to build and point latest at the newest main source
+      - name: Append this commit's packaged commit to build and point latest at the newest main source
         if: steps.token.outputs.proceed == 'true'
         env:
           SOURCE_SHA: ${{ inputs.sha }}

@@ -405,7 +405,7 @@ const CALLER_EXPECTED: CallerContract = {
           with: undefined,
         },
         {
-          name: "Append this commit's packaged child to build and point latest at the newest main source",
+          name: "Append this commit's packaged commit to build and point latest at the newest main source",
           id: undefined,
           uses: undefined,
           if: PROCEED,

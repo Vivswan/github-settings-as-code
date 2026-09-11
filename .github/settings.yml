@@ -94,7 +94,7 @@ rulesets:
     bypass_actors: []
 
   # The `build` branch of packaged commits: post-green.yml appends a green
-  # main commit's packaged child with a plain push when its token can (the
+  # main commit's packaged commit with a plain push when its token can (the
   # release hook appends the release's when post-green did not), so build may
   # only ever move forward - no force-push can rewrite the chain that
   # `@build` consumers pin by sha and that the release hook walks to find
