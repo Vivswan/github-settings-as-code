@@ -59,6 +59,10 @@ The [getting started guide](docs/start/getting-started.md) walks the same steps 
 - v2 activates settings keys that were inert on v1: `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos`, and `branches[].protection.required_signatures`. Audit them in your files before moving a `@v1` pin; a stale `required_signatures: false` would remove a hand-enabled requirement.
 - Only the latest release is supported; fixes are not backported (see [SECURITY.md](.github/SECURITY.md)). Each major has an [upgrade guide](docs/upgrading/README.md).
 
+## Library
+
+The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node 22.14 or newer): validate, merge, check, and apply from your own code. Install it with `npm install @vivswan/github-settings-as-code` or `bun add @vivswan/github-settings-as-code`; the [library reference](docs/reference/library.md) has the API by group and the `@next` pre-release channel.
+
 ## Docs
 
 | Goal | Read |
@@ -80,6 +84,7 @@ The [getting started guide](docs/start/getting-started.md) walks the same steps 
 | Read a failing run | [Troubleshooting](docs/operate/troubleshooting.md) |
 | Move a pin to a new major | [Upgrading](docs/upgrading/README.md) |
 | See how the code is laid out | [Architecture](docs/reference/architecture.md) |
+| Use the engine from your own code | [Library](docs/reference/library.md) |
 
 ## Contributing
 

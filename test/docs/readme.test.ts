@@ -48,7 +48,7 @@ function assertBacktickedEnumeration(
 
 describe("README front door", () => {
   // The README is the front door to docs/: a pitch, a three-step quick start, the versioning
-  // note, and a table into the guides. Each pin here is a shape the reference content would
+  // note, the library pointer, and a table into the guides. Each pin here is a shape the reference content would
   // break if it grew back: the tables live on the reference pages now.
   const prose = readme.replace(/```[\s\S]*?```/g, "");
 
@@ -57,6 +57,7 @@ describe("README front door", () => {
       "# GitHub Settings as Code",
       "## Quick start",
       "## Versioning",
+      "## Library",
       "## Docs",
       "## Contributing",
     ]);
@@ -92,6 +93,7 @@ describe("README front door", () => {
         "docs/start/migrating-from-probot.md",
         "docs/reference/sections.md",
         "docs/reference/architecture.md",
+        "docs/reference/library.md",
         "docs/reference/inputs.md",
         "docs/reference/semantics.md",
         "docs/reference/permissions.md",
@@ -253,7 +255,7 @@ describe("schema $schema hints and $id", () => {
     // The $id is stamped by gen-settings-schema.ts as the raw copy at HEAD,
     // an identity that names no release...
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
-      name: string;
+      repository: { url: string };
     };
     // ...and the URL's parts must each match their own single source:
     // https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>.
@@ -270,10 +272,13 @@ describe("schema $schema hints and $id", () => {
       genScript.includes(`join(ROOT, ${rest.map((part) => JSON.stringify(part)).join(", ")})`),
       `gen-settings-schema.ts does not write to ${rest.join("/")}, where the $id points`,
     ).toBe(true);
-    // <repo> matching the package name is a convention witness, not an
-    // authority - nothing forces a repository to be named after its package,
-    // but this one is, and the equality catches a rename on either side.
-    expect(repo).toBe(pkg.name);
+    // <owner>/<repo> is the slug the manifest's repository URL names (the
+    // package name is scoped and cannot serve); the equality catches a
+    // rename on either side.
+    const manifestSlug = pkg.repository.url.match(
+      /^git\+https:\/\/github\.com\/([^/]+\/[^/]+)\.git$/,
+    )?.[1];
+    expect(`${owner}/${repo}`).toBe(manifestSlug ?? "");
     // <owner>/<repo> is the slug the README's own workflow snippet installs
     // (that pin is itself anchored by the "README version pins" test). An
     // includes() cannot prove EVERY install line agrees - third-party
