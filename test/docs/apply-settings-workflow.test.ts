@@ -312,6 +312,7 @@ const PUSH_PROBE = [
   '  echo "proceed=true" >> "$GITHUB_OUTPUT"',
   'elif [ "$PAT_SET" = "true" ]; then',
   "  echo \"::error::REPO_PLATFORM_TOKEN cannot push to this repository: $(tr '\\n' ' ' <probe.err)\"",
+  "  rm -f probe.err",
   "  exit 1",
   "else",
   '  echo "::warning::this run\'s token cannot push (the caller grants contents: read); the build branch and the latest tag were not advanced here (the release hook advances them on each release)." \\',
@@ -386,7 +387,7 @@ const CALLER_EXPECTED: CallerContract = {
           with: undefined,
         },
         {
-          name: "Append this commit's packaged child to build and move latest to the tip",
+          name: "Append this commit's packaged child to build and point latest at the newest main source",
           id: undefined,
           uses: undefined,
           if: PROCEED,

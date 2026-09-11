@@ -501,7 +501,7 @@ describe("packageRelease", () => {
     expect(buildTip(fx)).toBe(chain);
   });
 
-  test("a release whose chain commit lies behind newer green commits is found by the walk", () => {
+  test("a release whose chain commit lies behind newer green commits is found on the chain", () => {
     const fx = seedFixture();
     const chain = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
     const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
@@ -574,10 +574,18 @@ describe("packageRelease", () => {
     });
     expect(result).toEqual({ created: false, packagedSha: packaged.packagedSha, latestSha: newer });
     expect(pushes).toEqual([]);
-    // The chain commits fetched at depth 1 are shallow by design; main's own
-    // history behind the merge commit is not.
-    execFileSync("git", ["merge-base", "--is-ancestor", fx.seedSha, fx.mergeSha], { cwd: rerun });
     expect(latestTag(fx)).toBe(newer);
+    // The same checkout then moves the major and confirms: no fetch along the
+    // way may have cut the chain's parent links (a shallow marker on a chain
+    // commit would read the release as off build).
+    expect(retagMajor({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
+      major: "v2",
+      packagedSha: packaged.packagedSha,
+    });
+    expect(verifyPublishedRefs({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
+      major: "v2",
+      packagedSha: packaged.packagedSha,
+    });
   });
 
   test("a release whose source is older than what latest names appends without moving latest", () => {
@@ -739,63 +747,64 @@ describe("packageRelease", () => {
     );
   });
 
-  /** The packaged children the releases before the build branch tagged: a
-   * child of the merge commit whose body names the source on a `source:`
-   * line, no trailer block (the run line's token has a space). */
-  const legacyMessage = (source: string): string[] => [
-    "build: package v2.1.0",
-    `source: ${source}`,
-    "workflow run: https://example.invalid/actions/runs/1",
-  ];
+  /** `count` plumbing-made chain commits of the seed appended after `from` on build. */
+  function appendFillers(fx: Fixture, from: string, count: number): string {
+    const filler = clone(fx.root, fx.origin, `filler-${from.slice(0, 8)}`);
+    git(filler, "checkout", "--quiet", fx.seedSha);
+    stripWorkflows(filler);
+    write(filler, "lib/index.js", "packaged-bundle-bytes-0\n");
+    git(filler, "add", "-f", "lib/index.js");
+    const tree = git(filler, "write-tree");
+    let tip = from;
+    for (let n = 0; n < count; n++) {
+      tip = git(
+        filler,
+        "commit-tree",
+        tree,
+        "-p",
+        tip,
+        "-m",
+        `build: backfill ${n}`,
+        "-m",
+        `Source: ${fx.seedSha}`,
+      );
+    }
+    git(filler, "push", "--quiet", "origin", `${tip}:refs/heads/build`);
+    return tip;
+  }
 
-  test("a detached packaged child from before the build branch verifies by its recorded source", () => {
+  test("a release sixty chain commits behind the tip still verifies, on every path", () => {
     const fx = seedFixture();
-    // The whole source tree, workflows included: the legacy shape.
-    const planted = plantTag(
-      fx,
-      "legacy",
-      fx.mergeSha,
-      legacyMessage(fx.mergeSha),
-      { "lib/index.js": "packaged-bundle-bytes-1\n" },
-      ["v2.1.0", "v2"],
-      "kept",
-    );
-    expect(sourceTrailer(fx.origin, planted)).toBe("");
-    expect(treePaths(fx.origin, planted)).toContain(".github/workflows/ci.yml");
-    expect(packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
+    const packaged = packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
+    retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
+    const tip = appendFillers(fx, packaged.packagedSha, 60);
+    const rerun = checkoutOf(fx, "rerun-deep", fx.mergeSha, "packaged-bundle-bytes-1\n");
+    let result: ReturnType<typeof packageRelease> | undefined;
+    const pushes = withPushPlans(fx, [], () => {
+      result = packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha });
+    });
+    // latest stays on the release: the fillers package an older source.
+    expect(result).toEqual({
       created: false,
-      packagedSha: planted,
-      latestSha: null,
+      packagedSha: packaged.packagedSha,
+      latestSha: packaged.packagedSha,
     });
-    expect(retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
+    expect(pushes).toEqual([]);
+    expect(buildTip(fx)).toBe(tip);
+    expect(retagMajor({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
       major: "v2",
-      packagedSha: planted,
+      packagedSha: packaged.packagedSha,
     });
-    const checker = clone(fx.root, fx.origin, "legacy-verify");
-    expect(verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
-      major: "v2",
-      packagedSha: planted,
-    });
-    expect(remoteRef(fx, "refs/heads/build")).toBe("");
+    expect(
+      verifyPublishedRefs({
+        cwd: shallowChecker(fx, "verify-deep"),
+        tag: "v2.1.0",
+        sourceSha: fx.mergeSha,
+      }),
+    ).toEqual({ major: "v2", packagedSha: packaged.packagedSha });
   });
 
-  test("a detached packaged child recording another source is rejected the same way", () => {
-    const fx = seedFixture();
-    plantTag(
-      fx,
-      "legacy-wrong",
-      fx.mergeSha,
-      legacyMessage(fx.seedSha),
-      { "lib/index.js": "packaged-bundle-bytes-1\n" },
-      ["v2.1.0"],
-      "kept",
-    );
-    expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      `refs/tags/v2.1.0 exists but records ${fx.seedSha} as its source, not this release's merge commit ${fx.mergeSha}; the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.`,
-    );
-  });
-
-  test("a chain-shaped tag on a commit that is not on build is refused, even with the right tree and bytes", () => {
+  test("a tag on a commit that is not on build is refused, even with the right tree and bytes", () => {
     const fx = seedFixture();
     // build holds the seed's package; the planted tag has the merge commit's
     // exact chain tree, its bundle bytes, and a Source trailer, but is
@@ -815,9 +824,9 @@ describe("packageRelease", () => {
       },
     );
     const refusal =
-      `refs/tags/v2.1.0 (${planted}) is chain-shaped but not on refs/heads/build (walked from ` +
-      `its tip ${tip} to the chain's end without meeting it); the release-tags ruleset freezes ` +
-      "version tags, so no rerun can replace it - inspect it by hand.";
+      `refs/tags/v2.1.0 (${planted}) is not on refs/heads/build (not an ancestor of its tip ` +
+      `${tip}); the release-tags ruleset freezes version tags, so no rerun can replace it - ` +
+      "inspect it by hand.";
     let error: unknown;
     const pushes = withPushPlans(fx, [], () => {
       try {
@@ -844,13 +853,13 @@ describe("packageRelease", () => {
     ).toThrow(`origin's ${refusal}`);
   });
 
-  test("a chain-shaped tag with no build branch at all is refused", () => {
+  test("a tag with no build branch at all is refused", () => {
     const fx = seedFixture();
     plantTag(fx, "planter-nobuild", fx.mergeSha, ["build: by hand", `Source: ${fx.mergeSha}`], {
       "lib/index.js": "packaged-bundle-bytes-1\n",
     });
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /is chain-shaped but refs\/heads\/build does not exist on origin/,
+      /exists but refs\/heads\/build does not exist on origin/,
     );
   });
 
@@ -1767,12 +1776,11 @@ describe("advanceBuild", () => {
     },
   );
 
-  test("a latest beyond the chain walk's bound is left alone rather than read as off the chain", () => {
+  test("a latest fifty-one chain commits behind the tip is left alone", () => {
     const fx = seedFixture();
     const kept = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
-    // Fifty-one release backfills of an older source land after it, more than
-    // the walk reads: the observed latest is then neither found nor shown off
-    // the chain, and rolling it back to the older tip would be wrong.
+    // Fifty-one release backfills of an older source land after it; rolling
+    // latest back to the older tip would be wrong however long the chain.
     const filler = clone(fx.root, fx.origin, "latest-filler");
     git(filler, "checkout", "--quiet", fx.seedSha);
     stripWorkflows(filler);
@@ -1794,7 +1802,7 @@ describe("advanceBuild", () => {
       );
     }
     git(filler, "push", "--quiet", "origin", `${tip}:refs/heads/build`);
-    const rerun = checkoutOf(fx, "latest-bounded", fx.seedSha, "packaged-bundle-bytes-0\n");
+    const rerun = checkoutOf(fx, "latest-deep", fx.seedSha, "packaged-bundle-bytes-0\n");
     let result: ReturnType<typeof advanceBuild> | undefined;
     const pushes = withPushPlans(fx, [], () => {
       result = advanceBuild({ cwd: rerun, sourceSha: fx.seedSha });
@@ -1807,6 +1815,41 @@ describe("advanceBuild", () => {
     });
     expect(pushes).toEqual([]);
     expect(latestTag(fx)).toBe(kept);
+  });
+
+  test("an annotated latest on a valid newer chain commit is left alone by a stale rerun", () => {
+    const fx = seedFixture();
+    advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
+    const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
+    const newer = advanceBuild({ cwd: next.dir, sourceSha: next.sha }).buildSha;
+    // The release hook backfills the seed after it; latest is then re-made by
+    // hand as an ANNOTATED tag at the newer commit (its id is a tag object).
+    const backfill = rivalChainCommit(
+      fx,
+      "seed-backfill",
+      fx.seedSha,
+      newer,
+      "packaged-bundle-bytes-0\n",
+    );
+    git(backfill.from, "push", "--quiet", "origin", `${backfill.sha}:refs/heads/build`);
+    git(backfill.from, "tag", "-a", "-f", "-m", "by hand", "latest", newer);
+    git(backfill.from, "push", "--quiet", "--force", "origin", "refs/tags/latest");
+    const tagObject = git(fx.origin, "rev-parse", "refs/tags/latest");
+    expect(tagObject).not.toBe(newer);
+    expect(latestTag(fx)).toBe(newer);
+    const rerun = checkoutOf(fx, "seed-rerun", fx.seedSha, "packaged-bundle-bytes-0\n");
+    let result: ReturnType<typeof advanceBuild> | undefined;
+    const pushes = withPushPlans(fx, [], () => {
+      result = advanceBuild({ cwd: rerun, sourceSha: fx.seedSha });
+    });
+    expect(result).toEqual({
+      changed: false,
+      buildSha: backfill.sha,
+      latestSha: newer,
+      reason: `refs/heads/build already packages ${fx.seedSha} at ${backfill.sha}; refs/tags/latest stays at ${newer} (built from ${next.sha}), newer than ${backfill.sha} (built from ${fx.seedSha}); the next green push appends past it`,
+    });
+    expect(pushes).toEqual([]);
+    expect(git(fx.origin, "rev-parse", "refs/tags/latest")).toBe(tagObject);
   });
 
   test("a hand-moved latest is brought back to the tip by the next run", () => {
@@ -1889,7 +1932,7 @@ describe("advanceBuild", () => {
 
   /** The exact refusal for a commit whose tree is not its Source plus the
    * bundle: `where` is how the pipeline met it (the tip it is at, or a
-   * commit the walk found it holding). */
+   * commit found holding it). */
   function notAPackage(
     fx: Fixture,
     where: "is at" | "holds",
