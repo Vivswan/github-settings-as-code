@@ -6,7 +6,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
@@ -305,13 +307,29 @@ interface CallerContract {
 
 /** The build job's gate: every step after the push probe runs only when the token can push. */
 const PROCEED = "steps.token.outputs.proceed == 'true'";
+/** The lines that print git's stderr inside a stop-commands fence keyed by a
+ * token minted for the run: remote-supplied text can neither forge a workflow
+ * command nor swallow the static error that follows (the runner decodes % and
+ * line breaks inside a command's message, acts on any line whose first
+ * non-blank text is "::", and resumes only on the fence's own token). awk
+ * terminates the last line even when git did not, so the closing fence is a
+ * line of its own; the behavioral test below runs the block under bash. */
+const FENCED_STDERR = [
+  "  fence=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \\n')",
+  '  echo "::stop-commands::$fence"',
+  '  echo "probe stderr:"',
+  "  awk '{ print \"  \" $0 }' probe.err",
+  '  echo "::$fence::"',
+].join("\n");
 /** The push probe: a dry-run push over the real channel; a PAT that cannot push
- * fails the job, a default token that cannot warns naming BOTH remedies. */
+ * fails the job, a default token that cannot warns naming BOTH remedies. The
+ * workflow-command messages are static; git's stderr is fenced (FENCED_STDERR). */
 const PUSH_PROBE = [
   "if git push --dry-run --quiet origin HEAD:refs/dry-run/token-probe 2>probe.err; then",
   '  echo "proceed=true" >> "$GITHUB_OUTPUT"',
   'elif [ "$PAT_SET" = "true" ]; then',
-  "  echo \"::error::REPO_PLATFORM_TOKEN cannot push to this repository: $(tr '\\n' ' ' <probe.err)\"",
+  FENCED_STDERR,
+  '  echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git\'s refusal is in the probe stderr lines above."',
   "  rm -f probe.err",
   "  exit 1",
   "else",
@@ -510,6 +528,39 @@ describe("post-green.yml reaches the hook", () => {
       "jobs",
     ],
     [
+      "a push probe that interpolates git's stderr into the workflow command",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.[1];
+        must(step, "probe step").run = PUSH_PROBE.replace(
+          `${FENCED_STDERR}\n  echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above."`,
+          "  echo \"::error::REPO_PLATFORM_TOKEN cannot push to this repository: $(tr '\\n' ' ' <probe.err)\"",
+        );
+      },
+      "jobs",
+    ],
+    [
+      "a push probe that prints git's stderr outside the stop-commands fence",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.[1];
+        must(step, "probe step").run = PUSH_PROBE.replace(
+          FENCED_STDERR,
+          '  echo "probe stderr:"\n  awk \'{ print "  " $0 }\' probe.err',
+        );
+      },
+      "jobs",
+    ],
+    [
+      "a push probe whose fence token is fixed, so remote text could name it and resume commands",
+      (w) => {
+        const step = must(w.jobs.build, "build job").steps?.[1];
+        must(step, "probe step").run = PUSH_PROBE.replace(
+          "  fence=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \\n')",
+          "  fence=probe-marker",
+        );
+      },
+      "jobs",
+    ],
+    [
       "a probe whose output the gates cannot read (its id gone)",
       (w) => {
         const step = must(w.jobs.build, "build job").steps?.[1];
@@ -622,5 +673,141 @@ describe("post-green.yml reaches the hook", () => {
     mutate(drifted);
     expect(callerContractOf(drifted)[key]).not.toEqual(CALLER_EXPECTED[key]);
     expect(() => expectCallerContract(drifted)).toThrow();
+  });
+});
+
+/** The probe's stdout as the runner reads it: one entry per line. */
+interface ProbeRun {
+  lines: string[];
+  status: number;
+  /** What the step wrote to GITHUB_OUTPUT. */
+  output: string;
+  probeErrLeft: boolean;
+}
+
+/**
+ * Run the pinned probe under `bash -e` (what a `run:` step gets on a Linux
+ * runner) with git replaced by a stub that writes `stderr` and exits
+ * `gitStatus`, so the branches the pin only spells out are exercised for
+ * real: what reaches the log, in which order, and whether probe.err is
+ * gone. The scratch directory is removed on every path.
+ */
+function runProbe(run: string, stderr: string, gitStatus: number, patSet: boolean): ProbeRun {
+  const dir = mkdtempSync(join(tmpdir(), "post-green-probe-"));
+  try {
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\nprintf '%s' "$STUB_STDERR" >&2\nexit ${gitStatus}\n`,
+      { mode: 0o755 },
+    );
+    const output = join(dir, "output");
+    writeFileSync(output, "");
+    const env = {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      PAT_SET: patSet ? "true" : "false",
+      GITHUB_OUTPUT: output,
+      STUB_STDERR: stderr,
+    };
+    let status = 0;
+    let stdout = "";
+    try {
+      stdout = execFileSync("bash", ["-e", "-c", run], {
+        cwd: dir,
+        encoding: "utf8",
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      status = (error as { status?: number }).status ?? -1;
+      stdout = String((error as { stdout?: string }).stdout ?? "");
+    }
+    return {
+      lines: stdout.split("\n"),
+      status,
+      output: readFileSync(output, "utf8"),
+      probeErrLeft: existsSync(join(dir, "probe.err")),
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const STATIC_ERROR =
+  "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above.";
+const FENCE_OPEN = /^::stop-commands::([0-9a-f]{32})$/;
+
+describe("the push probe under bash", () => {
+  const wf = parseYaml(
+    readFileSync(join(ROOT, ".github", "workflows", "post-green.yml"), "utf8"),
+  ) as Caller;
+  const run = must(must(must(wf.jobs.build, "build job").steps?.[1], "probe step").run, "run");
+
+  /** The fence token a run opened with; asserts the open and close lines bracket exactly `inner`. */
+  function expectFenced(lines: string[], inner: string[]): void {
+    const [open, header, ...rest] = lines;
+    const token = open?.match(FENCE_OPEN)?.[1];
+    expect(token).toBeDefined();
+    expect(header).toBe("probe stderr:");
+    expect(rest).toEqual([...inner, `::${token}::`, STATIC_ERROR, ""]);
+    // The fence is what keeps the runner from acting on the stderr lines
+    // (the runner trims, so an indented "::error::forged" still reads as a
+    // command outside one); the indent only marks them as quoted text in
+    // the log. Outside the fence only its two lines and the static error
+    // start a command.
+    for (const line of inner) {
+      expect(line.startsWith("  ")).toBe(true);
+    }
+  }
+
+  test("a stderr that does not end in a newline still closes the fence on a line of its own", () => {
+    const probe = runProbe(run, "refused", 1, true);
+    expect(probe.status).toBe(1);
+    expectFenced(probe.lines, ["  refused"]);
+    expect(probe.probeErrLeft).toBe(false);
+    expect(probe.output).toBe("");
+  });
+
+  test("a stderr carrying workflow-command text is confined to indented lines inside the fence", () => {
+    const hostile = "::stop-commands::probe-marker\nremote: %25 done\r\n::error::forged\n";
+    const probe = runProbe(run, hostile, 1, true);
+    expect(probe.status).toBe(1);
+    expectFenced(probe.lines, [
+      "  ::stop-commands::probe-marker",
+      "  remote: %25 done\r",
+      "  ::error::forged",
+    ]);
+    expect(probe.probeErrLeft).toBe(false);
+  });
+
+  test("an empty stderr opens and closes the fence around nothing", () => {
+    const probe = runProbe(run, "", 1, true);
+    expect(probe.status).toBe(1);
+    expectFenced(probe.lines, []);
+    expect(probe.probeErrLeft).toBe(false);
+  });
+
+  test("without a PAT a refused probe warns, skips, and prints no stderr (control)", () => {
+    const probe = runProbe(run, "refused\n", 1, false);
+    expect(probe.status).toBe(0);
+    expect(probe.lines.filter((line) => line.startsWith("::"))).toEqual([
+      "::warning::this run's token cannot push (the caller grants contents: read); the build branch " +
+        "and the latest tag were not advanced here (the release hook advances them on each release). " +
+        "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with " +
+        "Contents (read and write) on this repository, to publish every green push to @latest.",
+    ]);
+    expect(probe.lines).not.toContain("  refused");
+    expect(probe.output).toBe("proceed=false\n");
+    expect(probe.probeErrLeft).toBe(false);
+  });
+
+  test("a probe the token passes proceeds and prints nothing (control)", () => {
+    const probe = runProbe(run, "", 0, true);
+    expect(probe.status).toBe(0);
+    expect(probe.lines).toEqual([""]);
+    expect(probe.output).toBe("proceed=true\n");
+    expect(probe.probeErrLeft).toBe(false);
   });
 });

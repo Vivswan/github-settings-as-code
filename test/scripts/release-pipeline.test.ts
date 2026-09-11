@@ -70,7 +70,8 @@ function guardRefusal(cwd: string): string {
  * ${PLANS_ENV} names a plans directory it is logged there and its plan (by
  * ordinal; none lets it through) runs first. */
 let shimDir = "";
-let realPath = "";
+/** PATH as it was before the shim went first; undefined until it did. */
+let realPath: string | undefined;
 /** The real git, for a scripted rival that must not be logged as one of the pipeline's pushes. */
 let realGit = "";
 beforeAll(() => {
@@ -108,9 +109,15 @@ beforeAll(() => {
   realPath = process.env.PATH ?? "";
   process.env.PATH = `${shimDir}:${realPath}`;
 });
+// Undo only what beforeAll got to: a setup failure must surface as itself,
+// not as a cleanup of a PATH never changed or a directory never made.
 afterAll(() => {
-  process.env.PATH = realPath;
-  rmSync(shimDir, { recursive: true, force: true });
+  if (realPath !== undefined) {
+    process.env.PATH = realPath;
+  }
+  if (shimDir !== "") {
+    rmSync(shimDir, { recursive: true, force: true });
+  }
 });
 
 /** A clone configured hermetically: fixed identity, no signing, no hooks
@@ -449,13 +456,15 @@ describe("packageRelease", () => {
     const packaged = git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}");
     expect(result).toEqual({ created: true, packagedSha: packaged, latestSha: packaged });
     expect(pushes).toEqual([appendOf(packaged), TAG_PUSH, latestOf("", packaged)]);
-    // The chain's first commit is parented on its source; the tag and latest
-    // sit on it, and so does the major once it moves.
+    // The chain's first commit is a root (no parent: a child of the source
+    // would record the workflow files' deletion, a workflow change the
+    // default token may not push); the tag and latest sit on it, and so
+    // does the major once it moves.
     expect(buildTip(fx)).toBe(packaged);
     expect(latestTag(fx)).toBe(packaged);
     retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
     expect(git(fx.origin, "rev-parse", "refs/tags/v2^{}")).toBe(packaged);
-    expect(git(fx.origin, "rev-parse", `${packaged}^`)).toBe(fx.mergeSha);
+    expect(parentOf(fx.origin, packaged)).toBe("");
     expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, packaged)).toBe(PACKAGED_DIFF);
     expect(treePaths(fx.origin, packaged)).toEqual([
       ".github/dependabot.yml",
@@ -625,7 +634,7 @@ describe("packageRelease", () => {
     expect(result).toEqual({ created: true, packagedSha: rival.sha, latestSha: rival.sha });
     const rejected = appendedSha(pushes[0] ?? []);
     expect(pushes).toEqual([appendOf(rejected), TAG_PUSH, latestOf("", rival.sha)]);
-    expect(git(fx.work, "rev-parse", `${rejected}^`)).toBe(fx.mergeSha);
+    expect(parentOf(fx.work, rejected)).toBe("");
     expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(rival.sha);
     expect(buildTip(fx)).toBe(rival.sha);
   });
@@ -651,7 +660,7 @@ describe("packageRelease", () => {
     expect(result).toEqual({ created: true, packagedSha: tip, latestSha: tip });
     const rejected = appendedSha(pushes[0] ?? []);
     expect(pushes).toEqual([appendOf(rejected), appendOf(tip), TAG_PUSH, latestOf("", tip)]);
-    expect(git(fx.work, "rev-parse", `${rejected}^`)).toBe(fx.mergeSha);
+    expect(parentOf(fx.work, rejected)).toBe("");
     expect(git(fx.origin, "rev-parse", `${tip}^`)).toBe(rival.sha);
     expect(sourceTrailer(fx.origin, tip)).toBe(fx.mergeSha);
     expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(tip);
@@ -874,6 +883,36 @@ describe("packageRelease", () => {
     );
   });
 
+  test("a source that never reached main is refused before any push, however well its manifest matches", () => {
+    const fx = seedFixture();
+    // A release-shaped commit (manifest at 2.1.0, release subject) on a side
+    // branch: what a draft whose target is not the merge commit would hand
+    // the hook. Everything but "is it on main" checks out.
+    const side = clone(fx.root, fx.origin, "off-main-release");
+    git(side, "checkout", "--quiet", "-b", "side", fx.seedSha);
+    write(side, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.1.0" }, null, 2)}\n`);
+    const sideSha = commitAll(side, "chore(main): release 2.1.0 (#43)");
+    git(side, "push", "--quiet", "origin", "HEAD:refs/heads/side");
+    write(side, "lib/index.js", "packaged-bundle-bytes-1\n");
+    let error: unknown;
+    const pushes = withPushPlans(fx, [], () => {
+      try {
+        packageRelease({ cwd: side, tag: "v2.1.0", sourceSha: sideSha });
+      } catch (thrown) {
+        error = thrown;
+      }
+    });
+    expect(error).toEqual(
+      new Error(
+        `the release source ${sideSha} is not on origin's main (its head is ${fx.mergeSha}); refusing to package, tag, or publish a commit main does not hold.`,
+      ),
+    );
+    expect(pushes).toEqual([]);
+    expect(remoteRef(fx, "refs/heads/build")).toBe("");
+    expect(remoteRef(fx, "refs/tags/v2.1.0")).toBe("");
+    expect(remoteRef(fx, "refs/tags/latest")).toBe("");
+  });
+
   test("a well-shaped tag for a version this source did not release mints nothing", () => {
     const fx = seedFixture();
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.2.0", sourceSha: fx.mergeSha })).toThrow(
@@ -1069,9 +1108,10 @@ describe("retagMajor", () => {
 describe("verifyPublishedRefs", () => {
   test("the version tag and the major point at the same packaged, bundle-carrying chain commit", () => {
     const fx = seedFixture();
-    // The seed's package comes first, so the release's chain commit is not
-    // parented on the merge commit and the tag fetch alone cannot supply
-    // the merge commit's tree.
+    // build already holds the seed's package, so the release's chain commit
+    // is appended behind it rather than minted as the root; the merge
+    // commit's tree reaches the shallow checker only through the
+    // confirmation's own fetch.
     advanceBuild({
       cwd: checkoutOf(fx, "seed-run", fx.seedSha, "packaged-bundle-bytes-0\n"),
       sourceSha: fx.seedSha,
@@ -1591,7 +1631,7 @@ describe("advanceBuild", () => {
     expect(result).toEqual({ changed: true, buildSha: tip, latestSha: tip, reason: advanced(tip) });
     expect(pushes).toEqual([appendOf(tip), latestOf("", tip)]);
     expect(latestTag(fx)).toBe(tip);
-    expect(git(fx.origin, "rev-parse", `${tip}^`)).toBe(fx.mergeSha);
+    expect(parentOf(fx.origin, tip)).toBe("");
     expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, tip)).toBe(PACKAGED_DIFF);
     expect(git(fx.origin, "show", `${tip}:lib/index.js`)).toBe("packaged-bundle-bytes-1");
     const body = git(fx.origin, "log", "-1", "--format=%B", tip);
@@ -2220,8 +2260,9 @@ describe("advanceBuild", () => {
 
   /** The retried outcome after one overtaken append: build landed as the
    * child of the rival's tip, latest followed, and the pushes carried a
-   * child of `before` (the tip this run first observed, rejected), then the
-   * child of the rival's tip, then the latest lease. */
+   * child of `before` (the tip this run first observed, rejected; "" for a
+   * root, minted while build did not exist), then the child of the rival's
+   * tip, then the latest lease. */
   function expectRetriedOnto(
     fx: Fixture,
     before: string,
@@ -2246,7 +2287,7 @@ describe("advanceBuild", () => {
     const pushes = withPushPlans(fx, rival.plans, () => {
       result = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
     });
-    expectRetriedOnto(fx, fx.mergeSha, rival.first, result, pushes);
+    expectRetriedOnto(fx, "", rival.first, result, pushes);
   });
 
   // The rival lands DURING the pipeline's push: origin's update hook moves
@@ -2278,7 +2319,7 @@ describe("advanceBuild", () => {
       const pushes = withPushPlans(fx, [], () => {
         result = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
       });
-      expectRetriedOnto(fx, preexisting ? rival.first : fx.mergeSha, rival.last, result, pushes);
+      expectRetriedOnto(fx, preexisting ? rival.first : "", rival.last, result, pushes);
     },
   );
 
@@ -2287,7 +2328,7 @@ describe("advanceBuild", () => {
     const stderr = `To https://github.com/o/r.git\n ! [remote rejected] 0123abc -> build (cannot lock ref 'refs/heads/build': is at ${fx.seedSha} but expected ${fx.mergeSha})\nerror: failed to push some refs to 'https://github.com/o/r.git'\n`;
     let result: ReturnType<typeof advanceBuild> | undefined;
     // The scripted loss lands nothing, so the retry finds no build and
-    // pushes the source's own child again, this time for real.
+    // pushes the source's own root package again, this time for real.
     const pushes = withPushPlans(fx, [{ fail: { stderr, status: 1 } }], () => {
       result = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
     });
@@ -2295,8 +2336,8 @@ describe("advanceBuild", () => {
     expect(result).toEqual({ changed: true, buildSha: tip, latestSha: tip, reason: advanced(tip) });
     const rejected = appendedSha(pushes[0] ?? []);
     expect(pushes).toEqual([appendOf(rejected), appendOf(tip), latestOf("", tip)]);
-    expect(parentOf(fx.work, rejected)).toBe(fx.mergeSha);
-    expect(parentOf(fx.origin, tip)).toBe(fx.mergeSha);
+    expect(parentOf(fx.work, rejected)).toBe("");
+    expect(parentOf(fx.origin, tip)).toBe("");
   });
 
   test("a push overtaken on every attempt gives up naming the concurrent mover", () => {
@@ -2307,13 +2348,11 @@ describe("advanceBuild", () => {
         "could not advance refs/heads/build after 3 attempts; something keeps moving it concurrently - rerun this job once it settles.",
       );
     });
-    // Each attempt re-read the tip and built on it before being overtaken again.
+    // Each attempt re-read the tip and built on it before being overtaken
+    // again: a root first, then a child of each rival tip but the last.
     const shas = pushes.map(appendedSha);
     expect(pushes).toEqual(shas.map(appendOf));
-    expect(shas.map((sha) => git(fx.work, "rev-parse", `${sha}^`))).toEqual([
-      fx.mergeSha,
-      ...rival.shas.slice(0, -1),
-    ]);
+    expect(shas.map((sha) => parentOf(fx.work, sha))).toEqual(["", ...rival.shas.slice(0, -1)]);
     expect(buildTip(fx)).toBe(rival.last);
     expect(remoteRef(fx, "refs/tags/latest")).toBe("");
   });
@@ -2330,11 +2369,11 @@ describe("advanceBuild", () => {
           error = thrown;
         }
       });
-      // One push, of the source's own packaged child, then the failure as git
+      // One push, of the source's own root package, then the failure as git
       // worded it: no retry, no "moving it concurrently", no latest.
       const shas = pushes.map(appendedSha);
       expect(pushes).toEqual(shas.map(appendOf));
-      expect(shas.map((sha) => git(fx.work, "rev-parse", `${sha}^`))).toEqual([fx.mergeSha]);
+      expect(shas.map((sha) => parentOf(fx.work, sha))).toEqual([""]);
       expect(error).toEqual(
         new Error(`git push origin ${shas.join()}:refs/heads/build failed: ${stderr.trim()}`),
       );

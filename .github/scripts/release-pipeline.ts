@@ -12,8 +12,9 @@
  * branch (the tags cut before that branch existed point at main commits
  * that still carried the committed bundle). post-green appends a green main
  * commit's packaged child to refs/heads/build when it can publish, the
- * release hook appends the release's when post-green did not (parent: the previous
- * tip; the first commit's parent is its source), each naming its source in
+ * release hook appends the release's when post-green did not (parent: the
+ * previous tip; the first chain commit is a ROOT, with no parent, so the
+ * chain never links into main's history), each naming its source in
  * a Source trailer. The `latest` tag names the chain commit of the newest
  * main source; the vX.Y.Z release tags and the moving major vX sit on the
  * chain commit whose source is the release's merge commit. release-please cuts the DRAFT release itself (no tag: the
@@ -45,10 +46,12 @@ import { join } from "node:path";
 const MANIFEST_FILE = ".release-please-manifest.json";
 const CONFIG_FILE = "release-please-config.json";
 const BUNDLE_FILE = "lib/index.js";
-/** Left out of every chain commit: GitHub refuses a push that creates or
- * updates a workflow file on a branch to any token without the workflows
- * grant (judged per push, against the ref's previous tip), and consumers run
- * the action, not this repository's workflows. With none on the chain, a
+/** Left out of every chain commit: GitHub refuses a push whose commits
+ * create, update, or delete a workflow file to any token without the
+ * workflows grant (judged on the diff each pushed commit introduces against
+ * its parent), and consumers run the action, not this repository's
+ * workflows. With none on the chain and the first chain commit a root (a
+ * child of its source would record the workflow files' deletion), a
  * GITHUB_TOKEN with contents: write can push every chain commit, and no
  * workflow can trigger on the build branch. */
 const WORKFLOWS_DIR = ".github/workflows";
@@ -341,11 +344,12 @@ function sourceTrailer(cwd: string, sha: string): string {
 }
 
 /** The one shape of chain commit: `tree` under the pipeline's identity, the
- * source named in a Source trailer (the provenance trailer beside it). */
+ * source named in a Source trailer (the provenance trailer beside it),
+ * parented on `parent`, or a root commit when the chain starts here (null). */
 function commitChain(
   cwd: string,
   tree: string,
-  parent: string,
+  parent: string | null,
   sourceSha: string,
   runUrl: string | undefined,
 ): string {
@@ -355,7 +359,8 @@ function commitChain(
     trailers.push(`Workflow-run: ${runUrl}`);
   }
   const subject = `build: main at ${git(cwd, "rev-parse", "--short", sourceSha)}`;
-  return git(cwd, "commit-tree", "-p", parent, "-m", subject, "-m", trailers.join("\n"), tree);
+  const parents = parent === null ? [] : ["-p", parent];
+  return git(cwd, "commit-tree", ...parents, "-m", subject, "-m", trailers.join("\n"), tree);
 }
 
 /** Origin's build tip and main head, read together. */
@@ -368,8 +373,8 @@ interface BuildTip {
 }
 
 /**
- * Fetch the whole chain, blobless (main's history is already local, so only
- * chain commits and trees arrive; on a server without filter support the
+ * Fetch the whole chain, blobless (the chain is rooted, so only chain
+ * commits and their trees arrive; on a server without filter support the
  * fetch is plain, bounded by the chain's length), and refresh main. The
  * tip's source may be a main commit newer than this checkout knows (a stale
  * rerun, or a push race lost to a newer run), and the Source trailer is no
@@ -384,27 +389,26 @@ function readBuildTip(cwd: string): BuildTip {
     git(cwd, "fetch", "--quiet", "--filter=blob:none", "origin", `+${BUILD_REF}:${BUILD_REMOTE}`);
     tip = git(cwd, "rev-parse", BUILD_REMOTE);
   }
+  return { tip, mainHead: fetchMainHead(cwd) };
+}
+
+/** Origin's main head, freshly fetched (its history lands with it). */
+function fetchMainHead(cwd: string): string {
   git(cwd, "fetch", "--quiet", "origin", "refs/heads/main");
-  return { tip, mainHead: git(cwd, "rev-parse", "FETCH_HEAD") };
+  return git(cwd, "rev-parse", "FETCH_HEAD");
 }
 
 /**
  * The chain commit whose Source is sourceSha, or null when none is. One
- * log over the fetched chain, read from the tip down to the first commit
- * without a Source trailer (the root's parent, on main), so the chain's
- * length bounds it and nothing else does.
+ * log over the fetched chain, read from the tip down to its root, so the
+ * chain's length bounds it and nothing else does; a commit without a Source
+ * trailer (a hand push the chain has since buried) packages nothing.
  */
 function findPackaged(cwd: string, sourceSha: string): string | null {
   const log = git(cwd, "log", "--format=%H%x09%(trailers:key=Source,valueonly)", BUILD_REMOTE);
   for (const line of log.split("\n")) {
     const [sha, source] = line.split("\t");
-    if (sha === undefined || sha === "" || source === undefined) {
-      continue;
-    }
-    if (source === "") {
-      return null;
-    }
-    if (source === sourceSha) {
+    if (sha !== undefined && sha !== "" && source === sourceSha) {
       return sha;
     }
   }
@@ -470,11 +474,14 @@ function assertSameBuild(cwd: string, packaged: string, sourceSha: string, tree:
 }
 
 /**
- * Append `tree`, sourceSha's package, to build after the validated tip,
- * with a plain fast-forward push: git's compare-and-set is the concurrency
- * control, so an overtaken push (another run appended first) is reported
- * for the caller to re-read the chain and decide again, and every other
- * failure is thrown as git worded it.
+ * Append `tree`, sourceSha's package, to build after the validated tip (or
+ * as the chain's root commit while build does not exist: a child of the
+ * source would record the workflow files' deletion, which GitHub judges as
+ * a workflow change the default token may not push), with a plain
+ * fast-forward push: git's compare-and-set is the concurrency control, so
+ * an overtaken push (another run appended first) is reported for the
+ * caller to re-read the chain and decide again, and every other failure is
+ * thrown as git worded it.
  */
 function appendChain(
   cwd: string,
@@ -483,7 +490,7 @@ function appendChain(
   tree: string,
   runUrl: string | undefined,
 ): { sha: string } | { overtaken: string } {
-  let parent = sourceSha;
+  let parent: string | null = null;
   if (build.tip !== null) {
     validateTip(cwd, build.tip, build.mainHead);
     parent = build.tip;
@@ -525,7 +532,11 @@ export interface PackagedRelease {
  * (recorded source, whole tree, bundle bytes), so no rerun can move or
  * replace a version tag - a mismatch is a loud stop - and then reconciles
  * latest the same way, so a run that died between the tag push and the
- * latest move is healed by its rerun.
+ * latest move is healed by its rerun. Before any of it pushes, the source
+ * must lie on origin's main: a draft whose target commit never reached main
+ * (a manifest-bearing commit on a side branch) would otherwise be appended
+ * and tagged, and only the latest move would notice - with the frozen tag
+ * and the build tip already poisoned.
  */
 export function packageRelease(options: PackageOptions): PackagedRelease {
   const { cwd, tag, sourceSha, runUrl } = options;
@@ -538,6 +549,12 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
   if (tag !== `v${manifest["."]}`) {
     throw new Error(
       `tag ${tag} does not match the manifest version ${JSON.stringify(manifest["."])} at ${sourceSha}; refusing to package a version this source did not release.`,
+    );
+  }
+  const mainHead = fetchMainHead(cwd);
+  if (!isAncestor(cwd, sourceSha, mainHead)) {
+    throw new Error(
+      `the release source ${sourceSha} is not on origin's main (its head is ${mainHead}); refusing to package, tag, or publish a commit main does not hold.`,
     );
   }
   const ref = `refs/tags/${tag}`;

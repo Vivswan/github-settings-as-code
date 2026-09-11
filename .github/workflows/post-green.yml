@@ -46,7 +46,14 @@ jobs:
       # access is refused; nothing is created. The target is a ref that never
       # exists, not build itself: HEAD is no descendant of build's tip, so a
       # dry run against build would be rejected locally as a non-fast-forward
-      # whatever the token.
+      # whatever the token. git's refusal is printed as plain log lines inside
+      # a stop-commands fence keyed by a token minted for this run, never
+      # inside a workflow command: the runner decodes % and line breaks in a
+      # command's message and acts on any line whose first non-blank text is
+      # "::", and only the fence's own token resumes command processing, so
+      # remote-supplied text can neither forge a command nor swallow the
+      # static error that follows (awk, not sed: it terminates the last line
+      # even when git did not, so the closing fence is a line of its own).
       - name: Check the token can push to build
         id: token
         env:
@@ -55,7 +62,12 @@ jobs:
           if git push --dry-run --quiet origin HEAD:refs/dry-run/token-probe 2>probe.err; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           elif [ "$PAT_SET" = "true" ]; then
-            echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository: $(tr '\n' ' ' <probe.err)"
+            fence=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+            echo "::stop-commands::$fence"
+            echo "probe stderr:"
+            awk '{ print "  " $0 }' probe.err
+            echo "::$fence::"
+            echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above."
             rm -f probe.err
             exit 1
           else
