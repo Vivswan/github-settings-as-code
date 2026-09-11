@@ -22,6 +22,13 @@ export function genRulesets(rng: Rng): EntriesForm {
         },
       },
       rules: [{ type: rng.pick(["deletion", "non_fast_forward", "required_signatures"]) }],
+      // The fuzz seeds no live rulesets, so this reaches the write payloads only; the
+      // hidden-key read path is the rulesets-check-bypass-hidden scenario.
+      ...rng.pick([
+        {},
+        { bypass_actors: [] },
+        { bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }] },
+      ]),
     };
   });
   return maybeWrapUndeclared(rng, entries);

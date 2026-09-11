@@ -12,7 +12,10 @@ coverage:
       passthrough except ref-name prefixing (staging -> refs/heads/staging, ~DEFAULT_BRANCH passes
       through). New rule types/bypass fields/condition types GitHub ships work day one. Undeclared
       rulesets kept by default (notes only); the wrapped `_undeclared: delete` form deletes them.
-      Org-sourced rulesets filtered out via source_type.
+      Org-sourced rulesets filtered out via source_type. GitHub returns bypass_actors only to a
+      token with write access to the ruleset, so under a token without Administration write a
+      declared bypass_actors is left out of the comparison and noted as not visible instead of
+      reported as drift.
   - area: "[Merge queue](https://docs.github.com/en/rest/repos/rules)"
     notes: >-
       Configured as the merge_queue rule type inside a branch ruleset; passes through verbatim like
@@ -39,4 +42,7 @@ schema:
     The rule's parameters, passed through verbatim as the API documents them for its type.
   RulesetConfig.rules[].type: >-
     The rule type, as the rulesets API names it (e.g. pull_request, required_status_checks).
-  RulesetConfig.bypass_actors: Who may bypass the ruleset, passed through verbatim.
+  RulesetConfig.bypass_actors: >-
+    Who may bypass the ruleset, passed through verbatim. GitHub returns it only to a token with
+    write access to the ruleset, so a token without Administration write cannot judge drift on it
+    (check mode notes this instead of reporting drift).

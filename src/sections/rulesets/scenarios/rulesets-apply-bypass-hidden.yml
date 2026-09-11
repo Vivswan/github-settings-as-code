@@ -1,0 +1,48 @@
+# Apply under a token that cannot see bypass_actors (Administration at read).
+# The declared list is not observable, so it is left out of the comparison and
+# surfaces as the same notice check mode emits, naming the grant; the visible
+# fields match, so no PUT is planned and the section lands applied as a no-op.
+# The same grant that hides the field would deny the PUT, so no enforcement
+# this token could have provided is lost; the notice is what tells the user.
+name: rulesets-apply-bypass-hidden
+settings:
+  rulesets:
+    - name: main-protection
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
+live_state:
+  rulesets:
+    - id: 42
+      name: main-protection
+      source_type: Repository
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors: []
+token_permissions:
+  administration: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    rulesets: applied
+  never:
+    - "PUT /repos/{repo}/rulesets/42"
+    - "POST /repos/{repo}/rulesets"
+  stdout_contains:
+    - "rulesets[main-protection]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), so drift on it cannot be judged here; grant Administration write to check it"

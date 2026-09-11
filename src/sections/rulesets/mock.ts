@@ -13,8 +13,23 @@ import {
   slicePage,
 } from "../../../test/e2e/mock/support.js";
 
+/**
+ * GitHub returns bypass_actors only to a token with write access to the ruleset (Administration
+ * at write); every other read omits the KEY, never answering `[]`. The list never carries it.
+ */
+function withoutBypassActors(ruleset: Json): Json {
+  const { bypass_actors: _hidden, ...visible } = ruleset;
+  return visible;
+}
+
+/** The admin view always carries the key: a ruleset stored without one reads `bypass_actors: []`. */
+function withBypassActors(ruleset: Json): Json {
+  return { bypass_actors: [], ...ruleset };
+}
+
 export const rulesetsMockHandlers: SectionRestHandlers<"rulesets"> = {
-  "rulesets.list": ({ state, query }) => ok(slicePage(state.rulesets, query)),
+  "rulesets.list": ({ state, query }) =>
+    ok(slicePage(state.rulesets, query).map(withoutBypassActors)),
   "rulesets.create": ({ state, body }) => {
     const invalid = invalidRuleTypeResponse(body, "create-a-repository-ruleset");
     if (invalid) {
@@ -22,15 +37,15 @@ export const rulesetsMockHandlers: SectionRestHandlers<"rulesets"> = {
     }
     const ruleset: Json = { id: state.nextId++, source_type: "Repository", ...asObject(body) };
     state.rulesets.push(ruleset);
-    return { status: 201, body: ruleset };
+    return { status: 201, body: withBypassActors(ruleset) };
   },
-  "rulesets.get": ({ state, param }) => {
+  "rulesets.get": ({ state, param, grants }) => {
     const id = param("ruleset_id");
     const ruleset = state.rulesets.find((r) => String(r.id) === id);
     if (!ruleset) {
       return { status: 404, body: { message: "Not Found" } };
     }
-    return ok(ruleset);
+    return ok(grants("write") ? withBypassActors(ruleset) : withoutBypassActors(ruleset));
   },
   "rulesets.update": ({ state, param, body }) => {
     const id = param("ruleset_id");
@@ -46,7 +61,7 @@ export const rulesetsMockHandlers: SectionRestHandlers<"rulesets"> = {
     }
     const updated: Json = { id: Number(id), source_type: "Repository", ...asObject(body) };
     state.rulesets[index] = updated;
-    return ok(updated);
+    return ok(withBypassActors(updated));
   },
   "rulesets.remove": ({ state, param }) => {
     const id = param("ruleset_id");

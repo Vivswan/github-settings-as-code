@@ -24,6 +24,7 @@ A section whose token lacks its grant fails with an error naming the denied requ
 
 - `mode: check` changes no settings, so the read half of each permission is enough for a drift-report-only workflow, with the exceptions listed below.
 - Fine-grained tokens surface a missing Administration permission as a 404, not a 403, on admin endpoints. The action treats both as permission errors and its messages name the exact permission to grant.
+- GitHub returns a ruleset's `bypass_actors` only to a token with write access to the ruleset: a token without Administration at write reads the ruleset fine but never sees that field, so check mode leaves a declared `bypass_actors` out of the comparison and says so in a notice instead of reporting drift.
 - `repos: "*"` discovery needs a user PAT; the workflow `GITHUB_TOKEN` and GitHub App installation tokens cannot enumerate a user's repositories. Remote multi-repo targets also need Contents: read on every target, because each repository's own settings.yml is fetched through the contents API.
 
 The exceptions to check mode's read-only rule:

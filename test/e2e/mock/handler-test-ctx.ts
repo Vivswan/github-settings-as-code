@@ -9,13 +9,20 @@
  */
 
 import { allEndpoints, type SectionEndpointKey } from "../../../src/sections/registry.js";
+import { GRADE_RANK, type MaskGrade } from "../schema.js";
 import type { MockState } from "./state.js";
 import type { Handler } from "./support.js";
 
 export function handlerTestContext(
   key: SectionEndpointKey,
   state: MockState,
-  opts: { body?: unknown; params?: Record<string, string>; query?: Record<string, string> } = {},
+  opts: {
+    body?: unknown;
+    params?: Record<string, string>;
+    query?: Record<string, string>;
+    /** The token's grade on the endpoint's permission; write, the mask default, unless a test narrows it. */
+    grade?: MaskGrade;
+  } = {},
 ): Parameters<Handler>[0] {
   // The key union already proves the endpoint exists; the lookup needs no
   // runtime guard.
@@ -34,5 +41,6 @@ export function handlerTestContext(
     },
     query: opts.query ?? {},
     body: opts.body,
+    grants: (kind) => GRADE_RANK[opts.grade ?? "write"] >= GRADE_RANK[kind],
   };
 }
