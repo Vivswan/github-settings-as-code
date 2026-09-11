@@ -8,7 +8,7 @@ Four breaks. One is silent (the fallback), so run `mode: check` before the first
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
-| `defaults-file` is a fallback | Merged under every multi-repo target; a target without a settings file was skipped | Applied whole to a target that has no settings file; a target with its own file is applied as written, never merged | No error. A target file written as a partial overlay now runs alone, and `pages: null` in it disables Pages instead of opting out of the defaults |
+| `defaults-file` is a fallback | Merged under every multi-repo target; a target without a settings file was skipped | Applied whole to a target that has no settings file; a target with its own file is applied as written, never merged | No error. A target file written as a partial overlay now runs alone, and `pages: null` in it disables Pages instead of opting out of the defaults; the check-first steps are under [section 1](#1-the-defaults-file-fallback) |
 | The wrapper key is `_undeclared` | `labels: {undeclared: keep, entries: [...]}` | `labels: {_undeclared: keep, entries: [...]}` | Validation fails before any section runs, naming the rename; the full error is under [section 2](#2-undeclared-becomes-_undeclared) |
 | Layering happens in `mode: merge` | The only merge was the defaults-file one | An ordered list of files folds in a merge step; apply and check take one final document | No error. Reach for the [two-step workflow](../operate/layering.md#the-two-step-workflow) to get merging back |
 | A `settings-file` path cannot contain a comma or newline | `settings-file: settings,prod.yml` named one file | A comma or newline is a list separator in every mode | Apply and check refuse the run before reading anything (the error is under [section 4](#4-commas-and-newlines-in-a-settings-file-path)); `mode: merge` reads two layer paths |
@@ -23,7 +23,7 @@ Blast radius first: with `repos: "*"`, every discovered repository that has no `
 
 The token also matters: a target the token cannot read Contents on fails with an error naming `Contents: read`, where v2 could mistake the denial for a missing file. Grant the permission or drop the target from `repos`.
 
-The [multi-repo guide](../operate/multi-repo.md) owns the rule.
+The [multi-repo guide's fallback section](../operate/multi-repo.md#fallback-for-repositories-without-a-settings-file) owns the rule.
 
 ## 2. undeclared becomes _undeclared
 
