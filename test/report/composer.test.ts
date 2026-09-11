@@ -23,17 +23,38 @@ function input(overrides: Partial<ReportInput> = {}): ReportInput {
 
 describe("composeReport", () => {
   test("renders the run metadata, the outcome table, and the transcript", () => {
-    const report = composeReport(input());
-    expect(report).toContain("# settings-as-code private report: o/private-repo");
-    expect(report).toContain("| Admin repository | o/admin |");
-    expect(report).toContain("| Run | https://github.com/o/admin/actions/runs/42 |");
-    expect(report).toContain("| Mode | check |");
-    expect(report).toContain("| Result | drift |");
-    expect(report).toContain("| Generated | 2026-07-22T10:00:00.000Z |");
-    expect(report).toContain("| labels | drift | labels[secret-project]: missing |");
-    expect(report).toContain("| repository | clean |  |");
-    expect(report).toContain("labels: comparing 3 labels");
-    expect(report).toContain("[warning] labels[secret-project]: missing");
+    // The timestamp is an input, so the whole document is deterministic.
+    expect(composeReport(input())).toBe(
+      [
+        "# settings-as-code private report: o/private-repo",
+        "",
+        "Full, unredacted report for this target. The public run redacts it; this document is its private mirror.",
+        "",
+        "| | |",
+        "|---|---|",
+        "| Target | o/private-repo |",
+        "| Admin repository | o/admin |",
+        "| Run | https://github.com/o/admin/actions/runs/42 |",
+        "| Mode | check |",
+        "| Result | drift |",
+        "| Generated | 2026-07-22T10:00:00.000Z |",
+        "",
+        "## Sections",
+        "",
+        "| Section | Status | Detail |",
+        "|---|---|---|",
+        "| labels | drift | labels[secret-project]: missing |",
+        "| repository | clean |  |",
+        "",
+        "## Transcript",
+        "",
+        "```",
+        "labels: comparing 3 labels",
+        "[warning] labels[secret-project]: missing",
+        "```",
+        "",
+      ].join("\n"),
+    );
   });
 
   test("joins multi-line detail with <br> and escapes table pipes", () => {

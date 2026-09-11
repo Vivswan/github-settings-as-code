@@ -54,9 +54,27 @@ describe("published schema wrapper strictness", () => {
 
   test("one wrapper definition per knobbed section and nested knob, each closed", () => {
     expect(wrapperNames.length).toBe(UNDECLARED_POLICY_SECTIONS.length + NESTED_WRAPPERS.length);
-    for (const nested of NESTED_WRAPPERS) {
-      expect(wrapperNames).toContain(nested);
-    }
+    expect([...wrapperNames].sort()).toEqual([
+      "UndeclaredPolicyList<ActionsSecretConfig>",
+      "UndeclaredPolicyList<ActionsVariableConfig>",
+      "UndeclaredPolicyList<AgentsSecretConfig>",
+      "UndeclaredPolicyList<AgentsVariableConfig>",
+      "UndeclaredPolicyList<AutolinkConfig>",
+      "UndeclaredPolicyList<CodespacesSecretConfig>",
+      "UndeclaredPolicyList<CollaboratorConfig>",
+      "UndeclaredPolicyList<CustomPropertyConfig>",
+      "UndeclaredPolicyList<DependabotSecretConfig>",
+      "UndeclaredPolicyList<DeployKeyConfig>",
+      "UndeclaredPolicyList<DeploymentBranchPolicyConfig>",
+      "UndeclaredPolicyList<DeploymentProtectionRuleConfig>",
+      "UndeclaredPolicyList<EnvironmentSecretConfig>",
+      "UndeclaredPolicyList<EnvironmentVariableConfig>",
+      "UndeclaredPolicyList<LabelConfig>",
+      "UndeclaredPolicyList<MilestoneConfig>",
+      "UndeclaredPolicyList<RulesetConfig>",
+      "UndeclaredPolicyList<SecretScanningPatternConfig>",
+      "UndeclaredPolicyList<WebhookConfig>",
+    ]);
     for (const name of wrapperNames) {
       expect(
         schema.definitions[name]?.additionalProperties,
@@ -243,10 +261,18 @@ describe("published schema wrapper strictness", () => {
       // against the ONE shared fixture set the zod superRefine is also
       // tested with - and, per fixture, the AJV verdict must agree with
       // validateSectionShapes (no error = valid), so the schema copy of the
-      // invariant cannot drift from the runtime copy. The class counts pin
-      // the SET: a deleted fixture would silently weaken both consumers.
-      expect(FLAG_PAIRING_FIXTURES.filter((f) => !f.valid)).toHaveLength(4);
-      expect(FLAG_PAIRING_FIXTURES.filter((f) => f.valid)).toHaveLength(3);
+      // invariant cannot drift from the runtime copy. The [name, valid]
+      // pairs pin the SET: a deleted or flipped fixture would silently
+      // weaken both consumers.
+      expect(FLAG_PAIRING_FIXTURES.map((f) => [f.name, f.valid])).toEqual([
+        ["patterns without the sibling flag object", false],
+        ["patterns with the flag present but false", false],
+        ["patterns with the sibling nulled (a clear)", false],
+        ["the wrapped form takes the same rule", false],
+        ["the paired form (flag true) passes", true],
+        ["the wrapped paired form passes", true],
+        ["an entry without the plural key keeps its freedom (nullable flag)", true],
+      ]);
       for (const { name, entry, valid } of FLAG_PAIRING_FIXTURES) {
         const doc = { environments: [entry] };
         expect(validate(doc), `published schema: ${name}`).toBe(valid);

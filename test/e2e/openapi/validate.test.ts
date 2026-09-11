@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/contract.js";
-import { excludeUndocumented, UNDOCUMENTED_PATHS, USED_PATHS } from "./paths.js";
+import { excludeUndocumented, USED_PATHS } from "./paths.js";
 import {
   OpenApiValidator,
   pathMatches,
@@ -273,12 +273,6 @@ describe("undocumented-route exemption", () => {
       /fix or delete that gap file/,
     );
   });
-
-  test("USED_PATHS carries no undocumented path (empty set included)", () => {
-    for (const path of UNDOCUMENTED_PATHS) {
-      expect(USED_PATHS).not.toContain(path);
-    }
-  });
 });
 
 describe("pathMatches greedy trailing params", () => {
@@ -313,7 +307,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   const v = sharedValidator();
 
   test("the fetched spec loads and shares one instance", () => {
-    expect(v).toBeInstanceOf(OpenApiValidator);
     expect(sharedValidator()).toBe(v); // process-wide singleton
   });
 

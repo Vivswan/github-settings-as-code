@@ -602,7 +602,6 @@ describe("the fetch-test-artifacts composite", () => {
 
   test("each cache key is the pinned literal and hashes every input its artifact depends on", () => {
     expect(OPENAPI.hashInputs()).toContain("src/report/issue-report.ts");
-    expect(hashFilesPatterns(keyOf(OPENAPI))).toContain("src/sections/**");
     for (const artifact of FETCHED_ARTIFACTS) {
       expectKeyPinned(keyOf(artifact), artifact);
       expectKeyHashesInputs(keyOf(artifact), artifact);

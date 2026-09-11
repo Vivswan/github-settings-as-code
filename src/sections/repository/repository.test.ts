@@ -7,7 +7,6 @@ import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js"
 import { REPO } from "../../../test/sections/section-run.js";
 import { validateSectionShapes } from "../../engine/validate.js";
 import { PermissionDenied } from "../contract/errors.js";
-import { grantFor } from "../contract/permissions.js";
 import { FEATURE_TOGGLES, normalizeTopics, repositorySection } from "./index.js";
 
 /** The verdict's error prose, or null when the document validated. */
@@ -32,7 +31,9 @@ async function apply(api: GithubClient, desired: Desired) {
 /** The rejection must be a PermissionDenied CARRYING the section's grant advice. */
 function expectAdministrationDenied(thrown: unknown): void {
   expect(thrown).toBeInstanceOf(PermissionDenied);
-  expect((thrown as PermissionDenied).detail).toContain(grantFor({ repo: ["administration"] }));
+  expect((thrown as PermissionDenied).detail).toContain(
+    'grant "Administration" (read and write) under the PAT\'s Repository permissions',
+  );
 }
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {

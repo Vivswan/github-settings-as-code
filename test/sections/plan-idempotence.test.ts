@@ -146,8 +146,15 @@ describe("provePlanIdempotent", () => {
       DESIRED,
       TOOLS,
     );
-    expect(first.ops).toHaveLength(1);
-    expect(second.ops).toHaveLength(1);
+    // The same write on both passes: the list already holds the secret, so the
+    // change line reads "updated" each time.
+    const facets = (ops: typeof first.ops) =>
+      ops.map((op) => [op.role, op.params, op.drift, op.change]);
+    const recurring = [
+      ["put", { secret_name: "DEPLOY_TOKEN" }, [], 'updated secret "DEPLOY_TOKEN"'],
+    ];
+    expect(facets(first.ops)).toEqual(recurring);
+    expect(facets(second.ops)).toEqual(recurring);
     // Each pass built its own thunk; the proof passes because it compares
     // operation identity, not function references.
     expect(typeof first.ops[0]?.payload).toBe("function");

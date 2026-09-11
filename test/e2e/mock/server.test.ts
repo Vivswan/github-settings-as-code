@@ -102,8 +102,8 @@ describe("pagination slicing", () => {
     const second = await jsonArray(await call(h, "GET", `${labelsPath}?per_page=100&page=2`));
     expect(first).toHaveLength(100);
     expect(second).toHaveLength(0);
-    // The page=2 read is present in the log, proving the client can advance.
-    expect(h.requests.some((r) => r.query.includes("page=2"))).toBe(true);
+    // The log holds exactly the two page reads, query strings intact.
+    expect(h.requests.map((r) => r.query)).toEqual(["per_page=100&page=1", "per_page=100&page=2"]);
   });
 });
 

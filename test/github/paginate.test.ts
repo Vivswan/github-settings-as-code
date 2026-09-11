@@ -12,7 +12,10 @@ describe("paginate", () => {
     });
     const result = await paginate(api, "/things");
     expect(result).toEqual({ items: [...fullPage("a"), "b0", "b1"] });
-    expect(api.calls).toHaveLength(2);
+    expect(api.calls.map((c) => c.path)).toEqual([
+      "/things?per_page=100&page=1",
+      "/things?per_page=100&page=2",
+    ]);
   });
 
   test("stop ends the walk early with the items collected so far", async () => {
@@ -22,7 +25,7 @@ describe("paginate", () => {
     });
     const result = await paginate(api, "/things", undefined, (items) => items.includes("a5"));
     expect(result).toEqual({ items: fullPage("a") });
-    expect(api.calls).toHaveLength(1);
+    expect(api.calls.map((c) => c.path)).toEqual(["/things?per_page=100&page=1"]);
   });
 
   test("a stop that never fires leaves paging behavior unchanged", async () => {
@@ -32,7 +35,10 @@ describe("paginate", () => {
     });
     const result = await paginate(api, "/things", undefined, () => false);
     expect(result).toEqual({ items: [...fullPage("a"), "b0"] });
-    expect(api.calls).toHaveLength(2);
+    expect(api.calls.map((c) => c.path)).toEqual([
+      "/things?per_page=100&page=1",
+      "/things?per_page=100&page=2",
+    ]);
   });
 
   test("an existing query string keeps its params and gains the page ones", async () => {

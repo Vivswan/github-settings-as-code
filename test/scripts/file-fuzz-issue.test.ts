@@ -219,34 +219,54 @@ describe("fileIssue", () => {
     return { run, calls };
   }
 
-  test("create path opens a labeled issue with the body", async () => {
+  const ensureLabel = [
+    "label",
+    "create",
+    "e2e-fuzz",
+    "--force",
+    "--color",
+    "B60205",
+    "--description",
+    "e2e fuzz failure",
+  ];
+  const findOpen = [
+    "issue",
+    "list",
+    "--label",
+    "e2e-fuzz",
+    "--state",
+    "open",
+    "--limit",
+    "1",
+    "--json",
+    "number",
+  ];
+
+  // Assignment policy lives in the auto-assign workflow, which the nightly
+  // dispatches after filing; neither argv sequence below touches assignees.
+  test("create path ensures the label, finds no open issue, and opens a labeled issue with the body", async () => {
     const { run, calls } = fakeGh(undefined);
     await fileIssue(run, "body");
-    const create = calls.find((c) => c[0] === "issue" && c[1] === "create");
-    expect(create).toBeDefined();
-    expect(create).toContain("--label");
-    expect(create?.[create.indexOf("--label") + 1]).toBe("e2e-fuzz");
-    expect(create?.[create.indexOf("--body") + 1]).toBe("body");
+    expect(calls).toEqual([
+      ensureLabel,
+      findOpen,
+      [
+        "issue",
+        "create",
+        "--label",
+        "e2e-fuzz",
+        "--title",
+        "e2e fuzz failures (nightly)",
+        "--body",
+        "body",
+      ],
+    ]);
   });
 
-  test("comment path comments on the existing issue, does not create a new one", async () => {
+  test("comment path ensures the label, then comments on the existing issue without creating one", async () => {
     const { run, calls } = fakeGh(3);
     await fileIssue(run, "body");
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "3")).toBe(true);
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "create")).toBe(false);
-  });
-
-  test("the filer performs no assignment on either path", async () => {
-    // Assignment policy lives in the auto-assign workflow, which the nightly
-    // dispatches after filing; the filer must never touch assignees.
-    for (const openNumber of [undefined, 3]) {
-      const { run, calls } = fakeGh(openNumber);
-      await fileIssue(run, "body");
-      const flat = calls.flat();
-      expect(flat).not.toContain("--assignee");
-      expect(flat).not.toContain("--add-assignee");
-      expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
-    }
+    expect(calls).toEqual([ensureLabel, findOpen, ["issue", "comment", "3", "--body", "body"]]);
   });
 
   test("returns the created issue number (parsed from gh's create URL)", async () => {

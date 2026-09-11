@@ -46,8 +46,8 @@ interface ListDeclView {
   };
 }
 
-// The caveat code-scanning appends to its derived grant. Kept here so the
-// snapshot below and the derivation check agree on one source of truth.
+// The caveat code-scanning appends to its derived grant, spelled once for
+// the snapshot below.
 const CODE_SCANNING_CAVEAT =
   "a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived";
 
@@ -75,16 +75,6 @@ const ACTIONS_OIDC_CAVEAT =
 // extra grants wherever an environments endpoint is denied.
 const ENVIRONMENTS_POLICIES_CAVEAT =
   'declared "deployment_branch_policies" and "deployment_protection_rules" keys additionally need "Actions" (read) and "Administration" (read and write)';
-
-// The per-section caveats grantFor appends; the derivation test and the
-// literal snapshot both read this one map.
-const GRANT_CAVEATS: Record<string, string> = {
-  code_scanning_default_setup: CODE_SCANNING_CAVEAT,
-  code_quality_setup: CODE_QUALITY_CAVEAT,
-  check_suite_preferences: CHECK_SUITE_PREFERENCES_CAVEAT,
-  actions: ACTIONS_OIDC_CAVEAT,
-  environments: ENVIRONMENTS_POLICIES_CAVEAT,
-};
 
 // The exact grant prose each section shows in permission errors, captured
 // against the pre-refactor literals. grantFor derives these now, so any
@@ -119,14 +109,14 @@ const EXPECTED_GRANT: Record<string, string> = {
 };
 
 describe("section permissions", () => {
-  test("every knobbed section's shape parses both forms and yields a default policy", () => {
+  test("every knobbed section's shape parses both forms, and the default policies are these", () => {
     // The knob invariant is mostly compile-time: UNDECLARED_POLICY_SECTIONS
     // is pinned to the SettingsFile types in both directions (schema.ts),
     // and SectionMeta's conditional undeclaredDefault type forces "delete"
     // or "keep" exactly for listed sections. The zod shapes are the one
     // runtime-only piece: a listed section must accept both the plain array
     // and the wrapped form. Round-tripping both forms here pins the shapes
-    // to the same list.
+    // to the same list; the policy map pins which side each section defaults to.
     const byKey = new Map(SECTIONS.map((module) => [module.key as string, module]));
     for (const key of UNDECLARED_POLICY_SECTIONS) {
       const module = byKey.get(key);
@@ -142,12 +132,28 @@ describe("section permissions", () => {
         module.shape.safeParse({ _undeclared: "keep", entries: [] }).success,
         `${key}: wrapper with a policy must parse`,
       ).toBe(true);
-      const policy = defaultUndeclaredPolicy(sectionModule(key));
-      expect(
-        ["keep", "delete"],
-        `${key}: defaultUndeclaredPolicy returned "${policy}", expected "keep" or "delete"`,
-      ).toContain(policy);
     }
+    expect(
+      Object.fromEntries(
+        UNDECLARED_POLICY_SECTIONS.map((key) => [key, defaultUndeclaredPolicy(sectionModule(key))]),
+      ),
+    ).toEqual({
+      labels: "delete",
+      rulesets: "keep",
+      autolinks: "delete",
+      actions_secrets: "keep",
+      dependabot_secrets: "keep",
+      codespaces_secrets: "keep",
+      agents_secrets: "keep",
+      collaborators: "delete",
+      milestones: "keep",
+      actions_variables: "delete",
+      agents_variables: "delete",
+      webhooks: "keep",
+      custom_properties: "keep",
+      deploy_keys: "keep",
+      secret_scanning_custom_patterns: "keep",
+    });
   });
 
   test("_layering is accepted on every top-level knobbed wrapper and rejected on the nested ones", () => {
@@ -246,12 +252,6 @@ describe("section permissions", () => {
       offenders,
       `section(s) declaring a permission with no repo resource (add at least one PatResource to permission.repo): ${offenders.join(", ")}`,
     ).toEqual([]);
-  });
-
-  test("each section's grant caveat matches the pinned per-section caveats", () => {
-    for (const module of SECTIONS) {
-      expect(sectionGrant(module)).toBe(grantFor(module.permission, GRANT_CAVEATS[module.key]));
-    }
   });
 
   test("each section's grant equals its exact pre-refactor literal", () => {
@@ -528,21 +528,155 @@ describe("section endpoints", () => {
 describe("allEndpoints", () => {
   test("flattens every section endpoint under a unique section.role key", () => {
     const all = allEndpoints();
-    const keys = Object.keys(all);
-    // At least one entry per section, and 55+ overall.
-    expect(keys.length).toBeGreaterThanOrEqual(55);
-    // Every key is ${sectionKey}.${role}; keys are unique by construction.
-    for (const key of keys) {
-      expect(key).toMatch(/^[a-z_]+\.[a-zA-Z]+$/);
-    }
-    expect(new Set(keys).size).toBe(keys.length);
-    // Each entry is tagged with its owning section and role, and the counts
-    // reconcile with the per-section dictionaries.
-    let total = 0;
-    for (const module of SECTIONS) {
-      total += Object.keys(module.endpoints).length;
-    }
-    expect(keys.length).toBe(total);
+    // The whole key set: a dropped, duplicated, or renamed declaration fails here.
+    expect(Object.keys(all).sort()).toEqual([
+      "actions.getAccess",
+      "actions.getCacheRetention",
+      "actions.getCacheStorage",
+      "actions.getForkPrApproval",
+      "actions.getForkPrPrivate",
+      "actions.getOidcSub",
+      "actions.getPermissions",
+      "actions.getRetention",
+      "actions.getSelected",
+      "actions.getWorkflow",
+      "actions.putAccess",
+      "actions.putCacheRetention",
+      "actions.putCacheStorage",
+      "actions.putForkPrApproval",
+      "actions.putForkPrPrivate",
+      "actions.putOidcSub",
+      "actions.putPermissions",
+      "actions.putRetention",
+      "actions.putSelected",
+      "actions.putWorkflow",
+      "actions_secrets.list",
+      "actions_secrets.publicKey",
+      "actions_secrets.put",
+      "actions_secrets.remove",
+      "actions_variables.create",
+      "actions_variables.list",
+      "actions_variables.remove",
+      "actions_variables.update",
+      "agents_secrets.list",
+      "agents_secrets.publicKey",
+      "agents_secrets.put",
+      "agents_secrets.remove",
+      "agents_variables.create",
+      "agents_variables.list",
+      "agents_variables.remove",
+      "agents_variables.update",
+      "autolinks.create",
+      "autolinks.list",
+      "autolinks.remove",
+      "branches.appLookup",
+      "branches.branchProbe",
+      "branches.getProtection",
+      "branches.putProtection",
+      "branches.removeProtection",
+      "branches.sigDelete",
+      "branches.sigPost",
+      "check_suite_preferences.update",
+      "code_quality_setup.get",
+      "code_quality_setup.update",
+      "code_scanning_default_setup.get",
+      "code_scanning_default_setup.update",
+      "codespaces_secrets.list",
+      "codespaces_secrets.publicKey",
+      "codespaces_secrets.put",
+      "codespaces_secrets.remove",
+      "collaborators.cancelInvitation",
+      "collaborators.list",
+      "collaborators.listInvitations",
+      "collaborators.remove",
+      "collaborators.update",
+      "collaborators.updateInvitation",
+      "custom_properties.list",
+      "custom_properties.org",
+      "custom_properties.update",
+      "dependabot_secrets.list",
+      "dependabot_secrets.publicKey",
+      "dependabot_secrets.put",
+      "dependabot_secrets.remove",
+      "deploy_keys.create",
+      "deploy_keys.list",
+      "deploy_keys.remove",
+      "environments.createPolicy",
+      "environments.createProtectionRule",
+      "environments.createVariable",
+      "environments.listPolicies",
+      "environments.listProtectionRuleApps",
+      "environments.listProtectionRules",
+      "environments.listSecrets",
+      "environments.listVariables",
+      "environments.probe",
+      "environments.putSecret",
+      "environments.removePolicy",
+      "environments.removeProtectionRule",
+      "environments.removeSecret",
+      "environments.removeVariable",
+      "environments.secretsPublicKey",
+      "environments.update",
+      "environments.updateVariable",
+      "interaction_limits.bypassAdd",
+      "interaction_limits.bypassList",
+      "interaction_limits.bypassRemove",
+      "interaction_limits.capGet",
+      "interaction_limits.capPatch",
+      "interaction_limits.get",
+      "interaction_limits.put",
+      "interaction_limits.remove",
+      "labels.create",
+      "labels.list",
+      "labels.remove",
+      "labels.update",
+      "milestones.create",
+      "milestones.list",
+      "milestones.remove",
+      "milestones.update",
+      "pages.create",
+      "pages.get",
+      "pages.remove",
+      "pages.update",
+      "repository.automatedSecurityFixesGet",
+      "repository.automatedSecurityFixesPut",
+      "repository.automatedSecurityFixesRemove",
+      "repository.get",
+      "repository.immutableReleasesGet",
+      "repository.immutableReleasesPut",
+      "repository.immutableReleasesRemove",
+      "repository.lfsPut",
+      "repository.lfsRemove",
+      "repository.privateVulnerabilityReportingGet",
+      "repository.privateVulnerabilityReportingPut",
+      "repository.privateVulnerabilityReportingRemove",
+      "repository.topics",
+      "repository.update",
+      "repository.vulnerabilityAlertsGet",
+      "repository.vulnerabilityAlertsPut",
+      "repository.vulnerabilityAlertsRemove",
+      "rulesets.create",
+      "rulesets.get",
+      "rulesets.list",
+      "rulesets.remove",
+      "rulesets.update",
+      "secret_scanning_custom_patterns.create",
+      "secret_scanning_custom_patterns.list",
+      "secret_scanning_custom_patterns.remove",
+      "secret_scanning_custom_patterns.update",
+      "teams.grant",
+      "teams.org",
+      "teams.probe",
+      "webhooks.create",
+      "webhooks.list",
+      "webhooks.remove",
+      "webhooks.update",
+      "webhooks.updateConfig",
+      "workflows.disable",
+      "workflows.enable",
+      "workflows.list",
+    ]);
+    // Each entry is tagged with its owning section and role.
     for (const [key, endpoint] of Object.entries(all)) {
       expect(key).toBe(`${endpoint.section}.${endpoint.role}`);
     }
@@ -551,7 +685,12 @@ describe("allEndpoints", () => {
   test("the returned view is frozen so a consumer cannot corrupt declarations", () => {
     const all = allEndpoints();
     const entry = all["labels.update"];
-    expect(entry).toBeDefined();
+    expect(entry).toEqual({
+      route: "PATCH /repos/{owner}/{repo}/labels/{name}",
+      statuses: { 200: "label updated" },
+      section: "labels",
+      role: "update",
+    });
     expect(Object.isFrozen(all)).toBe(true);
     expect(Object.isFrozen(entry)).toBe(true);
     expect(Object.isFrozen(entry?.statuses)).toBe(true);
@@ -588,10 +727,17 @@ describe("allGraphqlOps", () => {
 
   test("flattens, tags, and freezes like allEndpoints", () => {
     const ops = allGraphqlOps([graphqlSection("repository", { toggles: op("RepoToggles") })]);
+    expect(ops).toEqual({
+      "repository.toggles": {
+        name: "RepoToggles",
+        kind: "read",
+        query: "query RepoToggles { viewer { login } }",
+        outcomes: { ok: "x" },
+        section: "repository",
+        role: "toggles",
+      },
+    });
     const tagged = ops["repository.toggles"];
-    expect(tagged).toBeDefined();
-    expect(tagged?.section).toBe("repository");
-    expect(tagged?.role).toBe("toggles");
     expect(Object.isFrozen(ops)).toBe(true);
     expect(Object.isFrozen(tagged)).toBe(true);
     expect(Object.isFrozen(tagged?.outcomes)).toBe(true);
@@ -604,7 +750,9 @@ describe("allGraphqlOps", () => {
         graphqlSection("branches", { rules: op("RepoToggles") }),
       ]),
     ).toThrow(
-      /operation name "RepoToggles" is declared by both repository\.toggles and branches\.rules/,
+      new Error(
+        'BUG: GraphQL operation name "RepoToggles" is declared by both repository.toggles and branches.rules; operation names are the wire dispatch key and must be globally unique',
+      ),
     );
   });
 
@@ -617,7 +765,11 @@ describe("allGraphqlOps", () => {
           { get: { route: "GET /repos/{owner}/{repo}", statuses: { 200: "x" } } },
         ),
       ]),
-    ).toThrow(/declares both a REST endpoint and a GraphQL operation under the role "get"/);
+    ).toThrow(
+      new Error(
+        'BUG: section "repository" declares both a REST endpoint and a GraphQL operation under the role "get"; fault and corruption directives share the "section.role" key space, so roles must be distinct',
+      ),
+    );
   });
 
   test("a declared connection whose query takes no $cursor does not compile", () => {
@@ -868,17 +1020,20 @@ describe("the section.role key space reserves ':'", () => {
 
   test("a role containing ':' fails allEndpoints at construction", () => {
     expect(() => allEndpoints([endpointSection("labels", { "ring:list": LIST })])).toThrow(
-      /role "ring:list" contains ":".*reserves.*scope prefix/,
+      new Error(
+        'BUG: role "ring:list" contains ":", which the "section.role" key space reserves for a future scope prefix ("<scope>:<section>.<role>"); rename it without a colon',
+      ),
     );
   });
 
   test("a section key containing ':' fails both flatteners", () => {
-    expect(() => allEndpoints([endpointSection("prod:labels", { list: LIST })])).toThrow(
-      /section key "prod:labels" contains ":"/,
+    const colonKey = new Error(
+      'BUG: section key "prod:labels" contains ":", which the "section.role" key space reserves for a future scope prefix ("<scope>:<section>.<role>"); rename it without a colon',
     );
+    expect(() => allEndpoints([endpointSection("prod:labels", { list: LIST })])).toThrow(colonKey);
     expect(() =>
       allGraphqlOps([{ key: "prod:labels" as (typeof SECTION_KEYS)[number], endpoints: {} }]),
-    ).toThrow(/section key "prod:labels" contains ":"/);
+    ).toThrow(colonKey);
   });
 
   test("the live registry passes every construction assert of both flatteners", () => {
@@ -927,7 +1082,7 @@ describe("handler contracts", () => {
     // The registry's _PlanModulesAreExact pin is only as good as its check: the shipped
     // workflows module measures exact, and the same module with plan() taking labels'
     // declared value measures misdeclared, so a passing pin means every module was compared.
-    type Exact = MustBeNever<MisdeclaredPlanModule<"workflows", typeof workflowsSection>>;
+    type _Exact = MustBeNever<MisdeclaredPlanModule<"workflows", typeof workflowsSection>>;
     const misdeclared = {
       ...workflowsSection,
       async plan(
@@ -938,9 +1093,7 @@ describe("handler contracts", () => {
       },
     };
     // @ts-expect-error a plan() over labels' value is not exact for workflows
-    type Wrong = MustBeNever<MisdeclaredPlanModule<"workflows", typeof misdeclared>>;
-    const witness: [Exact, Wrong] | undefined = undefined;
-    expect(witness).toBeUndefined();
+    type _Wrong = MustBeNever<MisdeclaredPlanModule<"workflows", typeof misdeclared>>;
   });
 
   test("every reading section declares exactly one primaryRead, and its 404 posture derives from it", () => {

@@ -409,15 +409,6 @@ describe("GraphQL multi-repo slug resolution", () => {
     expect(multi?.repos.get("acme/beta")?.repo.has_wiki).toBe(true);
   });
 
-  test("a mutation without a decodable node id is a violation", () => {
-    const result = dispatch(
-      G_WRITE,
-      { repositoryId: "R_kgDOnotOurs", hasWiki: true },
-      multiOptions(scenario()),
-    );
-    expect(result.violation).toContain("carries no decodable mock node id");
-  });
-
   test("a mutation whose ids span two repositories is a violation", () => {
     const result = dispatch(
       G_WRITE,

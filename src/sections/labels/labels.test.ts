@@ -163,7 +163,11 @@ describe("labels", () => {
         { name: "bug", new_name: "triage" },
         { name: "enhancement", new_name: "Triage" },
       ]),
-    ).rejects.toThrow(/name the same labels entry: "triage" and "Triage"/);
+    ).rejects.toThrow(
+      new Error(
+        'labels: the settings file declares entries that name the same labels entry: "triage" and "Triage". Keep exactly one entry per resource',
+      ),
+    );
     expect(api.calls).toHaveLength(0);
   });
 

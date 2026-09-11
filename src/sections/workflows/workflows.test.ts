@@ -163,9 +163,11 @@ describe("workflows", () => {
       "PUT /repos/o/r/actions/workflows/1/disable",
       "PUT /repos/o/r/actions/workflows/2/enable",
     ]);
-    // The unfixable finding survives both plans unchanged.
-    expect(first.drift).toHaveLength(1);
-    expect(second).toEqual({ ops: [], notes: [], drift: first.drift });
+    // The unfixable finding (a "deleted" live workflow is absent) survives both plans unchanged.
+    const gone =
+      "workflows[gone.yml]: declared in the settings file but no workflow with that path exists on the repo, so apply skips it - create the workflow file, or remove it from the workflows section";
+    expect(first.drift).toEqual([gone]);
+    expect(second).toEqual({ ops: [], notes: [], drift: [gone] });
   });
 
   test("the read port exposes exactly the list role, narrowed to its denied posture", () => {
@@ -188,13 +190,12 @@ describe("workflows", () => {
     // is built first and assigned on one line, so the directive anchors to
     // the assignment whichever property the compiler blames.
     type Op = PlannedOp<typeof workflowsSection.endpoints>;
-    const enable: Op = {
+    const _enable: Op = {
       role: "enable",
       params: { workflow_id: "1" },
       drift: ["enabling"],
       change: "",
     };
-    expect(enable.role).toBe("enable");
     const read = { role: "list", drift: ["x"], change: "" } as const;
     // @ts-expect-error the list role is a read, not a plannable write
     const _read: Op = read;

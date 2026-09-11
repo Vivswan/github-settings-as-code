@@ -84,21 +84,24 @@ describe("deliverArtifactReport", () => {
         throw new Error("Unable to get the ACTIONS_RUNTIME_TOKEN env variable");
       },
     };
-    const result = await deliverArtifactReport("doc", recipient, uploader);
-    if (!("warning" in result)) {
-      throw new Error("expected a warning");
-    }
-    expect(result.warning).toContain("could not upload the private report artifact");
-    expect(result.warning).toContain("ACTIONS_RUNTIME_TOKEN");
+    expect(await deliverArtifactReport("doc", recipient, uploader)).toEqual({
+      warning:
+        "could not upload the private report artifact: Unable to get the ACTIONS_RUNTIME_TOKEN " +
+        "env variable. Re-run the workflow, or set private-report: none if it persists",
+    });
   });
 
   test("a malformed recipient is a warning and the uploader is never called", async () => {
     const { uploader, uploads } = captureUploader();
     const result = await deliverArtifactReport("doc", "not-a-key", uploader);
+    // The middle of the warning is the age library's own wording for a bad recipient, so only
+    // our prefix and advice are pinned around it.
     expect(result).toEqual({
-      warning: expect.stringContaining("could not upload the private report artifact"),
+      warning: expect.stringMatching(
+        /^could not upload the private report artifact: .+\. Re-run the workflow, or set private-report: none if it persists$/,
+      ),
     });
-    expect(uploads).toHaveLength(0);
+    expect(uploads).toEqual([]);
   });
 });
 
@@ -123,15 +126,16 @@ describe("default uploader without a runtime token", () => {
       const { recipient } = await testKeypair();
       const result = await deliverArtifactReport("secret document", recipient);
 
-      // exactly one warning, and it is ours (the client's own text never appears)
-      if (!("warning" in result)) {
-        throw new Error("expected a warning");
-      }
-      expect(result.warning).toContain("could not upload the private report artifact");
-      expect(result.warning).toContain("ACTIONS_RUNTIME_TOKEN");
+      // exactly one warning, and it is ours (the client's own text never
+      // appears, and neither does any report content)
+      expect(result).toEqual({
+        warning:
+          "could not upload the private report artifact: the artifact service is unavailable: no " +
+          "ACTIONS_RUNTIME_TOKEN in the environment. Artifact upload needs a GitHub-hosted or " +
+          "self-hosted Actions runner (it is not available on GitHub Enterprise Server or outside " +
+          "Actions). Re-run the workflow, or set private-report: none if it persists",
+      });
       expect(uploadSpy).toHaveBeenCalledTimes(0);
-      // and no report content ever leaves the module
-      expect(result.warning).not.toContain("secret document");
     } finally {
       uploadSpy.mockRestore();
     }

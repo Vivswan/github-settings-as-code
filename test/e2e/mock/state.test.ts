@@ -41,7 +41,6 @@ import {
   ruleWireNode,
   teamRepoFromPut,
 } from "./state.js";
-import { storedKeyMaterial } from "./support.js";
 
 describe("buildState overlay semantics", () => {
   test("undefined LiveState uses fixture defaults and empty lists", () => {
@@ -65,12 +64,6 @@ describe("buildState overlay semantics", () => {
     expect(state.repo.permissions).toMatchObject({ admin: false, push: true, pull: true });
     // Untouched top-level fixture fields survive.
     expect(state.repo.default_branch).toBe("main");
-  });
-
-  test("explicit labels list replaces the (empty) baseline", () => {
-    const state = buildState({ labels: [{ name: "bug", color: "d73a4a" }] }, "org");
-    expect(state.labels).toHaveLength(1);
-    expect(state.labels[0]).toMatchObject({ name: "bug", color: "d73a4a" });
   });
 
   test("labels.generate sugar produces count labels with the prefix and color", () => {
@@ -101,32 +94,39 @@ describe("buildState overlay semantics", () => {
       },
       "org",
     );
-    expect(state.labels[0]).toEqual({
-      name: "bug",
-      color: "d73a4a",
-      description: null,
-      default: false,
-      id: expect.any(Number),
-      node_id: expect.any(String),
-      url: "https://api.github.com/repos/e2e-owner/e2e-repo/labels/bug",
-    });
-    expect(state.autolinks[0]).toEqual({
-      key_prefix: "JIRA-",
-      url_template: "https://j.example.com/<num>",
-      is_alphanumeric: true,
-      id: expect.any(Number),
-    });
+    // Each explicit list replaces the empty baseline outright (one seed, one item), and the ids
+    // are minted in seed order from the 90_000_000 pool.
+    expect(state.labels).toEqual([
+      {
+        name: "bug",
+        color: "d73a4a",
+        description: null,
+        default: false,
+        id: 90_000_000,
+        node_id: "MDU6TGFiZWw90000000",
+        url: "https://api.github.com/repos/e2e-owner/e2e-repo/labels/bug",
+      },
+    ]);
+    expect(state.autolinks).toEqual([
+      {
+        key_prefix: "JIRA-",
+        url_template: "https://j.example.com/<num>",
+        is_alphanumeric: true,
+        id: 90_000_001,
+      },
+    ]);
     // The seed's comment is stripped the way a created key is stored, so a converging apply over a
-    // seeded key still proves the section compares algorithm + blob, not the raw string.
-    expect(state.deploy_keys[0]).toMatchObject({
+    // seeded key still proves the section compares algorithm + blob, not the raw string. The id is
+    // the third mint from the 90_000_000 pool (the label and the autolink took the first two).
+    expect(state.deploy_keys[0]).toEqual({
       title: "bot",
-      key: storedKeyMaterial("ssh-ed25519 AAAAC3seedseedseed deploy@bot"),
+      key: "ssh-ed25519 AAAAC3seedseedseed",
       read_only: false,
       verified: true,
+      id: 90_000_002,
+      url: "https://api.github.com/repos/e2e-owner/e2e-repo/keys/90000002",
+      created_at: "2026-07-01T00:00:00Z",
     });
-    expect(String((state.deploy_keys[0] as Record<string, unknown>).key)).not.toContain(
-      "deploy@bot",
-    );
   });
 
   test("a pinned seed id anywhere in the overlay is reserved before any family mints", () => {

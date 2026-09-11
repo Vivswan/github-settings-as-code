@@ -37,10 +37,18 @@ describe("loosen", () => {
   });
 
   test("array elements and record values are loosened (the def-surgery tripwire)", () => {
+    // The parsed DATA carries the unknown key: a strip object would parse the
+    // same input successfully while dropping it, so success alone proves nothing.
     const viaArray = loosen(z.array(z.object({ name: z.string() })));
-    expect(viaArray.safeParse([{ name: "a", extra: 1 }]).success).toBe(true);
+    expect(viaArray.safeParse([{ name: "a", extra: 1 }])).toEqual({
+      success: true,
+      data: [{ name: "a", extra: 1 }],
+    });
     const viaRecord = loosen(z.record(z.string(), z.object({ name: z.string() })));
-    expect(viaRecord.safeParse({ key: { name: "a", extra: 1 } }).success).toBe(true);
+    expect(viaRecord.safeParse({ key: { name: "a", extra: 1 } })).toEqual({
+      success: true,
+      data: { key: { name: "a", extra: 1 } },
+    });
   });
 
   test("the knobbed union is rewrapped with per-container issue paths", () => {
@@ -69,10 +77,18 @@ describe("loosen", () => {
         z.strictObject({ entries: z.array(z.object({ name: z.string() })) }),
       ])
       .superRefine(() => {});
-    expect(() => loosen(knob)).toThrow(/routed rewrap would silently drop/);
+    expect(() => loosen(knob)).toThrow(
+      new Error(
+        "loosen(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
+      ),
+    );
   });
 
   test("an unrecognized container type fails loudly instead of skipping the derivation", () => {
-    expect(() => loosen(z.tuple([z.string()]))).toThrow(/unhandled schema type "tuple"/);
+    expect(() => loosen(z.tuple([z.string()]))).toThrow(
+      new Error(
+        'loosen(): unhandled schema type "tuple" - teach loosen() its runtime derivation before authoring it in src/schema.ts',
+      ),
+    );
   });
 });

@@ -66,7 +66,8 @@ describe("retry and throttling", () => {
     const result = await api().tryRequest("GET", "/hopeless");
     expect(state.calls).toBe(1 + MAX_RETRIES);
     expect("error" in result && result.error.status).toBe(429);
-    expect("error" in result && result.error.message).toContain("rate limited");
+    // No JSON content-type on the stubbed body, so the raw text is the message.
+    expect("error" in result && result.error.message).toBe('{"message":"rate limited"}');
   });
 
   test("a rate-limit reset beyond the 60s cap fails now instead of stalling", async () => {
@@ -286,7 +287,9 @@ describe("error body shaping", () => {
       "https://docs.github.com/rest/repos/rules",
     );
     // errors[] stays appended to the message, as before.
-    expect("error" in result && result.error.message).toContain("Invalid rule");
+    expect("error" in result && result.error.message).toBe(
+      'Validation Failed ([{"field":"rules","message":"Invalid rule"}])',
+    );
   });
 
   test("string and empty bodies leave documentationUrl unset", async () => {
@@ -448,47 +451,59 @@ describe("debug-trace hardening for redacted slugs", () => {
 });
 
 describe("withheld() rebuilds from the allowlist", () => {
-  const ALLOWLIST = ["status", "message", "body", "rateLimited", "graphqlTypes"];
   const base = { status: 422, message: "echo: CANARY", body: '{"echo":"CANARY"}' };
+  const rebuilt = { status: 422, message: "withheld reason", body: "withheld reason" };
+  const rebuiltRateLimited = { ...rebuilt, rateLimited: true };
 
   // Each shape smuggles CANARY past a different field FILTER (spread, copy
-  // loop, for..in); only a rebuild that names its fields drops them all.
+  // loop, for..in); only a rebuild that names its fields drops them all. The
+  // third column is the exact output, own keys in declaration order: a
+  // rateLimited: true anywhere on the input (own or inherited) is the one
+  // field that survives beside the status.
   test.each([
     [
       "extra fields",
       { ...base, documentationUrl: "https://docs/CANARY", extra: "CANARY" } as ApiError,
+      rebuilt,
     ],
-    ["nested objects", { ...base, rateLimited: true, nested: { deep: "CANARY" } } as ApiError],
-    ["a toJSON hook", { ...base, toJSON: () => ({ leak: "CANARY" }) } as ApiError],
+    [
+      "nested objects",
+      { ...base, rateLimited: true, nested: { deep: "CANARY" } } as ApiError,
+      rebuiltRateLimited,
+    ],
+    ["a toJSON hook", { ...base, toJSON: () => ({ leak: "CANARY" }) } as ApiError, rebuilt],
     [
       "an enumerable getter",
       Object.defineProperty({ ...base }, "leak", {
         get: () => "CANARY",
         enumerable: true,
       }) as ApiError,
+      rebuilt,
     ],
     [
       "prototype-chain properties",
       Object.assign(Object.create({ inherited: "CANARY", rateLimited: true }), base) as ApiError,
+      rebuiltRateLimited,
     ],
-  ])("the output carries ONLY allowlisted own data fields against %s", (_shape, error) => {
-    const out = withheld(error, "withheld reason");
-    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
-    for (const key of Reflect.ownKeys(out)) {
-      expect(ALLOWLIST).toContain(String(key));
-      const descriptor = Object.getOwnPropertyDescriptor(out, key);
-      expect(descriptor?.get).toBeUndefined();
-    }
-    expect(out.status).toBe(422);
-    expect(out.message).toBe("withheld reason");
-    expect(out.body).toBe("withheld reason");
-    expect(JSON.stringify(out)).not.toContain("CANARY");
-    let inherited = 0;
-    for (const _key in out) {
-      inherited += 1;
-    }
-    expect(inherited).toBe(Object.keys(out).length);
-  });
+  ])(
+    "the output carries ONLY allowlisted own data fields against %s",
+    (_shape, error, expected) => {
+      const out = withheld(error, "withheld reason");
+      expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+      expect([...Reflect.ownKeys(out)].sort()).toEqual(Object.keys(expected).sort());
+      expect(out).toEqual(expected);
+      for (const key of Reflect.ownKeys(out)) {
+        const descriptor = Object.getOwnPropertyDescriptor(out, key);
+        expect(descriptor?.get).toBeUndefined();
+      }
+      expect(JSON.stringify(out)).not.toContain("CANARY");
+      let inherited = 0;
+      for (const _key in out) {
+        inherited += 1;
+      }
+      expect(inherited).toBe(Object.keys(out).length);
+    },
+  );
 
   test("the classification fields survive as fresh values; anything falsy or absent is dropped", () => {
     const types = Object.freeze(["FORBIDDEN", "NOT_FOUND"]);
@@ -527,7 +542,6 @@ describe("withheld() rebuilds from the allowlist", () => {
       "r",
     );
     expect(disguised).toEqual({ status: 404, message: "r", body: "r" });
-    expect(JSON.stringify(disguised)).not.toContain("CANARY");
   });
 });
 
@@ -552,6 +566,14 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   // scan for the original string would find the echo.
   const hostileSecret = 'he said "no" \\ back\nslash';
 
+  // The fixed tail of every unsent-payload abort, after the scan's reason clause.
+  const NOT_SENT_TAIL =
+    ", so it could not be safely inspected for secret fields. Replace that value with a plain string in the settings file";
+  // The reason when the scan has no typed rejection to name a field with: a
+  // hostile proxy, a bare bigint, a cycle.
+  const NOT_PLAIN_FALLBACK =
+    "its payload is not plain JSON data (a cyclic value, or a value carrying a function or exotic prototype)";
+
   test("config.secret is masked in the trace; the outgoing request is untouched", async () => {
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
     const dbg = traceIo();
@@ -565,8 +587,12 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     // Non-secret payload fields still trace normally.
     expect(trace).toContain('"url":"https://example.test/hook"');
     // The wire carries the real value; only the trace is masked.
-    expect(sent.bodies.join("")).toContain(JSON.stringify(hostileSecret).slice(1, -1));
-    expect(sent.bodies.join("")).not.toContain("***");
+    expect(sent.bodies).toEqual([
+      JSON.stringify({
+        name: "web",
+        config: { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
+      }),
+    ]);
   });
 
   test("encrypted_value is masked in the trace", async () => {
@@ -654,7 +680,13 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     const trace = dbg.lines.join("");
     expect(trace).toContain('"secret":"***"');
     expect(trace).not.toContain("he said");
-    expect(sent.bodies.join("")).toContain(JSON.stringify(hostileSecret).slice(1, -1));
+    expect(sent.bodies).toEqual([
+      JSON.stringify({
+        url: "https://example.test/hook",
+        content_type: "json",
+        secret: hostileSecret,
+      }),
+    ]);
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
@@ -704,9 +736,10 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     if (thrown === undefined) {
       throw new Error("expected a thrown transport error");
     }
-    expect(thrown.message).toContain("details withheld");
-    expect(thrown.message).not.toContain("he said");
-    expect(thrown.message).not.toContain("body was");
+    // The withholding clause replaces the transport's own text wholesale.
+    expect(thrown.message).toBe(
+      "PATCH /repos/hookco/hookrepo/hooks/1/config failed: the transport failed before an HTTP response arrived (details withheld: the request carried a secret field). Check network connectivity from the runner to https://api.test, then re-run the workflow",
+    );
   });
 
   test("a transport failure on a non-secret request keeps its diagnostic message", async () => {
@@ -719,7 +752,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     } catch (error) {
       thrown = error as Error;
     }
-    expect(thrown?.message).toContain("socket hang up");
+    expect(thrown?.message).toBe(
+      "GET /repos/hookco/hookrepo failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run the workflow",
+    );
   });
 
   test("a secret-carrying 403 rate limit still classifies as a rate limit", async () => {
@@ -933,8 +968,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       } catch (error) {
         thrown = error as Error;
       }
-      expect(thrown?.message).toContain("was not sent");
-      expect(thrown?.message).not.toContain("he said");
+      expect(thrown?.message).toBe(
+        `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: the value at "toJSON" is not plain JSON data (a function)${NOT_SENT_TAIL}`,
+      );
       expect(calls).toBe(0);
       expect(sent.bodies).toHaveLength(0);
       expect(dbg.lines.join("")).not.toContain("he said");
@@ -960,8 +996,10 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     } catch (error) {
       thrown = error as Error;
     }
-    expect(thrown?.message).toContain("was not sent");
-    expect(thrown?.message).not.toContain("he said");
+    // The trap's throw is swallowed: no field name, so the fallback reason.
+    expect(thrown?.message).toBe(
+      `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: ${NOT_PLAIN_FALLBACK}${NOT_SENT_TAIL}`,
+    );
     expect(sent.bodies).toHaveLength(0);
   });
 
@@ -984,7 +1022,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     } catch (error) {
       thrown = error as Error;
     }
-    expect(thrown?.message).toContain("was not sent");
+    expect(thrown?.message).toBe(
+      `POST /repos/hookco/hookrepo/anything was not sent: the value at "note" is not plain JSON data (an accessor property)${NOT_SENT_TAIL}`,
+    );
     expect(getterRan).toBe(false);
     expect(sent.bodies).toHaveLength(0);
   });
@@ -1008,7 +1048,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     } catch (error) {
       thrown = error as Error;
     }
-    expect(thrown?.message).toContain("was not sent");
+    expect(thrown?.message).toBe(
+      `POST /repos/hookco/hookrepo/anything was not sent: the value is not plain JSON data (a non-plain object)${NOT_SENT_TAIL}`,
+    );
     expect(overrideRan).toBe(false);
     expect(sent.bodies).toHaveLength(0);
   });
@@ -1027,8 +1069,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     } catch (error) {
       thrown = error as Error;
     }
-    expect(thrown?.message).toContain("was not sent");
-    expect(thrown?.message).toContain("!!timestamp");
+    expect(thrown?.message).toBe(
+      `POST /repos/hookco/hookrepo/anything was not sent: the value at "stamp" is not plain JSON data (a Date, e.g. from a YAML !!timestamp tag)${NOT_SENT_TAIL}`,
+    );
     expect(sent.bodies).toHaveLength(0);
   });
 
@@ -1040,7 +1083,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     } catch (error) {
       thrown = error as Error;
     }
-    expect(thrown?.message).toContain("was not sent");
+    expect(thrown?.message).toBe(
+      `POST /repos/hookco/hookrepo/anything was not sent: ${NOT_PLAIN_FALLBACK}${NOT_SENT_TAIL}`,
+    );
     expect(sent.bodies).toHaveLength(0);
   });
 
@@ -1060,7 +1105,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     } catch (error) {
       thrown = error as Error;
     }
-    expect(thrown?.message).toContain("was not sent");
+    expect(thrown?.message).toBe(
+      `POST /repos/hookco/hookrepo/anything was not sent: the value is not plain JSON data (a non-plain object)${NOT_SENT_TAIL}`,
+    );
     expect(sent.bodies).toHaveLength(0);
   });
 
@@ -1106,8 +1153,10 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     if (thrown === undefined) {
       throw new Error("expected a thrown abort");
     }
-    expect(thrown.message).toContain("was not sent");
-    expect(thrown.message).not.toContain("he said");
+    // The abort names the field but never the getter's own message.
+    expect(thrown.message).toBe(
+      `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: the value at "secret" is not plain JSON data (an accessor property)${NOT_SENT_TAIL}`,
+    );
     expect(sent.bodies).toHaveLength(0);
     expect(dbg.lines.join("")).not.toContain("he said");
   });
@@ -1123,8 +1172,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     } catch (error) {
       thrown = error as Error;
     }
-    expect(thrown?.message).toContain("was not sent");
-    expect(thrown?.message).not.toContain("he said");
+    expect(thrown?.message).toBe(
+      `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: ${NOT_PLAIN_FALLBACK}${NOT_SENT_TAIL}`,
+    );
     expect(sent.bodies).toHaveLength(0);
     expect(dbg.lines.join("")).not.toContain("he said");
   });
@@ -1219,11 +1269,14 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
-    // The error keeps the message/errors/body shaping exactly as before.
+    // The error keeps the message/errors/body shaping exactly as before; the
+    // body is the response JSON re-serialized, key order intact.
     expect(result.error.message).toBe(
       'Validation Failed ([{"field":"name","message":"bad name"}])',
     );
-    expect(result.error.body).toContain('"bad name"');
+    expect(result.error.body).toBe(
+      '{"message":"Validation Failed","errors":[{"field":"name","message":"bad name"}],"documentation_url":"https://docs.github.com/rest"}',
+    );
     expect(result.error.documentationUrl).toBe("https://docs.github.com/rest");
   });
 });
@@ -1261,12 +1314,12 @@ describe("DELETE request bodies reach the wire", () => {
         },
       );
       expect(result).toEqual({ data: null });
-      expect(received).toHaveLength(1);
-      expect(received[0]?.method).toBe("DELETE");
-      expect(JSON.parse(received[0]?.body ?? "")).toEqual({
-        patterns: [{ pattern_id: 7, custom_pattern_version: "v2" }],
-        post_delete_action: "resolve_alerts",
-      });
+      expect(received).toEqual([
+        {
+          method: "DELETE",
+          body: '{"patterns":[{"pattern_id":7,"custom_pattern_version":"v2"}],"post_delete_action":"resolve_alerts"}',
+        },
+      ]);
     } finally {
       await server.stop(true);
     }

@@ -84,7 +84,8 @@ describe("check_suite_preferences", () => {
     expect(changes).toEqual(["applied check suite preferences (2 auto_trigger_checks entries)"]);
     expect(notes).toEqual([]);
     expect(second.ops.map((op) => op.role)).toEqual(["update"]);
-    expect(second.notes).toEqual(first.notes);
+    expect(first.notes).toEqual([note]);
+    expect(second.notes).toEqual([note]);
     // Both executions (the proof also runs the converged plan) sent the
     // declaration verbatim; nothing was ever read.
     expect(api.calls).toEqual([

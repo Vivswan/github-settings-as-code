@@ -188,7 +188,9 @@ describe("executePlan", () => {
     const execution = await executePlan(plan, SECTION, api, REPO, TOOLS);
     expect(execution.status).toBe("failed");
     expect(execution.changes).toEqual(["flipped the toggle"]);
-    expect(errorOf(execution)).toContain("422");
+    expect(errorOf(execution)).toBe(
+      'Error: labels: POST /repos/o/r/labels: 422 Validation Failed. The API rejected the request; fix the "labels" values in the settings file to satisfy the message above',
+    );
   });
 
   test("an operation's describe label leads the failure message, REST and GraphQL alike", async () => {
@@ -203,8 +205,8 @@ describe("executePlan", () => {
       REPO,
       TOOLS,
     );
-    expect(errorOf(rest)).toContain(
-      'creating label "bug" failed - POST /repos/o/r/labels: 422 Validation Failed',
+    expect(errorOf(rest)).toBe(
+      'Error: labels: creating label "bug" failed - POST /repos/o/r/labels: 422 Validation Failed. The API rejected the request; fix the "labels" values in the settings file to satisfy the message above',
     );
     const graphql = await executePlan(
       planOf({ role: "write", variables: {}, describe: "flipping the toggle" }),
@@ -213,7 +215,9 @@ describe("executePlan", () => {
       REPO,
       TOOLS,
     );
-    expect(errorOf(graphql)).toContain("flipping the toggle failed - GRAPHQL ExecutorWrite: 502");
+    expect(errorOf(graphql)).toBe(
+      "Error: labels: flipping the toggle failed - GRAPHQL ExecutorWrite: 502 Bad Gateway. GitHub returned a server error; re-run the workflow, and retry later if it persists",
+    );
   });
 
   test("a change thunk renders from the response once the request landed, one line or several", async () => {
@@ -299,7 +303,7 @@ describe("executePlan", () => {
       landed: 1,
       error: new Error("the write did not take"),
     });
-    expect(api.mutations()).toHaveLength(1);
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(["POST /repos/o/r/labels"]);
     // The render failed, so the hook after it never ran.
     expect(captured).toBe(false);
   });
@@ -345,7 +349,10 @@ describe("executePlan", () => {
       landed: 2,
       error: new Error("the response carried no node id"),
     });
-    expect(api.mutations()).toHaveLength(2);
+    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "POST /repos/o/r/labels",
+      "GRAPHQL ExecutorWrite",
+    ]);
   });
 
   test.each<[hook: string, op: Partial<SectionPlan["ops"][number]>]>([
@@ -455,12 +462,13 @@ describe("executePlan", () => {
       drift: [],
     };
     const execution = await executePlan(plan, SECTION, api, REPO, TOOLS);
-    expect(execution).toMatchObject({
+    expect(execution).toEqual({
       status: "failed",
       changes: ['created label "bug"'],
+      notes: [],
       landed: 1,
+      error: new Error("the actor does not exist"),
     });
-    expect(errorOf(execution)).toContain("the actor does not exist");
     expect(seen).toEqual(['[{"name":"live"}]']);
     // The read ran before the first write; the second write never left.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
@@ -553,9 +561,15 @@ describe("executePlan", () => {
       REPO,
       TOOLS,
     );
-    expect(narrowed.status).toBe("failed");
-    expect(narrowed.notes).toEqual([]);
-    expect(errorOf(narrowed)).toContain("422 Validation Failed");
+    expect(narrowed).toEqual({
+      status: "failed",
+      changes: [],
+      notes: [],
+      landed: 0,
+      error: new Error(
+        'labels: POST /repos/o/r/labels: 422 Validation Failed. The API rejected the request; fix the "labels" values in the settings file to satisfy the message above',
+      ),
+    });
     // An undeclared status under the default: throwFor's classification, a
     // PermissionDenied here, not the operation's outcome.
     const denied = await executePlan(
@@ -565,7 +579,17 @@ describe("executePlan", () => {
       REPO,
       TOOLS,
     );
-    expect(denied.status).toBe("failed");
+    expect(denied).toEqual({
+      status: "failed",
+      changes: [],
+      notes: [],
+      landed: 0,
+      error: new PermissionDenied(
+        "labels",
+        `the token was denied POST /repos/o/r/labels: 403 Forbidden. To fix, grant "Administration" (read and write) under the PAT's Repository permissions`,
+        403,
+      ),
+    });
     expect((denied as { error: unknown }).error).toBeInstanceOf(PermissionDenied);
     // The control: a tolerated operation that succeeds records its line.
     const succeeded = await executePlan(
@@ -595,8 +619,8 @@ describe("executePlan", () => {
       TOOLS,
     );
     expect(execution.status).toBe("failed");
-    expect(errorOf(execution)).toMatch(
-      /BUG: POST \/repos\/\{owner\}\/\{repo\}\/labels was asked to tolerate status\(es\) 404, which it does not declare/,
+    expect(errorOf(execution)).toBe(
+      "Error: BUG: POST /repos/{owner}/{repo}/labels was asked to tolerate status(es) 404, which it does not declare as a tolerable error status; a tolerance may only name declared 4xx statuses other than 401 and 429",
     );
     expect(api.calls).toEqual([]);
   });
@@ -637,7 +661,9 @@ describe("executePlan", () => {
       TOOLS,
     );
     expect(execution.status).toBe("failed");
-    expect(errorOf(execution)).toMatch(/rate limit was hit/);
+    expect(errorOf(execution)).toBe(
+      "Error: labels: POST /repos/o/r/labels: 403 API rate limit exceeded. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
+    );
     expect(consulted).toBe(false);
   });
 
@@ -664,7 +690,9 @@ describe("executePlan", () => {
       TOOLS,
     );
     expect(execution.status).toBe("failed");
-    expect(errorOf(execution)).toContain("502");
+    expect(errorOf(execution)).toBe(
+      "Error: labels: GRAPHQL ExecutorWrite: 502 Bad Gateway. GitHub returned a server error; re-run the workflow, and retry later if it persists",
+    );
     expect(consulted).toBe(false);
   });
 
@@ -870,21 +898,52 @@ describe("executePlan", () => {
   // The refusals: each names a role the erased plan type admits but the
   // executor must never issue, and each runs against a client that would
   // otherwise answer, so a missing guard fails the test loudly.
-  const refused: ReadonlyArray<{ what: string; role: string; message: RegExp }> = [
-    { what: "a REST read role", role: "list", message: /is a read endpoint/ },
-    { what: "a GraphQL read role", role: "read", message: /is a GraphQL read operation/ },
-    { what: "an undeclared role", role: "typo", message: /names no declared endpoint/ },
+  const refused: ReadonlyArray<{ what: string; role: string; message: string }> = [
+    {
+      what: "a REST read role",
+      role: "list",
+      message:
+        'Error: BUG: labels planned an operation under role "list", which is a read endpoint (GET /repos/{owner}/{repo}/labels); only write roles are plannable',
+    },
+    {
+      what: "a GraphQL read role",
+      role: "read",
+      message:
+        'Error: BUG: labels planned an operation under role "read", which is a GraphQL read operation; only write roles are plannable',
+    },
+    {
+      what: "an undeclared role",
+      role: "typo",
+      message:
+        'Error: BUG: labels planned an operation under role "typo", which names no declared endpoint or GraphQL operation',
+    },
     // Inherited names resolve through a plain `dict[role]` lookup; the
     // executor must read own properties only.
-    { what: "an inherited role (constructor)", role: "constructor", message: /names no declared/ },
-    { what: "an inherited role (toString)", role: "toString", message: /names no declared/ },
+    {
+      what: "an inherited role (constructor)",
+      role: "constructor",
+      message:
+        'Error: BUG: labels planned an operation under role "constructor", which names no declared endpoint or GraphQL operation',
+    },
+    {
+      what: "an inherited role (toString)",
+      role: "toString",
+      message:
+        'Error: BUG: labels planned an operation under role "toString", which names no declared endpoint or GraphQL operation',
+    },
     // Non-string roles: a number would coerce onto a matching key, a symbol
     // would enter the property-key path; both are refused before any lookup.
-    { what: "a numeric role", role: 0 as unknown as string, message: /role is a number/ },
+    {
+      what: "a numeric role",
+      role: 0 as unknown as string,
+      message:
+        "Error: BUG: labels planned an operation whose role is a number, not the name of a declared write",
+    },
     {
       what: "a symbol role",
       role: Symbol("create") as unknown as string,
-      message: /role is a symbol/,
+      message:
+        "Error: BUG: labels planned an operation whose role is a symbol, not the name of a declared write",
     },
   ];
   for (const { what, role, message } of refused) {
@@ -900,7 +959,7 @@ describe("executePlan", () => {
       expect(execution.status).toBe("failed");
       expect(execution.changes).toEqual([]);
       expect(execution.landed).toBe(0);
-      expect(errorOf(execution)).toMatch(message);
+      expect(errorOf(execution)).toBe(message);
       expect(api.calls).toEqual([]);
     });
   }
