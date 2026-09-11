@@ -1,3 +1,8 @@
+# Security policy
+
+## Reporting
+
+Do not open a public issue for security problems. Report privately through GitHub's private vulnerability reporting: open this repository's Security tab and choose "Report a vulnerability". What a useful report contains, the response time to expect, and the disclosure expectations are in [Vivswan/.github's SECURITY.md](https://github.com/Vivswan/.github/blob/main/SECURITY.md).
 
 ## What counts as a vulnerability here
 
