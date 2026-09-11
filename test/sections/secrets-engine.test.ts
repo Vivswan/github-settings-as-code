@@ -9,13 +9,13 @@ import { describe, expect, test } from "bun:test";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../../src/sections/contract/plan.js";
+import { decodeBase64, sealForGithub } from "../../src/sections/shared/sealed-box.js";
 import {
   parseSealingKey,
   planSecrets,
   rejectDuplicateSecretNames,
   type SealedSecretPayload,
   type SecretsPlanScope,
-  sealSecretValue,
   secretKey,
 } from "../../src/sections/shared/secrets-engine.js";
 import {
@@ -83,10 +83,10 @@ function fabricatedPlanScope(live: string[], reads: string[]): SecretsPlanScope<
 }
 
 describe("sealing", () => {
-  test("sealSecretValue round-trips through the mock keypair, hostile characters included", async () => {
+  test("sealForGithub round-trips through the mock keypair, hostile characters included", async () => {
     await mockSodiumReady();
     const hostile = 'p@ss"word\\with\nnewline\tand unicode-éñ中';
-    const sealed = await sealSecretValue(hostile, MOCK_SECRETS_PUBLIC_KEY);
+    const sealed = sealForGithub(decodeBase64(MOCK_SECRETS_PUBLIC_KEY), hostile);
     // The ciphertext is base64 and never contains the plaintext.
     expect(sealed).toMatch(/^[A-Za-z0-9+/]+=*$/);
     expect(sealed).not.toContain("p@ss");
@@ -118,23 +118,17 @@ describe("sealing", () => {
       { key_id: "k", key: Buffer.alloc(32).toString("base64") },
       `${WHERE}a key that is not a usable X25519 public key${ADVICE}`,
     ],
-  ])(
-    "parseSealingKey rejects %s, naming the scope and the defect",
-    async (_what, body, message) => {
-      const attempt = parseSealingKey(
-        section,
-        { label: "actions_secrets" },
-        PUBLIC_KEY_ENDPOINT,
-        body,
-      );
-      await expect(attempt).rejects.toThrow(new Error(message));
-    },
-  );
+  ])("parseSealingKey rejects %s, naming the scope and the defect", (_what, body, message) => {
+    const attempt = () =>
+      parseSealingKey(section, { label: "actions_secrets" }, PUBLIC_KEY_ENDPOINT, body);
+    expect(attempt).toThrow(new Error(message));
+  });
 
   test("a parsed sealing key seals synchronously into the {encrypted_value, key_id} body, fresh per seal", async () => {
+    await mockSodiumReady();
     // Sealed boxes use a fresh ephemeral key per seal, so the ciphertexts
     // must differ while both still carry the exact plaintext.
-    const key = await parseSealingKey(
+    const key = parseSealingKey(
       section,
       { label: "actions_secrets" },
       PUBLIC_KEY_ENDPOINT,

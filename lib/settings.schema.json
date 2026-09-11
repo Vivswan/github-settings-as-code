@@ -150,7 +150,7 @@
           "type": "string"
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
           "type": "string"
         }
       },
@@ -186,7 +186,7 @@
           "type": "string"
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
           "type": "string"
         }
       },
@@ -444,7 +444,7 @@
           "type": "string"
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
           "type": "string"
         }
       },
@@ -516,7 +516,7 @@
           "type": "string"
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
           "type": "string"
         }
       },
@@ -745,7 +745,7 @@
           "type": "string"
         },
         "value": {
-          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
+          "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
           "type": "string"
         }
       },

@@ -4,8 +4,9 @@ schema:
   "{ActionsSecretConfig,AgentsSecretConfig,CodespacesSecretConfig,DependabotSecretConfig,EnvironmentSecretConfig}.value": >-
     A whole-value `$NAME` reference to an environment variable holding the secret - never a literal
     (settings files are committed plaintext). Resolved from the action step's env at run time and
-    sealed with a libsodium sealed box before upload; GitHub cannot return the value, so check mode
-    verifies existence only and apply re-seals it on every run.
+    sealed client-side into the sealed box GitHub's secrets API expects (libsodium's
+    crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies
+    existence only and apply re-seals it on every run.
   UndeclaredPolicy: What apply does to live resources the settings file does not declare.
   UndeclaredPolicyList<*>: >-
     The wrapped form of a list, overriding what happens to live resources the file does not declare.
