@@ -6,7 +6,9 @@
  * that needs it), are exempt: they run downstream of the gate and cannot also
  * be inside it. Informational jobs are exempt on BOTH sides of the comparison:
  * template sync flips ci.yml independently of this test, so it must pass
- * whether the job is still in the needs list or already out of it.
+ * whether the job is still in the needs list or already out of it. Schedule-only
+ * jobs (a job-level if: restricting them to the schedule event) are exempt the
+ * same way: they never run on a pull request, so they can never gate one.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -32,6 +34,18 @@ function needsOf(job: { needs?: string | string[] } | undefined): string[] {
   return Array.isArray(raw) ? raw : [raw];
 }
 
+// The whole job-level condition, not a substring of it: a comparison joined by || to
+// another event still runs on pull requests and must stay inside the gate.
+const SCHEDULE_ONLY = /^\s*github\s*\.\s*event_name\s*==\s*(['"])schedule\1\s*$/;
+
+function scheduleOnly(job: { if?: string } | undefined): boolean {
+  return SCHEDULE_ONLY.test(String(job?.if ?? ""));
+}
+
+function exempt(jobs: Workflow["jobs"], name: string): boolean {
+  return INFORMATIONAL.has(name) || scheduleOnly(jobs[name]);
+}
+
 /** Every job reachable from `gate` by following `needs` edges away from it, however many hops. */
 function downstreamOf(jobs: Workflow["jobs"], gate: string): Set<string> {
   const downstream = new Set<string>();
@@ -48,25 +62,53 @@ function downstreamOf(jobs: Workflow["jobs"], gate: string): Set<string> {
   return downstream;
 }
 
+/** The contract: all-green.needs is exactly the non-exempt jobs that are not downstream of it. */
+function expectGateCovers(wf: Workflow): void {
+  const jobs = Object.keys(wf.jobs);
+  expect(jobs, "ci.yml has no all-green job").toContain("all-green");
+  const downstream = downstreamOf(wf.jobs, "all-green");
+  const others = jobs
+    .filter((name) => name !== "all-green" && !downstream.has(name) && !exempt(wf.jobs, name))
+    .sort();
+  const needs = needsOf(wf.jobs["all-green"])
+    .filter((name) => !exempt(wf.jobs, name))
+    .sort();
+  expect(
+    needs,
+    `all-green.needs must list every job not downstream of it. Missing: [${others.filter((j) => !needs.includes(j)).join(", ")}], extra: [${needs.filter((n) => !others.includes(n)).join(", ")}]`,
+  ).toEqual(others);
+}
+
 describe("ci.yml all-green gate", () => {
   const ci = parseYaml(
     readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8"),
   ) as Workflow;
 
   test("all-green needs every job that is not downstream of it", () => {
-    const jobs = Object.keys(ci.jobs);
-    expect(jobs, "ci.yml has no all-green job").toContain("all-green");
-    const downstream = downstreamOf(ci.jobs, "all-green");
-    const others = jobs
-      .filter((name) => name !== "all-green" && !downstream.has(name) && !INFORMATIONAL.has(name))
-      .sort();
-    const needs = needsOf(ci.jobs["all-green"])
-      .filter((name) => !INFORMATIONAL.has(name))
-      .sort();
-    expect(
-      needs,
-      `all-green.needs must list every job not downstream of it. Missing: [${others.filter((j) => !needs.includes(j)).join(", ")}], extra: [${needs.filter((n) => !others.includes(n)).join(", ")}]`,
-    ).toEqual(others);
+    expectGateCovers(ci);
+  });
+
+  test("a schedule-only job passes whether or not all-green lists it", () => {
+    const nightly = { if: 'github.event_name == "schedule"' };
+    const gated = { checks: {}, nightly, "all-green": { needs: ["checks", "nightly"] } };
+    const ungated = { checks: {}, nightly, "all-green": { needs: ["checks"] } };
+    expectGateCovers({ jobs: gated });
+    expectGateCovers({ jobs: ungated });
+  });
+
+  // Every forgotten job that can run on a pull request, including conditions that merely
+  // mention the schedule event, fails through the same assertion the green run takes.
+  test.each([
+    ["no condition", {}],
+    [
+      "schedule joined by || to another event",
+      { if: "github.event_name == 'schedule' || github.event_name == 'pull_request'" },
+    ],
+    ["schedule excluded", { if: "github.event_name != 'schedule'" }],
+    ["schedule negated", { if: "!(github.event_name == 'schedule')" }],
+  ])("a forgotten job fails the contract: %s (negative control)", (_label, extra) => {
+    const forgotten = { jobs: { checks: {}, extra, "all-green": { needs: ["checks"] } } };
+    expect(() => expectGateCovers(forgotten)).toThrow();
   });
 });
 
