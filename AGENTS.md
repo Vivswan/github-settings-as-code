@@ -3,7 +3,7 @@
 
 Guidance for AI coding agents working in this repository. `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are symlinks to this file, so edit only here.
 
-Everything between the BEGIN and END markers is managed by Vivswan/repo-platform and overwritten by template sync. This repository's own guidance goes below the END marker.
+Everything between the BEGIN and END markers is managed by Vivswan/repo-platform and replaced on every sync. This repository's own guidance goes below the END marker.
 
 ## Project
 
@@ -28,6 +28,10 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
 
 - bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)
 - `.bun-version` is managed by sync; pin another version in a repo-owned workflow's version input, not in the dotfile.
+
+## Repository-specific guidance
+
+<!-- Add project-specific instructions below the END marker; they are this repository's own and survive every sync. -->
 <!-- END REPO-PLATFORM MANAGED -->
 
 - `lib/settings.schema.json` is the COMMITTED JSON Schema for settings.yml, generated from the zod slices in `src/sections/<key>/schema.ts` as composed into the settings document by `src/schema.ts`. Each slice is ONE declaration that produces its config type (z.infer), the section's tolerant runtime shape (the section module derives `loosen(<slice>)` itself; the factory-minted families - secrets, variables, the two setup sections, and the list sections on `listSection` - get it from their shared factory in `src/sections/shared/`, which does that derivation once), and its part of the published schema (`.meta({id})` names its definitions; the descriptions come from the `schema:` map in the section's `<key>.docs.yml`, keyed `Definition.field`, which the generator attaches and fails on when a site or a key is unmatched); `src/schema.ts` adds only the document-level wrappers and pins each property to its slice with a lockstep type. Regenerate the schema with `bun run build:schema` after a schema-affecting `src/` change - CI's schema-check job fails when it drifts. `lib/index.js`, the bundled entrypoint the action runs (node24), is NOT committed on main: every workflow that executes the action builds it first (`bun run build:bundle`), the e2e runner builds it to a temp path, and a release builds and commits it on a packaged child of the release commit, which is what every `vX.Y.Z` tag and the moving major point at (main itself stays source-only). `lib/` is exempt from the typography check (third-party unicode in the bundle; the schema descriptions are checked at source) and excluded from [biome](https://biomejs.dev).
