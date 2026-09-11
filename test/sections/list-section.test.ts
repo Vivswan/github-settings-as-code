@@ -186,8 +186,8 @@ describe("listSection", () => {
     const live = [{ name: "stray", color: "ffffff", description: null }];
     const plan = (declared: Parameters<typeof worded.plan>[1]) =>
       worded.plan(planContext(worded, new MockApi({ [LIST]: { data: live } }), REPO), declared);
-    expect((await plan({ undeclared: "keep", entries: [] })).notes).toEqual([
-      'label "stray" lingers in the settings file; kept under "undeclared: keep" - add them to the settings file to manage their fate, or set "undeclared: delete" to have apply REMOVE them',
+    expect((await plan({ _undeclared: "keep", entries: [] })).notes).toEqual([
+      'label "stray" lingers in the settings file; kept under "_undeclared: keep" - add them to the settings file to manage their fate, or set "_undeclared: delete" to have apply REMOVE them',
     ]);
     expect((await plan([])).ops.map((op) => op.drift)).toEqual([
       [
@@ -218,7 +218,7 @@ describe("listSection", () => {
       { label: "c", value: "$C" },
     ];
     expect(secretive.secretValues?.(entries)).toEqual(listed);
-    expect(secretive.secretValues?.({ undeclared: "keep", entries })).toEqual(listed);
+    expect(secretive.secretValues?.({ _undeclared: "keep", entries })).toEqual(listed);
     expect(labelsSection.secretValues).toBeUndefined();
   });
 });

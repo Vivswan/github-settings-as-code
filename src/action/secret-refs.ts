@@ -100,13 +100,10 @@ export type SecretRefsResolution =
 
 /**
  * One designated secret field's value, tagged with the provenance of the
- * DOCUMENT that contributed it. Provenance must be captured when each source
- * document is read - the merge folds documents together, and afterwards only
- * the per-SECTION lookup taken at read time (engine/secrets.ts
- * targetSecretSource) can say which document a surviving section came from;
- * no batch-level source could be correct: operator defaults merged under a
- * target's settings would either authorize the target's references or
- * reject the operator's.
+ * DOCUMENT that declared it. Provenance is captured when the source document
+ * is read: the per-SECTION lookup (engine/secrets.ts targetSecretSource) says
+ * whether a target-fetched document declared the section, so a target's
+ * references are refused while an operator document's resolve.
  */
 export interface SourcedSecretValue {
   readonly value: string;

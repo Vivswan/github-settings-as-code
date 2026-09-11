@@ -61,7 +61,7 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 /**
  * Rewrite each UNDECLARED_POLICY_SECTIONS value from the plain array form to
  * the wrapped one, PRESERVING OMISSION of the policy key - a plain array
- * becomes `{entries}` with NO `undeclared`. That omission is what lets a
+ * becomes `{entries}` with NO `_undeclared`. That omission is what lets a
  * merge inherit a lower layer's policy: had the plain form been resolved to
  * its default here, the higher layer's resolved default would overwrite the
  * lower's explicit policy. Values in neither form (null opt-outs, malformed
@@ -69,7 +69,7 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
  * validation see them as written; a wrapper keeps every key it carries,
  * `_layering` included. Returns a shallow copy; the input is never mutated.
  */
-export function normalizeKnobbedSections(settings: unknown): unknown {
+function normalizeKnobbedSections(settings: unknown): unknown {
   // A document that is not a mapping (a raw list, a scalar) has no sections
   // to normalize; hand it on untouched so the top-level validator still sees
   // exactly what was written.
@@ -96,26 +96,11 @@ function sectionDefaultPolicy(key: UndeclaredPolicySection): UndeclaredPolicy {
  * resolves to the section's default, so the merged document is
  * self-describing. Runs on the merged document the caller owns.
  */
-export function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
+function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
   for (const key of UNDECLARED_POLICY_SECTIONS) {
     const value = merged[key];
-    if (isPlainObject(value) && Array.isArray(value.entries) && value.undeclared === undefined) {
-      value.undeclared = sectionDefaultPolicy(key);
-    }
-  }
-}
-
-/**
- * Drop a recognized `_layering` directive from every knobbed wrapper of a
- * merged document the caller owns: the directive addresses the merge that
- * produced the document, never the engine that applies it. Any other value
- * under the key stays in place for post-merge validation to name.
- */
-export function dropWrapperLayering(merged: Record<string, unknown>): void {
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
-    const value = merged[key];
-    if (isPlainObject(value) && isLayering(value[LAYERING_KEY])) {
-      delete value[LAYERING_KEY];
+    if (isPlainObject(value) && Array.isArray(value.entries) && value._undeclared === undefined) {
+      value._undeclared = sectionDefaultPolicy(key);
     }
   }
 }
@@ -304,7 +289,7 @@ interface Step {
 
 /** A knobbed section of one admitted layer, ready to combine. */
 interface AdmittedSection {
-  /** The wrapper's keys besides `entries` and `_layering` (`undeclared`, or a typo for validation). */
+  /** The wrapper's keys besides `entries` and `_layering` (`_undeclared`, or a typo for validation). */
   readonly knobs: Readonly<Record<string, unknown>>;
   readonly entries: readonly Readonly<Record<string, unknown>>[];
   /** How this section combines with the layers below it in this step. */
@@ -435,7 +420,7 @@ function admitSection(
   if (!isPlainObject(value) || !Array.isArray(value.entries)) {
     refuse(layer, key, {
       kind: "wrong-shape",
-      expected: "a list of mappings or an {undeclared, entries} wrapper",
+      expected: "a list of mappings or an {_undeclared, entries} wrapper",
       actual: value,
       detail: isPlainObject(value) ? " without an entries list" : "",
     });
@@ -661,7 +646,7 @@ function unionKeyed(
 
 /**
  * One knobbed section over the accumulated document: the knobs merge key by
- * key (an omitted `undeclared` inherits the lower one), the entries combine
+ * key (an omitted `_undeclared` inherits the lower one), the entries combine
  * per the section's layering in this step. A lower value that is not a
  * wrapper (absent, or a null that stayed as written) declares nothing.
  */

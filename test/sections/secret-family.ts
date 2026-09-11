@@ -100,7 +100,7 @@ export function pinSecretFamily({ section, segment, keyId, noun, secretName }: S
     test("undeclared secrets are kept by default and deleted only under the knob", async () => {
       expect(section.undeclaredDefault).toBe("keep");
       const api = new MockApi({ [LIST]: listOf("STALE") });
-      const result = await plan(api, { undeclared: "delete", entries: [] });
+      const result = await plan(api, { _undeclared: "delete", entries: [] });
       expect(result.ops.map((op) => [op.role, op.params, op.change])).toEqual([
         ["remove", { secret_name: "STALE" }, 'DELETED undeclared secret "STALE"'],
       ]);

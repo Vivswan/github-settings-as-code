@@ -1,7 +1,7 @@
 # Check mode reports pattern drift without writing: a declared pattern is
 # missing, a matching pattern's type differs (immutable upstream, so apply
 # would delete and recreate), and an undeclared live pattern falls under the
-# default delete policy. The staging entry's wrapped "undeclared: keep" form
+# default delete policy. The staging entry's wrapped "_undeclared: keep" form
 # softens its undeclared pattern to a note, and the qa environment's live
 # custom_branch_policies flag is off, so its declared patterns are not
 # verifiable - a note, while the flag drift itself comes from the environment
@@ -22,7 +22,7 @@ settings:
         protected_branches: false
         custom_branch_policies: true
       deployment_branch_policies:
-        undeclared: keep
+        _undeclared: keep
         entries:
           - name: main
     - name: qa

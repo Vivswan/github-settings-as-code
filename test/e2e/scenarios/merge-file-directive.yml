@@ -30,12 +30,12 @@ expect:
   zero_requests: true
   merged:
     labels:
-      undeclared: delete
+      _undeclared: delete
       entries:
         - name: infra
           color: "111111"
     rulesets:
-      undeclared: keep
+      _undeclared: keep
       entries:
         - name: main
           target: branch

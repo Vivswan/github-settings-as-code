@@ -39,7 +39,7 @@ describe("published schema wrapper strictness", () => {
   );
 
   /**
-   * The nested {undeclared, entries} knobs inside a section entry
+   * The nested {_undeclared, entries} knobs inside a section entry
    * (environments[].variables, environments[].secrets,
    * environments[].deployment_branch_policies, and
    * environments[].deployment_protection_rules): each adds one wrapper
@@ -78,7 +78,7 @@ describe("published schema wrapper strictness", () => {
     test("the wrapped form validates", () => {
       expect(
         validate({
-          labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
+          labels: { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
         }),
       ).toBe(true);
     });
@@ -86,13 +86,13 @@ describe("published schema wrapper strictness", () => {
     test("a typo key inside the wrapper is rejected, matching the runtime", () => {
       expect(
         validate({
-          labels: { undeclared: "keep", entires: [], entries: [] },
+          labels: { _undeclared: "keep", entires: [], entries: [] },
         }),
       ).toBe(false);
     });
 
     test("a bad policy value is rejected", () => {
-      expect(validate({ rulesets: { undeclared: "remove", entries: [] } })).toBe(false);
+      expect(validate({ rulesets: { _undeclared: "remove", entries: [] } })).toBe(false);
     });
 
     test("both forms of the nested variables knob validate", () => {
@@ -106,7 +106,7 @@ describe("published schema wrapper strictness", () => {
           environments: [
             {
               name: "prod",
-              variables: { undeclared: "keep", entries: [{ name: "A", value: "1" }] },
+              variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
             },
           ],
         }),
@@ -139,7 +139,7 @@ describe("published schema wrapper strictness", () => {
             {
               name: "prod",
               deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-              deployment_branch_policies: { undeclared: "keep", entries: [{ name: "main" }] },
+              deployment_branch_policies: { _undeclared: "keep", entries: [{ name: "main" }] },
             },
           ],
         }),
@@ -172,7 +172,7 @@ describe("published schema wrapper strictness", () => {
             {
               name: "prod",
               deployment_protection_rules: {
-                undeclared: "delete",
+                _undeclared: "delete",
                 entries: [{ app: "my-gate-app" }],
               },
             },

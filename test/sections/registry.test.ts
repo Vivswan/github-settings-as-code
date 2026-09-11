@@ -124,11 +124,9 @@ describe("section permissions", () => {
     // is pinned to the SettingsFile types in both directions (schema.ts),
     // and SectionMeta's conditional undeclaredDefault type forces "delete"
     // or "keep" exactly for listed sections. The zod shapes are the one
-    // runtime-only piece: merge.ts wraps unconditionally for every listed
-    // key, so a listed section whose shape only accepted the plain array
-    // would reject its own normalized declaration - and only in multi-repo
-    // mode (single-repo skips applyDefaults). Round-tripping both forms
-    // here pins the shapes to the same list the merge drives off.
+    // runtime-only piece: a listed section must accept both the plain array
+    // and the wrapped form. Round-tripping both forms here pins the shapes
+    // to the same list.
     const byKey = new Map(SECTIONS.map((module) => [module.key as string, module]));
     for (const key of UNDECLARED_POLICY_SECTIONS) {
       const module = byKey.get(key);
@@ -141,7 +139,7 @@ describe("section permissions", () => {
         `${key}: wrapper without a policy must parse`,
       ).toBe(true);
       expect(
-        module.shape.safeParse({ undeclared: "keep", entries: [] }).success,
+        module.shape.safeParse({ _undeclared: "keep", entries: [] }).success,
         `${key}: wrapper with a policy must parse`,
       ).toBe(true);
       const policy = defaultUndeclaredPolicy(sectionModule(key));

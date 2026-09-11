@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type Layer, type Layering, mergeLayers, stripNulls } from "../../src/engine/layers.js";
-import { applyDefaults } from "../../src/engine/merge.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import type { SettingsFile } from "../../src/schema.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { silentIo } from "../io-fake.js";
@@ -125,7 +123,7 @@ describe("mergeLayers: the mapping dialect", () => {
     const expected = {
       settings: {
         autolinks: {
-          undeclared: "delete",
+          _undeclared: "delete",
           entries: [{ key_prefix: "R-", url_template: "https://r/<num>" }],
         },
         branches: [{ name: "release", protection: null }],
@@ -184,9 +182,9 @@ describe("mergeLayers: the mapping dialect", () => {
     expect(result).toEqual({
       settings: {
         repository: { has_wiki: false },
-        labels: { undeclared: "delete", entries: [{ name: "Bug", color: "ffffff" }] },
+        labels: { _undeclared: "delete", entries: [{ name: "Bug", color: "ffffff" }] },
         rulesets: {
-          undeclared: "keep",
+          _undeclared: "keep",
           entries: [
             { ...MAIN_RULESET, rules: [...MAIN_RULESET.rules, { type: "non_fast_forward" }] },
           ],
@@ -217,7 +215,7 @@ describe("mergeLayers: the mapping dialect", () => {
     const result = merge([layer("fleet", below), layer("repo", above)]);
     expect(result).toEqual({
       settings: {
-        custom_properties: { undeclared: "keep", entries: [{ property_name: "a" }] },
+        custom_properties: { _undeclared: "keep", entries: [{ property_name: "a" }] },
         repository: { constructor: { x: 1 }, [proto]: { y: 2 } },
         actions: { constructor: null },
       },
@@ -253,7 +251,7 @@ describe("mergeLayers: keyed sections", () => {
     expect(result).toEqual({
       settings: {
         labels: {
-          undeclared: "delete",
+          _undeclared: "delete",
           entries: [
             { name: "bug", color: "d73a4a", description: "Fleet bug" },
             { name: "docs", color: "ffffff" },
@@ -271,7 +269,7 @@ describe("mergeLayers: keyed sections", () => {
       layer("repo", { labels: [{ name: "bug", color: "ffffff" }] }),
     ]);
     expect(result).toEqual({
-      settings: { labels: { undeclared: "delete", entries: [{ name: "bug", color: "ffffff" }] } },
+      settings: { labels: { _undeclared: "delete", entries: [{ name: "bug", color: "ffffff" }] } },
       notices: [],
     });
   });
@@ -315,7 +313,7 @@ describe("mergeLayers: keyed sections", () => {
       // no longer renames "bug" into it), a higher one is kept as written.
       const result = merge([layer("fleet", { labels: lower }), layer("repo", { labels: higher })]);
       expect(result).toEqual({
-        settings: { labels: { undeclared: "delete", entries } },
+        settings: { labels: { _undeclared: "delete", entries } },
         notices: [],
       });
       expect(await planLabels(entries)).toEqual(['creating label "defect"']);
@@ -329,7 +327,7 @@ describe("mergeLayers: keyed sections", () => {
     ]);
     const entries = [{ name: "Bug", new_name: "Defect" }];
     expect(result).toEqual({
-      settings: { labels: { undeclared: "delete", entries } },
+      settings: { labels: { _undeclared: "delete", entries } },
       notices: [],
     });
     expect(await planLabels(entries)).toEqual(['creating label "Defect"']);
@@ -349,7 +347,7 @@ describe("mergeLayers: keyed sections", () => {
       // the rename at "bug", "docs" at the superseded lower rename.
       const entries = [{ name: "bug", new_name: "defect" }, { name: "docs" }];
       expect(result).toEqual({
-        settings: { labels: { undeclared: "delete", entries } },
+        settings: { labels: { _undeclared: "delete", entries } },
         notices: [],
       });
       expect(await planLabels(entries)).toEqual([
@@ -366,7 +364,7 @@ describe("mergeLayers: keyed sections", () => {
     ]);
     const entries = [{ name: "bug", new_name: "defect" }, { name: "docs" }, { name: "infra" }];
     expect(result).toEqual({
-      settings: { labels: { undeclared: "delete", entries } },
+      settings: { labels: { _undeclared: "delete", entries } },
       notices: [],
     });
     expect(await planLabels(entries)).toEqual([
@@ -388,7 +386,7 @@ describe("mergeLayers: keyed sections", () => {
     expect(result).toEqual({
       settings: {
         rulesets: {
-          undeclared: "keep",
+          _undeclared: "keep",
           entries: [
             {
               ...MAIN_RULESET,
@@ -420,7 +418,7 @@ describe("mergeLayers: keyed sections", () => {
     expect(result).toEqual({
       settings: {
         rulesets: {
-          undeclared: "keep",
+          _undeclared: "keep",
           entries: [
             {
               ...MAIN_RULESET,
@@ -444,7 +442,7 @@ describe("mergeLayers: keyed sections", () => {
       layer("repo", { rulesets: [{ name: "main", bypass_actors: null }] }),
     ]);
     expect(result).toEqual({
-      settings: { rulesets: { undeclared: "keep", entries: [MAIN_RULESET] } },
+      settings: { rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } },
       notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
     });
   });
@@ -456,7 +454,7 @@ describe("mergeLayers: keyed sections", () => {
       layer("repo", { rulesets: [{ name: "main", bypass_actors: null }] }),
     ]);
     expect(result).toEqual({
-      settings: { rulesets: { undeclared: "keep", entries: [tags, MAIN_RULESET] } },
+      settings: { rulesets: { _undeclared: "keep", entries: [tags, MAIN_RULESET] } },
       notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
     });
   });
@@ -474,7 +472,7 @@ describe("mergeLayers: keyed sections", () => {
     expect(result).toEqual({
       settings: {
         rulesets: {
-          undeclared: "keep",
+          _undeclared: "keep",
           entries: [
             { name: "main", rules: [{ type: "deletion" }], enforcement: "active" },
             { name: "tags", target: "tag" },
@@ -488,12 +486,12 @@ describe("mergeLayers: keyed sections", () => {
 
 describe("mergeLayers: the undeclared knob across layers", () => {
   const fleetKeep = layer("fleet", {
-    labels: { undeclared: "keep", entries: [{ name: "fleet" }] },
+    labels: { _undeclared: "keep", entries: [{ name: "fleet" }] },
   });
 
   test.each([
-    ["merge", { undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] }],
-    ["replace", { undeclared: "keep", entries: [{ name: "mine" }] }],
+    ["merge", { _undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] }],
+    ["replace", { _undeclared: "keep", entries: [{ name: "mine" }] }],
   ] as const)(
     "a plain array inherits the lower wrapper's policy under the %s run default",
     (layering, labels) => {
@@ -507,11 +505,11 @@ describe("mergeLayers: the undeclared knob across layers", () => {
   test("an explicit higher policy wins", () => {
     const result = merge([
       layer("fleet", { rulesets: [{ name: "fleet" }] }),
-      layer("repo", { rulesets: { undeclared: "delete", entries: [{ name: "mine" }] } }),
+      layer("repo", { rulesets: { _undeclared: "delete", entries: [{ name: "mine" }] } }),
     ]);
     expect(result).toEqual({
       settings: {
-        rulesets: { undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
+        rulesets: { _undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
       },
       notices: [],
     });
@@ -519,12 +517,12 @@ describe("mergeLayers: the undeclared knob across layers", () => {
 
   test("a bare {entries} wrapper inherits like a plain array", () => {
     const result = merge([
-      layer("fleet", { rulesets: { undeclared: "delete", entries: [{ name: "fleet" }] } }),
+      layer("fleet", { rulesets: { _undeclared: "delete", entries: [{ name: "fleet" }] } }),
       layer("repo", { rulesets: { entries: [{ name: "mine" }] } }),
     ]);
     expect(result).toEqual({
       settings: {
-        rulesets: { undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
+        rulesets: { _undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
       },
       notices: [],
     });
@@ -537,8 +535,8 @@ describe("mergeLayers: the undeclared knob across layers", () => {
     ]);
     expect(result).toEqual({
       settings: {
-        labels: { undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
-        milestones: { undeclared: "keep", entries: [{ title: "v1" }] },
+        labels: { _undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
+        milestones: { _undeclared: "keep", entries: [{ title: "v1" }] },
       },
       notices: [],
     });
@@ -552,7 +550,7 @@ describe("mergeLayers: the undeclared knob across layers", () => {
     expect(result).toEqual({
       settings: {
         autolinks: {
-          undeclared: "delete",
+          _undeclared: "delete",
           entries: [{ key_prefix: "J-", url_template: "u<num>" }],
         },
         repository: { has_wiki: false },
@@ -561,22 +559,25 @@ describe("mergeLayers: the undeclared knob across layers", () => {
     });
   });
 
-  test("policies resolve once after the fold, so a higher undeclared: null over a plain array stays as written", () => {
+  test("policies resolve once after the fold, so a higher _undeclared: null over a plain array stays as written", () => {
     const result = merge([
       layer("fleet", { labels: [] }),
-      layer("repo", { labels: { undeclared: null, entries: [] } }),
+      layer("repo", { labels: { _undeclared: null, entries: [] } }),
     ]);
     expect(result).toEqual({
-      settings: { labels: { undeclared: null, entries: [] } },
+      settings: { labels: { _undeclared: null, entries: [] } },
       notices: [],
     });
   });
 
-  test("undeclared: null deletes the lower policy with a notice, and the default fills in", () => {
-    const result = merge([fleetKeep, layer("repo", { labels: { undeclared: null, entries: [] } })]);
+  test("_undeclared: null deletes the lower policy with a notice, and the default fills in", () => {
+    const result = merge([
+      fleetKeep,
+      layer("repo", { labels: { _undeclared: null, entries: [] } }),
+    ]);
     expect(result).toEqual({
-      settings: { labels: { undeclared: "delete", entries: [{ name: "fleet" }] } },
-      notices: [{ layer: "repo", path: "labels.undeclared" }],
+      settings: { labels: { _undeclared: "delete", entries: [{ name: "fleet" }] } },
+      notices: [{ layer: "repo", path: "labels._undeclared" }],
     });
   });
 });
@@ -593,8 +594,8 @@ describe("mergeLayers: the _layering directive", () => {
       const repo = layer("repo", { labels: { _layering: directive, entries: [{ name: "mine" }] } });
       expect(merge([fleet, repo], run)).toEqual({
         settings: {
-          labels: { undeclared: "delete", entries },
-          rulesets: { undeclared: "keep", entries: [{ name: "fleet" }] },
+          labels: { _undeclared: "delete", entries },
+          rulesets: { _undeclared: "keep", entries: [{ name: "fleet" }] },
         },
         notices: [],
       });
@@ -611,7 +612,7 @@ describe("mergeLayers: the _layering directive", () => {
     ]);
     expect(result).toEqual({
       settings: {
-        labels: { undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
+        labels: { _undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
       },
       notices: [],
     });
@@ -628,8 +629,8 @@ describe("mergeLayers: the _layering directive", () => {
     ]);
     expect(result).toEqual({
       settings: {
-        labels: { undeclared: "delete", entries: [{ name: "mine" }] },
-        rulesets: { undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] },
+        labels: { _undeclared: "delete", entries: [{ name: "mine" }] },
+        rulesets: { _undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] },
       },
       notices: [],
     });
@@ -687,17 +688,17 @@ describe("mergeLayers: layer-boundary refusals", () => {
     [
       "a scalar where a list belongs",
       { labels: "oops" },
-      'layer "repo": labels must be a list of mappings or an {undeclared, entries} wrapper; got a string',
+      'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a string',
     ],
     [
       "a wrapper without entries",
-      { labels: { undeclared: "keep" } },
-      'layer "repo": labels must be a list of mappings or an {undeclared, entries} wrapper; got a mapping without an entries list',
+      { labels: { _undeclared: "keep" } },
+      'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
     ],
     [
       "a YAML-tagged value where a list belongs",
       { milestones: new Date(0) },
-      'layer "repo": milestones must be a list of mappings or an {undeclared, entries} wrapper; got a Date value',
+      'layer "repo": milestones must be a list of mappings or an {_undeclared, entries} wrapper; got a Date value',
     ],
     [
       "a non-mapping entry in a section without a layering key",
@@ -737,37 +738,10 @@ describe("mergeLayers: layer-boundary refusals", () => {
   test("a section without a layering key merges under the run default without complaint", () => {
     expect(merge([fleet, layer("repo", { milestones: [{ title: "v1" }] })])).toEqual({
       settings: {
-        labels: { undeclared: "delete", entries: [{ name: "fleet" }] },
-        milestones: { undeclared: "keep", entries: [{ title: "v1" }] },
+        labels: { _undeclared: "delete", entries: [{ name: "fleet" }] },
+        milestones: { _undeclared: "keep", entries: [{ title: "v1" }] },
       },
       notices: [],
-    });
-  });
-});
-
-describe("applyDefaults and the wrapper directive", () => {
-  const defaults = {
-    labels: { undeclared: "keep", entries: [{ name: "fleet" }] },
-  } as SettingsFile;
-
-  test.each([
-    ["a recognized directive is dropped from the result", "merge", {}],
-    ["an unrecognized value survives for validation", "union", { _layering: "union" }],
-  ])("%s, nothing else changes", (_name, directive, survivor) => {
-    const repo = { labels: { _layering: directive, entries: [{ name: "mine" }] } };
-    expect(applyDefaults(defaults, deepFreeze(repo))).toEqual({
-      settings: { labels: { ...survivor, undeclared: "keep", entries: [{ name: "mine" }] } },
-      disabled: [],
-    });
-  });
-
-  test("an unrecognized directive reaches the validator, which names the key", () => {
-    const repo = { labels: { _layering: "union", entries: [] } };
-    const { settings } = applyDefaults(defaults, deepFreeze(repo));
-    expect(validateSettingsDoc(settings, "repo", new Set(), silentIo())).toEqual({
-      error: expect.stringContaining(
-        'labels._layering: Invalid option: expected one of "merge"|"replace"',
-      ),
     });
   });
 });
@@ -832,8 +806,8 @@ describe("stripNulls", () => {
       b: { c: null, d: 1, e: { f: null } },
       list: [null, { g: null }],
       branches: [null, { name: "release", protection: null }],
-      labels: { undeclared: null, entries: [{ name: "bug", description: null }] },
-      milestones: { undeclared: null, entries: [{ title: "v1", due_on: null }] },
+      labels: { _undeclared: null, entries: [{ name: "bug", description: null }] },
+      milestones: { _undeclared: null, entries: [{ title: "v1", due_on: null }] },
       rulesets: [
         null,
         {
@@ -865,10 +839,10 @@ describe("stripNulls", () => {
 
   test("the wrapper form of a keyed section is entered like the plain list", () => {
     const doc = deepFreeze({
-      rulesets: { undeclared: "keep", entries: [{ name: "main", bypass_actors: null }] },
+      rulesets: { _undeclared: "keep", entries: [{ name: "main", bypass_actors: null }] },
     });
     expect(stripNulls(doc)).toEqual({
-      rulesets: { undeclared: "keep", entries: [{ name: "main" }] },
+      rulesets: { _undeclared: "keep", entries: [{ name: "main" }] },
     });
   });
 
@@ -890,7 +864,7 @@ describe("stripNulls", () => {
     const fleet = layer("fleet", {
       a: 1,
       b: { c: 2, e: { f: 3 } },
-      labels: { undeclared: "keep", entries: [{ name: "bug", description: "Fleet bug" }] },
+      labels: { _undeclared: "keep", entries: [{ name: "bug", description: "Fleet bug" }] },
       rulesets: [
         {
           name: "main",
@@ -904,7 +878,7 @@ describe("stripNulls", () => {
       a: null,
       b: { c: null, e: { f: null } },
       branches: [{ name: "release", protection: null }],
-      labels: { undeclared: null, entries: [{ name: "bug", description: null }] },
+      labels: { _undeclared: null, entries: [{ name: "bug", description: null }] },
       rulesets: [
         {
           name: "main",
@@ -917,9 +891,9 @@ describe("stripNulls", () => {
     expect(merge([fleet, repo])).toEqual({
       settings: {
         b: { e: {} },
-        labels: { undeclared: "delete", entries: [{ name: "bug", description: null }] },
+        labels: { _undeclared: "delete", entries: [{ name: "bug", description: null }] },
         rulesets: {
-          undeclared: "keep",
+          _undeclared: "keep",
           entries: [
             {
               name: "main",
@@ -934,7 +908,7 @@ describe("stripNulls", () => {
         { layer: "repo", path: "a" },
         { layer: "repo", path: "b.c" },
         { layer: "repo", path: "b.e.f" },
-        { layer: "repo", path: "labels.undeclared" },
+        { layer: "repo", path: "labels._undeclared" },
         { layer: "repo", path: "rulesets[0].bypass_actors" },
         { layer: "repo", path: "rulesets[0].conditions.ref_name.include" },
       ],
@@ -953,14 +927,14 @@ describe("stripNulls", () => {
     expect(validate(stripNulls(upper))).toEqual({ settings: { rulesets: [{ name: "main" }] } });
     const merged = merge([layer("fleet", lower), layer("repo", upper)]);
     expect(merged).toEqual({
-      settings: { rulesets: { undeclared: "keep", entries: [MAIN_RULESET] } },
+      settings: { rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } },
       notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
     });
     if ("error" in merged) {
       throw new Error(merged.error);
     }
     expect(validate(merged.settings)).toEqual({
-      settings: { rulesets: { undeclared: "keep", entries: [MAIN_RULESET] } },
+      settings: { rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } },
     });
   });
 

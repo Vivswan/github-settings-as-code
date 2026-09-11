@@ -4,7 +4,7 @@ schema:
     mode: merge only: a layer-level default for how this document's keyed list sections (labels,
     rulesets) combine with the layers below it, overriding the run's layering input; a section's
     own wrapper-level `_layering` overrides it again. `merge` reaches every section of this document
-    that takes the `{undeclared, entries}` wrapper, and only the keyed ones accept it, so a
+    that takes the `{_undeclared, entries}` wrapper, and only the keyed ones accept it, so a
     document declaring `merge` with a section whose entries have no layering identity (milestones,
     autolinks) is refused unless that section's wrapper says `_layering: replace`. Consumed by the
     merge, never applied: the merged document carries no `_layering`, and apply and check ignore it

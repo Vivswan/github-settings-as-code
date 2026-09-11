@@ -347,7 +347,7 @@ export async function deliverIssueReport(
 
 /**
  * Marker-label injection, closing the undeclaredDefault hole: when the
- * merged settings declare a `labels` section, an apply would DELETE the
+ * settings declare a `labels` section, an apply would DELETE the
  * undeclared marker label right after report delivery created it. Appending
  * the marker to the declared set (when no entry already manages it) lets the
  * labels section manage it like any other label.
@@ -364,7 +364,7 @@ export function injectMarkerLabel(settings: SettingsFile): {
   outcome: "unchanged" | "injected" | "rename-refused";
 } {
   // The labels section takes the undeclared-policy knob, so the declaration
-  // is either the plain entry array or the wrapped {undeclared, entries}
+  // is either the plain entry array or the wrapped {_undeclared, entries}
   // form; unwrap here and rebuild in the SAME form below, so the injection
   // never rewrites the operator's chosen shape (or their policy).
   const declaration = settings.labels;

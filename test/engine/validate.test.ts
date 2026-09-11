@@ -105,11 +105,11 @@ describe("closed-surface sections reject unrecognized entry keys upfront", () =>
 describe("the wrapped undeclared-policy form", () => {
   test("both policies and the bare wrapper validate on every knobbed section", () => {
     const doc = {
-      labels: { undeclared: "keep", entries: [{ name: "bug" }] },
-      autolinks: { undeclared: "keep", entries: [{ key_prefix: "J-", url_template: "u" }] },
+      labels: { _undeclared: "keep", entries: [{ name: "bug" }] },
+      autolinks: { _undeclared: "keep", entries: [{ key_prefix: "J-", url_template: "u" }] },
       collaborators: { entries: [{ username: "alice" }] },
-      rulesets: { undeclared: "delete", entries: [{ name: "r" }] },
-      milestones: { undeclared: "delete", entries: [{ title: "v1" }] },
+      rulesets: { _undeclared: "delete", entries: [{ name: "r" }] },
+      milestones: { _undeclared: "delete", entries: [{ title: "v1" }] },
     };
     expect<unknown>(validateSectionShapes(doc, "f.yml")).toEqual({ settings: doc });
   });
@@ -119,8 +119,8 @@ describe("the wrapped undeclared-policy form", () => {
     // passthrough fields, its extra keys have nowhere to go.
     const unknownKey = errorOf({ labels: { entires: [{ name: "bug" }] } });
     expect(unknownKey).toContain('"entires"');
-    const badPolicy = errorOf({ milestones: { undeclared: "detele", entries: [] } });
-    expect(badPolicy).toContain("milestones.undeclared");
+    const badPolicy = errorOf({ milestones: { _undeclared: "detele", entries: [] } });
+    expect(badPolicy).toContain("milestones._undeclared");
   });
 
   test("entry paths keep their precision inside the wrapper", () => {
@@ -130,9 +130,34 @@ describe("the wrapped undeclared-policy form", () => {
     expect(error).toContain("rulesets.entries[0].conditions.ref_name.include");
   });
 
+  test.each([
+    {
+      name: "a top-level section",
+      doc: { labels: { undeclared: "keep", entries: [{ name: "bug" }] } },
+      site: "labels",
+    },
+    {
+      name: "a nested environments list",
+      doc: {
+        environments: [
+          { name: "prod", variables: { undeclared: "keep", entries: [{ name: "A", value: "1" }] } },
+        ],
+      },
+      site: "environments[0].variables",
+    },
+  ])("the pre-v3 policy key fails naming the rename on $name", ({ doc, site }) => {
+    expect(errorOf(doc)).toBe(
+      `f.yml has malformed section entries: ${site}: Unrecognized key: "undeclared"; the wrapper's ` +
+        `policy key "undeclared" was renamed to "_undeclared" in v3 (a directive, like _layering) - ` +
+        `write _undeclared: keep or _undeclared: delete. Fix these values in the settings file (only ` +
+        `the named keys are validated; extra fields pass through, except in closed sections and strict ` +
+        `nested objects like actions.cache, which reject unrecognized keys)`,
+    );
+  });
+
   test("closed-surface entry checks see through the wrapper (collaborators)", () => {
     const error = errorOf({
-      collaborators: { undeclared: "keep", entries: [{ username: "alice", permision: "x" }] },
+      collaborators: { _undeclared: "keep", entries: [{ username: "alice", permision: "x" }] },
     });
     expect(error).toContain('collaborators[alice]: declares "permision"');
   });

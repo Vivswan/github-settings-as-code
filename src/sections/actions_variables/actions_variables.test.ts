@@ -171,16 +171,16 @@ describe("actions_variables", () => {
     expect(api.calls).toHaveLength(0);
   });
 
-  test("wrapped undeclared:keep leaves the undeclared variable as a note, never a DELETE", async () => {
+  test("wrapped _undeclared:keep leaves the undeclared variable as a note, never a DELETE", async () => {
     const api = new MockApi(listRoute(liveVariables));
     const result = await plan(api, {
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [{ name: "DEPLOY_REGION", value: "us-east-1" }],
     });
     expect(result).toEqual({
       ops: [],
       notes: [
-        'Actions variable "RETIRED_FLAG" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it',
+        'Actions variable "RETIRED_FLAG" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
       ],
       drift: [],
     });
@@ -190,7 +190,7 @@ describe("actions_variables", () => {
     const entries = [{ name: "DEPLOY_REGION", value: "us-east-1" }];
     const implicit = await plan(new MockApi(listRoute(liveVariables)), { entries });
     const explicit = await plan(new MockApi(listRoute(liveVariables)), {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries,
     });
     expect(implicit.ops.map((op) => [op.role, op.change])).toEqual([

@@ -94,10 +94,10 @@ describe("deploy_keys conflicts", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
   });
 
-  test("the live holder conflict also fails under wrapped undeclared:delete: the create would run before the holder's delete", async () => {
+  test("the live holder conflict also fails under wrapped _undeclared:delete: the create would run before the holder's delete", async () => {
     const api = new MockApi({ [LIST]: { data: [liveKey(7, "old-name", BOT_KEY)] } });
     await expect(
-      plan(api, { undeclared: "delete", entries: [{ title: "new-name", key: BOT_KEY }] }),
+      plan(api, { _undeclared: "delete", entries: [{ title: "new-name", key: BOT_KEY }] }),
     ).rejects.toThrow(/live key "old-name" \(id 7\) already holds/);
     expect(api.mutations()).toEqual([]);
   });
@@ -269,7 +269,7 @@ describe("deploy_keys reconcile", () => {
 describe("deploy_keys undeclared policy", () => {
   const liveKeys = [liveKey(1, "deploy-bot", BOT_KEY), liveKey(2, "retired-service", MIRROR_KEY)];
   const KEEP_NOTE =
-    'deploy key "retired-service" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it';
+    'deploy key "retired-service" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it';
 
   test.each<
     [
@@ -280,15 +280,15 @@ describe("deploy_keys undeclared policy", () => {
     ]
   >([
     [
-      "wrapped undeclared:delete",
-      { undeclared: "delete", entries: [{ title: "deploy-bot", key: BOT_KEY }] },
+      "wrapped _undeclared:delete",
+      { _undeclared: "delete", entries: [{ title: "deploy-bot", key: BOT_KEY }] },
       [
         {
           role: "remove",
           params: { key_id: "2" },
           describe: 'deleting undeclared deploy key "retired-service"',
           drift: [
-            'deploy_keys[retired-service]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
+            'deploy_keys[retired-service]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
           ],
           change: 'DELETED undeclared deploy key "retired-service"',
         },
@@ -320,7 +320,7 @@ describe("deploy_keys convergence", () => {
       ],
     });
     const { second, changes, notes } = await provePlanIdempotent(deployKeysSection, api, {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [
         { title: "deploy-bot", key: `${BOT_KEY} deploy@bot`, read_only: true },
         { title: "mirror-pull", key: `${MIRROR_KEY} mirror@new` },

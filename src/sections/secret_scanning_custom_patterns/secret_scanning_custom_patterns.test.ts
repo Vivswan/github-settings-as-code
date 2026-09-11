@@ -103,8 +103,8 @@ describe("secret_scanning_custom_patterns", () => {
       ],
       notes: [
         'secret scanning custom pattern "unmanaged" exists on the repo but is not declared in ' +
-          'the settings file; kept under "undeclared: keep" - add it to the settings file to ' +
-          'manage it, or set "undeclared: delete" to have apply DELETE it (its alerts are then ' +
+          'the settings file; kept under "_undeclared: keep" - add it to the settings file to ' +
+          'manage it, or set "_undeclared: delete" to have apply DELETE it (its alerts are then ' +
           "resolved, not deleted)",
       ],
       drift: [],
@@ -169,14 +169,14 @@ describe("secret_scanning_custom_patterns", () => {
     ]);
   });
 
-  test("a rename is create plus bulk delete under undeclared:delete, never a PATCH (no rename inference)", async () => {
+  test("a rename is create plus bulk delete under _undeclared:delete, never a PATCH (no rename inference)", async () => {
     // The declared pattern carries the SAME fields as the live one, only the
     // name differs: the name is the identity.
     const api = new MockApi(
       listRoute([livePattern({ id: 9, name: "old-name", custom_pattern_version: "v7" })]),
     );
     const result = await plan(api, {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [{ name: "new-name", pattern: "int_[a-z0-9]{8}" }],
     });
     expect(rendered(result).ops).toEqual([
@@ -197,7 +197,7 @@ describe("secret_scanning_custom_patterns", () => {
         },
         describe: 'deleting undeclared secret scanning pattern(s) "old-name"',
         drift: [
-          'secret_scanning_custom_patterns[old-name]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it',
+          'secret_scanning_custom_patterns[old-name]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it',
         ],
         change: [
           'DELETED undeclared secret scanning custom pattern "old-name" (alerts resolved, not deleted)',
@@ -221,7 +221,7 @@ describe("secret_scanning_custom_patterns", () => {
         livePattern({ id: 5, name: "stale-c", custom_pattern_version: undefined }),
       ]),
     );
-    const result = await plan(api, { undeclared: "delete", entries: [] });
+    const result = await plan(api, { _undeclared: "delete", entries: [] });
     expect(result.ops.map((op) => [op.role, op.payload])).toEqual([
       [
         "remove",
@@ -294,7 +294,7 @@ describe("secret_scanning_custom_patterns", () => {
       secretScanningPatternsSection,
       api,
       {
-        undeclared: "delete",
+        _undeclared: "delete",
         entries: [
           { ...INTERNAL, start_delimiter: "\\b" },
           { name: "vendor-key", pattern: "key-[0-9]{6}", must_not_match: ["example"] },

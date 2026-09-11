@@ -72,7 +72,7 @@ export const FLAG_PAIRING_FIXTURES: readonly FlagPairingFixture[] = [
     entry: {
       name: FIXTURE_ENV_NAME,
       deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-      deployment_branch_policies: { undeclared: "keep", entries: [{ name: "main" }] },
+      deployment_branch_policies: { _undeclared: "keep", entries: [{ name: "main" }] },
     },
     valid: true,
   },

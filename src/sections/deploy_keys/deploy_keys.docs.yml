@@ -20,14 +20,14 @@ coverage:
       apply. A 422 on create can mean the public key is already attached to another repository (one
       repository per key, account-wide); the error says so. Undeclared keys are KEPT by default
       (deleting a live deploy key breaks whatever service authenticates with it, and deployment
-      tooling installs its own keys); the wrapped `undeclared: delete` form opts into deletion.
+      tooling installs its own keys); the wrapped `_undeclared: delete` form opts into deletion.
 schema:
   SettingsFile.deploy_keys: >-
     Deploy keys, matched by title. The declared material is a PUBLIC key, safe in a committed
     settings file. Keys are immutable upstream, so any change is applied as delete plus recreate.
     Undeclared keys are kept by default - deleting a live deploy key breaks whatever service
     authenticates with it, and deployment tooling installs its own keys - and the wrapped form can
-    set `undeclared: delete`.
+    set `_undeclared: delete`.
   DeployKeyConfig: >-
     One deploy key, matched by exact title (GitHub documents no case folding for titles). Extra
     fields pass through to the create call verbatim.

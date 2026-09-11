@@ -15,8 +15,9 @@ import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 
 /**
  * Path templates the action calls outside any section: the repository probe
- * that opens every run, the Contents fetch that reads settings.yml, and the
- * discovery listing that expands a multi-repo target. Kept here because no
+ * that opens every run, the Contents fetch that reads settings.yml, the git
+ * ref read that proves a settings.yml absent (Contents-gated, file-independent),
+ * and the discovery listing that expands a multi-repo target. Kept here because no
  * SectionModule owns them. The private-report issue-channel paths are NOT hand
  * listed here - they derive from ISSUE_REPORT_ENDPOINTS below, single-sourced
  * from the report module (its marker-label create reuses the labels section's
@@ -25,6 +26,7 @@ import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 const CORE_PATHS: readonly string[] = [
   "/repos/{owner}/{repo}",
   "/repos/{owner}/{repo}/contents/{path}",
+  "/repos/{owner}/{repo}/git/ref/{ref}",
   "/user/repos",
 ];
 

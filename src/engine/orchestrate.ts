@@ -70,12 +70,11 @@ export interface RepoRunOptions {
   onlySections: ReadonlySet<SectionKey>;
   /**
    * Provenance of one section's secret-field values: which source DOCUMENT
-   * contributed the section that survived the merge. Omitted, every value is
-   * "operator" (single-repo settings, central files, and the defaults file
-   * are operator-authored). The multi-repo remote flow passes
-   * targetSecretSource(), built from the target-fetched document BEFORE the
-   * defaults merge, so a target-contributed section's references are refused
-   * even after the merge folds the documents together.
+   * declared the section. Omitted, every value is "operator" (single-repo
+   * settings, central files, and the defaults document are operator-authored).
+   * The multi-repo remote flow passes targetSecretSource(), built from the
+   * target-fetched document, so a target-declared section's references are
+   * refused.
    */
   secretSource?: (section: SectionKey) => SettingsSource;
   /**
@@ -143,9 +142,8 @@ export function validateSettingsDoc(
   // Only a PLAIN mapping may pass: an explicit YAML tag (!!timestamp, !!set,
   // !!binary) parses to a Date/Set/Uint8Array, which is an object with no
   // meaningful keys - branding it valid would turn the document into a
-  // silent green no-op (and the merge's own plain-object guard would
-  // otherwise be the only thing standing between it and the defaults). The
-  // same prototype rule requirePlainMapping applies to section values.
+  // silent green no-op. The same prototype rule requirePlainMapping applies
+  // to section values.
   const proto = Object.getPrototypeOf(settings);
   if (proto !== Object.prototype && proto !== null) {
     return {

@@ -112,7 +112,7 @@ export function validateSectionShapes(
  * issues above. Runs only after the shape parse succeeded; entries that are
  * not objects are skipped (for the current closed shapes the parse already
  * excludes them, so the guard is only defensive). A knobbed section's
- * wrapped `{undeclared, entries}` form is unwrapped first, so a closed
+ * wrapped `{_undeclared, entries}` form is unwrapped first, so a closed
  * section that also takes the policy knob (collaborators) keeps its entry
  * checks in both forms - the wrapper's own keys are validated by the
  * strictObject in the section shape, never here.
