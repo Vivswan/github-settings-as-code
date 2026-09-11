@@ -113,8 +113,8 @@ jobs:
         working-directory: platform
         run: bun install --frozen-lockfile --silent
 
-      # Facts (module selection, copier answers, declared visibility) come
-      # from the checkout, so the render needs no Contents scope.
+      # Facts (the module selection in .repo-platform.yml, the declared
+      # visibility) come from the checkout, so the render needs no Contents scope.
       - name: Render this repository's settings layers
         id: render
         if: steps.token.outputs.proceed == 'true'

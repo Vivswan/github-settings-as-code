@@ -232,7 +232,7 @@ outOfScope:
     - >-
       Repo-content-borne configuration (CODEOWNERS, dependabot.yml, workflow files, issue/PR
       templates, FUNDING.yml, .gitattributes): These are versioned files in the repository tree,
-      managed by commits/PRs (e.g. by the copier template layer), not by the settings REST API.
+      managed by commits/PRs (e.g. by the repo-platform sync), not by the settings REST API.
       Writing repo content is a different tool's job.
     - >-
       Self-hosted runners (repo-level registration, labels): Operational infrastructure lifecycle:
