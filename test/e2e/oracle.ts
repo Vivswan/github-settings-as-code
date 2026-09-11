@@ -149,6 +149,11 @@ export function predictSection(key: SectionKey, meta: ScenarioMeta): SectionPred
  * The union of the per-grade predictions over effectiveGrades. A mixed section
  * denied under a READ grant stops at a gated read whose 404 posture may differ
  * from the section's primary read's, so that arm covers both postures.
+ *
+ * Two folds precede the grades because they decide whether the mask is
+ * consulted at all: exclusion (the section never runs) and the org-only
+ * no-op on a personal account (the section runs, but never past its
+ * ungated org probe).
  */
 export function predictSectionAt(
   key: SectionKey,
@@ -157,6 +162,34 @@ export function predictSectionAt(
 ): SectionPrediction {
   const grant = sectionGrade(key, meta.mask, meta.orgMask ?? meta.mask);
   const grades = effectiveGrades(grant, gating);
+  // A declared section outside the `sections` allowlist never runs: the engine
+  // reports it "excluded" before any read (orchestrate.ts), so exclusion folds
+  // before EVERYTHING - grades, denial semantics, and witnesses alike. An
+  // EMPTY allowlist means unrestricted, mirroring orchestrate.ts's size > 0
+  // gate, so only a non-empty list excludes.
+  if (
+    meta.onlySections !== undefined &&
+    meta.onlySections.length > 0 &&
+    !meta.onlySections.includes(key)
+  ) {
+    return { key, grades, allowed: new Set(["excluded"]), mayWrite: false };
+  }
+  // An org-only section on a personal account no-ops regardless of mask: its
+  // org probe (declared permission "none", so no mask key gates it) 404s and
+  // the handler returns with only a note, before any gated read or write. The
+  // run therefore never meets a denial: by sectionGrade's own convention an
+  // ungated resource is graded write, so the section runs write-granted with
+  // nothing to write - check reports clean and apply reports applied, never
+  // both in one mode, and no consumer (preflight, convergence, the
+  // write-denied set) sees the mask's grade, which the run never reached.
+  if (ORG_ONLY_SECTIONS.has(key) && meta.ownerKind === "user") {
+    return {
+      key,
+      grades: ["write"],
+      allowed: new Set([meta.mode === "check" ? "clean" : "applied"]),
+      mayWrite: false,
+    };
+  }
   const deniedAtGatedRead = gating === "mixed" && grant === "read";
   const arms = grades.flatMap((grade) =>
     grade === "none" && deniedAtGatedRead
@@ -175,6 +208,8 @@ export function predictSectionAt(
  * One section's allowed outcomes at ONE grade, from mode, policy, denial style,
  * and the denied read's 404 posture. A seeded live-state WITNESS tightens
  * {clean, drift} to one outcome, but only after the permission/policy fold.
+ * The section is known to run and to reach its mask-graded reads here;
+ * predictSectionAt folds exclusion and the personal-account no-op first.
  */
 function predictAtGrade(
   key: SectionKey,
@@ -185,24 +220,6 @@ function predictAtGrade(
   const check = meta.mode === "check";
   const required = meta.requiredSections.includes(key);
   const witness = meta.liveKinds?.[key];
-  // A declared section outside the `sections` allowlist never runs: the engine
-  // reports it "excluded" before any read (orchestrate.ts), so exclusion folds
-  // before EVERYTHING - grades, denial semantics, and witnesses alike. An
-  // EMPTY allowlist means unrestricted, mirroring orchestrate.ts's size > 0
-  // gate, so only a non-empty list excludes.
-  if (
-    meta.onlySections !== undefined &&
-    meta.onlySections.length > 0 &&
-    !meta.onlySections.includes(key)
-  ) {
-    return { allowed: new Set(["excluded"]), mayWrite: false };
-  }
-  // An org-only section on a personal account no-ops regardless of mask:
-  // its org probe 404s, the section returns with only a note, so check
-  // reports clean and apply reports applied - never both in one mode.
-  if (ORG_ONLY_SECTIONS.has(key) && meta.ownerKind === "user") {
-    return { allowed: new Set([check ? "clean" : "applied"]), mayWrite: false };
-  }
   // A section with no read endpoint makes NO request in check mode, so it is
   // exactly clean regardless of the mask - there is nothing a denial could
   // deny - and no witness kind is modeled for it.
