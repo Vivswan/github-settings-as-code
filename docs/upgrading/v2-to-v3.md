@@ -23,7 +23,7 @@ Blast radius first: with `repos: "*"`, every discovered repository that has no `
 
 The token also matters: a target the token cannot read Contents on fails with an error naming `Contents: read`, where v2 could mistake the denial for a missing file. Grant the permission or drop the target from `repos`.
 
-The [multi-repo guide](../operate/multi-repo.md) owns the rule.
+The [fallback section of the multi-repo guide](../operate/multi-repo.md#fallback-for-repositories-without-a-settings-file) owns the rule.
 
 ## 2. undeclared becomes _undeclared
 
