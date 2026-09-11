@@ -744,7 +744,7 @@ describe("fetched test artifacts across workflows", () => {
   test("an inline artifact cache is reported by job (negative control)", () => {
     const wf = readWorkflow("checks.yml");
     wf.jobs.check?.steps?.push({
-      uses: "actions/cache@v6",
+      uses: "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
       with: { path: GRAPHQL.path, key: "anything" },
     });
     expect(inlineArtifactCaches([{ file: "checks.yml", wf }])).toEqual(["checks.yml#check"]);
@@ -855,7 +855,10 @@ describe("fetched test artifacts across workflows", () => {
 
 /** The step predicates the guards above are built from, each proven on the forms it must accept and reject. */
 describe("step predicates", () => {
-  const cache = (path: string, uses = "actions/cache@v6"): Step => ({ uses, with: { path } });
+  const cache = (
+    path: string,
+    uses = "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+  ): Step => ({ uses, with: { path } });
 
   test.each([
     ["the exact path", true, cache(OPENAPI.path)],
