@@ -53,6 +53,7 @@ export function fragmentFake(
         },
         query: Object.fromEntries(url.searchParams),
         body: payload,
+        grants: () => true,
       });
       if (response.status >= 400) {
         const error: ApiError = {

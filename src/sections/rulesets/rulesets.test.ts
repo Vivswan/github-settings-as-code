@@ -258,6 +258,110 @@ describe("rulesets", () => {
     expect(api.writes).toEqual(["PUT /repos/o/r/rulesets/9"]);
   });
 
+  describe("bypass_actors visibility", () => {
+    // GitHub answers a non-admin GET without the bypass_actors KEY (never `[]`),
+    // so the declared list cannot be judged: converged, one note, no phantom.
+    const BASE = { id: 9, name: "main", target: "branch", enforcement: "active" };
+    const HIDDEN_NOTE =
+      "rulesets[main]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), so drift on it cannot be judged here; grant Administration write to check it";
+    const team = { actor_id: 1, actor_type: "Team", bypass_mode: "always" };
+    const cases: Array<{
+      name: string;
+      declared: Record<string, unknown>[];
+      live: Record<string, unknown>;
+      expected: Awaited<ReturnType<typeof plan>>;
+    }> = [
+      {
+        name: "key absent live, declared []: converged with the visibility note",
+        declared: [],
+        live: BASE,
+        expected: { ops: [], notes: [HIDDEN_NOTE], drift: [] },
+      },
+      {
+        name: "key absent live, declared non-empty: converged with the visibility note",
+        declared: [team],
+        live: BASE,
+        expected: { ops: [], notes: [HIDDEN_NOTE], drift: [] },
+      },
+      {
+        name: "key present and different: real drift, no note",
+        declared: [team],
+        live: { ...BASE, bypass_actors: [] },
+        expected: {
+          ops: [
+            {
+              role: "update",
+              params: { ruleset_id: "9" },
+              payload: {
+                name: "main",
+                target: "branch",
+                enforcement: "active",
+                bypass_actors: [team],
+              },
+              describe: 'updating ruleset "main"',
+              drift: [
+                'rulesets[main].bypass_actors[0]: no matching live entry for {"actor_id":1,"actor_type":"Team","bypass_mode":"always"}',
+              ],
+              change: 'updated ruleset "main" (id 9)',
+            },
+          ],
+          notes: [],
+          drift: [],
+        },
+      },
+      {
+        name: "key present and equal: converged, no note",
+        declared: [team],
+        live: { ...BASE, bypass_actors: [team] },
+        expected: { ops: [], notes: [], drift: [] },
+      },
+    ];
+    for (const { name, declared, live, expected } of cases) {
+      test(name, async () => {
+        const api = writable({
+          [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
+          "GET /repos/o/r/rulesets/9": { data: live },
+        });
+        const result = await plan(api, [
+          { name: "main", target: "branch", enforcement: "active", bypass_actors: declared },
+        ]);
+        expect(result).toEqual(expected);
+        expect(api.mutations()).toEqual([]);
+      });
+    }
+
+    test("a hidden bypass_actors beside real drift: the note, the drift, and the full declared payload", async () => {
+      // The write path is unchanged: the PUT carries the whole declaration,
+      // hidden list included, and the hidden key is not a phantom.
+      const api = writable({
+        [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
+        "GET /repos/o/r/rulesets/9": { data: { ...BASE, enforcement: "evaluate" } },
+      });
+      const result = await plan(api, [
+        { name: "main", target: "branch", enforcement: "active", bypass_actors: [team] },
+      ]);
+      expect(result).toEqual({
+        ops: [
+          {
+            role: "update",
+            params: { ruleset_id: "9" },
+            payload: {
+              name: "main",
+              target: "branch",
+              enforcement: "active",
+              bypass_actors: [team],
+            },
+            describe: 'updating ruleset "main"',
+            drift: ['rulesets[main].enforcement: "active" != "evaluate"'],
+            change: 'updated ruleset "main" (id 9)',
+          },
+        ],
+        notes: [HIDDEN_NOTE],
+        drift: [],
+      });
+    });
+  });
+
   test("a converged ruleset plans nothing: rules match by type regardless of order", async () => {
     const api = writable({
       [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },

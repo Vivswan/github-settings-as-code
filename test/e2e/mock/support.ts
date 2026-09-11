@@ -73,6 +73,12 @@ interface HandlerContext {
   param(name: string): string;
   query: Record<string, string>;
   body: unknown;
+  /**
+   * Whether the token holds at least `kind` on the matched endpoint's permission - the grading the
+   * gate already admitted the request by. For a field GitHub reveals only above the endpoint's own
+   * grade (a ruleset's bypass_actors, admin-only), so the mock omits it like GitHub does.
+   */
+  grants(kind: "read" | "write"): boolean;
 }
 
 export type Handler = (ctx: HandlerContext) => MockResponse;

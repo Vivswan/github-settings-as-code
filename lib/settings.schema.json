@@ -1031,7 +1031,7 @@
           }
         },
         "bypass_actors": {
-          "description": "Who may bypass the ruleset, passed through verbatim.",
+          "description": "Who may bypass the ruleset, passed through verbatim. GitHub returns it only to a token with write access to the ruleset, so a token without Administration write cannot judge drift on it (check mode notes this instead of reporting drift).",
           "type": "array",
           "items": {
             "type": "object",

@@ -740,6 +740,7 @@ export function runPipeline(
     param: paramAccessor(key, endpoint, matched.params),
     query: request.query,
     body: request.body,
+    grants: (kind) => gradeRequirement(mask, { permission: requirement.permission, kind }).allowed,
   });
 
   // Structural status-subset guard: a handler may only answer a status the

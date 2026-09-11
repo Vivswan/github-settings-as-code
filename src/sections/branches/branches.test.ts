@@ -67,7 +67,14 @@ function liveRepo(live: LiveState): GithubClient & { writes: Recorded[] } {
         return decodeURIComponent(concrete[index] as string);
       };
       const handler = branchesMockHandlers[key as keyof typeof branchesMockHandlers];
-      const response = handler({ state, endpoint, param, query: {}, body: payload });
+      const response = handler({
+        state,
+        endpoint,
+        param,
+        query: {},
+        body: payload,
+        grants: () => true,
+      });
       if (method !== "GET") {
         this.writes.push({ method, path, payload });
       }

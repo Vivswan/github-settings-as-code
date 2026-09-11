@@ -1,6 +1,9 @@
 # Check mode reports drift when a declared ruleset exists live but differs: the
 # declared enforcement is "active", live is "disabled", so the section pins a
 # drift line and no write is attempted. The org-sourced ruleset is ignored.
+# The token holds Administration at write, so the live bypass_actors is
+# visible and its genuine difference is drift too (a read-grade token cannot
+# see it; rulesets-check-bypass-hidden pins that posture).
 name: rulesets-check-drift
 settings:
   rulesets:
@@ -11,6 +14,10 @@ settings:
         ref_name:
           include: ["~DEFAULT_BRANCH"]
           exclude: []
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
 inputs:
   mode: check
 live_state:
@@ -24,13 +31,14 @@ live_state:
         ref_name:
           include: ["refs/heads/main"]
           exclude: []
+      bypass_actors: []
     - id: 900
       name: org-baseline
       source_type: Organization
       target: branch
       enforcement: active
 token_permissions:
-  administration: read
+  administration: write
 expect:
   exit_code: 1
   result: drift
@@ -38,6 +46,9 @@ expect:
     rulesets: drift
   summary_contains:
     - "rulesets[main-protection].enforcement"
+    - "rulesets[main-protection].bypass_actors[0]: no matching live entry"
+  stdout_lacks:
+    - "bypass_actors is not visible to this token"
   never:
     - "PUT /repos/{repo}/rulesets/42"
     - "PUT /repos/{repo}/rulesets/900"
