@@ -8,8 +8,6 @@
 import { defineConfig } from "tsdown";
 import pkg from "./package.json" with { type: "json" };
 
-const runtimeDependencies = Object.keys(pkg.dependencies);
-
 export default defineConfig({
   entry: "src/index.ts",
   format: "esm",
@@ -17,11 +15,9 @@ export default defineConfig({
   dts: true,
   outDir: "lib/pkg",
   deps: {
-    // Bare specifiers and their subpaths ("pkg" and "pkg/anything").
-    neverBundle: runtimeDependencies.flatMap((name) => [
-      name,
-      new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}/`),
-    ]),
+    // tsdown already externalizes package.json dependencies and their subpaths
+    // ("bottleneck/light.js" included); naming them keeps that choice explicit.
+    neverBundle: Object.keys(pkg.dependencies),
   },
   sourcemap: false,
   // index.js and index.d.ts, not .mjs/.d.mts: package.json declares type module.
