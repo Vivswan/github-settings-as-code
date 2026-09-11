@@ -50,8 +50,9 @@ inputs:
       takes an undeclared policy in its policy-wrapper form with the policy
       made explicit, the other sections in their own shape, and private
       underscore keys and the _layering directives dropped. Feed it to a later
-      apply or check step as its settings-file. Fails when set in apply or
-      check.
+      apply or check step as its settings-file. Must not name one of the
+      settings-file layers (the merge would overwrite it). Fails when set in
+      apply or check.
     required: false
     default: ""
   on-missing-permission:

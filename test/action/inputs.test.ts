@@ -206,6 +206,25 @@ describe("mode: merge", () => {
     );
   });
 
+  test("a merged-file that names one of the layers is rejected, naming the layer's position", () => {
+    setMergeEnv({ "merged-file": "repo.yml" });
+    expect(rejection()).toBe(
+      'the "merged-file" input "repo.yml" is layer 2 of the "settings-file" list ("repo.yml"): the merge would overwrite that layer with the folded document, and the next run would fold the merged document as a layer. Write the merged document to a path outside the layer list',
+    );
+  });
+
+  test("the collision is found on the resolved paths, so a ./ spelling of a layer still collides", () => {
+    setMergeEnv({ "merged-file": "./fleet.yml" });
+    expect(rejection()).toBe(
+      'the "merged-file" input "./fleet.yml" is layer 1 of the "settings-file" list ("fleet.yml"): the merge would overwrite that layer with the folded document, and the next run would fold the merged document as a layer. Write the merged document to a path outside the layer list',
+    );
+  });
+
+  test("a merged-file beside the layers but not among them is accepted", () => {
+    setMergeEnv({ "merged-file": "./merged.yml" });
+    expect(parseConfig()).toEqual({ config: { ...MERGE_CONFIG, mergedFile: "./merged.yml" } });
+  });
+
   test("an unsupported layering is rejected", () => {
     setMergeEnv({ layering: "union" });
     expect(rejection()).toBe(
