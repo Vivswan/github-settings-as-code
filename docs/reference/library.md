@@ -8,22 +8,14 @@ The engine behind the action is also an npm package, `@vivswan/github-settings-a
 
 ## Install
 
-```bash
-npm install @vivswan/github-settings-as-code
-bun add @vivswan/github-settings-as-code
-```
-
-Pre-releases ride the `next` dist-tag; until the first stable release only `@next` exists:
+The package is built from this repository:
 
 ```bash
-npm install @vivswan/github-settings-as-code@next
+bun install
+bun run build:lib
 ```
 
-A packaged commit on the `build` branch that carries `lib/pkg/` installs straight from GitHub (no registry, no build step on your side):
-
-```bash
-npm install github:Vivswan/github-settings-as-code#<packaged sha>
-```
+That writes `lib/pkg/index.js` and `lib/pkg/index.d.ts`, the files the manifest's `exports` point at. Installing from npm or from a packaged commit of the `build` branch arrives with the publishing change.
 
 The package exports three paths: the entry (`.`), the committed settings.yml JSON Schema (`./settings.schema.json`), and its own manifest (`./package.json`).
 
@@ -153,11 +145,7 @@ console.log(exitCode, collected.outputs.result, collected.lines.map((entry) => e
 
 ## Versioning
 
-The package and the action share one version, the one in `.release-please-manifest.json`, so a settings file that validates on the library validates on the action of the same version.
-
-- Every green push to `main` publishes a pre-release under the `next` dist-tag: the next patch version, then `-main.<run>.<sha7>` (the workflow run number and the short source commit).
-- A release publishes the stable version and moves `latest` to it.
-- The `github:Vivswan/github-settings-as-code#<packaged sha>` form installs a packaged commit of the `build` branch, which carries `lib/pkg/` and `lib/index.js` built from its source commit.
+The package and the action share one version, the one in `.release-please-manifest.json` (release-please rewrites `package.json` from it), so a settings file that validates on the library validates on the action of the same version.
 
 ## One-time publishing setup
 

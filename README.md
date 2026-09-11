@@ -61,7 +61,7 @@ The [getting started guide](docs/start/getting-started.md) walks the same steps 
 
 ## Library
 
-The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node 22.14 or newer): validate, merge, check, and apply from your own code. Install it with `npm install @vivswan/github-settings-as-code` or `bun add @vivswan/github-settings-as-code`; the [library reference](docs/reference/library.md) has the API by group and the `@next` pre-release channel.
+The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node 22.14 or newer): validate, merge, check, and apply from your own code. It is built from this repository with `bun run build:lib`; the [library reference](docs/reference/library.md) has the API by group.
 
 ## Docs
 

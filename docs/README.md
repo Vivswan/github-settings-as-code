@@ -43,7 +43,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 - [The undeclared policy](reference/undeclared-policy.md): the `_undeclared` knob on the list sections, per-section defaults, the milestone-deletion caveat, and how the policy layers in `mode: merge`.
 - [Forward compatibility](reference/forward-compatibility.md): where payloads pass through verbatim and which sections are deliberately closed.
 - [Secrets and vaults](reference/secrets-and-vaults.md): the `$NAME` references secret fields take, wiring them from GitHub Secrets or a vault action, and what check mode can and cannot verify.
-- [Library](reference/library.md): the npm package `@vivswan/github-settings-as-code`, its install lines, the API by group with one example each, and how its version tracks the action's.
+- [Library](reference/library.md): the npm package `@vivswan/github-settings-as-code`, how it is built, the API by group with one example each, and how its version tracks the action's.
 
 ## operate: day-to-day operation
 
