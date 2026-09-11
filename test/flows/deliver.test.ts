@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { parseRepoSlug, type RepoRef } from "../../src/discovery/targets.js";
+import type { RepoResult, SectionOutcome } from "../../src/engine/orchestrate.js";
 import {
   concludeRun,
   type Delivery,
@@ -9,19 +11,17 @@ import {
   runOutcome,
   type TargetResult,
   withDelivery,
-} from "../../src/action/deliver.js";
+} from "../../src/flows/deliver.js";
 import {
-  type PrivateReportChannel,
   publicChannel,
   REDACTED_NOTE,
   redactedChannel,
   type TargetChannel,
-} from "../../src/action/redact.js";
-import { parseRepoSlug, type RepoRef } from "../../src/discovery/targets.js";
-import type { RepoResult, SectionOutcome } from "../../src/engine/orchestrate.js";
+} from "../../src/flows/redact.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
+import type { PrivateReportChannel } from "../../src/report/delivery.js";
 import { MockApi } from "../mock-api.js";
 
 const MARKER = "settings-as-code-report";
@@ -163,13 +163,25 @@ describe("withDelivery", () => {
     ["issue-on-failure", PRIVATE, true],
     ["artifact", PRIVATE, false],
   ])("under %s a %j target injects the marker: %p", async (channel, exposure, injects) => {
-    await delivered(cfg(channel, "apply"), {}, async (delivery, io) => {
-      const opened = { repo: repo("o/priv"), channel: publicChannel(io, "o/priv", true), exposure };
-      await delivery.target(opened, async (injectsMarker) => {
-        expect(injectsMarker).toBe(injects);
-        return outcome("clean");
-      });
-    });
+    // The artifact channel opens only with an upload port; nothing is delivered here.
+    const uploader: ArtifactUploader | undefined =
+      channel === "artifact" ? { upload: async () => {} } : undefined;
+    await delivered(
+      cfg(channel, "apply"),
+      {},
+      async (delivery, io) => {
+        const opened = {
+          repo: repo("o/priv"),
+          channel: publicChannel(io, "o/priv", true),
+          exposure,
+        };
+        await delivery.target(opened, async (injectsMarker) => {
+          expect(injectsMarker).toBe(injects);
+          return outcome("clean");
+        });
+      },
+      uploader,
+    );
   });
 
   test("channel none: a redacted target closes sealed and speaks one closed-value line; a shown target closes open and stays silent", async () => {

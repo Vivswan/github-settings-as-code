@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { actionsIo } from "../../src/action/io.js";
-import { writeSummary } from "../../src/action/summary.js";
+import { writeSummary } from "../../src/flows/summary.js";
 
 /**
  * Whether `source` names the runner module as a module specifier - a static

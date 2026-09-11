@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseSettingsDoc } from "../../src/action/settings-read.js";
+import { parseSettingsDoc } from "../../src/flows/settings-read.js";
 
 /**
  * Runs `fn` while recording every process warning and every stderr write it

@@ -6,8 +6,8 @@
 
 import { expect } from "bun:test";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { silentIo } from "../../src/io.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
-import { silentIo } from "../io-fake.js";
 
 /** Assert `doc` validates and its repository special-looking keys are real. */
 export function assertValidSettingsExample(doc: unknown, label: string): void {

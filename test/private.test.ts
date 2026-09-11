@@ -11,10 +11,7 @@ import { revealPrivate } from "../src/private-open.js";
  * an EXISTING export's value is the accepted residual of reviewed trusted code.
  */
 const OPENER_IMPORTERS: Record<string, string[]> = {
-  "src/action/redact.ts": [
-    "DEFAULT_PRIVATE_REPORT",
-    "DEFAULT_PRIVATE_REPOS",
-    "PRIVATE_REPORT_CHANNELS",
+  "src/flows/redact.ts": [
     "PRIVATE_REPOS_POLICIES",
     "REDACTED_DETAIL",
     "REDACTED_NOTE",
@@ -22,7 +19,6 @@ const OPENER_IMPORTERS: Record<string, string[]> = {
     "attempt",
     "capturingIo",
     "emitRedactedResult",
-    "isIssueChannel",
     "isPrivateVisibility",
     "openTargetChannel",
     "planRedaction",
@@ -42,7 +38,13 @@ const OPENER_IMPORTERS: Record<string, string[]> = {
     "formatSkipNotice",
   ],
   "src/private.ts": ["isPrivate", "markPrivate"],
-  "src/report/delivery.ts": ["applyMarkerInjection", "openReportChannel"],
+  "src/report/delivery.ts": [
+    "ARTIFACT_NEEDS_UPLOADER",
+    "PRIVATE_REPORT_CHANNELS",
+    "applyMarkerInjection",
+    "isIssueChannel",
+    "openReportChannel",
+  ],
   "test/private.test.ts": [],
 };
 const OPENER_MODULE = resolve("src/private-open");

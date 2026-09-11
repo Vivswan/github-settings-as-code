@@ -8,7 +8,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { MERGE_RESULT } from "../../src/action/deliver.js";
 import {
   FILTER_INPUTS,
   INPUT_DECLS,
@@ -18,6 +17,7 @@ import {
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
+import { MERGE_RESULT } from "../../src/flows/deliver.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 

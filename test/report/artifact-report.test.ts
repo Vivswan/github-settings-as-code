@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { DefaultArtifactClient } from "@actions/artifact";
+import { describe, expect, test } from "bun:test";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import {
   ARTIFACT_FILE,
@@ -64,7 +63,7 @@ describe("deliverArtifactReport", () => {
   test("hands the uploader port ciphertext under the fixed artifact names", async () => {
     const { identity, recipient } = await testKeypair();
     const { uploader, uploads } = captureUploader();
-    const result = await deliverArtifactReport("secret document", recipient, uploader);
+    const result = await deliverArtifactReport(uploader, "secret document", recipient);
     expect(result).toEqual({ uploaded: true });
     expect(uploads).toHaveLength(1);
     expect(uploads[0]?.name).toBe(ARTIFACT_NAME);
@@ -84,7 +83,7 @@ describe("deliverArtifactReport", () => {
         throw new Error("Unable to get the ACTIONS_RUNTIME_TOKEN env variable");
       },
     };
-    expect(await deliverArtifactReport("doc", recipient, uploader)).toEqual({
+    expect(await deliverArtifactReport(uploader, "doc", recipient)).toEqual({
       warning:
         "could not upload the private report artifact: Unable to get the ACTIONS_RUNTIME_TOKEN " +
         "env variable. Re-run the workflow, or set private-report: none if it persists",
@@ -93,7 +92,7 @@ describe("deliverArtifactReport", () => {
 
   test("a malformed recipient is a warning and the uploader is never called", async () => {
     const { uploader, uploads } = captureUploader();
-    const result = await deliverArtifactReport("doc", "not-a-key", uploader);
+    const result = await deliverArtifactReport(uploader, "doc", "not-a-key");
     // The middle of the warning is the age library's own wording for a bad recipient, so only
     // our prefix and advice are pinned around it.
     expect(result).toEqual({
@@ -102,42 +101,5 @@ describe("deliverArtifactReport", () => {
       ),
     });
     expect(uploads).toEqual([]);
-  });
-});
-
-describe("default uploader without a runtime token", () => {
-  const savedToken = process.env.ACTIONS_RUNTIME_TOKEN;
-
-  afterEach(() => {
-    if (savedToken === undefined) {
-      delete process.env.ACTIONS_RUNTIME_TOKEN;
-    } else {
-      process.env.ACTIONS_RUNTIME_TOKEN = savedToken;
-    }
-  });
-
-  test("missing token yields exactly ONE warning and never invokes the artifact client", async () => {
-    delete process.env.ACTIONS_RUNTIME_TOKEN;
-    // Reaching the client would double-warn (it warns on its own before it
-    // throws). Its @actions/core import is a named binding a namespace spy
-    // cannot observe, so the client's entry point is what gets watched.
-    const uploadSpy = spyOn(DefaultArtifactClient.prototype, "uploadArtifact");
-    try {
-      const { recipient } = await testKeypair();
-      const result = await deliverArtifactReport("secret document", recipient);
-
-      // exactly one warning, and it is ours (the client's own text never
-      // appears, and neither does any report content)
-      expect(result).toEqual({
-        warning:
-          "could not upload the private report artifact: the artifact service is unavailable: no " +
-          "ACTIONS_RUNTIME_TOKEN in the environment. Artifact upload needs a GitHub-hosted or " +
-          "self-hosted Actions runner (it is not available on GitHub Enterprise Server or outside " +
-          "Actions). Re-run the workflow, or set private-report: none if it persists",
-      });
-      expect(uploadSpy).toHaveBeenCalledTimes(0);
-    } finally {
-      uploadSpy.mockRestore();
-    }
   });
 });

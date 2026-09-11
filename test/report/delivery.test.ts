@@ -1,28 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
-import { runOutcome } from "../../src/action/deliver.js";
-import {
-  type PrivateReportChannel,
-  type RedactedDetail,
-  redactedChannel,
-} from "../../src/action/redact.js";
 import { parseRepoSlug, type RepoRef } from "../../src/discovery/targets.js";
 import {
   type SectionOutcome,
   type ValidatedSettings,
   validateSettingsDoc,
 } from "../../src/engine/orchestrate.js";
-import { type Io, maskRegistry } from "../../src/io.js";
+import { runOutcome } from "../../src/flows/deliver.js";
+import { redactedChannel } from "../../src/flows/redact.js";
+import { type Io, maskRegistry, silentIo } from "../../src/io.js";
 import { isPrivate, type Private } from "../../src/private.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import {
   applyMarkerInjection,
   openReportChannel,
+  type PrivateReportChannel,
+  type RedactedDetail,
   type ReportRunMeta,
 } from "../../src/report/delivery.js";
 import { MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import type { SettingsFile } from "../../src/schema.js";
-import { silentIo } from "../io-fake.js";
 import { MockApi } from "../mock-api.js";
 
 const MARKER = "settings-as-code-report";

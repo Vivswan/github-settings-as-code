@@ -12,13 +12,11 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { countWord } from "../../.github/scripts/lib/count-word.js";
-import {
-  DEFAULT_PRIVATE_REPOS,
-  PRIVATE_REPORT_CHANNELS,
-  REDACTED_DETAIL,
-} from "../../src/action/redact.js";
+import { DEFAULT_PRIVATE_REPOS } from "../../src/action/inputs.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
+import { REDACTED_DETAIL } from "../../src/flows/redact.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
+import { PRIVATE_REPORT_CHANNELS } from "../../src/report/delivery.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS } from "../../src/schema.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";

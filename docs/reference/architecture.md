@@ -14,7 +14,7 @@ The [module map](#the-module-map) at the end is generated from [architecture.yml
 
 ```mermaid
 flowchart TD
-  read["src/action/settings-read.ts<br>readSettingsFile()"]
+  read["src/flows/settings-read.ts<br>readSettingsFile()"]
   mode{"mode"}
   fold["src/engine/layers.ts<br>stripNulls() mergeLayers()"]
   validate["src/engine/orchestrate.ts<br>validateSettingsDoc()"]
@@ -25,7 +25,7 @@ flowchart TD
   api["src/github/api.ts<br>GithubClient"]
   drift["check: the plan's drift lines<br>src/sections/contract/plan.ts planDrift() planCheckNotes()"]
   exec["apply: the plan's writes<br>src/engine/execute.ts executePlan()"]
-  report["src/action/deliver.ts<br>concludeRun()"]
+  report["src/flows/deliver.ts<br>concludeRun()"]
   read -->|YAML text, parsed to an unknown document per file| mode
   mode -->|merge: every layer, each validated on its own first| fold
   fold -->|one folded document, a notice per null opt-out| validate
@@ -124,8 +124,8 @@ Demonstrated by: [test/e2e/scenarios/merge-union-optout.yml](https://github.com/
 flowchart LR
   operator["operator-authored documents<br>settings-file layers, repos-dir files, the defaults-file"]
   target["target-authored documents<br>a repository's own settings file, fetched via repos"]
-  refs["src/action/secret-refs.ts<br>validateSecretRef()"]
-  resolve["src/action/secret-refs.ts<br>resolveSecretRefs()"]
+  refs["src/engine/secret-refs.ts<br>validateSecretRef()"]
+  resolve["src/engine/secret-refs.ts<br>resolveSecretRefs()"]
   refused["hard error for that section"]
   operator -->|SettingsSource operator| refs
   target -->|SettingsSource target| refs
@@ -140,7 +140,7 @@ Two kinds of document reach the engine:
 
 A `$NAME` secret reference resolves from the workflow step's environment, so it is honored only in operator documents. A target repository must never be able to route the operator's secrets into itself. Provenance is a property of the source document, decided once where the document is chosen, and every value in it shares that one source.
 
-Demonstrated by: [test/action/secret-refs.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/action/secret-refs.test.ts), [test/engine/secrets.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/secrets.test.ts), [test/e2e/scenarios/multi-secrets-target-ref-rejected.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/multi-secrets-target-ref-rejected.yml).
+Demonstrated by: [test/engine/secret-refs.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/secret-refs.test.ts), [test/engine/secrets.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/secrets.test.ts), [test/e2e/scenarios/multi-secrets-target-ref-rejected.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/multi-secrets-target-ref-rejected.yml).
 
 ## The section-module contract
 
@@ -191,7 +191,7 @@ Demonstrated by: [test/sections/registry.test.ts](https://github.com/Vivswan/git
 ```mermaid
 flowchart TD
   targets["src/discovery/central.ts resolveCentralTargets()<br>src/discovery/discover.ts discoverRepos()"]
-  each["one target at a time<br>src/action/multi.ts runMulti()"]
+  each["one target at a time<br>src/flows/multi.ts runMulti()"]
   own["applied from that file, as written"]
   fetch["src/github/repo-file.ts<br>getRepoFile()"]
   probe["the repository object names the default branch"]
@@ -219,7 +219,7 @@ Targets come from checked-in files under `repos-dir`, from the `repos` list, or 
 - A contents 404 alone proves nothing (a missing file, a missing grant, or an invisible repository all look the same). The proof is the default-branch ref read, a call that needs Contents: read and succeeds whether or not the file exists: 200 means the token could have read the file, so the file is absent.
 - A ref read that is denied leaves the proof inconclusive, and the target fails naming the grant. A denial must never look like a missing file.
 
-Demonstrated by: [test/action/multi.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/action/multi.test.ts), [test/e2e/scenarios/multi-missing-and-failing.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/multi-missing-and-failing.yml), [test/e2e/scenarios/multi-contents-denied.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/multi-contents-denied.yml).
+Demonstrated by: [test/flows/multi.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/flows/multi.test.ts), [test/e2e/scenarios/multi-missing-and-failing.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/multi-missing-and-failing.yml), [test/e2e/scenarios/multi-contents-denied.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/multi-contents-denied.yml).
 
 ## The module map
 
@@ -230,6 +230,8 @@ Each node is one layer of `src/`, labelled with the paths it owns; an arrow mean
 graph TD
   main["src/main.ts"]
   action["src/action/"]
+  library["src/index.ts"]
+  flows["src/flows/"]
   engine["src/engine/"]
   sections["src/sections/"]
   github["src/github/"]
@@ -242,15 +244,23 @@ graph TD
   private["src/private.ts<br>src/private-open.ts"]
   upstream_gaps["src/upstream-gaps/"]
   main --> action
-  action --> discovery
-  action --> engine
-  action --> github
-  action --> io
-  action --> private
-  action --> report
-  action --> schema
-  action --> types
-  engine --> action
+  action --> library
+  library --> discovery
+  library --> engine
+  library --> flows
+  library --> github
+  library --> io
+  library --> report
+  library --> schema
+  library --> sections
+  library --> types
+  flows --> discovery
+  flows --> engine
+  flows --> github
+  flows --> io
+  flows --> private
+  flows --> report
+  flows --> schema
   engine --> discovery
   engine --> github
   engine --> io
@@ -268,7 +278,6 @@ graph TD
   github --> plain_data
   discovery --> github
   discovery --> private
-  report --> action
   report --> discovery
   report --> engine
   report --> github

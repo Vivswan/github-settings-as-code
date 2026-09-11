@@ -9,6 +9,7 @@
 
 import type { OptOutNotice } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { silentIo } from "../../src/io.js";
 import {
   SECTION_KEYS,
   type SectionKey,
@@ -24,7 +25,6 @@ import {
 } from "../../src/sections/contract/module.js";
 import type { SectionPermission } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { silentIo } from "../io-fake.js";
 import {
   type Json,
   LAYERING_DIRECTIVES,

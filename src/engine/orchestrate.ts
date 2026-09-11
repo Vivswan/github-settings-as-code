@@ -4,11 +4,6 @@
  * All output goes through the Io sink; callers decide how (or whether) to tag lines per repository.
  */
 
-import {
-  resolveSecretRefs,
-  type SettingsSource,
-  validateSecretRef,
-} from "../action/secret-refs.js";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
@@ -23,6 +18,7 @@ import {
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
 import { executePlan } from "./execute.js";
+import { resolveSecretRefs, type SettingsSource, validateSecretRef } from "./secret-refs.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
 import { validateSectionShapes } from "./validate.js";
 

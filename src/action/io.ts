@@ -5,7 +5,7 @@
 
 import { appendFileSync } from "node:fs";
 import * as core from "@actions/core";
-import { type Io, maskRegistry, type OutputName } from "../io.js";
+import { type Io, maskRegistry, type OutputName } from "../index.js";
 
 /**
  * The description of every action output, generated into the action.yml
