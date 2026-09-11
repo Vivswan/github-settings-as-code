@@ -2,17 +2,24 @@
 # managed release.yml between release-please cutting the DRAFT release and
 # the attested publish. This repository's stage is the single-tag scheme:
 # main is source-only (lib/index.js is never committed there), yet every
-# ref a consumer can name - the vX.Y.Z tags and the moving major vX - must
-# point at a packaged commit carrying the built bundle. So this hook, not
-# release-please, mints the tag (release-please-config.json sets `draft`
-# and pins the fleet's `force-tag-creation` OFF):
+# ref a consumer can name from now on - the vX.Y.Z tags, the moving major
+# vX, and the latest tag - must point at a packaged commit (the source tree
+# without its workflows, plus the built bundle), all of them on the `build`
+# branch post-green.yml appends to (the tags cut before that branch existed
+# stay on main commits from when main committed the bundle). So this hook, not release-please, mints the
+# tag (release-please-config.json sets `draft` and pins the fleet's
+# `force-tag-creation` OFF):
 #   1. resolve the merge commit from the draft's target commitish - NOT
 #      this run's GITHUB_SHA: the managed pipeline lets a newer push's run
 #      recover an older merge's pending release - and rebuild the bundle
 #      from it, verifying the committed schema byte-for-byte;
-#   2. commit lib/index.js as a CHILD of the merge commit and create
-#      vX.Y.Z once, on that child: born runnable, never moved (the
-#      release-tags ruleset freezes it, as SECURITY.md states);
+#   2. find the build commit whose recorded source is the merge commit
+#      (post-green appended it earlier in this run), appending it when
+#      none exists (post-green skipped for want of its token), create
+#      vX.Y.Z once, on that commit - born runnable, never moved (the
+#      release-tags ruleset freezes it, as SECURITY.md states) - and
+#      reconcile the latest tag to the chain commit of the newest main
+#      source;
 #   3. force-move the major tag there and upload bundle and schema to the
 #      draft (published releases freeze their assets);
 #   4. confirm origin's refs and the draft's assets; the managed publish
@@ -25,7 +32,7 @@
 # NEWER release shipped, the major move stops by design.
 
 # Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand
-# run has no run trailer and no attestation.json). <merge sha> is the
+# run has no attestation.json, and a chain commit it appends no run trailer). <merge sha> is the
 # draft's target commitish. NEVER publish before `package` has minted the
 # tag: a tagless draft makes GitHub create vX.Y.Z lazily at the merge
 # commit on main, which has no bundle (the managed release.yml's generic
@@ -45,7 +52,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: The draft release's tag (recorded on the release; the ref itself is created here, on the packaged commit)
+        description: The draft release's tag (recorded on the release; the ref itself is created here, on the build commit)
         required: true
         type: string
 
@@ -54,7 +61,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write # tag pushes; also what makes the draft visible to gh
+      # Tag pushes and the append to build when post-green did not run it;
+      # chain commits carry no .github/workflows/, so the default token
+      # needs no workflows grant (post-green.yml relies on the same fact).
+      # Also what makes the draft visible to gh.
+      contents: write
     outputs:
       source-sha: ${{ steps.source.outputs.sha }}
     steps:
@@ -79,6 +90,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ steps.source.outputs.sha }}
+          # The script rebuilds build's tip from its recorded source and
+          # judges whether that source lies on main; a shallow checkout
+          # cannot answer either.
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -91,11 +106,13 @@ jobs:
           # a divergent regeneration (generator drift, or a compromised
           # generator - SECURITY.md leans on this) stops the release here.
           git diff --exit-code lib/settings.schema.json
-      # Create the packaged child and its version tag exactly once; a rerun
-      # byte-verifies the existing tag instead (parent, whole tree, bundle
-      # bytes) and never moves it. Both paths end with the worktree bundle
-      # equal to the tagged bundle.
-      - name: Create or verify the packaged commit and its version tag
+      # Create the version tag on the merge commit's build commit exactly
+      # once, appending that commit when build lacks it, and reconcile
+      # latest to the chain commit of the newest main source; a rerun
+      # byte-verifies the existing tag instead (recorded source, whole tree,
+      # bundle bytes) and never moves it. Both paths end with the worktree
+      # bundle equal to the tagged bundle.
+      - name: Create or verify the version tag on the build commit
         env:
           TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
@@ -119,8 +136,9 @@ jobs:
 
   # The gate between packaging and publishing, against origin's ACTUAL
   # state rather than anything the packaging job held locally: the version
-  # tag and the major must both point at the packaged child of this merge
-  # commit, and that commit's tree must carry a non-empty lib/index.js.
+  # tag and the major must both point at a packaged commit recording this
+  # merge commit as its source, and that commit's tree must carry a
+  # non-empty lib/index.js.
   verify-release:
     needs: [package-release]
     runs-on: ubuntu-latest

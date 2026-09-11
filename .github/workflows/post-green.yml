@@ -21,3 +21,73 @@ jobs:
     with:
       sha: ${{ inputs.sha }}
     secrets: inherit
+
+  # Appends the green commit's packaged commit to the `build` branch and moves
+  # the `latest` tag (release-pipeline.ts advance-build). Beside
+  # apply-settings, not behind it: a settings skip must not hold build back.
+  # No permissions key: the job inherits the caller's grant and pushes with
+  # GITHUB_TOKEN when that is contents: write, which suffices because chain
+  # commits carry no .github/workflows/ (the same fact update-release.yml's
+  # append relies on); with a read ceiling and no PAT it warns and skips, and
+  # the release hook publishes the release's chain commit and latest itself.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          # The script judges whether build's recorded sources lie on this
+          # commit's history; a shallow checkout cannot answer that.
+          fetch-depth: 0
+          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+      # A dry-run push asks origin for its receive-pack advertisement over
+      # the very channel the real push uses, which a token without write
+      # access is refused; nothing is created. The target is a ref that never
+      # exists, not build itself: HEAD is no descendant of build's tip, so a
+      # dry run against build would be rejected locally as a non-fast-forward
+      # whatever the token. git's refusal is printed as plain log lines inside
+      # a stop-commands fence keyed by a token minted for this run, never
+      # inside a workflow command: the runner decodes % and line breaks in a
+      # command's message and acts on any line whose first non-blank text is
+      # "::", and only the fence's own token resumes command processing, so
+      # remote-supplied text can neither forge a command nor swallow the
+      # static error that follows (awk, not sed: it terminates the last line
+      # even when git did not, so the closing fence is a line of its own).
+      - name: Check the token can push to build
+        id: token
+        env:
+          PAT_SET: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
+        run: |
+          if git push --dry-run --quiet origin HEAD:refs/dry-run/token-probe 2>probe.err; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$PAT_SET" = "true" ]; then
+            fence=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+            echo "::stop-commands::$fence"
+            echo "probe stderr:"
+            awk '{ print "  " $0 }' probe.err
+            echo "::$fence::"
+            echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above."
+            rm -f probe.err
+            exit 1
+          else
+            echo "::warning::this run's token cannot push (the caller grants contents: read); the build branch and the latest tag were not advanced here (the release hook advances them on each release)." \
+              "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) on this repository, to publish every green push to @latest."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+          rm -f probe.err
+      - uses: oven-sh/setup-bun@v2
+        if: steps.token.outputs.proceed == 'true'
+        with:
+          bun-version-file: .bun-version
+      - name: Build the bundle
+        if: steps.token.outputs.proceed == 'true'
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build:bundle
+      - name: Append this commit's packaged commit to build and point latest at the newest main source
+        if: steps.token.outputs.proceed == 'true'
+        env:
+          SOURCE_SHA: ${{ inputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts advance-build
