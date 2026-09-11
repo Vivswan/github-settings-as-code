@@ -302,7 +302,7 @@ export interface PlanContext<
  * itself with at least one drift line (see DriftFor), so "check reported
  * clean while apply mutated" is unrepresentable.
  */
-interface PlannedOpBase<D extends Justification = Justification> {
+export interface PlannedOpBase<D extends Justification = Justification> {
   /**
    * The drift lines this operation resolves, in the check-mode prose
    * ("labels[bug]: color d73a4a != live ffffff; apply will update it"), or
@@ -342,13 +342,13 @@ interface PlannedOpBase<D extends Justification = Justification> {
  * check-mode note beside whatever drift lines the operation does resolve. It occupies the drift slot
  * and is admitted only on an endpoint declaring `unverifiable: true` (DriftFor).
  */
-interface Unverifiable {
+export interface Unverifiable {
   readonly unverifiable: string;
   readonly lines: readonly string[];
 }
 
 /** What a planned operation offers check mode: its drift lines, or an unverifiable facet. */
-type Justification = readonly string[] | Unverifiable;
+export type Justification = readonly string[] | Unverifiable;
 
 /** The drift lines an operation resolves, whichever justification it carries. */
 export function driftOf(op: Pick<PlannedOpBase, "drift">): readonly string[] {
@@ -375,7 +375,7 @@ export type ToleratedOutcome =
  * `statuses` defaults to the endpoint's tolerable set; the non-empty tuple
  * may name only those, so an undeclared tolerance cannot compile.
  */
-interface Tolerance<E extends EndpointDecl> {
+export interface Tolerance<E extends EndpointDecl> {
   readonly statuses?: readonly [DeclaredErrorStatus<E>, ...DeclaredErrorStatus<E>[]];
   readonly outcome: (error: ApiError) => ToleratedOutcome;
 }
