@@ -5,7 +5,6 @@
  * places each under its own role.
  */
 
-import sodium from "libsodium-wrappers";
 import { z } from "zod";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
@@ -18,6 +17,7 @@ import {
 } from "../contract/module.js";
 import type { ExecTools, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
+import { decodeBase64, SEALED_BOX_PUBLIC_KEY_BYTES, sealForGithub } from "./sealed-box.js";
 
 /** One declared secret entry, as every family's settings shape spells it. */
 export interface SecretEntry {
@@ -155,21 +155,7 @@ export function rejectDuplicateSecretNames(
   );
 }
 
-/** A libsodium sealed box over an X25519 public key, base64 for the PUT body. */
-function sealedBox(plaintext: string, publicKey: Uint8Array): string {
-  return sodium.to_base64(
-    sodium.crypto_box_seal(sodium.from_string(plaintext), publicKey),
-    sodium.base64_variants.ORIGINAL,
-  );
-}
-
-/** Seal a resolved plaintext against a base64 key: the raw primitive, for the mock's crypto tests. */
-export async function sealSecretValue(plaintext: string, publicKeyB64: string): Promise<string> {
-  await sodium.ready;
-  return sealedBox(plaintext, sodium.from_base64(publicKeyB64, sodium.base64_variants.ORIGINAL));
-}
-
-/** A parsed sealing key; `seal` is synchronous because parseSealingKey awaited sodium.ready. */
+/** A parsed sealing key, ready to seal any number of values synchronously. */
 export interface SealingKey {
   readonly keyId: string;
   /** Seal one ALREADY-RESOLVED plaintext into the {encrypted_value, key_id} PUT body. */
@@ -177,17 +163,16 @@ export interface SealingKey {
 }
 
 /**
- * Parse a public-key response down to its X25519 key material, so a
- * malformed key fails here with the endpoint and scope named rather than as
- * a bare libsodium error inside a seal.
+ * Parse a public-key response down to a usable sealing key, so a malformed
+ * key fails here with the endpoint and scope named rather than as a bare
+ * primitive error inside a seal.
  */
-export async function parseSealingKey(
+export function parseSealingKey(
   section: SectionMeta,
   scope: Pick<SecretsScopeProse, "label">,
   endpoint: EndpointDecl,
   data: unknown,
-): Promise<SealingKey> {
-  await sodium.ready;
+): SealingKey {
   const advice = `Check the "api-version" input against the GitHub REST docs for this endpoint`;
   const where = `${section.key}: GET ${endpointPath(endpoint.route)} (the ${scope.label} sealing key)`;
   const body = (data ?? {}) as { key_id?: unknown; key?: unknown };
@@ -216,20 +201,20 @@ export async function parseSealingKey(
   }
   let keyBytes: Uint8Array;
   try {
-    keyBytes = sodium.from_base64(publicKey, sodium.base64_variants.ORIGINAL);
+    keyBytes = decodeBase64(publicKey);
   } catch {
     throw new Error(
       `${where} returned a key that is not valid base64, so no value can be sealed. ${advice}`,
     );
   }
-  if (keyBytes.length !== sodium.crypto_box_PUBLICKEYBYTES) {
+  if (keyBytes.length !== SEALED_BOX_PUBLIC_KEY_BYTES) {
     throw new Error(
-      `${where} returned a key that decodes to ${keyBytes.length} bytes where an X25519 public key has ${sodium.crypto_box_PUBLICKEYBYTES}, so no value can be sealed. ${advice}`,
+      `${where} returned a key that decodes to ${keyBytes.length} bytes where an X25519 public key has ${SEALED_BOX_PUBLIC_KEY_BYTES}, so no value can be sealed. ${advice}`,
     );
   }
   // Right-sized bytes can still be an unusable point; one probe seal is the exact test.
   try {
-    sealedBox("", keyBytes);
+    sealForGithub(keyBytes, "");
   } catch {
     throw new Error(
       `${where} returned a key that is not a usable X25519 public key, so no value can be sealed. ${advice}`,
@@ -237,7 +222,7 @@ export async function parseSealingKey(
   }
   return {
     keyId,
-    seal: (plaintext) => ({ encrypted_value: sealedBox(plaintext, keyBytes), key_id: keyId }),
+    seal: (plaintext) => ({ encrypted_value: sealForGithub(keyBytes, plaintext), key_id: keyId }),
   };
 }
 
@@ -308,7 +293,7 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
 
   if (entries.length > 0) {
-    const sealingKey = await parseSealingKey(
+    const sealingKey = parseSealingKey(
       section,
       scope,
       scope.publicKeyEndpoint,
