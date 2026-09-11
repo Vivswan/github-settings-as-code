@@ -1,0 +1,32 @@
+# The branch EXISTS live, unprotected; the token has Administration but not Contents.
+# The advisory branch-existence probe is denied.
+# A fine-grained token conceals that denial as a 404 "Not Found", a missing branch's status too.
+# Only GitHub's "Branch not found" body may flip the finding.
+# The section keeps the unprotected reading, protects the branch, and the re-run proof converges.
+name: branches-existing-branch-no-contents-apply-converges
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: false
+inputs:
+  mode: apply
+denial_style: fine_grained
+live_state:
+  branches: ["main"]
+  branch_protection: {}
+token_permissions:
+  administration: write
+  contents: none
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  mutations:
+    - "PUT /repos/{repo}/branches/main/protection"
+  summary_contains:
+    - 'applied protection to "main"'
+  summary_lacks:
+    - "the branch does not exist on the repo"
+  apply_idempotent: true

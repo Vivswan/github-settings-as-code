@@ -184,7 +184,10 @@ describe("branches", () => {
   });
 
   test("a missing branch is op-less drift: nothing can create it, so apply notes it instead of a PUT that 404s", async () => {
-    const api = new MockApi({}); // every GET 404s, the branch probe included
+    // The unrouted protection GET 404s; the probe answers GitHub's missing-branch body.
+    const api = new MockApi({
+      [PROBE]: { error: { status: 404, message: "Branch not found", body: "" } },
+    });
     const result = await plan(api, declared);
     expect(result).toEqual({
       ops: [],
@@ -195,18 +198,29 @@ describe("branches", () => {
     });
   });
 
-  test("an inconclusive branch probe (no Contents grant) falls back to the unprotected reading instead of failing", async () => {
-    const api = new MockApi({
-      [PROBE]: { error: { status: 403, message: "Forbidden", body: "" } },
-    });
-    const result = await plan(api, declared);
-    expect(result.drift).toEqual([]);
-    expect(result.ops.map((op) => op.drift)).toEqual([
-      [
-        "branches[main]: unprotected live but the settings file declares protection; apply will protect it",
-      ],
-    ]);
-  });
+  test.each([
+    ["a 403 denial", { status: 403, message: "Resource not accessible by personal access token" }],
+    [
+      "a concealed 404 denial (fine-grained token without Contents)",
+      { status: 404, message: "Not Found" },
+    ],
+  ])(
+    "an inconclusive branch probe, %s, falls back to the unprotected reading and plans the PUT",
+    async (_label, error) => {
+      const api = new MockApi({ [PROBE]: { error: { ...error, body: "" } } });
+      const result = await plan(api, declared);
+      expect(result.drift).toEqual([]);
+      expect(result.notes).toEqual([]);
+      expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+        [
+          "putProtection",
+          [
+            "branches[main]: unprotected live but the settings file declares protection; apply will protect it",
+          ],
+        ],
+      ]);
+    },
+  );
 
   test("duplicate branch names are rejected before any API call", async () => {
     const api = new MockApi({});

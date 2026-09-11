@@ -76,7 +76,7 @@ function scenarioDocs(): CorpusDoc[] {
   }
   // The corpus size is pinned exactly so a loader that silently drops a root,
   // a file, or a document kind cannot pass; a new scenario updates the number.
-  expect(docs.length).toBe(254);
+  expect(docs.length).toBe(256);
   return docs;
 }
 

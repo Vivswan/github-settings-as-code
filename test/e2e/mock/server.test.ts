@@ -769,8 +769,8 @@ describe("writes mutate state", () => {
     expect(list[0]?.default).toBe(false);
   });
 
-  test("a branch protection PUT stores the flattened GET shape; DELETE clears it", async () => {
-    const h = await start(scenario());
+  test("a branch protection PUT stores the flattened GET shape; DELETE clears it; a missing branch answers GitHub's 404", async () => {
+    const h = await start(scenario({ live_state: { branches: ["main"] } }));
     const branch = `/repos/${OWNER}/${REPO}/branches/main/protection`;
     await call(h, "PUT", branch, { body: { enforce_admins: true, restrictions: null } });
     const get = await json(await call(h, "GET", branch));
@@ -778,6 +778,11 @@ describe("writes mutate state", () => {
     await call(h, "DELETE", branch);
     const after = await call(h, "GET", branch);
     expect(after.status).toBe(404);
+    const missing = await call(h, "PUT", `/repos/${OWNER}/${REPO}/branches/gone/protection`, {
+      body: { enforce_admins: true, restrictions: null },
+    });
+    expect(missing.status).toBe(404);
+    expect(await json(missing)).toEqual({ message: "Branch not found" });
   });
 
   test("a label update renames the stored key", async () => {
