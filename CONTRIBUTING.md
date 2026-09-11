@@ -25,7 +25,7 @@ PR CI runs a diff-aware subset, scoped to the sections a pull request changed. T
 
 ## Releases
 
-The release leg is ci.yml calling Vivswan/repo-platform's fleet-release.yml via workflow_call, downstream of the `all-green` gate and of post-green.yml, so releases and release-PR refreshes only happen from a green main. release-please does version math, the changelog, the manifest and version pins, and the release PR; merging that PR has it cut the release as a draft with no tag.
+The release leg is ci.yml calling the fleet's release workflow, fleet-release.yml, via workflow_call, downstream of the `all-green` gate and of post-green.yml, so releases and release-PR refreshes only happen from a green main. release-please does version math, the changelog, the manifest and version pins, and the release PR; merging that PR has it cut the release as a draft with no tag.
 
 Every release ref a `uses:` pin can name from now on - the `vX.Y.Z` tags, the moving major, and the `latest` tag - points at a packaged commit on the `build` branch: the source tree without its workflows, plus the built bundle, its source named in a Source trailer (the tags cut before that branch existed, v2.0.0 and earlier, stay on main commits from when main committed the bundle). post-green.yml appends one for each green main commit when its token can push, and the repo-owned update-release.yml hook appends the release's when post-green could not.
 
