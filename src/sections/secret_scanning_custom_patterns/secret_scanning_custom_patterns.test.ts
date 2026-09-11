@@ -5,6 +5,7 @@ import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js"
 import { REPO } from "../../../test/sections/section-run.js";
 import { validateSettingsDoc } from "../../engine/orchestrate.js";
 import { silentIo } from "../../io.js";
+import { describeProblem } from "../../problem.js";
 import { type PlainData, planContext, type SectionPlan } from "../contract/plan.js";
 import { secretScanningPatternsSection } from "./index.js";
 import { secretScanningCustomPatternsMockHandlers } from "./mock.js";
@@ -273,7 +274,7 @@ describe("secret_scanning_custom_patterns", () => {
     for (const key of ["start_delimiter", "end_delimiter"] as const) {
       const doc = { secret_scanning_custom_patterns: [{ ...INTERNAL, [key]: "" }] };
       const invalid = validateSettingsDoc(doc, "test doc", new Set(), silentIo());
-      expect("error" in invalid ? invalid.error : "").toContain(
+      expect(invalid.match(() => "", describeProblem)).toContain(
         "cannot be cleared with an empty string",
       );
     }
@@ -347,8 +348,8 @@ describe("secret_scanning_custom_patterns closed surface", () => {
         new Set(),
         silentIo(),
       );
-      expect("error" in error, `a declared "${key}" must be rejected`).toBe(true);
-      const message = "error" in error ? error.error : "";
+      expect(error.isErr(), `a declared "${key}" must be rejected`).toBe(true);
+      const message = error.match(() => "", describeProblem);
       expect(message).toContain(`"${key}"`);
       expect(message).toContain("read-only");
     }

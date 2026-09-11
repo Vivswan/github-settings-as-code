@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { silentIo } from "../../src/io.js";
+import { describeProblem } from "../../src/problem.js";
 import {
   deliverIssueReport,
   ISSUE_TITLE,
@@ -500,7 +501,7 @@ describe("injectMarkerLabel", () => {
       expect(result.outcome).toBe(expected as typeof result.outcome);
       const verdict = validateSettingsDoc(result.settings, "injected doc", new Set(), silentIo());
       expect(
-        "error" in verdict ? verdict.error : null,
+        verdict.match(() => null, describeProblem),
         `outcome "${expected}" produced a document validation rejects`,
       ).toBeNull();
     }

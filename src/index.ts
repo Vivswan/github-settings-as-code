@@ -12,6 +12,7 @@ export {
   ARCHIVED_FILTERS,
   DEFAULT_DISCOVERY_FILTERS,
   type DiscoveryFilters,
+  type DiscoveryProblem,
   discoverRepos,
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
@@ -49,7 +50,14 @@ export {
   worstOf,
 } from "./engine/orchestrate.js";
 // The run flows
-export { concludeRun, failRun, MERGE_RESULT, type RunFlowConfig } from "./flows/deliver.js";
+export {
+  concludeMerge,
+  concludeRun,
+  type FinishedMerge,
+  failRun,
+  MERGE_RESULT,
+  type RunFlowConfig,
+} from "./flows/deliver.js";
 export { foldLayers, readLayerFiles } from "./flows/layers.js";
 export {
   applyRepository,
@@ -59,7 +67,7 @@ export {
   validateSettings,
 } from "./flows/library.js";
 export { type MergeConfig, runMerge } from "./flows/merge.js";
-export { DEFAULT_SETTINGS_FILE, type MultiConfig, quoteList, runMulti } from "./flows/multi.js";
+export { DEFAULT_SETTINGS_FILE, type MultiConfig, runMulti } from "./flows/multi.js";
 export {
   capturingIo,
   PRIVATE_REPOS_POLICIES,
@@ -71,7 +79,7 @@ export {
   toPublicView,
 } from "./flows/redact.js";
 export { parseSettingsDoc, readSettingsFile } from "./flows/settings-read.js";
-export { runSingle, type SingleConfig } from "./flows/single.js";
+export { runSingle, type SingleConfig, type SingleOutcome } from "./flows/single.js";
 // The client
 export {
   type ApiError,
@@ -98,6 +106,18 @@ export {
   prefixedIo,
   silentIo,
 } from "./io.js";
+// Problems
+export {
+  type CentralFileProblem,
+  describeProblem,
+  type LayerProblem,
+  type Problem,
+  type ProblemOf,
+  quoteList,
+  type SettingsFileRole,
+  type SettingsProblem,
+  type TopLevelShape,
+} from "./problem.js";
 // The private report
 export {
   type ArtifactUploader,

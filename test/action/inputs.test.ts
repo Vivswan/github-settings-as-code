@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { ok } from "neverthrow";
 import { INPUT_DECLS, parseConfig, type RunConfig } from "../../src/action/inputs.js";
+import type { Problem } from "../../src/problem.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 
 /**
@@ -47,38 +49,47 @@ function setMergeEnv(inputs: Record<string, string>): void {
   );
 }
 
-function rejection(): string {
-  const parsed = parseConfig();
-  if (!("error" in parsed)) {
-    throw new Error(`expected a rejection, got: ${JSON.stringify(parsed.config)}`);
+function rejection(): Problem {
+  return parseConfig().match(
+    (config) => {
+      throw new Error(`expected a rejection, got: ${JSON.stringify(config)}`);
+    },
+    (problem) => problem,
+  );
+}
+
+/** The parsed config of an engine mode; a merge config or a rejection fails the test. */
+function engineConfig(): Extract<RunConfig, { kind: "single" | "multi" }> {
+  const config = parseConfig()._unsafeUnwrap();
+  if (config.kind === "merge") {
+    throw new Error(`expected an engine config, got: ${JSON.stringify(config)}`);
   }
-  return parsed.error;
+  return config;
 }
 
 describe("required-sections x sections cross-validation", () => {
   test("rejects a required section excluded by the sections allowlist", () => {
     setEnv({ "required-sections": "labels", sections: "repository" });
-    expect(rejection()).toBe(
-      'the "required-sections" entry "labels" is excluded by the "sections" allowlist, so the run would pass without ever attempting it. Add it to the "sections" input, or remove it from "required-sections"',
-    );
+    expect(rejection()).toEqual({
+      code: "input-required-sections-excluded",
+      excluded: ["labels"],
+    });
   });
 
-  test("names every excluded required section at once", () => {
+  test("names every excluded required section at once, and only those", () => {
     setEnv({ "required-sections": "labels,milestones,repository", sections: "repository" });
-    const error = rejection();
-    expect(error).toContain('entries "labels", "milestones" are excluded');
-    expect(error).not.toContain('"repository"');
+    expect(rejection()).toEqual({
+      code: "input-required-sections-excluded",
+      excluded: ["labels", "milestones"],
+    });
   });
 
   test("accepts required sections inside the allowlist", () => {
     setEnv({ "required-sections": "labels", sections: "labels,repository" });
-    const parsed = parseConfig();
-    if ("error" in parsed || parsed.config.kind === "merge") {
-      throw new Error(`expected a single-repo config, got: ${JSON.stringify(parsed)}`);
-    }
     // Accepted AND carried into the config: a parse that silently dropped
     // either set would otherwise pass.
-    expect([parsed.config.requiredSections, parsed.config.onlySections]).toEqual([
+    const config = engineConfig();
+    expect([config.requiredSections, config.onlySections]).toEqual([
       new Set(["labels"]),
       new Set(["labels", "repository"]),
     ]);
@@ -86,47 +97,50 @@ describe("required-sections x sections cross-validation", () => {
 
   test("an empty sections input restricts nothing, so any required section passes", () => {
     setEnv({ "required-sections": "labels" });
-    const parsed = parseConfig();
-    if ("error" in parsed || parsed.config.kind === "merge") {
-      throw new Error(`expected a single-repo config, got: ${JSON.stringify(parsed)}`);
-    }
-    expect([parsed.config.requiredSections, parsed.config.onlySections]).toEqual([
+    const config = engineConfig();
+    expect([config.requiredSections, config.onlySections]).toEqual([
       new Set(["labels"]),
       new Set(),
     ]);
   });
 
-  test("unknown-name validation still wins over the cross-check", () => {
-    setEnv({ "required-sections": "nope", sections: "repository" });
-    expect(rejection()).toBe(
-      `unknown section "nope" in the "required-sections" input; it matches none of: ${SECTION_KEYS.join(", ")}. Fix the name in the workflow's input list`,
-    );
+  test("unknown-name validation still wins over the cross-check, per input", () => {
+    setEnv({ "required-sections": "nope", sections: "repository,typo" });
+    expect(rejection()).toEqual({
+      code: "input-unknown-sections",
+      unknown: [
+        { input: "required-sections", names: ["nope"] },
+        { input: "sections", names: ["typo"] },
+      ],
+      known: SECTION_KEYS,
+    });
   });
 });
 
 describe("the mode input", () => {
-  test("an unsupported mode is rejected naming every supported one", () => {
+  test("an unsupported mode is rejected carrying every supported one and the default", () => {
     setEnv({ mode: "dry-run" });
-    expect(rejection()).toBe(
-      'the "mode" input is "dry-run", which is not a supported mode. Set it to "apply" (default), "check", "merge"',
-    );
+    expect(rejection()).toEqual({
+      code: "input-unsupported-value",
+      input: "mode",
+      value: "dry-run",
+      noun: "mode",
+      allowed: ["apply", "check", "merge"],
+      fallback: "apply",
+    });
   });
 
   test.each([
-    ["layering", { layering: "replace" }, 'the "layering" input(s) only apply to mode: merge'],
-    [
-      "merged-file",
-      { "merged-file": "out.yml" },
-      'the "merged-file" input(s) only apply to mode: merge',
-    ],
+    ["layering", { layering: "replace" }, ["layering"]],
+    ["merged-file", { "merged-file": "out.yml" }, ["merged-file"]],
     [
       "both merge-only inputs",
       { layering: "merge", "merged-file": "out.yml" },
-      'the "merged-file", "layering" input(s) only apply to mode: merge, but this run is in check mode, so they would never be used',
+      ["merged-file", "layering"],
     ],
-  ] as const)("%s outside merge mode is rejected", (_case, inputs, fragment) => {
+  ] as const)("%s outside merge mode is rejected", (_case, inputs, named) => {
     setEnv({ mode: "check", ...inputs });
-    expect(rejection()).toContain(fragment);
+    expect(rejection()).toEqual({ code: "input-merge-only", inputs: named, mode: "check" });
   });
 
   const SEPARATOR_CASES = [
@@ -143,18 +157,13 @@ describe("the mode input", () => {
     ),
   )("%s mode rejects a settings-file with %s rather than repairing it", (mode, _case, value) => {
     setEnv({ mode, "settings-file": value });
-    expect(rejection()).toBe(
-      `the "settings-file" input is "${value}", which contains a list separator: ${mode} mode ` +
-        `reads exactly one settings file, and only mode: merge takes a newline- or ` +
-        `comma-separated list. Name one file, or set mode: merge to fold the list into one ` +
-        `document`,
-    );
+    expect(rejection()).toEqual({ code: "input-settings-file-is-list", value, mode });
   });
 
   test("a plain settings-file path is carried verbatim into the single-repo config", () => {
     setEnv({ "settings-file": "conf/only.yml" });
-    expect(parseConfig()).toEqual({
-      config: {
+    expect(parseConfig()).toEqual(
+      ok({
         token: "t",
         mode: "apply",
         onMissingPermission: "fail",
@@ -169,8 +178,13 @@ describe("the mode input", () => {
         kind: "single",
         repo: { owner: "o", name: "r", slug: "o/r" },
         settingsFile: "conf/only.yml",
-      },
-    });
+      }),
+    );
+  });
+
+  test("a repository that is not an owner/name slug is rejected with the value", () => {
+    setEnv({ repository: "not-a-slug" });
+    expect(rejection()).toEqual({ code: "input-repository-not-slug", value: "not-a-slug" });
   });
 });
 
@@ -185,74 +199,70 @@ describe("mode: merge", () => {
 
   test("parses without any token, carrying the ordered layers, the output path, and the layering", () => {
     setMergeEnv({ layering: "replace" });
-    expect(parseConfig()).toEqual({ config: { ...MERGE_CONFIG, layering: "replace" } });
+    expect(parseConfig()).toEqual(ok({ ...MERGE_CONFIG, layering: "replace" }));
   });
 
   test("the layering input defaults to merge and a comma list of layers works too", () => {
     setMergeEnv({ "settings-file": " fleet.yml , team.yml ,repo.yml" });
-    expect(parseConfig()).toEqual({
-      config: { ...MERGE_CONFIG, settingsFiles: ["fleet.yml", "team.yml", "repo.yml"] },
-    });
+    expect(parseConfig()).toEqual(
+      ok({ ...MERGE_CONFIG, settingsFiles: ["fleet.yml", "team.yml", "repo.yml"] }),
+    );
   });
 
   test("an empty layer list is rejected", () => {
     setMergeEnv({ "settings-file": "," });
-    expect(rejection()).toBe(
-      'the "settings-file" input is ",", which lists no file. In mode: merge it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file',
-    );
+    expect(rejection()).toEqual({ code: "input-settings-file-empty", value: "," });
   });
 
   test("a missing merged-file is rejected", () => {
     setMergeEnv({ "merged-file": "" });
-    expect(rejection()).toBe(
-      'mode: merge needs a "merged-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file',
-    );
+    expect(rejection()).toEqual({ code: "input-merged-file-missing" });
   });
 
   test("a merged-file beside the layers but not among them is accepted", () => {
     setMergeEnv({ "merged-file": "./merged.yml" });
-    expect(parseConfig()).toEqual({ config: { ...MERGE_CONFIG, mergedFile: "./merged.yml" } });
+    expect(parseConfig()).toEqual(ok({ ...MERGE_CONFIG, mergedFile: "./merged.yml" }));
   });
 
   test("an unsupported layering is rejected", () => {
     setMergeEnv({ layering: "union" });
-    expect(rejection()).toBe(
-      'the "layering" input is "union", which is not a supported layering. Set it to "merge" (default), "replace"',
-    );
+    expect(rejection()).toEqual({
+      code: "input-unsupported-value",
+      input: "layering",
+      value: "union",
+      noun: "layering",
+      allowed: ["merge", "replace"],
+      fallback: "merge",
+    });
   });
 
   test.each([
-    ["repository", { repository: "o/r" }, '"repository"'],
-    ["repos", { repos: "o/a" }, '"repos"'],
-    ["defaults-file", { "defaults-file": "defaults.yml" }, '"defaults-file"'],
-    ["required-sections", { "required-sections": "labels" }, '"required-sections"'],
-    ["a discovery filter", { forks: "exclude" }, '"forks"'],
-    ["private-report", { "private-report": "issue" }, '"private-report"'],
-    ["report-public-key", { "report-public-key": "age1x" }, '"report-public-key"'],
-    ["sections: the allowlist belongs on the apply step", { sections: "labels" }, '"sections"'],
-    ["on-missing-permission: warn", { "on-missing-permission": "warn" }, '"on-missing-permission"'],
-    ["a custom api-version", { "api-version": "2099-01-01" }, '"api-version"'],
-    ["private-repos: show", { "private-repos": "show" }, '"private-repos"'],
+    ["repository", { repository: "o/r" }, ["repository"]],
+    ["repos", { repos: "o/a" }, ["repos"]],
+    ["defaults-file", { "defaults-file": "defaults.yml" }, ["defaults-file"]],
+    ["required-sections", { "required-sections": "labels" }, ["required-sections"]],
+    ["a discovery filter", { forks: "exclude" }, ["forks"]],
+    ["private-report", { "private-report": "issue" }, ["private-report"]],
+    ["report-public-key", { "report-public-key": "age1x" }, ["report-public-key"]],
+    ["sections: the allowlist belongs on the apply step", { sections: "labels" }, ["sections"]],
+    ["on-missing-permission: warn", { "on-missing-permission": "warn" }, ["on-missing-permission"]],
+    ["a custom api-version", { "api-version": "2099-01-01" }, ["api-version"]],
+    ["private-repos: show", { "private-repos": "show" }, ["private-repos"]],
     [
       "several at once, every one named in declaration order",
       { repos: "o/a", "repos-dir": "repos", "private-report": "artifact" },
-      '"repos", "repos-dir", "private-report"',
+      ["repos", "repos-dir", "private-report"],
     ],
     [
       "a previously tolerated control beside an always-rejected one, both named",
       { repos: "o/a", sections: "labels", "api-version": "2099-01-01" },
-      '"sections", "api-version", "repos"',
+      ["sections", "api-version", "repos"],
     ],
   ] as const)(
     "%s is rejected: a merge has no repository, API, report, or allowlist",
     (_case, inputs, named) => {
       setMergeEnv(inputs);
-      expect(rejection()).toBe(
-        `the ${named} input(s) do not apply to mode: merge, which only folds the settings-file ` +
-          `layers into merged-file: it never targets a repository, calls the GitHub API, ` +
-          `delivers a report, or narrows the sections it writes. Remove the input(s), or move ` +
-          `them to the apply or check step that runs the merged document`,
-      );
+      expect(rejection()).toEqual({ code: "input-rejected-in-merge", inputs: named });
     },
   );
 
@@ -266,14 +276,14 @@ describe("mode: merge", () => {
         .map(([name, decl]) => [name, decl.default]),
     );
     setMergeEnv(defaults);
-    expect(parseConfig()).toEqual({ config: MERGE_CONFIG });
+    expect(parseConfig()).toEqual(ok(MERGE_CONFIG));
   });
 
   test("token is tolerated and never carried: the config has no field to read it from", () => {
     setMergeEnv({ token: "ghp_stepwide" });
     process.env.GITHUB_TOKEN = "ghp_envwide";
     const parsed = parseConfig();
-    expect(parsed).toEqual({ config: MERGE_CONFIG });
+    expect(parsed).toEqual(ok(MERGE_CONFIG));
     expect(JSON.stringify(parsed)).not.toContain("ghp_");
   });
 });

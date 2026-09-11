@@ -18,6 +18,7 @@ import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
 import { MERGE_RESULT } from "../../src/flows/deliver.js";
+import { describeProblem } from "../../src/problem.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -124,11 +125,13 @@ describe("parseConfig <-> input declarations", () => {
     }
     process.env.INPUT_TOKEN = "t";
     process.env.GITHUB_REPOSITORY = "o/r";
-    const parsed = parseConfig();
-    if ("error" in parsed) {
-      throw new Error(`expected a config, got: ${parsed.error}`);
-    }
-    expect(parsed.config).toEqual({
+    const config = parseConfig().match(
+      (parsed) => parsed,
+      (problem) => {
+        throw new Error(`expected a config, got: ${describeProblem(problem)}`);
+      },
+    );
+    expect(config).toEqual({
       kind: "single",
       token: "t",
       mode: INPUT_DECLS.mode.default,

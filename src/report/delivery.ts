@@ -10,6 +10,7 @@ import type { GithubClient } from "../github/api.js";
 import type { CollectedLine, Io } from "../io.js";
 import type { Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
+import { describeProblem } from "../problem.js";
 import { type ArtifactUploader, deliverArtifactReport } from "./artifact-report.js";
 import { composeReport } from "./composer.js";
 import {
@@ -32,10 +33,6 @@ import {
 export const PRIVATE_REPORT_CHANNELS = ["none", "issue", "issue-on-failure", "artifact"] as const;
 
 export type PrivateReportChannel = (typeof PRIVATE_REPORT_CHANNELS)[number];
-
-/** The `artifact` channel cannot open without an upload port; the message names the fix. */
-export const ARTIFACT_NEEDS_UPLOADER =
-  "private-report: artifact needs an artifact uploader, and none was supplied: the action supplies its own; a library caller passes one as the uploader argument, or picks another private-report channel";
 
 /** The channels that deliver through the target repo's report issue. */
 export type IssueChannel = Extract<PrivateReportChannel, "issue" | "issue-on-failure">;
@@ -151,7 +148,8 @@ export interface ReportChannel {
  * The run's report channel from the `private-report` input, null for `none`.
  * Issue channels post per target as it closes; the artifact channel uploads ONE
  * encrypted document on flush through `uploader`, which the flows check for
- * before any API work (missingUploaderProblem); the throw here is the backstop.
+ * before any API work (requireUploader); the throw here is the backstop for a
+ * caller that skipped that check, an invariant violation and not a run outcome.
  */
 export function openReportChannel(
   api: GithubClient,
@@ -170,7 +168,7 @@ export function openReportChannel(
       return issueChannel(api, meta, "on-failure", io);
     case "artifact":
       if (uploader === undefined) {
-        throw new Error(ARTIFACT_NEEDS_UPLOADER);
+        throw new Error(describeProblem({ code: "artifact-uploader-missing" }));
       }
       return artifactChannel(meta, reportPublicKey, io, uploader);
   }

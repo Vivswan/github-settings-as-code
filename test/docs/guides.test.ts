@@ -13,12 +13,14 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 import { DecodingMode, decodeHTML } from "entities";
+import { ok } from "neverthrow";
 import { parse as parseYaml } from "yaml";
 import { MERGE_REJECTED_INPUTS } from "../../src/action/inputs.js";
 import { type Layer, mergeLayers, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { foldLayers } from "../../src/flows/layers.js";
 import { silentIo } from "../../src/io.js";
+import { describeProblem } from "../../src/problem.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
 import { SECTIONS } from "../../src/sections/registry.js";
@@ -718,10 +720,9 @@ describe("docs/ guide pages", () => {
       expect(layers).toHaveLength(count);
       const results = fencedBlocks(section, "yaml settings").map((block) => parseYaml(block));
       expect(results).toHaveLength(1);
-      expect(mergeLayers(layers, { layering: "merge" })).toEqual({
-        settings: results[0],
-        notices,
-      });
+      expect(mergeLayers(layers, { layering: "merge" })).toEqual(
+        ok({ settings: results[0], notices }),
+      );
     },
   );
 
@@ -774,13 +775,17 @@ describe("docs/ guide pages", () => {
             ? malformedSectionEntries(layerName, row.quoted)
             : `layer "${layerName}": ${row.quoted}`;
         const folded = foldLayers([{ name: layerName, doc }], "merged", "merge", silentIo());
-        expect("error" in folded ? folded.error : null, `layer ${input}`).toBe(expected);
+        expect(
+          folded.match(() => null, describeProblem),
+          `layer ${input}`,
+        ).toBe(expected);
         if (row.gate === "validation") {
           // "with the same messages a standalone file gets"
           const standalone = validateSettingsDoc(doc, layerName, new Set(), silentIo());
-          expect("error" in standalone ? standalone.error : null, `standalone ${input}`).toBe(
-            expected,
-          );
+          expect(
+            standalone.match(() => null, describeProblem),
+            `standalone ${input}`,
+          ).toBe(expected);
         }
       }
     });
@@ -796,11 +801,12 @@ describe("docs/ guide pages", () => {
       new Set(),
       silentIo(),
     );
-    if (!("error" in result)) {
+    if (result.isOk()) {
       throw new Error("the validator accepted the v2 wrapper key");
     }
-    expect(result.error).toContain('"undeclared" was renamed to "_undeclared"');
-    expect(fencedBlocks(guide, "text").map((block) => block.trim())).toContain(result.error);
+    const message = describeProblem(result.error);
+    expect(message).toContain('"undeclared" was renamed to "_undeclared"');
+    expect(fencedBlocks(guide, "text").map((block) => block.trim())).toContain(message);
   });
 
   test("the troubleshooting guide quotes the stale-version hint verbatim", () => {

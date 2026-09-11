@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "neverthrow";
 import { stringify as stringifyYaml } from "yaml";
 import {
   applyRepository,
   checkRepository,
   collectingIo,
+  describeProblem,
   parseRepoSlug,
   renderMergedYaml,
   type ValidatedSettings,
@@ -11,25 +13,24 @@ import {
 } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
 
-const repo = parseRepoSlug("o/r") as NonNullable<ReturnType<typeof parseRepoSlug>>;
+const repo = parseRepoSlug("o/r")._unsafeUnwrap();
 
 /** The brand is minted only by validation, so the tests' documents pass through it. */
 function branded(doc: unknown): ValidatedSettings {
-  const validated = validateSettings(doc);
-  if (!validated.ok) {
-    throw new Error(validated.error);
-  }
-  return validated.settings;
+  return validateSettings(doc).match(
+    (validated) => validated.settings,
+    (problem) => {
+      throw new Error(describeProblem(problem));
+    },
+  );
 }
 const settings = branded({ repository: { has_wiki: false } });
 
 describe("validateSettings", () => {
   test("a valid document comes back branded with no warnings", () => {
-    expect(validateSettings({ repository: { has_wiki: false } })).toEqual({
-      ok: true,
-      settings,
-      warnings: [],
-    });
+    expect(validateSettings({ repository: { has_wiki: false } })).toEqual(
+      ok({ settings, warnings: [] }),
+    );
   });
 
   test("an unknown key outside the sections allowlist is a returned warning, not a printed one", () => {
@@ -38,21 +39,20 @@ describe("validateSettings", () => {
         { repository: { has_wiki: false }, typo: 1 },
         { source: "fleet.yml", sections: new Set(["repository"]) },
       ),
-    ).toEqual({
-      ok: true,
-      settings,
-      warnings: [
-        'ignoring unknown top-level section(s) outside the "sections" allowlist: typo. Upgrade the action to a version that knows them, or remove them from fleet.yml',
-      ],
-    });
+    ).toEqual(
+      ok({
+        settings,
+        warnings: [
+          'ignoring unknown top-level section(s) outside the "sections" allowlist: typo. Upgrade the action to a version that knows them, or remove them from fleet.yml',
+        ],
+      }),
+    );
   });
 
-  test("an invalid document names the default source in its error", () => {
-    expect(validateSettings([1])).toEqual({
-      ok: false,
-      error:
-        'the settings document must be a YAML mapping of section names to settings, but its top level parsed as a list. Rewrite the top level as "section: ..." keys',
-    });
+  test("an invalid document comes back as its problem, naming the default source", () => {
+    expect(validateSettings([1])).toEqual(
+      err({ code: "settings-not-mapping", source: "the settings document", shape: "list" }),
+    );
   });
 });
 

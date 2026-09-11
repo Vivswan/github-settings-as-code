@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
+import { err, ok } from "neverthrow";
 import {
   ARTIFACT_FILE,
   ARTIFACT_NAME,
@@ -45,7 +46,7 @@ describe("encryptReport", () => {
 describe("parseRecipient", () => {
   test("accepts a generated age recipient", async () => {
     const { recipient } = await testKeypair();
-    expect(parseRecipient(recipient)).toEqual({ ok: true });
+    expect(parseRecipient(recipient)).toEqual(ok());
   });
 
   test.each([
@@ -54,8 +55,9 @@ describe("parseRecipient", () => {
     "age1shortandinvalid", // gitleaks:allow
     "AGE-SECRET-KEY-1NOTPUBLIC",
   ])("rejects a malformed recipient: %j", (recipient) => {
-    const result = parseRecipient(recipient);
-    expect(result.ok).toBe(false);
+    expect(parseRecipient(recipient)).toEqual(
+      err({ code: "age-recipient-invalid", reason: expect.any(String) }),
+    );
   });
 });
 

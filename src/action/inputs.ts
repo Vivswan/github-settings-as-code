@@ -1,11 +1,12 @@
 /**
  * GitHub Actions input reading and validation. parseConfig() reads every
- * input in a stable order, validates it (each error names the input and
+ * input in a stable order, validates it (each problem names the input and
  * the fix), and returns the typed RunConfig run() executes - so the
  * execution code never touches raw inputs.
  */
 
 import * as core from "@actions/core";
+import { err, ok, type Result, safeTry } from "neverthrow";
 import {
   AFFILIATIONS,
   ARCHIVED_FILTERS,
@@ -22,9 +23,9 @@ import {
   PRIVATE_REPOS_POLICIES,
   type PrivateReportChannel,
   type PrivateReposPolicy,
+  type Problem,
   parseRecipient,
   parseRepoSlug,
-  quoteList,
   type RunFlowConfig,
   SECTION_KEYS,
   type SectionKey,
@@ -82,36 +83,21 @@ export const INPUT_DECLS = {
   },
   "settings-file": {
     description:
-      "Path to the settings YAML file: exactly one in apply and check. In mode: merge, the " +
-      "ordered list of settings files to fold instead, newline- or comma-separated, lowest " +
-      "layer first. Newlines and commas are list separators in every mode, so a settings-file " +
-      "path can never contain a comma. Single-repo and merge modes only; multi-repo targets " +
-      "read repos-dir files or each repository's own .github/settings.yml, so overriding it " +
-      "alongside repos or repos-dir fails the run.",
+      "Path to the settings YAML file: exactly one in apply and check. In mode: merge, the ordered list of settings files to fold instead, newline- or comma-separated, lowest layer first. Newlines and commas are list separators in every mode, so a settings-file path can never contain a comma. Single-repo and merge modes only; multi-repo targets read repos-dir files or each repository's own .github/settings.yml, so overriding it alongside repos or repos-dir fails the run.",
     default: DEFAULT_SETTINGS_FILE,
     summary:
       "Settings file path (single-repo mode); in `mode: merge`, the ordered list of layers to fold, low to high",
   },
   mode: {
     description:
-      "apply (mutate), check (report drift, exit 1 on any), or merge (fold the settings-file " +
-      "layers into one document written to merged-file, with no token and no GitHub API call; " +
-      "merge reads only settings-file, merged-file, and layering, ignores token, and rejects " +
-      "every other input set to a non-default value, since each controls an apply or check " +
-      "run). check makes no settings changes, though a private report may still be delivered.",
+      "apply (mutate), check (report drift, exit 1 on any), or merge (fold the settings-file layers into one document written to merged-file, with no token and no GitHub API call; merge reads only settings-file, merged-file, and layering, ignores token, and rejects every other input set to a non-default value, since each controls an apply or check run). check makes no settings changes, though a private report may still be delivered.",
     default: "apply",
     summary:
       "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `merge` folds the settings-file layers into merged-file without touching GitHub",
   },
   "merged-file": {
     description:
-      "mode: merge only, and required there: the path the merged settings document is written " +
-      "to (parent directories are created). The file holds exactly what apply would run: every " +
-      "section validated, each section that takes an undeclared policy in its policy-wrapper " +
-      "form with the policy made explicit, the other sections in their own shape, and private " +
-      "underscore keys and the _layering directives dropped. Feed it to a later apply or check " +
-      "step as its settings-file. Must not name one of the settings-file layers (the merge " +
-      "would overwrite it). Fails when set in apply or check.",
+      "mode: merge only, and required there: the path the merged settings document is written to (parent directories are created). The file holds exactly what apply would run: every section validated, each section that takes an undeclared policy in its policy-wrapper form with the policy made explicit, the other sections in their own shape, and private underscore keys and the _layering directives dropped. Feed it to a later apply or check step as its settings-file. Must not name one of the settings-file layers (the merge would overwrite it). Fails when set in apply or check.",
     default: "",
     summary:
       "`mode: merge` only (required there): where the merged document is written, exactly what `apply` would run",
@@ -176,11 +162,7 @@ export const INPUT_DECLS = {
   },
   layering: {
     description:
-      "mode: merge only: merge (default) or replace, the run-wide default for how the keyed " +
-      "list sections (labels, rulesets) combine with the layers below them; a layer's own " +
-      "_layering directive, at its top level or on a section's {entries} wrapper, overrides it " +
-      "per file or per section. Every other list is replaced by the higher layer's. Fails when " +
-      "set in apply or check.",
+      "mode: merge only: merge (default) or replace, the run-wide default for how the keyed list sections (labels, rulesets) combine with the layers below them; a layer's own _layering directive, at its top level or on a section's {entries} wrapper, overrides it per file or per section. Every other list is replaced by the higher layer's. Fails when set in apply or check.",
     default: "",
     summary:
       "`mode: merge` only: `merge` unions the keyed list sections (labels, rulesets) by key across layers, `replace` lets the higher layer's list win; a layer's `_layering` overrides it",
@@ -321,22 +303,20 @@ type _UnlistedFilter = MustBeNever<Exclude<keyof DiscoveryFilters, FilterInput>>
 
 /**
  * Read an enum-valued input against the allowed list its type derives
- * from, so the type, the check, and the error message cannot drift apart.
+ * from, so the type, the check, and the problem's list cannot drift apart.
  */
 function readEnum<T extends string>(
   name: InputName,
   allowed: readonly T[],
   fallback: T,
   noun: string,
-): T | { error: string } {
+): Result<T, Problem> {
   const value = input(name) || fallback;
-  if (!(allowed as readonly string[]).includes(value)) {
-    const values = allowed.map((v) => (v === fallback ? `"${v}" (default)` : `"${v}"`));
-    return {
-      error: `the "${name}" input is "${value}", which is not a supported ${noun}. Set it to ${values.join(", ")}`,
-    };
+  const match = allowed.find((candidate) => candidate === value);
+  if (match === undefined) {
+    return err({ code: "input-unsupported-value", input: name, value, noun, allowed, fallback });
   }
-  return value as T;
+  return ok(match);
 }
 
 /** What separates the entries of a list input; a single path can never contain one. */
@@ -369,36 +349,28 @@ const MERGE_ONLY_INPUTS = ["merged-file", "layering"] as const satisfies readonl
  * unknown name in each is reported at once, against its own input name, and
  * a required section the allowlist excludes is rejected.
  */
-function readSectionSets():
-  | { requiredSections: Set<SectionKey>; onlySections: Set<SectionKey> }
-  | { error: string } {
-  const readSectionNames = (name: "required-sections" | "sections"): Set<string> =>
-    new Set(splitList(input(name)));
-  const requiredNames = readSectionNames("required-sections");
-  const onlyNames = readSectionNames("sections");
+function readSectionSets(): Result<
+  { requiredSections: Set<SectionKey>; onlySections: Set<SectionKey> },
+  Problem
+> {
+  const sectionInputs = ["required-sections", "sections"] as const;
+  const names = sectionInputs.map((name) => ({ input: name, names: splitList(input(name)) }));
   const knownSections = new Set<string>(SECTION_KEYS);
-  const unknownIn = (names: Set<string>, inputName: string): string | null => {
-    const unknown = [...names].filter((name) => !knownSections.has(name));
-    if (unknown.length === 0) {
-      return null;
-    }
-    const quoted = unknown.map((name) => `"${name}"`).join(", ");
-    return unknown.length === 1
-      ? `unknown section ${quoted} in the "${inputName}" input; it matches none of: ${SECTION_KEYS.join(", ")}. Fix the name in the workflow's input list`
-      : `unknown sections ${quoted} in the "${inputName}" input; each matches none of: ${SECTION_KEYS.join(", ")}. Fix the names in the workflow's input list`;
-  };
-  const unknownSections = [
-    unknownIn(requiredNames, "required-sections"),
-    unknownIn(onlyNames, "sections"),
-  ].filter((problem): problem is string => problem !== null);
-  if (unknownSections.length > 0) {
-    return { error: unknownSections.join("; ") };
+  const unknown = names
+    .map(({ input: name, names: listed }) => ({
+      input: name,
+      names: [...new Set(listed)].filter((entry) => !knownSections.has(entry)),
+    }))
+    .filter((entry) => entry.names.length > 0);
+  if (unknown.length > 0) {
+    return err({ code: "input-unknown-sections", unknown, known: SECTION_KEYS });
   }
   // Past the rejection above every name is a known key, so the narrowed sets
   // are honest - the guard is the proof, not a cast.
   const isSectionKey = (name: string): name is SectionKey => knownSections.has(name);
-  const requiredSections = new Set([...requiredNames].filter(isSectionKey));
-  const onlySections = new Set([...onlyNames].filter(isSectionKey));
+  const [required = [], only = []] = names.map((entry) => entry.names.filter(isSectionKey));
+  const requiredSections = new Set(required);
+  const onlySections = new Set(only);
   // required-sections is a proof obligation ("this section must not be
   // skipped"), but a `sections` allowlist EXCLUDES sections from running at
   // all - the engine reports them "excluded" without attempting them - so a
@@ -407,19 +379,10 @@ function readSectionSets():
   if (onlySections.size > 0) {
     const excluded = [...requiredSections].filter((name) => !onlySections.has(name));
     if (excluded.length > 0) {
-      const quoted = quoteList(excluded);
-      const [noun, pronoun] =
-        excluded.length === 1 ? (["entry", "it"] as const) : (["entries", "them"] as const);
-      return {
-        error:
-          `the "required-sections" ${noun} ${quoted} ${excluded.length === 1 ? "is" : "are"} ` +
-          `excluded by the "sections" allowlist, so the run would pass without ever attempting ` +
-          `${pronoun}. Add ${pronoun} to the "sections" input, or remove ${pronoun} from ` +
-          `"required-sections"`,
-      };
+      return err({ code: "input-required-sections-excluded", excluded });
     }
   }
-  return { requiredSections, onlySections };
+  return ok({ requiredSections, onlySections });
 }
 
 /**
@@ -429,33 +392,19 @@ function readSectionSets():
  * (a key set for `none`/`issue` would silently do nothing). A supplied key is
  * validated through the age library at parse time, so a malformed recipient
  * fails the run before any API work rather than at upload. Returns the trimmed
- * key (empty for the non-artifact channels) or a loud error.
+ * key (empty for the non-artifact channels) or the problem.
  */
-function resolveReportPublicKey(channel: PrivateReportChannel): string | { error: string } {
+function resolveReportPublicKey(channel: PrivateReportChannel): Result<string, Problem> {
   const key = input("report-public-key");
   if (channel !== "artifact") {
-    if (key) {
-      return {
-        error: `the "report-public-key" input only applies to private-report: artifact, but the channel is "${channel}", so the key would never be used. Remove report-public-key, or set private-report: artifact`,
-      };
-    }
-    return "";
+    return key ? err({ code: "input-report-key-unused", channel }) : ok("");
   }
   if (!key) {
-    return {
-      error:
-        'private-report: artifact needs a "report-public-key" input: the age recipient every ' +
-        'report is encrypted to. Generate a keypair with "age-keygen -o key.txt", keep key.txt ' +
-        'secret, and set report-public-key to the printed "age1..." recipient (safe to commit)',
-    };
+    return err({ code: "input-report-key-missing" });
   }
-  const parsed = parseRecipient(key);
-  if (!parsed.ok) {
-    return {
-      error: `the "report-public-key" input is not a valid age recipient: ${parsed.error}. It must be an "age1..." public key from "age-keygen" (the recipient line, not the AGE-SECRET-KEY identity)`,
-    };
-  }
-  return key;
+  return parseRecipient(key)
+    .map(() => key)
+    .mapErr((invalid) => ({ code: "input-report-key-invalid", reason: invalid.reason }));
 }
 
 /**
@@ -501,208 +450,158 @@ export const MERGE_REJECTED_INPUTS: readonly InputName[] = (
 ).filter((name) => !(MERGE_INPUTS as readonly string[]).includes(name));
 
 /** Read and validate the mode: merge inputs; the first problem wins. */
-function parseMergeConfig(): { config: Extract<RunConfig, { kind: "merge" }> } | { error: string } {
-  const rejected = MERGE_REJECTED_INPUTS.filter((name) => {
-    const value = input(name);
-    return value !== "" && value !== INPUT_DECLS[name].default;
+function parseMergeConfig(): Result<Extract<RunConfig, { kind: "merge" }>, Problem> {
+  return safeTry(function* () {
+    const rejected = MERGE_REJECTED_INPUTS.filter((name) => {
+      const value = input(name);
+      return value !== "" && value !== INPUT_DECLS[name].default;
+    });
+    if (rejected.length > 0) {
+      return err({ code: "input-rejected-in-merge", inputs: rejected });
+    }
+    const mergedFile = input("merged-file");
+    if (!mergedFile) {
+      return err({ code: "input-merged-file-missing" });
+    }
+    const layering = yield* readEnum("layering", LAYERINGS, "merge", "layering");
+    const settingsFiles = splitList(inputOrDefault("settings-file"));
+    if (settingsFiles.length === 0) {
+      return err({ code: "input-settings-file-empty", value: inputOrDefault("settings-file") });
+    }
+    return ok({ kind: "merge", settingsFiles, mergedFile, layering });
   });
-  if (rejected.length > 0) {
-    return {
-      error:
-        `the ${quoteList(rejected)} input(s) do not apply to mode: merge, which only folds the ` +
-        `settings-file layers into merged-file: it never targets a repository, calls the GitHub ` +
-        `API, delivers a report, or narrows the sections it writes. Remove the input(s), or move ` +
-        `them to the apply or check step that runs the merged document`,
-    };
-  }
-  const mergedFile = input("merged-file");
-  if (!mergedFile) {
-    return {
-      error:
-        'mode: merge needs a "merged-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file',
-    };
-  }
-  const layering = readEnum("layering", LAYERINGS, "merge", "layering");
-  if (typeof layering !== "string") {
-    return { error: layering.error };
-  }
-  const settingsFiles = splitList(inputOrDefault("settings-file"));
-  if (settingsFiles.length === 0) {
-    return {
-      error: `the "settings-file" input is "${inputOrDefault("settings-file")}", which lists no file. In mode: merge it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file`,
-    };
-  }
-  return { config: { kind: "merge", settingsFiles, mergedFile, layering } };
 }
 
 /** Read and validate every input; the first problem wins. */
-export function parseConfig(): { config: RunConfig } | { error: string } {
-  // The mode decides which inputs exist at all, so it is read before any of
-  // them: a merge never needs the token the engine modes require first.
-  const mode = readEnum("mode", MODES, INPUT_DECLS.mode.default, "mode");
-  if (typeof mode !== "string") {
-    return { error: mode.error };
-  }
-  if (mode === "merge") {
-    return parseMergeConfig();
-  }
-  const mergeOnly = MERGE_ONLY_INPUTS.filter((name) => input(name) !== "");
-  if (mergeOnly.length > 0) {
-    return {
-      error: `the ${quoteList(mergeOnly)} input(s) only apply to mode: merge, but this run is in ${mode} mode, so ${mergeOnly.length === 1 ? "it" : "they"} would never be used. Remove the input(s), or set mode: merge to fold settings files`,
+export function parseConfig(): Result<RunConfig, Problem> {
+  return safeTry(function* () {
+    // The mode decides which inputs exist at all, so it is read before any of
+    // them: a merge never needs the token the engine modes require first.
+    const mode = yield* readEnum("mode", MODES, INPUT_DECLS.mode.default, "mode");
+    if (mode === "merge") {
+      return parseMergeConfig();
+    }
+    const mergeOnly = MERGE_ONLY_INPUTS.filter((name) => input(name) !== "");
+    if (mergeOnly.length > 0) {
+      return err({ code: "input-merge-only", inputs: mergeOnly, mode });
+    }
+    const token = input("token") || process.env.GITHUB_TOKEN || "";
+    if (!token) {
+      return err({ code: "input-token-missing" });
+    }
+    // The workflow's own repository, read once and reused for the self slug, the
+    // run URL, the central-mode admin owner, and the single-repo fallback target.
+    const githubRepository = process.env.GITHUB_REPOSITORY ?? "";
+    const onMissingPermission = yield* readEnum(
+      "on-missing-permission",
+      ["fail", "warn"] as const,
+      INPUT_DECLS["on-missing-permission"].default,
+      "policy",
+    );
+    const { requiredSections, onlySections } = yield* readSectionSets();
+    const apiVersion = inputOrDefault("api-version");
+    const privateRepos = yield* readEnum(
+      "private-repos",
+      PRIVATE_REPOS_POLICIES,
+      INPUT_DECLS["private-repos"].default,
+      "private-repository policy",
+    );
+    const privateReport = yield* readEnum(
+      "private-report",
+      PRIVATE_REPORT_CHANNELS,
+      INPUT_DECLS["private-report"].default,
+      "private-report channel",
+    );
+    // A report channel only ever runs for a REDACTED target, so combining it with
+    // private-repos: show (which redacts nothing) would silently deliver no
+    // report - a silent no-op violates the loud-failure promise, so reject it.
+    if (privateReport !== "none" && privateRepos === "show") {
+      return err({ code: "input-report-without-redaction" });
+    }
+    const reportPublicKey = yield* resolveReportPublicKey(privateReport);
+    const serverUrl = process.env.GITHUB_SERVER_URL ?? "";
+    const runId = process.env.GITHUB_RUN_ID ?? "";
+    const runUrl =
+      serverUrl && githubRepository && runId
+        ? `${serverUrl}/${githubRepository}/actions/runs/${runId}`
+        : "";
+    const common: CommonConfig = {
+      token,
+      mode,
+      onMissingPermission,
+      requiredSections,
+      onlySections,
+      apiVersion,
+      privateRepos,
+      privateReport,
+      reportPublicKey,
+      selfSlug: githubRepository,
+      runUrl,
     };
-  }
-  const token = input("token") || process.env.GITHUB_TOKEN || "";
-  if (!token) {
-    return {
-      error:
-        'cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
+
+    const discoveryFiltersSet = FILTER_INPUTS.filter((name) => input(name) !== "");
+    const list = (name: FilterInput): string[] => splitList(input(name));
+    const visibility = yield* readEnum(
+      "visibility",
+      VISIBILITY_FILTERS,
+      DEFAULT_DISCOVERY_FILTERS.visibility,
+      "discovery filter",
+    );
+    const archived = yield* readEnum(
+      "archived",
+      ARCHIVED_FILTERS,
+      DEFAULT_DISCOVERY_FILTERS.archived,
+      "archived-repository policy",
+    );
+    const forks = yield* readEnum(
+      "forks",
+      FORKS_FILTERS,
+      DEFAULT_DISCOVERY_FILTERS.forks,
+      "fork policy",
+    );
+    const affiliation = [...new Set(list("affiliation"))];
+    const unsupported = affiliation.find(
+      (entry) => !(AFFILIATIONS as readonly string[]).includes(entry),
+    );
+    if (unsupported !== undefined) {
+      return err({
+        code: "input-affiliation-unsupported",
+        entry: unsupported,
+        allowed: AFFILIATIONS,
+      });
+    }
+    const exclude = list("exclude");
+    const unmatchable = exclude.find((pattern) => {
+      const parts = pattern.split("/");
+      return parts.length > 2 || (parts.length === 2 && (!parts[0] || !parts[1]));
+    });
+    if (unmatchable !== undefined) {
+      return err({ code: "input-exclude-pattern-invalid", pattern: unmatchable });
+    }
+    const discoveryFilters: DiscoveryFilters = {
+      visibility,
+      archived,
+      forks,
+      affiliation: affiliation.length > 0 ? affiliation : DEFAULT_DISCOVERY_FILTERS.affiliation,
+      topics: list("topics").map((topic) => topic.toLowerCase()),
+      exclude,
     };
-  }
-  // The workflow's own repository, read once and reused for the self slug, the
-  // run URL, the central-mode admin owner, and the single-repo fallback target.
-  const githubRepository = process.env.GITHUB_REPOSITORY ?? "";
-  const onMissingPermission = readEnum(
-    "on-missing-permission",
-    ["fail", "warn"] as const,
-    INPUT_DECLS["on-missing-permission"].default,
-    "policy",
-  );
-  if (typeof onMissingPermission !== "string") {
-    return { error: onMissingPermission.error };
-  }
-  const sets = readSectionSets();
-  if ("error" in sets) {
-    return { error: sets.error };
-  }
-  const { requiredSections, onlySections } = sets;
-  const apiVersion = inputOrDefault("api-version");
-  const privateRepos = readEnum(
-    "private-repos",
-    PRIVATE_REPOS_POLICIES,
-    INPUT_DECLS["private-repos"].default,
-    "private-repository policy",
-  );
-  if (typeof privateRepos !== "string") {
-    return { error: privateRepos.error };
-  }
-  const privateReport = readEnum(
-    "private-report",
-    PRIVATE_REPORT_CHANNELS,
-    INPUT_DECLS["private-report"].default,
-    "private-report channel",
-  );
-  if (typeof privateReport !== "string") {
-    return { error: privateReport.error };
-  }
-  // A report channel only ever runs for a REDACTED target, so combining it with
-  // private-repos: show (which redacts nothing) would silently deliver no
-  // report - a silent no-op violates the loud-failure promise, so reject it.
-  if (privateReport !== "none" && privateRepos === "show") {
-    return {
-      error:
-        'the "private-report" input delivers reports only for redacted targets, but "private-repos" is "show", so nothing is redacted and no report would ever be sent. Set private-repos: redact, or set private-report: none',
-    };
-  }
-  const reportPublicKey = resolveReportPublicKey(privateReport);
-  if (typeof reportPublicKey !== "string") {
-    return { error: reportPublicKey.error };
-  }
-  const serverUrl = process.env.GITHUB_SERVER_URL ?? "";
-  const runId = process.env.GITHUB_RUN_ID ?? "";
-  const runUrl =
-    serverUrl && githubRepository && runId
-      ? `${serverUrl}/${githubRepository}/actions/runs/${runId}`
-      : "";
-  const common: CommonConfig = {
-    token,
-    mode,
-    onMissingPermission,
-    requiredSections,
-    onlySections,
-    apiVersion,
-    privateRepos,
-    privateReport,
-    reportPublicKey,
-    selfSlug: githubRepository,
-    runUrl,
-  };
 
-  const discoveryFiltersSet = FILTER_INPUTS.filter((name) => input(name) !== "");
-  const list = (name: FilterInput): string[] => splitList(input(name));
-  const visibility = readEnum(
-    "visibility",
-    VISIBILITY_FILTERS,
-    DEFAULT_DISCOVERY_FILTERS.visibility,
-    "discovery filter",
-  );
-  if (typeof visibility !== "string") {
-    return { error: visibility.error };
-  }
-  const archived = readEnum(
-    "archived",
-    ARCHIVED_FILTERS,
-    DEFAULT_DISCOVERY_FILTERS.archived,
-    "archived-repository policy",
-  );
-  if (typeof archived !== "string") {
-    return { error: archived.error };
-  }
-  const forks = readEnum("forks", FORKS_FILTERS, DEFAULT_DISCOVERY_FILTERS.forks, "fork policy");
-  if (typeof forks !== "string") {
-    return { error: forks.error };
-  }
-  const affiliation = [...new Set(list("affiliation"))];
-  for (const entry of affiliation) {
-    if (!(AFFILIATIONS as readonly string[]).includes(entry)) {
-      return {
-        error: `the "affiliation" input entry "${entry}" is not a supported affiliation, so discovery cannot build the /user/repos query. Use a comma-separated list of ${AFFILIATIONS.map((a) => `"${a}"`).join(", ")}`,
-      };
-    }
-  }
-  const exclude = list("exclude");
-  for (const pattern of exclude) {
-    const parts = pattern.split("/");
-    if (parts.length > 2 || (parts.length === 2 && (!parts[0] || !parts[1]))) {
-      return {
-        error:
-          `the "exclude" input pattern "${pattern}" can never match an owner/name repository: a ` +
-          `pattern takes at most one "/", with a non-empty glob on each side of it. Use ` +
-          `"<name-glob>" or "<owner-glob>/<name-glob>", where "*" matches any characters`,
-      };
-    }
-  }
-  const discoveryFilters: DiscoveryFilters = {
-    visibility,
-    archived,
-    forks,
-    affiliation: affiliation.length > 0 ? affiliation : DEFAULT_DISCOVERY_FILTERS.affiliation,
-    topics: list("topics").map((topic) => topic.toLowerCase()),
-    exclude,
-  };
+    const reposInput = input("repos");
+    const reposDir = input("repos-dir");
+    const defaultsFile = input("defaults-file");
+    const settingsFile = inputOrDefault("settings-file");
 
-  const reposInput = input("repos");
-  const reposDir = input("repos-dir");
-  const defaultsFile = input("defaults-file");
-  const settingsFile = inputOrDefault("settings-file");
-
-  if (reposInput || reposDir) {
-    // Multi-repo mode: the single-repo inputs make no sense here.
-    if (input("repository")) {
-      return {
-        error:
-          'the "repository" input cannot be combined with "repos" or "repos-dir"; multi-repo targets come from those inputs. Remove "repository", or remove the multi-repo inputs to stay in single-repo mode',
-      };
-    }
-    if (settingsFile !== DEFAULT_SETTINGS_FILE) {
-      return {
-        error:
-          'the "settings-file" input cannot be combined with "repos" or "repos-dir": central targets are read from repos-dir files and remote targets from each repository\'s own .github/settings.yml. Remove the settings-file override',
-      };
-    }
-    const adminOwner = githubRepository.split("/")[0] ?? "";
-    return {
-      config: {
+    if (reposInput || reposDir) {
+      // Multi-repo mode: the single-repo inputs make no sense here.
+      if (input("repository")) {
+        return err({ code: "input-repository-with-multi" });
+      }
+      if (settingsFile !== DEFAULT_SETTINGS_FILE) {
+        return err({ code: "input-settings-file-with-multi" });
+      }
+      const adminOwner = githubRepository.split("/")[0] ?? "";
+      return ok({
         ...common,
         kind: "multi",
         reposDir,
@@ -711,39 +610,29 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
         adminOwner,
         discoveryFilters,
         discoveryFiltersSet,
-      },
-    };
-  }
+      });
+    }
 
-  // Single-repo mode (unchanged legacy behavior).
-  if (discoveryFiltersSet.length > 0) {
-    return {
-      error: `the discovery filter input(s) ${quoteList(discoveryFiltersSet)} only apply to repos: "*" discovery, but this run is in single-repo mode. Set repos: "*" to discover repositories, or remove the filter input(s)`,
-    };
-  }
-  if (defaultsFile) {
-    return {
-      error:
-        'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never apply. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode',
-    };
-  }
-  // Only a merge folds a list; the engine modes read exactly one file, so
-  // even a stray separator ("only.yml,") is rejected rather than repaired.
-  if (LIST_SEPARATOR.test(settingsFile)) {
-    return {
-      error:
-        `the "settings-file" input is "${settingsFile}", which contains a list separator: ` +
-        `${mode} mode reads exactly one settings file, and only mode: merge takes a newline- or ` +
-        `comma-separated list. Name one file, or set mode: merge to fold the list into one ` +
-        `document`,
-    };
-  }
-  const rawRepo = input("repository") || githubRepository;
-  const repo = parseRepoSlug(rawRepo);
-  if (repo === null) {
-    return {
-      error: `cannot target a repository: "${rawRepo}" is not an owner/name slug. Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"`,
-    };
-  }
-  return { config: { ...common, kind: "single", repo, settingsFile } };
+    // Single-repo mode (unchanged legacy behavior).
+    if (discoveryFiltersSet.length > 0) {
+      return err({
+        code: "discovery-filters-without-wildcard",
+        filters: discoveryFiltersSet,
+        targets: "single-repo",
+      });
+    }
+    if (defaultsFile) {
+      return err({ code: "input-defaults-file-without-multi" });
+    }
+    // Only a merge folds a list; the engine modes read exactly one file, so
+    // even a stray separator ("only.yml,") is rejected rather than repaired.
+    if (LIST_SEPARATOR.test(settingsFile)) {
+      return err({ code: "input-settings-file-is-list", value: settingsFile, mode });
+    }
+    const rawRepo = input("repository") || githubRepository;
+    const repo = yield* parseRepoSlug(rawRepo).mapErr(
+      (): Problem => ({ code: "input-repository-not-slug", value: rawRepo }),
+    );
+    return ok({ ...common, kind: "single", repo, settingsFile });
+  });
 }

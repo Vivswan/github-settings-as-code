@@ -7,19 +7,21 @@
  * them when the target is a different, non-public repository.
  */
 
+import { ResultAsync } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
-import { runForRepo, validateSettingsDoc } from "../engine/orchestrate.js";
+import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
 import type { GithubClient } from "../github/api.js";
 import { createVisibilityResolver } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
+import type { Problem } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import { applyMarkerInjection } from "../report/delivery.js";
 import {
   type Exposure,
   engineOutcome,
   failedTarget,
-  missingUploaderProblem,
   type RunFlowConfig,
+  requireUploader,
   withDelivery,
 } from "./deliver.js";
 import {
@@ -68,38 +70,42 @@ async function openSingleRepoChannel(
   };
 }
 
+/** The one target's outcome; the source is implied (the local settings file). */
+export type SingleOutcome = Omit<TargetOutcome, "source">;
+
 /**
  * Run one repository from its settings file. A problem before the target runs
  * (no uploader for the artifact channel, an unreadable or invalid settings
- * file) is `fatal`; otherwise the target's outcome, which concludeRun turns
- * into the summary, the outputs, and the exit code.
+ * file) comes back as the error; otherwise the target's outcome, which
+ * concludeRun turns into the summary, the outputs, and the exit code.
  */
-export async function runSingle(
+export function runSingle(
   api: GithubClient,
   cfg: SingleConfig,
   io: Io,
   uploader?: ArtifactUploader,
-): Promise<{ fatal: string } | { target: Omit<TargetOutcome, "source"> }> {
-  const noUploader = missingUploaderProblem(cfg, uploader);
-  if (noUploader !== null) {
-    return { fatal: noUploader };
-  }
-  const read = readSettingsFile(cfg.settingsFile);
-  if ("error" in read) {
-    return {
-      fatal: `cannot read settings from ${cfg.settingsFile}: ${read.error}. Check that the file exists at that path (set the "settings-file" input if it lives elsewhere) and is valid YAML`,
-    };
-  }
-  const validated = validateSettingsDoc(read.doc, cfg.settingsFile, cfg.onlySections, io);
-  if ("error" in validated) {
-    return { fatal: validated.error };
-  }
+): ResultAsync<SingleOutcome, Problem> {
+  return requireUploader(cfg, uploader)
+    .andThen(() => readSettingsFile(cfg.settingsFile, "settings-file"))
+    .andThen((doc) => validateSettingsDoc(doc, cfg.settingsFile, cfg.onlySections, io))
+    .asyncAndThen((settings) =>
+      ResultAsync.fromSafePromise(runTarget(api, cfg, io, settings, uploader)),
+    );
+}
 
+/** The target's run, past every check that could refuse it: open its channel, run, deliver. */
+async function runTarget(
+  api: GithubClient,
+  cfg: SingleConfig,
+  io: Io,
+  settings: ValidatedSettings,
+  uploader: ArtifactUploader | undefined,
+): Promise<SingleOutcome> {
   const opened = await openSingleRepoChannel(api, cfg, io);
   const { channel } = opened;
-  const target = await withDelivery({ api, cfg, io, uploader }, (delivery) =>
+  return withDelivery({ api, cfg, io, uploader }, (delivery) =>
     delivery.target({ repo: cfg.repo, ...opened }, (injectsMarker) => {
-      const injected = applyMarkerInjection(validated.settings, injectsMarker);
+      const injected = applyMarkerInjection(settings, injectsMarker);
       if (injected.notice) {
         channel.io.annotate("notice", injected.notice);
       }
@@ -125,5 +131,4 @@ export async function runSingle(
       );
     }),
   );
-  return { target };
 }

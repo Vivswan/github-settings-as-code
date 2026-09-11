@@ -22,6 +22,7 @@
 
 import {
   type ArtifactUploader,
+  concludeMerge,
   concludeRun,
   failRun,
   GithubApi,
@@ -48,27 +49,28 @@ export async function run(overrides?: {
   const uploader = overrides?.uploader ?? actionsArtifactUploader;
 
   const parsed = parseConfig();
-  if ("error" in parsed) {
+  if (parsed.isErr()) {
     return failRun(io, parsed.error);
   }
-  const cfg = parsed.config;
+  const cfg = parsed.value;
   // A merge folds local files only: no client is built, so no token is read.
   if (cfg.kind === "merge") {
-    return runMerge(cfg, io);
+    return runMerge(cfg, io).match(
+      (merged) => concludeMerge(io, merged),
+      (problem) => failRun(io, problem),
+    );
   }
   const api = overrides?.api ?? new GithubApi({ token: cfg.token, io, apiVersion: cfg.apiVersion });
 
   if (cfg.kind === "multi") {
-    const { fatal, targets } = await runMulti(api, cfg, io, uploader);
-    if (fatal) {
-      return failRun(io, fatal);
-    }
-    return concludeRun(io, { kind: "multi", mode: cfg.mode, targets });
+    return runMulti(api, cfg, io, uploader).match(
+      (targets) => concludeRun(io, { kind: "multi", mode: cfg.mode, targets }),
+      (problem) => failRun(io, problem),
+    );
   }
 
-  const single = await runSingle(api, cfg, io, uploader);
-  if ("fatal" in single) {
-    return failRun(io, single.fatal);
-  }
-  return concludeRun(io, { kind: "single", mode: cfg.mode, target: single.target });
+  return runSingle(api, cfg, io, uploader).match(
+    (target) => concludeRun(io, { kind: "single", mode: cfg.mode, target }),
+    (problem) => failRun(io, problem),
+  );
 }

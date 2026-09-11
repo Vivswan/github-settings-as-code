@@ -5,6 +5,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { describeOptOut } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { silentIo } from "../../src/io.js";
+import { describeProblem } from "../../src/problem.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
 import { type LiveWitnessKind, UNDECLARED_KEY } from "./gen-support.js";
@@ -473,12 +474,13 @@ describe("genInvalidSettings", () => {
       for (let i = 0; i < 25; i++) {
         const { doc, offendingToken } = build(new Rng(i * 13 + 1));
         const verdict = validateSettingsDoc(doc, "settings.yml", new Set(), silentIo());
-        if (!("error" in verdict)) {
+        if (verdict.isOk()) {
           throw new Error(`case "${name}" produced a doc the validator accepts`);
         }
-        if (!verdict.error.includes(offendingToken)) {
+        const rendered = describeProblem(verdict.error);
+        if (!rendered.includes(offendingToken)) {
           throw new Error(
-            `case "${name}" token "${offendingToken}" missing from error: ${verdict.error}`,
+            `case "${name}" token "${offendingToken}" missing from error: ${rendered}`,
           );
         }
       }

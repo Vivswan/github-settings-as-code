@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { describeOptOut, mergeLayers, type OptOutNotice } from "../../src/engine/layers.js";
+import { describeProblem } from "../../src/problem.js";
 import { UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { ADMIN_SLUG } from "./constants.js";
@@ -1095,11 +1096,12 @@ function stack(...docs: Record<string, unknown>[]): MergeLayer[] {
 
 /** The notices the ENGINE's fold reports for a stack, to pin the oracle's paths against. */
 function engineNotices(layers: readonly MergeLayer[]): OptOutNotice[] {
-  const result = mergeLayers(layers, { layering: "merge" });
-  if ("error" in result) {
-    throw new Error(`the engine refused a stack the oracle folded: ${result.error}`);
-  }
-  return result.notices;
+  return mergeLayers(layers, { layering: "merge" }).match(
+    (folded) => folded.notices,
+    (problem) => {
+      throw new Error(`the engine refused a stack the oracle folded: ${describeProblem(problem)}`);
+    },
+  );
 }
 
 describe("foldMergeLayers (the oracle's own dialect)", () => {

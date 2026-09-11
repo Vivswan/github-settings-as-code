@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { err } from "neverthrow";
 
 import {
   preflightProbe,
@@ -11,7 +12,8 @@ import {
 } from "../../src/engine/orchestrate.js";
 import type { Io } from "../../src/io.js";
 import { maskRegistry, prefixedIo } from "../../src/io.js";
-import type { SettingsFile } from "../../src/schema.js";
+import { describeProblem, type TopLevelShape } from "../../src/problem.js";
+import { SECTION_KEYS, type SettingsFile } from "../../src/schema.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import type { SectionPlan } from "../../src/sections/contract/plan.js";
 import { pagesSection } from "../../src/sections/pages/index.js";
@@ -51,11 +53,12 @@ function validated(doc: SettingsFile): ValidatedSettings {
     output: () => {},
     ...maskRegistry(() => {}),
   };
-  const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silent);
-  if ("error" in verdict) {
-    throw new Error(`test fixture failed validation: ${verdict.error}`);
-  }
-  return verdict.settings;
+  return validateSettingsDoc(doc, "test fixture", new Set(), silent).match(
+    (settings) => settings,
+    (problem) => {
+      throw new Error(`test fixture failed validation: ${describeProblem(problem)}`);
+    },
+  );
 }
 
 function opts(overrides: Partial<RepoRunOptions> = {}): RepoRunOptions {
@@ -193,9 +196,12 @@ describe("runForRepo", () => {
     const polluted = JSON.parse(
       '{"rulesets":{"entries":[{"name":"r"}],"__proto__":{"planted":2}}}',
     );
-    const verdict = validateSettingsDoc(polluted, "s.yml", new Set(), captureIo().io);
-    expect("error" in verdict ? verdict.error : "").toContain(
-      'rulesets: Unrecognized key: "__proto__"',
+    expect(validateSettingsDoc(polluted, "s.yml", new Set(), captureIo().io)).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "s.yml",
+        issues: [expect.stringContaining('rulesets: Unrecognized key: "__proto__"')],
+      }),
     );
   });
 
@@ -328,19 +334,28 @@ describe("runForRepo secret references", () => {
 });
 
 describe("validateSettingsDoc", () => {
-  const errorOf = (verdict: ReturnType<typeof validateSettingsDoc>): string =>
-    "error" in verdict ? verdict.error : "";
-
-  test("unknown top-level keys are errors naming the source", () => {
+  test("unknown top-level keys are a problem naming the source and the known sections", () => {
     const { io } = captureIo();
-    const err = errorOf(validateSettingsDoc({ labls: [] }, "repos/x.yml", new Set(), io));
-    expect(err).toContain("repos/x.yml");
-    expect(err).toContain("labls");
+    expect(validateSettingsDoc({ labls: [] }, "repos/x.yml", new Set(), io)).toEqual(
+      err({
+        code: "settings-unknown-sections",
+        source: "repos/x.yml",
+        unknown: ["labls"],
+        known: SECTION_KEYS,
+      }),
+    );
   });
 
-  test("non-mapping documents are rejected", () => {
+  test.each<[what: string, doc: unknown, shape: TopLevelShape]>([
+    ["a list", [], "list"],
+    ["null", null, "null"],
+    ["a string", "labels", "string"],
+    ["a number", 7, "number"],
+  ])("a non-mapping document (%s) is rejected with its shape", (_what, doc, shape) => {
     const { io } = captureIo();
-    expect(errorOf(validateSettingsDoc([], "f.yml", new Set(), io))).toContain("a list");
+    expect(validateSettingsDoc(doc, "f.yml", new Set(), io)).toEqual(
+      err({ code: "settings-not-mapping", source: "f.yml", shape }),
+    );
   });
 
   test("a YAML-tagged top-level value (a Date) is rejected, never branded", () => {
@@ -348,23 +363,16 @@ describe("validateSettingsDoc", () => {
     // branding it valid would turn the whole document into a silent green
     // no-op. Only a plain-prototype mapping may pass the boundary.
     const { io } = captureIo();
-    const err = errorOf(validateSettingsDoc(new Date(0), "f.yml", new Set(), io));
-    expect(err).toContain("plain YAML mapping");
-    expect(err).toContain("!!timestamp");
-    expect(errorOf(validateSettingsDoc(new Set(["a"]), "f.yml", new Set(), io))).toContain(
-      "plain YAML mapping",
-    );
+    const tagged = err({ code: "settings-not-plain-mapping" as const, source: "f.yml" });
+    expect(validateSettingsDoc(new Date(0), "f.yml", new Set(), io)).toEqual(tagged);
+    expect(validateSettingsDoc(new Set(["a"]), "f.yml", new Set(), io)).toEqual(tagged);
   });
 
   test("a valid document comes back branded, ready for runForRepo", () => {
     const { io } = captureIo();
     const doc = { repository: { has_wiki: false } };
-    const verdict = validateSettingsDoc(doc, "s.yml", new Set(), io);
-    if ("error" in verdict) {
-      throw new Error(`expected the document to validate: ${verdict.error}`);
-    }
     // The brand is compile-time only; the value is zod's parsed copy.
-    const branded: unknown = verdict.settings;
+    const branded: unknown = validateSettingsDoc(doc, "s.yml", new Set(), io)._unsafeUnwrap();
     expect(branded).toEqual(doc);
     expect(branded).not.toBe(doc);
   });

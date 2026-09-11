@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "neverthrow";
 import {
   collectingIo,
   parseRepoSlug,
@@ -6,10 +7,9 @@ import {
   runSingle,
   type SingleConfig,
 } from "../../src/index.js";
-import { ARTIFACT_NEEDS_UPLOADER } from "../../src/report/delivery.js";
 import { MockApi } from "../mock-api.js";
 
-const repo = parseRepoSlug("o/r") as NonNullable<ReturnType<typeof parseRepoSlug>>;
+const repo = parseRepoSlug("o/r")._unsafeUnwrap();
 
 const cfg = (overrides: Partial<SingleConfig> = {}): SingleConfig => ({
   repo,
@@ -30,8 +30,8 @@ describe("runSingle", () => {
   test("a clean check returns the one target's outcome and prints nothing", async () => {
     const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } });
     const collected = collectingIo();
-    expect(await runSingle(api, cfg(), collected.io)).toEqual({
-      target: {
+    expect(await runSingle(api, cfg(), collected.io)).toEqual(
+      ok({
         result: "clean",
         display: "o/r",
         detail: {
@@ -39,14 +39,14 @@ describe("runSingle", () => {
           outcomes: [{ key: "repository", status: "clean", detail: [] }],
           note: undefined,
         },
-      },
-    });
+      }),
+    );
     expect(collected.lines).toEqual([]);
   });
 
   test("the artifact channel without an uploader is fatal before any API call", async () => {
     const api = new MockApi({});
-    const fatal = { fatal: ARTIFACT_NEEDS_UPLOADER };
+    const fatal = err({ code: "artifact-uploader-missing" as const });
     expect(
       await runSingle(
         api,
@@ -75,18 +75,21 @@ describe("runSingle", () => {
         },
         collectingIo().io,
       ),
-    ).toEqual({ ...fatal, targets: [] });
+    ).toEqual(fatal);
     expect(api.calls).toEqual([]);
   });
 
-  test("an unreadable settings file is fatal, naming the path and the input", async () => {
+  test("an unreadable settings file is fatal, carrying the path under the settings-file role", async () => {
     const api = new MockApi({});
     const result = await runSingle(api, cfg({ settingsFile: "missing.yml" }), collectingIo().io);
-    expect(result).toEqual({
-      fatal: expect.stringMatching(
-        /^cannot read settings from missing\.yml: .*ENOENT.*\. Check that the file exists at that path \(set the "settings-file" input if it lives elsewhere\) and is valid YAML$/,
-      ),
-    });
+    expect(result).toEqual(
+      err({
+        code: "settings-file-unreadable",
+        role: "settings-file",
+        path: "missing.yml",
+        reason: expect.stringContaining("ENOENT"),
+      }),
+    );
     expect(api.calls).toEqual([]);
   });
 });

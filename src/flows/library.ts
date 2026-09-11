@@ -1,5 +1,11 @@
-/** The engine for a caller with no action inputs: the mode and the Io sink are fixed here. */
+/**
+ * The library-shaped entry points over the engine. Each fixes what the action
+ * decides from its inputs (the mode, the Io sink, the source label), so a
+ * caller holding a client and a document gets a result back with the lines
+ * the run printed.
+ */
 
+import type { Result } from "neverthrow";
 import { stringify as stringifyYaml } from "yaml";
 import {
   type RepoRunOptions,
@@ -10,6 +16,7 @@ import {
 } from "../engine/orchestrate.js";
 import type { GithubClient } from "../github/api.js";
 import { type CollectedLine, collectingIo, type Io } from "../io.js";
+import type { SettingsProblem } from "../problem.js";
 import type { SectionKey } from "../schema.js";
 
 /** How a document with no caller-given source is named in its own errors. */
@@ -21,22 +28,14 @@ const NO_ALLOWLIST: ReadonlySet<SectionKey> = new Set();
 export function validateSettings(
   doc: unknown,
   options: { source?: string; sections?: ReadonlySet<SectionKey> } = {},
-): { ok: true; settings: ValidatedSettings; warnings: string[] } | { ok: false; error: string } {
+): Result<{ settings: ValidatedSettings; warnings: string[] }, SettingsProblem> {
   const collected = collectingIo();
-  const validated = validateSettingsDoc(
+  return validateSettingsDoc(
     doc,
     options.source ?? UNNAMED_SOURCE,
     options.sections ?? NO_ALLOWLIST,
     collected.io,
-  );
-  if ("error" in validated) {
-    return { ok: false, error: validated.error };
-  }
-  return {
-    ok: true,
-    settings: validated.settings,
-    warnings: collected.lines.map((entry) => entry.line),
-  };
+  ).map((settings) => ({ settings, warnings: collected.lines.map((entry) => entry.line) }));
 }
 
 /** The engine's result plus every line it printed when the caller brought no Io of their own. */

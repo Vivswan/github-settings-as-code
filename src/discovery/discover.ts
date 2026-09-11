@@ -5,10 +5,12 @@
  */
 
 import type { components } from "@octokit/openapi-types";
-import { type GithubClient, isPermissionError, RERUN_ADVICE } from "../github/api.js";
+import { err, ok, ResultAsync } from "neverthrow";
+import { type GithubClient, isPermissionError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
+import type { ProblemOf } from "../problem.js";
 
 type DiscoveredRepo = Pick<
   components["schemas"]["repository"],
@@ -114,11 +116,16 @@ export interface DiscoveryResult {
   filtered: Array<{ reason: string; repos: FilteredRepoRef[] }>;
 }
 
+/** What discovery can fail with: the request, the transport, or a response that is not a list. */
+export type DiscoveryProblem = ProblemOf<
+  "discovery-request-failed" | "discovery-transport-failed" | "discovery-response-not-a-list"
+>;
+
 /** Discover the repositories the token's user can see, applying the filters. */
-export async function discoverRepos(
+export function discoverRepos(
   api: GithubClient,
   filters: DiscoveryFilters,
-): Promise<DiscoveryResult | { error: string }> {
+): ResultAsync<DiscoveryResult, DiscoveryProblem> {
   const params = [`affiliation=${filters.affiliation.join(",")}`];
   if (filters.visibility === "public" || filters.visibility === "private") {
     // The API's visibility param has no "internal" value; that case (and the
@@ -126,38 +133,42 @@ export async function discoverRepos(
     params.push(`visibility=${filters.visibility}`);
   }
   const path = `/user/repos?${params.join("&")}`;
-  const wrap = (message: string, advice: string): { error: string } => ({
-    error: `cannot discover repositories for repos: "*": ${message}. ${advice}`,
-  });
-  let page: Awaited<ReturnType<typeof paginate>>;
-  try {
-    page = await paginate(api, path);
-  } catch (error) {
-    // Network-level failure: tryRequest throws once the retries are spent.
-    return wrap(error instanceof Error ? error.message : String(error), RERUN_ADVICE);
-  }
-  if ("error" in page) {
-    const cause = `GET ${path} failed: ${page.error.status} ${page.error.message}`;
-    // The PAT advice fits genuine denials only. A rate-limit 403 is NOT a
-    // permission problem (isPermissionError excludes it), so it must fall
-    // through to RERUN_ADVICE instead of telling the operator to swap tokens
-    // and abandon "*" discovery for nothing. 401 is an invalid/expired token,
-    // which the same PAT advice covers.
-    if (isPermissionError(page.error) || page.error.status === 401) {
-      return wrap(
-        cause,
-        `Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens cannot enumerate a user's repositories. List the target repositories explicitly in the "repos" input`,
-      );
+  // Network-level failure: tryRequest throws once the retries are spent.
+  return ResultAsync.fromPromise(
+    paginate(api, path),
+    (error): DiscoveryProblem => ({
+      code: "discovery-transport-failed",
+      reason: error instanceof Error ? error.message : String(error),
+    }),
+  ).andThen((page) => {
+    if ("error" in page) {
+      // The PAT advice fits genuine denials only. A rate-limit 403 is NOT a
+      // permission problem (isPermissionError excludes it), so it must not
+      // tell the operator to swap tokens and abandon "*" discovery for
+      // nothing. 401 is an invalid/expired token, which the PAT advice covers.
+      return err<DiscoveryResult, DiscoveryProblem>({
+        code: "discovery-request-failed",
+        path,
+        status: page.error.status,
+        message: page.error.message,
+        denied: isPermissionError(page.error) || page.error.status === 401,
+      });
     }
-    return wrap(cause, RERUN_ADVICE);
-  }
-  if ("malformed" in page) {
-    return wrap(
-      `GET ${path} returned a JSON value that is not a list, so the response cannot be paginated`,
-      RERUN_ADVICE,
-    );
-  }
-  const repos = page.items as DiscoveredRepo[];
+    if ("malformed" in page) {
+      return err<DiscoveryResult, DiscoveryProblem>({
+        code: "discovery-response-not-a-list",
+        path,
+      });
+    }
+    return ok(applyFilters(page.items as DiscoveredRepo[], filters));
+  });
+}
+
+/** Keep the repositories the filters admit; group the rest by the first reason that hit. */
+function applyFilters(
+  repos: readonly DiscoveredRepo[],
+  filters: DiscoveryFilters,
+): DiscoveryResult {
   // One rule per filter, in reporting-attribution order; the first reason
   // returned is the one a skipped repo is grouped under.
   const rules: Array<(repo: DiscoveredRepo) => string | null> = [

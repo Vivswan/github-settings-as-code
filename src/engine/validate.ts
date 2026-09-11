@@ -4,7 +4,9 @@
  * applies. Closed sections and strict nested shapes reject unknown keys here.
  */
 
+import { err, ok, type Result } from "neverthrow";
 import { nonPlainKind } from "../plain-data.js";
+import type { ProblemOf } from "../problem.js";
 import { SECTION_KEYS, type SettingsFile } from "../schema.js";
 import { sectionModule, sectionShape } from "../sections/registry.js";
 
@@ -54,12 +56,12 @@ function findNonPlain(value: unknown, path: string, seen: WeakSet<object>): stri
 /**
  * Validate the declared sections' shapes. Returns the parsed document (the
  * declared sections, each as zod's output: fresh plain objects at every node
- * the shape describes) or an error naming the source file and what to fix.
+ * the shape describes) or the problem naming the source file and what to fix.
  */
 export function validateSectionShapes(
   settings: Record<string, unknown>,
   sourceLabel: string,
-): { settings: SettingsFile } | { error: string } {
+): Result<SettingsFile, ProblemOf<"settings-malformed-sections">> {
   const problems: string[] = [];
   const parsedSections: Record<string, unknown> = {};
   for (const key of SECTION_KEYS) {
@@ -96,15 +98,9 @@ export function validateSectionShapes(
     parsedSections[key] = parsed.data;
   }
   if (problems.length === 0) {
-    return { settings: parsedSections as SettingsFile };
+    return ok(parsedSections as SettingsFile);
   }
-  return {
-    error:
-      `${sourceLabel} has malformed section entries: ${problems.join("; ")}. Fix these values in ` +
-      `the settings file (only the named keys are validated; extra fields pass through, except ` +
-      `in closed sections and strict nested objects like actions.cache, which reject ` +
-      `unrecognized keys)`,
-  };
+  return err({ code: "settings-malformed-sections", source: sourceLabel, issues: problems });
 }
 
 /**

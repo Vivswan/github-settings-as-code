@@ -39,7 +39,6 @@ const OPENER_IMPORTERS: Record<string, string[]> = {
   ],
   "src/private.ts": ["isPrivate", "markPrivate"],
   "src/report/delivery.ts": [
-    "ARTIFACT_NEEDS_UPLOADER",
     "PRIVATE_REPORT_CHANNELS",
     "applyMarkerInjection",
     "isIssueChannel",

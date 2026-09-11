@@ -7,12 +7,13 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { err, ok, type Result } from "neverthrow";
 import { describeOptOut, type Layering } from "../engine/layers.js";
 import type { Io } from "../io.js";
-import { concludeMerge, failRun } from "./deliver.js";
+import type { Problem, ProblemOf } from "../problem.js";
+import type { FinishedMerge } from "./deliver.js";
 import { foldLayers, readLayerFiles } from "./layers.js";
 import { renderMergedYaml } from "./library.js";
-import { writeMergeSummary } from "./summary.js";
 
 /**
  * A mode: merge run: the layers to fold, low to high, and where the result
@@ -30,50 +31,44 @@ export interface MergeConfig {
 const MERGED_LABEL = "the merged settings document";
 
 /**
- * The layer merged-file would overwrite, as a message, or null. Paths are
- * compared resolved, so "./a.yml" and "a.yml" collide. Guarded here, beside
- * the write: the next run would fold the merged document as if it were a layer.
+ * Refuse a merged-file that names one of the layers. Paths are compared
+ * resolved, so "./a.yml" and "a.yml" collide. Guarded here, beside the write:
+ * the next run would fold the merged document as if it were a layer.
  */
-function mergedFileCollision(cfg: MergeConfig): string | null {
+function mergedFileCollision(cfg: MergeConfig): Result<void, ProblemOf<"merged-file-is-layer">> {
   const mergedPath = resolve(cfg.mergedFile);
-  const collision = cfg.settingsFiles.findIndex((layer) => resolve(layer) === mergedPath);
-  if (collision === -1) {
-    return null;
-  }
-  return (
-    `the "merged-file" input "${cfg.mergedFile}" is layer ${collision + 1} of the ` +
-    `"settings-file" list ("${cfg.settingsFiles[collision]}"): the merge would overwrite that ` +
-    `layer with the folded document, and the next run would fold the merged document as a ` +
-    `layer. Write the merged document to a path outside the layer list`
-  );
+  const index = cfg.settingsFiles.findIndex((layer) => resolve(layer) === mergedPath);
+  const layer = cfg.settingsFiles[index];
+  return layer === undefined
+    ? ok()
+    : err({ code: "merged-file-is-layer", mergedFile: cfg.mergedFile, index, layer });
 }
 
-/** Execute a mode: merge run; returns the process exit code. */
-export function runMerge(cfg: MergeConfig, io: Io): number {
-  const collision = mergedFileCollision(cfg);
-  if (collision !== null) {
-    return failRun(io, collision);
-  }
-  const read = readLayerFiles(cfg.settingsFiles);
-  if ("error" in read) {
-    return failRun(io, read.error);
-  }
-  const folded = foldLayers(read.layers, MERGED_LABEL, cfg.layering, io);
-  if ("error" in folded) {
-    return failRun(io, folded.error);
-  }
-  for (const notice of folded.notices) {
-    io.annotate("notice", describeOptOut(notice));
-  }
-  try {
-    mkdirSync(dirname(cfg.mergedFile), { recursive: true });
-    writeFileSync(cfg.mergedFile, renderMergedYaml(folded.settings));
-  } catch (error) {
-    return failRun(
-      io,
-      `cannot write the merged document to ${cfg.mergedFile}: ${String(error)}. Check that the "merged-file" input names a writable path`,
-    );
-  }
-  writeMergeSummary(io, cfg.settingsFiles, cfg.mergedFile);
-  return concludeMerge(io, { layers: cfg.settingsFiles, mergedFile: cfg.mergedFile });
+/**
+ * Execute a mode: merge run: read, fold, and write. A problem before the
+ * document is written (a merged-file that is a layer, an unreadable layer, a
+ * refused fold, an unwritable path) comes back for the caller to render; the
+ * finished merge is what concludeMerge turns into the summary, the outputs,
+ * and the exit code.
+ */
+export function runMerge(cfg: MergeConfig, io: Io): Result<FinishedMerge, Problem> {
+  return mergedFileCollision(cfg)
+    .andThen(() => readLayerFiles(cfg.settingsFiles))
+    .andThen((layers) => foldLayers(layers, MERGED_LABEL, cfg.layering, io))
+    .andThen((folded): Result<FinishedMerge, Problem> => {
+      for (const notice of folded.notices) {
+        io.annotate("notice", describeOptOut(notice));
+      }
+      try {
+        mkdirSync(dirname(cfg.mergedFile), { recursive: true });
+        writeFileSync(cfg.mergedFile, renderMergedYaml(folded.settings));
+      } catch (error) {
+        return err({
+          code: "merged-file-unwritable",
+          path: cfg.mergedFile,
+          reason: String(error),
+        });
+      }
+      return ok({ layers: cfg.settingsFiles, mergedFile: cfg.mergedFile });
+    });
 }

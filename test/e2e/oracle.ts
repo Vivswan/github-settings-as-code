@@ -10,6 +10,7 @@
 import type { OptOutNotice } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { silentIo } from "../../src/io.js";
+import { describeProblem } from "../../src/problem.js";
 import {
   SECTION_KEYS,
   type SectionKey,
@@ -1248,8 +1249,8 @@ export function predictMerge(meta: MergeScenarioMeta): MergePrediction {
   // document it just folded (cross-field rules the published schema cannot
   // spell, so the generator cannot avoid them by construction).
   const validated = validateSettingsDoc(folded.merged, "merged", new Set(), silentIo());
-  if ("error" in validated) {
-    return { kind: "invalid", error: validated.error };
+  if (validated.isErr()) {
+    return { kind: "invalid", error: describeProblem(validated.error) };
   }
   return { kind: "merged", ...folded };
 }

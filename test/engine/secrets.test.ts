@@ -7,6 +7,7 @@ import {
 import type { SettingsSource } from "../../src/engine/secret-refs.js";
 import { collectSecretValues } from "../../src/engine/secrets.js";
 import { type Io, maskRegistry } from "../../src/io.js";
+import { describeProblem } from "../../src/problem.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { MockApi } from "../mock-api.js";
@@ -162,10 +163,10 @@ describe("runForRepo provenance", () => {
       ...maskRegistry(() => {}),
     };
     const verdict = validateSettingsDoc(doc, "fixture", new Set(), silent);
-    if ("error" in verdict) {
-      throw new Error(`fixture failed validation: ${verdict.error}`);
+    if (verdict.isErr()) {
+      throw new Error(`fixture failed validation: ${describeProblem(verdict.error)}`);
     }
-    return verdict.settings;
+    return verdict.value;
   };
   const baseOpts = (settings: unknown) => ({
     repo: { owner: "o", name: "r", slug: "o/r" },
