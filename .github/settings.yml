@@ -74,10 +74,10 @@ rulesets:
         actor_type: RepositoryRole
         bypass_mode: always
 
-  # The moving `latest` tag: post-green.yml moves it to the newest packaged
-  # commit on `build` with a lease on every green push, so no update or
-  # non_fast_forward rule (either would refuse that move; the lease and the
-  # script's own checks keep it from going backward). Deletion is the one
+  # The moving `latest` tag: post-green.yml and the release hook point it at
+  # the `build` commit of the newest main source with a lease, so no update
+  # or non_fast_forward rule (either would refuse that move; the lease and
+  # the script's own checks keep it from going backward). Deletion is the one
   # thing it must never suffer: a deleted latest bricks every @latest
   # consumer at once. No bypass, like the build ruleset, so the apply heals
   # an out-of-band bypass actor.
@@ -93,9 +93,9 @@ rulesets:
       - type: deletion
     bypass_actors: []
 
-  # The `build` branch of packaged commits: post-green.yml appends a
-  # packaged child of every green main commit with a plain push (the
-  # release hook appends one too when post-green could not), so build may
+  # The `build` branch of packaged commits: post-green.yml appends a green
+  # main commit's packaged child with a plain push when its token can (the
+  # release hook appends the release's when post-green did not), so build may
   # only ever move forward - no force-push can rewrite the chain that
   # `@build` consumers pin by sha and that the release hook walks to find
   # a release's commit, and no deletion can remove it from under them.

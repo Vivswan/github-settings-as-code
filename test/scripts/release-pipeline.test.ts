@@ -138,7 +138,7 @@ function commitAll(cwd: string, subject: string): string {
 }
 
 /** Take the workflows directory out of a clone's index: what every
- * chain-shaped tree lacks, so a planted chain commit deviates from the
+ * packaged tree lacks, so a planted chain commit deviates from the
  * pipeline's only where the test means it to. */
 function stripWorkflows(cwd: string): void {
   git(cwd, "rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".github/workflows");
@@ -266,9 +266,8 @@ function shallowChecker(fx: Fixture, name: string): string {
 }
 
 const buildTip = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/heads/build");
-/** A commit's first parent as its object records it: `rev-parse <sha>^` fails
- * once the pipeline's depth-1 fetch of the tip has marked that commit shallow
- * in the same clone. */
+/** A commit's first parent as its object records it, whatever ref or
+ * shallow state the clone reading it is in. */
 const parentOf = (cwd: string, sha: string): string =>
   git(cwd, "cat-file", "-p", sha).match(/^parent ([0-9a-f]{40})$/m)?.[1] ?? "";
 const latestTag = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/tags/latest^{}");
@@ -731,7 +730,7 @@ describe("packageRelease", () => {
     );
   });
 
-  test("an existing chain-shaped tag that kept its workflows stops loudly, naming them", () => {
+  test("an existing tag that kept its workflows stops loudly, naming them", () => {
     const fx = seedFixture();
     plantTag(
       fx,
@@ -855,11 +854,16 @@ describe("packageRelease", () => {
 
   test("a tag with no build branch at all is refused", () => {
     const fx = seedFixture();
-    plantTag(fx, "planter-nobuild", fx.mergeSha, ["build: by hand", `Source: ${fx.mergeSha}`], {
-      "lib/index.js": "packaged-bundle-bytes-1\n",
-    });
+    const planted = plantTag(
+      fx,
+      "planter-nobuild",
+      fx.mergeSha,
+      ["build: by hand", `Source: ${fx.mergeSha}`],
+      { "lib/index.js": "packaged-bundle-bytes-1\n" },
+    );
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /exists but refs\/heads\/build does not exist on origin/,
+      `refs/tags/v2.1.0 (${planted}) exists but refs/heads/build does not exist on origin; ` +
+        "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.",
     );
   });
 

@@ -2,10 +2,11 @@
 # managed release.yml between release-please cutting the DRAFT release and
 # the attested publish. This repository's stage is the single-tag scheme:
 # main is source-only (lib/index.js is never committed there), yet every
-# ref a consumer can name - the vX.Y.Z tags, the moving major vX, and the
-# latest tag - must point at a packaged commit (the source tree without its
-# workflows, plus the built bundle), all of them on the `build` branch
-# post-green.yml appends to. So this hook, not release-please, mints the
+# ref a consumer can name from now on - the vX.Y.Z tags, the moving major
+# vX, and the latest tag - must point at a packaged commit (the source tree
+# without its workflows, plus the built bundle), all of them on the `build`
+# branch post-green.yml appends to (the tags cut before that branch existed
+# stay on main commits from when main committed the bundle). So this hook, not release-please, mints the
 # tag (release-please-config.json sets `draft` and pins the fleet's
 # `force-tag-creation` OFF):
 #   1. resolve the merge commit from the draft's target commitish - NOT
@@ -16,8 +17,9 @@
 #      (post-green appended it earlier in this run), appending it when
 #      none exists (post-green skipped for want of its token), create
 #      vX.Y.Z once, on that commit - born runnable, never moved (the
-#      release-tags ruleset freezes it, as SECURITY.md states) - and move
-#      the latest tag there unless it already names a newer source;
+#      release-tags ruleset freezes it, as SECURITY.md states) - and
+#      reconcile the latest tag to the chain commit of the newest main
+#      source;
 #   3. force-move the major tag there and upload bundle and schema to the
 #      draft (published releases freeze their assets);
 #   4. confirm origin's refs and the draft's assets; the managed publish
@@ -30,7 +32,7 @@
 # NEWER release shipped, the major move stops by design.
 
 # Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand
-# run has no run trailer and no attestation.json). <merge sha> is the
+# run has no attestation.json, and a chain commit it appends no run trailer). <merge sha> is the
 # draft's target commitish. NEVER publish before `package` has minted the
 # tag: a tagless draft makes GitHub create vX.Y.Z lazily at the merge
 # commit on main, which has no bundle (the managed release.yml's generic
@@ -105,11 +107,11 @@ jobs:
           # generator - SECURITY.md leans on this) stops the release here.
           git diff --exit-code lib/settings.schema.json
       # Create the version tag on the merge commit's build commit exactly
-      # once, appending that commit when build lacks it, and move latest
-      # there unless it names a newer source; a rerun byte-verifies the
-      # existing tag instead (recorded source, whole tree, bundle bytes) and
-      # never moves it. Both paths end with the worktree bundle equal to the
-      # tagged bundle.
+      # once, appending that commit when build lacks it, and reconcile
+      # latest to the chain commit of the newest main source; a rerun
+      # byte-verifies the existing tag instead (recorded source, whole tree,
+      # bundle bytes) and never moves it. Both paths end with the worktree
+      # bundle equal to the tagged bundle.
       - name: Create or verify the version tag on the build commit
         env:
           TAG: ${{ inputs.tag }}

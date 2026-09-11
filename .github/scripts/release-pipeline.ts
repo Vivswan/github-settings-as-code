@@ -12,7 +12,7 @@
  * branch (the tags cut before that branch existed point at main commits
  * that still carried the committed bundle). post-green appends a green main
  * commit's packaged child to refs/heads/build when it can publish, the
- * release hook appends the release's at every release (parent: the previous
+ * release hook appends the release's when post-green did not (parent: the previous
  * tip; the first commit's parent is its source), each naming its source in
  * a Source trailer. The `latest` tag names the chain commit of the newest
  * main source; the vX.Y.Z release tags and the moving major vX sit on the
@@ -20,9 +20,9 @@
  * config sets `draft` without `force-tag-creation`); these subcommands then
  * run, one per workflow step:
  *   package         packageRelease: tag the release's chain commit ONCE
- *                   (appending it when post-green has not) and move latest
- *                   there, or byte-verify an existing tag. No path moves a
- *                   version tag.
+ *                   (appending it when post-green has not) and point latest
+ *                   at the newest main source's commit, or byte-verify an
+ *                   existing tag. No path moves a version tag.
  *   retag-major     retagMajor: force-move the major tag, never backward.
  *   verify          verifyPublishedRefs: origin's actual refs and tree.
  *   anchor          anchorReleasePr: advance last-release-sha on the
@@ -31,7 +31,8 @@
  *   boundary-check  boundaryCheck: main's recorded boundary is fresh.
  *   anchor-check    anchorCheck: the release PR carries the anchor.
  *   advance-build   advanceBuild: append a green commit's packaged child to
- *                   build and move latest to the tip.
+ *                   build and point latest at the chain commit of the
+ *                   newest main source.
  * Env: TAG and GITHUB_SHA (package/retag-major/anchor), GITHUB_SHA
  * (advance-build), RUN_URL (optional provenance, package/advance-build).
  * Node builtins only: `bun` runs it pre-install.
@@ -250,7 +251,7 @@ function treePlusBundle(
   }
 }
 
-/** Paths under the workflows directory in a tree; a chain-shaped tree must have none. */
+/** Paths under the workflows directory in a tree; a packaged tree must have none. */
 function workflowPaths(cwd: string, treeish: string): string[] {
   return git(cwd, "ls-tree", "-r", "--name-only", treeish, "--", WORKFLOWS_DIR)
     .split("\n")
@@ -957,16 +958,18 @@ export interface AdvanceBuildResult {
 
 /**
  * Append the packaged child of a green main commit to refs/heads/build and
- * move the `latest` tag to build's tip. Every commit on build is its
- * source's tree minus workflows plus the bundle and names that source in a
- * Source trailer,
- * so the branch is a chain of packaged commits whose sources walk forward
- * along main: the next commit is parented on the current tip and pushed
- * WITHOUT force, so build can only advance. A rerun on a source the chain
- * already packages pushes nothing (after checking that commit carries the
- * very tree this checkout's build packages); a rerun of an older commit's
- * run finds the tip already past it and leaves it; a tip whose source is
- * off main's history (a hand push) stops the run instead of being built on.
+ * point the `latest` tag at the chain commit of the newest main source.
+ * Every commit on build is its source's tree minus workflows plus the bundle
+ * and names that source in a Source trailer; the next commit is parented on
+ * the current tip and pushed WITHOUT force, so build can only advance. The
+ * sources mostly walk forward along main, but a release-hook backfill can
+ * append an older source behind newer ones, which is why latest follows the
+ * newest source rather than the tip. A rerun on a source the chain
+ * already packages appends nothing (after checking that commit carries the
+ * very tree this checkout's build packages) and only reconciles latest; a
+ * rerun of an older commit's run finds the tip already past it and leaves
+ * it; a tip whose source is off main's history (a hand push) stops the run
+ * instead of being built on.
  * Needs the full history: whether a recorded source lies behind sourceSha
  * cannot be judged on a shallow checkout.
  */
