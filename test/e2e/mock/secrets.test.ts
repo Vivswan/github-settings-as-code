@@ -9,7 +9,7 @@
  */
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { sealSecretValue } from "../../../src/sections/shared/secrets-engine.js";
+import { decodeBase64, sealForGithub } from "../../../src/sections/shared/sealed-box.js";
 import { parseScenario, type Scenario } from "../schema.js";
 import { newPipelineRunState } from "./contract.js";
 import { runPipeline } from "./routes.js";
@@ -53,7 +53,7 @@ describe("mock secrets crypto", () => {
 
   test("PUT unseals, stores name + digest (never the plaintext), 201 then 204", async () => {
     const state = buildState(undefined, "org");
-    const sealed = await sealSecretValue("plain-one", MOCK_SECRETS_PUBLIC_KEY);
+    const sealed = sealForGithub(decodeBase64(MOCK_SECRETS_PUBLIC_KEY), "plain-one");
     const path = "/repos/e2e-owner/e2e-repo/actions/secrets/DEPLOY_TOKEN";
     const created = request(state, "PUT", path, {
       encrypted_value: sealed,
@@ -71,7 +71,7 @@ describe("mock secrets crypto", () => {
     const before = state.actions_secrets[0] as Record<string, unknown>;
     const createdAt = before.created_at;
     const updatedAtFirst = before.updated_at;
-    const resealed = await sealSecretValue("plain-one", MOCK_SECRETS_PUBLIC_KEY);
+    const resealed = sealForGithub(decodeBase64(MOCK_SECRETS_PUBLIC_KEY), "plain-one");
     expect(resealed).not.toBe(sealed);
     const updated = request(state, "PUT", path, {
       encrypted_value: resealed,
@@ -85,7 +85,7 @@ describe("mock secrets crypto", () => {
     expect(after.updated_at).not.toBe(updatedAtFirst);
 
     // A rotated value keeps the entry but moves the digest.
-    const rotated = await sealSecretValue("plain-two", MOCK_SECRETS_PUBLIC_KEY);
+    const rotated = sealForGithub(decodeBase64(MOCK_SECRETS_PUBLIC_KEY), "plain-two");
     expect(
       request(state, "PUT", path, { encrypted_value: rotated, key_id: MOCK_SECRETS_KEY_ID })
         .response.status,
@@ -96,7 +96,7 @@ describe("mock secrets crypto", () => {
   test("a wrong key_id or an unopenable ciphertext is rejected with 422", async () => {
     const state = buildState(undefined, "org");
     const path = "/repos/e2e-owner/e2e-repo/actions/secrets/X";
-    const sealed = await sealSecretValue("v", MOCK_SECRETS_PUBLIC_KEY);
+    const sealed = sealForGithub(decodeBase64(MOCK_SECRETS_PUBLIC_KEY), "v");
     expect(
       request(state, "PUT", path, { encrypted_value: sealed, key_id: "wrong" }).response.status,
     ).toBe(422);

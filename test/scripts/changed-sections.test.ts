@@ -116,6 +116,14 @@ describe("changed-sections derived fan-out", () => {
         "codespaces_secrets",
         "agents_secrets",
       ),
+      // The sealed-box primitive reaches every family only through the engine.
+      "sealed-box.ts": inKeyOrder(
+        "environments",
+        "actions_secrets",
+        "dependabot_secrets",
+        "codespaces_secrets",
+        "agents_secrets",
+      ),
       "repo-secrets.ts": inKeyOrder(
         "actions_secrets",
         "dependabot_secrets",
