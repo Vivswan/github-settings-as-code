@@ -272,7 +272,7 @@ That guarantee covers the fold alone. The per-layer validation prints the same m
   - `branches` wildcard entries, by name with the unrecognized key: `branches[0].protection.enforce_admin: the wildcard entry "release/*" declares protection.enforce_admin, which this section does not manage on wildcard rules`.
   - `branches` wildcard entries, by name with the scalar declared where a mapping belongs, the widest echo in the set: `branches[0].protection.required_status_checks: the wildcard entry "release/*" declares protection.required_status_checks as "strict", but on a wildcard rule it must be a mapping`.
   - `environments` entries, by name: `environments[0].deployment_branch_policies: the "prod" entry declares deployment_branch_policies, so it must also declare deployment_branch_policy`.
-  - `actions.selected_actions` repeats the declared `allowed_actions`, which has already passed its enum, so only `all`, `local_only`, or `selected` can appear there.
+  - `actions.selected_actions`, repeating the declared `allowed_actions`, which has already passed its enum, so only `all`, `local_only`, or `selected` can appear: `actions.selected_actions: selected_actions is declared together with allowed_actions: "all", but an allowlist only applies under allowed_actions: "selected"`.
 - A YAML syntax error, quoting the offending source line with a caret under the column; an unresolved alias names the alias instead.
 - A YAML parser warning (an unresolved tag, an unknown directive, an ambiguous anchor) leaves the parse successful, but the parser still prints the offending source line, values included, to the step's log; a collection used as a key warns with the stringified key.
 
