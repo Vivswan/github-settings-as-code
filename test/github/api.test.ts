@@ -39,6 +39,29 @@ describe("retry and throttling", () => {
     expect("data" in result && result.data).toEqual({ ok: true });
   }, 10_000); // The retry plugin's backoff is a fixed ~1s for the first retry.
 
+  test("every attempt leaves a trace line carrying GitHub's request id", async () => {
+    // The request-log plugin writes one line per attempt, failed ones included,
+    // with the x-github-request-id support asks for; dropping the plugin from
+    // the Octokit build (as an @octokit/rest to @octokit/core swap would) loses
+    // exactly these lines while every request still succeeds.
+    const withId = (id: string, status: number, body: string | null) =>
+      new Response(body, {
+        status,
+        headers: { "x-github-request-id": id, "content-type": "application/json" },
+      });
+    stubFetch([() => withId("A1:FAIL", 502, null), () => withId("A2:OK", 200, '{"ok":true}')]);
+    const trace = traceIo();
+    const result = await api(trace.io).tryRequest("GET", "/repos/o/r/flaky");
+    expect("data" in result && result.data).toEqual({ ok: true });
+    const attempts = trace.lines
+      .filter((line) => line.includes(" with id "))
+      .map((line) => line.replace(/ in \d+ms$/, ""));
+    expect(attempts).toEqual([
+      "GET /repos/o/r/flaky - 502 with id A1:FAIL",
+      "GET /repos/o/r/flaky - 200 with id A2:OK",
+    ]);
+  }, 10_000);
+
   test("permission 403 (rate limit not exhausted) is NOT retried", async () => {
     const state = stubFetch([
       () =>
@@ -111,7 +134,12 @@ describe("throttle plugin honors the test knob", () => {
     // exactly as the spawned bundle does.
     process.env.RETRY_BASE_MS = "1";
     stubFetch([() => new Response(null, { status: 204 })]);
-    const client = new GithubApi("t", traceIo().io, "https://api.test", "2022-11-28");
+    const client = new GithubApi({
+      token: "t",
+      io: traceIo().io,
+      baseUrl: "https://api.test",
+      apiVersion: "2022-11-28",
+    });
     const started = Date.now();
     for (let i = 0; i < 12; i++) {
       await client.tryRequest("PATCH", `/repos/o/r${i}`, { i });
@@ -127,7 +155,13 @@ describe("throttle plugin honors the test knob", () => {
     // No env, explicit retryBaseMs=1 arg keeps waits short. A 429 that resolves
     // on retry proves the throttle plugin is active.
     const state = stubFetch([rateLimited, okJson]);
-    const client = new GithubApi("t", traceIo().io, "https://api.test", "2022-11-28", 1);
+    const client = new GithubApi({
+      token: "t",
+      io: traceIo().io,
+      baseUrl: "https://api.test",
+      apiVersion: "2022-11-28",
+      retryBaseMs: 1,
+    });
     const result = await client.tryRequest("GET", "/rl");
     expect(state.calls).toBe(2);
     expect("data" in result && result.data).toEqual({ ok: true });
@@ -150,7 +184,12 @@ describe("throttle plugin honors the test knob", () => {
         headers: { "retry-after": "30", "x-ratelimit-remaining": "0" },
       });
     const state = stubFetch([rateLimitedSlowHeader, okJson]);
-    const client = new GithubApi("t", traceIo().io, "https://api.test", "2022-11-28");
+    const client = new GithubApi({
+      token: "t",
+      io: traceIo().io,
+      baseUrl: "https://api.test",
+      apiVersion: "2022-11-28",
+    });
     const started = Date.now();
     const result = await client.tryRequest("GET", "/rl");
     expect(state.calls).toBe(2);
@@ -1298,13 +1337,13 @@ describe("DELETE request bodies reach the wire", () => {
       },
     });
     try {
-      const client = new GithubApi(
-        "t",
-        traceIo().io,
-        `http://localhost:${server.port}`,
-        "2022-11-28",
-        1,
-      );
+      const client = new GithubApi({
+        token: "t",
+        io: traceIo().io,
+        baseUrl: `http://localhost:${server.port}`,
+        apiVersion: "2022-11-28",
+        retryBaseMs: 1,
+      });
       const result = await client.tryRequest(
         "DELETE",
         "/repos/o/r/secret-scanning/custom-patterns",

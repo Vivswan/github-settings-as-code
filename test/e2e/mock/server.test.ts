@@ -1079,7 +1079,12 @@ describe("429 fault production parity", () => {
     const h = await start(scenario({ live_state: { labels: [{ id: 1, name: "bug" }] } }), {
       faults: [{ key: "labels.list", kind: "429_then_200" }],
     });
-    const api = new GithubApi("e2e-token", silentTrace, h.url, undefined, 1);
+    const api = new GithubApi({
+      token: "e2e-token",
+      io: silentTrace,
+      baseUrl: h.url,
+      retryBaseMs: 1,
+    });
     const result = await api.tryRequest("GET", `/repos/${OWNER}/${REPO}/labels`);
     expect("error" in result).toBe(false);
     // The fault FIRED (the absorption was not vacuous) and the retried
