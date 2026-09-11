@@ -15,7 +15,7 @@ const liveMilestones = [
 ];
 const KEEP_NOTE =
   'milestone "old" exists on the repo but is not declared in the settings file; kept under ' +
-  '"undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" ' +
+  '"_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" ' +
   "to have apply DELETE it, detaching it from every issue that carries it (closing is not " +
   "enough; closed milestones are still listed)";
 const plan = (api: MockApi, desired: Parameters<typeof milestonesSection.plan>[1]) =>
@@ -60,7 +60,7 @@ describe("milestones", () => {
   test("a matching milestone plans nothing: a declared empty description reads as the live null", async () => {
     const api = new MockApi({ [LIST]: { data: liveMilestones } });
     const result = await plan(api, {
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [
         { title: "v1", description: "" },
         { title: "old", state: "open" },
@@ -72,7 +72,7 @@ describe("milestones", () => {
   test("a declared key the live milestone lacks is drift plus a phantom note beside the update", async () => {
     const api = new MockApi({ [LIST]: { data: liveMilestones } });
     const result = await plan(api, {
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [{ title: "v1", due_on: "2026-01-15T00:00:00Z" } as never],
     });
     expect(result.ops.map((op) => [op.role, op.payload, op.drift])).toEqual([
@@ -99,15 +99,15 @@ describe("milestones", () => {
     ]
   >([
     [
-      "wrapped undeclared:delete",
-      { undeclared: "delete", entries: [{ title: "v1" }] },
+      "wrapped _undeclared:delete",
+      { _undeclared: "delete", entries: [{ title: "v1" }] },
       [
         {
           role: "remove",
           params: { milestone_number: "2" },
           describe: 'deleting undeclared milestone "old"',
           drift: [
-            'milestones[old]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it, detaching it from every issue that carries it; add it to the settings file to keep it',
+            'milestones[old]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it, detaching it from every issue that carries it; add it to the settings file to keep it',
           ],
           change: 'DELETED undeclared milestone "old" (detached from every issue that carried it)',
         },
@@ -155,7 +155,7 @@ describe("milestones", () => {
       ],
     });
     const { second, changes, notes } = await provePlanIdempotent(milestonesSection, api, {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [
         {
           title: "v1.0",

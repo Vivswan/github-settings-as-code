@@ -55,7 +55,7 @@ The [getting started guide](docs/start/getting-started.md) walks the same steps 
 - `@v2` is a moving major tag: <!-- x-release-please-major --> every release in that major line moves it, so fixes arrive without changing your pin.
 - Pin `@vX.Y.Z` (or a commit SHA) for byte-stable behavior. Every version tag points at a packaged commit carrying the built action; its parent is the audited release commit on main. A ruleset freezes the tags.
 - v2 activates settings keys that were inert on v1: `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos`, and `branches[].protection.required_signatures`. Audit them in your files before moving a `@v1` pin; a stale `required_signatures: false` would remove a hand-enabled requirement.
-- Only the latest release is supported; fixes are not backported (see [SECURITY.md](.github/SECURITY.md)).
+- Only the latest release is supported; fixes are not backported (see [SECURITY.md](.github/SECURITY.md)). Each major has an [upgrade guide](docs/upgrading/README.md).
 
 ## Docs
 
@@ -71,10 +71,13 @@ The [getting started guide](docs/start/getting-started.md) walks the same steps 
 | Feed secret values from GitHub Secrets or a vault | [Secrets and vaults](docs/reference/secrets-and-vaults.md) |
 | Detect drift without changing anything | [Check mode](docs/operate/check-mode.md) |
 | Manage a fleet from one repository | [Multi-repo mode](docs/operate/multi-repo.md) |
+| Layer settings files and fold them with `mode: merge` | [Layering settings files](docs/operate/layering.md) |
 | Keep private targets out of public logs | [Private repositories](docs/operate/private-repositories.md) |
 | Replace the Probot Settings app | [Migrating from Probot](docs/start/migrating-from-probot.md) |
 | Adapt a complete platform-team workflow | [Playbooks](docs/playbooks/README.md) |
 | Read a failing run | [Troubleshooting](docs/operate/troubleshooting.md) |
+| Move a pin to a new major | [Upgrading](docs/upgrading/README.md) |
+| See how the code is laid out | [Architecture](docs/reference/architecture.md) |
 
 ## Contributing
 

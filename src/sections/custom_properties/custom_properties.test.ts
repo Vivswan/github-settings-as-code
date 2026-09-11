@@ -83,7 +83,7 @@ describe("custom_properties", () => {
     // A fake that would accept any write: the plan must still issue none.
     const api = new MockApi(orgRoutes(live), { unroutedMutations: "succeed" });
     const result = await plan(api, {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [
         { property_name: "team", value: "platform" },
         { property_name: "pilot", value: true },
@@ -108,7 +108,7 @@ describe("custom_properties", () => {
           'custom_properties[team]: declared "platform" != live unset; apply will set the declared value',
           'custom_properties[pilot]: declared "true" != live "false"; apply will set the declared value',
           'custom_properties[compliance]: declared null but the live value is ["soc2"]; apply will unset it (reverting to the org default, if any)',
-          'custom_properties[tier]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will unset it (reverting to the org default, if any); add it to the settings file to keep it',
+          'custom_properties[tier]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will unset it (reverting to the org default, if any); add it to the settings file to keep it',
         ],
         change: [
           'set custom property "team" to "platform"',
@@ -135,8 +135,8 @@ describe("custom_properties", () => {
     ]);
     // "pilot" is live, declared nowhere, and kept; "compliance" is managed.
     expect(result.notes).toEqual([
-      'custom property "pilot" is set on the repo but not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply UNSET it',
-      'custom property "tier" is set on the repo but not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply UNSET it',
+      'custom property "pilot" is set on the repo but not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply UNSET it',
+      'custom property "tier" is set on the repo but not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply UNSET it',
     ]);
   });
 
@@ -177,7 +177,10 @@ describe("custom_properties", () => {
     ],
     [
       "the same, in the wrapped form",
-      { undeclared: "delete", entries: [{ property_name: "compliance", value: ["soc2", "soc2"] }] },
+      {
+        _undeclared: "delete",
+        entries: [{ property_name: "compliance", value: ["soc2", "soc2"] }],
+      },
       /"compliance" entry lists the value "soc2" more than once/,
     ],
     [
@@ -209,7 +212,7 @@ describe("custom_properties", () => {
   test("executing the plan against the mock fragment converges: the re-plan is empty", async () => {
     const { api, fake } = orgFake(live);
     const { second, changes, notes } = await provePlanIdempotent(customPropertiesSection, api, {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [
         { property_name: "team", value: "platform" },
         { property_name: "pilot", value: true },

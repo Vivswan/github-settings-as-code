@@ -99,7 +99,7 @@ Every resolved plaintext is registered with the runner's secret masker before it
 
 ## Multi-repo: operator files only
 
-References are honored only in settings sources the OPERATOR authors: the single-repo settings file, `repos-dir` files, and the `defaults-file`. A settings.yml fetched from a target repository (the `repos` input) is target-authored, and a reference there is a hard error: a target repository must not be able to route the operator's environment - and its secrets - into itself. Declare secret-bearing sections centrally when you manage a fleet.
+References are honored only in settings sources the OPERATOR authors: the single-repo settings file, every `settings-file` layer of a `mode: merge` step, `repos-dir` files, and the `defaults-file` document. A settings.yml fetched from a target repository (the `repos` input) is target-authored, and a reference there is a hard error: a target repository must not be able to route the operator's environment - and its secrets - into itself. Declare secret-bearing sections centrally when you manage a fleet.
 
 ## Repository Actions secrets
 
@@ -113,7 +113,7 @@ actions_secrets:
     value: $PUBLISH_TOKEN
 ```
 
-GitHub never returns a secret's value, only names and timestamps, so check mode reconciles EXISTENCE: a declared-but-missing secret is drift, and the declared values get one cannot-verify note. Apply seals every declared value client-side against the repository's public key and re-writes it on every run, which is also how a rotated vault value propagates. Undeclared secrets are kept by default - a deleted secret's value is unrecoverable - and the wrapped `undeclared: delete` form opts into deletion.
+GitHub never returns a secret's value, only names and timestamps, so check mode reconciles EXISTENCE: a declared-but-missing secret is drift, and the declared values get one cannot-verify note. Apply seals every declared value client-side against the repository's public key and re-writes it on every run, which is also how a rotated vault value propagates. Undeclared secrets are kept by default - a deleted secret's value is unrecoverable - and the wrapped `_undeclared: delete` form opts into deletion.
 
 Unlike the variables sections, a secret entry accepts ONLY `name` and `value` - an unknown key is rejected upfront rather than passed through. That is not an inconsistency: a variables entry's body goes to GitHub verbatim, so an extra key rides along and GitHub decides; a secret's PUT body is built from the sealed value alone, so an extra key has no destination and would "apply" successfully forever while doing nothing.
 
@@ -133,7 +133,7 @@ agents_secrets:
     value: $AGENT_TOKEN
 ```
 
-Everything said about `actions_secrets` applies: existence-only checks, one cannot-verify note, re-seal on every apply, undeclared secrets kept unless the wrapped `undeclared: delete` form says otherwise.
+Everything said about `actions_secrets` applies: existence-only checks, one cannot-verify note, re-seal on every apply, undeclared secrets kept unless the wrapped `_undeclared: delete` form says otherwise.
 
 ## Environment secrets
 
@@ -151,8 +151,14 @@ environments:
         value: $PROD_DEPLOY_TOKEN
 ```
 
-Each environment is its own sealing scope with its own public key, so the same secret name can carry a different value per environment, as above. Reconciliation runs after the environment itself is applied; in check mode against an environment that does not exist yet, the declared secrets cannot be listed, so a note says they are unverifiable until apply creates it. Within a declared `secrets` key, live secrets the entries do not declare are kept by default (their values are unrecoverable); the wrapped `{undeclared: delete, entries}` form opts into deletion. The endpoints ride the same "Environments" PAT permission as the rest of the section.
+Each environment is its own sealing scope with its own public key, so the same secret name can carry a different value per environment, as above. Reconciliation runs after the environment itself is applied; in check mode against an environment that does not exist yet, the declared secrets cannot be listed, so a note says they are unverifiable until apply creates it. Within a declared `secrets` key, live secrets the entries do not declare are kept by default (their values are unrecoverable); the wrapped `{_undeclared: delete, entries}` form opts into deletion. The endpoints ride the same "Environments" PAT permission as the rest of the section.
 
 ## Multi-repo fan-out
 
-In multi-repo mode a defaults file merges under every target the run processes. A defaults file that declares a secret section (`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, or environment secrets) therefore writes those secrets into EVERY discovered target - which is sometimes exactly the point (a fleet-wide deploy key), and sometimes a surprise (a token fanned out to repositories that should never hold it). Scope discovery deliberately before declaring secrets in a defaults file: prefer an explicit `repos` list or tight discovery filters over `repos: "*"`, and run `mode: check` first to see which repositories the run would process and which declared secrets are missing where. Check mode verifies existence only - apply re-writes every declared secret on every run regardless, so a "clean" check still means those values will be sealed and sent.
+In multi-repo mode the defaults file is applied whole to every `repos` target that has no settings file of its own. A defaults file that declares a secret section (`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, or environment secrets) therefore writes those secrets into EVERY fileless target the run discovers. Sometimes that is exactly the point (a fleet-wide deploy key), and sometimes a surprise (a token fanned out to repositories that should never hold it).
+
+Scope discovery deliberately before declaring secrets in a defaults file:
+
+- Prefer an explicit `repos` list or tight discovery filters over `repos: "*"`.
+- Run `mode: check` first to see which repositories would take the defaults and which declared secrets are missing where.
+- Check mode verifies existence only. Apply re-writes every declared secret on every run regardless, so a "clean" check still means those values will be sealed and sent.

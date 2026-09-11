@@ -26,6 +26,8 @@ jobs:
       - uses: ./.github/actions/fetch-test-artifacts
       - name: Lint (biome)
         run: bun run lint
+      - name: Lint (architecture)
+        run: bun run lint:arch
       - name: Typecheck
         run: bun run typecheck
       - name: Dead code (knip)

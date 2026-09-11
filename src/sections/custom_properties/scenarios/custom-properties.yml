@@ -4,11 +4,11 @@ description: >
   property with no live value, change a drifted true_false property (the
   declared boolean normalizes to the "true" string on the wire), unset one
   via `value: null`, and unset an undeclared live property under the wrapped
-  `undeclared: delete` form. The section compares before writing, so the
+  `_undeclared: delete` form. The section compares before writing, so the
   idempotence re-run must issue zero writes.
 settings:
   custom_properties:
-    undeclared: delete
+    _undeclared: delete
     entries:
       - property_name: team
         value: platform

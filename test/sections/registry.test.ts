@@ -32,9 +32,19 @@ import {
   type MisdeclaredPlanModule,
   SECTIONS,
   sectionModule,
+  sectionShape,
 } from "../../src/sections/registry.js";
 import { workflowsSection } from "../../src/sections/workflows/index.js";
 import type { MustBeNever } from "../../src/types.js";
+
+/** The identity facet of a list section's declaration, as the erased registry view exposes it. */
+interface ListDeclView {
+  readonly identity: {
+    readonly field: string;
+    readonly fold?: (name: string) => string;
+    readonly aliases?: (entry: object) => readonly string[];
+  };
+}
 
 // The caveat code-scanning appends to its derived grant. Kept here so the
 // snapshot below and the derivation check agree on one source of truth.
@@ -114,11 +124,9 @@ describe("section permissions", () => {
     // is pinned to the SettingsFile types in both directions (schema.ts),
     // and SectionMeta's conditional undeclaredDefault type forces "delete"
     // or "keep" exactly for listed sections. The zod shapes are the one
-    // runtime-only piece: merge.ts wraps unconditionally for every listed
-    // key, so a listed section whose shape only accepted the plain array
-    // would reject its own normalized declaration - and only in multi-repo
-    // mode (single-repo skips applyDefaults). Round-tripping both forms
-    // here pins the shapes to the same list the merge drives off.
+    // runtime-only piece: a listed section must accept both the plain array
+    // and the wrapped form. Round-tripping both forms here pins the shapes
+    // to the same list.
     const byKey = new Map(SECTIONS.map((module) => [module.key as string, module]));
     for (const key of UNDECLARED_POLICY_SECTIONS) {
       const module = byKey.get(key);
@@ -131,7 +139,7 @@ describe("section permissions", () => {
         `${key}: wrapper without a policy must parse`,
       ).toBe(true);
       expect(
-        module.shape.safeParse({ undeclared: "keep", entries: [] }).success,
+        module.shape.safeParse({ _undeclared: "keep", entries: [] }).success,
         `${key}: wrapper with a policy must parse`,
       ).toBe(true);
       const policy = defaultUndeclaredPolicy(sectionModule(key));
@@ -140,6 +148,94 @@ describe("section permissions", () => {
         `${key}: defaultUndeclaredPolicy returned "${policy}", expected "keep" or "delete"`,
       ).toContain(policy);
     }
+  });
+
+  test("_layering is accepted on every top-level knobbed wrapper and rejected on the nested ones", () => {
+    // The directive addresses the layers below a SECTION; a list nested in an
+    // entry is replaced wholesale, so accepting the key there would let it
+    // validate and never act. nestedKnobbed() is the one place that decides.
+    const wrapper = { entries: [], _layering: "merge" };
+    const nested = {
+      deployment_branch_policies: wrapper,
+      deployment_protection_rules: wrapper,
+      variables: wrapper,
+      secrets: wrapper,
+    };
+    const verdict = sectionShape("environments").safeParse([{ name: "prod", ...nested }]);
+    expect({
+      topLevel: Object.fromEntries(
+        UNDECLARED_POLICY_SECTIONS.map((key) => [
+          key,
+          sectionShape(key).safeParse(wrapper).success,
+        ]),
+      ),
+      nested: verdict.success
+        ? "accepted"
+        : verdict.error.issues.map((issue) => [issue.path.join("."), issue.message]).sort(),
+    }).toEqual({
+      topLevel: Object.fromEntries(UNDECLARED_POLICY_SECTIONS.map((key) => [key, true])),
+      nested: Object.keys(nested)
+        .map((list) => [`0.${list}`, 'Unrecognized key: "_layering"'])
+        .sort(),
+    });
+  });
+
+  test("the layering declarations sit on knobbed sections and agree with the list identities", () => {
+    // A `layering` only makes sense where the layered merge combines entries
+    // (the knobbed sections), and a list section's layering keys must be the
+    // identities its planner folds and claims - the written name plus every
+    // alias - or the merge would pair entries the planner treats as distinct
+    // (or the reverse, leaving a merged document the planner refuses).
+    const layered = SECTIONS.flatMap((module) =>
+      module.layering === undefined ? [] : [{ module, layering: module.layering }],
+    );
+    const knobbed: readonly string[] = UNDECLARED_POLICY_SECTIONS;
+    const plain = { name: "Bug" };
+    const renaming = { name: "Bug", new_name: "Defect" };
+    expect(
+      layered.map(({ module, layering }) => {
+        const identity = "decl" in module ? (module.decl as ListDeclView).identity : undefined;
+        const fold = identity?.fold ?? ((n: string) => n);
+        return {
+          key: module.key,
+          knobbed: knobbed.includes(module.key),
+          keyField: layering.keyField,
+          keysOfPlain: layering.keys(plain),
+          keysOfRenaming: layering.keys(renaming),
+          identity:
+            identity === undefined
+              ? undefined
+              : {
+                  field: identity.field,
+                  foldOfBug: fold("Bug"),
+                  aliasesOfPlain: identity.aliases?.(plain).map(fold),
+                  aliasesOfRenaming: identity.aliases?.(renaming).map(fold),
+                },
+        };
+      }),
+    ).toEqual([
+      {
+        key: "labels",
+        knobbed: true,
+        keyField: "name",
+        keysOfPlain: ["bug"],
+        keysOfRenaming: ["defect", "bug"],
+        identity: {
+          field: "name",
+          foldOfBug: "bug",
+          aliasesOfPlain: [],
+          aliasesOfRenaming: ["bug"],
+        },
+      },
+      {
+        key: "rulesets",
+        knobbed: true,
+        keyField: "name",
+        keysOfPlain: ["Bug"],
+        keysOfRenaming: ["Bug"],
+        identity: undefined,
+      },
+    ]);
   });
 
   test("every registered section declares a permission with at least one repo resource", () => {

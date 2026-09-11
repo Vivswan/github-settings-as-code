@@ -66,6 +66,48 @@ describe("multi-repo mode", () => {
     expect(log?.deniedBy).toBe("contents");
   });
 
+  const refPath = (slug: string, ref: string) => `/repos/${slug}/git/ref/${ref}`;
+
+  test("git ref read: the default branch head answers 200 for a fileless slug, any other ref 404s", async () => {
+    const h = await start(scenario({ repos: { "e2e-owner/svc-b": { settings: null } } }));
+    const head = await call(h, "GET", refPath("e2e-owner/svc-b", "heads/main"));
+    expect(head.status).toBe(200);
+    expect(await json(head)).toEqual({
+      ref: "refs/heads/main",
+      node_id: Buffer.from("MOCKREF:e2e-owner/svc-b:heads/main", "utf8").toString("base64"),
+      url: "https://api.github.com/repos/e2e-owner/svc-b/git/refs/heads/main",
+      object: {
+        type: "commit",
+        sha: "0123456789abcdef0123456789abcdef01234567",
+        url: "https://api.github.com/repos/e2e-owner/svc-b/git/commits/0123456789abcdef0123456789abcdef01234567",
+      },
+    });
+    const other = await call(h, "GET", refPath("e2e-owner/svc-b", "heads/develop"));
+    expect(other.status).toBe(404);
+    const unknown = await call(h, "GET", refPath("e2e-owner/nobody", "heads/main"));
+    expect(unknown.status).toBe(404);
+    expect(h.violations).toEqual([]);
+  });
+
+  test("git ref read is Contents-gated like the contents route", async () => {
+    const h = await start(
+      scenario({
+        repos: { "e2e-owner/locked": { settings: null, permissions: { contents: "none" } } },
+      }),
+    );
+    const res = await call(h, "GET", refPath("e2e-owner/locked", "heads/main"));
+    expect(res.status).toBe(404);
+    const log = h.requests.find((r) => r.pathname === refPath("e2e-owner/locked", "heads/main"));
+    expect(log?.deniedBy).toBe("contents");
+  });
+
+  test("git ref read rejects a non-GET method with a violation", async () => {
+    const h = await start(scenario({ repos: { "e2e-owner/svc-a": { settings: {} } } }));
+    const res = await call(h, "POST", refPath("e2e-owner/svc-a", "heads/main"), { body: {} });
+    expect(res.status).toBe(400);
+    expect(h.violations).toEqual(["git ref read must be GET, got POST"]);
+  });
+
   test("/user/repos enumerates the discovery pool, paginated", async () => {
     const pool = Array.from({ length: 100 }, (_, i) => ({ slug: `e2e-owner/repo-${i}` }));
     const h = await start(scenario({ discovery: { inputs: {}, pool } }));

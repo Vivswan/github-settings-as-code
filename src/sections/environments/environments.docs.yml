@@ -1,11 +1,11 @@
-readme:
+sections_table:
   endpoints: >-
     PUT environments + per-environment variables, secrets, deployment branch policies, deployment
     protection rules, and pins (GraphQL EnvironmentPins + PinEnvironment + ReorderEnvironment)
   notes: >-
     reviewers, wait timer, branch-policy flags; nested `variables`, `secrets`,
     `deployment_branch_policies`, and `deployment_protection_rules` keys reconcile per environment,
-    each with its own `undeclared:` knob (within a declared key, undeclared variables and
+    each with its own `_undeclared:` knob (within a declared key, undeclared variables and
     branch-policy patterns are deleted; secrets and protection rules are kept); a `pinned` key pins
     the environment on the home page's deployments sidebar over GraphQL (declaration order sets the
     pin order, max 10 pins; environments without the key are never unpinned)
@@ -25,17 +25,17 @@ coverage:
       reconciles that environment's Actions variables AFTER the PUT, through GET/POST
       /repos/{owner}/{repo}/environments/{name}/variables and PATCH/DELETE .../variables/{name}:
       create missing, update divergent values, and delete undeclared ones by default (the wrapped
-      `undeclared: keep` form keeps them as notes); names match case-insensitively, values are plain
+      `_undeclared: keep` form keeps them as notes); names match case-insensitively, values are plain
       text by design. A declared per-environment `secrets` key reconciles that environment's Actions
       secrets the same way the shipped secret sections do - GET .../environments/{name}/secrets
       (names + timestamps), GET .../secrets/public-key, sealed PUT/DELETE .../secrets/{secret_name}
       - one sealing scope per environment, so same-named secrets in sibling environments resolve
       independently; undeclared secrets within a declared key are KEPT by default (values
-      unrecoverable; `undeclared: delete` opts in). A declared per-environment
+      unrecoverable; `_undeclared: delete` opts in). A declared per-environment
       `deployment_branch_policies` key reconciles that environment's custom branch-policy patterns
       through GET/POST .../environments/{name}/deployment-branch-policies and DELETE
       .../deployment-branch-policies/{branch_policy_id}: create missing patterns, delete undeclared
-      ones by default (`undeclared: keep` softens to notes), and replace a matching pattern whose
+      ones by default (`_undeclared: keep` softens to notes), and replace a matching pattern whose
       type differs (type is immutable upstream, so the change is delete + recreate; the upstream PUT
       is deliberately unused - its body is the name alone, and the name is the pattern's identity,
       so it can never help reconciliation). Declaring the key requires the singular
@@ -51,7 +51,7 @@ coverage:
       time via ONE GET .../deployment_protection_rules/apps fetch (made only when a declared rule is
       missing; a slug the listing does not carry is a hard error naming the available slugs).
       Undeclared rules within a declared key are KEPT by default - Apps can enable themselves as
-      gates, and silently disabling a deployment gate is security-relevant - with `undeclared:
+      gates, and silently disabling a deployment gate is security-relevant - with `_undeclared:
       delete` opting into disabling; these endpoints also sit outside the Environments PAT
       permission (the enabled-rules list under Actions read, the Apps read and both writes under
       Administration). In check mode against a missing environment the declared variables, secrets,
@@ -120,7 +120,7 @@ schema:
     `deployment_branch_policy` to set `custom_branch_policies: true`; without the flag GitHub
     rejects every pattern write. A pattern's `type` is immutable on GitHub, so a declared type that
     differs from the live one is applied as delete plus recreate. Within a declared key, live
-    patterns the entries do not declare are DELETED by default; the wrapped `{undeclared: keep,
+    patterns the entries do not declare are DELETED by default; the wrapped `{_undeclared: keep,
     entries}` form keeps them as notes.
   EnvironmentConfig.deployment_protection_rules: >-
     Custom deployment protection rules for this environment, reconciled only when this key is
@@ -128,13 +128,13 @@ schema:
     declared by its App slug and resolved to the App's integration id at apply time; GitHub offers
     no update call, so the model is enable/disable only. Within a declared key, live rules the
     entries do not declare are KEPT by default - Apps can enable themselves as gates, and silently
-    removing a deployment gate is security-relevant - and the wrapped `{undeclared: delete,
+    removing a deployment gate is security-relevant - and the wrapped `{_undeclared: delete,
     entries}` form opts into disabling them.
   EnvironmentConfig.variables: >-
     Actions variables for this environment, reconciled only when this key is declared (an absent key
     leaves the live variables untouched). Values are plain text by design - use environment secrets
     for anything sensitive. Within a declared `variables` key, live variables the entries do not
-    declare are DELETED by default; the wrapped `{undeclared: keep, entries}` form keeps them as
+    declare are DELETED by default; the wrapped `{_undeclared: keep, entries}` form keeps them as
     notes. Names match case-insensitively, as GitHub treats them.
   EnvironmentConfig.secrets: >-
     Actions secrets for this environment, reconciled only when this key is declared (an absent key
@@ -142,7 +142,7 @@ schema:
     step's environment, never a literal, sealed client-side against the environment's public key;
     GitHub cannot return a value, so check mode verifies existence only and apply re-seals every
     declared value on each run. Within a declared `secrets` key, live secrets the entries do not
-    declare are KEPT by default (their values are unrecoverable); the wrapped `{undeclared: delete,
+    declare are KEPT by default (their values are unrecoverable); the wrapped `{_undeclared: delete,
     entries}` form opts into deletion.
   EnvironmentSecretConfig: >-
     One per-environment Actions secret, matched by case-insensitive name (GitHub stores secret names

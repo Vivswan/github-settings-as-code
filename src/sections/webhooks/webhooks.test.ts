@@ -91,7 +91,7 @@ describe("webhooks shape", () => {
     ["name 'web'", { webhooks: [{ name: "web", config: { url: "https://x.test/h" } }] }, null],
     [
       "an omitted name in the wrapped form",
-      { webhooks: { undeclared: "delete", entries: [{ config: { url: "https://x.test/h" } }] } },
+      { webhooks: { _undeclared: "delete", entries: [{ config: { url: "https://x.test/h" } }] } },
       null,
     ],
     ["a missing config", { webhooks: [{ events: ["push"] }] }, "webhooks[0].config"],
@@ -115,7 +115,7 @@ describe("webhooks secretValues", () => {
     ).toEqual([{ label: 'the webhook "https://a.test" config.secret', value: "$A" }]);
     expect(
       webhooksSection.secretValues?.({
-        undeclared: "keep",
+        _undeclared: "keep",
         entries: [{ config: { url: "https://a.test", secret: "$B" } }],
       }),
     ).toEqual([{ label: 'the webhook "https://a.test" config.secret', value: "$B" }]);
@@ -124,7 +124,7 @@ describe("webhooks secretValues", () => {
   test("malformed containers return [] and leave the error to validation", () => {
     // The extractor can face any merged value, so a malformed declaration
     // must not throw here - validation is where the user gets the message.
-    for (const malformed of [null, "hooks", 42, { undeclared: "keep" }, [null, "x"]]) {
+    for (const malformed of [null, "hooks", 42, { _undeclared: "keep" }, [null, "x"]]) {
       // The double cast feeds the extractor a PRE-VALIDATION value on purpose.
       expect(webhooksSection.secretValues?.(malformed as unknown as WebhookConfig[])).toEqual([]);
     }
@@ -259,15 +259,15 @@ describe("webhooks plan", () => {
     });
   });
 
-  test("a changed config.url is a new identity: a create plus a kept undeclared note, or a delete under undeclared:delete", async () => {
+  test("a changed config.url is a new identity: a create plus a kept undeclared note, or a delete under _undeclared:delete", async () => {
     const api = new MockApi({ [LIST]: { data: [liveHook(8, "https://old.test/h")] } });
     const kept = await plan(api, [{ config: { url: "https://new.test/h" } }]);
     expect(kept.ops.map((op) => [op.role, op.params])).toEqual([["create", undefined]]);
     expect(kept.notes).toEqual([
-      'webhook "https://old.test/h" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it',
+      'webhook "https://old.test/h" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
     ]);
     const deleted = await plan(api, {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [{ config: { url: "https://new.test/h" } }],
     });
     expect(deleted.notes).toEqual([]);
@@ -284,7 +284,7 @@ describe("webhooks plan", () => {
         "remove",
         { hook_id: "8" },
         [
-          'webhooks["https://old.test/h"]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
+          'webhooks["https://old.test/h"]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
         ],
         'DELETED undeclared webhook "https://old.test/h"',
       ],
@@ -330,7 +330,7 @@ describe("webhooks plan", () => {
       webhooksSection,
       api,
       {
-        undeclared: "delete",
+        _undeclared: "delete",
         entries: [
           {
             config: {

@@ -19,4 +19,4 @@ Nine sections are closed rather than passthrough: `collaborators`, `teams`, `wor
 
 A few nested surfaces are strict for the same reason. Each key of the actions section's `cache` object is the entire body of its own endpoint, so an unrecognized cache key has nowhere to go and is rejected upfront; the rest of that section stays passthrough. Inside a declared environment, the `secrets` and `deployment_protection_rules` entries are strict the same way: their write bodies are built from the named fields alone, so an extra entry key would silently do nothing.
 
-The wrapped [`undeclared` form](undeclared-policy.md) of the list sections is strict the same way: `undeclared` and `entries` are this action's own vocabulary, never sent to GitHub, so any other wrapper key is rejected upfront as a typo.
+The wrapped form of the list sections is strict the same way: its keys are this action's own vocabulary, never sent to GitHub, so any other wrapper key is rejected upfront as a typo. The [undeclared policy page](undeclared-policy.md) is the one place that lists them.
