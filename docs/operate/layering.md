@@ -55,7 +55,7 @@ Mappings merged key by key, the two label lists unioned by name, and `labels` ca
 |---|---|
 | `mode` | `merge` |
 | `settings-file` | The ordered list of layer paths, newline- or comma-separated, lowest layer first |
-| `merged-file` | Required: where the merged document is written (parent directories are created) |
+| `merged-file` | Required: where the merged document is written (parent directories are created). It must not name one of the `settings-file` layers, compared as resolved paths: the run refuses that, naming the layer's position, because the merge would overwrite the layer and the next run would fold the merged document as one |
 | `layering` | `merge` (default) or `replace`: the run-wide default for the keyed list sections, see below |
 | `token` | Ignored: a merge makes no GitHub API call, so a token a workflow sets on every step does no harm |
 | `repository`, `repos`, `repos-dir`, `defaults-file`, `visibility`, `archived`, `forks`, `exclude`, `topics`, `affiliation`, `sections`, `required-sections`, `on-missing-permission`, `api-version`, `private-repos`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a merge addresses no repository, fleet, or report, calls no API, and writes every section its layers declare; a `sections` allowlist belongs on the step that runs the merged document |
@@ -258,6 +258,25 @@ The per-layer validation catches what a standalone settings file could not say, 
 | A non-mapping entry (`milestones: [v2]`) | Validation: `milestones[0]: Invalid input: expected object, received string` |
 
 The fold itself refuses what only a merge can judge (`layer ".github/settings/repo.yml": ...`). A fold refusal names the key path (entries by index) and the kind of problem, never a value from the document: the merge runs without a repository's redaction context, so a label name or rule type echoed here could put a private repository's settings into a public log.
+
+That guarantee covers the fold alone. The per-layer validation prints the same messages an apply or check run prints, and these message families can name what they find:
+
+- An unrecognized key in a strict object: `actions.cache: Unrecognized key: "cache_ttl"`. A type mismatch prints only the type received, except a non-finite number, which prints as itself: `actions.cache.max_cache_size_gb: .inf` gives `Invalid input: expected number, received Infinity` (the vocabulary is Infinity, -Infinity, and NaN).
+- An unknown top-level section, by its name: `unknown top-level section(s) in repo.yml: lables`.
+- A key path through keys you chose, wherever a section accepts arbitrary ones: `repository.private_project is not plain YAML data`, and under `interaction_limits` the unknown keys themselves: `interaction_limits.limit: key(s) [private_project] ride the base interaction-limits PUT`.
+- A closed section's entry, by its identity, with the key it does not know: `collaborators[octocat]: declares "permision", which this section does not recognize`.
+- A section-worded error that prints the rejected value:
+  - `repository` toggles and the issue policy: `repository.enable_vulnerability_alerts: "yes" is not a boolean` and `repository.issue_creation_policy: "everyone" is not a recognized policy`.
+  - `interaction_limits` logins: `interaction_limits.pull_request_creation_bypass: "Octocat" and "octocat" name the same login`.
+  - `branches` duplicates: `branches[0].protection.force_push_bypassers: force_push_bypassers lists "octocat" more than once`, and the same for `required_deployments.environments`.
+  - `branches` wildcard entries, by name with the unrecognized key: `branches[0].protection.enforce_admin: the wildcard entry "release/*" declares protection.enforce_admin, which this section does not manage on wildcard rules`.
+  - `branches` wildcard entries, by name with the scalar declared where a mapping belongs, the widest echo in the set: `branches[0].protection.required_status_checks: the wildcard entry "release/*" declares protection.required_status_checks as "strict", but on a wildcard rule it must be a mapping`.
+  - `environments` entries, by name: `environments[0].deployment_branch_policies: the "prod" entry declares deployment_branch_policies, so it must also declare deployment_branch_policy`.
+  - `actions.selected_actions`, repeating the declared `allowed_actions`, which has already passed its enum, so only `all`, `local_only`, or `selected` can appear: `actions.selected_actions: selected_actions is declared together with allowed_actions: "all", but an allowlist only applies under allowed_actions: "selected"`.
+- A YAML syntax error, quoting the offending source line with a caret under the column; an unresolved alias names the alias instead.
+- A YAML parser warning (an unresolved tag, an unknown directive, an ambiguous anchor) leaves the parse successful, but the parser still prints the offending source line, values included, to the step's log; a collection used as a key warns with the stringified key.
+
+A merge-mode log can therefore show your settings file's structure and, through these messages, a value from it: treat it like any log that prints a parse error for a file the runner holds.
 
 | The layer has | The fold says |
 |---|---|
