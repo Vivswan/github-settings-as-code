@@ -4,10 +4,10 @@ order: 320
 
 # A fleet security baseline, rolled out in rings
 
-One reviewed defaults file defines "secure by default" for every managed repository, and a topic per rollout ring controls who gets it when. The baseline lives in the admin repository:
+One reviewed baseline file defines "secure by default" for every managed repository, and a topic per rollout ring controls who gets it when. The baseline lives in the admin repository:
 
 ```yaml settings
-# .github/settings-defaults.yml
+# .github/settings/baseline.yml
 repository:
   delete_branch_on_merge: true
   allow_merge_commit: false
@@ -48,16 +48,57 @@ rulesets:
           required_review_thread_resolution: true
 ```
 
-Two details in that file earn a sentence each. Rule parameters pass through verbatim, so `required_signatures` works as a ruleset rule today even though classic `branches` protection does not support it (see [COVERAGE.md](https://github.com/Vivswan/github-settings-as-code/blob/main/COVERAGE.md)). And the `bypass_actors` entry is a deliberate break-glass path: `bypass_mode: pull_request` lets repository admins bypass through a pull request while still blocking direct pushes, which is usually the right emergency valve for a baseline. Capability boundaries shape what belongs in shared defaults for a mixed fleet. Settings that exist only on public repositories (private vulnerability reporting, for one) go in a job scoped with `visibility: public`. Settings gated by plan rather than visibility (secret scanning on private repositories needs Advanced Security, which no discovery filter can see) go in a topic-marked capability cohort, the same mechanism as the rings. And `selected_actions.patterns_allowed` sits in between: it is accepted everywhere but only applies to public repositories, so private repositories in this cohort rely on the `github_owned_allowed` and `verified_allowed` flags alone.
+Two details in that file earn a sentence each:
 
-The workflow applies the baseline ring by ring, using `repos: "*"` discovery filtered by topic:
+- Rule parameters pass through verbatim, so every rule type GitHub accepts works here, `required_signatures` included (see [COVERAGE.md](https://github.com/Vivswan/github-settings-as-code/blob/main/COVERAGE.md)).
+- The `bypass_actors` entry is the break-glass path: `bypass_mode: pull_request` lets repository admins bypass through a pull request while direct pushes stay blocked.
+
+Capability boundaries decide what belongs in a shared baseline for a mixed fleet:
+
+| The setting | Example | Where it goes |
+|---|---|---|
+| Exists only on public repositories | Private vulnerability reporting | A job scoped with `visibility: public` |
+| Gated by plan, not visibility | Secret scanning on private repositories needs Advanced Security, which no discovery filter can see | A topic-marked capability cohort, the same mechanism as the rings |
+| Accepted everywhere, applied on public only | `selected_actions.patterns_allowed` | The baseline; private repositories rely on `github_owned_allowed` and `verified_allowed` alone |
+
+## The layers
+
+The baseline is the lowest layer. A ring layer sits above it, and a repository's own file above that. Ring 1 installs the ruleset with `enforcement: evaluate`: GitHub records what each rule would have blocked without blocking anything, so a repository shows the effect in its rule insights before promotion to ring 0 makes the ruleset active:
+
+```yaml layer
+# .github/settings/rings/settings-ring-1.yml
+rulesets:
+  - name: baseline default branch
+    enforcement: evaluate
+```
+
+Ring 0's layer, `settings-ring-0.yml`, is empty (an empty file is a valid layer). A repository that keeps its own settings adds a file under `.github/repos/<ring>/<name>.yml` in the admin repository; it need only say what differs:
+
+```yaml layer
+# .github/repos/settings-ring-0/payments.yml
+repository:
+  description: Payments service
+labels:
+  - name: incident
+    color: "b60205"
+```
+
+Under `mode: merge` the same-name ruleset merges key by key, so ring 1's `enforcement: evaluate` lands on the baseline ruleset without repeating its rules; `labels` union by name, so the baseline's labels stay. The [layering guide](../operate/layering.md) has the full rules.
+
+## The workflow
+
+Three jobs per run, both rings applying (ring 1 applies the evaluate ruleset):
+
+- `plan` lists the curated files.
+- `curated` folds three layers per file and applies the merged document to that repository.
+- `fileless` folds the baseline and the ring layer once and hands the result to discovery as the `defaults-file`, which reaches every ring-topic repository that has no `.github/settings.yml` of its own. The curated names are excluded from discovery, so no repository is applied twice.
 
 ```yaml
 name: Fleet baseline
 on:
   push:
     branches: [main]
-    paths: [.github/settings-defaults.yml]
+    paths: [".github/settings/**", ".github/repos/**"]
   schedule:
     - cron: "23 5 * * *"
   workflow_dispatch:
@@ -66,26 +107,79 @@ permissions:
   contents: read
 
 jobs:
-  rings:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      curated: ${{ steps.list.outputs.curated }}
+      exclude: ${{ steps.list.outputs.exclude }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        run: |
+          curated="$(find .github/repos -name '*.yml' \
+            | sed -E 's#^\.github/repos/([^/]+)/(.+)\.yml$#{"ring":"\1","repo":"\2"}#' | jq -sc .)"
+          echo "curated=$curated" >> "$GITHUB_OUTPUT"
+          echo "exclude=$(jq -r 'map(.repo) | join(",")' <<< "$curated")" >> "$GITHUB_OUTPUT"
+
+  curated:
+    needs: plan
+    if: needs.plan.outputs.curated != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - ring: settings-ring-0
-            mode: apply
-          - ring: settings-ring-1
-            mode: check
+        include: ${{ fromJSON(needs.plan.outputs.curated) }}
     steps:
       - uses: actions/checkout@v7
+      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+        with:
+          mode: merge
+          settings-file: |
+            .github/settings/baseline.yml
+            .github/settings/rings/${{ matrix.ring }}.yml
+            .github/repos/${{ matrix.ring }}/${{ matrix.repo }}.yml
+          merged-file: merged/${{ matrix.repo }}.yml
+      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+        with:
+          token: ${{ secrets.FLEET_TOKEN }}
+          repository: acme/${{ matrix.repo }}
+          settings-file: merged/${{ matrix.repo }}.yml
+
+  fileless:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ring: [settings-ring-0, settings-ring-1]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+        with:
+          mode: merge
+          settings-file: |
+            .github/settings/baseline.yml
+            .github/settings/rings/${{ matrix.ring }}.yml
+          merged-file: merged/${{ matrix.ring }}.yml
       - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_TOKEN }}
           repos: "*"
           topics: ${{ matrix.ring }}
+          exclude: ${{ needs.plan.outputs.exclude }}
           archived: skip
-          mode: ${{ matrix.mode }}
-          defaults-file: .github/settings-defaults.yml
+          defaults-file: merged/${{ matrix.ring }}.yml
 ```
 
-Ring 0 converges on the baseline while ring 1 only reports what would change; `fail-fast: false` keeps ring 1's expected drift exit from cancelling ring 0's apply mid-run. Enrollment needs two things on each target: the ring topic, and a `.github/settings.yml` of the target's own on its default branch, because a `repos: "*"` target without one is skipped with a notice and the defaults are never merged for it (a minimal file declaring the repository's `topics` serves both needs at once). Promotion is retopicking the repository, and the mechanics matter: discovery reads each repository's live topics, and ring 1 runs in check mode, so a ring topic merely declared in a target's settings file is invisible to discovery until something applies it. Promote by changing the live topic (`gh repo edit acme/payments --add-topic settings-ring-0 --remove-topic settings-ring-1`), or through the target's own settings workflow when it runs one. After promoting, the ring topic must also appear in the target's declared `topics` list, because the repository section replaces the full topic set on apply: a file that omits the ring topic un-promotes the repository on the next apply run, and the ring workflow stops seeing it. When ring 1's checks read clean or acceptable, flip its matrix entry to `apply`. Note that `topics` and the other discovery filters are rejected unless `repos: "*"` is set, so this pattern does not transfer directly to `repos-dir` cohorts; with central files, staging is folders (one `repos-dir` per cohort) instead of topics.
+`fail-fast: false` keeps one repository's failure from cancelling the rest of the matrix, and the `if` skips the `curated` job while the tree is empty (a matrix cannot include nothing). The merge steps need no token: they fold local files and write the merged documents the apply steps read. The `exclude` input takes the curated names as wildcard patterns, so a curated repository that still carries a ring topic is never applied by both jobs.
+
+The `curated` matrix runs one job per file, and a matrix runs at most 256 jobs. Past that, split only the `curated` job by cohort folder into copies; the `fileless` job stays single, and its `exclude` keeps listing every curated name across all cohorts, or a cohort's fallback run would apply the bare baseline to another cohort's curated repository that has no remote settings file. To preview a baseline change before it lands, run the same merged documents through `mode: check` on pull requests, as in [Preview the blast radius](preview-blast-radius.md).
+
+## Enrollment and promotion
+
+- A curated repository is enrolled by its file under `.github/repos/<ring>/`; the `plan` job reads the tree, so promotion is moving the file to the next ring's folder in a reviewed pull request.
+- A fileless repository is enrolled by its live ring topic. Promotion is retopicking it: `gh repo edit acme/payments --add-topic settings-ring-0 --remove-topic settings-ring-1`. Discovery reads live topics, so a topic declared in a file is invisible until something applies it.
+- Keep `topics` out of the baseline. The repository section replaces the full topic set on apply, so a baseline that declared topics would strip the ring topic from every fileless repository it reaches.
+- A fileless repository that gains a `.github/settings.yml` leaves the fallback: the fleet job applies that file alone. Move it to the curated matrix so the baseline keeps reaching it.
+
+Promotion to ring 0 is what turns `evaluate` into `active`: the ring-0 layer is empty, so the baseline's `enforcement: active` applies unchanged. Read a ring-1 repository's rule insights first (Settings, then Rules, then Insights) to see what the evaluate run would have blocked.

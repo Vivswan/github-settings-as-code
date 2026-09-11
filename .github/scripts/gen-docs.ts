@@ -1,8 +1,8 @@
-// Emits the generated regions of COVERAGE.md, the sections and inputs reference pages, and the two
-// pages carrying the token-form link (README.md and the getting-started guide), each between
-// `<!-- BEGIN/END GENERATED: <name> -->` markers (build:docs): the Sections table, the `result`
-// list, the token-form link definition, and COVERAGE's whole body. Authored prose from the docs
-// registry + coverage-data.
+// Emits the generated regions of COVERAGE.md, the sections, inputs, and architecture reference
+// pages, and the two pages carrying the token-form link (README.md and the getting-started
+// guide), each between `<!-- BEGIN/END GENERATED: <name> -->` markers (build:docs): the Sections
+// table, the `result` list, the token-form link definition, COVERAGE's whole body, and the module
+// map rendered from architecture.yml. Authored prose from the docs registry + coverage-data.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { MERGE_RESULT } from "../../src/action/deliver.js";
@@ -18,6 +18,7 @@ import { RESOURCE_SLUGS } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
+import { readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import {
   escapeRe,
@@ -115,7 +116,7 @@ const TABLE_HEADER =
 /** The Sections table, one row per section in the given order; a section without docs throws. */
 export function renderSectionsTable(
   sections: readonly SectionsTableRow[],
-  docs: Readonly<Record<string, Pick<SectionDocs, "readme">>>,
+  docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
 ): string {
   const rows = sections.map((section) => {
     const doc = docs[section.key];
@@ -124,10 +125,10 @@ export function renderSectionsTable(
     }
     return [
       `\`${section.key}\``,
-      cell(doc.readme.endpoints, `the ${section.key} Endpoints cell`),
+      cell(doc.sections_table.endpoints, `the ${section.key} Endpoints cell`),
       cell(renderPatCell(sectionGrant(section)), `the ${section.key} PAT permission cell`),
       UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault],
-      cell(doc.readme.notes, `the ${section.key} Notes cell`),
+      cell(doc.sections_table.notes, `the ${section.key} Notes cell`),
     ];
   });
   return [TABLE_HEADER, ...rows.map((cells) => `| ${cells.join(" | ")} |`)].join("\n");
@@ -377,6 +378,18 @@ function patUrlRegion(name: string): GeneratedRegion {
   };
 }
 
+// The module map: a mermaid fence rendered from architecture.yml's layers and edges (the lint
+// keeps that declaration equal to the tree), as region `name` under `heading`.
+function architectureMapRegion(name: string, heading: string): GeneratedRegion {
+  return {
+    name,
+    placement: { kind: "under-heading", heading },
+    body: /^\n(?:\x60{3}mermaid\n(?:[^\x60\n][^\n]*\n)*\x60{3}\n)?$/,
+    render: () =>
+      `\n\x60\x60\x60mermaid\n${renderArchitectureMermaid(readArchitecture(ROOT))}\n\x60\x60\x60\n`,
+  };
+}
+
 // Every page this generator writes besides COVERAGE.md, keyed by path: the reference tables in
 // their homes, and the token-form link definition closing the README and the getting-started guide.
 export const PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
@@ -384,6 +397,9 @@ export const PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> 
   "docs/start/getting-started.md": [patUrlRegion("pat-url")],
   "docs/reference/sections.md": [sectionsTableRegion("sections-table", "# Sections")],
   "docs/reference/inputs.md": [outputsListRegion("outputs-list", "## Outputs")],
+  "docs/reference/architecture.md": [
+    architectureMapRegion("architecture-map", "## The module map"),
+  ],
 };
 
 // The page at `path` with its regions checked for placement, then regenerated. The result must

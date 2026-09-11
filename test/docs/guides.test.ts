@@ -14,12 +14,16 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 import { DecodingMode, decodeHTML } from "entities";
 import { parse as parseYaml } from "yaml";
+import { MERGE_REJECTED_INPUTS } from "../../src/action/inputs.js";
+import { type Layer, mergeLayers, stripNulls } from "../../src/engine/layers.js";
+import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
+import { silentIo } from "../io-fake.js";
 import { deleteEnumerationProblems } from "./claims.js";
-import { fencedBlocks } from "./markdown.js";
+import { fencedBlocks, sectionLines } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
@@ -38,8 +42,10 @@ const REQUIRED_PAGES = [
   "reference/undeclared-policy.md",
   "reference/forward-compatibility.md",
   "reference/secrets-and-vaults.md",
+  "reference/architecture.md",
   "operate/check-mode.md",
   "operate/multi-repo.md",
+  "operate/layering.md",
   "operate/private-repositories.md",
   "operate/troubleshooting.md",
   "playbooks/README.md",
@@ -52,6 +58,9 @@ const REQUIRED_PAGES = [
   "playbooks/sunset-decommission.md",
   "playbooks/teams-not-collaborators.md",
   "playbooks/trust-tiers.md",
+  "upgrading/README.md",
+  "upgrading/v1-to-v2.md",
+  "upgrading/v2-to-v3.md",
 ] as const;
 
 function guidePages(): string[] {
@@ -60,7 +69,20 @@ function guidePages(): string[] {
     .sort();
 }
 
-const ALLOWED_FENCE_INFO = new Set(["yaml settings", "yaml", "text", "bash"]);
+/**
+ * The closed fence vocabulary: `yaml settings` is a complete settings document,
+ * `yaml layer` one layer of a merge (valid once its null markers are stripped,
+ * not necessarily standalone), `yaml` a workflow file, `mermaid` a diagram
+ * (pinned to real code in diagrams.test.ts), `text` and `bash` never yaml.
+ */
+const ALLOWED_FENCE_INFO = new Set([
+  "yaml settings",
+  "yaml layer",
+  "yaml",
+  "mermaid",
+  "text",
+  "bash",
+]);
 
 /**
  * Fence-policy violations for one markdown document. The fencedBlocks
@@ -441,6 +463,25 @@ describe("docs/ guide pages", () => {
       }
     });
 
+    test(`docs/${page}: every \`yaml layer\` block is a valid layer`, () => {
+      // A layer is judged exactly as the merge step judges it: the nulls the
+      // fold reads as markers are dropped first (src/engine/layers.ts
+      // stripNulls), then the same document validation apply runs, then the
+      // fold's own gates (a duplicate key within the layer, a layering
+      // directive on a section without a layering key) admit it alone.
+      for (const block of fencedBlocks(markdown, "yaml layer")) {
+        let doc: unknown;
+        try {
+          doc = parseYaml(block);
+        } catch (error) {
+          throw new Error(`docs/${page} has an unparseable layer example: ${error}`);
+        }
+        assertValidSettingsExample(stripNulls(doc), `docs/${page} layer example`);
+        const folded = mergeLayers([{ name: `docs/${page}`, doc }], { layering: "merge" });
+        expect("error" in folded ? folded.error : null).toBeNull();
+      }
+    });
+
     test(`docs/${page}: fences are column-zero triple backticks with known info strings`, () => {
       expect(fenceViolations(markdown, ALLOWED_FENCE_INFO)).toEqual([]);
     });
@@ -529,6 +570,70 @@ describe("docs/ guide pages", () => {
         `docs/start/examples.md never declares the nested environments[].${key}`,
       ).toBe(true);
     }
+  });
+
+  test.each<[string, number, Array<{ layer: string; path: string }>]>([
+    ["A first fold", 2, []],
+    [
+      "A worked example",
+      3,
+      [
+        { layer: "layer-1", path: "repository.has_projects" },
+        { layer: "layer-2", path: "pages" },
+      ],
+    ],
+  ])(
+    'the layering guide\'s "%s" folds to the merged document it shows',
+    (heading, count, notices) => {
+      // The `yaml layer` fences under the heading are the layers, lowest first,
+      // and the section's one `yaml settings` fence is the result; the real
+      // fold must produce exactly that result, so the page cannot describe a
+      // dialect the engine does not implement.
+      const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
+      const section = sectionLines(markdown, heading, "docs/operate/layering.md").join("\n");
+      const layers: Layer[] = fencedBlocks(section, "yaml layer").map((block, index) => ({
+        name: `layer-${index}`,
+        doc: parseYaml(block),
+      }));
+      expect(layers).toHaveLength(count);
+      const results = fencedBlocks(section, "yaml settings").map((block) => parseYaml(block));
+      expect(results).toHaveLength(1);
+      expect(mergeLayers(layers, { layering: "merge" })).toEqual({
+        settings: results[0],
+        notices,
+      });
+    },
+  );
+
+  test("the layering guide's inputs table names every input mode: merge rejects", () => {
+    // The rejected set is derived from the input declarations, so a new
+    // apply/check-time input is rejected by the merge the moment it is
+    // declared; the table must name it, or the page under-reports the refusal.
+    const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
+    const section = sectionLines(markdown, "Inputs in mode: merge", "docs/operate/layering.md");
+    const rejectedRow = section.find((line) => line.includes("| Rejected"));
+    if (rejectedRow === undefined) {
+      throw new Error('docs/operate/layering.md has no "Rejected" row in its inputs table');
+    }
+    const named = [...rejectedRow.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
+    expect(new Set(named)).toEqual(new Set(MERGE_REJECTED_INPUTS));
+  });
+
+  test("the v2-to-v3 guide quotes the complete wrapper-key rename error the validator emits", () => {
+    // The guide's text fence is the reader's search string, so it is held to
+    // the error the validator emits for a v2 wrapper, not to a source substring.
+    const guide = readFileSync(join(DOCS, "upgrading", "v2-to-v3.md"), "utf8");
+    const result = validateSettingsDoc(
+      { labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] } },
+      ".github/settings.yml",
+      new Set(),
+      silentIo(),
+    );
+    if (!("error" in result)) {
+      throw new Error("the validator accepted the v2 wrapper key");
+    }
+    expect(result.error).toContain('"undeclared" was renamed to "_undeclared"');
+    expect(fencedBlocks(guide, "text").map((block) => block.trim())).toContain(result.error);
   });
 
   test("the troubleshooting guide quotes the stale-version hint verbatim", () => {

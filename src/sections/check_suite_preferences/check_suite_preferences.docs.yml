@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: check-suites preferences PATCH (no read endpoint exists upstream)
   notes: >-
     per-app `auto_trigger_checks` toggles; write-only: check mode cannot verify them (one note, zero

@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: >-
     PUT environments + per-environment variables, secrets, deployment branch policies, deployment
     protection rules, and pins (GraphQL EnvironmentPins + PinEnvironment + ReorderEnvironment)

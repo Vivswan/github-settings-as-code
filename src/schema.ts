@@ -199,8 +199,8 @@ type _KnobListSound = MustBeNever<
  * The sections whose plain-array settings.yml form matches the Probot
  * Settings app schema, so an existing Probot config applies to them as-is
  * (the wrapped `_undeclared` form is this action's own addition on top). The
- * single source the README's "Migrating from the Probot Settings app"
- * paragraph is pinned against. `satisfies` keeps every entry a real section
+ * single source the migration guide's "What carries over as-is" paragraph
+ * (docs/start/migrating-from-probot.md) is pinned against. `satisfies` keeps every entry a real section
  * key.
  */
 export const PROBOT_PARITY_KEYS = [

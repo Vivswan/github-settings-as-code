@@ -20,10 +20,10 @@ The app applies settings from a hosted GitHub App installation, and when somethi
 | Rulesets | Experimental upstream feature; schema may change | First class: branch, tag, and push targets, upsert by name; undeclared rulesets kept by default, `_undeclared: delete` opts into deletion |
 | Partial success policy | None | on-missing-permission: fail or warn, plus required-sections as a minimum-requirements floor |
 | Token | App installation token; its scope is invisible in the repo | A PAT you mint and scope yourself; permission errors name the exact missing permission |
-| Org-level shared config | Yes (org _settings repo with extends) | Yes, as multi-repo mode: an admin repo with a defaults-file plus per-repo files (repos-dir) or each repo's own settings.yml (repos input); no hosted app needed |
+| Org-level shared config | Yes (org _settings repo with extends) | Yes: `mode: merge` folds shared layers into each repository's document, and multi-repo mode applies per-repo files (repos-dir), each repo's own settings.yml (repos input), or a defaults-file fallback for repositories without one; no hosted app needed |
 | Call transparency | None | Every API call is traced as a debug line (method, path, payload, status, timing) when debug logging is on |
 
-The one Probot-family feature without a direct equivalent is suborg-level grouping (safe-settings' .github/suborgs layer); here the layers are the defaults-file and per-repo files. Everything else in Probot's schema is supported, plus the rows above.
+The one Probot-family feature without a direct equivalent is suborg-level grouping (safe-settings' .github/suborgs layer); here the layers are settings files folded by `mode: merge` (see the [layering guide](../operate/layering.md)). Everything else in Probot's schema is supported, plus the rows above.
 
 ## What carries over as-is
 
@@ -89,7 +89,10 @@ Re-run check. Once the report is clean, or shows only the drift you expect, swit
 
 ## Organization-wide configuration
 
-The app's `extends` inheritance, where repositories pull shared settings from an org settings repository, maps to this action's multi-repo mode: one admin repository applies a `defaults-file` merged under per-repo files (`repos-dir`) or under each repository's own settings.yml (`repos`), with no hosted app in the loop. The [multi-repo guide](../operate/multi-repo.md) owns the rules and the walkthrough.
+The app's `extends` inheritance, where repositories pull shared settings from an org settings repository, maps to two mechanisms:
+
+- Composition is `mode: merge` layers: the shared file is the lowest layer, the repository's own file the highest, and a merge step writes the document the apply step runs. The [layering guide](../operate/layering.md) owns the rules and has the two-step workflow.
+- Delivery at org scale is multi-repo mode: one admin repository applies per-repo files (`repos-dir`) or each repository's own settings.yml (`repos`), with a `defaults-file` as the fallback for repositories that have no file. No hosted app is in the loop. The [multi-repo guide](../operate/multi-repo.md) owns those rules.
 
 ## At org scale: the shadow run
 

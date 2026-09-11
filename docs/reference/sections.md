@@ -47,7 +47,7 @@ What happens to a live resource the settings file does not declare:
 | `kept (settable)` | An undeclared resource is left in place; only declared entries are compared and written. |
 | `untouched` | Undeclared top-level entries are neither compared nor changed; only declared keys are applied. A nested list inside a declared entry (an environment's variables, say) has its own default, named in the Notes cell. |
 
-`(settable)` means the wrapped `_undeclared:` form overrides the default per file. [The undeclared policy](undeclared-policy.md) covers the knob and how it layers with a multi-repo defaults file.
+`(settable)` means the wrapped `_undeclared:` form overrides the default per file. [The undeclared policy](undeclared-policy.md) covers the knob and how it layers in `mode: merge`.
 
 ## Where to read next
 

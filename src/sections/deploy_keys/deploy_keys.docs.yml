@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: deploy keys list/create/delete
   notes: >-
     matched by title; the declared material is a PUBLIC key; immutable upstream, so changed entries

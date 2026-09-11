@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: hooks CRUD + hook config sub-endpoint
   notes: >-
     one hook per `config.url`, the natural key; `config.secret` takes a `$NAME` reference and is

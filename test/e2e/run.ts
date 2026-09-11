@@ -106,8 +106,8 @@ async function main(): Promise<number> {
       );
       return 1;
     }
-    // Before the corpus phase the scenarios dirs are empty; land green so the
-    // script itself is not a failure.
+    // No filter and no scenario loaded (the roots hold no readable .yml file):
+    // report the empty set and exit 0; the printed line is the signal.
     console.log(`no scenario .yml files found under ${roots.join(", ")}`);
     return 0;
   }

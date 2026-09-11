@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: labels CRUD
   notes: upsert by name (rename via `new_name`); the delete-by-default is Probot parity
 coverage:

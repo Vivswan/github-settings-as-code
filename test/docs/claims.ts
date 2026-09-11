@@ -1,6 +1,6 @@
 /**
  * Shared vocabulary for the kept/deleted-by-default contradiction tests
- * (COVERAGE rows, SettingsFile JSDoc, README Notes cells). One definition of
+ * (COVERAGE rows, SettingsFile JSDoc, the Sections table's Notes cells). One definition of
  * the claim-word families, the negator rule, and the window logic, so the
  * three matchers cannot drift apart on what counts as a claim.
  */
@@ -12,8 +12,8 @@ const KEEP_STEMS = String.raw`kept|keep\w*|retain\w*|preserv\w*`;
 
 /**
  * The prose display name of each delete-by-default section, for the
- * enumeration pins over the README quick-start warning and the migration
- * paragraphs. A new delete-by-default section fails those tests through
+ * enumeration pins over the getting-started warning and the migration
+ * guide's paragraphs. A new delete-by-default section fails those tests through
  * deleteEnumerationProblems until its display name is added here.
  */
 const DELETE_DEFAULT_DISPLAY_NAMES: Partial<Record<SectionKey, string>> = {

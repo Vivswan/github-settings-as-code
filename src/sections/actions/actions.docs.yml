@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: >-
     actions permissions + selected-actions + workflow token + access level + artifact/log retention
     + cache limits + OIDC subject claim + fork PR policies
