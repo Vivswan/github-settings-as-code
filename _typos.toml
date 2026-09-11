@@ -67,3 +67,13 @@ reslut = "reslut"           # output name the Io port rejects at compile time (@
 [type.probot-guide]
 extend-glob = ["migrating-from-probot.md"]
 extend-ignore-re = ['`permision: maintain`', '"permision"']
+
+# The layering guide quotes the messages the validator prints for an unknown key,
+# each built around a deliberately misspelled example. Only the quoted spans are
+# allowed; the word in running prose still fails.
+[type.layering-guide]
+extend-glob = ["layering.md"]
+extend-ignore-re = [
+  'repo\.yml: lables`',      # the unknown top-level section bullet: the section name the message echoes
+  'declares "permision"',   # the closed-section entry bullet: the unrecognized key the message echoes
+]
