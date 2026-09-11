@@ -1,4 +1,4 @@
-# The wrapped variables form with "undeclared: keep" softens the nested
+# The wrapped variables form with "_undeclared: keep" softens the nested
 # default: a live variable the entries do not declare is KEPT and surfaced as
 # a note instead of being deleted. The declared variable still updates, apply
 # stays green, and a check rerun converges (the kept variable is a note, not
@@ -8,7 +8,7 @@ settings:
   environments:
     - name: production
       variables:
-        undeclared: keep
+        _undeclared: keep
         entries:
           - name: DEPLOY_REGION
             value: eu-west-1
@@ -39,6 +39,6 @@ expect:
   never:
     - "DELETE /repos/{repo}/environments/production/variables"
   stdout_contains:
-    - "kept under \"undeclared: keep\""
+    - "kept under \"_undeclared: keep\""
     - LEGACY
   converges: true

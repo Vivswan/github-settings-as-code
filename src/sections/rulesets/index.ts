@@ -2,7 +2,7 @@
  * `rulesets:` section - upsert by name with full-payload PUT (a partial PUT
  * silently narrows a ruleset). Undeclared rulesets are NEVER deleted by
  * default; they are listed as notes so removal stays an explicit human
- * action. The wrapped `undeclared: delete` form hardens that to deletion.
+ * action. The wrapped `_undeclared: delete` form hardens that to deletion.
  */
 
 import { z } from "zod";
@@ -111,6 +111,19 @@ export const rulesetsSection = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(RulesetConfig)),
+  // Same-name rulesets merge key by key; their rules pair by type, a rule replacing wholesale.
+  layering: {
+    keys: (entry) => (typeof entry.name === "string" ? [entry.name] : null),
+    keyField: "name",
+    combine: "merge",
+    nested: {
+      rules: {
+        keys: (rule) => (typeof rule.type === "string" ? [rule.type] : null),
+        keyField: "type",
+        combine: "replace",
+      },
+    },
+  },
   async plan(ctx, declared) {
     const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     const desired = entries.map(normalizeRuleset);

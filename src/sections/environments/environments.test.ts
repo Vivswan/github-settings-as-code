@@ -287,16 +287,16 @@ describe("environments variables case-insensitive matching", () => {
 });
 
 describe("environments variables undeclared policy", () => {
-  test("the wrapped undeclared:keep form keeps the live variable as a note", async () => {
+  test("the wrapped _undeclared:keep form keeps the live variable as a note", async () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
     });
     const result = await apply(api, [
-      { name: "prod", variables: { undeclared: "keep", entries: [] } },
+      { name: "prod", variables: { _undeclared: "keep", entries: [] } },
     ]);
     expect(result.notes).toEqual([
-      'variable "LEGACY" exists on environment "prod" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it',
+      'variable "LEGACY" exists on environment "prod" but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
     ]);
     expect(api.mutations()).toEqual([]);
   });
@@ -312,13 +312,13 @@ describe("environments variables undeclared policy", () => {
     ]);
   });
 
-  test("check mode under undeclared:keep converges (note, not drift)", async () => {
+  test("check mode under _undeclared:keep converges (note, not drift)", async () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
     });
     const result = await check(api, [
-      { name: "prod", variables: { undeclared: "keep", entries: [] } },
+      { name: "prod", variables: { _undeclared: "keep", entries: [] } },
     ]);
     expect(result.drift).toEqual([]);
     expect(result.notes).toHaveLength(1);
@@ -335,7 +335,7 @@ describe("environments variables shape", () => {
       shape.safeParse([
         {
           name: "prod",
-          variables: { undeclared: "keep", entries: [{ name: "A", value: "1" }] },
+          variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
         },
       ]).success,
     ).toBe(true);
@@ -511,7 +511,7 @@ describe("environments nested secrets apply mode", () => {
       [PROD_SECRETS_LIST]: secretsBody(["LEGACY"]),
     }).allowMutations("DELETE /repos/o/r/environments/prod/secrets/LEGACY");
     const deleted = await apply(api2, [
-      { name: "prod", secrets: { undeclared: "delete", entries: [] } },
+      { name: "prod", secrets: { _undeclared: "delete", entries: [] } },
     ]);
     expect(deleted.changes).toEqual(['DELETED undeclared secret "LEGACY" in environment "prod"']);
     // Nothing declared, so no resolver was needed and no public key fetched.
@@ -598,7 +598,7 @@ describe("environments nested secrets validation and shape", () => {
     );
     expect(
       shape.safeParse([
-        { name: "prod", secrets: { undeclared: "delete", entries: [{ name: "A", value: "$A" }] } },
+        { name: "prod", secrets: { _undeclared: "delete", entries: [{ name: "A", value: "$A" }] } },
       ]).success,
     ).toBe(true);
     // An extra entry key has no destination (the PUT body is the sealed
@@ -741,12 +741,12 @@ describe("environments deployment branch policies apply mode", () => {
     );
   });
 
-  test("the wrapped undeclared:keep form keeps the live pattern as a note", async () => {
+  test("the wrapped _undeclared:keep form keeps the live pattern as a note", async () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/prod": liveProdWithFlag(true),
       [POLICIES_LIST]: policiesBody([{ id: 41, name: "legacy/*", type: "branch" }]),
     });
-    const result = await apply(api, [envWithPolicies({ undeclared: "keep", entries: [] })]);
+    const result = await apply(api, [envWithPolicies({ _undeclared: "keep", entries: [] })]);
     expect(result.notes.join("\n")).toContain(
       'deployment branch policy "legacy/*" exists on environment "prod" but is not declared',
     );
@@ -838,7 +838,8 @@ describe("environments deployment branch policies validation and shape", () => {
       true,
     );
     expect(
-      shape.safeParse([envWithPolicies({ undeclared: "keep", entries: [{ name: "v*" }] })]).success,
+      shape.safeParse([envWithPolicies({ _undeclared: "keep", entries: [{ name: "v*" }] })])
+        .success,
     ).toBe(true);
     // Loose entries: a field GitHub ships tomorrow rides the create verbatim.
     expect(
@@ -949,13 +950,13 @@ describe("environments deployment protection rules apply mode", () => {
     expect(result.changes).toEqual([]);
   });
 
-  test("the wrapped undeclared:delete form DISABLES a live undeclared rule by id", async () => {
+  test("the wrapped _undeclared:delete form DISABLES a live undeclared rule by id", async () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
     }).allowMutations("DELETE /repos/o/r/environments/prod/deployment_protection_rules/41");
     const result = await apply(api, [
-      { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
+      { name: "prod", deployment_protection_rules: { _undeclared: "delete", entries: [] } },
     ]);
     expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
       "DELETE /repos/o/r/environments/prod/deployment_protection_rules/41",
@@ -1061,7 +1062,7 @@ describe("environments deployment protection rules apply mode", () => {
       });
       await expect(
         plan(api, [
-          { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
+          { name: "prod", deployment_protection_rules: { _undeclared: "delete", entries: [] } },
         ]),
       ).rejects.toThrow(
         /returned a body outside the documented shape - custom_deployment_protection_rules\[0\]\.id/,
@@ -1088,7 +1089,7 @@ describe("environments deployment protection rules apply mode", () => {
   });
 
   test("a disabled undeclared rule is not an active gate: neither noted nor disabled", async () => {
-    // The other half of the enabled-false skip: under undeclared: delete the
+    // The other half of the enabled-false skip: under _undeclared: delete the
     // goal is "no undeclared gate is on", which a disabled rule already
     // satisfies - and a DELETE aimed at a disabled id would likely 404
     // mid-apply for a no-op.
@@ -1097,7 +1098,7 @@ describe("environments deployment protection rules apply mode", () => {
       [RULES_LIST]: rulesBody([{ ...liveRule(41, "change-window"), enabled: false }]),
     });
     const planned = await plan(api, [
-      { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
+      { name: "prod", deployment_protection_rules: { _undeclared: "delete", entries: [] } },
     ]);
     expect(planned).toEqual({ ops: [], notes: [], drift: [] });
   });
@@ -1125,10 +1126,10 @@ describe("environments deployment protection rules check mode", () => {
       [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
     });
     const deleted = await check(api2, [
-      { name: "prod", deployment_protection_rules: { undeclared: "delete", entries: [] } },
+      { name: "prod", deployment_protection_rules: { _undeclared: "delete", entries: [] } },
     ]);
     expect(deleted.drift).toEqual([
-      'environments[prod].deployment_protection_rules[change-window]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DISABLE it; add it to the settings file to keep it',
+      'environments[prod].deployment_protection_rules[change-window]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DISABLE it; add it to the settings file to keep it',
     ]);
   });
 });
@@ -1208,7 +1209,7 @@ describe("environments deployment protection rules validation and shape", () => 
         {
           name: "prod",
           deployment_protection_rules: {
-            undeclared: "delete",
+            _undeclared: "delete",
             entries: [{ app: "deploy-gate" }],
           },
         },
@@ -1425,10 +1426,10 @@ describe("environments convergence", () => {
     expect(first.notes).toEqual([
       "prod environment secret values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run",
       'prod environment secret "KEPT" exists on the environment but is not declared in the ' +
-        'settings file; kept under "undeclared: keep" - add it to the settings file to manage ' +
-        'it, or set "undeclared: delete" to have apply DELETE it (a deleted secret\'s value is ' +
+        'settings file; kept under "_undeclared: keep" - add it to the settings file to manage ' +
+        'it, or set "_undeclared: delete" to have apply DELETE it (a deleted secret\'s value is ' +
         "unrecoverable)",
-      'deployment protection rule "change-window" is enabled on environment "prod" but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DISABLE it',
+      'deployment protection rule "change-window" is enabled on environment "prod" but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DISABLE it',
     ]);
     expect(second.ops.map((op) => `${op.role} ${op.change}`)).toEqual([
       'putSecret updated secret "DEPLOY_TOKEN" in environment "prod"',

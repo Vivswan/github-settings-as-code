@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { run } from "../../src/action/run.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
+import { SECTION_KEYS } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 
 // Every run() below injects this capturing Io in place of the @actions/core
@@ -533,5 +538,283 @@ describe("run in multi-repo mode (env glue)", () => {
     const withheld = captured.find((line) => line.includes("visibility could not be verified"));
     expect(withheld).toStartWith("notice: private repository: ");
     expect(captured.join("\n").replace("mask: o/maybe", "")).not.toContain("o/maybe");
+  });
+});
+
+describe("run in mode: merge", () => {
+  const ENV_KEYS = [
+    "INPUT_TOKEN",
+    "GITHUB_TOKEN",
+    "INPUT_MODE",
+    "INPUT_REPOSITORY",
+    "INPUT_SETTINGS-FILE",
+    "INPUT_MERGED-FILE",
+    "INPUT_LAYERING",
+    "INPUT_SECTIONS",
+    "GITHUB_REPOSITORY",
+  ];
+  const saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
+  const FIXTURES = join(import.meta.dir, "..", "fixtures", "layers");
+  const layer = (name: string) => join(FIXTURES, name);
+  let dir: string;
+  let mergedFile: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "merge-mode-"));
+    mergedFile = join(dir, "out", "merged.yml");
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    for (const [key, value] of saved) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  /** A merge run's env: NO token anywhere, the layers low to high, the output path. */
+  function setMergeEnv(layers: string[], inputs: { layering?: "merge" | "replace" } = {}) {
+    for (const key of ENV_KEYS) {
+      delete process.env[key];
+    }
+    process.env.INPUT_MODE = "merge";
+    process.env["INPUT_SETTINGS-FILE"] = layers.join("\n");
+    process.env["INPUT_MERGED-FILE"] = mergedFile;
+    if (inputs.layering) {
+      process.env.INPUT_LAYERING = inputs.layering;
+    }
+  }
+
+  /** Write a layer document into the temp dir and return its path. */
+  function tempLayer(name: string, doc: unknown): string {
+    const path = join(dir, name);
+    writeFileSync(path, stringifyYaml(doc));
+    return path;
+  }
+
+  const FLEET_RULESET = {
+    name: "main",
+    target: "branch",
+    enforcement: "active",
+    rules: [{ type: "deletion" }],
+  };
+
+  /** fleet < team < repo under the merge layering: what the three fixtures fold to. */
+  const THREE_LAYERS_MERGED = {
+    repository: { has_wiki: false, description: "mine" },
+    labels: {
+      _undeclared: "delete",
+      entries: [
+        { name: "bug", color: "d73a4a" },
+        { name: "docs", color: "ffffff" },
+        { name: "team", color: "00ff00" },
+      ],
+    },
+    rulesets: {
+      _undeclared: "keep",
+      entries: [{ ...FLEET_RULESET, rules: [{ type: "deletion" }, { type: "non_fast_forward" }] }],
+    },
+  };
+
+  test("three layers fold into the merged file with no token and no API call; nulls opt out with notices", async () => {
+    const layers = [layer("fleet.yml"), layer("team.yml"), layer("repo.yml")];
+    setMergeEnv(layers);
+    const api = new MockApi({});
+    expect(await run({ api, io: testIo })).toBe(0);
+    expect(api.calls).toEqual([]);
+    expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual(THREE_LAYERS_MERGED);
+    expect(outputs).toEqual({ "skipped-sections": "", result: "merged" });
+    expect(captured).toEqual([
+      `notice: ${layer("team.yml")}: null removed repository.has_projects declared by a lower layer`,
+      `notice: ${layer("repo.yml")}: null removed pages declared by a lower layer`,
+      `merged 3 layer(s) into ${mergedFile}`,
+      "result: merged",
+    ]);
+    expect(summaries).toEqual([
+      [
+        "## github-settings-as-code (merge)",
+        "",
+        "| Layer | Settings file |",
+        "|---|---|",
+        `| 1 | ${layer("fleet.yml")} |`,
+        `| 2 | ${layer("team.yml")} |`,
+        `| 3 | ${layer("repo.yml")} |`,
+        "",
+        `Merged document written to ${mergedFile}.`,
+      ].join("\n"),
+    ]);
+  });
+
+  test("a layer that is invalid on its own fails the run naming the layer, before any merge or write", async () => {
+    const broken = tempLayer("broken.yml", { labels: [{ color: "ffffff" }] });
+    setMergeEnv([layer("fleet.yml"), broken]);
+    const api = new MockApi({});
+    expect(await run({ api, io: testIo })).toBe(1);
+    expect(api.calls).toEqual([]);
+    expect(existsSync(mergedFile)).toBe(false);
+    expect(outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    const errors = captured.filter((line) => line.startsWith("error: "));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toStartWith(
+      `error: ${broken} has malformed section entries: labels[0].name:`,
+    );
+  });
+
+  test("an unreadable layer fails the run naming the path and the input", async () => {
+    const missing = join(dir, "nope.yml");
+    setMergeEnv([layer("fleet.yml"), missing]);
+    expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
+    expect(captured.filter((line) => line.startsWith("error: "))).toEqual([
+      `error: cannot read the settings layer ${missing}: Error: ENOENT: no such file or directory, open '${missing}'. Check that every path in the "settings-file" input exists and is valid YAML`,
+    ]);
+  });
+
+  test("layering: replace lets the higher layer's keyed lists win while mappings still merge", async () => {
+    setMergeEnv([layer("fleet.yml"), layer("repo.yml")], { layering: "replace" });
+    expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
+    expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
+      repository: { has_wiki: false, has_projects: false, description: "mine" },
+      labels: { _undeclared: "delete", entries: [{ name: "docs", color: "ffffff" }] },
+      rulesets: { _undeclared: "keep", entries: [FLEET_RULESET] },
+    });
+  });
+
+  test("a wrapper _layering: replace under a merge run replaces that section alone, and never reaches the file", async () => {
+    const top = tempLayer("top.yml", {
+      labels: { _layering: "replace", entries: [{ name: "only", color: "000000" }] },
+      rulesets: [{ name: "tags", target: "tag" }],
+    });
+    setMergeEnv([layer("fleet.yml"), top]);
+    expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
+    expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
+      repository: { has_wiki: false, has_projects: false },
+      labels: { _undeclared: "delete", entries: [{ name: "only", color: "000000" }] },
+      rulesets: { _undeclared: "keep", entries: [FLEET_RULESET, { name: "tags", target: "tag" }] },
+      pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
+    });
+  });
+
+  test("a top-level _layering: replace governs every keyed section of its layer and is consumed", async () => {
+    const top = tempLayer("top.yml", {
+      _layering: "replace",
+      labels: [{ name: "only", color: "000000" }],
+      rulesets: [{ name: "main", rules: [{ type: "non_fast_forward" }] }],
+    });
+    setMergeEnv([layer("fleet.yml"), top]);
+    expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
+    expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
+      repository: { has_wiki: false, has_projects: false },
+      labels: { _undeclared: "delete", entries: [{ name: "only", color: "000000" }] },
+      rulesets: {
+        _undeclared: "keep",
+        entries: [{ name: "main", rules: [{ type: "non_fast_forward" }] }],
+      },
+      pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
+    });
+  });
+
+  test("a null inside a keyed entry is a merge marker too, announced against its layer", async () => {
+    const bypass = [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }];
+    const fleet = tempLayer("fleet.yml", {
+      rulesets: [{ ...FLEET_RULESET, bypass_actors: bypass }],
+    });
+    const top = tempLayer("top.yml", { rulesets: [{ name: "main", bypass_actors: null }] });
+    setMergeEnv([fleet, top]);
+    expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
+    expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
+      rulesets: { _undeclared: "keep", entries: [FLEET_RULESET] },
+    });
+    expect(captured).toEqual([
+      `notice: ${top}: null removed rulesets[0].bypass_actors declared by a lower layer`,
+      `merged 2 layer(s) into ${mergedFile}`,
+      "result: merged",
+    ]);
+  });
+
+  test.each([
+    ["a mapping", { setting: true }],
+    // A null on an unknown key is no opt-out marker: nothing known is
+    // being removed, so it is the same misspelling and must name the file.
+    ["null", null],
+  ])(
+    "a layer with an unknown top-level key set to %s fails naming the layer: a merge has no allowlist to tolerate it",
+    async (_case, value) => {
+      const top = tempLayer("top.yml", {
+        future: value,
+        rulesets: [{ name: "tags", target: "tag" }],
+      });
+      setMergeEnv([layer("fleet.yml"), top]);
+      expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
+      expect(existsSync(mergedFile)).toBe(false);
+      expect(captured).toEqual([
+        `error: unknown top-level section(s) in ${top}: future (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or prefix private keys with "_", or set the "sections" input to limit processing`,
+        "result: failed",
+      ]);
+    },
+  );
+
+  test("a sections allowlist is rejected before any layer is read, so the written document is never narrower than the fold", async () => {
+    // The fixtures fold to three sections (THREE_LAYERS_MERGED above); an
+    // allowlist naming one of them is refused up front rather than
+    // narrowing the file, and a layer path that does not exist proves the
+    // refusal precedes the read.
+    setMergeEnv([layer("fleet.yml"), layer("repo.yml"), join(dir, "nope.yml")]);
+    process.env.INPUT_SECTIONS = "labels";
+    expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
+    expect(existsSync(mergedFile)).toBe(false);
+    expect(captured).toEqual([
+      'error: the "sections" input(s) do not apply to mode: merge, which only folds the settings-file layers into merged-file: it never targets a repository, calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input(s), or move them to the apply or check step that runs the merged document',
+      "result: failed",
+    ]);
+  });
+
+  test("a cyclic layer (a YAML anchor that includes itself) is refused by the fold, naming the layer", async () => {
+    // Raw YAML: a self-referencing anchor under a private key parses to a
+    // cyclic object; the standalone validation ignores the key, so the
+    // engine's boundary is what refuses the layer.
+    const top = join(dir, "top.yml");
+    writeFileSync(top, ["_notes: &loop", "  self: *loop", "labels: []", ""].join("\n"));
+    setMergeEnv([layer("fleet.yml"), top]);
+    expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
+    expect(existsSync(mergedFile)).toBe(false);
+    expect(captured).toEqual([
+      `error: layer "${top}": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees`,
+      "result: failed",
+    ]);
+  });
+
+  test("merge then apply: the written file applies exactly like the expected merged document", async () => {
+    setMergeEnv([layer("fleet.yml"), layer("team.yml"), layer("repo.yml")]);
+    expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
+    const expectedFile = tempLayer("expected.yml", THREE_LAYERS_MERGED);
+
+    const applyRun = async (settingsFile: string): Promise<MockApi> => {
+      for (const key of ENV_KEYS) {
+        delete process.env[key];
+      }
+      process.env.INPUT_TOKEN = "t";
+      process.env.INPUT_MODE = "apply";
+      process.env.INPUT_REPOSITORY = "o/r";
+      process.env.GITHUB_REPOSITORY = "o/r";
+      process.env.INPUT_SECTIONS = "repository,labels";
+      process.env["INPUT_SETTINGS-FILE"] = settingsFile;
+      const api = new MockApi({
+        "GET /repos/o/r": { data: { has_wiki: true, description: "old" } },
+        "GET /repos/o/r/labels?per_page=100&page=1": { data: [] },
+      }).allowMutations("PATCH /repos/o/r", "POST /repos/o/r/labels");
+      expect(await run({ api, io: testIo })).toBe(0);
+      return api;
+    };
+    const fromMerged = await applyRun(mergedFile);
+    const fromExpected = await applyRun(expectedFile);
+    expect(fromMerged.mutations()).toEqual(fromExpected.mutations());
+    expect(fromMerged.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
+      "PATCH /repos/o/r",
+      "POST /repos/o/r/labels",
+      "POST /repos/o/r/labels",
+      "POST /repos/o/r/labels",
+    ]);
   });
 });

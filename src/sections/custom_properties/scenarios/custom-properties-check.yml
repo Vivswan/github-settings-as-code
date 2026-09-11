@@ -41,4 +41,4 @@ expect:
     - "custom_properties[compliance]"
   stdout_contains:
     - 'custom property "tier" is set on the repo but not declared'
-    - 'kept under "undeclared: keep"'
+    - 'kept under "_undeclared: keep"'

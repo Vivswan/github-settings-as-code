@@ -3,10 +3,10 @@
  * scanning custom patterns, matched by exact name. The name is immutable
  * upstream (the update PATCH takes no name field), so a renamed entry is
  * created under the new name while the old pattern follows the undeclared
- * policy: deleted under `undeclared: delete`, kept and noted under the
+ * policy: deleted under `_undeclared: delete`, kept and noted under the
  * default keep. Undeclared patterns are KEPT by default:
  * removing a pattern disposes of its alerts, so deletion stays a human
- * opt-in through the wrapped `undeclared: delete` form. Every delete this
+ * opt-in through the wrapped `_undeclared: delete` form. Every delete this
  * action issues asks GitHub to RESOLVE the pattern's alerts
  * (post_delete_action: "resolve_alerts"), never to delete them: a settings
  * change must not destroy alert history, and resolved alerts keep the

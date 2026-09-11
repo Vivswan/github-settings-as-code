@@ -146,7 +146,7 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
  * Mint one repository-level variable family's section module. Everything the
  * families share - the upsert-by-case-insensitive-name plan, the engine
  * wiring, the delete-undeclared-by-default posture (variables are readable,
- * recreatable configuration; the wrapped `undeclared: keep` form softens
+ * recreatable configuration; the wrapped `_undeclared: keep` form softens
  * deletion to notes) - lives here once, and the routes derive from the key
  * through VARIABLES_SEGMENTS; a family supplies only its key, PAT resource,
  * and noun.
@@ -240,7 +240,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
   const section: RepoVariablesSectionModule<K> = {
     key,
     // Undeclared variables are deleted by default, loudly on purpose; the
-    // wrapped `undeclared: keep` form downgrades each to a note.
+    // wrapped `_undeclared: keep` form downgrades each to a note.
     undeclaredDefault: "delete",
     permission: { repo: [resource] },
     endpoints,

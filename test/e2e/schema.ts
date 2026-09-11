@@ -76,7 +76,9 @@ const OwnerKindSchema = z.enum(["org", "user"]);
  */
 const InputsSchema = z
   .object({
-    mode: z.enum(["apply", "check"]).optional(),
+    mode: z.enum(["apply", "check", "merge"]).optional(),
+    /** The mode: merge run default for the keyed list sections (INPUT_LAYERING). */
+    layering: z.enum(["merge", "replace"]).optional(),
     on_missing_permission: z.enum(["fail", "warn"]).optional(),
     required_sections: z.string().optional(),
     sections: z.string().optional(),
@@ -91,6 +93,9 @@ const InputsSchema = z
     report_public_key: z.string().optional(),
   })
   .strict();
+
+/** A settings file body: any YAML mapping (validated for real by the action). */
+const SettingsSchema = z.record(z.string(), z.unknown());
 
 /**
  * The expected outcome of a run. Every field is optional except exit_code; the
@@ -232,6 +237,12 @@ const ExpectSchema = z
      * ("applied" | "clean" | "drift" | "skipped" | "failed" | ...).
      */
     repos_result: z.record(z.string(), z.string()).optional(),
+    /**
+     * mode: merge only: the EXACT document the run must write to merged-file,
+     * compared whole (Bun.deepEquals) after a YAML parse. A merge never runs
+     * the engine, so it cannot combine with a fixpoint re-run proof.
+     */
+    merged: SettingsSchema.optional(),
   })
   .strict()
   // apply_idempotent's final check-mode run IS the convergence proof, so a
@@ -239,6 +250,14 @@ const ExpectSchema = z
   .refine((expected) => !(expected.converges && expected.apply_idempotent), {
     message: "apply_idempotent subsumes converges; set only one",
   })
+  .refine(
+    (expected) =>
+      expected.merged === undefined ||
+      (expected.converges === undefined &&
+        expected.apply_idempotent === undefined &&
+        expected.fixpoint === undefined),
+    { message: "merged pins a mode: merge run, which has no fixpoint re-run to prove" },
+  )
   .refine(
     (expected) =>
       expected.fixpoint === undefined ||
@@ -270,16 +289,14 @@ const LiveStateSchema = z
   .partialRecord(z.enum(LIVE_STATE_KEYS), z.unknown())
   .transform((v) => v as LiveState);
 
-/** A settings file body: any YAML mapping (validated for real by the action). */
-const SettingsSchema = z.record(z.string(), z.unknown());
-
 /** The token permission mask shape, reused for the global and per-repo masks. */
 const TokenPermissionsSchema = z.partialRecord(MaskKeySchema, MaskGradeSchema);
 
 /**
  * One target repo in a multi-repo scenario. `settings` is that repo's
  * settings.yml body, or null when the repo has NO settings file (the
- * contents-404 -> skipped path). `settings_raw` serves that exact string as the
+ * contents-404 path: the defaults document applies, or the target is skipped
+ * without one). `settings_raw` serves that exact string as the
  * settings.yml content instead (for a genuine YAML PARSE failure, which a
  * serialized object cannot produce); exactly one of `settings`/`settings_raw`
  * is set. `live_state` and `permissions` scope the mock's per-slug state and
@@ -409,6 +426,12 @@ const ScenarioSchema = z
      * a multi-repo target's raw file is `repos.<slug>.settings_raw` instead.
      */
     settings_raw: z.string().optional(),
+    /**
+     * mode: merge only: the settings documents BELOW `settings`, lowest layer
+     * first; the runner writes each to its own file and lists them before
+     * settings.yml in INPUT_SETTINGS-FILE, so `settings` is always the top layer.
+     */
+    settings_layers: z.array(SettingsSchema).optional(),
     inputs: InputsSchema.optional(),
     /**
      * Extra child-process environment variables (see EnvSchema): the step-env
@@ -435,7 +458,7 @@ const ScenarioSchema = z
     repos: z.record(z.string(), MultiRepoSchema).optional(),
     /** Multi-repo repos: "*" discovery: the pool plus the filter inputs. */
     discovery: DiscoverySchema.optional(),
-    /** The defaults-file body merged under every target (INPUT_DEFAULTS-FILE). */
+    /** The defaults-file body applied to every target without a settings file (INPUT_DEFAULTS-FILE). */
     defaults_file: SettingsSchema.optional(),
     /** Transport-level faults injected on the first matching requests. */
     faults: z.array(FaultSchema).optional(),
@@ -456,6 +479,18 @@ const ScenarioSchema = z
   .refine((s) => s.settings_raw === undefined || (!s.repos && !s.discovery), {
     message:
       "settings_raw is single-repo only; a multi-repo target's raw file is `repos.<slug>.settings_raw`",
+  })
+  // The layer stack and the merged pin describe a mode: merge run; anywhere
+  // else they would be dead configuration the runner never reads.
+  .refine((s) => s.settings_layers === undefined || s.inputs?.mode === "merge", {
+    message: "settings_layers only applies with inputs.mode: merge",
+  })
+  .refine((s) => s.expect.merged === undefined || s.inputs?.mode === "merge", {
+    message: "expect.merged only applies with inputs.mode: merge",
+  })
+  // A merge runs no engine: a fixpoint re-run would be a check against nothing.
+  .refine((s) => s.inputs?.mode !== "merge" || s.expect.fixpoint === undefined, {
+    message: "a mode: merge scenario cannot arm converges or apply_idempotent",
   });
 
 export type MaskKey = z.infer<typeof MaskKeySchema>;
@@ -525,7 +560,7 @@ export function settingsYamlFor(source: {
 /**
  * Where a scenario re-types MARKER_LABEL_CONFIG as fixture data because .yml
  * files cannot import the constant: DECLARED settings (top-level, per-repo,
- * defaults file) and expectation blocks. live_state is deliberately out of
+ * defaults file, merge layers) and expectation blocks. live_state is deliberately out of
  * scope - seeding a DRIFTED marker label there is how a future scenario
  * would test that the report path repairs a mangled marker, so the pin must
  * not make that inexpressible. Walk each in-scope root and compare any
@@ -538,6 +573,10 @@ export function markerLabelFixtureMismatches(scenario: Scenario): string[] {
     ["settings", scenario.settings],
     ["defaults_file", scenario.defaults_file],
     ["expect", scenario.expect],
+    ...(scenario.settings_layers ?? []).map((layer, i): [string, unknown] => [
+      `settings_layers[${i}]`,
+      layer,
+    ]),
   ];
   for (const [slug, repo] of Object.entries(scenario.repos ?? {})) {
     roots.push([`repos.${slug}.settings`, repo.settings], [`repos.${slug}.expect`, repo.expect]);

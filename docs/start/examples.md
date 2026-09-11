@@ -280,11 +280,11 @@ branches:
     protection: null
 ```
 
-Under a multi-repo defaults file, a target's `null` section can instead mean "opt out of the defaults for this repository"; the rules for that merge are in the [multi-repo guide](../operate/multi-repo.md). A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/main/lib/settings.schema.json) marks those.
+In a `mode: merge` fold, a `null` over a key a lower layer declared removes that key from the merged document instead; the [layering guide](../operate/layering.md) has the rules. A multi-repo `defaults-file` never merges into a target's file, so a `null` there keeps the meanings above. A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/main/lib/settings.schema.json) marks those.
 
 ## Private notes
 
-Unknown top-level sections are hard errors, so a typo cannot silently do nothing (the one exception: under a `sections` allowlist, unknown keys outside the allowlist warn instead of failing, which eases version skew; the [troubleshooting guide](../operate/troubleshooting.md) covers it). Keys starting with an underscore are the escape hatch: they are ignored, which makes them usable as private notes.
+Unknown top-level sections are hard errors, so a typo cannot silently do nothing (the one exception: under a `sections` allowlist, unknown keys outside the allowlist warn instead of failing, which eases version skew; the [troubleshooting guide](../operate/troubleshooting.md) covers it). Top-level keys starting with an underscore are the escape hatch: they are ignored, which makes them usable as private notes. The one exception is `_layering`, a merge-time directive the [layering guide](../operate/layering.md) owns.
 
 ```yaml settings
 _owner: platform-team, see runbook RB-112
@@ -296,4 +296,4 @@ labels:
 
 ## Where to go next
 
-[Check mode](../operate/check-mode.md) is the safe way to try any of these files against a real repository before applying. [Multi-repo mode](../operate/multi-repo.md) reuses the same documents across a fleet, and [the undeclared policy](../reference/undeclared-policy.md) explains what happens to live resources these files do not declare, and the `undeclared` knob that changes it.
+[Check mode](../operate/check-mode.md) is the safe way to try any of these files against a real repository before applying. [Multi-repo mode](../operate/multi-repo.md) reuses the same documents across a fleet, [layering](../operate/layering.md) folds several files into one, and [the undeclared policy](../reference/undeclared-policy.md) explains what happens to live resources these files do not declare, and the `_undeclared` knob that changes it.

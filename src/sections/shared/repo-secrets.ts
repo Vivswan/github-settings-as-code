@@ -200,7 +200,7 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
  * families share - the reconcile-by-existence plan, the engine wiring, the
  * closed {name, value} entry surface, the keep-by-default posture (deleted
  * secret values are unrecoverable, so deletion is opt-in via the wrapped
- * `undeclared: delete` form) - lives here once, and the routes derive from
+ * `_undeclared: delete` form) - lives here once, and the routes derive from
  * the key through SECRETS_SEGMENTS; a family supplies only its key, PAT
  * resource, noun, and (Codespaces) read grade.
  */

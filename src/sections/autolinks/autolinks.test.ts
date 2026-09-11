@@ -14,7 +14,7 @@ const liveAutolinks = [
   { id: 2, key_prefix: "OLD-", url_template: "https://y.test/<num>", is_alphanumeric: true },
 ];
 const KEEP_NOTE =
-  'autolink "OLD-" exists on the repo but is not declared in the settings file; kept under "undeclared: keep" - add it to the settings file to manage it, or set "undeclared: delete" to have apply DELETE it';
+  'autolink "OLD-" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it';
 const plan = (api: MockApi, desired: Parameters<typeof autolinksSection.plan>[1]) =>
   autolinksSection.plan(planContext(autolinksSection, api, REPO), desired);
 
@@ -87,7 +87,7 @@ describe("autolinks", () => {
   test("a declared key the live autolink lacks is drift on the recreate plus a phantom note", async () => {
     const api = new MockApi({ [LIST]: { data: liveAutolinks } });
     const result = await plan(api, {
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [
         {
           key_prefix: "JIRA-",
@@ -125,9 +125,9 @@ describe("autolinks", () => {
     ]
   >([
     [
-      "wrapped undeclared:keep",
+      "wrapped _undeclared:keep",
       {
-        undeclared: "keep",
+        _undeclared: "keep",
         entries: [{ key_prefix: "JIRA-", url_template: "https://x.test/<num>" }],
       },
       [],

@@ -1,7 +1,7 @@
 /**
  * `collaborators:` section - direct collaborators by username plus their pending invitations, which
  * converge, get PATCHed, or are cancelled and re-sent once expired. Undeclared collaborators are REMOVED
- * and undeclared invitations cancelled by default, never the owner; `undeclared: keep` softens both to notes.
+ * and undeclared invitations cancelled by default, never the owner; `_undeclared: keep` softens both to notes.
  */
 
 import { z } from "zod";

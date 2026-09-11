@@ -47,7 +47,7 @@ describe("loosen", () => {
     const knob = z.union([
       z.array(z.object({ name: z.string() })),
       z.strictObject({
-        undeclared: z.enum(["keep", "delete"]).optional(),
+        _undeclared: z.enum(["keep", "delete"]).optional(),
         entries: z.array(z.object({ name: z.string() })),
       }),
     ]);

@@ -5,10 +5,11 @@
   "description": "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more.",
   "type": "module",
   "scripts": {
-    "check": "bun run lint && bun run lint:yaml && bun run typecheck && bun run knip && bun run test && bun run build:check",
+    "check": "bun run lint && bun run lint:yaml && bun run lint:arch && bun run typecheck && bun run knip && bun run test && bun run build:check",
     "lint": "bun x biome ci --error-on-warnings .",
     "lint:yaml": "if command -v yamllint >/dev/null 2>&1; then git ls-files -z '*.yml' '*.yaml' | xargs -0 yamllint -s; else echo 'lint:yaml: yamllint not installed, skipping (CI enforces it; install with pip install yamllint or brew install yamllint)'; fi",
     "lint:fix": "bun x biome check --write .",
+    "lint:arch": "bun .github/scripts/arch-lint.ts",
     "typecheck": "bun x tsc -p .",
     "knip": "knip",
     "test": "bun test",
@@ -19,7 +20,7 @@
     "build:schema": "bun .github/scripts/gen-settings-schema.ts",
     "build:docs": "bun .github/scripts/gen-docs.ts",
     "build:action-docs": "bun .github/scripts/gen-action-docs.ts",
-    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep . && bun run build:docs && bun run build:action-docs && git diff --exit-code README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md && ! git ls-files --others --exclude-standard README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md | grep .",
+    "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep . && bun run build:docs && bun run build:action-docs && git diff --exit-code README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/architecture.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md && ! git ls-files --others --exclude-standard README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/architecture.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md | grep .",
     "prepare": "lefthook install"
   },
   "dependencies": {

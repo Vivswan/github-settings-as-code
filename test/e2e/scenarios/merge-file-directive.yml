@@ -1,0 +1,43 @@
+# A top-level `_layering: replace` governs every keyed section of its layer
+# (the labels list replaces the fleet's), and one section's wrapper opts back
+# into `merge` (the rulesets union). Both directives are consumed by the fold:
+# neither key appears in the written document.
+name: merge-file-directive
+inputs:
+  mode: merge
+settings_layers:
+  - labels:
+      - name: bug
+        color: d73a4a
+      - name: docs
+        color: "0075ca"
+    rulesets:
+      - name: main
+        target: branch
+settings:
+  _layering: replace
+  labels:
+    - name: infra
+      color: "111111"
+  rulesets:
+    _layering: merge
+    entries:
+      - name: tags
+        target: tag
+expect:
+  exit_code: 0
+  result: merged
+  zero_requests: true
+  merged:
+    labels:
+      _undeclared: delete
+      entries:
+        - name: infra
+          color: "111111"
+    rulesets:
+      _undeclared: keep
+      entries:
+        - name: main
+          target: branch
+        - name: tags
+          target: tag

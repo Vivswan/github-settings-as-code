@@ -225,6 +225,22 @@ export function failRun(io: Io, message: string): number {
   return conclude(io, [failedTarget(message)], false);
 }
 
+/**
+ * The `result` output of a mode: merge run. Not a RepoResult: a merge has no
+ * target, so it never enters worstOf and never appears beside the per-repo
+ * values.
+ */
+export const MERGE_RESULT = "merged";
+
+/** A finished mode: merge run: the outputs and result line a merge earns, exit 0. */
+export function concludeMerge(io: Io, run: { layers: string[]; mergedFile: string }): number {
+  io.log(`merged ${run.layers.length} layer(s) into ${run.mergedFile}`);
+  io.output("skipped-sections", "");
+  io.output("result", MERGE_RESULT);
+  io.log(`result: ${MERGE_RESULT}`);
+  return 0;
+}
+
 function conclude(
   io: Io,
   results: ReadonlyArray<{

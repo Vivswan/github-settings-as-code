@@ -90,7 +90,7 @@ describe("collaborators", () => {
       },
     });
     const result = await plan(api, {
-      undeclared: "keep",
+      _undeclared: "keep",
       entries: [
         { username: "alice", permission: "push" },
         { username: "carol", permission: "push" },
@@ -99,8 +99,8 @@ describe("collaborators", () => {
     expect(result).toEqual({
       ops: [],
       notes: [
-        'collaborator "bob" has access but is not declared in the settings file; kept under "undeclared: keep" - add them to the settings file to manage their access, or set "undeclared: delete" to have apply REMOVE them',
-        'invitation for "mallory" is pending but not declared in the settings file; kept under "undeclared: keep" - add them to the settings file to manage their access, or set "undeclared: delete" to have apply CANCEL the invitation',
+        'collaborator "bob" has access but is not declared in the settings file; kept under "_undeclared: keep" - add them to the settings file to manage their access, or set "_undeclared: delete" to have apply REMOVE them',
+        'invitation for "mallory" is pending but not declared in the settings file; kept under "_undeclared: keep" - add them to the settings file to manage their access, or set "_undeclared: delete" to have apply CANCEL the invitation',
         "invitation 9 was sent by email, so no username can declare it; left untouched - cancel it from the repository's Access settings if it is unwanted",
       ],
       drift: [],

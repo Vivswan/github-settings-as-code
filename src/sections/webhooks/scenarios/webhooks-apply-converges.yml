@@ -4,12 +4,12 @@ description: >-
   config drifted (content_type) gets the config sub-endpoint PATCH carrying
   the resolved $WEBHOOK_SECRET, its events drift rides the general PATCH
   (no config key), a missing hook is created, and a live hook the file does
-  not declare is DELETED under "undeclared: delete". The declared secret
+  not declare is DELETED under "_undeclared: delete". The declared secret
   makes the config PATCH unconditional, so the proof is apply-idempotence:
   a second apply rewrites the same state and a final check converges.
 settings:
   webhooks:
-    undeclared: delete
+    _undeclared: delete
     entries:
       - config:
           url: https://ci.example.com/hook

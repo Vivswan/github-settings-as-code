@@ -37,28 +37,34 @@ const SPEC_PATH = join(import.meta.dir, "github-openapi.trimmed.json");
 
 /**
  * Split a path into non-empty segments (query already absent from a pathname).
- * Shared by the greedy contents matcher below.
+ * Shared by the greedy trailing-param matcher below.
  */
 function segments(path: string): string[] {
   return path.split("/").filter((s) => s.length > 0);
 }
 
 /**
+ * The trailing params GitHub routes greedily: `{path}` on the contents
+ * endpoint absorbs a file path with slashes (".github/settings.yml"), and
+ * `{ref}` on the git ref endpoint absorbs a fully qualified ref
+ * ("heads/release/1.x").
+ */
+const GREEDY_TRAILING_PARAMS: ReadonlySet<string> = new Set(["{path}", "{ref}"]);
+
+/**
  * True when a concrete pathname matches a spec template. Most GitHub params are
- * one segment, which the shared matchesTemplate handles. The sole exception is
- * the contents endpoint, whose trailing `{path}` absorbs a file path that may
- * itself contain slashes (".github/settings.yml"): for a template ending in
- * `{path}`, match the fixed prefix and let `{path}` take one-or-more remaining
- * segments. This mirrors GitHub's own routing, where `{path}` is greedy.
+ * one segment, which the shared matchesTemplate handles. For a template ending
+ * in a GREEDY_TRAILING_PARAMS member, match the fixed prefix and let the param
+ * take one-or-more remaining segments, mirroring GitHub's own routing.
  */
 export function pathMatches(template: string, pathname: string): boolean {
   const templateSegs = segments(template);
   const lastTemplate = templateSegs[templateSegs.length - 1];
-  if (lastTemplate === "{path}") {
+  if (lastTemplate !== undefined && GREEDY_TRAILING_PARAMS.has(lastTemplate)) {
     const prefix = templateSegs.slice(0, -1);
     const pathSegs = segments(pathname);
     // The prefix must match segment-for-segment, then at least one more
-    // segment remains for {path} to absorb.
+    // segment remains for the trailing param to absorb.
     if (pathSegs.length <= prefix.length) {
       return false;
     }

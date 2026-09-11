@@ -95,11 +95,11 @@ export interface SectionMeta<
   /**
    * The section's undeclared-entry policy; the generated Sections and COVERAGE tables and the docs
    * registry's contradiction tests derive their deletion claims from it. Which sections sit in each
-   * bucket is read off ./registry.ts; the wrapped `{undeclared, entries}` form overrides it per run:
+   * bucket is read off ./registry.ts; the wrapped `{_undeclared, entries}` form overrides it per run:
    * - "delete": the section lists live resources and DELETES undeclared ones
-   *   by default; `undeclared: keep` softens that to notes.
+   *   by default; `_undeclared: keep` softens that to notes.
    * - "keep": the section lists live resources but KEEPS undeclared ones by
-   *   default, surfacing each as a note; `undeclared: delete` hardens that
+   *   default, surfacing each as a note; `_undeclared: delete` hardens that
    *   to deletion.
    * - "untouched": the section never enumerates sibling resources, so an
    *   undeclared one is simply never seen and no policy applies.
@@ -110,6 +110,34 @@ export interface SectionMeta<
    * can never be reached for a section the merge does not normalize.
    */
   readonly undeclaredDefault: K extends UndeclaredPolicySection ? UndeclaredPolicy : "untouched";
+  /**
+   * How this section's entries layer across settings documents in a layered
+   * merge (engine/layers.ts): declared only by knobbed sections whose entries
+   * carry a matching identity; a knobbed section without one always replaces.
+   * The conditional type makes it unrepresentable on a non-knobbed section.
+   */
+  readonly layering?: K extends UndeclaredPolicySection ? KeyedListLayering : never;
+}
+
+/**
+ * A list whose entries layer by identity across settings documents
+ * (engine/layers.ts). Two entries are one resource when their key sets
+ * intersect, which is the same test the section's planner applies to a
+ * single document, so a merged document is always one the planner accepts.
+ */
+export interface KeyedListLayering {
+  /**
+   * Every identity one entry claims, folded as the planner folds it: a
+   * ruleset's name; a label's name, plus its current name when it renames.
+   * Null when the entry carries none (refused at the layer boundary).
+   */
+  readonly keys: (entry: Readonly<Record<string, unknown>>) => readonly string[] | null;
+  /** The entry field the keys come from, for refusal prose ("name", "type"). */
+  readonly keyField: string;
+  /** A matched pair: "replace" (higher wins wholesale) or "merge" (key by key, nested keyed lists below). */
+  readonly combine: "replace" | "merge";
+  /** Fields of a merged entry that are themselves keyed lists (rulesets' `rules`). */
+  readonly nested?: Readonly<Record<string, KeyedListLayering>>;
 }
 
 /**
@@ -365,7 +393,7 @@ interface SectionModuleBase<
    * forces a decision here) and a key the entry type does not carry is an
    * excess property - no per-section lockstep pin needed. A non-list
    * section cannot declare a closedSurface at all (the property collapses
-   * to never). EntryOf sees through the wrapped `{undeclared, entries}`
+   * to never). EntryOf sees through the wrapped `{_undeclared, entries}`
    * form, so a closed section that also takes the policy knob
    * (collaborators) keeps its closed-surface validation in both forms.
    */
@@ -490,7 +518,7 @@ function cloneWith(schema: z.ZodType, patch: Partial<LoosenDef>): z.ZodType {
  * keys ride through to GitHub instead of being dropped and superRefine
  * checks that read undeclared keys can see them. Deliberately preserved as
  * authored:
- * - strictObject stays strict (the {undeclared, entries} wrapper and the
+ * - strictObject stays strict (the {_undeclared, entries} wrapper and the
  *   nested shapes whose endpoints offer no passthrough destination);
  * - every refine/superRefine survives (clones carry the checks), so the
  *   runtime-only invariants keep firing;
@@ -563,7 +591,7 @@ const LOOSEN_LEAF_TYPES: ReadonlySet<string> = new Set([
 
 /**
  * Recognize a knobbed-section union: exactly the entry array plus the strict
- * {undeclared, entries} wrapper (see knobbed() in src/sections/shared/schema-helpers.ts).
+ * {_undeclared, entries} wrapper (see knobbed() in src/sections/shared/schema-helpers.ts).
  */
 function detectKnobUnion(
   options: readonly z.ZodType[],
@@ -601,7 +629,7 @@ function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
       if (shape === null) {
         ctx.addIssue({
           code: "custom",
-          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "undeclared" policy), but this section parsed as ${value === null ? "null" : typeof value}`,
+          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "_undeclared" policy), but this section parsed as ${value === null ? "null" : typeof value}`,
         });
         return z.NEVER;
       }
@@ -618,7 +646,7 @@ function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
 
 /**
  * The entry type of a list section's declared value, whichever form it
- * takes: a plain entry array, or the wrapped `{undeclared, entries}` form.
+ * takes: a plain entry array, or the wrapped `{_undeclared, entries}` form.
  * Distributes over the union, so a knobbed section (whose SettingsFile type
  * is that union) resolves to its one entry type; a non-list section
  * resolves to never.
@@ -632,7 +660,7 @@ export type EntryOf<T> = T extends readonly (infer E)[]
 /**
  * Unwrap a list section's declared value into its policy and entries. The
  * plain array form takes `defaultPolicy`; the wrapped form's explicit
- * `undeclared` wins, and an omitted one falls back to the same default. The
+ * `_undeclared` wins, and an omitted one falls back to the same default. The
  * default is a REQUIRED parameter on purpose: a nested list in a future
  * feature cannot derive its default from its section's undeclaredDefault,
  * so the call site always says which default applies. Entries are returned
@@ -646,7 +674,7 @@ export function undeclaredPolicy<E>(
     return { policy: defaultPolicy, entries: declared };
   }
   const wrapped = declared as UndeclaredPolicyList<E>;
-  return { policy: wrapped.undeclared ?? defaultPolicy, entries: wrapped.entries };
+  return { policy: wrapped._undeclared ?? defaultPolicy, entries: wrapped.entries };
 }
 
 /**
@@ -679,13 +707,13 @@ export function undeclaredNote(opts: {
   add?: string;
   /** What adding it would manage ("it", or "their access" for people). */
   manage?: string;
-  /** What `undeclared: delete` would make apply do, with any consequence. */
+  /** What `_undeclared: delete` would make apply do, with any consequence. */
   action: string;
 }): string {
   const state = opts.state ?? "exists on the repo but is not declared";
   const add = opts.add ?? "it";
   const manage = opts.manage ?? "it";
-  return `${opts.subject} ${state} in the settings file; kept under "undeclared: keep" - add ${add} to the settings file to manage ${manage}, or set "undeclared: delete" to have apply ${opts.action}`;
+  return `${opts.subject} ${state} in the settings file; kept under "_undeclared: keep" - add ${add} to the settings file to manage ${manage}, or set "_undeclared: delete" to have apply ${opts.action}`;
 }
 
 /**
@@ -694,7 +722,7 @@ export function undeclaredNote(opts: {
  * undeclaredNote sibling. The middle clause derives from the list's DEFAULT
  * policy, so it can never contradict the section again: under a keep
  * default this branch is only reachable because the file set
- * `undeclared: delete`, so the line says so; under a delete default the
+ * `_undeclared: delete`, so the line says so; under a delete default the
  * deletion is the list's own posture and no knob was needed. Callers pass
  * the same default they unwrapped the policy with (the section's
  * undeclaredDefault via defaultUndeclaredPolicy, or a nested list's own
@@ -719,7 +747,7 @@ export function undeclaredDrift(
     keep?: string;
   },
 ): string {
-  const knob = listDefault === "keep" ? ' and "undeclared: delete" is set' : "";
+  const knob = listDefault === "keep" ? ' and "_undeclared: delete" is set' : "";
   const state = opts.state ?? "not in the settings file";
   const add = opts.add ?? "it";
   const keep = opts.keep ?? "it";

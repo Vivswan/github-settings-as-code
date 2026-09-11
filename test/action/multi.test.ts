@@ -106,8 +106,10 @@ describe("runMulti", () => {
       },
       "PATCH /repos/o/b": { error: { status: 500, message: "boom", body: "" } },
       // o/c: repo visible with readable contents, but has no settings file
-      // (contents GET unrouted -> 404; the repo probe confirms Contents access)
-      "GET /repos/o/c": { data: { permissions: { pull: true } } },
+      // (contents GET unrouted -> 404; the default branch ref read proves
+      // Contents access)
+      "GET /repos/o/c": { data: { default_branch: "main" } },
+      "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
     }).allowMutations("PATCH /repos/o/a");
     const { io, annotations } = captureIo();
     const { fatal, targets } = await runMulti(
@@ -143,9 +145,74 @@ describe("runMulti", () => {
     expect(annotations.some((a) => a.startsWith("error: o/a: repository:"))).toBe(true);
   });
 
-  test("defaults-file merges under a central per-repo file", async () => {
-    // Both live repos diverge from every declared field, so the merged
-    // document's PATCH carries the per-repo key and the defaults key alike.
+  test("defaults-file applies whole to a remote target without a settings file", async () => {
+    // o/c has no settings.yml (the contents GET is unrouted -> 404; the
+    // default branch ref read proves Contents access), so the defaults
+    // document runs as its settings: the live repo drifts on has_projects,
+    // the defaults' one key.
+    const api = new MockApi({
+      "GET /repos/o/c": { data: { default_branch: "main", has_projects: true } },
+      "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
+    }).allowMutations("PATCH /repos/o/c");
+    const { io, annotations } = captureIo();
+    const { fatal, targets } = await runMulti(
+      api,
+      cfg({ reposInput: "o/c", defaultsFile: "test/fixtures/defaults.yml" }),
+      io,
+    );
+    expect(fatal).toBeNull();
+    expect(targets.map((t) => [t.display, t.result])).toEqual([["o/c", "applied"]]);
+    expect(api.mutations().map((m) => [m.method, m.path, m.payload])).toEqual([
+      ["PATCH", "/repos/o/c", { has_projects: false }],
+    ]);
+    expect(annotations).toEqual([
+      "notice: o/c: applying the defaults file: the repository has no .github/settings.yml on its default branch",
+    ]);
+  });
+
+  test("a target with its own file ignores the defaults", async () => {
+    // The live repo drifts on BOTH keys; only the target's own has_wiki is
+    // PATCHed, so the defaults' has_projects never reached this target.
+    const api = new MockApi({
+      "GET /repos/o/a": { data: { has_wiki: true, has_projects: true } },
+      "GET /repos/o/a/contents/.github/settings.yml": {
+        data: "repository:\n  has_wiki: false\n",
+      },
+    }).allowMutations("PATCH /repos/o/a");
+    const { io, annotations } = captureIo();
+    const { fatal, targets } = await runMulti(
+      api,
+      cfg({ reposInput: "o/a", defaultsFile: "test/fixtures/defaults.yml" }),
+      io,
+    );
+    expect(fatal).toBeNull();
+    expect(targets.map((t) => [t.display, t.result])).toEqual([["o/a", "applied"]]);
+    expect(api.mutations().map((m) => [m.method, m.path, m.payload])).toEqual([
+      ["PATCH", "/repos/o/a", { has_wiki: false }],
+    ]);
+    expect(annotations).toEqual([]);
+  });
+
+  test("without defaults-file a fileless target is still skipped", async () => {
+    const api = new MockApi({
+      "GET /repos/o/c": { data: { default_branch: "main", has_projects: true } },
+      "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
+    });
+    const { io, annotations } = captureIo();
+    const { fatal, targets } = await runMulti(api, cfg({ reposInput: "o/c" }), io);
+    expect(fatal).toBeNull();
+    expect(targets.map((t) => [t.display, t.result])).toEqual([["o/c", "skipped"]]);
+    expect(api.mutations()).toEqual([]);
+    expect(annotations).toEqual([
+      'notice: o/c: skipped - the repository has no .github/settings.yml on its default branch. Add the file to manage it, or remove o/c from the "repos" input',
+    ]);
+  });
+
+  test("central per-repo files are applied as written; the defaults never reach them", async () => {
+    // Both live repos drift on has_wiki and has_projects. viv/api declares
+    // has_wiki only and octo/web has_projects only, so each PATCH carries
+    // exactly its own file's key - the defaults' has_projects is never merged
+    // into viv/api.
     const api = new MockApi({
       "GET /repos/viv/api": { data: { has_wiki: true, has_projects: true } },
       "GET /repos/octo/web": { data: { has_wiki: true, has_projects: true } },
@@ -162,17 +229,17 @@ describe("runMulti", () => {
       io,
     );
     expect(fatal).toBeNull();
-    expect(targets.map((t) => t.display).sort()).toEqual(["octo/web", "viv/api"]);
-    // viv/api declares has_wiki; defaults add has_projects; both PATCHed.
-    // octo/web declares nothing of its own, so it gets the defaults alone.
+    expect(targets.map((t) => [t.display, t.result]).sort()).toEqual([
+      ["octo/web", "applied"],
+      ["viv/api", "applied"],
+    ]);
     const patches = api
       .mutations()
-      .filter((m) => m.method === "PATCH")
-      .map((m) => [m.path, m.payload])
+      .map((m) => [m.method, m.path, m.payload])
       .sort();
     expect(patches).toEqual([
-      ["/repos/octo/web", { has_projects: false }],
-      ["/repos/viv/api", { has_wiki: false, has_projects: false }],
+      ["PATCH", "/repos/octo/web", { has_projects: false }],
+      ["PATCH", "/repos/viv/api", { has_wiki: false }],
     ]);
   });
 
@@ -194,14 +261,26 @@ describe("runMulti", () => {
     expect(annotations.some((a) => a.includes("the token was denied"))).toBe(true);
   });
 
-  test("a visible repo without Contents access fails, never skips", async () => {
+  test("a Contents-denied repo fails naming the grant; it neither skips nor receives the defaults", async () => {
+    // The contents GET and the default branch ref read are both unrouted
+    // (404, the fine-grained denial), while the repo probe succeeds: the file
+    // cannot be proven absent, so the target fails - even with a defaults
+    // file in hand, nothing is applied to it.
     const api = new MockApi({
-      "GET /repos/o/x": { data: { permissions: { pull: false } } },
+      "GET /repos/o/x": { data: { default_branch: "main", has_projects: true } },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(api, cfg({ reposInput: "o/x" }), io);
-    expect(targets[0]?.result).toBe("failed");
-    expect(annotations.some((a) => a.includes("Contents"))).toBe(true);
+    const { fatal, targets } = await runMulti(
+      api,
+      cfg({ reposInput: "o/x", defaultsFile: "test/fixtures/defaults.yml" }),
+      io,
+    );
+    expect(fatal).toBeNull();
+    expect(targets.map((t) => [t.display, t.result])).toEqual([["o/x", "failed"]]);
+    expect(api.mutations()).toEqual([]);
+    expect(annotations).toEqual([
+      'error: o/x: cannot prove .github/settings.yml is absent: reading the default branch ref heads/main returned 404. Grant the token Contents: read on this repository, or initialize its default branch; a repository whose file cannot be read never receives the defaults. To stop managing it instead, remove o/x from the "repos" input',
+    ]);
   });
 
   test("discovery filters with repos-dir-only targets are fatal", async () => {

@@ -1,13 +1,13 @@
 name: milestones-undeclared-delete
 description: >-
-  The wrapped milestones form with "undeclared: delete" removes a live
+  The wrapped milestones form with "_undeclared: delete" removes a live
   milestone the settings file does not declare - and says out loud that the
   deletion DETACHES the milestone from every issue that carried it, the
   reason keep is the default. The declared milestone is created, apply stays
   green, and a check rerun converges.
 settings:
   milestones:
-    undeclared: delete
+    _undeclared: delete
     entries:
       - title: v1.0
         description: First stable release.

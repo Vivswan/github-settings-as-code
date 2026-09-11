@@ -2,10 +2,11 @@
  * The complete set of REST path templates the action can reach, derived from
  * the section endpoint dictionary, the private-report issue-channel endpoint
  * dictionary, plus the handful of non-section "core" calls (repo probe,
- * settings-file fetch, multi-repo discovery). A later phase's OpenAPI trim
- * script imports USED_PATHS to slice the published spec down to exactly what the
- * mock must model, so this stays dependency-light: it pulls from the endpoint
- * declarations only, and re-derives nothing they already declare.
+ * settings-file fetch, multi-repo discovery). The OpenAPI trim script
+ * (.github/scripts/trim-openapi.ts) imports USED_PATHS to slice the published
+ * spec down to exactly what the mock must model, so this stays dependency-light:
+ * it pulls from the endpoint declarations only, and re-derives nothing they
+ * already declare.
  */
 
 import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";
@@ -15,8 +16,9 @@ import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 
 /**
  * Path templates the action calls outside any section: the repository probe
- * that opens every run, the Contents fetch that reads settings.yml, and the
- * discovery listing that expands a multi-repo target. Kept here because no
+ * that opens every run, the Contents fetch that reads settings.yml, the git
+ * ref read that proves a settings.yml absent (Contents-gated, file-independent),
+ * and the discovery listing that expands a multi-repo target. Kept here because no
  * SectionModule owns them. The private-report issue-channel paths are NOT hand
  * listed here - they derive from ISSUE_REPORT_ENDPOINTS below, single-sourced
  * from the report module (its marker-label create reuses the labels section's
@@ -25,6 +27,7 @@ import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 const CORE_PATHS: readonly string[] = [
   "/repos/{owner}/{repo}",
   "/repos/{owner}/{repo}/contents/{path}",
+  "/repos/{owner}/{repo}/git/ref/{ref}",
   "/user/repos",
 ];
 

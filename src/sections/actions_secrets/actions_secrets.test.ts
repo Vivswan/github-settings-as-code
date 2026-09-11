@@ -173,22 +173,22 @@ describe("actions_secrets planning", () => {
     ]);
   });
 
-  test("an undeclared live secret is a keep-note by default, a planned DELETE under undeclared: delete", async () => {
+  test("an undeclared live secret is a keep-note by default, a planned DELETE under _undeclared: delete", async () => {
     const api = new MockApi({ [LIST]: listOf("STALE") });
     const kept = await plan(api, []);
     expect(kept).toEqual({
       ops: [],
       notes: [
         'Actions secret "STALE" exists on the repo but is not declared in the settings file; ' +
-          'kept under "undeclared: keep" - add it to the settings file to manage it, or set ' +
-          '"undeclared: delete" to have apply DELETE it (a deleted secret\'s value is ' +
+          'kept under "_undeclared: keep" - add it to the settings file to manage it, or set ' +
+          '"_undeclared: delete" to have apply DELETE it (a deleted secret\'s value is ' +
           "unrecoverable)",
       ],
       drift: [],
     });
 
     const deleted = await plan(new MockApi({ [LIST]: listOf("STALE") }), {
-      undeclared: "delete",
+      _undeclared: "delete",
       entries: [],
     });
     expect(deleted).toEqual({
@@ -197,7 +197,7 @@ describe("actions_secrets planning", () => {
           role: "remove",
           params: { secret_name: "STALE" },
           drift: [
-            'actions_secrets[STALE]: undeclared - not in the settings file and "undeclared: delete" is set, so apply will DELETE it (the value is unrecoverable); add it to the settings file to keep it',
+            'actions_secrets[STALE]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it (the value is unrecoverable); add it to the settings file to keep it',
           ],
           change: 'DELETED undeclared secret "STALE"',
           describe: 'deleting undeclared secret "STALE"',
@@ -274,7 +274,7 @@ describe("actions_secrets execution", () => {
     const { first, second, changes } = await provePlanIdempotent(
       actionsSecretsSection,
       api,
-      { undeclared: "delete", entries: [{ name: "rotated", value: "$R" }] },
+      { _undeclared: "delete", entries: [{ name: "rotated", value: "$R" }] },
       tools({ $R: "new-plaintext" }),
     );
     expect(changes).toEqual(['updated secret "ROTATED"', 'DELETED undeclared secret "STALE"']);
@@ -312,7 +312,7 @@ describe("actions_secrets execution", () => {
       "DELETE /repos/o/r/actions/secrets/STALE",
     );
     const exec = tools();
-    const deleted = await apply(api2, { undeclared: "delete", entries: [] }, exec);
+    const deleted = await apply(api2, { _undeclared: "delete", entries: [] }, exec);
     expect(deleted.changes).toEqual(['DELETED undeclared secret "STALE"']);
     expect(exec.lookups).toEqual([]);
     expect(api2.calls.some((call) => call.path.endsWith("/public-key"))).toBe(false);
