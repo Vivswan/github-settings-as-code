@@ -2,7 +2,7 @@
 # job below (it MUST be named copilot-setup-steps) to prepare its
 # development environment before working on this repository. Triggered on
 # edits to itself so changes are validated in CI. Generated once by
-# Vivswan/repo-platform and never overwritten by template
+# the fleet sync and never overwritten by a later
 # sync: add whatever setup the agent needs (dependencies, generated files,
 # environment checks).
 

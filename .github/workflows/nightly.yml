@@ -1,5 +1,5 @@
-# Nightly upstream-freshness probes. Generated from the repo-platform nightly
-# starter and never overwritten by template sync. The checks job re-cuts the
+# Nightly upstream-freshness probes. Generated from the fleet sync's nightly
+# starter and never overwritten by a later sync. The checks job re-cuts the
 # trimmed OpenAPI spec from upstream HEAD (a path-level staleness check) and
 # typechecks against the latest @octokit/types, so pinned-dependency staleness
 # fails a night instead of surprising the next manual bump; the float-canary
@@ -7,7 +7,7 @@
 # workflow does, so a breaking upstream release fails a night instead of
 # reddening every open Dependabot PR; the report job below files or updates
 # one label-deduplicated tracking issue on a red night and closes it on a
-# green one (see repo-platform's docs/nightly.md).
+# green one (see the platform repository's docs/nightly.md).
 name: Nightly
 
 on:

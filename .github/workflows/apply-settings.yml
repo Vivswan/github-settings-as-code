@@ -1,11 +1,12 @@
 # The most direct consumer of this action is this repository itself: its
 # settings are applied by the CURRENT code (uses: ./), so a regression here
 # bites us before it bites anyone else. The document it applies is the
-# SAME six-layer merge Vivswan/repo-platform computes for this repository
+# SAME six-layer merge the fleet's central settings run computes for this
+# repository
 # (the settings-sync module: fleet baseline, module layers, this repo's
-# .github/settings.yml, the fleet override), rendered with repo-platform's
+# .github/settings.yml, the fleet override), rendered with the platform's
 # own scripts, so this writer and the central heal converge on one
-# document: each renders from a green repo-platform commit, so two runs
+# document: each renders from a green platform commit, so two runs
 # can differ only by a platform revision, and the next heal settles it.
 # Applying this repo's partial settings.yml alone would delete every fleet
 # label the merged roster carries. Needs APPLY_SETTING_TOKEN
@@ -14,7 +15,7 @@
 # Called from post-green.yml, the repo-owned hook ci.yml runs after the
 # all-green gate and before release (the judged commit as `sha`, secrets:
 # inherit): that call is the only write trigger, so settings never come from
-# a commit the gate has not passed. The weekly heal is repo-platform's
+# a commit the gate has not passed. The weekly heal is the fleet's
 # central settings run; a dispatch only reports drift.
 
 name: Apply Settings
@@ -56,7 +57,7 @@ jobs:
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::APPLY_SETTING_TOKEN is not set; self-apply skipped. Add a fine-grained PAT secret" \
-              "(Administration + Issues, read and write) to enable it. Vivswan/repo-platform's central" \
+              "(Administration + Issues, read and write) to enable it. The fleet's central" \
               "settings run applies this repository's settings either way."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
@@ -72,14 +73,14 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || inputs.sha }}
 
-      # repo-platform's `build` branch is the green-gated delivery ref the
+      # The platform's `build` branch is the green-gated delivery ref the
       # fleet pins, but its tree carries only workflow files, never the
       # scripts. Its tip commit message carries a provenance stamp naming
       # the green main commit it was composed from (the same
       # `source: .../commit/<sha>` line reusable-apply-settings.yml
       # parses), so the scripts are checked out THERE: the exact commit
       # CI vouched for. A tip without a stamp fails closed.
-      - name: Resolve the repo-platform scripts commit
+      - name: Resolve the platform scripts commit
         id: scripts
         if: steps.token.outputs.proceed == 'true'
         env:
@@ -88,12 +89,12 @@ jobs:
           message="$(gh api repos/Vivswan/repo-platform/commits/build --jq '.commit.message')"
           stamp="$(printf '%s\n' "$message" | sed -n -E 's|^source: .*/commit/([0-9a-f]{40})$|\1|p' | head -n 1)"
           if [ -z "$stamp" ]; then
-            echo "::error::refusing to run repo-platform scripts: the build tip carries no provenance stamp."
+            echo "::error::refusing to run the platform scripts: the build tip carries no provenance stamp."
             exit 1
           fi
           echo "ref=$stamp" >> "$GITHUB_OUTPUT"
 
-      - name: Check out repo-platform
+      - name: Check out the platform scripts
         if: steps.token.outputs.proceed == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -108,7 +109,7 @@ jobs:
         with:
           bun-version-file: platform/.bun-version
 
-      - name: Install repo-platform script dependencies
+      - name: Install the platform script dependencies
         if: steps.token.outputs.proceed == 'true'
         working-directory: platform
         run: bun install --frozen-lockfile --silent

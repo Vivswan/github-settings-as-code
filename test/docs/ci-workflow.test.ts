@@ -20,7 +20,7 @@ const ROOT = join(import.meta.dir, "..", "..");
 
 // Deliberately outside the gate: a red run flags template-convention drift
 // that the next sync PR heals, and must not block unrelated merges. Mirrors
-// repo-platform's validator (see its docs/all-green.md).
+// the central CI's validator (see the platform repository's docs/all-green.md).
 const INFORMATIONAL = new Set(["validate-template"]);
 
 interface Workflow {
@@ -80,7 +80,7 @@ function expectReleasePrefixes(wf: Workflow): void {
 describe("ci.yml release PR branch spelling", () => {
   // ci.yml is template-managed and carries no head_ref condition today; a sync
   // PR that brings one spelling the release PR branch namespace differently
-  // fails here, and the fix routes to Vivswan/repo-platform, not this file.
+  // fails here, and the fix routes to the platform repository, not this file.
   test("every startsWith(github.head_ref, ...) prefix is RELEASE_PR_BRANCH_PREFIX", () => {
     const text = readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8");
     expectReleasePrefixes(parseYaml(text) as Workflow);
