@@ -17,7 +17,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { OutputName } from "../../src/io.js";
 import {
   assertApplyIdempotent,
@@ -286,6 +286,45 @@ function expectedReposResult(scenario: Scenario): Record<string, string> | null 
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
+/** Where a mode: merge child writes its merged document, inside the scenario's temp dir. */
+function mergedFilePath(dir: string): string {
+  return join(dir, "merged.yml");
+}
+
+/**
+ * The expect.merged assertion: the document the child wrote, parsed, must
+ * equal the pinned one whole. Returns the failure lines: one when the file is
+ * missing or unparseable, else one per differing top-level key (with both
+ * sides rendered), so a mismatch reads as a diff rather than a boolean.
+ */
+function mergedFileFailures(path: string, expected: Record<string, unknown>): string[] {
+  let live: unknown;
+  try {
+    live = parseYaml(readFileSync(path, "utf8"));
+  } catch (error) {
+    return [
+      `merged file ${path} unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    ];
+  }
+  if (Bun.deepEquals(live, expected)) {
+    return [];
+  }
+  if (typeof live !== "object" || live === null || Array.isArray(live)) {
+    return [`merged document is not a mapping: ${JSON.stringify(live)}`];
+  }
+  const record = live as Record<string, unknown>;
+  const keys = new Set([...Object.keys(expected), ...Object.keys(record)]);
+  const failures: string[] = [];
+  for (const key of keys) {
+    if (!Bun.deepEquals(record[key], expected[key])) {
+      failures.push(
+        `merged.${key}: ${JSON.stringify(record[key])} != expected ${JSON.stringify(expected[key])}`,
+      );
+    }
+  }
+  return failures;
+}
+
 /** Build the child environment from scratch: nothing leaks from process.env. */
 function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.ProcessEnv {
   const inputs = scenario.inputs ?? {};
@@ -308,12 +347,24 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
     RETRY_BASE_MS: "1",
   };
   // settings-file is a single-repo input; the action rejects it alongside the
-  // multi-repo inputs, so it is set only in single-repo mode.
-  if (!multi) {
+  // multi-repo inputs, so it is set only in single-repo mode. A merge lists
+  // every layer file below settings.yml, lowest first, and names its output.
+  if (inputs.mode === "merge") {
+    const layers = (scenario.settings_layers ?? []).map((layer, i) => {
+      const path = join(dir, `layer-${i}.yml`);
+      writeFileSync(path, stringifyYaml(layer));
+      return path;
+    });
+    env["INPUT_SETTINGS-FILE"] = [...layers, join(dir, "settings.yml")].join("\n");
+    env["INPUT_MERGED-FILE"] = mergedFilePath(dir);
+  } else if (!multi) {
     env["INPUT_SETTINGS-FILE"] = join(dir, "settings.yml");
   }
   if (inputs.mode) {
     env.INPUT_MODE = inputs.mode;
+  }
+  if (inputs.layering) {
+    env.INPUT_LAYERING = inputs.layering;
   }
   if (inputs.on_missing_permission) {
     env["INPUT_ON-MISSING-PERMISSION"] = inputs.on_missing_permission;
@@ -557,6 +608,10 @@ export async function runScenario(
     // 3. The `result` output.
     if (exp.result !== undefined && first.outputs.result !== exp.result) {
       failures.push(`result "${first.outputs.result}" != expected "${exp.result}"`);
+    }
+    // 3-merge. The merged document a mode: merge run wrote, compared whole.
+    if (exp.merged !== undefined) {
+      failures.push(...mergedFileFailures(mergedFilePath(dir), exp.merged));
     }
     // 3a. The `skipped-sections` output, compared as a set (the engine emits
     // a comma-joined list whose order is SECTION_KEYS order; the expectation

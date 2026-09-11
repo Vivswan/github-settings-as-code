@@ -134,6 +134,10 @@ describe("changed-sections derived fan-out", () => {
       // nested lists. src/schema.ts uses it too, but every section reaches
       // src/schema.ts only through type imports, which are not edges.
       "schema-helpers.ts": inKeyOrder(...UNDECLARED_POLICY_SECTIONS, "environments"),
+      // The renamed-key error map behind knobbed()'s wrapper, so the same
+      // sections as schema-helpers.ts (the docs shape imports it too, but
+      // nothing bundled reaches the docs shape).
+      "renamed-key.ts": inKeyOrder(...UNDECLARED_POLICY_SECTIONS, "environments"),
     });
   });
 

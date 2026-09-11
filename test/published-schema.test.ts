@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
 import { validateSectionShapes } from "../src/engine/validate.js";
-import { UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
+import { SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
 import { FLAG_PAIRING_FIXTURES } from "./fixtures/environment-flag-pairing.js";
 
 const ROOT = join(import.meta.dir, "..");
@@ -39,7 +39,7 @@ describe("published schema wrapper strictness", () => {
   );
 
   /**
-   * The nested {undeclared, entries} knobs inside a section entry
+   * The nested {_undeclared, entries} knobs inside a section entry
    * (environments[].variables, environments[].secrets,
    * environments[].deployment_branch_policies, and
    * environments[].deployment_protection_rules): each adds one wrapper
@@ -78,7 +78,7 @@ describe("published schema wrapper strictness", () => {
     test("the wrapped form validates", () => {
       expect(
         validate({
-          labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
+          labels: { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
         }),
       ).toBe(true);
     });
@@ -86,13 +86,13 @@ describe("published schema wrapper strictness", () => {
     test("a typo key inside the wrapper is rejected, matching the runtime", () => {
       expect(
         validate({
-          labels: { undeclared: "keep", entires: [], entries: [] },
+          labels: { _undeclared: "keep", entires: [], entries: [] },
         }),
       ).toBe(false);
     });
 
     test("a bad policy value is rejected", () => {
-      expect(validate({ rulesets: { undeclared: "remove", entries: [] } })).toBe(false);
+      expect(validate({ rulesets: { _undeclared: "remove", entries: [] } })).toBe(false);
     });
 
     test("both forms of the nested variables knob validate", () => {
@@ -106,7 +106,7 @@ describe("published schema wrapper strictness", () => {
           environments: [
             {
               name: "prod",
-              variables: { undeclared: "keep", entries: [{ name: "A", value: "1" }] },
+              variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
             },
           ],
         }),
@@ -139,7 +139,7 @@ describe("published schema wrapper strictness", () => {
             {
               name: "prod",
               deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-              deployment_branch_policies: { undeclared: "keep", entries: [{ name: "main" }] },
+              deployment_branch_policies: { _undeclared: "keep", entries: [{ name: "main" }] },
             },
           ],
         }),
@@ -172,7 +172,7 @@ describe("published schema wrapper strictness", () => {
             {
               name: "prod",
               deployment_protection_rules: {
-                undeclared: "delete",
+                _undeclared: "delete",
                 entries: [{ app: "my-gate-app" }],
               },
             },
@@ -271,5 +271,34 @@ describe("published schema wrapper strictness", () => {
         true,
       );
     });
+  });
+});
+
+describe("the document-level _layering directive", () => {
+  const ajv = new Ajv({ strict: false, allErrors: true });
+  const validate: ValidateFunction = ajv.compile(schema);
+
+  test("the published schema and the zod document both accept a supported value", () => {
+    const doc: SettingsFile = { _layering: "replace", labels: [{ name: "bug" }] };
+    expect(validate(doc)).toBe(true);
+    expect(SettingsFile.safeParse(doc)).toEqual({ success: true, data: doc });
+  });
+
+  test("both reject an unsupported value with the enum error, naming the key", () => {
+    const doc = { _layering: "union", labels: [{ name: "bug" }] };
+    expect(validate(doc)).toBe(false);
+    expect((validate.errors ?? []).map((e) => [e.instancePath, e.keyword, e.params])).toEqual([
+      ["/_layering", "enum", { allowedValues: ["merge", "replace"] }],
+    ]);
+    const parsed = SettingsFile.safeParse(doc);
+    expect(parsed.success ? [] : parsed.error.issues.map((i) => [i.path, i.code])).toEqual([
+      [["_layering"], "invalid_value"],
+    ]);
+  });
+
+  test("the apply-path shape validation copies only sections, so the directive never reaches the engine", () => {
+    expect(
+      validateSectionShapes({ _layering: "replace", labels: [{ name: "bug" }] }, "settings.yml"),
+    ).toEqual({ settings: { labels: [{ name: "bug" }] } });
   });
 });

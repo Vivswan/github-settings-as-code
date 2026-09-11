@@ -17,14 +17,14 @@ import { MockApi } from "../mock-api.js";
  * handler walks its drift paths (create/update/delete/replace), not just
  * the clean early returns. The two wrapped declarations exercise the
  * undeclared-policy knob's both settings: labels keeps its undeclared live
- * label under `undeclared: keep` (still drifting on the missing declared
- * label), rulesets walks its DELETE path under `undeclared: delete` - in
+ * label under `_undeclared: keep` (still drifting on the missing declared
+ * label), rulesets walks its DELETE path under `_undeclared: delete` - in
  * check mode both must stay read-only like everything else.
  */
 const FIXTURES: Record<SectionKey, unknown> = {
   repository: { description: "declared", enable_vulnerability_alerts: true },
-  labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
-  rulesets: { undeclared: "delete", entries: [{ name: "declared-ruleset", target: "branch" }] },
+  labels: { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
+  rulesets: { _undeclared: "delete", entries: [{ name: "declared-ruleset", target: "branch" }] },
   branches: [{ name: "main", protection: { enforce_admins: true } }],
   environments: [
     {
@@ -62,18 +62,18 @@ const FIXTURES: Record<SectionKey, unknown> = {
   ],
   custom_properties: [{ property_name: "team", value: "platform" }],
   // The declared key's material differs from the live one (a replace, which
-  // in check mode must stay a drift line), and `undeclared: delete` walks
+  // in check mode must stay a drift line), and `_undeclared: delete` walks
   // the undeclared-deletion drift branch over the stale live key.
   deploy_keys: {
-    undeclared: "delete",
+    _undeclared: "delete",
     entries: [
       { title: "deploy-bot", key: "ssh-ed25519 AAAAC3declared deploy@bot", read_only: true },
     ],
   },
   // The declared pattern is missing from the live list (create drift) and
-  // the live one is undeclared under `undeclared: delete` (delete drift).
+  // the live one is undeclared under `_undeclared: delete` (delete drift).
   secret_scanning_custom_patterns: {
-    undeclared: "delete",
+    _undeclared: "delete",
     entries: [{ name: "internal-token", pattern: "int_[a-z0-9]{8}" }],
   },
 };
@@ -196,7 +196,7 @@ const ROUTES = {
     data: [{ property_name: "team", value: "core" }],
   },
   // A live key whose material diverges from the declared one, plus a stale
-  // undeclared key the wrapped `undeclared: delete` fixture must flag.
+  // undeclared key the wrapped `_undeclared: delete` fixture must flag.
   "GET /repos/o/r/keys?per_page=100&page=1": {
     data: [
       { id: 1, title: "deploy-bot", key: "ssh-ed25519 AAAAC3live", read_only: false },
@@ -204,7 +204,7 @@ const ROUTES = {
     ],
   },
   // A live pattern the fixture does not declare (delete drift under the
-  // wrapped `undeclared: delete`), while the declared one is missing.
+  // wrapped `_undeclared: delete`), while the declared one is missing.
   "GET /repos/o/r/secret-scanning/custom-patterns?per_page=100&page=1": {
     data: [
       {

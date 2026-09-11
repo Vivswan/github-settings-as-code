@@ -11,9 +11,13 @@
  * Multi-repo mode (repos / repos-dir / defaults-file inputs): one run in an
  * admin repo applies settings to many repositories - from per-repo files
  * checked into the admin repo (central), or from each target's own
- * .github/settings.yml (remote), with an optional defaults layer merged
- * under every target. Targets run independently; the run fails at the end
- * if any target failed.
+ * .github/settings.yml (remote), or the defaults-file document for a
+ * remote target that has no file. Targets run independently; the run fails
+ * at the end if any target failed.
+ *
+ * mode: merge folds an ordered list of settings files into one document
+ * written to merged-file, for a later apply or check step to run; it never
+ * touches GitHub (merge-mode.ts).
  */
 
 import type { RepoRef } from "../discovery/targets.js";
@@ -33,6 +37,7 @@ import {
 } from "./deliver.js";
 import { parseConfig } from "./inputs.js";
 import { actionsIo } from "./io.js";
+import { runMerge } from "./merge-mode.js";
 import { runMulti } from "./multi.js";
 import { attempt, publicChannel, redactedChannel, type TargetChannel } from "./redact.js";
 import { readSettingsFile } from "./settings-read.js";
@@ -84,6 +89,10 @@ export async function run(overrides?: {
     return failRun(io, parsed.error);
   }
   const cfg = parsed.config;
+  // A merge folds local files only: no client is built, so no token is read.
+  if (cfg.kind === "merge") {
+    return runMerge(cfg, io);
+  }
   const api = overrides?.api ?? new GithubApi(cfg.token, io, undefined, cfg.apiVersion);
 
   if (cfg.kind === "multi") {

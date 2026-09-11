@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: org team repo permissions
   notes: org repos only, skipped with a notice on personal accounts
 coverage:

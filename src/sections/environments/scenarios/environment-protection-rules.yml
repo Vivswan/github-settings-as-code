@@ -5,7 +5,7 @@
 # region-guard rule already satisfies its entry, and the undeclared
 # change-window rule is KEPT with a note (the default WITHIN a declared key:
 # disabling a deployment gate is opt-in). The staging entry's wrapped
-# "undeclared: delete" form opts in, disabling its live rule by id. A check
+# "_undeclared: delete" form opts in, disabling its live rule by id. A check
 # rerun lists the reconciled rules and sees them satisfied, so it converges.
 # Warms the list, apps, create, and remove routes for the coverage tripwire.
 name: environment-protection-rules
@@ -17,7 +17,7 @@ settings:
         - app: region-guard
     - name: staging
       deployment_protection_rules:
-        undeclared: delete
+        _undeclared: delete
         entries: []
 live_state:
   environments:

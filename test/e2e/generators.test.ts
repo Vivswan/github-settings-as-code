@@ -1,20 +1,27 @@
 import { describe, expect, test } from "bun:test";
-import { parse as parseYaml } from "yaml";
+import { readFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { describeOptOut } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
 import { silentIo } from "../io-fake.js";
-import type { LiveWitnessKind } from "./gen-support.js";
+import { type LiveWitnessKind, UNDECLARED_KEY } from "./gen-support.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
   canariesOf,
   genDiscoveryScenario,
   genInvalidSettings,
   genLiveWitness,
+  genMergeScenario,
   genMultiScenario,
   genScenario,
   genSettings,
   INVALID_SETTINGS_CASES,
+  MERGE_FEATURES,
+  MERGE_REFUSAL_KINDS,
+  mergeFeaturesOf,
   NON_MAPPING_YAML,
   ORG_GATED_SECTIONS,
   SECTION_PRIMARY_READ,
@@ -23,9 +30,9 @@ import {
   WITNESS_KINDS,
   WITNESS_SECTIONS,
 } from "./generators.js";
-import { predictDiscovery } from "./oracle.js";
+import { predictDiscovery, predictMerge } from "./oracle.js";
 import { Rng } from "./prng.js";
-import { parseScenario } from "./schema.js";
+import { collectYmlFiles, parseScenario } from "./schema.js";
 
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {
@@ -58,7 +65,7 @@ describe("three-way drift detection", () => {
           );
         }
         // 4. A witness section is drawn as the bare list its live witness
-        //    mirrors entry by entry, never the wrapped {undeclared, entries} form.
+        //    mirrors entry by entry, never the wrapped {_undeclared, entries} form.
         if ((WITNESS_SECTIONS as readonly string[]).includes(key) && !Array.isArray(value)) {
           offenders.push(
             `${key} seed ${i}: witness section drew the wrapped form ${JSON.stringify(value)}`,
@@ -199,9 +206,9 @@ describe("generator couplings and pools", () => {
           plain++;
           continue;
         }
-        const wrapper = value as { undeclared?: string; entries: unknown[] };
+        const wrapper = value as { [UNDECLARED_KEY]?: string; entries: unknown[] };
         expect(Array.isArray(wrapper.entries)).toBe(true);
-        const policy = wrapper.undeclared ?? "(omitted)";
+        const policy = wrapper[UNDECLARED_KEY] ?? "(omitted)";
         wrapped.set(policy, (wrapped.get(policy) ?? 0) + 1);
       }
       expect(plain).toBeGreaterThan(0);
@@ -332,7 +339,7 @@ describe("genLiveWitness", () => {
       expect(live.length).toBe(declared.length + 1);
       const extra = live[live.length - 1] as Label;
       // The extra label matches no declared identity (case-insensitively), so
-      // the handler must classify it as undeclared: delete in apply, drift in
+      // the handler must classify it as _undeclared: delete in apply, drift in
       // check.
       expect(declared.some((l) => l.name.toLowerCase() === extra.name.toLowerCase())).toBe(false);
     }
@@ -660,16 +667,16 @@ describe("genScenario", () => {
 });
 
 describe("genMultiScenario", () => {
-  test("builds 2 to 5 valid targets with exactly one skipped", () => {
+  test("builds 2 to 5 valid targets with exactly one fileless", () => {
     for (let i = 0; i < 100; i++) {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       expect(() => parseScenario(scenario, `m-${i}`)).not.toThrow();
       expect(meta.repos.length).toBeGreaterThanOrEqual(2);
       expect(meta.repos.length).toBeLessThanOrEqual(5);
-      // Exactly one missing-settings target per scenario (a raw-invalid one
-      // is a separate kind and may or may not exist).
-      const skipped = meta.repos.filter((r) => r.target.kind === "missing");
-      expect(skipped.length).toBe(1);
+      // Exactly one fileless target per scenario (a raw-invalid one is a
+      // separate kind and may or may not exist).
+      const fileless = meta.repos.filter((r) => r.target.kind === "missing");
+      expect(fileless.length).toBe(1);
     }
   });
 
@@ -709,9 +716,7 @@ describe("genMultiScenario", () => {
             false,
           );
         }
-        // Never the milestones opt-out target (there is no mapping to null a
-        // section in) and never the guaranteed leak-canary target.
-        expect(meta.milestonesOptOutSlug).not.toBe(repo.slug);
+        // Never the guaranteed leak-canary target.
         expect(canariesOf(repo)).toEqual([]);
       }
     }
@@ -719,23 +724,38 @@ describe("genMultiScenario", () => {
     expect(sawNonMapping).toBeGreaterThan(0);
   });
 
-  test("defaults file declares milestones; a target sometimes nulls it (the opt-out)", () => {
-    // The null-section opt-out lives on a TARGET (nulling a section the defaults
-    // declare), never in the defaults file itself - a defaults file with a null
-    // section fails the action's schema validation. So the defaults file always
-    // declares milestones as a real array, and some targets set milestones: null.
-    let targetOptOut = 0;
+  test("the fileless target runs exactly the defaults' sections; every other target exactly its own", () => {
+    // The defaults document is applied whole to the target without a settings
+    // file and never merged into one that has a file: the recorded defaults
+    // meta names the defaults_file keys under an empty mask, and no normal
+    // target's meta gains (or nulls) a section it did not declare itself.
     for (let i = 0; i < 100; i++) {
-      const { scenario } = genMultiScenario(new Rng(i));
-      expect(Array.isArray(scenario.defaults_file?.milestones)).toBe(true);
-      for (const spec of Object.values(scenario.repos ?? {})) {
-        const settings = (spec as { settings: Record<string, unknown> | null }).settings;
-        if (settings && settings.milestones === null) {
-          targetOptOut++;
+      const { scenario, meta } = genMultiScenario(new Rng(i));
+      expect(meta.defaults).toEqual({
+        sections: Object.keys(scenario.defaults_file ?? {}) as SectionKey[],
+        mask: {},
+        mode: meta.mode,
+        policy: meta.policy,
+        ownerKind: "org",
+        denialStyle: scenario.denial_style ?? "fine_grained",
+        requiredSections: [],
+        orgMask: meta.globalMask,
+      });
+      for (const repo of meta.repos) {
+        const spec = scenario.repos?.[repo.slug] as { settings?: Record<string, unknown> | null };
+        if (repo.target.kind === "missing") {
+          expect(spec.settings, `seed ${i}: ${repo.slug}`).toBeNull();
+          continue;
         }
+        if (repo.target.kind !== "normal") {
+          continue;
+        }
+        expect(
+          [...repo.target.meta.sections].sort() as string[],
+          `seed ${i}: ${repo.slug}`,
+        ).toEqual(Object.keys(spec.settings ?? {}).sort());
       }
     }
-    expect(targetOptOut).toBeGreaterThan(0);
   });
 
   test("the redaction flag follows the mechanical rule per target", () => {
@@ -1075,4 +1095,249 @@ describe("dead-corner knobs", () => {
     expect(single).toBeGreaterThan(0);
     expect(multi).toBeGreaterThan(0);
   });
+});
+
+describe("genMergeScenario", () => {
+  const SEEDS = Array.from({ length: 300 }, (_, i) => i);
+
+  test("produces schema-valid mode: merge scenarios whose layers the runner files in meta order", () => {
+    for (const seed of SEEDS) {
+      const { scenario, meta } = genMergeScenario(new Rng(seed));
+      expect(() => parseScenario(scenario, `seed-${seed}`)).not.toThrow();
+      expect(scenario.inputs?.mode).toBe("merge");
+      expect(meta.layers.length).toBeGreaterThanOrEqual(2);
+      expect(meta.layers.length).toBeLessThanOrEqual(5);
+      // The runner writes settings_layers[i] as layer-i.yml and settings as
+      // settings.yml, the names the action's refusals and notices carry.
+      const below = scenario.settings_layers ?? [];
+      expect(below.length).toBe(meta.layers.length - 1);
+      below.forEach((doc, i) => {
+        expect(meta.layers[i]).toEqual({ name: `layer-${i}.yml`, doc });
+      });
+      expect(meta.layers[meta.layers.length - 1]).toEqual({
+        name: "settings.yml",
+        doc: scenario.settings as Record<string, unknown>,
+      });
+      expect(meta.layering).toBe(scenario.inputs?.layering ?? "merge");
+    }
+  });
+
+  test("the oracle's boundary read agrees with the generator's refusal intent, layer by layer", () => {
+    let refused = 0;
+    for (const seed of SEEDS) {
+      const { meta } = genMergeScenario(new Rng(seed));
+      const prediction = predictMerge(meta);
+      if (meta.refusal === undefined) {
+        expect(prediction.kind, `seed ${seed}: an admitted stack read as refused`).not.toBe(
+          "refused",
+        );
+        continue;
+      }
+      refused++;
+      expect(prediction, `seed ${seed}: ${meta.refusal.kind}`).toEqual({
+        kind: "refused",
+        layer: meta.refusal.layer,
+      });
+    }
+    expect(refused).toBeGreaterThan(20);
+  });
+
+  test("a predicted merged document is valid and survives the YAML round trip the runner compares through", () => {
+    let merged = 0;
+    for (const seed of SEEDS) {
+      const { meta } = genMergeScenario(new Rng(seed));
+      const prediction = predictMerge(meta);
+      if (prediction.kind !== "merged") {
+        continue;
+      }
+      merged++;
+      const verdict = validateSettingsDoc(prediction.merged, "merged", new Set(), silentIo());
+      expect("error" in verdict ? verdict.error : undefined, `seed ${seed}`).toBeUndefined();
+      expect(parseYaml(stringifyYaml(prediction.merged))).toEqual(prediction.merged);
+      // The directives address the fold; none may reach the written document.
+      expect(prediction.merged._layering).toBeUndefined();
+      for (const value of Object.values(prediction.merged)) {
+        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+          expect((value as Record<string, unknown>)._layering).toBeUndefined();
+        }
+      }
+    }
+    expect(merged).toBeGreaterThan(150);
+  });
+
+  test("every merge feature and every refusal kind surfaces across seeds", () => {
+    const features = new Set<string>();
+    const refusals = new Set<string>();
+    for (const seed of SEEDS) {
+      const { meta } = genMergeScenario(new Rng(seed));
+      for (const feature of meta.features) {
+        features.add(feature);
+      }
+      if (meta.refusal !== undefined) {
+        refusals.add(meta.refusal.kind);
+        // A refused stack asserts no document, so no other shape counts for it.
+        expect(meta.features).toEqual(["refused"]);
+      }
+    }
+    expect(MERGE_FEATURES.filter((feature) => !features.has(feature))).toEqual([]);
+    expect(MERGE_REFUSAL_KINDS.filter((kind) => !refusals.has(kind))).toEqual([]);
+  });
+
+  test("forces construct their eligibility: a pinned run layering, or the named refusal", () => {
+    for (let seed = 0; seed < 60; seed++) {
+      for (const layering of ["merge", "replace"] as const) {
+        const { scenario, meta } = genMergeScenario(new Rng(seed), {
+          force: { kind: "valid", layering },
+        });
+        expect(scenario.inputs?.layering).toBe(layering);
+        expect(meta.refusal).toBeUndefined();
+        // The whole point of the force: the battery compares a document.
+        expect(predictMerge(meta).kind, `seed ${seed} ${layering}`).toBe("merged");
+      }
+      for (const refusal of MERGE_REFUSAL_KINDS) {
+        const { meta } = genMergeScenario(new Rng(seed), { force: { kind: "refused", refusal } });
+        if (meta.refusal === undefined) {
+          throw new Error(`seed ${seed}: the ${refusal} force produced no refused layer`);
+        }
+        expect(meta.refusal.kind).toBe(refusal);
+        expect(predictMerge(meta)).toEqual({ kind: "refused", layer: meta.refusal.layer });
+      }
+    }
+  });
+
+  test("honors the sections option", () => {
+    const pool: SectionKey[] = ["labels", "rulesets", "milestones", "pages"];
+    for (let seed = 0; seed < 60; seed++) {
+      const { meta } = genMergeScenario(new Rng(seed), { sections: pool });
+      for (const layer of meta.layers) {
+        for (const key of Object.keys(layer.doc)) {
+          expect(
+            key === "_layering" || (pool as string[]).includes(key),
+            `seed ${seed}: ${key}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  test("is deterministic for a seed", () => {
+    const draw = () => JSON.stringify(genMergeScenario(new Rng(77)));
+    expect(draw()).toBe(draw());
+  });
+});
+
+describe("mergeFeaturesOf (the axes read off a finished stack)", () => {
+  // The feature read pairs a layer's labels with the held ones the way the
+  // fold does: through every claim, the rename target included, and only
+  // against what the fold still holds. Each row pins the label features of
+  // one stack; the controls are stacks the pairing must NOT see.
+  const cases: Array<[string, Record<string, unknown>[], string[]]> = [
+    [
+      "a higher label naming a held rename target pairs through the alias",
+      [{ labels: [{ name: "a", new_name: "b" }] }, { labels: [{ name: "b" }] }],
+      ["union-labels", "label-rename-union"],
+    ],
+    [
+      "the alias pairing folds case too",
+      [{ labels: [{ name: "a", new_name: "b" }] }, { labels: [{ name: "B" }] }],
+      ["union-labels", "label-case-fold", "label-rename-union"],
+    ],
+    [
+      "a higher rename claiming a held name pairs through its current name",
+      [{ labels: [{ name: "a" }] }, { labels: [{ name: "a", new_name: "z" }] }],
+      ["union-labels", "label-rename-union"],
+    ],
+    [
+      "a superseded label is not held: a later layer naming it pairs with nothing",
+      [
+        { labels: [{ name: "a", new_name: "b" }] },
+        { labels: [{ name: "b" }] },
+        { labels: [{ name: "A" }] },
+      ],
+      ["union-labels", "label-rename-union"],
+    ],
+    [
+      "a higher rename claiming two held labels reads its case fold off the second one too",
+      [{ labels: [{ name: "a" }, { name: "b" }] }, { labels: [{ name: "B", new_name: "a" }] }],
+      ["union-labels", "label-case-fold", "label-rename-union"],
+    ],
+    [
+      "the same pairing read in the other held order",
+      [{ labels: [{ name: "b" }, { name: "a" }] }, { labels: [{ name: "B", new_name: "a" }] }],
+      ["union-labels", "label-case-fold", "label-rename-union"],
+    ],
+    [
+      "control: disjoint names pair with nothing",
+      [{ labels: [{ name: "a" }] }, { labels: [{ name: "b" }] }],
+      ["union-labels"],
+    ],
+    [
+      "control: a same-name pairing without a rename is not a rename union",
+      [{ labels: [{ name: "a" }] }, { labels: [{ name: "A" }] }],
+      ["union-labels", "label-case-fold"],
+    ],
+    [
+      "control: under replace nothing is held to pair with",
+      [
+        { labels: [{ name: "a", new_name: "b" }] },
+        { labels: { _layering: "replace", entries: [{ name: "b" }] } },
+      ],
+      ["wrapper-layering-replace"],
+    ],
+  ];
+  test.each(cases)("%s", (_name, docs, expected) => {
+    const layers = docs.map((doc, i) => ({
+      name: i === docs.length - 1 ? "settings.yml" : `layer-${i}.yml`,
+      doc,
+    }));
+    // Every row redeclares labels the fold holds under the run's merge default.
+    const always: string[] = ["override", "run-layering-merge"];
+    expect(mergeFeaturesOf(layers, "merge", false)).toEqual(
+      MERGE_FEATURES.filter((feature) => always.includes(feature) || expected.includes(feature)),
+    );
+  });
+});
+
+describe("merge oracle against the curated merge scenarios", () => {
+  // The hand-written scenarios pin what the dialect means; the oracle's own
+  // fold must reproduce every pinned document exactly, or the fuzz would be
+  // checking the engine against a mirror of itself.
+  const files = collectYmlFiles(join(import.meta.dir, "scenarios")).filter((file) =>
+    basename(file).startsWith("merge-"),
+  );
+
+  test("the corpus carries the three curated merge scenarios", () => {
+    expect(files.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test.each(files.map((file) => [basename(file), file]))(
+    "%s: the oracle's fold reproduces expect.merged",
+    (_name, file) => {
+      const scenario = parseScenario(parseYaml(readFileSync(file, "utf8")), file);
+      // A curated merge scenario without a pinned document would leave this
+      // comparison vacuous; the corpus count above cannot tell.
+      if (scenario.expect.merged === undefined) {
+        throw new Error(`${file}: a curated merge scenario must pin expect.merged`);
+      }
+      const layers = [
+        ...(scenario.settings_layers ?? []).map((doc, i) => ({ name: `layer-${i}.yml`, doc })),
+        { name: "settings.yml", doc: scenario.settings as Record<string, unknown> },
+      ];
+      const prediction = predictMerge({
+        layers,
+        layering: scenario.inputs?.layering ?? "merge",
+        features: [],
+      });
+      expect(prediction.kind).toBe("merged");
+      if (prediction.kind === "merged") {
+        expect(prediction.merged).toEqual(scenario.expect.merged);
+        // Every notice the fold predicts is one the scenario pins on stdout,
+        // in the action's words (the e2e run itself catches the converse, a
+        // pinned line the engine never prints).
+        for (const notice of prediction.notices) {
+          expect(scenario.expect.stdout_contains ?? []).toContain(describeOptOut(notice));
+        }
+      }
+    },
+  );
 });

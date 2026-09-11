@@ -1,12 +1,12 @@
 name: invitations-keep
 description: >-
-  Under the wrapped `undeclared: keep` form an undeclared pending invitation
+  Under the wrapped `_undeclared: keep` form an undeclared pending invitation
   is kept as a note, never cancelled; a declared user's matching pending
   invitation converges without any write at all; an email invitation (null
   invitee) is noted and left untouched.
 settings:
   collaborators:
-    undeclared: keep
+    _undeclared: keep
     entries:
       - username: e2e-pending
         permission: push

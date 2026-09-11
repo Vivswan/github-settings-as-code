@@ -62,7 +62,7 @@ type NestedEntry<K extends NestedKey> = EntryOf<NestedDeclared[K]>;
 
 /**
  * The EnvironmentConfig keys whose type takes the wrapped
- * `{undeclared, entries}` form. Taking the wrapper is a rule this section
+ * `{_undeclared, entries}` form. Taking the wrapper is a rule this section
  * commits to for every nested sub-resource list (plain-array PUT fields
  * like `reviewers` never take it), and the guarantee below rests on it:
  * the lockstep types pin NESTED_KEYS to the wrapped keys in both
@@ -103,9 +103,8 @@ interface NestedPlanner<K extends NestedKey> {
    * The policy for live sub-resources WITHIN a declared key that its entries
    * do not declare, the single source every unwrap reads. An explicit
    * value per key on purpose: the section-level default ("untouched")
-   * describes sibling ENVIRONMENTS, not the resources inside one, and nested
-   * lists never inherit a policy through the multi-repo defaults merge
-   * (environment entries merge as whole array elements).
+   * describes sibling ENVIRONMENTS, not the resources inside one, and no
+   * other declaration supplies a policy for a nested list.
    */
   defaultPolicy: UndeclaredPolicy;
   /**

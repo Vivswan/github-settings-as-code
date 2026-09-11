@@ -1,10 +1,11 @@
-// Emits the generated regions of COVERAGE.md, the sections and inputs reference pages, and the two
-// pages carrying the token-form link (README.md and the getting-started guide), each between
-// `<!-- BEGIN/END GENERATED: <name> -->` markers (build:docs): the Sections table, the `result`
-// list, the token-form link definition, and COVERAGE's whole body. Authored prose from the docs
-// registry + coverage-data.
+// Emits the generated regions of COVERAGE.md, the sections, inputs, and architecture reference
+// pages, and the two pages carrying the token-form link (README.md and the getting-started
+// guide), each between `<!-- BEGIN/END GENERATED: <name> -->` markers (build:docs): the Sections
+// table, the `result` list, the token-form link definition, COVERAGE's whole body, and the module
+// map rendered from architecture.yml. Authored prose from the docs registry + coverage-data.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { MERGE_RESULT } from "../../src/action/deliver.js";
 import { REPO_RESULTS, type RepoResult } from "../../src/engine/orchestrate.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import {
@@ -17,6 +18,7 @@ import { RESOURCE_SLUGS } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
+import { readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import {
   escapeRe,
@@ -114,7 +116,7 @@ const TABLE_HEADER =
 /** The Sections table, one row per section in the given order; a section without docs throws. */
 export function renderSectionsTable(
   sections: readonly SectionsTableRow[],
-  docs: Readonly<Record<string, Pick<SectionDocs, "readme">>>,
+  docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
 ): string {
   const rows = sections.map((section) => {
     const doc = docs[section.key];
@@ -123,10 +125,10 @@ export function renderSectionsTable(
     }
     return [
       `\`${section.key}\``,
-      cell(doc.readme.endpoints, `the ${section.key} Endpoints cell`),
+      cell(doc.sections_table.endpoints, `the ${section.key} Endpoints cell`),
       cell(renderPatCell(sectionGrant(section)), `the ${section.key} PAT permission cell`),
       UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault],
-      cell(doc.readme.notes, `the ${section.key} Notes cell`),
+      cell(doc.sections_table.notes, `the ${section.key} Notes cell`),
     ];
   });
   return [TABLE_HEADER, ...rows.map((cells) => `| ${cells.join(" | ")} |`)].join("\n");
@@ -255,8 +257,10 @@ const RESULT_DISPLAY: Record<RepoResult, "any mode" | "multi-repo only"> = {
 /** The outputs enumeration's fixed phrases, as rendered and as the region shape expects them. */
 const WORST_OF = "; worst-of across targets in multi-repo mode";
 const CAN_ALSO_APPEAR = " can also appear";
+/** The merge-mode result, a value outside RepoResult, closes the enumeration. */
+const MERGE_ONLY = `; \`${MERGE_RESULT}\` in mode: merge`;
 
-/** The `result` output's value enumeration: the any-mode values, then the multi-repo-only ones. */
+/** The `result` output's value enumeration: the any-mode values, the multi-repo-only ones, then the merge result. */
 export function renderOutputsList(results: readonly RepoResult[]): string {
   const ordered = (Object.keys(RESULT_DISPLAY) as RepoResult[]).filter((value) =>
     results.includes(value),
@@ -267,9 +271,9 @@ export function renderOutputsList(results: readonly RepoResult[]): string {
     .filter((value) => RESULT_DISPLAY[value] === "multi-repo only")
     .map(code);
   const lead = `${anyMode.join(" / ")}${WORST_OF}`;
-  return multiOnly.length === 0
-    ? lead
-    : `${lead}, where ${multiOnly.join(" and ")}${CAN_ALSO_APPEAR}`;
+  const withMulti =
+    multiOnly.length === 0 ? lead : `${lead}, where ${multiOnly.join(" and ")}${CAN_ALSO_APPEAR}`;
+  return `${withMulti}${MERGE_ONLY}`;
 }
 
 /** A section operation tagged with its section, as patFormParameters reads it. */
@@ -358,7 +362,7 @@ function outputsListRegion(name: string, heading: string): GeneratedRegion {
     name,
     placement: { kind: "under-heading", heading },
     body: new RegExp(
-      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where \x60[a-z]+\x60(?: and \x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?)?$`,
+      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where \x60[a-z]+\x60(?: and \x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?(?:${escapeRe(MERGE_ONLY)})?)?$`,
     ),
     render: () => renderOutputsList(REPO_RESULTS),
   };
@@ -374,6 +378,18 @@ function patUrlRegion(name: string): GeneratedRegion {
   };
 }
 
+// The module map: a mermaid fence rendered from architecture.yml's layers and edges (the lint
+// keeps that declaration equal to the tree), as region `name` under `heading`.
+function architectureMapRegion(name: string, heading: string): GeneratedRegion {
+  return {
+    name,
+    placement: { kind: "under-heading", heading },
+    body: /^\n(?:\x60{3}mermaid\n(?:[^\x60\n][^\n]*\n)*\x60{3}\n)?$/,
+    render: () =>
+      `\n\x60\x60\x60mermaid\n${renderArchitectureMermaid(readArchitecture(ROOT))}\n\x60\x60\x60\n`,
+  };
+}
+
 // Every page this generator writes besides COVERAGE.md, keyed by path: the reference tables in
 // their homes, and the token-form link definition closing the README and the getting-started guide.
 export const PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
@@ -381,6 +397,9 @@ export const PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> 
   "docs/start/getting-started.md": [patUrlRegion("pat-url")],
   "docs/reference/sections.md": [sectionsTableRegion("sections-table", "# Sections")],
   "docs/reference/inputs.md": [outputsListRegion("outputs-list", "## Outputs")],
+  "docs/reference/architecture.md": [
+    architectureMapRegion("architecture-map", "## The module map"),
+  ],
 };
 
 // The page at `path` with its regions checked for placement, then regenerated. The result must

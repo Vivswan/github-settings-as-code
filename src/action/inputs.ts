@@ -5,6 +5,7 @@
  * execution code never touches raw inputs.
  */
 
+import { resolve } from "node:path";
 import * as core from "@actions/core";
 import {
   AFFILIATIONS,
@@ -15,6 +16,7 @@ import {
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
+import type { Layering } from "../engine/layers.js";
 import { DEFAULT_API_VERSION } from "../github/api.js";
 import { parseRecipient } from "../report/artifact-report.js";
 import { SECTION_KEYS, type SectionKey } from "../schema.js";
@@ -39,7 +41,8 @@ export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
 
 /**
  * One action input: its action.yml entry (description, default) and its
- * README Inputs row (summary, shown default). The runner applies the
+ * row in the generated Inputs table (summary, shown default) on the inputs
+ * reference page, docs/reference/inputs.md. The runner applies the
  * defaults; parseConfig() falls back to them outside the runner.
  */
 export interface InputDecl {
@@ -47,10 +50,10 @@ export interface InputDecl {
   readonly description: string;
   /** The action.yml default, verbatim (an empty string means "unset"). */
   readonly default: string;
-  /** The README Inputs table's Meaning cell: the one-line gist. */
+  /** The Inputs table's Meaning cell: the one-line gist. */
   readonly summary: string;
   /**
-   * The README Default cell when the raw default is not what a reader should
+   * The Inputs table's Default cell when the raw default is not what a reader should
    * see: an expression, a prose fallback, or the effective value the code
    * supplies for an empty raw default (the discovery filters).
    */
@@ -58,8 +61,8 @@ export interface InputDecl {
 }
 
 /**
- * Every input parseConfig() reads, in the order the README and action.yml
- * list them: the single source both are generated from
+ * Every input parseConfig() reads, in the order the inputs reference page
+ * and action.yml list them: the single source both are generated from
  * (bun run build:action-docs), so adding an input here is the whole declaration.
  */
 export const INPUT_DECLS = {
@@ -80,16 +83,24 @@ export const INPUT_DECLS = {
   },
   "settings-file": {
     description:
-      "Path to the settings YAML file. Single-repo mode only; multi-repo targets read repos-dir files or each repository's own .github/settings.yml, so overriding it alongside repos or repos-dir fails the run.",
+      "Path to the settings YAML file: exactly one in apply and check. In mode: merge, the ordered list of settings files to fold instead, newline- or comma-separated, lowest layer first. Newlines and commas are list separators in every mode, so a settings-file path can never contain a comma. Single-repo and merge modes only; multi-repo targets read repos-dir files or each repository's own .github/settings.yml, so overriding it alongside repos or repos-dir fails the run.",
     default: DEFAULT_SETTINGS_FILE,
-    summary: "Settings file path (single-repo mode only)",
+    summary:
+      "Settings file path (single-repo mode); in `mode: merge`, the ordered list of layers to fold, low to high",
   },
   mode: {
     description:
-      "apply (mutate) or check (report drift, exit 1 on any). check makes no settings changes, though a private report may still be delivered.",
+      "apply (mutate), check (report drift, exit 1 on any), or merge (fold the settings-file layers into one document written to merged-file, with no token and no GitHub API call; merge reads only settings-file, merged-file, and layering, ignores token, and rejects every other input set to a non-default value, since each controls an apply or check run). check makes no settings changes, though a private report may still be delivered.",
     default: "apply",
     summary:
-      "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered)",
+      "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `merge` folds the settings-file layers into merged-file without touching GitHub",
+  },
+  "merged-file": {
+    description:
+      "mode: merge only, and required there: the path the merged settings document is written to (parent directories are created). The file holds exactly what apply would run: every section validated, each section that takes an undeclared policy in its policy-wrapper form with the policy made explicit, the other sections in their own shape, and private underscore keys and the _layering directives dropped. Feed it to a later apply or check step as its settings-file. Must not name one of the settings-file layers (the merge would overwrite it). Fails when set in apply or check.",
+    default: "",
+    summary:
+      "`mode: merge` only (required there): where the merged document is written, exactly what `apply` would run",
   },
   "on-missing-permission": {
     description:
@@ -107,9 +118,11 @@ export const INPUT_DECLS = {
     summary: "Sections that must fully apply even under `warn`",
   },
   sections: {
-    description: "Optional comma-separated allowlist of sections to process.",
+    description:
+      "Optional comma-separated allowlist of sections to process. apply and check only: mode: merge writes every section its layers declare, so the allowlist belongs on the step that runs the merged document and fails the merge when set.",
     default: "",
-    summary: "Comma-separated allowlist of sections to process",
+    summary:
+      "Comma-separated allowlist of sections to process (apply and check only; rejected in `mode: merge`)",
     shownDefault: "(all declared)",
   },
   "api-version": {
@@ -137,12 +150,23 @@ export const INPUT_DECLS = {
   },
   "defaults-file": {
     description:
-      "YAML file deep-merged UNDER every multi-repo target's settings. Target keys win; " +
-      "objects merge, arrays and scalars replace; a target section set to null opts that " +
-      "repository out of the defaults section. Multi-repo mode only; fails when set without " +
-      "repos or repos-dir.",
+      "YAML settings document applied to every multi-repo target that has no settings file of " +
+      "its own (a repos target without .github/settings.yml, which is otherwise skipped). A " +
+      "target with its own file is applied as written; the defaults are never merged into it. " +
+      'With repos: "*" every discovered repository without a settings file receives the ' +
+      "defaults; run mode: check first. Multi-repo mode only; fails when set without repos or " +
+      "repos-dir.",
     default: "",
-    summary: "YAML merged under every multi-repo target's settings (multi-repo mode only)",
+    summary:
+      "YAML applied to every multi-repo target without a settings file (multi-repo mode only)",
+  },
+  layering: {
+    description:
+      "mode: merge only: merge (default) or replace, the run-wide default for how the keyed list sections (labels, rulesets) combine with the layers below them; a layer's own _layering directive, at its top level or on a section's {entries} wrapper, overrides it per file or per section. Every other list is replaced by the higher layer's. Fails when set in apply or check.",
+    default: "",
+    summary:
+      "`mode: merge` only: `merge` unions the keyed list sections (labels, rulesets) by key across layers, `replace` lets the higher layer's list win; a layer's `_layering` overrides it",
+    shownDefault: "`merge`",
   },
   "private-repos": {
     description:
@@ -301,129 +325,44 @@ export function quoteList(names: string[]): string {
   return names.map((name) => `"${name}"`).join(", ");
 }
 
+/** What separates the entries of a list input; a single path can never contain one. */
+const LIST_SEPARATOR = /[\n,]/;
+
+/** A comma- or newline-separated list input, trimmed, empty entries dropped. */
+function splitList(value: string): string[] {
+  return value
+    .split(LIST_SEPARATOR)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** The run kinds the `mode` input selects; apply and check run the engine, merge only folds files. */
+const MODES = ["apply", "check", "merge"] as const;
+
+/** The `layering` input's values, locked to the engine's Layering type. */
+const LAYERINGS = ["merge", "replace"] as const satisfies readonly Layering[];
+type _UnlistedLayering = MustBeNever<Exclude<Layering, (typeof LAYERINGS)[number]>>;
+
 /**
- * Resolve and validate the `report-public-key` input against the chosen
- * channel. The key is the age recipient the `artifact` channel encrypts to, so
- * it is required exactly when the channel is `artifact` and rejected otherwise
- * (a key set for `none`/`issue` would silently do nothing). A supplied key is
- * validated through the age library at parse time, so a malformed recipient
- * fails the run before any API work rather than at upload. Returns the trimmed
- * key (empty for the non-artifact channels) or a loud error.
+ * The inputs only mode: merge reads. Their declared defaults are empty so
+ * "explicitly set" is detectable, as with the discovery filters; apply and
+ * check reject a set one instead of silently ignoring it.
  */
-function resolveReportPublicKey(channel: PrivateReportChannel): string | { error: string } {
-  const key = input("report-public-key");
-  if (channel !== "artifact") {
-    if (key) {
-      return {
-        error: `the "report-public-key" input only applies to private-report: artifact, but the channel is "${channel}", so the key would never be used. Remove report-public-key, or set private-report: artifact`,
-      };
-    }
-    return "";
-  }
-  if (!key) {
-    return {
-      error:
-        'private-report: artifact needs a "report-public-key" input: the age recipient every ' +
-        'report is encrypted to. Generate a keypair with "age-keygen -o key.txt", keep key.txt ' +
-        'secret, and set report-public-key to the printed "age1..." recipient (safe to commit)',
-    };
-  }
-  const parsed = parseRecipient(key);
-  if (!parsed.ok) {
-    return {
-      error: `the "report-public-key" input is not a valid age recipient: ${parsed.error}. It must be an "age1..." public key from "age-keygen" (the recipient line, not the AGE-SECRET-KEY identity)`,
-    };
-  }
-  return key;
-}
+const MERGE_ONLY_INPUTS = ["merged-file", "layering"] as const satisfies readonly InputName[];
 
-/** The inputs shared by both modes. */
-interface CommonConfig {
-  token: string;
-  mode: "apply" | "check";
-  onMissingPermission: "fail" | "warn";
-  requiredSections: Set<SectionKey>;
-  onlySections: Set<SectionKey>;
-  apiVersion: string;
-  /** Whether to hide private/internal targets from the public view. */
-  privateRepos: PrivateReposPolicy;
-  /** Where the full unredacted report for a redacted target is delivered. */
-  privateReport: PrivateReportChannel;
-  /**
-   * The age recipient the `artifact` channel encrypts every report to. Empty
-   * for the other channels (parse rejects a value supplied without the artifact
-   * channel), a validated `age1...` recipient when the channel is `artifact`.
-   */
-  reportPublicKey: string;
-  /**
-   * The workflow's own repository (GITHUB_REPOSITORY), read once here so the
-   * run flows stay env-free. A target equal to this slug is never redacted:
-   * a repository operating on itself leaks nothing.
-   */
-  selfSlug: string;
-  /**
-   * Link to the workflow run, for the private report metadata. Built once here
-   * from GITHUB_SERVER_URL/GITHUB_REPOSITORY/GITHUB_RUN_ID so the run flows stay
-   * env-free; empty when those are unset (local runs), which the report tolerates.
-   */
-  runUrl: string;
-}
-
-/** Everything run() needs, already validated; `kind` picks the mode. */
-export type RunConfig = CommonConfig &
-  (
-    | { kind: "single"; repo: RepoRef; settingsFile: string }
-    | {
-        kind: "multi";
-        reposDir: string;
-        reposInput: string;
-        defaultsFile: string;
-        adminOwner: string;
-        discoveryFilters: DiscoveryFilters;
-        /** Filter inputs the user explicitly set, for the misuse rejections. */
-        discoveryFiltersSet: string[];
-      }
-  );
-
-/** Read and validate every input; the first problem wins. */
-export function parseConfig(): { config: RunConfig } | { error: string } {
-  const token = input("token") || process.env.GITHUB_TOKEN || "";
-  if (!token) {
-    return {
-      error:
-        'cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
-    };
-  }
-  // The workflow's own repository, read once and reused for the self slug, the
-  // run URL, the central-mode admin owner, and the single-repo fallback target.
-  const githubRepository = process.env.GITHUB_REPOSITORY ?? "";
-  const mode = inputOrDefault("mode");
-  if (mode !== "apply" && mode !== "check") {
-    return {
-      error: `the "mode" input is "${mode}", which is not a supported mode. Set it to "apply" (mutate settings) or "check" (report drift only)`,
-    };
-  }
-  const onMissingPermission = readEnum(
-    "on-missing-permission",
-    ["fail", "warn"] as const,
-    INPUT_DECLS["on-missing-permission"].default,
-    "policy",
-  );
-  if (typeof onMissingPermission !== "string") {
-    return { error: onMissingPermission.error };
-  }
+/**
+ * The `required-sections` and `sections` inputs as validated key sets: every
+ * unknown name in each is reported at once, against its own input name, and
+ * a required section the allowlist excludes is rejected.
+ */
+function readSectionSets():
+  | { requiredSections: Set<SectionKey>; onlySections: Set<SectionKey> }
+  | { error: string } {
   const readSectionNames = (name: "required-sections" | "sections"): Set<string> =>
-    new Set(
-      input(name)
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    );
+    new Set(splitList(input(name)));
   const requiredNames = readSectionNames("required-sections");
   const onlyNames = readSectionNames("sections");
   const knownSections = new Set<string>(SECTION_KEYS);
-  // Each set is validated against ITS OWN input name (the file's header
-  // contract), and every unknown name in a set is reported at once.
   const unknownIn = (names: Set<string>, inputName: string): string | null => {
     const unknown = [...names].filter((name) => !knownSections.has(name));
     if (unknown.length === 0) {
@@ -466,6 +405,217 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
       };
     }
   }
+  return { requiredSections, onlySections };
+}
+
+/**
+ * Resolve and validate the `report-public-key` input against the chosen
+ * channel. The key is the age recipient the `artifact` channel encrypts to, so
+ * it is required exactly when the channel is `artifact` and rejected otherwise
+ * (a key set for `none`/`issue` would silently do nothing). A supplied key is
+ * validated through the age library at parse time, so a malformed recipient
+ * fails the run before any API work rather than at upload. Returns the trimmed
+ * key (empty for the non-artifact channels) or a loud error.
+ */
+function resolveReportPublicKey(channel: PrivateReportChannel): string | { error: string } {
+  const key = input("report-public-key");
+  if (channel !== "artifact") {
+    if (key) {
+      return {
+        error: `the "report-public-key" input only applies to private-report: artifact, but the channel is "${channel}", so the key would never be used. Remove report-public-key, or set private-report: artifact`,
+      };
+    }
+    return "";
+  }
+  if (!key) {
+    return {
+      error:
+        'private-report: artifact needs a "report-public-key" input: the age recipient every ' +
+        'report is encrypted to. Generate a keypair with "age-keygen -o key.txt", keep key.txt ' +
+        'secret, and set report-public-key to the printed "age1..." recipient (safe to commit)',
+    };
+  }
+  const parsed = parseRecipient(key);
+  if (!parsed.ok) {
+    return {
+      error: `the "report-public-key" input is not a valid age recipient: ${parsed.error}. It must be an "age1..." public key from "age-keygen" (the recipient line, not the AGE-SECRET-KEY identity)`,
+    };
+  }
+  return key;
+}
+
+/** The inputs shared by the two engine modes (apply and check). */
+interface CommonConfig {
+  token: string;
+  mode: "apply" | "check";
+  onMissingPermission: "fail" | "warn";
+  requiredSections: Set<SectionKey>;
+  onlySections: Set<SectionKey>;
+  apiVersion: string;
+  /** Whether to hide private/internal targets from the public view. */
+  privateRepos: PrivateReposPolicy;
+  /** Where the full unredacted report for a redacted target is delivered. */
+  privateReport: PrivateReportChannel;
+  /**
+   * The age recipient the `artifact` channel encrypts every report to. Empty
+   * for the other channels (parse rejects a value supplied without the artifact
+   * channel), a validated `age1...` recipient when the channel is `artifact`.
+   */
+  reportPublicKey: string;
+  /**
+   * The workflow's own repository (GITHUB_REPOSITORY), read once here so the
+   * run flows stay env-free. A target equal to this slug is never redacted:
+   * a repository operating on itself leaks nothing.
+   */
+  selfSlug: string;
+  /**
+   * Link to the workflow run, for the private report metadata. Built once here
+   * from GITHUB_SERVER_URL/GITHUB_REPOSITORY/GITHUB_RUN_ID so the run flows stay
+   * env-free; empty when those are unset (local runs), which the report tolerates.
+   */
+  runUrl: string;
+}
+
+/**
+ * A mode: merge run: the layers to fold, low to high, and where the result
+ * goes. No token, no API version, no target, no section allowlist: merge mode
+ * never reaches GitHub and writes every section the layers declare, and the
+ * type carries that (no field to read a token or an allowlist from).
+ */
+export interface MergeConfig {
+  kind: "merge";
+  settingsFiles: string[];
+  mergedFile: string;
+  layering: Layering;
+}
+
+/** Everything run() needs, already validated; `kind` picks the mode. */
+export type RunConfig =
+  | (CommonConfig &
+      (
+        | { kind: "single"; repo: RepoRef; settingsFile: string }
+        | {
+            kind: "multi";
+            reposDir: string;
+            reposInput: string;
+            defaultsFile: string;
+            adminOwner: string;
+            discoveryFilters: DiscoveryFilters;
+            /** Filter inputs the user explicitly set, for the misuse rejections. */
+            discoveryFiltersSet: string[];
+          }
+      ))
+  | MergeConfig;
+
+/**
+ * The inputs a mode: merge run reads, plus `token`, which it tolerates unread
+ * (a workflow commonly sets it on every step). Every OTHER declared input is
+ * an apply/check-time control - a target, the API, a report, the section
+ * allowlist - so the merge rejects it unless it holds its declared default,
+ * which the runner supplies whether or not the workflow set the input.
+ * Derived from the declarations, so a future input is rejected here until it
+ * is listed as one the merge reads.
+ */
+const MERGE_INPUTS = [
+  "mode",
+  "settings-file",
+  "merged-file",
+  "layering",
+  "token",
+] as const satisfies readonly InputName[];
+
+/**
+ * The inputs mode: merge rejects when set to a non-default value: every
+ * declared input MERGE_INPUTS does not list. Exported so the layering guide's
+ * table is pinned to the whole set.
+ */
+export const MERGE_REJECTED_INPUTS: readonly InputName[] = (
+  Object.keys(INPUT_DECLS) as InputName[]
+).filter((name) => !(MERGE_INPUTS as readonly string[]).includes(name));
+
+/** Read and validate the mode: merge inputs; the first problem wins. */
+function parseMergeConfig(): { config: MergeConfig } | { error: string } {
+  const rejected = MERGE_REJECTED_INPUTS.filter((name) => {
+    const value = input(name);
+    return value !== "" && value !== INPUT_DECLS[name].default;
+  });
+  if (rejected.length > 0) {
+    return {
+      error: `the ${quoteList(rejected)} input(s) do not apply to mode: merge, which only folds the settings-file layers into merged-file: it never targets a repository, calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input(s), or move them to the apply or check step that runs the merged document`,
+    };
+  }
+  const mergedFile = input("merged-file");
+  if (!mergedFile) {
+    return {
+      error:
+        'mode: merge needs a "merged-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file',
+    };
+  }
+  const layering = readEnum("layering", LAYERINGS, "merge", "layering");
+  if (typeof layering !== "string") {
+    return { error: layering.error };
+  }
+  const settingsFiles = splitList(inputOrDefault("settings-file"));
+  if (settingsFiles.length === 0) {
+    return {
+      error: `the "settings-file" input is "${inputOrDefault("settings-file")}", which lists no file. In mode: merge it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file`,
+    };
+  }
+  // The merge reads every layer, then writes the folded document to
+  // merged-file: a merged-file that names a layer would overwrite that layer,
+  // and the next run would fold the merged document as if it were a layer.
+  // Paths are compared resolved, so "./a.yml" and "a.yml" collide.
+  const mergedPath = resolve(mergedFile);
+  const collision = settingsFiles.findIndex((layer) => resolve(layer) === mergedPath);
+  if (collision !== -1) {
+    return {
+      error: `the "merged-file" input "${mergedFile}" is layer ${collision + 1} of the "settings-file" list ("${settingsFiles[collision]}"): the merge would overwrite that layer with the folded document, and the next run would fold the merged document as a layer. Write the merged document to a path outside the layer list`,
+    };
+  }
+  return { config: { kind: "merge", settingsFiles, mergedFile, layering } };
+}
+
+/** Read and validate every input; the first problem wins. */
+export function parseConfig(): { config: RunConfig } | { error: string } {
+  // The mode decides which inputs exist at all, so it is read before any of
+  // them: a merge never needs the token the engine modes require first.
+  const mode = readEnum("mode", MODES, INPUT_DECLS.mode.default, "mode");
+  if (typeof mode !== "string") {
+    return { error: mode.error };
+  }
+  if (mode === "merge") {
+    return parseMergeConfig();
+  }
+  const mergeOnly = MERGE_ONLY_INPUTS.filter((name) => input(name) !== "");
+  if (mergeOnly.length > 0) {
+    return {
+      error: `the ${quoteList(mergeOnly)} input(s) only apply to mode: merge, but this run is in ${mode} mode, so ${mergeOnly.length === 1 ? "it" : "they"} would never be used. Remove the input(s), or set mode: merge to fold settings files`,
+    };
+  }
+  const token = input("token") || process.env.GITHUB_TOKEN || "";
+  if (!token) {
+    return {
+      error:
+        'cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
+    };
+  }
+  // The workflow's own repository, read once and reused for the self slug, the
+  // run URL, the central-mode admin owner, and the single-repo fallback target.
+  const githubRepository = process.env.GITHUB_REPOSITORY ?? "";
+  const onMissingPermission = readEnum(
+    "on-missing-permission",
+    ["fail", "warn"] as const,
+    INPUT_DECLS["on-missing-permission"].default,
+    "policy",
+  );
+  if (typeof onMissingPermission !== "string") {
+    return { error: onMissingPermission.error };
+  }
+  const sets = readSectionSets();
+  if ("error" in sets) {
+    return { error: sets.error };
+  }
+  const { requiredSections, onlySections } = sets;
   const apiVersion = inputOrDefault("api-version");
   const privateRepos = readEnum(
     "private-repos",
@@ -519,11 +669,7 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   };
 
   const discoveryFiltersSet = FILTER_INPUTS.filter((name) => input(name) !== "");
-  const list = (name: FilterInput): string[] =>
-    input(name)
-      .split(/[\n,]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+  const list = (name: FilterInput): string[] => splitList(input(name));
   const visibility = readEnum(
     "visibility",
     VISIBILITY_FILTERS,
@@ -618,7 +764,14 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   if (defaultsFile) {
     return {
       error:
-        'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never be merged. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode',
+        'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never apply. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode',
+    };
+  }
+  // Only a merge folds a list; the engine modes read exactly one file, so
+  // even a stray separator ("only.yml,") is rejected rather than repaired.
+  if (LIST_SEPARATOR.test(settingsFile)) {
+    return {
+      error: `the "settings-file" input is "${settingsFile}", which contains a list separator: ${mode} mode reads exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file, or set mode: merge to fold the list into one document`,
     };
   }
   const rawRepo = input("repository") || githubRepository;

@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: direct collaborators + pending invitations
   notes: >-
     invitations for new users, pending ones reconciled (stale permission updated, expired re-sent,
@@ -16,13 +16,13 @@ coverage:
       follow the section's one undeclared policy (email invitations, which no username can declare,
       are noted and left untouched); vocabulary mapping push<->write, pull<->read for check mode;
       custom org role names pass through; undeclared direct collaborators REMOVED by default (kept
-      as notes under the wrapped `undeclared: keep` form), owner never touched; new users get
+      as notes under the wrapped `_undeclared: keep` form), owner never touched; new users get
       invitations.
 schema:
   SettingsFile.collaborators: >-
     Direct collaborators, with pending invitations reconciled alongside; undeclared ones are REMOVED
     (pending invitations cancelled) by default (owner never touched; the wrapped form can set
-    `undeclared: keep`).
+    `_undeclared: keep`).
   CollaboratorConfig: >-
     One direct collaborator, matched by username. Keys other than username and permission are
     rejected (a misspelled "permission" would otherwise silently grant the default role).

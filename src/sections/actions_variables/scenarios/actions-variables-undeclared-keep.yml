@@ -1,13 +1,13 @@
 name: actions-variables-undeclared-keep
 description: >-
-  The wrapped actions_variables form with "undeclared: keep" softens the
+  The wrapped actions_variables form with "_undeclared: keep" softens the
   section's delete default: a live variable the settings file does not
   declare is KEPT and surfaced as a note instead of being deleted. The
   declared variable still updates, apply stays green, and a check rerun
   converges (the kept variable is a note, not drift).
 settings:
   actions_variables:
-    undeclared: keep
+    _undeclared: keep
     entries:
       - name: DEPLOY_REGION
         value: eu-west-1
@@ -31,6 +31,6 @@ expect:
   never:
     - "DELETE /repos/{repo}/actions/variables"
   stdout_contains:
-    - "kept under \"undeclared: keep\""
+    - "kept under \"_undeclared: keep\""
     - RETIRED_FLAG
   converges: true

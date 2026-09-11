@@ -149,6 +149,18 @@ describe("docs registry reachability", () => {
 });
 
 describe("section docs completeness", () => {
+  /** A well-formed docs document, line by line: the control the malformed fixtures deviate from. */
+  const WELL_FORMED_DOCS = [
+    "sections_table:",
+    "  endpoints: labels CRUD",
+    "  notes: upsert by name",
+    "coverage:",
+    "  - area: Labels",
+    "    notes: CRUD",
+    "schema:",
+    "  LabelConfig: One label.",
+  ];
+
   test("every section has a <key>.docs.yml and every docs file belongs to a section", () => {
     // Loading DOCS already proves each SectionKey's file exists and parses; the reverse pin is
     // what a stray file (a renamed or removed section's leftover) would otherwise escape.
@@ -174,44 +186,64 @@ describe("section docs completeness", () => {
       // and a blank cell.
       writeFileSync(
         malformed,
-        ["readme:", "  endpoints: labels CRUD", "  notes: ''", "  extra: 1", "coverage: []"].join(
-          "\n",
-        ),
+        [
+          "sections_table:",
+          "  endpoints: labels CRUD",
+          "  notes: ''",
+          "  extra: 1",
+          "coverage: []",
+        ].join("\n"),
       );
       // Zod reports the issues in its own order, so each is pinned on its own.
       for (const issue of [
         `${malformed} is not a valid docs document:`,
         'Unrecognized key: "extra"',
-        "at readme.notes",
+        "at sections_table.notes",
         "at coverage",
       ]) {
         expect(() => readDocsYaml(malformed, SectionDocs)).toThrow(new RegExp(escapeRe(issue)));
       }
       expect(() => readDocsYaml(join(dir, "absent.yml"), SectionDocs)).toThrow(/absent\.yml/);
       // YAML that does not even parse (a duplicated key, which the loader refuses) names the file too.
-      writeFileSync(malformed, ["readme:", "  endpoints: a", "  endpoints: b"].join("\n"));
+      writeFileSync(malformed, ["sections_table:", "  endpoints: a", "  endpoints: b"].join("\n"));
       expect(() => readDocsYaml(malformed, SectionDocs)).toThrow(
         new RegExp(`${escapeRe(malformed)} is not valid YAML: .*unique`),
       );
       // Control: the same reader accepts a well-formed document.
-      writeFileSync(
-        malformed,
-        [
-          "readme:",
-          "  endpoints: labels CRUD",
-          "  notes: upsert by name",
-          "coverage:",
-          "  - area: Labels",
-          "    notes: CRUD",
-          "schema:",
-          "  LabelConfig: One label.",
-        ].join("\n"),
-      );
+      writeFileSync(malformed, WELL_FORMED_DOCS.join("\n"));
       expect(readDocsYaml(malformed, SectionDocs)).toEqual({
-        readme: { endpoints: "labels CRUD", notes: "upsert by name" },
+        sections_table: { endpoints: "labels CRUD", notes: "upsert by name" },
         coverage: [{ area: "Labels", notes: "CRUD" }],
         schema: { LabelConfig: "One label." },
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a docs file still keyed by the table's former name fails naming the file and the rename", () => {
+    const dir = mkdtempSync(join(tmpdir(), "docs-yml-"));
+    try {
+      const stale = join(dir, "labels.docs.yml");
+      writeFileSync(
+        stale,
+        WELL_FORMED_DOCS.map((line) => line.replace(/^sections_table:/, "readme:")).join("\n"),
+      );
+      // toThrow(string) matches a substring, so the whole message is compared outright.
+      let message = "did not throw";
+      try {
+        readDocsYaml(stale, SectionDocs);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toBe(
+        [
+          `${stale} is not a valid docs document:`,
+          '\u2716 Unrecognized key: "readme"; the Sections table cells key "readme" was renamed to "sections_table" (the table renders into docs/reference/sections.md)',
+          "\u2716 Invalid input: expected object, received undefined",
+          "  \u2192 at sections_table",
+        ].join("\n"),
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -232,7 +264,7 @@ describe("Notes cells vs undeclaredDefault", () => {
       if (section.undeclaredDefault === "untouched") {
         continue;
       }
-      const notes = DOCS[section.key].readme.notes;
+      const notes = DOCS[section.key].sections_table.notes;
       const claims = [...notes.matchAll(claimRe)];
       if (trigger.test(notes)) {
         // Per-section tripwire: THIS cell mentions its default, so at least
@@ -295,7 +327,7 @@ describe("Endpoints cells vs declared operations", () => {
         ...[...lastForms].map((form) => [...words, form].join(" ")),
         ...(COMPOUND_MENTIONS[needle] ?? []),
       ];
-      const cell = normalize(DOCS[endpoint.section].readme.endpoints);
+      const cell = normalize(DOCS[endpoint.section].sections_table.endpoints);
       expect(
         variants.some((variant) => new RegExp(`\\b${escapeRe(variant)}\\b`).test(cell)),
         `the ${endpoint.section} Endpoints cell never mentions "${needle}" from endpoint ${endpoint.route}`,
@@ -305,7 +337,7 @@ describe("Endpoints cells vs declared operations", () => {
     // the cell must name each one by its wire operationName instead.
     for (const op of Object.values(allGraphqlOps())) {
       expect(
-        namesOperation(DOCS[op.section].readme.endpoints, op.name),
+        namesOperation(DOCS[op.section].sections_table.endpoints, op.name),
         `the ${op.section} Endpoints cell never mentions the GraphQL operation "${op.name}"`,
       ).toBe(true);
     }

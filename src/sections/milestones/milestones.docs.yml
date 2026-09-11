@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: milestones
   notes: >-
     upsert by title; deleting a milestone detaches it from every issue carrying it, which is why
@@ -9,11 +9,11 @@ coverage:
       POST/PATCH/DELETE /repos/{owner}/{repo}/milestones, matched by title, declared-keys-only
       (description/state untouched unless declared); undeclared milestones kept by default and
       surfaced as notes, because deleting a milestone DETACHES it from every issue carrying it - the
-      wrapped `undeclared: delete` form opts into exactly that.
+      wrapped `_undeclared: delete` form opts into exactly that.
 schema:
   SettingsFile.milestones: >-
     Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set
-    `undeclared: delete`, which detaches deleted milestones from their issues).
+    `_undeclared: delete`, which detaches deleted milestones from their issues).
   MilestoneConfig: One milestone, matched by title.
   MilestoneConfig.title: The milestone title, the natural key.
   MilestoneConfig.description: Longer explanation of the milestone.

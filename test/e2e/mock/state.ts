@@ -913,7 +913,8 @@ export function buildState(
 export interface MultiRepoSpec {
   /**
    * The raw settings.yml body the contents endpoint serves for this slug, or
-   * null when the repo has NO settings file (the contents 404 -> skipped path).
+   * null when the repo has NO settings file (the contents 404 path: the
+   * defaults document applies, or the target is skipped without one).
    */
   settingsYaml: string | null;
   /** Starting live state for this slug's section endpoints. */
@@ -1053,7 +1054,8 @@ function discoveryRepoBody(spec: DiscoveryRepoSpec): Json {
  * scenarios. A discovery-pool slug that also has a repos spec shares that
  * spec's per-slug state and settings; a pool slug WITHOUT a spec still gets a
  * default state and a null settings file (so an unconfigured discovered repo
- * reads as "no settings", the skipped path).
+ * reads as "no settings": the defaults document applies, or the target is
+ * skipped without one).
  */
 export function buildMultiState(
   repos: Record<string, MultiRepoSpec>,

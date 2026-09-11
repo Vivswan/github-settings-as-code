@@ -19,7 +19,7 @@
  *   (passthrough-first forward compatibility) and loosen() turns it into a
  *   passthrough looseObject for the runtime.
  * - z.strictObject only where the runtime rejects unknown keys in the shape
- *   itself - the {undeclared, entries} wrapper and the nested shapes whose
+ *   itself - the {_undeclared, entries} wrapper and the nested shapes whose
  *   endpoints offer no passthrough destination: it emits
  *   additionalProperties: false and loosen() keeps it strict.
  * - z.looseObject where the config type carries an index signature (the
@@ -59,7 +59,7 @@ import { PagesConfig } from "./sections/pages/schema.js";
 import { RepositoryConfig } from "./sections/repository/schema.js";
 import { RulesetConfig } from "./sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
-import { knobbed } from "./sections/shared/schema-helpers.js";
+import { knobbed, LayeringSchema } from "./sections/shared/schema-helpers.js";
 import { TeamsConfig } from "./sections/teams/schema.js";
 import { WebhookConfig } from "./sections/webhooks/schema.js";
 import { WorkflowsConfig } from "./sections/workflows/schema.js";
@@ -95,6 +95,9 @@ export const SettingsFile = z
     custom_properties: knobbed(CustomPropertyConfig).optional(),
     deploy_keys: knobbed(DeployKeyConfig).optional(),
     secret_scanning_custom_patterns: knobbed(SecretScanningPatternConfig).optional(),
+    // The one non-section key: the document-level layering directive the
+    // merge consumes (engine/layers.ts); the apply path never reads it.
+    _layering: LayeringSchema.optional(),
   })
   .meta({ id: "SettingsFile" });
 export type SettingsFile = z.infer<typeof SettingsFile>;
@@ -144,11 +147,10 @@ export const SECTION_KEYS = [
 export type SectionKey = (typeof SECTION_KEYS)[number];
 
 /**
- * The sections that take the `undeclared` policy knob: their SettingsFile
+ * The sections that take the `_undeclared` policy knob: their SettingsFile
  * value is a union of the plain entry array and UndeclaredPolicyList. The
- * defaults merge (engine/merge.ts) normalizes and resolves exactly these
- * sections; the lockstep types below pin the list to the SettingsFile
- * declarations in both directions.
+ * lockstep types below pin the list to the SettingsFile declarations in
+ * both directions.
  */
 export const UNDECLARED_POLICY_SECTIONS = [
   "labels",
@@ -168,7 +170,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "secret_scanning_custom_patterns",
 ] as const satisfies readonly SectionKey[];
 
-/** A section key that takes the `undeclared` policy knob. */
+/** A section key that takes the `_undeclared` policy knob. */
 export type UndeclaredPolicySection = (typeof UNDECLARED_POLICY_SECTIONS)[number];
 
 /**
@@ -196,9 +198,9 @@ type _KnobListSound = MustBeNever<
 /**
  * The sections whose plain-array settings.yml form matches the Probot
  * Settings app schema, so an existing Probot config applies to them as-is
- * (the wrapped `undeclared` form is this action's own addition on top). The
- * single source the README's "Migrating from the Probot Settings app"
- * paragraph is pinned against. `satisfies` keeps every entry a real section
+ * (the wrapped `_undeclared` form is this action's own addition on top). The
+ * single source the migration guide's "What carries over as-is" paragraph
+ * (docs/start/migrating-from-probot.md) is pinned against. `satisfies` keeps every entry a real section
  * key.
  */
 export const PROBOT_PARITY_KEYS = [
@@ -210,8 +212,21 @@ export const PROBOT_PARITY_KEYS = [
   "milestones",
 ] as const satisfies readonly SectionKey[];
 
-/** Compile-time lockstep: a SettingsFile property missing from SECTION_KEYS fails here. */
-type _UnlistedSection = MustBeNever<Exclude<keyof SettingsFile, SectionKey>>;
+/**
+ * The top-level keys that are directives to the layered merge, not sections:
+ * declared on the document so the published schema types them, and excluded
+ * by name from the section pins below. validateSectionShapes copies only
+ * SECTION_KEYS, so none of these reaches the engine's apply path.
+ */
+export const DOCUMENT_DIRECTIVE_KEYS = [
+  "_layering",
+] as const satisfies readonly (keyof SettingsFile)[];
+type DocumentDirectiveKey = (typeof DOCUMENT_DIRECTIVE_KEYS)[number];
+
+/** Compile-time lockstep: a SettingsFile property that is neither a section nor a declared directive fails here. */
+type _UnlistedSection = MustBeNever<Exclude<keyof SettingsFile, SectionKey | DocumentDirectiveKey>>;
+/** Compile-time lockstep: a directive key that is also a section fails here. */
+type _DirectiveNotASection = MustBeNever<Extract<DocumentDirectiveKey, SectionKey>>;
 
 // --- Slice-composition pins -----------------------------------------------------
 

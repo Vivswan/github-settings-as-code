@@ -1,0 +1,40 @@
+# The import layering of src/: one declaration, two readers. `bun run lint:arch`
+# (.github/scripts/arch-lint.ts) fails on an import between two layers that is
+# not listed under `edges`, and on a listed edge no file draws; `bun run
+# build:docs` renders the same list as the module map in
+# docs/reference/architecture.md. An edge counts whether the import is runtime
+# or type-only. Imports inside one layer are not edges. The e2e fragments
+# beside each section (mock.ts, generators.ts) are test code and excluded.
+
+layers:
+  main: [src/main.ts]
+  action: [src/action/]
+  engine: [src/engine/]
+  sections: [src/sections/]
+  github: [src/github/]
+  discovery: [src/discovery/]
+  report: [src/report/]
+  schema: [src/schema.ts]
+  io: [src/io.ts]
+  types: [src/types.ts]
+  plain-data: [src/plain-data.ts]
+  private: [src/private.ts, src/private-open.ts]
+  upstream-gaps: [src/upstream-gaps/]
+
+exclude:
+  - src/sections/*/mock.ts
+  - src/sections/*/generators.ts
+  - "src/**/*.test.ts"
+  - "src/**/*.d.ts"
+
+# from -> the layers it may import; a layer absent here imports nothing outside itself.
+edges:
+  main: [action]
+  action: [discovery, engine, github, io, private, report, schema, types]
+  engine: [action, discovery, github, io, plain-data, schema, sections, types]
+  sections: [discovery, engine, github, schema, types, upstream-gaps]
+  github: [io, plain-data]
+  discovery: [github, private]
+  report: [action, discovery, engine, github, io, private, schema, sections, types]
+  schema: [sections, types]
+  upstream-gaps: [types]

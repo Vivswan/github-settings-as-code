@@ -1,4 +1,4 @@
-readme:
+sections_table:
   endpoints: autolinks CRUD
   notes: immutable upstream, so changed entries are replaced
 coverage:
@@ -6,11 +6,11 @@ coverage:
     notes: >-
       GET/POST/DELETE /repos/{owner}/{repo}/autolinks; immutable upstream so changed entries are
       delete+recreate; undeclared autolinks DELETED by default, kept as notes under the wrapped
-      `undeclared: keep` form.
+      `_undeclared: keep` form.
 schema:
   SettingsFile.autolinks: >-
     Autolink references; undeclared ones are DELETED by default (the wrapped form can set
-    `undeclared: keep`).
+    `_undeclared: keep`).
   AutolinkConfig: One autolink reference, matched by key prefix.
   AutolinkConfig.key_prefix: Text prefix that triggers the link (e.g. "TICKET-"), the natural key.
   AutolinkConfig.url_template: Target URL template containing "<num>".

@@ -52,6 +52,24 @@ export function writeSummary(
   io.summary([...lines, ...outcomeRows(view.outcomes)].join("\n"));
 }
 
+/** The mode: merge summary: the layers in fold order (lowest first), then where the result went. */
+export function writeMergeSummary(
+  io: SummaryIo,
+  layers: readonly string[],
+  mergedFile: string,
+): void {
+  const lines = [
+    "## github-settings-as-code (merge)",
+    "",
+    "| Layer | Settings file |",
+    "|---|---|",
+    ...layers.map((path, index) => `| ${index + 1} | ${markdownCell(path)} |`),
+    "",
+    `Merged document written to ${markdownCell(mergedFile)}.`,
+  ];
+  io.summary(lines.join("\n"));
+}
+
 export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode: string): void {
   const lines = [
     `## github-settings-as-code (${mode}, ${views.length} repositories)`,

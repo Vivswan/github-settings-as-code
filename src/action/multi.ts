@@ -1,7 +1,10 @@
 /**
  * Multi-repo orchestration: resolve targets (central files, explicit
  * repos, "*" discovery), read each target's settings, and run every
- * target independently through the engine.
+ * target independently through the engine. A target's own document is
+ * applied exactly as written. The `defaults-file` document is a FALLBACK:
+ * it is applied whole to a target that has no settings file of its own, and
+ * never merged into a target that has one.
  *
  * When `private-repos: redact` (the default), private and internal targets
  * are hidden from this run's public view: their slug is masked and replaced
@@ -26,8 +29,7 @@ import {
   type RepoRef,
   type Target,
 } from "../discovery/targets.js";
-import { applyDefaults } from "../engine/merge.js";
-import { runForRepo, validateSettingsDoc } from "../engine/orchestrate.js";
+import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
 import { targetSecretSource } from "../engine/secrets.js";
 import { type GithubClient, isPermissionError, RERUN_ADVICE } from "../github/api.js";
 import { getRepoFile } from "../github/repo-file.js";
@@ -36,7 +38,7 @@ import type { Io } from "../io.js";
 import type { Private } from "../private.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import { applyMarkerInjection } from "../report/delivery.js";
-import type { SectionKey, SettingsFile } from "../schema.js";
+import type { SectionKey } from "../schema.js";
 import {
   engineOutcome,
   failedTarget,
@@ -84,15 +86,22 @@ export interface MultiConfig {
 
 /**
  * Process one target end to end and return its end state; each failure (read,
- * missing file, parse, validation, preflight) returns early. The channel is the
- * only sink in scope, so a redacted target's text lands only in its report.
+ * parse, validation, preflight) returns early. A target without a settings
+ * file runs the defaults document when one was given and is skipped
+ * otherwise. The channel is the only sink in scope, so a redacted target's
+ * text lands only in its report.
  */
 async function processTarget(ctx: {
   api: GithubClient;
   target: Target;
   /** The target as an owner/name pair, parsed once at the caller's boundary. */
   repo: RepoRef;
-  defaults: SettingsFile;
+  /**
+   * The defaults document, validated once before any target ran; null when
+   * no `defaults-file` was given. Applied whole to a target that has no
+   * settings file, never to one that has.
+   */
+  defaults: ValidatedSettings | null;
   cfg: MultiConfig;
   injectMarker: boolean;
   channel: TargetChannel;
@@ -100,20 +109,58 @@ async function processTarget(ctx: {
   const { api, target, defaults, cfg, injectMarker, channel } = ctx;
   const fail = (richMessage: string): TargetResult => targetFailure(channel.io, richMessage);
 
+  // Run one admitted document. Marker injection is validity-preserving (it
+  // appends the constant marker label config, or strips a rename), so it
+  // happens after validation and keeps the brand. Without a provenance
+  // lookup every secret value is operator-sourced.
+  const run = async (
+    settings: ValidatedSettings,
+    secretSource?: ReturnType<typeof targetSecretSource>,
+  ): Promise<TargetResult> => {
+    const injected = applyMarkerInjection(settings, injectMarker);
+    if (injected.notice) {
+      channel.io.annotate("notice", injected.notice);
+    }
+    const result = await runForRepo(
+      api,
+      {
+        repo: ctx.repo,
+        settings: injected.settings,
+        mode: cfg.mode,
+        onMissingPermission: cfg.onMissingPermission,
+        requiredSections: cfg.requiredSections,
+        onlySections: cfg.onlySections,
+        ...(secretSource === undefined ? {} : { secretSource }),
+      },
+      channel.io,
+    );
+    return engineOutcome(result, channel.io);
+  };
+
   const read = await readTargetSettings(api, target);
   if ("error" in read) {
     return fail(read.error);
   }
   if ("missing" in read) {
+    if (defaults === null) {
+      channel.io.annotate(
+        "notice",
+        `skipped - the repository has no ${DEFAULT_SETTINGS_FILE} on its default branch. Add the file to manage it, or remove ${target.slug} from the "repos" input`,
+      );
+      return {
+        result: "skipped",
+        outcomes: [],
+        note: `no ${DEFAULT_SETTINGS_FILE} on the default branch`,
+      };
+    }
+    // The defaults document is operator-authored, so it runs with operator
+    // provenance: a $NAME reference in it resolves from the operator's
+    // environment, exactly as in a central file.
     channel.io.annotate(
       "notice",
-      `skipped - the repository has no ${DEFAULT_SETTINGS_FILE} on its default branch. Add the file to manage it, or remove ${target.slug} from the "repos" input`,
+      `applying the defaults file: the repository has no ${DEFAULT_SETTINGS_FILE} on its default branch`,
     );
-    return {
-      result: "skipped",
-      outcomes: [],
-      note: `no ${DEFAULT_SETTINGS_FILE} on the default branch`,
-    };
+    return run(defaults);
   }
 
   const parsed = parseSettingsDoc(read.raw);
@@ -121,30 +168,19 @@ async function processTarget(ctx: {
     return fail(`cannot parse ${read.sourceLabel}: ${parsed.error}. Fix the YAML in that file`);
   }
 
-  // Secret provenance is tagged at READ time, before the defaults merge folds
-  // the documents together: a remote target's settings.yml is authored by the
-  // TARGET repository, so every section it declares - and, since arrays
-  // replace wholesale in the merge, every secret value that survives in such
-  // a section - is sourced "target" (where a $NAME reference is refused - a
-  // target must not route the operator's environment into itself). Central
-  // files and the defaults file are operator-authored, so everything else
-  // stays the "operator" default.
+  // A remote target's settings.yml is authored by the TARGET repository and
+  // is applied as written, so every value in a section it declares came from
+  // that target: those sections are sourced "target" (where a $NAME reference
+  // is refused - a target must not route the operator's environment into
+  // itself). Central files are operator-authored, so they keep the
+  // "operator" default.
   const secretSource = target.source === "remote" ? targetSecretSource(parsed.doc) : undefined;
-
-  const { settings: merged, disabled } = applyDefaults(defaults, parsed.doc);
-  for (const key of disabled) {
-    channel.io.annotate(
-      "notice",
-      `section "${key}" is set to null in ${read.sourceLabel}, which opts this repository out of that defaults-file section`,
-    );
-  }
 
   // validateSettingsDoc names sourceLabel (the slug for remote targets) in
   // its own warnings, so they go through the unprefixed sink. Its branded
-  // return is the engine's admission ticket, so the merge-then-validate order
-  // is enforced by the types.
+  // return is the engine's admission ticket.
   const validated = validateSettingsDoc(
-    merged,
+    parsed.doc,
     read.sourceLabel,
     cfg.onlySections,
     channel.unprefixed,
@@ -152,29 +188,7 @@ async function processTarget(ctx: {
   if ("error" in validated) {
     return fail(validated.error);
   }
-
-  // Marker injection is validity-preserving (it appends the constant marker
-  // label config, or strips a rename), so it happens after validation and
-  // keeps the brand.
-  const injected = applyMarkerInjection(validated.settings, injectMarker);
-  if (injected.notice) {
-    channel.io.annotate("notice", injected.notice);
-  }
-
-  const run = await runForRepo(
-    api,
-    {
-      repo: ctx.repo,
-      settings: injected.settings,
-      mode: cfg.mode,
-      onMissingPermission: cfg.onMissingPermission,
-      requiredSections: cfg.requiredSections,
-      onlySections: cfg.onlySections,
-      ...(secretSource === undefined ? {} : { secretSource }),
-    },
-    channel.io,
-  );
-  return engineOutcome(run, channel.io);
+  return run(validated.settings, secretSource);
 }
 
 /**
@@ -200,7 +214,8 @@ function openTarget(
 /**
  * Read a target's raw settings: from the checked-in central file, or from the
  * target repo's own default-branch settings.yml. Returns `{raw, sourceLabel}`,
- * `{missing: true}` when a remote target has no file, or `{error}` on failure.
+ * `{missing: true}` when a remote target is proven to have no file, or
+ * `{error}` when the read failed or the absence could not be proven.
  */
 async function readTargetSettings(
   api: GithubClient,
@@ -220,6 +235,11 @@ async function readTargetSettings(
   const file = await getRepoFile(api, target.slug, DEFAULT_SETTINGS_FILE);
   if ("missing" in file) {
     return { missing: true };
+  }
+  if ("unproven" in file) {
+    return {
+      error: `${file.unproven}. To stop managing it instead, remove ${target.slug} from the "repos" input`,
+    };
   }
   if ("error" in file) {
     return {
@@ -268,7 +288,7 @@ export async function runMulti(
     return { fatal: message, targets: [] };
   };
 
-  let defaults: SettingsFile = {};
+  let defaults: ValidatedSettings | null = null;
   if (cfg.defaultsFile) {
     const read = readSettingsFile(cfg.defaultsFile);
     if ("error" in read) {

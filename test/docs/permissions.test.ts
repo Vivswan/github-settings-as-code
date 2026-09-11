@@ -26,15 +26,15 @@ describe("branches Contents advice", () => {
     // The advisory branch-existence probe carries a Contents permission
     // override (src/sections/branches/endpoints.ts), advised at the level the section
     // needs on that permission - the source both prose mentions restate. The
-    // README row renders from the section's authored docs, pinned here at
-    // their source.
+    // Sections table row renders from the section's authored docs, pinned
+    // here at their source.
     const probe = allEndpoints()["branches.branchProbe"];
     const override = probe?.permission;
     expect(override !== undefined && override !== "none").toBe(true);
     const label = repoLabels(override as SectionPermission).join(" or ");
     const level = overrideAdviceLevel(sectionModule("branches"), override as SectionPermission);
     const advice = `${label}: ${level}`;
-    const notes = DOCS.branches.readme.notes;
+    const notes = DOCS.branches.sections_table.notes;
     expect(
       notes.includes(`add ${advice}`),
       `the branches Notes cell (src/sections/branches/branches.docs.yml) must advise "add ${advice}" for the probe`,
