@@ -6,7 +6,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) from the [pre-filled token form][pat-form] and save it as the `ADMIN_TOKEN` repository secret. The form starts with every repository permission the action can need (an organization owner adds Members: read by hand); the default `GITHUB_TOKEN` can never hold them.
 
-2. Add `.github/settings.yml`. The first line gives editor autocomplete and hover docs:
+2. Add `.github/settings.yml` (or start from a [snapshot](docs/operate/snapshot.md) of the live settings). The first line gives editor autocomplete and hover docs:
 
    ```yaml
    # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
@@ -23,7 +23,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 3. Add the workflow and run it from the Actions tab.
    - Keep `mode: check` for the first run: the drift report lists everything an apply would change or delete, and nothing is written.
    - Read the report. An apply deletes undeclared labels, autolinks, collaborators, Actions variables, and Copilot agents variables.
-   - Drop the `mode: check` line once the report says what you expect. The [getting started guide](docs/start/getting-started.md) explains the drift output; [Snapshot mode](docs/operate/snapshot.md) writes an existing repository's live settings as the file to start from.
+   - Drop the `mode: check` line once the report says what you expect. The [getting started guide](docs/start/getting-started.md) explains the drift output.
 
    ```yaml
    # .github/workflows/settings.yml

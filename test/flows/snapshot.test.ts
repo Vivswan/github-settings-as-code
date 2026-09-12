@@ -8,7 +8,16 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -244,7 +253,7 @@ function disjointRefusal(snapshotDir: string, reposDir: string): string {
 describe("runSnapshot writes through a staging file", () => {
   const unwritable = (path: string, input: "snapshot-file" | "snapshot-dir", os: string) => ({
     level: "error" as const,
-    line: `cannot write the snapshot to ${path}: Error: ${os}. Check that the "${input}" input names a writable path`,
+    line: `cannot write the snapshot to ${path}: ${os}. Check that the "${input}" input names a writable path`,
   });
 
   test("a staging write that fails leaves the previous snapshot intact and reports the write's error", async () => {
@@ -253,21 +262,41 @@ describe("runSnapshot writes through a staging file", () => {
     const staging = `${cfg.snapshotFile}.tmp`;
     mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
     writeFileSync(cfg.snapshotFile, "labels: []\n");
-    // A directory at the staging path fails the write before the rename; the run must not remove it either.
+    // A directory at the staging path fails the run before the rename; the run must not remove it either.
     mkdirSync(staging);
     const collected = collectingIo();
     expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(collected.outputs.result).toBe("failed");
-    expect(collected.lines[0]).toEqual(
+    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(collected.lines).toEqual([
       unwritable(
         cfg.snapshotFile,
         "snapshot-file",
-        `EISDIR: illegal operation on a directory, open '${staging}'`,
+        `SystemError [ERR_FS_EISDIR]: Path is a directory: rm returned EISDIR (is a directory) ${staging}`,
       ),
-    );
+      { line: "result: failed" },
+    ]);
     expect(readFileSync(cfg.snapshotFile, "utf8")).toBe("labels: []\n");
     rmSync(staging, { recursive: true });
     expect(await run(api, cfg, collectingIo().io)).toBe(0);
+    expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
+    expect(existsSync(staging)).toBe(false);
+  });
+
+  test("a leftover link at the staging path is unlinked, never written through: the destination becomes a regular file", async () => {
+    const api = new MockApi(labelsRoute("o/r", [BUG]));
+    const cfg = fileCfg();
+    const staging = `${cfg.snapshotFile}.tmp`;
+    mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
+    writeFileSync(cfg.snapshotFile, "labels: []\n");
+    symlinkSync("snapshot.yml", staging);
+    const collected = collectingIo();
+    expect(await run(api, cfg, collected.io)).toBe(0);
+    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "snapshot" });
+    expect(collected.lines).toEqual([
+      { line: `snapshot written to ${cfg.snapshotFile}` },
+      { line: "result: snapshot" },
+    ]);
+    expect(lstatSync(cfg.snapshotFile).isSymbolicLink()).toBe(false);
     expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
     expect(existsSync(staging)).toBe(false);
   });
@@ -298,9 +327,13 @@ describe("runSnapshot writes through a staging file", () => {
     const { level, line } = unwritable(
       fileA,
       "snapshot-dir",
-      `EISDIR: illegal operation on a directory, rename '${fileA}.tmp' -> '${fileA}'`,
+      `Error: EISDIR: illegal operation on a directory, rename '${fileA}.tmp' -> '${fileA}'`,
     );
-    expect(collected.lines[0]).toEqual({ level, line: `o/a: ${line}` });
+    expect(collected.lines).toEqual([
+      { level, line: `o/a: ${line}` },
+      { line: `o/b: snapshot written to ${fileB}` },
+      { line: "result: failed" },
+    ]);
     expect(existsSync(`${fileA}.tmp`)).toBe(false);
     expect(readFileSync(join(fileA, "keep"), "utf8")).toBe("authored\n");
     expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));

@@ -23,6 +23,7 @@ import { buildProgram, CLI_COMMANDS, main } from "../../src/cli/program.js";
 import {
   type ConfigEnv,
   describeProblem,
+  FILTER_INPUTS,
   INPUT_DECLS,
   type InputDecl,
   type InputName,
@@ -424,12 +425,7 @@ const SNAPSHOT_FLEET_INPUTS = new Set<InputName>([
   "snapshot-dir",
   "repos",
   "repos-dir",
-  "visibility",
-  "archived",
-  "forks",
-  "exclude",
-  "topics",
-  "affiliation",
+  ...FILTER_INPUTS,
 ]);
 
 /** The inputs a flag needs beside it under `mode`, on top of that mode's base. */

@@ -13,6 +13,7 @@ import {
   INPUT_DECLS,
   type Io,
   type Mode,
+  type MustBeNever,
   parseConfig,
   type RunConfig,
 } from "../index.js";
@@ -57,6 +58,9 @@ const MODE_COMMANDS = {
   merge: "merge",
   snapshot: "snapshot",
 } as const satisfies Partial<Record<CliCommand, Mode>>;
+
+/** Compile-time lockstep: a Mode without a subcommand fails here. */
+type _UnlistedMode = MustBeNever<Exclude<Mode, (typeof MODE_COMMANDS)[keyof typeof MODE_COMMANDS]>>;
 
 interface Globals {
   readonly token?: string;
