@@ -902,9 +902,6 @@ export declare function silentIo(): Io;
  *
  * TIMERS_SCHEDULER     -> Bottleneck itself: real pacing, real Retry-After sleeps
  * IMMEDIATE_SCHEDULER  -> every job runs at once; a request the plugin decides to retry is retried without sleeping
- *
- * The plugin's own limiter groups (global, auth, search, notifications) are process-wide singletons built from the
- * FIRST instance's scheduler; a process mixing schedulers paces those groups by whichever came first.
  */
 /**
  * Bottleneck's "failed" contract: a numeric return is the wait before a retry; anything else, a handler that throws
@@ -921,6 +918,9 @@ interface SchedulerLimiter {
   /** Both Bottleneck call shapes: `schedule(fn, ...args)` and `schedule(options, fn, ...args)`. */
   schedule(...call: unknown[]): Promise<unknown>;
 }
+interface SchedulerGroup {
+  key(id: string): SchedulerLimiter;
+}
 /**
  * The slice of Bottleneck's class the throttling plugin calls on the class it is handed, declared structurally so the
  * library's public declarations never name `bottleneck/light.js`, which publishes no types of its own.
@@ -931,9 +931,8 @@ interface Scheduler {
     id: string;
     maxConcurrent?: number;
     minTime?: number;
-  }) => {
-    key(id: string): SchedulerLimiter;
-  };
+    timeout?: number;
+  }) => SchedulerGroup;
   /** The plugin attaches its rate-limit listeners to a plain object through this emitter. */
   Events: new (target: object) => unknown;
 }

@@ -6,9 +6,6 @@
  *
  * TIMERS_SCHEDULER     -> Bottleneck itself: real pacing, real Retry-After sleeps
  * IMMEDIATE_SCHEDULER  -> every job runs at once; a request the plugin decides to retry is retried without sleeping
- *
- * The plugin's own limiter groups (global, auth, search, notifications) are process-wide singletons built from the
- * FIRST instance's scheduler; a process mixing schedulers paces those groups by whichever came first.
  */
 
 import Bottleneck from "bottleneck/light.js";
@@ -29,6 +26,10 @@ interface SchedulerLimiter {
   schedule(...call: unknown[]): Promise<unknown>;
 }
 
+interface SchedulerGroup {
+  key(id: string): SchedulerLimiter;
+}
+
 /**
  * The slice of Bottleneck's class the throttling plugin calls on the class it is handed, declared structurally so the
  * library's public declarations never name `bottleneck/light.js`, which publishes no types of its own.
@@ -39,9 +40,8 @@ export interface Scheduler {
     id: string;
     maxConcurrent?: number;
     minTime?: number;
-  }) => {
-    key(id: string): SchedulerLimiter;
-  };
+    timeout?: number;
+  }) => SchedulerGroup;
   /** The plugin attaches its rate-limit listeners to a plain object through this emitter. */
   Events: new (
     target: object,
@@ -49,6 +49,40 @@ export interface Scheduler {
 }
 
 export const TIMERS_SCHEDULER: Scheduler = Bottleneck;
+
+export interface ThrottleGroups {
+  global: SchedulerGroup;
+  auth: SchedulerGroup;
+  search: SchedulerGroup;
+  notifications: SchedulerGroup;
+}
+
+const groupsByScheduler = new WeakMap<Scheduler, ThrottleGroups>();
+
+/**
+ * The plugin builds these groups once per process from the FIRST client's scheduler and hands them to every later
+ * client, so a process mixing schedulers would pace a client by a limiter it never chose.
+ */
+export function throttleGroups(scheduler: Scheduler): ThrottleGroups {
+  const cached = groupsByScheduler.get(scheduler);
+  if (cached) {
+    return cached;
+  }
+  const timeout = 1000 * 60 * 2;
+  const groups: ThrottleGroups = {
+    global: new scheduler.Group({ id: "octokit-global", maxConcurrent: 10, timeout }),
+    auth: new scheduler.Group({ id: "octokit-auth", maxConcurrent: 1, timeout }),
+    search: new scheduler.Group({ id: "octokit-search", maxConcurrent: 1, minTime: 2000, timeout }),
+    notifications: new scheduler.Group({
+      id: "octokit-notifications",
+      maxConcurrent: 1,
+      minTime: 3000,
+      timeout,
+    }),
+  };
+  groupsByScheduler.set(scheduler, groups);
+  return groups;
+}
 
 type Job = (...args: unknown[]) => unknown;
 
