@@ -435,6 +435,43 @@ describe("private-report bypass is scoped to redact-and-deliver targets", () => 
     expect(h.violations).toHaveLength(0);
   });
 
+  test("the issues list is newest first by default and honours sort=created with a direction", async () => {
+    // The report lookups walk newest first and stop at the first page with a candidate, so the mock must order as GitHub does.
+    const target = "e2e-owner/svc-sorted";
+    const issue = (number: number) => ({
+      number,
+      title: `issue ${number}`,
+      body: "",
+      state: "open",
+      labels: [],
+      user: { login: "e2e-token-user" },
+      html_url: `https://github.com/${target}/issues/${number}`,
+    });
+    const h = await start(
+      scenario({
+        inputs: { private_report: "issue" },
+        repos: {
+          [target]: {
+            settings: {},
+            live_state: {
+              repo: { private: true, visibility: "private" },
+              issues: [issue(1), issue(9), issue(5)],
+            },
+          },
+        },
+      }),
+    );
+    const numbers = async (query: string) =>
+      (await jsonArray(await call(h, "GET", `/repos/${target}/issues${query}`))).map(
+        (i) => (i as { number: number }).number,
+      );
+    expect(await numbers("?state=all")).toEqual([9, 5, 1]);
+    expect(await numbers("?state=all&sort=created&direction=asc")).toEqual([1, 5, 9]);
+    const unmodelled = await call(h, "GET", `/repos/${target}/issues?state=all&sort=updated`);
+    expect(unmodelled.status).toBe(400);
+    expect(h.violations.some((v) => v.includes('sort "updated" is not modelled'))).toBe(true);
+  });
+
   test("delivery to a private target whose PROBE is denied is a no-route violation", async () => {
     // The fixture is private, but administration:none denies the visibility probe, so the action
     // resolves "unknown" and must NOT deliver. The mock models provability, not the fixture alone.

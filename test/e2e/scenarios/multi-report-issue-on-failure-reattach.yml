@@ -32,7 +32,7 @@ repos:
       issues:
         - number: 9
           title: "[automated] settings-as-code: private settings report"
-          body: "OLD REPORT BODY"
+          body: "# settings-as-code private report: e2e-owner/svc-reattach\n\nOLD REPORT BODY"
           state: open
           labels:
             - name: keep-me
@@ -63,10 +63,10 @@ expect:
   stdout_lacks:
     - "svc-reattach"
     - "REATTACHLEAK-sentinel"
-  # The stripped marker forces the fallback title scan (oldest first, every
+  # The stripped marker forces the fallback title scan (newest first, every
   # creator) before any create.
   requests_contain:
-    - "GET /repos/e2e-owner/svc-reattach/issues?state=all&sort=created&direction=asc"
+    - "GET /repos/e2e-owner/svc-reattach/issues?state=all&sort=created&direction=desc"
   # The upsert PATCH reattaches the marker after the human label, zero creates,
   # opened because the run drifted.
   issue_report:

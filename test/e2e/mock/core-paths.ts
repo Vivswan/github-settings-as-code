@@ -419,7 +419,14 @@ export function handleIssueReport(
   }
   const repoState = resolved.state;
   if (method === "GET" && issueNumber === undefined) {
-    const matched = repoState.issues.filter((issue) => issueMatchesQuery(issue, query));
+    if (query.sort !== undefined && query.sort !== "created") {
+      return coreViolation(`issues list sort "${query.sort}" is not modelled`);
+    }
+    // GitHub's default is newest first; the number stands in for created_at, which the seeded issues do not carry.
+    const newestFirst = (query.direction ?? "desc") === "desc";
+    const matched = repoState.issues
+      .filter((issue) => issueMatchesQuery(issue, query))
+      .sort((a, b) => (newestFirst ? 1 : -1) * (Number(b.number) - Number(a.number)));
     return { response: ok(slicePage(matched, query)), coreKey: "core.issuesList" };
   }
   if (method === "POST" && issueNumber === undefined) {

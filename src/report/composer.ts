@@ -39,9 +39,12 @@ function transcriptLine(entry: TranscriptLine): string {
   return entry.level === undefined ? entry.line : `[${entry.level}] ${entry.line}`;
 }
 
+/** The report's first line. src/report/issue-report.ts reads it back as the proof that an issue body is one of these reports. */
+export const REPORT_HEADING = "# settings-as-code private report:";
+
 export function composeReport(input: ReportInput): string {
   const lines: string[] = [
-    `# settings-as-code private report: ${input.target}`,
+    `${REPORT_HEADING} ${input.target}`,
     "",
     "Full, unredacted report for this target. The public run redacts it; this document is its private mirror.",
     "",

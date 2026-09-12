@@ -102,7 +102,10 @@ const ExpectSchema = z
      * never appears in the write log despite its POST.
      */
     mutations: z.array(z.string()).optional(),
-    /** "METHOD /path" (or "GRAPHQL <opName>") prefixes that must NEVER appear in the request log. */
+    /**
+     * Prefixes of "METHOD /path?query" (or "GRAPHQL <opName>") that must NEVER appear in the request log; a pattern
+     * with a query forbids one lookup on a path that other lookups share.
+     */
     never: z.array(z.string()).optional(),
     summary_contains: z.array(z.string()).optional(),
     /** Substrings the publicly-readable step summary must NOT contain: a redacted target's slug and private live values. */

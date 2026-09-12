@@ -12,6 +12,7 @@ import { type Io, maskRegistry, silentIo } from "../../src/io.js";
 import { isPrivate, type Private } from "../../src/private.js";
 import { describeProblem } from "../../src/problem.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
+import { REPORT_HEADING } from "../../src/report/composer.js";
 import {
   applyMarkerInjection,
   openReportChannel,
@@ -77,7 +78,14 @@ function issueApi(overrides: ConstructorParameters<typeof MockApi>[0] = {}): Moc
   return new MockApi({
     "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
     [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: {
-      data: [{ number: 7, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/7" }],
+      data: [
+        {
+          number: 7,
+          title: ISSUE_TITLE,
+          body: `${REPORT_HEADING} o/priv`,
+          html_url: "https://github.com/o/priv/issues/7",
+        },
+      ],
     },
     "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
     ...overrides,

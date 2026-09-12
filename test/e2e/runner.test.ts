@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { ok } from "neverthrow";
 import { parseRecipient } from "../../src/report/artifact-report.js";
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
+import type { LoggedRequest } from "./mock/contract.js";
 import {
   bundleBuildParityFailure,
   checkLeaks,
@@ -16,6 +17,7 @@ import {
   markReportTitle,
   parseGithubOutput,
   parseSummaryOutcomes,
+  requestLogFailures,
   type ScenarioReport,
   setReplay,
   stripDebugLines,
@@ -169,6 +171,50 @@ describe("forbiddenPresent (never matcher)", () => {
   for (const [name, patterns, want] of cases) {
     test(name, () => {
       expect(forbiddenPresent(patterns, log)).toEqual(want);
+    });
+  }
+});
+
+describe("requestLogFailures (the request-log rules over recorded requests)", () => {
+  // Recorded requests keep pathname and query apart; the rules decide which spelling each matches. A `never` pattern
+  // carrying a query must fail against a request that carries that query, and stay clear of a sibling query on the
+  // same path, or the quiet-path scenarios' `GET .../issues?state=all` guards would be always-green.
+  const recorded: LoggedRequest[] = [
+    {
+      method: "GET",
+      pathname: "/repos/o/r/issues",
+      query: "state=open&labels=m&per_page=100&page=1",
+      status: 200,
+    },
+    { method: "PATCH", pathname: "/repos/o/r/issues/7", query: "", status: 200 },
+  ];
+  const cases: Array<[string, Parameters<typeof requestLogFailures>[0], string[]]> = [
+    [
+      "a never pattern with the recorded query",
+      { never: ["GET /repos/o/r/issues?state=open"] },
+      ["forbidden request present: GET /repos/o/r/issues?state=open"],
+    ],
+    [
+      "a never pattern with a sibling query stays clear",
+      { never: ["GET /repos/o/r/issues?state=all"] },
+      [],
+    ],
+    [
+      "a never pattern without a query still forbids the path",
+      { never: ["GET /repos/o/r/issues"] },
+      ["forbidden request present: GET /repos/o/r/issues"],
+    ],
+    ["mutations match the write by path alone", { mutations: ["PATCH /repos/o/r/issues/7"] }, []],
+    ["requests_contain sees the query", { requests_contain: ["page=1"] }, []],
+    [
+      "requests_contain misses an absent query",
+      { requests_contain: ["page=2"] },
+      ["no request contains: page=2"],
+    ],
+  ];
+  for (const [name, exp, want] of cases) {
+    test(name, () => {
+      expect(requestLogFailures(exp, recorded)).toEqual(want);
     });
   }
 });
