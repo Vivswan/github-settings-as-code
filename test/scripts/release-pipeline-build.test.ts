@@ -505,6 +505,24 @@ describe("advanceBuild", () => {
       },
     ],
     [
+      "naming its source by an abbreviated sha",
+      (fx) => {
+        // Git resolves the alias onto main, so every ancestry check passed; the chain map is keyed by the
+        // trailer's text, so the lookup for this source missed and the run appended onto the hand-pushed tip.
+        const alias = fx.mergeSha.slice(0, 12);
+        const planted = plantBuild(fx, "build-aliased", fx.mergeSha, [
+          "build: by hand",
+          `Source: ${alias}`,
+        ]);
+        return {
+          planted,
+          error: new Error(
+            `refs/heads/build is at ${planted}, whose Source trailer "${alias}" is not a full commit sha, so this pipeline did not mint it; ${byHand}`,
+          ),
+        };
+      },
+    ],
+    [
       "naming this source but changing more than the build outputs",
       (fx) => {
         const planted = plantBuild(
@@ -661,6 +679,26 @@ describe("advanceBuild", () => {
     const { planted, error } = plant(fx);
     const latestBefore = remoteRef(fx, "refs/tags/latest");
     expect(() => advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha })).toThrow(error);
+    expect(buildTip(fx)).toBe(planted);
+    expect(remoteRef(fx, "refs/tags/latest")).toBe(latestBefore);
+  });
+
+  test("a rerun for an older commit refuses a build tip naming its source by an abbreviated sha", () => {
+    // The "already past" path: the alias resolved for validateTip and isAncestor, then the latest walk found no
+    // chain commit keyed by a full sha on main and fell through to its own refusal. The tip is refused first now.
+    const fx = seedFixture();
+    const alias = fx.mergeSha.slice(0, 12);
+    const planted = plantBuild(fx, "build-aliased-stale", fx.mergeSha, [
+      "build: by hand",
+      `Source: ${alias}`,
+    ]);
+    const stale = checkoutOf(fx, "stale-aliased", fx.seedSha, "packaged-bundle-bytes-1\n");
+    const latestBefore = remoteRef(fx, "refs/tags/latest");
+    expect(() => advanceBuild({ cwd: stale, sourceSha: fx.seedSha })).toThrow(
+      new Error(
+        `refs/heads/build is at ${planted}, whose Source trailer "${alias}" is not a full commit sha, so this pipeline did not mint it; ${byHand}`,
+      ),
+    );
     expect(buildTip(fx)).toBe(planted);
     expect(remoteRef(fx, "refs/tags/latest")).toBe(latestBefore);
   });
