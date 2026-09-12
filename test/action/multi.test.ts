@@ -342,7 +342,10 @@ describe("runMulti", () => {
     expect(targets.map((t) => [t.display, t.result])).toEqual([["o/x", "failed"]]);
     expect(api.mutations()).toEqual([]);
     expect(annotations).toEqual([
-      'error: o/x: cannot prove .github/settings.yml is absent: reading the default branch ref heads/main returned 404. Grant the token Contents: read on this repository, or initialize its default branch; a repository whose file cannot be read never receives the defaults. To stop managing it instead, remove o/x from the "repos" input',
+      "error: o/x: cannot prove .github/settings.yml is absent: reading the default branch ref " +
+        "heads/main returned 404. Grant the token Contents: read on this repository, or " +
+        "initialize its default branch; a repository whose file cannot be read never receives " +
+        'the defaults. To stop managing it instead, remove o/x from the "repos" input',
     ]);
   });
 

@@ -765,7 +765,10 @@ describe("run in mode: merge", () => {
     expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
     expect(existsSync(mergedFile)).toBe(false);
     expect(captured).toEqual([
-      'error: the "sections" input(s) do not apply to mode: merge, which only folds the settings-file layers into merged-file: it never targets a repository, calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input(s), or move them to the apply or check step that runs the merged document',
+      'error: the "sections" input(s) do not apply to mode: merge, which only folds the ' +
+        "settings-file layers into merged-file: it never targets a repository, calls the GitHub " +
+        "API, delivers a report, or narrows the sections it writes. Remove the input(s), or move " +
+        "them to the apply or check step that runs the merged document",
       "result: failed",
     ]);
   });

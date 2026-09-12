@@ -56,7 +56,11 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
     conflict409:
       "code_scanning_default_setup: PATCH /repos/o/r/code-scanning/default-setup: 409 Conflict. A code scanning default setup configuration run is already in progress on the repository; re-run the workflow after it finishes",
     denied403:
-      'code_scanning_default_setup: the token was denied PATCH /repos/o/r/code-scanning/default-setup: 403 Forbidden. To fix, grant "Administration" or "Code scanning alerts" (read and write) under the PAT\'s Repository permissions; a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived',
+      "code_scanning_default_setup: the token was denied PATCH " +
+      '/repos/o/r/code-scanning/default-setup: 403 Forbidden. To fix, grant "Administration" ' +
+      'or "Code scanning alerts" (read and write) under the PAT\'s Repository permissions; a ' +
+      "403 on this endpoint can also mean GitHub Advanced Security (code security) is not " +
+      "enabled on the repository, or the repository is archived",
   },
   code_quality_setup: {
     section: codeQualitySetupSection,
@@ -74,7 +78,10 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
     conflict409:
       "code_quality_setup: PATCH /repos/o/r/code-quality/setup: 409 Conflict. A code quality setup configuration run is already in progress on the repository; re-run the workflow after it finishes",
     denied403:
-      'code_quality_setup: the token was denied PATCH /repos/o/r/code-quality/setup: 403 Forbidden. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions; a 403 on this endpoint can also mean code quality is unavailable on the repository, or the repository is archived',
+      "code_quality_setup: the token was denied PATCH /repos/o/r/code-quality/setup: 403 " +
+      'Forbidden. To fix, grant "Administration" (read and write) under the PAT\'s Repository ' +
+      "permissions; a 403 on this endpoint can also mean code quality is unavailable on the " +
+      "repository, or the repository is archived",
   },
 };
 

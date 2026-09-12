@@ -55,6 +55,10 @@ export async function getRepoFile(
     return { error: refProbe.error };
   }
   return {
-    unproven: `cannot prove ${filePath} is absent: reading the default branch ref ${ref} returned ${refProbe.error.status}. Grant the token Contents: read on this repository, or initialize its default branch; a repository whose file cannot be read never receives the defaults`,
+    unproven:
+      `cannot prove ${filePath} is absent: reading the default branch ref ${ref} returned ` +
+      `${refProbe.error.status}. Grant the token Contents: read on this repository, or ` +
+      `initialize its default branch; a repository whose file cannot be read never receives the ` +
+      `defaults`,
   };
 }

@@ -362,7 +362,9 @@ function outputsListRegion(name: string, heading: string): GeneratedRegion {
     name,
     placement: { kind: "under-heading", heading },
     body: new RegExp(
-      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where \x60[a-z]+\x60(?: and \x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?(?:${escapeRe(MERGE_ONLY)})?)?$`,
+      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where ` +
+        String.raw`\x60[a-z]+\x60(?: and ` +
+        String.raw`\x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?(?:${escapeRe(MERGE_ONLY)})?)?$`,
     ),
     render: () => renderOutputsList(REPO_RESULTS),
   };
