@@ -1,0 +1,84 @@
+name: actions-snapshot-roundtrip
+description: "mode: snapshot reads the live Actions settings back into snapshot.yml and writes nothing to GitHub. Every endpoint reads back onto its key: the permissions policy with its selected-actions allowlist, the workflow token defaults, the access level, the retention and cache limits, a customized OIDC subject claim, and both fork pull request policies; selected_actions_url and maximum_allowed_days fall away. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  actions_permissions:
+    enabled: true
+    allowed_actions: selected
+    selected_actions_url: https://api.github.com/repos/e2e-owner/e2e-repo/actions/permissions/selected-actions
+  selected_actions:
+    github_owned_allowed: true
+    verified_allowed: true
+    patterns_allowed:
+      - docker/*
+  workflow_permissions:
+    default_workflow_permissions: write
+    can_approve_pull_request_reviews: true
+  actions_access:
+    access_level: user
+  actions_retention:
+    days: 14
+    maximum_allowed_days: 400
+  cache_retention_limit:
+    max_cache_retention_days: 5
+  cache_storage_limit:
+    max_cache_size_gb: 20
+  oidc_customization_sub:
+    use_default: false
+    include_claim_keys:
+      - repo
+      - context
+  fork_pr_contributor_approval:
+    approval_policy: all_external_contributors
+  fork_pr_workflows_private_repos:
+    run_workflows_from_fork_pull_requests: true
+    send_write_tokens_to_workflows: false
+    send_secrets_and_variables: false
+    require_approval_for_fork_pr_workflows: true
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: actions
+token_permissions:
+  administration: write
+  actions: write
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    actions: snapshot
+  snapshot:
+    actions:
+      enabled: true
+      allowed_actions: selected
+      default_workflow_permissions: write
+      can_approve_pull_request_reviews: true
+      selected_actions:
+        github_owned_allowed: true
+        verified_allowed: true
+        patterns_allowed:
+          - docker/*
+      access_level: user
+      artifact_and_log_retention:
+        days: 14
+      cache:
+        max_cache_retention_days: 5
+        max_cache_size_gb: 20
+      oidc_customization_sub:
+        use_default: false
+        include_claim_keys:
+          - repo
+          - context
+      fork_pr_contributor_approval:
+        approval_policy: all_external_contributors
+      fork_pr_workflows_private_repos:
+        run_workflows_from_fork_pull_requests: true
+        send_write_tokens_to_workflows: false
+        send_secrets_and_variables: false
+        require_approval_for_fork_pr_workflows: true
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

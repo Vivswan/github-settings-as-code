@@ -1,0 +1,103 @@
+name: rulesets-snapshot-roundtrip
+description: "mode: snapshot reads the live rulesets back into snapshot.yml and writes nothing to GitHub. Each repository-owned ruleset reads back as a keep entry with its target, enforcement, ref conditions, rules, and the bypass_actors the write-grade token sees; ids, the source fields, links, and timestamps fall away, and the organization's inherited ruleset is a note, not an entry. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  rulesets:
+    - id: 42
+      name: protect-main
+      node_id: RRS_lACqUmVwb3NpdG9yeQ
+      source_type: Repository
+      source: e2e-owner/e2e-repo
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+        - type: pull_request
+          parameters:
+            required_approving_review_count: 2
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
+      current_user_can_bypass: always
+      _links:
+        self:
+          href: https://api.github.com/repos/e2e-owner/e2e-repo/rulesets/42
+      created_at: "2026-01-01T00:00:00Z"
+      updated_at: "2026-02-01T00:00:00Z"
+    - id: 44
+      name: release-tags
+      source_type: Repository
+      source: e2e-owner/e2e-repo
+      target: tag
+      enforcement: evaluate
+      conditions:
+        ref_name:
+          include: ["refs/tags/v*"]
+          exclude: []
+      rules:
+        - type: update
+        - type: non_fast_forward
+      bypass_actors: []
+    - id: 900
+      name: org-baseline
+      source_type: Organization
+      source: e2e-owner
+      target: branch
+      enforcement: active
+      rules:
+        - type: non_fast_forward
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: rulesets
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    rulesets: snapshot
+  snapshot:
+    rulesets:
+      _undeclared: keep
+      entries:
+        - name: protect-main
+          target: branch
+          enforcement: active
+          conditions:
+            ref_name:
+              include: ["~DEFAULT_BRANCH"]
+              exclude: []
+          rules:
+            - type: deletion
+            - type: pull_request
+              parameters:
+                required_approving_review_count: 2
+          bypass_actors:
+            - actor_id: 5
+              actor_type: RepositoryRole
+              bypass_mode: always
+        - name: release-tags
+          target: tag
+          enforcement: evaluate
+          conditions:
+            ref_name:
+              include: ["refs/tags/v*"]
+              exclude: []
+          rules:
+            - type: update
+            - type: non_fast_forward
+          bypass_actors: []
+  stdout_contains:
+    - "rulesets[org-baseline]: inherited from the organization"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true
