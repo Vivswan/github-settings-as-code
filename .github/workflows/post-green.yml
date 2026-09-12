@@ -83,7 +83,8 @@ jobs:
   #   no ACTIONS_ID_TOKEN_REQUEST_URL -> the caller granted none (a fork, a ceiling change); step one skips the rest
   #   shared lane                     -> update-release.yml's publish takes the same lane; no caller holds it
   #   queue: max                      -> a lane keeps ONE pending job by default; a dropped job fails the post-green call
-  #   verdict compares dist-tags      -> the lane serializes but does not order; GitHub promises no queue order
+  #   verdict compares the record     -> the lane serializes but does not order; GitHub promises no queue order
+  #   confirm holds the lane          -> a job ends once the registry shows its publish, so the next holder's verdict sees it
   publish-next:
     if: github.repository == 'Vivswan/github-settings-as-code'
     concurrency:
@@ -143,12 +144,15 @@ jobs:
       # scripts.prepare is dropped from the published manifest: it installs
       # lefthook, a devDependency the tarball does not carry, and npm blocks
       # install scripts from a provenance-attested package anyway.
-      # The verdict reads the registry: a version already there (a rerun of
-      # this run) or a next or latest that is not older (a stale retry after
-      # newer runs published) publishes nothing, so next never moves back; a
-      # registry error stops the job instead of publishing blind. npm's
-      # provenance names the commit in GITHUB_SHA, so the source is passed in.
+      # The verdict reads the registry's origin record (the CDN's copy lags a
+      # publish by up to 300 s): a version already there (a rerun of this run),
+      # a newer version, or a next or latest that is not older (a stale retry
+      # after newer runs published) publishes nothing, so next never moves back
+      # on what the run can see; a registry error stops the job instead of
+      # publishing blind. npm's provenance names the commit in GITHUB_SHA, so
+      # the source is passed in.
       - name: Publish the pre-release under the next dist-tag
+        id: publish
         if: steps.oidc.outputs.proceed == 'true'
         env:
           SOURCE_SHA: ${{ inputs.sha }}
@@ -158,10 +162,35 @@ jobs:
             publish\ *)
               npm version "${verdict#publish }" --no-git-tag-version
               npm pkg delete scripts.prepare
-              GITHUB_SHA="$SOURCE_SHA" npm publish --tag next ;;
+              GITHUB_SHA="$SOURCE_SHA" npm publish --tag next
+              echo "published=true" >> "$GITHUB_OUTPUT" ;;
             skip\ *) echo "::notice::${verdict#skip }" ;;
             *)
               echo "unexpected npm-verdict output: $verdict"
               echo "::error::npm-verdict printed neither publish nor skip; see the line above."
+              exit 1 ;;
+          esac
+      # npm makes a publish readable asynchronously. This step holds the lane
+      # until the record shows the version (5 reads, 20 s apart), so the next
+      # holder's verdict sees it; a record that never shows it warns. It then
+      # fails the job if next ended behind a newer pre-release: OIDC
+      # authenticates npm publish alone, not npm dist-tag add, so no tag is
+      # moved here and the next green push moves next forward instead. A rerun
+      # of the failed run publishes nothing, skips this step, and passes.
+      - name: Confirm the registry shows the publish and next moved forward
+        if: steps.publish.outputs.published == 'true'
+        env:
+          SOURCE_SHA: ${{ inputs.sha }}
+        run: |
+          confirmed="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-confirm next)"
+          case "$confirmed" in
+            settled\ *) echo "::notice::${confirmed#settled }" ;;
+            unsettled\ *) echo "::warning::${confirmed#unsettled }" ;;
+            behind\ *)
+              echo "::error::${confirmed#behind }"
+              exit 1 ;;
+            *)
+              echo "unexpected npm-confirm output: $confirmed"
+              echo "::error::npm-confirm printed neither settled, unsettled, nor behind; see the line above."
               exit 1 ;;
           esac

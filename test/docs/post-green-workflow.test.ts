@@ -152,11 +152,32 @@ const PUBLISH_NEXT = [
   "  publish\\ *)",
   `    npm version "\${verdict#publish }" --no-git-tag-version`,
   "    npm pkg delete scripts.prepare",
-  `    GITHUB_SHA="$SOURCE_SHA" npm publish --tag next ;;`,
+  `    GITHUB_SHA="$SOURCE_SHA" npm publish --tag next`,
+  '    echo "published=true" >> "$GITHUB_OUTPUT" ;;',
   `  skip\\ *) echo "::notice::\${verdict#skip }" ;;`,
   "  *)",
   '    echo "unexpected npm-verdict output: $verdict"',
   '    echo "::error::npm-verdict printed neither publish nor skip; see the line above."',
+  "    exit 1 ;;",
+  "esac",
+  "",
+].join("\n");
+
+/** The confirmation's gate: it runs only after this job's own publish, so the lane is held until the registry shows it. */
+const PUBLISHED = "steps.publish.outputs.published == 'true'";
+/** After the publish: the registry is read until it shows the version; next behind a newer pre-release fails the job
+ * (trusted publishing cannot move a dist-tag), and a version the registry never shows warns. */
+const CONFIRM_NEXT = [
+  `confirmed="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-confirm next)"`,
+  'case "$confirmed" in',
+  `  settled\\ *) echo "::notice::\${confirmed#settled }" ;;`,
+  `  unsettled\\ *) echo "::warning::\${confirmed#unsettled }" ;;`,
+  "  behind\\ *)",
+  `    echo "::error::\${confirmed#behind }"`,
+  "    exit 1 ;;",
+  "  *)",
+  '    echo "unexpected npm-confirm output: $confirmed"',
+  '    echo "::error::npm-confirm printed neither settled, unsettled, nor behind; see the line above."',
   "    exit 1 ;;",
   "esac",
   "",
@@ -294,10 +315,19 @@ const CALLER_EXPECTED: CallerContract = {
         },
         {
           name: "Publish the pre-release under the next dist-tag",
-          id: undefined,
+          id: "publish",
           uses: undefined,
           if: OIDC_PROCEED,
           run: PUBLISH_NEXT,
+          env: { SOURCE_SHA: `\${{ inputs.sha }}` },
+          with: undefined,
+        },
+        {
+          name: "Confirm the registry shows the publish and next moved forward",
+          id: undefined,
+          uses: undefined,
+          if: PUBLISHED,
+          run: CONFIRM_NEXT,
           env: { SOURCE_SHA: `\${{ inputs.sha }}` },
           with: undefined,
         },
@@ -402,15 +432,34 @@ describe("post-green.yml publishes the build branch", () => {
     [
       "a publish step that runs without the OIDC gate",
       (w) => {
-        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
+        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-2);
         must(step, "publish step").if = undefined;
+      },
+      "jobs",
+    ],
+    [
+      "a confirmation that runs without the publish gate, holding the lane for a publish that never happened",
+      (w) => {
+        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
+        must(step, "confirm step").if = OIDC_PROCEED;
+      },
+      "jobs",
+    ],
+    [
+      "a confirmation that treats next behind a newer pre-release as a warning",
+      (w) => {
+        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
+        must(step, "confirm step").run = CONFIRM_NEXT.replace(
+          `echo "::error::\${confirmed#behind }"\n    exit 1 ;;`,
+          `echo "::warning::\${confirmed#behind }" ;;`,
+        );
       },
       "jobs",
     ],
     [
       "a publish job that hands npm a registry token",
       (w) => {
-        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
+        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-2);
         must(step, "publish step").env = {
           ...must(step, "publish step").env,
           NODE_AUTH_TOKEN: `\${{ secrets.NPM_TOKEN }}`,
@@ -421,7 +470,7 @@ describe("post-green.yml publishes the build branch", () => {
     [
       "a publish job that publishes under the default dist-tag",
       (w) => {
-        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
+        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-2);
         must(step, "publish step").run = PUBLISH_NEXT.replace(
           "npm publish --tag next",
           "npm publish",
