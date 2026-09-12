@@ -117,7 +117,7 @@ function noLiveLimit(live: unknown): boolean {
 
 const LiveCreationCap = z.looseObject({
   enabled: z.boolean(),
-  max_open_pull_requests: z.number().optional(),
+  max_open_pull_requests: z.number(),
 });
 
 const LiveInteractionLimit = z.looseObject({
@@ -362,10 +362,12 @@ export const interactionLimitsSection = {
     return plan;
   },
   /**
-   * The base limit only when the repository owns it (an inherited one is the organization's
-   * setting); the cap only where the feature exists (its 405 also means the bypass endpoints
-   * would deny) and is enabled, since a disabled cap is GitHub's default; the bypass list only
-   * when someone is on it.
+   * Only what the repository itself owns reads back; an inherited limit is the org's or user's
+   * setting, and a disabled cap is GitHub's default.
+   *
+   *   limit inherited (org or user origin)   -> noted, not declared
+   *   cap answers 405                        -> cap and bypass both omitted, noted
+   *   cap disabled, or nobody on the bypass  -> omitted
    */
   async snapshot(ctx) {
     const notes: string[] = [];

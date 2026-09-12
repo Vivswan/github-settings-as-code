@@ -42,7 +42,7 @@ const LiveHook = z.looseObject({
   name: z.string().optional(),
   active: z.boolean().optional(),
   events: z.array(z.string()).optional(),
-  config: z.record(z.string(), z.unknown()).optional(),
+  config: z.looseObject({ secret: z.string().optional() }).optional(),
 });
 type LiveHook = z.infer<typeof LiveHook>;
 

@@ -159,7 +159,14 @@ describe("snapshot round trip", () => {
   });
 
   test.each([
-    [{ enabled: "yes" }, "enabled: Invalid input: expected boolean, received string"],
+    [
+      { enabled: "yes", max_open_pull_requests: 1 },
+      "enabled: Invalid input: expected boolean, received string",
+    ],
+    [
+      { enabled: true },
+      "max_open_pull_requests: Invalid input: expected number, received undefined",
+    ],
     [null, "(body): Invalid input: expected object, received null"],
   ])(
     "a creation-cap body off the shape (%j) fails the snapshot instead of reading as no cap",
@@ -181,6 +188,26 @@ describe("snapshot round trip", () => {
       );
     },
   );
+
+  test("a hook whose config.secret is not a string fails the snapshot instead of minting a reference", async () => {
+    const fake = registryFake({});
+    const api: GithubClient = {
+      tryRequest: (method, path, payload, options) =>
+        method === "GET" && path.startsWith("/repos/o/r/hooks?")
+          ? Promise.resolve({
+              data: [
+                { id: 7, name: "web", config: { url: "https://ci.example.com/hook", secret: 123 } },
+              ],
+            })
+          : fake.tryRequest(method, path, payload, options),
+      tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
+    };
+    await expect(webhooksSection.snapshot(planContext(webhooksSection, api, REPO))).rejects.toThrow(
+      "webhooks: GET /repos/{owner}/{repo}/hooks returned a body outside the documented shape - " +
+        "[0].config.secret: Invalid input: expected string, received number. Check the " +
+        '"api-version" input against the GitHub REST docs for this endpoint',
+    );
+  });
 
   test("a hook without a config.url is noted and left out; alone, it leaves nothing to declare", async () => {
     const api = registryFake({ hooks: [{ id: 7, config: {} }] });
