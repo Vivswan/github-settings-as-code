@@ -697,7 +697,9 @@ export const repositorySection = {
     // nothing, so the toggles are left out rather than written as off.
     if (probes.length > 0 && probes.every((probe) => probe.concealable)) {
       notes.push(
-        `repository.${probes.map((probe) => probe.toggle.key).join("/")}: every toggle GET answered 404, which reads as off but is also how a fine-grained token missing the grant is answered, so they are left out; if the token does ${sectionGrant(this)}, they are all off and can be declared false`,
+        `repository.${probes.map((probe) => probe.toggle.key).join("/")}: every toggle GET answered 404, which reads as off ` +
+          "but is also how a fine-grained token missing the grant is answered, so they are left out; " +
+          `if the token does ${sectionGrant(this)}, they are all off and can be declared false`,
       );
     } else {
       for (const { toggle, live } of probes) {
