@@ -7,7 +7,7 @@
 
 import { expect } from "bun:test";
 import type { SectionModule, SectionSnapshot } from "../../src/sections/contract/module.js";
-import { planContext, planDrift, type SectionPlan } from "../../src/sections/contract/plan.js";
+import { planDrift, type SectionPlan, snapshotContext } from "../../src/sections/contract/plan.js";
 import type { LiveState } from "../e2e/mock/state.js";
 import type { FragmentFake } from "./fragment-fake.js";
 import { identityOf, unconvergedOps } from "./plan-idempotence.js";
@@ -29,7 +29,7 @@ export async function proveSnapshotRoundTrip(
   section: SnapshotSection,
   api: FragmentFake,
 ): Promise<{ snapshot: SectionSnapshot; plan: SectionPlan }> {
-  const ctx = planContext(section, api, REPO);
+  const ctx = snapshotContext(section, api, REPO, "fail");
   const snapshot = await section.snapshot(ctx);
   expect(api.writes, `${section.key}: snapshot() issued a write`).toEqual([]);
   if (snapshot.value === undefined) {

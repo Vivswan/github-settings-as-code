@@ -30,6 +30,7 @@ import {
   type PlannedOp,
   plainData,
   type SectionPlan,
+  type SnapshotContext,
 } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
@@ -237,7 +238,7 @@ export interface ListSectionModule<
     ctx: PlanContext<Ends>,
     desired: Declared<K>,
   ) => Promise<SectionPlan<PlannedOp<Ends>>>;
-  readonly snapshot: (ctx: PlanContext<Ends>) => Promise<SectionSnapshot<K>>;
+  readonly snapshot: (ctx: SnapshotContext<Ends>) => Promise<SectionSnapshot<K>>;
   /** The declaration, for the harness derivations (the mock's transformers, the fuzz witness). */
   readonly decl: ListSectionDecl<K, Ends, Live, F>;
 }

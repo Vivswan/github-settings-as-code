@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { GithubClient } from "../../src/github/api.js";
 import type { SectionKey } from "../../src/schema.js";
 import { actionsSecretsSection } from "../../src/sections/actions_secrets/index.js";
-import { planContext } from "../../src/sections/contract/plan.js";
+import { snapshotContext } from "../../src/sections/contract/plan.js";
 import { deployKeysSection } from "../../src/sections/deploy_keys/index.js";
 import { interactionLimitsSection } from "../../src/sections/interaction_limits/index.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
@@ -78,7 +78,9 @@ describe("snapshot round trip", () => {
     const writing: SnapshotSection = {
       ...labelsSection,
       snapshot: async () => {
-        const read = await labelsSection.snapshot(planContext(labelsSection, api, REPO));
+        const read = await labelsSection.snapshot(
+          snapshotContext(labelsSection, api, REPO, "fail"),
+        );
         await api.tryRequest("DELETE", "/repos/o/r/labels/bug");
         return read;
       },
@@ -96,7 +98,7 @@ describe("snapshot round trip", () => {
       ],
     });
     await expect(
-      deployKeysSection.snapshot(planContext(deployKeysSection, keys, REPO)),
+      deployKeysSection.snapshot(snapshotContext(deployKeysSection, keys, REPO, "fail")),
     ).rejects.toThrow(
       'deploy_keys: GitHub holds deploy keys that resolve to one identity: "ci" and "ci". ' +
         "This section manages one deploy key per identity, so the snapshot cannot declare them; " +
@@ -116,10 +118,10 @@ describe("snapshot round trip", () => {
       ],
     });
     await expect(
-      webhooksSection.snapshot(planContext(webhooksSection, mixed, REPO)),
+      webhooksSection.snapshot(snapshotContext(webhooksSection, mixed, REPO, "fail")),
     ).rejects.toThrow(/webhooks: GitHub holds webhooks that resolve to one identity/);
     await expect(
-      webhooksSection.snapshot(planContext(webhooksSection, hooks, REPO)),
+      webhooksSection.snapshot(snapshotContext(webhooksSection, hooks, REPO, "fail")),
     ).rejects.toThrow(
       "webhooks: GitHub holds webhooks that resolve to one identity: " +
         '"https://ci.example.com/hook (id 1)" and "https://ci.example.com/hook (id 2)". ' +
@@ -150,7 +152,7 @@ describe("snapshot round trip", () => {
       ],
     });
     await expect(
-      milestonesSection.snapshot(planContext(milestonesSection, api, REPO)),
+      milestonesSection.snapshot(snapshotContext(milestonesSection, api, REPO, "fail")),
     ).rejects.toThrow(
       'milestones: GitHub holds milestones that resolve to one identity: "v1 (number 1)" and ' +
         '"v1 (number 2)". This section manages one milestone per identity, so the snapshot ' +
@@ -180,7 +182,9 @@ describe("snapshot round trip", () => {
         tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
       };
       await expect(
-        interactionLimitsSection.snapshot(planContext(interactionLimitsSection, api, REPO)),
+        interactionLimitsSection.snapshot(
+          snapshotContext(interactionLimitsSection, api, REPO, "fail"),
+        ),
       ).rejects.toThrow(
         "interaction_limits: GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap " +
           `returned a body outside the documented shape - ${issue}. Check the "api-version" ` +
@@ -202,7 +206,9 @@ describe("snapshot round trip", () => {
           : fake.tryRequest(method, path, payload, options),
       tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
     };
-    await expect(webhooksSection.snapshot(planContext(webhooksSection, api, REPO))).rejects.toThrow(
+    await expect(
+      webhooksSection.snapshot(snapshotContext(webhooksSection, api, REPO, "fail")),
+    ).rejects.toThrow(
       "webhooks: GET /repos/{owner}/{repo}/hooks returned a body outside the documented shape - " +
         "[0].config.secret: Invalid input: expected string, received number. Check the " +
         '"api-version" input against the GitHub REST docs for this endpoint',
@@ -211,7 +217,9 @@ describe("snapshot round trip", () => {
 
   test("a hook without a config.url is noted and left out; alone, it leaves nothing to declare", async () => {
     const api = registryFake({ hooks: [{ id: 7, config: {} }] });
-    const snapshot = await webhooksSection.snapshot(planContext(webhooksSection, api, REPO));
+    const snapshot = await webhooksSection.snapshot(
+      snapshotContext(webhooksSection, api, REPO, "fail"),
+    );
     expect(snapshot).toEqual({
       value: undefined,
       notes: [
@@ -239,7 +247,7 @@ describe("snapshot round trip", () => {
       "secret_scanning_custom_patterns",
     ] as const) {
       const { section } = (await loadRow(key)).row;
-      const snapshot = await section.snapshot(planContext(section, api, REPO));
+      const snapshot = await section.snapshot(snapshotContext(section, api, REPO, "fail"));
       expect({ key, ...snapshot }).toEqual({ key, value: undefined, notes: [] });
     }
     expect(api.writes).toEqual([]);

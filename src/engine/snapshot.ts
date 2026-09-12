@@ -21,7 +21,7 @@ import {
   type SectionSnapshot,
   snapshotUnsupportedNote,
 } from "../sections/contract/module.js";
-import { planContext } from "../sections/contract/plan.js";
+import { type MissingPermissionPolicy, snapshotContext } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import { type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
 import type { SectionSelection } from "./section-selection.js";
@@ -34,7 +34,7 @@ export interface SnapshotOptions {
    * a snapshot never writes, so a denial classifies on onMissingPermission alone.
    */
   sections: SectionSelection;
-  onMissingPermission: "fail" | "warn";
+  onMissingPermission: MissingPermissionPolicy;
 }
 
 /**
@@ -131,9 +131,16 @@ export async function snapshotRepository(
     let snapshot: SectionSnapshot;
     try {
       snapshot = await section.snapshot(
-        planContext(section, watchingNotFound(api, absentRead, seen), opts.repo),
+        snapshotContext(
+          section,
+          watchingNotFound(api, absentRead, seen),
+          opts.repo,
+          opts.onMissingPermission,
+        ),
       );
     } catch (error) {
+      // A denial escapes the section from its primary read under both policies and from a
+      // sub-read (readOrNote) under fail, so this branch classifies every denial the run sees.
       if (error instanceof PermissionDenied) {
         const status = opts.onMissingPermission === "warn" ? "skipped" : "failed";
         if (status === "skipped") {
