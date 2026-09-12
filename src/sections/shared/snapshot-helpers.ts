@@ -143,7 +143,8 @@ export function rejectLiveDuplicates<T>(
  * One read of a snapshot whose denial is that read's alone, for a section whose keys sit behind
  * different grants (repository, actions, environments). Under `warn` a PermissionDenied becomes a
  * note naming the key left out and the grant advice; under `fail` it propagates, so the engine
- * fails the section exactly as it does a primary read's denial. Anything else propagates.
+ * fails the section exactly as it does a primary read's denial. Anything else propagates. The
+ * policy arrives as the carrier only snapshotContext() mints, so a section cannot pick "warn".
  */
 export async function readOrNote<T>(
   ctx: Pick<SnapshotContext, "onMissingPermission">,
@@ -154,7 +155,7 @@ export async function readOrNote<T>(
   try {
     return { value: await read() };
   } catch (error) {
-    if (error instanceof PermissionDenied && ctx.onMissingPermission === "warn") {
+    if (error instanceof PermissionDenied && ctx.onMissingPermission.notesDenials) {
       notes.push(`${label}: left out of the snapshot - ${error.detail}`);
       return { denied: true };
     }

@@ -131,7 +131,7 @@ A snapshot is written so that applying it changes nothing and checking it reads 
 | `repository.enable_immutable_releases` under owner enforcement | GitHub answers 409 to both writes | `true`, with a header line saying apply cannot change it from the repository |
 | `repository.enable_git_lfs` | GitHub exposes no read endpoint | Nothing; the header says so, and apply re-asserts the declared value on every run |
 | `repository.enable_*` toggles under a token whose every toggle probe answers 404 | A fine-grained token missing the Administration grant is answered like a disabled toggle | Nothing for the four toggles, under one header line |
-| `actions.<key>` the token cannot read, under `on-missing-permission: warn` | A sub-endpoint has its own grant (the OIDC template needs Actions) | Nothing for that key; the header names it, and the other keys read back. Under `fail` (the default) the denial fails the section and the run instead |
+| `actions.<key>` the token cannot read, under `on-missing-permission: warn` | A sub-endpoint has its own grant (the OIDC template needs Actions) | Nothing for that key; the header names it, and the other keys read back. Under `fail` the section fails instead: [what a denial does](#what-a-denial-does) |
 | `rulesets[]` whose `bypass_actors` the token cannot see | GitHub returns the list only to a write-grade token | No entry (kept under `_undeclared: keep`) and a header line; an entry without the list would clear it on the next update |
 | Organization and enterprise rulesets | Inherited, not the repository's to manage | Nothing; a header line names each |
 | `collaborators`: the repository owner, email invitations | The owner's access is implicit, and an email invitation has no username to declare | No entry and a note each; apply leaves both alone |
@@ -174,6 +174,17 @@ Copy the directory in as your `repos-dir` to bring the fleet under management, o
 
 Private and internal targets are redacted by default, exactly as in a multi-repo apply (see [private repositories](private-repositories.md)): their file is written like the others, but the public surfaces know them only as `private repository #N`, with the file name and every detail hidden. Their notes are in their file header; there is no report channel in snapshot mode. The uploaded `snapshots` artifact therefore holds those targets' full documents in the clear, and an artifact inherits the admin repository's visibility, so on a public admin repository encrypt it or skip the upload (see [what redaction does and does not protect](private-repositories.md#what-redaction-does-and-does-not-protect)).
 
+## What a denial does
+
+A denial is a read the token's grants refuse. Where it lands decides what `on-missing-permission` does with it:
+
+| Denied read | `fail` (default) | `warn` |
+|---|---|---|
+| A section's main read (the labels list, the Actions permissions) | The section fails; the run fails with exit 1 and writes no file | The section is skipped with a warning and listed in `skipped-sections`; the rest is written |
+| A key the section reads on its own (an `actions` key such as the OIDC template or a cache limit; an environment's branch policies or protection rules) | The same: the section fails and no file is written | That key alone is left out under a header line; the rest of its section reads back |
+
+Under both policies the error or the header line names the grant to add.
+
 ## Inputs in mode: snapshot
 
 | Input | In `mode: snapshot` |
@@ -184,7 +195,7 @@ Private and internal targets are redacted by default, exactly as in a multi-repo
 | `repository` | With `snapshot-file`: the target, defaulting to the current repository. Rejected with `snapshot-dir` |
 | `repos`, `repos-dir`, `visibility`, `archived`, `forks`, `exclude`, `topics`, `affiliation` | With `snapshot-dir`: the targets and the discovery filters, as in multi-repo mode. Rejected with `snapshot-file` |
 | `sections` | The allowlist of sections to read back; every other section is left out of the file |
-| `on-missing-permission` | `fail` (default) fails the run on a section the token cannot read, in whole or in part: a denial on any of the section's reads, one behind another grant included (an Actions-gated `actions` key, an environment's branch policies), and no file is written for that target; `warn` skips a denied section with a warning, except that a key the section reads on its own (an `actions` key such as the OIDC template or a cache limit, an environment's branch policies or protection rules) is left out alone under a header line while the rest of its section reads back; the file holds what did read |
+| `on-missing-permission` | `fail` (default) fails the run on a read the token is denied, and no file is written for that target; `warn` reports the denial and writes what did read. What each policy does per read: [what a denial does](#what-a-denial-does) |
 | `private-repos` | `redact` (default) hides private and internal targets from the public surfaces; `show` reveals them |
 | `token`, `api-version` | The API calls, as in every mode that reaches GitHub |
 | `settings-file`, `merged-file`, `layering`, `required-sections`, `defaults-file`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a snapshot applies no document, folds no layers, and delivers no report |

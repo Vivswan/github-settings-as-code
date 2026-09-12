@@ -15,12 +15,19 @@ import {
 import type { GithubClient } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
 import { maskRegistry } from "../../src/io.js";
+import {
+  endpointPermission,
+  type SectionMeta,
+  sectionOperations,
+} from "../../src/sections/contract/module.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { pagesSection } from "../../src/sections/pages/index.js";
-import { SECTIONS } from "../../src/sections/registry.js";
+import { allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
+import { matchEndpoint } from "../e2e/mock/dispatch.js";
 import type { LiveState } from "../e2e/mock/state.js";
 import { registryFake } from "../sections/fragment-fake.js";
 import { REPO } from "../sections/section-run.js";
+import type { Row } from "../sections/snapshot-roundtrip.js";
 
 function captureIo(): { io: Io; annotations: string[] } {
   const annotations: string[] = [];
@@ -48,6 +55,67 @@ function denying(api: GithubClient, denied: RegExp, status: 403 | 404 = 404): Gi
         : api.tryRequest(method, path, payload, options),
     tryGraphql: (op, variables, slug) => api.tryGraphql(op, variables, slug),
   };
+}
+
+/** A client that records every read it forwards, as "GET <path>" or "GRAPHQL <opName>". */
+function recording(api: GithubClient, reads: Set<string>): GithubClient {
+  return {
+    tryRequest: (method, path, payload, options) => {
+      if (method === "GET") {
+        reads.add(`GET ${path}`);
+      }
+      return api.tryRequest(method, path, payload, options);
+    },
+    tryGraphql: (op, variables, slug) => {
+      if (op.kind === "read") {
+        reads.add(`GRAPHQL ${op.name}`);
+      }
+      return api.tryGraphql(op, variables, slug);
+    },
+  };
+}
+
+/** A client that answers one recorded read with the classic 403 (FORBIDDEN for a GraphQL read). */
+function denyingRead(api: GithubClient, read: string): GithubClient {
+  const forbidden = {
+    status: 403,
+    message: "Resource not accessible by personal access token",
+    body: "",
+  };
+  return {
+    tryRequest: (method, path, payload, options) =>
+      `${method} ${path}` === read
+        ? Promise.resolve({ error: forbidden })
+        : api.tryRequest(method, path, payload, options),
+    tryGraphql: (op, variables, slug) =>
+      `GRAPHQL ${op.name}` === read
+        ? Promise.resolve({ error: { ...forbidden, graphqlTypes: ["FORBIDDEN" as const] } })
+        : api.tryGraphql(op, variables, slug),
+  };
+}
+
+/**
+ * Whether a 403 on the recorded read is a permission denial by the declarations: a REST read on an
+ * operation whose permission is "none" (a public probe) is not, and a GraphQL read declaring a
+ * FORBIDDEN outcome tolerates it.
+ */
+function countsAsDenial(read: string): boolean {
+  if (read.startsWith("GRAPHQL ")) {
+    const op = Object.values(allGraphqlOps()).find((candidate) => candidate.name === read.slice(8));
+    if (op === undefined) {
+      throw new Error(`BUG: recorded GraphQL read ${read} is not a registered operation`);
+    }
+    return op.outcomes.FORBIDDEN === undefined;
+  }
+  const matched = matchEndpoint("GET", new URL(read.slice(4), "https://api.github.com").pathname);
+  if (matched === null) {
+    throw new Error(`BUG: recorded read ${read} matches no registered endpoint`);
+  }
+  const section = SECTIONS.find((candidate) => candidate.key === matched.endpoint.section);
+  if (section === undefined) {
+    throw new Error(`BUG: endpoint ${matched.key} names an unregistered section`);
+  }
+  return endpointPermission(section, matched.endpoint) !== "none";
 }
 
 const LIVE: LiveState = {
@@ -240,71 +308,62 @@ describe("snapshotRepository", () => {
   });
 
   /**
-   * The roster of sub-reads readOrNote guards, one per section that calls it: the path whose
-   * denial is that read's alone (the primary read still answers) and the key the note names.
+   * Every read a section's snapshot issues against its round-trip fixture, denied one at a time:
+   * under fail the section and the run fail with the grant prose and no document, whatever the
+   * read (primary or a readOrNote sub-read); under warn the run survives and the denial is
+   * reported. Driven off the registry, so a section swallowing a denial in its own try/catch
+   * fails here by name. A read on a public operation is not a denial and is left out.
    */
-  const SUB_READS = [
-    {
-      key: "repository",
-      denied: /\/repos\/o\/r\/private-vulnerability-reporting$/,
-      status: 403,
-      label: "repository.enable_private_vulnerability_reporting",
-    },
-    {
-      key: "actions",
-      denied: /\/repos\/o\/r\/actions\/oidc\/customization\/sub$/,
-      status: 404,
-      label: "actions.oidc_customization_sub",
-    },
-    {
-      key: "environments",
-      denied: /\/repos\/o\/r\/environments\/production\/deployment_protection_rules$/,
-      status: 404,
-      label: "environments[production].deployment_protection_rules",
-    },
-  ] as const;
+  const DENIABLE = SECTIONS.filter((section) => section.snapshot !== undefined).map((s) => s.key);
 
-  for (const sub of SUB_READS) {
-    test(`${sub.key}: a denied sub-read fails the section under fail and is a note under warn`, async () => {
-      const live: LiveState = {
-        ...LIVE,
-        environments: {
-          production: { name: "production", protection_rules: [], deployment_branch_policy: null },
-        },
+  test.each(DENIABLE)(
+    "%s: a 403 on any of its reads fails it under fail and is reported under warn",
+    async (key) => {
+      const { row } = (await import(`../sections/snapshot-rows/${key}.ts`)) as { row: Row };
+      const only = SectionSelection.of({ only: [key] })._unsafeUnwrap();
+      const run = (api: GithubClient, policy: "fail" | "warn") => {
+        const { io, annotations } = captureIo();
+        return snapshotRepository(api, { ...opts(policy), sections: only }, io).then((result) => ({
+          result,
+          annotations,
+        }));
       };
-      const denied = denying(registryFake(live), sub.denied, sub.status);
-      const only = SectionSelection.of({ only: [sub.key] })._unsafeUnwrap();
-      const fail = captureIo();
-      const failed = await snapshotRepository(denied, { ...opts("fail"), sections: only }, fail.io);
-      expect(failed.result).toBe("failed");
-      expect(failed.settings).toBeUndefined();
-      expect(failed.outcomes).toEqual([
-        {
-          key: sub.key,
-          status: "failed",
-          detail: [expect.stringMatching(/^the token was denied .*GET \/repos\/o\/r\//)],
-        },
-      ]);
-      expect(fail.annotations).toEqual([
-        expect.stringMatching(
-          new RegExp(
-            `^error: ${sub.key}: not snapshotted - the token was denied .*GET /repos/o/r/`,
+      const reads = new Set<string>();
+      const baseline = await run(recording(registryFake(row.live), reads), "fail");
+      expect(
+        baseline.result.outcomes.map((o) => o.status),
+        `${key}: fixture did not read back`,
+      ).toEqual(["snapshot"]);
+      expect(baseline.result.settings?.[key]).toBeDefined();
+      const deniable = [...reads].filter(countsAsDenial);
+      // The control: a section declaring a gated planning read must have exercised one (custom_properties reads only public routes).
+      const section = SECTIONS.find((candidate) => candidate.key === key);
+      const gated = sectionOperations(section as SectionMeta).some(
+        (op) => op.wire === "read" && op.phase === "plan" && op.permission !== "none",
+      );
+      expect(deniable.length > 0, `${key}: deniable reads vs declared gated reads`).toBe(gated);
+      for (const read of deniable) {
+        const denied = denyingRead(registryFake(row.live), read);
+        const failed = await run(denied, "fail");
+        expect(failed.result.result, `${key}: ${read} denied under fail`).toBe("failed");
+        expect(failed.result.settings).toBeUndefined();
+        expect(failed.result.outcomes.map((o) => o.status)).toEqual(["failed"]);
+        expect(failed.result.outcomes[0]?.detail.at(-1)).toMatch(
+          /the token was denied .*To fix, grant "/,
+        );
+        expect(failed.annotations).toContainEqual(
+          expect.stringMatching(
+            new RegExp(`^error: ${key}: not snapshotted - the token was denied `),
           ),
-        ),
-      ]);
-
-      const warn = captureIo();
-      const noted = await snapshotRepository(denied, { ...opts("warn"), sections: only }, warn.io);
-      expect(noted.result).toBe("snapshot");
-      expect(noted.settings?.[sub.key]).toBeDefined();
-      expect(noted.outcomes.map((o) => o.status)).toEqual(["snapshot"]);
-      const prefix = `${sub.label}: left out of the snapshot - the token was denied `;
-      const noteAt = (level: string) => (line: string) =>
-        line.startsWith(`${level}${prefix}`) && line.includes("GET /repos/o/r/");
-      expect(noted.outcomes[0]?.detail.some(noteAt(""))).toBe(true);
-      expect(warn.annotations.some(noteAt("notice: "))).toBe(true);
-    });
-  }
+        );
+        const noted = await run(denied, "warn");
+        expect(noted.result.result, `${key}: ${read} denied under warn`).not.toBe("failed");
+        const [outcome] = noted.result.outcomes;
+        expect(outcome?.status).toMatch(/^(snapshot|skipped)$/);
+        expect(outcome?.detail.some((line) => line.includes("the token was denied"))).toBe(true);
+      }
+    },
+  );
 
   test("a section whose snapshot throws fails alone; the document still carries the rest", async () => {
     const stubbed = spyOn(labelsSection, "snapshot").mockRejectedValue(new Error("boom"));
