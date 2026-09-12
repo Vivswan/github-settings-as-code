@@ -1636,6 +1636,29 @@ describe("fault injection", () => {
     expect(normal.map((l) => l.name)).toEqual(["real"]);
   });
 
+  test("echo_422 rejects with the request body quoted back, budgeted like every fault, then serves the handler", async () => {
+    const h = await start(scenario(), {
+      faults: [{ key: "labels.create", kind: "echo_422" }],
+    });
+    const payload = { name: "echoed", color: "ff0000", description: "CANARY-in-body" };
+    const faulted = await call(h, "POST", labelsPath, { body: payload });
+    // A validation rejection is never retried, so the client sees exactly this body: the echo it must withhold
+    // for a secret-carrying request lands in errors[].message verbatim.
+    expect({ status: faulted.status, body: await json(faulted) }).toEqual({
+      status: 422,
+      body: {
+        message: "Validation Failed",
+        errors: [{ code: "custom", message: `rejected value: ${JSON.stringify(payload)}` }],
+        documentation_url: "https://docs.github.com/rest",
+      },
+    });
+    expect(singleState(h).labels.map((l) => l.name)).toEqual([]);
+    const served = await call(h, "POST", labelsPath, { body: payload });
+    expect(served.status).toBe(201);
+    expect(singleState(h).labels.map((l) => l.name)).toEqual(["echoed"]);
+    expect(h.requests.filter((r) => r.method === "POST").map((r) => r.status)).toEqual([422, 201]);
+  });
+
   test("a fault only fires for its named endpoint", async () => {
     const h = await start(scenario(), {
       faults: [{ key: "labels.list", kind: "rate_limit_403" }],
