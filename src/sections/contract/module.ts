@@ -2,7 +2,12 @@ import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { GithubClient } from "../../github/api.js";
 import type { SectionKey, SettingsFile, UndeclaredPolicySection } from "../../schema.js";
-import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
+import type {
+  DeepReadonly,
+  MustBeNever,
+  UndeclaredPolicy,
+  UndeclaredPolicyList,
+} from "../../types.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -361,6 +366,49 @@ export interface SectionModule<
   snapshot?(ctx: SnapshotContext<E, G, K>): Promise<SectionSnapshot<K>>;
   /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
   run?: never;
+}
+
+/**
+ * Freezes in place through every nested object and array; functions are left as they are (nothing
+ * reads their properties). The registry views freeze the tagged copies they build with it.
+ */
+export function deepFreeze<T>(value: T): DeepReadonly<T> {
+  if (typeof value === "object" && value !== null) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) {
+      deepFreeze(child);
+    }
+  }
+  return value as DeepReadonly<T>;
+}
+
+/** Every SectionMeta field; the pin below fails on a field added there without being frozen here. */
+const DECLARATION_FIELDS = [
+  "key",
+  "permission",
+  "grantCaveat",
+  "ownerSensitivity",
+  "endpoints",
+  "graphql",
+  "undeclaredDefault",
+  "layering",
+] as const satisfies readonly (keyof SectionMeta)[];
+
+type _EveryDeclarationFieldFrozen = MustBeNever<
+  Exclude<keyof SectionMeta, (typeof DECLARATION_FIELDS)[number]>
+>;
+
+/**
+ * Called once per module as ../registry.ts registers it, so a route, status, hint, permission, or GraphQL
+ * outcome cannot move after that in the action, the CLI, or the library alike; the readonly types stop
+ * only compiled assignments. The module object is frozen shallowly with its declarations frozen through:
+ * `shape` stays as zod built it, and the handlers are functions.
+ */
+export function freezeDeclarations<M extends SectionModule>(module: M): M {
+  for (const field of DECLARATION_FIELDS) {
+    deepFreeze(module[field]);
+  }
+  return Object.freeze(module);
 }
 
 /** Write-only is derived from the operations, as writeOnlyCheckNote does, so the two notes cannot disagree. */

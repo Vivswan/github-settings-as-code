@@ -40,10 +40,6 @@ interface SecretsScopeProse {
   label: string;
   /** The noun for notes ("Actions secret"; a nested scope says "prod environment secret"). */
   noun: string;
-  /** Where a secret lives in note and drift prose; "the repo" unless a nested scope says otherwise. */
-  home?: string;
-  /** Appended to change lines and describes (` in environment "prod"`); "" for the repo families. */
-  changeSuffix?: string;
 }
 
 /** The payload thunk resolves and seals only when executed, so the plan carries the `$NAME` reference and nothing derived from a value. */
@@ -194,7 +190,7 @@ export function parseSealingKey(
 }
 
 function missingSecretDrift(scope: SecretsScopeProse, name: string): string {
-  return `${scope.label}[${name}]: missing - declared in the settings file but not on ${scope.home ?? "the repo"}; apply will create it`;
+  return `${scope.label}[${name}]: missing - declared in the settings file but not on the repo; apply will create it`;
 }
 
 /** ONE note per scope (the LFS precedent): values are unverifiable by design. */
@@ -205,7 +201,7 @@ function cannotVerifyNote(scope: SecretsScopeProse): string {
 function undeclaredSecretNote(scope: SecretsScopeProse, liveName: string): string {
   return undeclaredNote({
     subject: `${scope.noun} "${liveName}"`,
-    state: `exists on ${scope.home ?? "the repo"} but is not declared`,
+    state: "exists on the repo but is not declared",
     action: "DELETE it (a deleted secret's value is unrecoverable)",
   });
 }
@@ -244,7 +240,6 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
   },
 ): Promise<SectionPlan<Put | Remove>> {
   const { entries, policy, defaultPolicy } = opts;
-  const suffix = scope.changeSuffix ?? "";
   const plan: SectionPlan<Put | Remove> = { ops: [], notes: [], drift: [] };
 
   const liveByKey = liveSecretsByKey(await scope.list());
@@ -264,10 +259,10 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
       plan.ops.push(
         scope.put({
           name,
-          describe: `writing secret "${name}"${suffix}`,
+          describe: `writing secret "${name}"`,
           payload: (exec) => sealingKey.seal(exec.resolveSecret(entry.value)),
           drift: exists ? [] : [missingSecretDrift(scope, name)],
-          change: `${exists ? "updated" : "created"} secret "${name}"${suffix}`,
+          change: `${exists ? "updated" : "created"} secret "${name}"`,
         }),
       );
     }
@@ -284,9 +279,9 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
       plan.ops.push(
         scope.remove({
           name: liveName,
-          describe: `deleting undeclared secret "${liveName}"${suffix}`,
+          describe: `deleting undeclared secret "${liveName}"`,
           drift: [undeclaredSecretDrift(scope, defaultPolicy, liveName)],
-          change: `DELETED undeclared secret "${liveName}"${suffix}`,
+          change: `DELETED undeclared secret "${liveName}"`,
         }),
       );
     }

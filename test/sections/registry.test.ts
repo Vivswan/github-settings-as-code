@@ -493,6 +493,108 @@ describe("section endpoints", () => {
   });
 });
 
+describe("declarations are frozen at registration", () => {
+  test("mutating any registered section's declaration throws, with no view called first", () => {
+    // The module, endpoint, and op objects themselves are frozen by no view (the views freeze only the tagged copies they build), so a
+    // frozen source here is freezeDeclarations' work alone. ES module test files are strict, so an assignment on a frozen object throws.
+    const attempts: [string, () => void][] = [];
+    let endpointCount = 0;
+    for (const section of SECTIONS) {
+      expect(Object.isFrozen(section), `${section.key} module`).toBe(true);
+      attempts.push([
+        `${section.key} permission`,
+        () => {
+          (section as { permission: unknown }).permission = "none";
+        },
+      ]);
+      for (const [role, endpoint] of Object.entries(section.endpoints)) {
+        endpointCount++;
+        const tag = `${section.key}.${role}`;
+        expect(Object.isFrozen(endpoint), tag).toBe(true);
+        attempts.push(
+          [
+            `${tag} replace`,
+            () => {
+              (section.endpoints as Record<string, unknown>)[role] = {};
+            },
+          ],
+          [
+            `${tag} route`,
+            () => {
+              (endpoint as { route: string }).route = "DELETE /repos/{owner}/{repo}";
+            },
+          ],
+          [
+            `${tag} statuses`,
+            () => {
+              (endpoint.statuses as Record<number, string>)[299] = "hacked";
+            },
+          ],
+        );
+        if (endpoint.hints !== undefined) {
+          attempts.push([
+            `${tag} hints`,
+            () => {
+              (endpoint.hints as Record<number, string>)[422] = "hacked";
+            },
+          ]);
+        }
+        if (typeof endpoint.permission === "object") {
+          attempts.push([
+            `${tag} permission`,
+            () => {
+              (endpoint.permission as unknown as { repo: string[] }).repo.push("hacked");
+            },
+          ]);
+        }
+        if (endpoint.rejections !== undefined) {
+          attempts.push([
+            `${tag} rejections`,
+            () => {
+              (endpoint.rejections as unknown as object[]).push({});
+            },
+          ]);
+        }
+      }
+      for (const [role, op] of Object.entries(section.graphql ?? {})) {
+        const tag = `${section.key}.${role}`;
+        expect(Object.isFrozen(op), tag).toBe(true);
+        attempts.push(
+          [
+            `${tag} outcomes`,
+            () => {
+              (op.outcomes as Record<string, string>).ok = "hacked";
+            },
+          ],
+          [
+            `${tag} kind`,
+            () => {
+              (op as { kind: string }).kind = "write";
+            },
+          ],
+        );
+        if (op.connection !== undefined) {
+          attempts.push([
+            `${tag} connection`,
+            () => {
+              (op.connection as unknown as { path: string[] }).path.push("hacked");
+            },
+          ]);
+        }
+      }
+    }
+    expect(attempts.length).toBeGreaterThanOrEqual(SECTIONS.length + endpointCount * 3);
+    for (const [what, mutate] of attempts) {
+      expect(mutate, what).toThrow(TypeError);
+    }
+    // Control: the same assignment on a spread copy lands, so the throws come from the freeze and not from the assignments themselves.
+    const copy: { route: string } = { ...labelsSection.endpoints.update };
+    copy.route = "DELETE /repos/{owner}/{repo}";
+    expect(copy.route).toBe("DELETE /repos/{owner}/{repo}");
+    expect(labelsSection.endpoints.update.route).toBe("PATCH /repos/{owner}/{repo}/labels/{name}");
+  });
+});
+
 describe("allEndpoints", () => {
   test("flattens every section endpoint under a unique section.role key", () => {
     const all = allEndpoints();

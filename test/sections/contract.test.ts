@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import {
   type GithubClient,
   SECRET_RESPONSE_WITHHELD,
@@ -14,9 +15,11 @@ import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.j
 import { type GraphqlOpDecl, graphqlOp } from "../../src/sections/contract/graphql.js";
 import {
   denialPosture,
+  freezeDeclarations,
   planningReads,
   readGating,
   type SectionMeta,
+  type SectionModule,
   sectionOperations,
   writeGatedReads,
 } from "../../src/sections/contract/module.js";
@@ -681,6 +684,77 @@ describe("throwFor context enrichment", () => {
         'permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and ' +
         "write)",
     );
+  });
+});
+
+describe("freezeDeclarations", () => {
+  test("freezes the module and every declaration facet in place, leaving the shape and the handlers alone", () => {
+    const shape = z.object({ name: z.string() });
+    const module = {
+      key: "labels",
+      permission: { repo: ["issues"] },
+      undeclaredDefault: "delete",
+      endpoints: {
+        list: {
+          route: "GET /repos/{owner}/{repo}/labels",
+          statuses: { 200: "x" },
+          primaryRead: { notFound: "denied" },
+        },
+      },
+      graphql: {
+        probe: {
+          name: "FreezeProbe",
+          kind: "read",
+          query: "query FreezeProbe { viewer { login } }",
+          outcomes: { ok: "x" },
+        },
+      },
+      layering: {
+        keys: () => ["x"],
+        keyField: "name",
+        combine: "merge",
+        nested: { rules: { keys: () => null, keyField: "type", combine: "replace" } },
+      },
+      shape,
+      plan: async () => ({ ops: [], notes: [], drift: [] }),
+    } as unknown as SectionModule;
+    expect(freezeDeclarations(module)).toBe(module);
+    expect(Object.isFrozen(module)).toBe(true);
+    const facets = {
+      endpoints: module.endpoints,
+      endpoint: module.endpoints.list,
+      statuses: module.endpoints.list?.statuses,
+      primaryRead: module.endpoints.list?.primaryRead,
+      graphql: module.graphql,
+      op: module.graphql?.probe,
+      outcomes: module.graphql?.probe?.outcomes,
+      permission: module.permission,
+      layering: module.layering,
+      nested: module.layering?.nested?.rules,
+    };
+    for (const [facet, value] of Object.entries(facets)) {
+      expect(Object.isFrozen(value), facet).toBe(true);
+    }
+    // The shape is zod's object and the handlers are functions: neither is a declaration, and both stay as built.
+    expect(Object.isFrozen(shape)).toBe(false);
+    expect(shape.safeParse({ name: "a" }).success).toBe(true);
+    expect(Object.isFrozen(module.plan)).toBe(false);
+    expect(Object.isFrozen(module.layering?.keys)).toBe(false);
+  });
+
+  test("a module declaring no optional facets freezes the same way", () => {
+    const module = {
+      key: "workflows",
+      permission: { repo: ["actions"] },
+      undeclaredDefault: "untouched",
+      endpoints: {},
+      shape: z.unknown(),
+      plan: async () => ({ ops: [], notes: [], drift: [] }),
+    } as unknown as SectionModule;
+    expect(() => freezeDeclarations(module)).not.toThrow();
+    expect(Object.isFrozen(module)).toBe(true);
+    expect(Object.isFrozen(module.endpoints)).toBe(true);
+    expect(Object.isFrozen(module.permission)).toBe(true);
   });
 });
 
