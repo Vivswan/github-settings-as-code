@@ -67,11 +67,11 @@ import { Rng } from "./prng.js";
 import {
   checkLeaks,
   failureArtifacts,
-  insertReplay,
   markReportTitle,
   parseReposResult,
   parseSummaryOutcomes,
   runScenario,
+  setReplay,
   stripDebugLines,
   stripMaskLines,
 } from "./runner.js";
@@ -124,14 +124,14 @@ function parseFlags(argv: string[]): Flags {
   return flags;
 }
 
-/** Every dumped artifact dir gets the replay block: the nightly fuzz-issue workflow reads it from report.md. */
+/** The runner wrote the curated replay; a fuzz artifact replays by seed, never by name (a fuzz scenario is not a file). */
 function reportArtifacts(result: IterationResult, replay: string): void {
   for (const dir of [result.artifactDir, ...(result.extraArtifactDirs ?? [])]) {
     if (dir === undefined) {
       continue;
     }
     console.log(`    artifact: ${dir}`);
-    insertReplay(dir, replay);
+    setReplay(dir, replay);
   }
 }
 

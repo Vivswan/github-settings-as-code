@@ -12,12 +12,12 @@ import {
   exitCodeFailure,
   failureArtifacts,
   forbiddenPresent,
-  insertReplay,
   isSubsequence,
   markReportTitle,
   parseGithubOutput,
   parseSummaryOutcomes,
   type ScenarioReport,
+  setReplay,
   stripDebugLines,
   stripMaskLines,
 } from "./runner.js";
@@ -279,27 +279,43 @@ describe("checkLeaks (redaction leak invariant)", () => {
   });
 });
 
-describe("insertReplay (fuzz-issue report contract)", () => {
-  test("puts the fenced replay block right after the title, inside the report head", () => {
-    const dir = mkdtempSync(join(tmpdir(), "insert-replay-"));
+describe("setReplay (nightly issue report contract)", () => {
+  test("swaps the fuzzer's command into the block writeReport left under the title, nothing else moves", () => {
+    const dir = mkdtempSync(join(tmpdir(), "set-replay-"));
     try {
-      writeFileSync(
-        join(dir, "report.md"),
-        "# fuzz-42\n\n## Failures\n\n- exit code 1 != expected 0\n\nExit code: 1\n",
-      );
-      insertReplay(dir, "bun test/e2e/fuzz.ts --seed 42 --iterations 1");
-      const lines = readFileSync(join(dir, "report.md"), "utf8").split("\n");
-      expect(lines[0]).toBe("# fuzz-42");
-      expect(lines.slice(1, 7)).toEqual([
+      const written = [
+        "# fuzz-42",
         "",
         "## Replay",
         "",
         "```sh",
-        "bun test/e2e/fuzz.ts --seed 42 --iterations 1",
+        "bun test/e2e/run.ts --scenario fuzz-42",
         "```",
-      ]);
-      expect(lines).toContain("## Failures");
-      expect(lines).toContain("Exit code: 1");
+        "",
+        "## Failures",
+        "",
+        "- exit code 1 != expected 0",
+        "",
+        "Exit code: 1",
+        "",
+      ];
+      writeFileSync(join(dir, "report.md"), written.join("\n"));
+      setReplay(dir, "bun test/e2e/fuzz.ts --seed 42 --iterations 1");
+      const expected = [...written];
+      expected[5] = "bun test/e2e/fuzz.ts --seed 42 --iterations 1";
+      expect(readFileSync(join(dir, "report.md"), "utf8").split("\n")).toEqual(expected);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a report without the block under its title is a bug, not a silent insert", () => {
+    const dir = mkdtempSync(join(tmpdir(), "set-replay-"));
+    try {
+      writeFileSync(join(dir, "report.md"), "# fuzz-42\n\n## Failures\n\n- leak\n");
+      expect(() => setReplay(dir, "bun test/e2e/fuzz.ts --seed 42 --iterations 1")).toThrow(
+        /carries no replay block under its title/,
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -353,7 +369,16 @@ describe("failureArtifacts (a verdict the runner did not reach)", () => {
     expect(dir).toBeDefined();
     try {
       const lines = readFileSync(join(dir as string, "report.md"), "utf8").split("\n");
-      expect(lines[0]).toBe("# fuzz-oracle-42");
+      // Every artifact opens with a replay a curated failure can run as is; the fuzzer overwrites the command.
+      expect(lines.slice(0, 7)).toEqual([
+        "# fuzz-oracle-42",
+        "",
+        "## Replay",
+        "",
+        "```sh",
+        "bun test/e2e/run.ts --scenario fuzz-oracle-42",
+        "```",
+      ]);
       expect(lines).toContain('- branches: observed "failed" not in predicted {clean,drift}');
       // The same directory the runner's own dump writes, so the fuzz-issue action's upload step finds it.
       expect(dir).toContain(join("test", "e2e", ".artifacts"));

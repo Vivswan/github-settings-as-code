@@ -56,12 +56,20 @@ jobs:
           path: test/e2e/.artifacts/
           if-no-files-found: ignore
 
-      - name: File an issue on failure
+      # The same fleet action nightly-fuzz.yml files through: one open issue per
+      # label, each artifact's report.md (title + replay block) lifted whole.
+      - name: File or update the e2e issue
         id: file-issue
         if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bun .github/scripts/file-fuzz-issue.ts
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: report
+          label: e2e-fuzz
+          title: e2e nightly failures
+          label-description: Automated e2e nightly failure
+          stream: generic
+          artifacts-dir: test/e2e/.artifacts
+          artifact-name: e2e-artifacts
 
       # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
       - name: Trigger auto-assign for the filed issue
@@ -70,3 +78,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.file-issue.outputs.issue-number }}
         run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
+
+      - name: Close the e2e issue on a green night
+        if: success()
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: resolve
+          label: e2e-fuzz
+          stream: generic

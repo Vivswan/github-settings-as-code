@@ -26,7 +26,6 @@ import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { isWriteRequest } from "./mock/dispatch.js";
 import { type ServerOptions, startMockServer } from "./mock/server.js";
 import { sharedValidator } from "./openapi/validate.js";
-import { replayBlockLines } from "./replay-block.js";
 import { type Scenario, settingsYamlFor } from "./schema.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -699,17 +698,30 @@ export async function runScenario(
 }
 
 /**
- * The fuzz-issue action's failure-report contract keeps only the head of report.md and wants the exact
- * replay command in a fenced block, so the block goes right after the title, not after the failure list.
+ * The nightly issue action lifts each report.md whole, so the replay rides in the report itself, right under the
+ * title; writeReport puts the curated command there and setReplay swaps in the fuzzer's.
  */
-export function insertReplay(artifactDir: string, replay: string): void {
+function replayBlockLines(replay: string): string[] {
+  return ["", "## Replay", "", "```sh", replay, "```"];
+}
+const REPLAY_LINE = 4;
+
+export function setReplay(artifactDir: string, replay: string): void {
   const path = join(artifactDir, "report.md");
-  const [title, ...rest] = readFileSync(path, "utf8").split("\n");
-  writeFileSync(path, [title, ...replayBlockLines(replay), ...rest].join("\n"));
+  const lines = readFileSync(path, "utf8").split("\n");
+  const block = replayBlockLines(replay);
+  const slot = lines.slice(1, 1 + block.length);
+  if (block.some((line, i) => i !== REPLAY_LINE && slot[i] !== line)) {
+    throw new Error(
+      `E2E BUG: ${path} carries no replay block under its title; writeReport always writes one`,
+    );
+  }
+  lines.splice(1, block.length, ...block);
+  writeFileSync(path, lines.join("\n"));
 }
 
 /**
- * The fuzz-issue action heads each issue section with the title line, and the redaction
+ * The nightly issue action heads each issue section with the title line, and the redaction
  * counterfactual re-runs the SAME scenario name: unmarked, its failure section would be
  * indistinguishable from the primary run's.
  */
@@ -749,7 +761,7 @@ function dumpArtifacts(
   return dir;
 }
 
-/** The fuzz-issue workflow reads this report.md; its headings are the contract. */
+/** The nightly issue action reads this report.md; its headings are the contract. */
 function writeReport(
   dir: string,
   scenario: Scenario,
@@ -758,6 +770,7 @@ function writeReport(
 ): void {
   const md = [
     `# ${scenario.name}`,
+    ...replayBlockLines(`bun test/e2e/run.ts --scenario ${scenario.name}`),
     "",
     `Artifact directory: ${dir}`,
     "",
@@ -771,7 +784,7 @@ function writeReport(
 }
 
 /**
- * The nightly's fuzz-issue action reads report.md, not the log, so every failure judged against a run,
+ * The nightly issue action reads report.md, not the log, so every failure judged against a run,
  * the runner's own and a caller's (the fuzz oracle's verdicts), must land in it.
  */
 export function failureArtifacts(
