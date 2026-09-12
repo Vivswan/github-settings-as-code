@@ -1,7 +1,7 @@
 # Stale-body prevention: a redacted deliverable target whose settings PARSE
 # fails still updates its report issue, so the private mirror never goes stale.
 # svc-badcfg is proven private with private_report: issue and a pre-existing
-# report issue (seeded, closed, "STALE PRIOR REPORT"). Its settings.yml is served
+# report issue (seeded, closed, a stale report body). Its settings.yml is served
 # as raw invalid YAML, so parsing fails before any section runs. The target
 # fails, yet the ONE finalizer still delivers the report: the existing issue is
 # PATCHed (not left stale, no duplicate) with the failure recorded, and reopened
@@ -27,7 +27,7 @@ repos:
       issues:
         - number: 3
           title: "[automated] settings-as-code: private settings report"
-          body: "STALE PRIOR REPORT"
+          body: "# settings-as-code private report: e2e-owner/svc-badcfg\n\nSTALE PRIOR REPORT"
           state: closed
           labels:
             - name: settings-as-code-report
