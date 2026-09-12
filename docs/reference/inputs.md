@@ -8,7 +8,7 @@ Every `with:` input the action accepts, and the outputs it sets for the steps af
 
 ## Inputs
 
-<!-- BEGIN GENERATED: inputs-table (bun run build:action-docs; edit src/action/inputs.ts) -->
+<!-- BEGIN GENERATED: inputs-table (bun run build:action-docs; edit src/flows/inputs.ts) -->
 | Input | Default | Meaning |
 |---|---|---|
 | `token` | `github.token` | Token for the API calls (see [Token permissions](permissions.md)) |

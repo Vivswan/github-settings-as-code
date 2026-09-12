@@ -63,7 +63,7 @@ import { parseSettingsDoc, readSettingsFile } from "./settings-read.js";
 /**
  * The settings file a remote target is read from, and the action's default
  * `settings-file`: the single source for the action.yml default, the
- * multi-repo override guard in src/action/inputs.ts, and the prose below.
+ * multi-repo override guard in src/flows/inputs.ts, and the prose below.
  */
 export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
 

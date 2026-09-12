@@ -6,7 +6,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { describeProblem, type Problem, type ProblemOf, quoteList } from "../src/problem.js";
+import {
+  describeProblem,
+  type Problem,
+  type ProblemOf,
+  quoteList,
+  type SettingsProblem,
+} from "../src/problem.js";
 import { SECTION_KEYS } from "../src/schema.js";
 
 const KNOWN = SECTION_KEYS.join(", ");
@@ -365,6 +371,20 @@ describe("describeProblem", () => {
     ],
   ])("renders the variant: %s", (_what, problem, line) => {
     expect(describeProblem(problem)).toBe(line);
+  });
+});
+
+describe("SettingsProblem", () => {
+  test("names the four validation refusals and not a file's read failure", () => {
+    const codes: SettingsProblem["code"][] = [
+      "settings-not-mapping",
+      "settings-not-plain-mapping",
+      "settings-unknown-sections",
+      "settings-malformed-sections",
+    ];
+    // @ts-expect-error a read failure shares the prefix but is not a validation problem
+    const unreadable: SettingsProblem["code"] = "settings-file-unreadable";
+    expect(codes).not.toContain(unreadable);
   });
 });
 

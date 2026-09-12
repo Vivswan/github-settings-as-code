@@ -217,8 +217,13 @@ export type ProblemOf<C extends Problem["code"]> = Extract<Problem, { readonly c
 /** The layer boundary's members: what mergeLayers refuses. */
 export type LayerProblem = Extract<Problem, { readonly code: `layer-${string}` }>;
 
-/** The settings document's members: what validateSettingsDoc refuses. */
-export type SettingsProblem = Extract<Problem, { readonly code: `settings-${string}` }>;
+/** The settings document's members: what validateSettingsDoc refuses (a file's read failure is not one). */
+export type SettingsProblem = ProblemOf<
+  | "settings-not-mapping"
+  | "settings-not-plain-mapping"
+  | "settings-unknown-sections"
+  | "settings-malformed-sections"
+>;
 
 const PAT_ADVICE =
   "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
