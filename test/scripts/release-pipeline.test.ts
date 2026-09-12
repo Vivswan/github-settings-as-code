@@ -737,8 +737,8 @@ describe("retagMajor", () => {
     const next = prepareNextRelease(fx, "2.1.1", 44, "packaged-bundle-bytes-2\n");
     const newer = advanceBuild({ cwd: next.dir, sourceSha: next.mergeSha }).buildSha;
     const stale = checkoutOf(fx, "stale-rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
-    // The 2.1.1 job tags its chain commit and moves v2 there right after this run has read the v2 line, so the
-    // line it judged held no newer release and the major it leases against is already the newer one.
+    // The 2.1.1 job tags its chain commit and moves v2 there right after this run has read the v2 line: the line
+    // it judged held no newer release, and its lease, taken on the v2 value it read, is stale against the move.
     const landing = [
       `"${realGit}" -C "${next.dir}" push --quiet origin ${newer}:refs/tags/v2.1.1`,
       `"${realGit}" -C "${next.dir}" push --quiet --force origin ${newer}:refs/tags/v2`,

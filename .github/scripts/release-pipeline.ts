@@ -455,8 +455,8 @@ function fetchMainHead(cwd: string): string {
   return git(cwd, "rev-parse", "FETCH_HEAD");
 }
 
-/** Each source the chain packages, mapped to the newest chain commit packaging it: a release-hook backfill can
- * package a source a lost post-green push already had. */
+/** Each source the chain packages, mapped to the newest chain commit packaging it. The pipeline appends a source
+ * only after finding no commit for it, so a second commit for one source can only be a hand push. */
 function chainPackaging(cwd: string): Map<string, string> {
   const packaging = new Map<string, string>();
   const log = git(cwd, "log", "--format=%H%x09%(trailers:key=Source,valueonly)", BUILD_REMOTE);
@@ -1048,7 +1048,7 @@ function publishLatest(cwd: string, attempts: number): { sha: string; reason: st
       );
     }
     validateTip(cwd, build.tip, build.mainHead);
-    const target = newestChainCommit(cwd, build.mainHead);
+    const target = chainCommitOfNewestSource(cwd, build.mainHead);
     if (target.commit !== build.tip) {
       assertPackages(
         cwd,
@@ -1094,9 +1094,13 @@ function observeRemote(cwd: string, ref: string): { id: string; peeled: string }
   return { id, peeled: peeled === "" ? id : peeled };
 }
 
-/** The chain commit whose source is the newest on main. A trailer naming a commit off main, or none, packages
- * nothing this can name. */
-function newestChainCommit(cwd: string, mainHead: string): { commit: string; source: string } {
+/** The chain commit packaging the newest main source, in MAIN's order rather than the chain's: a release-hook
+ * backfill appends an older source behind newer ones. A trailer naming a commit off main, or none, packages nothing
+ * this can name. */
+function chainCommitOfNewestSource(
+  cwd: string,
+  mainHead: string,
+): { commit: string; source: string } {
   const packaging = chainPackaging(cwd);
   for (const source of git(cwd, "rev-list", "--topo-order", mainHead).split("\n")) {
     const commit = packaging.get(source);
