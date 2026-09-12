@@ -34,7 +34,8 @@ function skipped(path: string): boolean {
 
 const OCCURRENCE = /COMPAT\(/g;
 const MARKER = /^COMPAT\(v(0|[1-9]\d*)\):(.*)$/;
-const PLACEHOLDER = /^COMPAT\(vN\)/;
+/** The placeholder inside an inline-code span: a backtick before it (checked at the call) and one after it. */
+const PLACEHOLDER = /^COMPAT\(vN\)[^`]*`/;
 /** The comment a marker sits in decides where its description ends: the nearest opener before it on the line names
  * a closer (a block comment) or none (a line comment, or Markdown prose, which run to the end of the line). */
 const OPENER = /\/\/|#|\/\*|<!--/g;
@@ -68,7 +69,7 @@ export function scanText(path: string, text: string): Scan {
     const starts = [...content.matchAll(OCCURRENCE)].map((occurrence) => occurrence.index);
     starts.forEach((start, position) => {
       const segment = content.slice(start, starts[position + 1]);
-      if (markdown && content[start - 1] === "`" && PLACEHOLDER.test(segment)) {
+      if (markdown && content[start - 1] === "`" && PLACEHOLDER.test(content.slice(start))) {
         return;
       }
       const line = index + 1;

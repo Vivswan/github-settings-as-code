@@ -52,7 +52,7 @@ describe("checkCompatMarkers", () => {
       ".github/workflows/publish.yml":
         "name: publish\n# COMPAT(v3): tolerate the old asset name; delete this step\n",
       "docs/anchors.md":
-        "The marker is `COMPAT(vN): <what stays working and what to delete>`, a `COMPAT(vN)` comment.\n\nCOMPAT(v5): keep the old anchor ids; delete the redirect table\n<!-- COMPAT(v5): the old heading slugs still resolve; delete the redirect list -->\n",
+        "The marker is `COMPAT(vN): <what stays working and what to delete>`, a `COMPAT(vN)` comment.\n\nCOMPAT(v5): keep the old anchor ids; delete the redirect table\n<!-- COMPAT(v5): the old heading slugs still resolve; delete the redirect list -->\nUse `COMPAT(vN): reason; for example COMPAT(v5): keep the old path; delete it`.\n",
     });
     expect(checkCompatMarkers({ cwd })).toEqual({
       code: 0,
@@ -68,6 +68,7 @@ describe("checkCompatMarkers", () => {
         "  v5",
         "    docs/anchors.md:3  keep the old anchor ids; delete the redirect table",
         "    docs/anchors.md:4  the old heading slugs still resolve; delete the redirect list",
+        "    docs/anchors.md:5  keep the old path; delete it`.",
         "",
       ].join("\n"),
       stderr: "",
@@ -90,7 +91,7 @@ describe("checkCompatMarkers", () => {
         "",
       ].join("\n"),
       "notes.md":
-        "A `COMPAT(vN)` marker, and one gone wrong: COMPAT(v3)\n<!-- COMPAT(v3): -->\n<!-- COMPAT(vN): keep the old anchor; delete the redirect -->\n",
+        "A `COMPAT(vN)` marker, and one gone wrong: COMPAT(v3)\n<!-- COMPAT(v3): -->\n<!-- COMPAT(vN): keep the old anchor; delete the redirect -->\n`COMPAT(vN): keep the old path; delete it\n",
     });
     expect(checkCompatMarkers({ cwd })).toEqual({
       code: 1,
@@ -106,6 +107,7 @@ describe("checkCompatMarkers", () => {
         malformed("notes.md:1", "COMPAT(v3)"),
         malformed("notes.md:2", "COMPAT(v3): -->"),
         malformed("notes.md:3", "COMPAT(vN): keep the old anchor; delete the redirect -->"),
+        malformed("notes.md:4", "COMPAT(vN): keep the old path; delete it"),
         malformed("src/m.ts:1", "COMPAT(v3) accept the old key"),
         malformed("src/m.ts:2", "COMPAT(3): drop the v prefix"),
         malformed("src/m.ts:3", "COMPAT(v3):"),
