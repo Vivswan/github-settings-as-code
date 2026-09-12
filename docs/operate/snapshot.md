@@ -124,6 +124,15 @@ A snapshot is written so that applying it changes nothing and checking it reads 
 | `webhooks[].config.secret` | GitHub echoes `********` | A `$WEBHOOK_SECRET_N` reference and a note per hook |
 | `interaction_limits.expiry` | GitHub reports only the computed `expires_at` | No `expiry` key; apply re-arms the limit with GitHub's default unless you declare one |
 | `check_suite_preferences` | GitHub exposes no read endpoint | Nothing; the header says so |
+| `repository.name` | The repository's identity: a reused file would rename its target | Nothing |
+| `repository.<field>` GitHub reports as null | No declarable value | Nothing for that field |
+| `repository.security_and_analysis.<sub-key>` the PATCH does not accept | Read-only state (dependabot_security_updates is `enable_automated_security_fixes`' own) | Only the PATCHable sub-keys |
+| `repository.enable_immutable_releases` under owner enforcement | GitHub answers 409 to both writes | `true`, with a header line saying apply cannot change it from the repository |
+| `repository.enable_git_lfs` | GitHub exposes no read endpoint | Nothing; the header says so, and apply re-asserts the declared value on every run |
+| `repository.enable_*` toggles under a token whose every toggle probe answers 404 | A fine-grained token missing the Administration grant is answered like a disabled toggle | Nothing for the four toggles, under one header line |
+| `actions.<key>` the token cannot read | A sub-endpoint has its own grant (the OIDC template needs Actions) | Nothing for that key; the header names it, and the other keys read back |
+| `rulesets[]` whose `bypass_actors` the token cannot see | GitHub returns the list only to a write-grade token | No entry (kept under `_undeclared: keep`) and a header line; an entry without the list would clear it on the next update |
+| Organization and enterprise rulesets | Inherited, not the repository's to manage | Nothing; a header line names each |
 | `collaborators`: the repository owner, email invitations | The owner's access is implicit, and an email invitation has no username to declare | No entry and a note each; apply leaves both alone |
 | `collaborators`: expired invitations | A declared one would be cancelled and re-sent; an undeclared one is cancelled under the delete default the file carries | No entry and a note per invitation; add the entry to re-invite |
 | A custom role named `push` or `pull` | In a settings file those words mean the `write` and `read` roles, so no declaration plans as the live role | `collaborators` fails and the file is written without it; `teams` omits the team with a note |

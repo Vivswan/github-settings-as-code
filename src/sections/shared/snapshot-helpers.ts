@@ -142,7 +142,6 @@ export function rejectLiveDuplicates<T>(
  * One read of a snapshot that a denial may take out without failing the section: a
  * PermissionDenied becomes a note naming the key left out and the grant advice, anything else
  * propagates. For a section whose keys sit behind different grants (repository, actions).
- * @public
  */
 export async function readOrNote<T>(
   notes: string[],

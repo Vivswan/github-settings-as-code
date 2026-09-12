@@ -15,7 +15,11 @@ coverage:
       Org-sourced rulesets filtered out via source_type. GitHub returns bypass_actors only to a
       token with write access to the ruleset, so under a token without Administration write a
       declared bypass_actors is left out of the comparison and noted as not visible instead of
-      reported as drift.
+      reported as drift. Snapshot reads repository rulesets back as entries under the keep default
+      (id, source, links, timestamps, and the caller's bypass state fall away); an inherited
+      organization ruleset is noted, not declared, and a ruleset whose bypass_actors the token cannot
+      see is left out with a note (kept undeclared), since an entry without the key would clear the
+      bypass list on the next full-payload update.
   - area: "[Merge queue](https://docs.github.com/en/rest/repos/rules)"
     notes: >-
       Configured as the merge_queue rule type inside a branch ruleset; passes through verbatim like

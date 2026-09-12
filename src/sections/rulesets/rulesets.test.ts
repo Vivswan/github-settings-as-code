@@ -546,3 +546,121 @@ describe("rulesets", () => {
     const _silent: Op = silent;
   });
 });
+
+describe("rulesets snapshot", () => {
+  const snapshot = (api: GithubClient) =>
+    rulesetsSection.snapshot(planContext(rulesetsSection, api, REPO));
+
+  /** A live ruleset as the by-id GET returns it, server fields included. */
+  const served = (
+    id: number,
+    name: string,
+    body: Record<string, unknown>,
+  ): Record<string, unknown> & { id: number; name: string } => ({
+    id,
+    name,
+    node_id: `RRS_${id}`,
+    source_type: "Repository",
+    source: "o/r",
+    _links: { self: { href: `https://api.github.com/repos/o/r/rulesets/${id}` } },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-02T00:00:00Z",
+    current_user_can_bypass: "always",
+    ...body,
+  });
+
+  test("reads repository rulesets back as keep entries, dropping server fields; a hidden bypass list and an inherited ruleset are notes, not entries", async () => {
+    const api = liveRepo([
+      served(1, "main", {
+        target: "branch",
+        enforcement: "active",
+        conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+        rules: [
+          { type: "deletion" },
+          { type: "pull_request", parameters: { required_approving_review_count: 1 } },
+        ],
+        bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+      }),
+      // No bypass_actors KEY: what a token without write access is served.
+      served(2, "tags", {
+        target: "tag",
+        enforcement: "evaluate",
+        conditions: { ref_name: { include: ["refs/tags/v*"], exclude: [] } },
+        rules: [{ type: "update" }],
+      }),
+      {
+        ...served(3, "org-wide", { target: "branch", enforcement: "active" }),
+        source_type: "Organization",
+      },
+    ]);
+    expect(await snapshot(api)).toEqual({
+      value: {
+        _undeclared: "keep",
+        entries: [
+          {
+            name: "main",
+            target: "branch",
+            enforcement: "active",
+            conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+            rules: [
+              { type: "deletion" },
+              { type: "pull_request", parameters: { required_approving_review_count: 1 } },
+            ],
+            bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+          },
+        ],
+      },
+      notes: [
+        'rulesets[org-wide]: inherited from the organization (source_type "Organization"), so it is not part of the repository\'s snapshot; manage it where it is defined',
+        "rulesets[tags]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
+          "and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); " +
+          "grant Administration write to read it back",
+      ],
+    });
+    expect(api.writes).toEqual([]);
+  });
+
+  test("two repository rulesets under one name fail the snapshot naming both, since plan() upserts by name", async () => {
+    const api = liveRepo([
+      served(1, "main", { target: "branch", enforcement: "active" }),
+      served(2, "main", { target: "tag", enforcement: "active" }),
+    ]);
+    await expect(snapshot(api)).rejects.toThrow(
+      'rulesets: GitHub holds rulesets that resolve to one identity: "main (id 1)" and "main (id 2)". This section manages one ruleset per identity, so the snapshot cannot declare them; delete all but one of each on GitHub, then snapshot again',
+    );
+  });
+
+  test("an owned ruleset left out for its hidden bypass list leaves an empty keep wrapper, which plans as a no-op", async () => {
+    const api = liveRepo([served(2, "tags", { target: "tag", enforcement: "evaluate" })]);
+    const read = await snapshot(api);
+    expect(read).toEqual({
+      value: { _undeclared: "keep", entries: [] },
+      notes: [
+        "rulesets[tags]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
+          "and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); " +
+          "grant Administration write to read it back",
+      ],
+    });
+    const planned = await rulesetsSection.plan(
+      planContext(rulesetsSection, api, REPO),
+      read.value as NonNullable<typeof read.value>,
+    );
+    expect({ ops: planned.ops, drift: planned.drift }).toEqual({ ops: [], drift: [] });
+    expect(api.writes).toEqual([]);
+  });
+
+  test("only inherited rulesets is nothing to declare, with the inherited note", async () => {
+    const api = liveRepo([
+      {
+        ...served(3, "org-wide", { target: "branch", enforcement: "active" }),
+        source_type: "Organization",
+      },
+    ]);
+    expect(await snapshot(api)).toEqual({
+      value: undefined,
+      notes: [
+        'rulesets[org-wide]: inherited from the organization (source_type "Organization"), so it is not part of the repository\'s snapshot; manage it where it is defined',
+      ],
+    });
+  });
+});
