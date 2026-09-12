@@ -4,7 +4,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 
 ## Quick start
 
-1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) from the [pre-filled token form][pat-form]: it starts with every repository permission the action can need (for an organization owner, add Members: read by hand). Save it as the `ADMIN_TOKEN` repository secret. The default `GITHUB_TOKEN` can never hold these permissions.
+1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) from the [pre-filled token form][pat-form] and save it as the `ADMIN_TOKEN` repository secret. The form starts with every repository permission the action can need (an organization owner adds Members: read by hand); the default `GITHUB_TOKEN` can never hold them.
 
 2. Add `.github/settings.yml`. The first line gives editor autocomplete and hover docs:
 
@@ -23,7 +23,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 3. Add the workflow and run it from the Actions tab.
    - Keep `mode: check` for the first run: the drift report lists everything an apply would change or delete, and nothing is written.
    - Read the report. An apply deletes undeclared labels, autolinks, collaborators, Actions variables, and Copilot agents variables.
-   - Drop the `mode: check` line once the report says what you expect.
+   - Drop the `mode: check` line once the report says what you expect. The [getting started guide](docs/start/getting-started.md) explains the drift output.
 
    ```yaml
    # .github/workflows/settings.yml
@@ -48,22 +48,24 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
              mode: check
    ```
 
-The [getting started guide](docs/start/getting-started.md) walks the same steps with the drift output explained.
-
 ## Versioning
 
-- `@v2` is a moving major tag: <!-- x-release-please-major --> every release in that major line moves it, so fixes arrive without changing your pin. Stable within the line; pin it for production.
-- `@latest` is a moving tag on the `build` branch's packaged commit of the newest `main` source: main's newest green commit with the built action, reconciled at every release and, where the repository's own CI can push, at every green push. Breaking changes arrive there unannounced, ahead of any release. The tag exists from the first release cut on the `build` branch.
-- Pin `@vX.Y.Z` (or a commit SHA) for byte-stable behavior. Version tags cut from the `build` branch onward point at a packaged commit carrying the built action, whose recorded source is the audited release commit on main. A ruleset freezes the tags.
-- Packaged commits live on the `build` branch: each is its source commit's tree without `.github/workflows/`, plus the built action (consumers run the action, not this repository's workflows). The tags cut before that branch existed (v2.0.0 and earlier) point at release commits on `main` from when `main` still committed the bundle. `main` is source-only now and not runnable as an action.
-- v2 activates settings keys that were inert on v1: `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos`, and `branches[].protection.required_signatures`. Audit them in your files before moving a `@v1` pin; a stale `required_signatures: false` would remove a hand-enabled requirement.
+| Pin | Points at | Use it for |
+|---|---|---|
+| `@v2` <!-- x-release-please-major --> | The newest release in the major line, so fixes arrive without changing your pin | Production |
+| `@vX.Y.Z` or a commit SHA | One release, frozen by a ruleset | Byte-stable behavior |
+| `@latest` | The newest green `main` commit, packaged; breaking changes arrive here unannounced, ahead of any release | Trying unreleased fixes |
+
+- Every pin points at a packaged commit on the `build` branch: its source commit's tree without `.github/workflows/`, plus the built action. `main` is source-only and not runnable as an action. The tags up to v2.0.0 point at release commits on `main` from when `main` still committed the bundle.
+- v2 activates settings keys that were inert on v1: `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos`, and `branches[].protection.required_signatures`. Audit them before moving a `@v1` pin; a stale `required_signatures: false` would remove a hand-enabled requirement.
 - Only the latest release is supported; fixes are not backported (see [SECURITY.md](.github/SECURITY.md)). Each major has an [upgrade guide](docs/upgrading/README.md).
 
 ## Library
 
-The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node 22.14 or newer): validate, merge, check, and apply from your own code. Every green push to `main` publishes a pre-release: `npm install @vivswan/github-settings-as-code@next` (or `bun add`). The plain `npm install @vivswan/github-settings-as-code` gives the released version once one exists, and the bootstrap pre-release until then (a first publish carries `latest` whatever tag it asked for). The [library reference](docs/reference/library.md) has the API by group and the versioning rules.
+The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node 22.14 or newer): validate, merge, check, and apply from your own code.
 
-The package is also a command: `npx @vivswan/github-settings-as-code@next check --repository o/r --settings-file .github/settings.yml` runs the action's check from a terminal; the [command line guide](docs/start/cli.md) has every command.
+- `npm install @vivswan/github-settings-as-code` installs the released version; `@next` installs the newest green `main` commit as a pre-release. The [library reference](docs/reference/library.md) has the API by group and the versioning rules.
+- `npx @vivswan/github-settings-as-code@next check --repository o/r --settings-file .github/settings.yml` runs the action's check from a terminal. The [command line guide](docs/start/cli.md) has every command.
 
 ## Docs
 
@@ -91,9 +93,7 @@ The package is also a command: `npx @vivswan/github-settings-as-code@next check 
 
 ## Contributing
 
-The toolchain, the end-to-end harness, and the PR conventions are in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-Licensed under the [Individual and Small Organization License](LICENSE.md).
+The toolchain, the end-to-end harness, and the PR conventions are in [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under the [Individual and Small Organization License](LICENSE.md).
 
 <!-- BEGIN GENERATED: readme-pat-url (bun run build:docs; derived from RESOURCE_SLUGS in src/sections/contract/permissions.ts) -->
 [pat-form]: https://github.com/settings/personal-access-tokens/new?name=github-settings-as-code&description=Token+for+Vivswan%2Fgithub-settings-as-code&administration=write&issues=write&environments=write&pages=write&actions=write&actions_variables=write&repository_hooks=write&checks=write&secrets=write&dependabot_secrets=write&codespaces_secrets=write&agent_secrets=write&agent_variables=write&repository_custom_properties=write&secret_scanning_alerts=write&contents=read
