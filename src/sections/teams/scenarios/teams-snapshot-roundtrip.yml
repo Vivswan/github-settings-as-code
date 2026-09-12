@@ -1,0 +1,39 @@
+name: teams-snapshot-roundtrip
+description: "mode: snapshot lists the teams with access to an organization repo, reads each team's role through the access probe, and writes nothing to GitHub. Roles read back through the inverse of the declared vocabulary (write -> push, read -> pull, a custom role by name); a custom role literally named push has no declaration that plans as itself, so that team is noted, not declared. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+owner_kind: org
+live_state:
+  teams:
+    platform:
+      role_name: write
+    auditors:
+      role_name: security-auditor
+    readers:
+      role_name: read
+    pushy:
+      role_name: push
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: teams
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    teams: snapshot
+  snapshot:
+    teams:
+      - name: platform
+        permission: push
+      - name: auditors
+        permission: security-auditor
+      - name: readers
+        permission: pull
+  summary_contains:
+    - "teams[pushy]: the live role \"push\" has no declaration that plans as itself (\"push\" in a settings file means the \"write\" role); not declared"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

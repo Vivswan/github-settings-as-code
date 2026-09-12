@@ -112,8 +112,6 @@ describe("snapshotRepository", () => {
       "branches",
       "actions",
       "check_suite_preferences",
-      "collaborators",
-      "teams",
     ]);
     expect(
       result.outcomes.filter((o) => o.status === "unsupported").map((o) => [o.key, o.detail]),

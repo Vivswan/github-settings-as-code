@@ -18,6 +18,11 @@ coverage:
       custom org role names pass through; undeclared direct collaborators REMOVED by default (kept
       as notes under the wrapped `_undeclared: keep` form), owner never touched; new users get
       invitations.
+      Snapshot reads the direct collaborators and the pending username invitations back as entries
+      under the delete default, each role through the inverse mapping (write -> push, read -> pull,
+      custom role names verbatim); the repository owner, email invitations, and expired invitations
+      are noted, not declared, and a live role no declaration plans as (a custom role named "push"
+      or "pull") fails the collaborators section; the snapshot is written as partial without it.
 schema:
   SettingsFile.collaborators: >-
     Direct collaborators, with pending invitations reconciled alongside; undeclared ones are REMOVED

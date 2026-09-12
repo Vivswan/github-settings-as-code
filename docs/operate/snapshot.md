@@ -121,6 +121,10 @@ A snapshot is written so that applying it changes nothing and checking it reads 
 | `webhooks[].config.secret` | GitHub echoes `********` | A `$WEBHOOK_SECRET_N` reference and a note per hook |
 | `interaction_limits.expiry` | GitHub reports only the computed `expires_at` | No `expiry` key; apply re-arms the limit with GitHub's default unless you declare one |
 | `check_suite_preferences` | GitHub exposes no read endpoint | Nothing; the header says so |
+| `collaborators`: the repository owner, email invitations | The owner's access is implicit, and an email invitation has no username to declare | No entry and a note each; apply leaves both alone |
+| `collaborators`: expired invitations | A declared one would be cancelled and re-sent; an undeclared one is cancelled under the delete default the file carries | No entry and a note per invitation; add the entry to re-invite |
+| A custom role named `push` or `pull` | In a settings file those words mean the `write` and `read` roles, so no declaration plans as the live role | `collaborators` fails and the file is written without it; `teams` omits the team with a note |
+| `teams`: access granted at the organization or enterprise level | Declaring it would grant direct repository access on top | No entry and a note; apply leaves it alone |
 | Sections the snapshot does not read back yet | Not implemented for that section | Nothing; the header lists each, and the run notices them |
 
 A section that exists but holds nothing live (no milestones, no Pages site) is omitted with a header line, never written as an empty list: an empty list under `_undeclared: delete` would delete on apply.
