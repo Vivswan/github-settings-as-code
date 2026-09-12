@@ -556,6 +556,14 @@ describe("declarations are frozen at registration", () => {
           ]);
         }
       }
+      if (section.closedSurface !== undefined) {
+        attempts.push([
+          `${section.key} closedSurface.known`,
+          () => {
+            (section.closedSurface?.known as Record<string, true>).typo = true;
+          },
+        ]);
+      }
       for (const [role, op] of Object.entries(section.graphql ?? {})) {
         const tag = `${section.key}.${role}`;
         expect(Object.isFrozen(op), tag).toBe(true);

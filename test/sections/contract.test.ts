@@ -715,6 +715,11 @@ describe("freezeDeclarations", () => {
         combine: "merge",
         nested: { rules: { keys: () => null, keyField: "type", combine: "replace" } },
       },
+      closedSurface: {
+        known: { name: true },
+        describe: () => "an entry",
+        consequence: "the key would be ignored",
+      },
       shape,
       plan: async () => ({ ops: [], notes: [], drift: [] }),
     } as unknown as SectionModule;
@@ -731,6 +736,8 @@ describe("freezeDeclarations", () => {
       permission: module.permission,
       layering: module.layering,
       nested: module.layering?.nested?.rules,
+      closedSurface: module.closedSurface,
+      known: module.closedSurface?.known,
     };
     for (const [facet, value] of Object.entries(facets)) {
       expect(Object.isFrozen(value), facet).toBe(true);

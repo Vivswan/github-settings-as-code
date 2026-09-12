@@ -200,8 +200,9 @@ function hasSnapshot<K extends SectionKey>(
 /**
  * The one door out of src/sections: the engine, the library, and the roster below all reach a module
  * through it, so the foreign-context refusal is applied here once and not in 26 handlers, and so is the
- * freeze (freezeDeclarations): the wrapper shares its declaration objects with the source module, so both
- * are frozen in place. The freeze lives here rather than in a definition helper because the modules arrive
+ * freeze (freezeDeclarations): the wrapper shares its declaration objects with the source module, so those
+ * are deep-frozen in place, while only the wrapper object is shallow-frozen (a test can still stub the
+ * source's handlers). The freeze lives here rather than in a definition helper because the modules arrive
  * by several routes (literal objects, listSection, the secrets, variables, and setup factories).
  */
 const guarded: { [K in SectionKey]: SectionModule<K> } = Object.fromEntries(

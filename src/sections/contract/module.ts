@@ -382,7 +382,7 @@ export function deepFreeze<T>(value: T): DeepReadonly<T> {
   return value as DeepReadonly<T>;
 }
 
-/** Every SectionMeta field; the pin below fails on a field added there without being frozen here. */
+/** Every SectionMeta field plus closedSurface (its `known` map gates validation); the pin below fails on a module field sorted into neither list. */
 const DECLARATION_FIELDS = [
   "key",
   "permission",
@@ -392,17 +392,20 @@ const DECLARATION_FIELDS = [
   "graphql",
   "undeclaredDefault",
   "layering",
-] as const satisfies readonly (keyof SectionMeta)[];
+  "closedSurface",
+] as const satisfies readonly (keyof SectionModule)[];
 
-type _EveryDeclarationFieldFrozen = MustBeNever<
-  Exclude<keyof SectionMeta, (typeof DECLARATION_FIELDS)[number]>
+/** `shape` stays as zod built it; the rest are handlers. */
+type HandlerField = "shape" | "plan" | "snapshot" | "secretValues" | "run";
+
+type _EveryModuleFieldSorted = MustBeNever<
+  Exclude<keyof SectionModule, (typeof DECLARATION_FIELDS)[number] | HandlerField>
 >;
 
 /**
- * Called once per module as ../registry.ts registers it, so a route, status, hint, permission, or GraphQL
- * outcome cannot move after that in the action, the CLI, or the library alike; the readonly types stop
- * only compiled assignments. The module object is frozen shallowly with its declarations frozen through:
- * `shape` stays as zod built it, and the handlers are functions.
+ * Called once per module as ../registry.ts registers it, so a route, status, hint, permission, GraphQL
+ * outcome, or closed-surface key cannot move after that in the action, the CLI, or the library alike; the
+ * readonly types stop only compiled assignments. The module object itself is frozen shallowly.
  */
 export function freezeDeclarations<M extends SectionModule>(module: M): M {
   for (const field of DECLARATION_FIELDS) {
