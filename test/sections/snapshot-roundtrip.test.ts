@@ -323,8 +323,13 @@ const ROWS: { readonly [K in SnapshotKey]: Row } = {
     live: {
       custom_property_values: [
         { property_name: "tier", value: "gold" },
-        { property_name: "compliance", value: ["soc2", "hipaa"] },
+        // A live duplicate option reads back once: the planner compares lists as sets.
+        { property_name: "compliance", value: ["soc2", "hipaa", "soc2"] },
         { property_name: "pilot", value: null },
+        // An empty list is unset, like null: the planner refuses a declared []. An empty STRING
+        // is a value GitHub stores, so it stays.
+        { property_name: "team", value: [] },
+        { property_name: "owner", value: "" },
       ],
     },
     expected: {
@@ -333,6 +338,7 @@ const ROWS: { readonly [K in SnapshotKey]: Row } = {
         entries: [
           { property_name: "tier", value: "gold" },
           { property_name: "compliance", value: ["soc2", "hipaa"] },
+          { property_name: "owner", value: "" },
         ],
       },
       notes: [],

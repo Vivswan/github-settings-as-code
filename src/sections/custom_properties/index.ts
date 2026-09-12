@@ -225,7 +225,9 @@ export const customPropertiesSection = {
     });
     return plan;
   },
-  // An unset (null) live value is the org default, which no declaration needs to restate.
+  // An unset (null) live value is the org default, which no declaration needs to restate; an empty
+  // list is read the same way (the planner refuses `[]`, whose storage GitHub leaves undocumented).
+  // A list reads back as the SET the planner compares, so a live duplicate option is dropped.
   async snapshot(ctx) {
     const orgProbe = await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } });
     if ("missing" in orgProbe) {
@@ -237,7 +239,16 @@ export const customPropertiesSection = {
       };
     }
     const live = parseLive(this, ENDPOINTS.list, z.array(LiveProperty), await ctx.read.list.call());
-    const set = live.filter((property) => property.value !== null);
+    const set = live.flatMap((property) => {
+      if (property.value === null) {
+        return [];
+      }
+      if (!Array.isArray(property.value)) {
+        return [property];
+      }
+      const options = [...new Set(property.value)];
+      return options.length === 0 ? [] : [{ ...property, value: options }];
+    });
     if (set.length === 0) {
       return { value: undefined, notes: [] };
     }
