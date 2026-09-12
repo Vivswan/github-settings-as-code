@@ -359,7 +359,9 @@ function assertPackages(
         ? "none (an entry a path diff cannot list, such as an empty subtree)"
         : changed.join(", ");
     throw new Error(
-      `${ref} is not ${source} plus ${PACKAGED}, minus ${MANIFEST}'s preparation scripts, and the removal of ${WORKFLOWS_DIR}/ alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ${source}: ${listed}); ${remedy}`,
+      `${ref} is not ${source} plus ${PACKAGED}, minus ${MANIFEST}'s preparation scripts, and the removal of ` +
+        `${WORKFLOWS_DIR}/ alone: its tree is ${actual}, the rebuilt one is ${expected} ` +
+        `(paths beyond those changed relative to ${source}: ${listed}); ${remedy}`,
     );
   }
 }

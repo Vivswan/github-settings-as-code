@@ -340,7 +340,10 @@ describe("packageRelease", () => {
     [
       "an extra library file",
       (rerun) => write(rerun, "lib/pkg/chunk.js", "extra\n"),
-      /refs\/tags\/v2\.1\.0 carries \[lib\/index\.js, lib\/pkg\/index\.d\.ts, lib\/pkg\/index\.js\] under lib\/index\.js and lib\/pkg\/, while this build of [0-9a-f]{40} produced \[lib\/index\.js, lib\/pkg\/chunk\.js, lib\/pkg\/index\.d\.ts, lib\/pkg\/index\.js\]/,
+      new RegExp(
+        String.raw`refs/tags/v2\.1\.0 carries \[lib/index\.js, lib/pkg/index\.d\.ts, lib/pkg/index\.js\] under lib/index\.js and lib/pkg/, ` +
+          String.raw`while this build of [0-9a-f]{40} produced \[lib/index\.js, lib/pkg/chunk\.js, lib/pkg/index\.d\.ts, lib/pkg/index\.js\]`,
+      ),
     ],
   ];
   test.each(drifted)("a rerun whose rebuild differs in %s stops loudly", (_name, drift, error) => {
