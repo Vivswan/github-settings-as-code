@@ -9,6 +9,8 @@ coverage:
       .../workflows/{id}/enable or /disable. Declared as {path, state: active or disabled}; a bare
       file name matches .github/workflows/<name>; every live disabled_* state counts as disabled and
       a live "deleted" workflow counts as absent; undeclared workflows are never touched.
+      Snapshot reads every present workflow back as {path, state}, each disabled_* state as
+      disabled; deleted workflows are left out.
 schema:
   SettingsFile.workflows: Per-workflow enable/disable state; undeclared workflows are untouched.
   WorkflowConfig: >-

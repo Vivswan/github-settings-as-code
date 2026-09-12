@@ -1,8 +1,11 @@
+import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { parseLive } from "../contract/live.js";
 import { loosen, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
+import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { PagesConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["pages"] };
@@ -124,5 +127,17 @@ export const pagesSection = {
       });
     }
     return plan;
+  },
+  // No site is nothing to declare (not `pages: null`, which would DISABLE Pages on apply); the
+  // engine notes the 404's other reading (a token without the Pages grant).
+  async snapshot(ctx) {
+    const probe = await ctx.read.get.probeAbsent();
+    if ("missing" in probe) {
+      return { value: undefined, notes: [] };
+    }
+    // A site body must be a mapping: PagesConfig accepts null (the declared "Pages off"), so a
+    // null 200 would otherwise read back as a declaration that DISABLES the site.
+    const site = parseLive(this, ENDPOINTS.get, z.looseObject({}), probe.data);
+    return { value: projectOntoSchema(PagesConfig, site), notes: [] };
   },
 } satisfies SectionModule<"pages", typeof ENDPOINTS>;

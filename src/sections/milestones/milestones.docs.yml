@@ -10,6 +10,7 @@ coverage:
       (description/state untouched unless declared); undeclared milestones kept by default and
       surfaced as notes, because deleting a milestone DETACHES it from every issue carrying it - the
       wrapped `_undeclared: delete` form opts into exactly that.
+      Snapshot reads every milestone, open and closed, back as entries under the keep default.
 schema:
   SettingsFile.milestones: >-
     Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set

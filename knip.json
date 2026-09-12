@@ -5,6 +5,7 @@
     "src/schema.ts",
     ".github/scripts/*.ts",
     "**/*.test.ts",
+    "test/sections/snapshot-rows/*.ts",
     "src/upstream-gaps/gap.ts"
   ],
   "project": ["src/**/*.ts", "test/**/*.ts", ".github/scripts/**/*.ts"]

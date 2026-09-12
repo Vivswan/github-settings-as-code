@@ -26,6 +26,7 @@ import {
   plainData,
   type SectionPlan,
 } from "../contract/plan.js";
+import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { INTERACTION_LIMITS_ROUTED_KEYS, InteractionLimitsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -113,6 +114,11 @@ function noLiveLimit(live: unknown): boolean {
     Object.keys(live).length === 0
   );
 }
+
+const LiveCreationCap = z.looseObject({
+  enabled: z.boolean(),
+  max_open_pull_requests: z.number(),
+});
 
 const LiveInteractionLimit = z.looseObject({
   limit: z.string(),
@@ -354,5 +360,54 @@ export const interactionLimitsSection = {
       }
     }
     return plan;
+  },
+  /**
+   * Only what the repository itself owns reads back; an inherited limit is the org's or user's
+   * setting, and a disabled cap is GitHub's default.
+   *
+   *   limit inherited (org or user origin)   -> noted, not declared
+   *   cap answers 405                        -> cap and bypass both omitted, noted
+   *   cap disabled, or nobody on the bypass  -> omitted
+   */
+  async snapshot(ctx) {
+    const notes: string[] = [];
+    const value: Record<string, unknown> = {};
+    const live = await liveBaseLimit(ctx, this);
+    if (live.kind === "repository") {
+      value.limit = live.limit;
+      notes.push(
+        "interaction_limits.expiry: GitHub reports only the computed expires_at, so the declared duration cannot be read back; apply re-arms the limit with GitHub's default (one_day) unless you declare expiry",
+      );
+    } else if (live.kind === "inherited") {
+      notes.push(
+        `interaction_limits: the live "${live.limit}" limit is set at the ${live.origin} level, not on the repository, so it is not part of the repository's snapshot`,
+      );
+    }
+    const cap = await ctx.read.capGet.tryCall({
+      describe: "reading the pull request creation cap",
+    });
+    if ("error" in cap) {
+      notes.push(
+        `interaction_limits: ${CAP_UNAVAILABLE} (405), so pull_request_creation_cap and pull_request_creation_bypass are omitted`,
+      );
+    } else {
+      // Parsed at the boundary: a body off the shape (a null, a quoted flag) fails the section
+      // instead of reading as "no cap".
+      const liveCap = parseLive(this, ENDPOINTS.capGet, LiveCreationCap, cap.data);
+      if (liveCap.enabled) {
+        value.pull_request_creation_cap = projectOntoSchema(
+          InteractionLimitsConfig.unwrap().shape.pull_request_creation_cap,
+          liveCap,
+        );
+      }
+      const bypass = await liveBypassLogins(ctx, this);
+      if (bypass.length > 0) {
+        value.pull_request_creation_bypass = bypass;
+      }
+    }
+    if (Object.keys(value).length === 0) {
+      return { value: undefined, notes };
+    }
+    return { value: value as DeclaredInteractionLimits, notes };
   },
 } satisfies SectionModule<"interaction_limits", typeof ENDPOINTS>;

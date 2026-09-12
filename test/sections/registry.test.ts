@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SECTION_KEYS, type SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import type { checkSuitePreferencesSection } from "../../src/sections/check_suite_preferences/index.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -26,10 +27,12 @@ import {
 import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
 import type { PlanContext, SectionPlan } from "../../src/sections/contract/plan.js";
 import { call, probeAbsent } from "../../src/sections/contract/requests.js";
+import { labelsSection } from "../../src/sections/labels/index.js";
 import {
   allEndpoints,
   allGraphqlOps,
   type MisdeclaredPlanModule,
+  type MisdeclaredSnapshotModule,
   SECTIONS,
   sectionModule,
   sectionShape,
@@ -998,6 +1001,22 @@ describe("handler contracts", () => {
     };
     // @ts-expect-error a plan() over labels' value is not exact for workflows
     type _Wrong = MustBeNever<MisdeclaredPlanModule<"workflows", typeof misdeclared>>;
+    // The snapshot twin: a module without snapshot() measures exact (nothing to compare), the
+    // shipped labels module measures exact, and labels' snapshot() over workflows' dictionary
+    // measures misdeclared.
+    type _NoSnapshot = MustBeNever<
+      MisdeclaredSnapshotModule<"check_suite_preferences", typeof checkSuitePreferencesSection>
+    >;
+    type _ExactSnapshot = MustBeNever<MisdeclaredSnapshotModule<"labels", typeof labelsSection>>;
+    const misdeclaredSnapshot = {
+      ...labelsSection,
+      async snapshot(_ctx: PlanContext<typeof workflowsSection.endpoints>) {
+        return { value: undefined, notes: [] };
+      },
+    };
+    type Misdeclared = typeof misdeclaredSnapshot;
+    // @ts-expect-error a snapshot() over workflows' dictionary is not exact for labels
+    type _WrongSnapshot = MustBeNever<MisdeclaredSnapshotModule<"labels", Misdeclared>>;
   });
 
   test("every reading section declares exactly one primaryRead, and its 404 posture derives from it", () => {

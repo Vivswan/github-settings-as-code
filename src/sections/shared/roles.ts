@@ -8,9 +8,28 @@ export const DEFAULT_ROLE = "push";
  * compares like with like. Custom org role names pass through.
  */
 export function roleForPermission(permission: string): string {
-  const roles: Record<string, string> = { push: "write", pull: "read" };
-  return roles[permission] ?? permission;
+  return ROLE_FOR_PERMISSION.get(permission) ?? permission;
 }
+
+/**
+ * The inverse: the declared permission a GET-vocabulary role reads back as (write -> push,
+ * read -> pull, custom roles verbatim), for a snapshot. Undefined when the role is not one a
+ * declaration could have produced, so a caller never emits a permission GitHub would map elsewhere.
+ */
+export function permissionForRole(role: string): string | undefined {
+  const permission = PERMISSION_FOR_ROLE.get(role) ?? role;
+  return roleForPermission(permission) === role ? permission : undefined;
+}
+
+// Maps, not records: a declared permission named like a prototype member ("constructor") must
+// pass through, not resolve to Object.prototype's.
+const ROLE_FOR_PERMISSION: ReadonlyMap<string, string> = new Map([
+  ["push", "write"],
+  ["pull", "read"],
+]);
+const PERMISSION_FOR_ROLE: ReadonlyMap<string, string> = new Map(
+  [...ROLE_FOR_PERMISSION].map(([permission, role]) => [role, permission]),
+);
 
 /**
  * The GET reports this enum and the PATCH accepts nothing else, so a declared custom org role can never be

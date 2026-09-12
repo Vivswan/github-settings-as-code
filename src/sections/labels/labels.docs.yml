@@ -7,6 +7,7 @@ coverage:
       Full CRUD on /repos/{owner}/{repo}/labels: upsert by name, rename via new_name (Probot
       parity), undeclared labels DELETED loudly by default; the wrapped `_undeclared: keep` form
       keeps them, each surfaced as a note.
+      Snapshot reads the live labels back as entries under the delete default.
 schema:
   SettingsFile.labels: >-
     Issue/PR labels; undeclared labels are DELETED by default (Probot parity; the wrapped form can

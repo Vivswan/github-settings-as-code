@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_ROLE, roleForPermission } from "../../src/sections/shared/roles.js";
+import {
+  DEFAULT_ROLE,
+  permissionForRole,
+  roleForPermission,
+} from "../../src/sections/shared/roles.js";
 
 describe("roleForPermission", () => {
   test("maps the PUT vocabulary to the GET role_name vocabulary", () => {
@@ -12,6 +16,31 @@ describe("roleForPermission", () => {
     expect(roleForPermission("maintain")).toBe("maintain");
     expect(roleForPermission("triage")).toBe("triage");
     expect(roleForPermission("security-team")).toBe("security-team");
+  });
+
+  test("a permission named like a prototype member passes through instead of resolving Object.prototype", () => {
+    expect(roleForPermission("constructor")).toBe("constructor");
+    expect(roleForPermission("toString")).toBe("toString");
+  });
+});
+
+describe("permissionForRole", () => {
+  test.each([
+    ["write", "push"],
+    ["read", "pull"],
+    ["admin", "admin"],
+    ["maintain", "maintain"],
+    ["security-team", "security-team"],
+    ["constructor", "constructor"],
+    // A role no declaration produces: "push" and "pull" are the PUT vocabulary GitHub reads
+    // back as write and read, so a live role spelled that way maps nowhere.
+    ["push", undefined],
+    ["pull", undefined],
+  ])("%s reads back as the declared permission %s", (role, permission) => {
+    expect(permissionForRole(role)).toBe(permission);
+    if (permission !== undefined) {
+      expect(roleForPermission(permission)).toBe(role);
+    }
   });
 });
 

@@ -22,6 +22,7 @@ import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
+import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { SecretScanningPatternConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["secret_scanning_alerts"] };
@@ -258,5 +259,18 @@ export const secretScanningPatternsSection = {
       });
     }
     return plan;
+  },
+  async snapshot(ctx) {
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LivePatternEntry),
+      await ctx.read.list.listAll(),
+    );
+    if (live.length === 0) {
+      return { value: undefined, notes: [] };
+    }
+    const entries = live.map((pattern) => projectOntoSchema(SecretScanningPatternConfig, pattern));
+    return { value: knobbedSnapshot(this, entries), notes: [] };
   },
 } satisfies SectionModule<"secret_scanning_custom_patterns", typeof ENDPOINTS>;
