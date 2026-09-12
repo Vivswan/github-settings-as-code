@@ -30,6 +30,8 @@ jobs:
         run: bun run typecheck
       - name: Dead code (knip)
         run: bun run knip
+      - name: Compat markers
+        run: bun run check:compat
       - name: Test
         run: bun run test
 

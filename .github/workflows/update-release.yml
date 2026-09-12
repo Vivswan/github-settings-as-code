@@ -114,6 +114,7 @@ jobs:
       # (v2.0.0 shipped assetless exactly this way).
       #   attestation.json   -> the managed publish stage's asset, attached after this job; ignored by the check
       #   attestation.jsonl  -> stale provenance under the old name, which that stage no longer cleans up; deleted first
+      # COMPAT(v3): a draft still carrying attestation.jsonl under the old asset name passes; delete the delete-asset branch.
       - name: Confirm the release carries both packaged assets
         env:
           GH_TOKEN: ${{ github.token }}

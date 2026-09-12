@@ -330,8 +330,8 @@ function assertPackages(
   };
   const expected = treePlusBundle(cwd, source, stage);
   const actual = git(cwd, "rev-parse", `${packaged}^{tree}`);
-  // The chain commits minted before the library rode along carry the source's package.json as is and stay valid
-  // parents and latest targets; a commit that carries lib/pkg/ was minted after the strip and is held to it.
+  // COMPAT(v3): bundle-only chain commits stay valid parents; delete this arm, the assertCarries above, REQUIRED_BUILT_FILES' parent clause, and the legacy-chain test.
+  // A commit that carries lib/pkg/ was minted after the strip and is held to it.
   const legacy =
     !entries.some(({ path }) => path.startsWith("lib/pkg/")) &&
     actual === treePlusBundle(cwd, source, stage, "source");
