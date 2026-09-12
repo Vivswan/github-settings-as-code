@@ -6,16 +6,23 @@ import { parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
+  type SectionMeta,
   type SectionModule,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import type { PlannedOp, SectionPlan } from "../contract/plan.js";
+import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
-import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "../shared/roles.js";
+import {
+  DEFAULT_ROLE,
+  INVITATION_ROLES,
+  permissionForRole,
+  roleForPermission,
+} from "../shared/roles.js";
 import { knobbed } from "../shared/schema-helpers.js";
+import { knobbedSnapshot } from "../shared/snapshot-helpers.js";
 import { CollaboratorConfig } from "./schema.js";
 
 const LiveCollaborator = z.looseObject({
@@ -23,6 +30,7 @@ const LiveCollaborator = z.looseObject({
   permissions: z.record(z.string(), z.boolean()).optional(),
   role_name: z.string().optional(),
 });
+type LiveCollaborator = z.infer<typeof LiveCollaborator>;
 
 // `permissions` speaks the READ vocabulary (read/write/...) that roleForPermission maps declared
 // permissions into; `invitee` is null on email invitations.
@@ -70,6 +78,55 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
+type CollaboratorsContext = PlanContext<typeof ENDPOINTS>;
+
+/** The permission a live role declares as; a role no declaration plans as fails loudly. */
+function declaredPermission(label: string, role: string): string {
+  const permission = permissionForRole(role);
+  if (permission === undefined) {
+    throw new Error(
+      `${label}: the live role "${role}" has no declaration that plans as itself ("${role}" in a settings file means the "${roleForPermission(role)}" role), so it cannot be read back`,
+    );
+  }
+  return permission;
+}
+
+/** Both pools in one read, so plan() and snapshot() see the same live access. */
+async function readLiveAccess(
+  ctx: CollaboratorsContext,
+  section: SectionMeta,
+): Promise<{
+  collaborators: LiveCollaborator[];
+  invitations: NamedInvitation[];
+  emailInvitations: LiveInvitation[];
+}> {
+  const collaborators = parseLive(
+    section,
+    ENDPOINTS.list,
+    z.array(LiveCollaborator),
+    await ctx.read.list.listAll({ query: { affiliation: "direct" } }),
+  );
+  const allInvitations = parseLive(
+    section,
+    ENDPOINTS.listInvitations,
+    z.array(LiveInvitation),
+    await ctx.read.listInvitations.listAll(),
+  );
+  return {
+    collaborators,
+    invitations: allInvitations.filter(isNamedInvitation),
+    emailInvitations: allInvitations.filter((invitation) => !isNamedInvitation(invitation)),
+  };
+}
+
+function isOwner(ctx: CollaboratorsContext, login: string): boolean {
+  return login.toLowerCase() === ctx.repo.owner.toLowerCase();
+}
+
+function emailInvitationNote(invitation: LiveInvitation, outcome: string): string {
+  return `invitation ${invitation.id} was sent by email, so no username can declare it; ${outcome}`;
+}
+
 export const collaboratorsSection = {
   key: "collaborators",
   undeclaredDefault: "delete",
@@ -90,24 +147,11 @@ export const collaboratorsSection = {
       (c) => c.username.toLowerCase(),
       (c) => c.username,
     );
-    const live = parseLive(
-      this,
-      ENDPOINTS.list,
-      z.array(LiveCollaborator),
-      await ctx.read.list.listAll({ query: { affiliation: "direct" } }),
-    );
-    const liveByLogin = new Map(live.map((c) => [c.login.toLowerCase(), c]));
     // Both pools are resolved BEFORE the declared walk, so a declared user is never mistaken for
     // undeclared in the other pool; email invitations (null invitee, which no username can declare)
     // split into their own pool.
-    const allInvitations = parseLive(
-      this,
-      ENDPOINTS.listInvitations,
-      z.array(LiveInvitation),
-      await ctx.read.listInvitations.listAll(),
-    );
-    const invitations = allInvitations.filter(isNamedInvitation);
-    const emailInvitations = allInvitations.filter((invitation) => !isNamedInvitation(invitation));
+    const { collaborators: live, invitations, emailInvitations } = await readLiveAccess(ctx, this);
+    const liveByLogin = new Map(live.map((c) => [c.login.toLowerCase(), c]));
     const inviteByLogin = new Map(
       invitations.map((invitation) => [invitation.invitee.login.toLowerCase(), invitation]),
     );
@@ -191,7 +235,7 @@ export const collaboratorsSection = {
 
     for (const collaborator of live) {
       const login = collaborator.login.toLowerCase();
-      if (login === ctx.repo.owner.toLowerCase() || declaredKeys.has(login)) {
+      if (isOwner(ctx, login) || declaredKeys.has(login)) {
         continue;
       }
       if (policy === "keep") {
@@ -256,9 +300,74 @@ export const collaboratorsSection = {
 
     for (const invitation of emailInvitations) {
       plan.notes.push(
-        `invitation ${invitation.id} was sent by email, so no username can declare it; left untouched - cancel it from the repository's Access settings if it is unwanted`,
+        emailInvitationNote(
+          invitation,
+          "left untouched - cancel it from the repository's Access settings if it is unwanted",
+        ),
       );
     }
     return plan;
+  },
+  /**
+   * Omitted with a note: the owner and email invitations (no-ops for plan()), and expired
+   * invitations (plan() cancels an undeclared one; a declared one it would cancel and re-send).
+   * A role the snapshot cannot declare fails loudly:
+   * dropping the entry would plan a removal, guessing a role would plan a grant.
+   */
+  async snapshot(ctx) {
+    const { collaborators, invitations, emailInvitations } = await readLiveAccess(ctx, this);
+    const notes: string[] = [];
+    const entries: CollaboratorConfig[] = [];
+    const expired: string[] = [];
+    for (const collaborator of collaborators) {
+      const label = `collaborators[${collaborator.login}]`;
+      if (isOwner(ctx, collaborator.login)) {
+        notes.push(
+          `${label}: the repository owner's access is implicit and never managed, so it is not declared`,
+        );
+        continue;
+      }
+      if (collaborator.role_name === undefined) {
+        throw new Error(
+          `${label}: GitHub reported no role_name for this collaborator, so their permission cannot be read back`,
+        );
+      }
+      entries.push({
+        username: collaborator.login,
+        permission: declaredPermission(label, collaborator.role_name),
+      });
+    }
+    for (const invitation of invitations) {
+      const login = invitation.invitee.login;
+      const label = `collaborators[${login}]`;
+      if (invitation.expired === true) {
+        expired.push(label);
+        continue;
+      }
+      if (invitation.permissions === undefined) {
+        throw new Error(
+          `${label}: GitHub reported no permissions on the pending invitation, so it cannot be read back`,
+        );
+      }
+      entries.push({
+        username: login,
+        permission: declaredPermission(label, invitation.permissions),
+      });
+    }
+    // With nothing to declare the section is omitted, so apply never reaches the expired ones.
+    const outcome =
+      entries.length > 0
+        ? "apply cancels it - add the entry to re-invite them"
+        : "nothing else is declared, so the section is omitted and apply leaves it - declare the entry to re-invite them";
+    for (const label of expired) {
+      notes.push(`${label}: the pending invitation has expired, so it is not declared; ${outcome}`);
+    }
+    for (const invitation of emailInvitations) {
+      notes.push(emailInvitationNote(invitation, "not declared, and apply leaves it untouched"));
+    }
+    if (entries.length === 0) {
+      return { value: undefined, notes };
+    }
+    return { value: knobbedSnapshot(this, entries), notes };
   },
 } satisfies SectionModule<"collaborators", typeof ENDPOINTS>;

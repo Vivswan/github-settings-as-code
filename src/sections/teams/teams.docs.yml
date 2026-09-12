@@ -1,5 +1,5 @@
 sections_table:
-  endpoints: org team repo permissions
+  endpoints: org team repo permissions + repo team list
   notes: org repos only, skipped with a notice on personal accounts
 coverage:
   - area: >-
@@ -9,6 +9,12 @@ coverage:
       note on personal accounts (404 only; 403/5xx still fail). Both modes probe each team's access
       with the v3.repository media type to read role_name, and the grant is issued only when the
       team lacks access or its live role diverges.
+      Snapshot lists the teams with access (GET /repos/{owner}/{repo}/teams) and reads each team's
+      role through the same probe, so a custom role reads back by name; noted, not declared: access
+      granted at the organization or enterprise level, a probe 404 (no access, or a fine-grained
+      token missing the grant; the note names both), a role the probe does not report, and a role
+      no declaration plans as (a custom role named "push" or "pull"). A personal account snapshots
+      nothing.
 schema:
   SettingsFile.teams: Org team access to the repo; skipped on personal accounts.
   TeamConfig: >-

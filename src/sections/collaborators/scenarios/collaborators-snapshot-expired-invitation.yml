@@ -1,0 +1,35 @@
+name: collaborators-snapshot-expired-invitation
+description: "mode: snapshot omits an expired invitation with a note instead of declaring it: a declared entry would be cancelled and re-sent on apply, and the undeclared one is cancelled under the delete default the snapshot carries, so the file cannot read clean against this state. The accepted collaborator still reads back."
+settings: {}
+live_state:
+  collaborators:
+    - login: alice
+      role_name: write
+  invitations:
+    - id: 901
+      invitee:
+        login: dave
+      permissions: write
+      expired: true
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: collaborators
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    collaborators: snapshot
+  snapshot:
+    collaborators:
+      _undeclared: delete
+      entries:
+        - username: alice
+          permission: push
+  summary_contains:
+    - "collaborators[dave]: the pending invitation has expired, so it is not declared; apply cancels it - add the entry to re-invite them"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /

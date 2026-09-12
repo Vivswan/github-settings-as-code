@@ -8,9 +8,11 @@ import { teamsSection } from "./index.js";
 import { teamsMockHandlers } from "./mock.js";
 
 const ORG = "GET /orgs/o";
+const LIST = "GET /repos/o/r/teams?per_page=100&page=1";
 const probeOf = (slug: string) => `GET /orgs/o/teams/${slug}/repos/o/r`;
 const plan = (api: MockApi, desired: Parameters<typeof teamsSection.plan>[1]) =>
   teamsSection.plan(planContext(teamsSection, api, REPO), desired);
+const snapshot = (api: MockApi) => teamsSection.snapshot(planContext(teamsSection, api, REPO));
 
 describe("teams", () => {
   test("a personal account no-ops with a note after the org probe alone", async () => {
@@ -118,9 +120,9 @@ describe("teams", () => {
     });
   });
 
-  test("the read port exposes the org probe in its absent posture and the team probe, never the grant", () => {
+  test("the read port exposes the org probe in its absent posture, the list, and the team probe, never the grant", () => {
     const ctx = planContext(teamsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["org", "probe"]);
+    expect(Object.keys(ctx.read)).toEqual(["org", "list", "probe"]);
     // @ts-expect-error a write role is not a read: the port has no `grant`
     ctx.read.grant;
     // @ts-expect-error an "absent" primary read offers no throwing helper
@@ -128,5 +130,70 @@ describe("teams", () => {
     // @ts-expect-error nor a list
     ctx.read.org.listAll;
     expect(typeof ctx.read.probe.probeAbsent).toBe("function");
+    expect(typeof ctx.read.list.listAll).toBe("function");
+  });
+
+  describe("snapshot", () => {
+    test("reads each listed team's role through the probe, not the listing's permission, so a custom role reads back by name; a probe 404 is noted with both readings", async () => {
+      const api = new MockApi({
+        [ORG]: { data: { login: "o" } },
+        [LIST]: {
+          data: [
+            { slug: "platform", permission: "push", access_source: "direct" },
+            { slug: "auditors", permission: "pull", access_source: "direct" },
+            { slug: "everyone", permission: "pull", access_source: "organization" },
+            { slug: "legacy", permission: "push" },
+            { slug: "gone", permission: "push", access_source: "direct" },
+            { slug: "roleless", permission: "push", access_source: "direct" },
+            { slug: "pushy", permission: "push", access_source: "direct" },
+          ],
+        },
+        [probeOf("platform")]: { data: { role_name: "write" } },
+        [probeOf("auditors")]: { data: { role_name: "security-auditor" } },
+        [probeOf("legacy")]: { data: { role_name: "read" } },
+        [probeOf("gone")]: { error: { status: 404, message: "Not Found", body: "" } },
+        [probeOf("roleless")]: { data: null },
+        [probeOf("pushy")]: { data: { role_name: "push" } },
+      });
+      expect(await snapshot(api)).toEqual({
+        value: [
+          { name: "platform", permission: "push" },
+          { name: "auditors", permission: "security-auditor" },
+          { name: "legacy", permission: "pull" },
+        ],
+        notes: [
+          "teams[everyone]: access to o/r is granted at the organization level, not on the repository; not declared, since declaring it would grant direct access",
+          "teams[gone]: listed with access to o/r, but the access probe answered 404, read here as no access; not declared. " +
+            "A fine-grained token missing the grant gets the same answer; if the team does have access, " +
+            'grant "Members" (read) under the PAT\'s Organization permissions and "Administration" (read and write) under its Repository permissions, then snapshot again',
+          "teams[roleless]: has access to o/r, but GitHub reported no role for it; not declared - add the entry with the intended permission",
+          'teams[pushy]: the live role "push" has no declaration that plans as itself ("push" in a settings file means the "write" role); not declared',
+        ],
+      });
+      expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+        ORG,
+        LIST,
+        probeOf("platform"),
+        probeOf("auditors"),
+        probeOf("legacy"),
+        probeOf("gone"),
+        probeOf("roleless"),
+        probeOf("pushy"),
+      ]);
+    });
+
+    test("a personal account snapshots nothing after the org probe alone; an org repo with no team access snapshots nothing after the list", async () => {
+      const personal = new MockApi({});
+      expect(await snapshot(personal)).toEqual({
+        value: undefined,
+        notes: [
+          'teams: owner "o" is a personal account, not an organization, so team access does not apply',
+        ],
+      });
+      expect(personal.calls.map((c) => `${c.method} ${c.path}`)).toEqual([ORG]);
+      const empty = new MockApi({ [ORG]: { data: { login: "o" } }, [LIST]: { data: [] } });
+      expect(await snapshot(empty)).toEqual({ value: undefined, notes: [] });
+      expect(empty.calls.map((c) => `${c.method} ${c.path}`)).toEqual([ORG, LIST]);
+    });
   });
 });

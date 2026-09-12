@@ -1,0 +1,47 @@
+name: collaborators-snapshot-roundtrip
+description: "mode: snapshot reads the live direct collaborators and pending username invitations back into snapshot.yml and writes nothing to GitHub. Roles read back through the inverse of the declared vocabulary (write -> push, read -> pull, a custom role by name); the repository owner and the email invitation are noted, not declared. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  collaborators:
+    - login: e2e-owner
+      role_name: admin
+    - login: alice
+      role_name: write
+    - login: carol
+      role_name: security-team
+  invitations:
+    - id: 501
+      invitee:
+        login: bob
+      permissions: read
+    - id: 502
+      invitee: null
+      permissions: read
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: collaborators
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    collaborators: snapshot
+  snapshot:
+    collaborators:
+      _undeclared: delete
+      entries:
+        - username: alice
+          permission: push
+        - username: carol
+          permission: security-team
+        - username: bob
+          permission: pull
+  summary_contains:
+    - "collaborators[e2e-owner]: the repository owner's access is implicit and never managed, so it is not declared"
+    - "invitation 502 was sent by email, so no username can declare it; not declared, and apply leaves it untouched"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

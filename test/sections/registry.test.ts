@@ -625,6 +625,7 @@ describe("allEndpoints", () => {
       "secret_scanning_custom_patterns.remove",
       "secret_scanning_custom_patterns.update",
       "teams.grant",
+      "teams.list",
       "teams.org",
       "teams.probe",
       "webhooks.create",
