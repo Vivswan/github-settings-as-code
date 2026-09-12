@@ -698,8 +698,9 @@ export async function runScenario(
 }
 
 /**
- * The nightly issue action lifts each report.md whole, so the replay rides in the report itself, right under the
- * title; writeReport puts the curated command there and setReplay swaps in the fuzzer's.
+ * The nightly issue action keeps only the head of each report.md (60 lines, 8000 chars) when an artifact name is
+ * given, so the replay sits right under the title; writeReport puts the curated command there and setReplay swaps in
+ * the fuzzer's.
  */
 function replayBlockLines(replay: string): string[] {
   return ["", "## Replay", "", "```sh", replay, "```"];

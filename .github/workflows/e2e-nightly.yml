@@ -52,12 +52,13 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-artifacts
+          name: e2e-artifacts-${{ github.run_attempt }}
           path: test/e2e/.artifacts/
           if-no-files-found: ignore
 
       # The same fleet action nightly-fuzz.yml files through: one open issue per
-      # label, each artifact's report.md (title + replay block) lifted whole.
+      # label, the head of each artifact's report.md (title + replay block), the
+      # rest in the uploaded artifact it points at.
       - name: File or update the e2e issue
         id: file-issue
         if: failure()
@@ -69,7 +70,7 @@ jobs:
           label-description: Automated e2e nightly failure
           stream: generic
           artifacts-dir: test/e2e/.artifacts
-          artifact-name: e2e-artifacts
+          artifact-name: e2e-artifacts-${{ github.run_attempt }}
 
       # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
       - name: Trigger auto-assign for the filed issue

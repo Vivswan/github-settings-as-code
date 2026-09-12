@@ -31,7 +31,9 @@ function workflow(file: string): Workflow {
 }
 
 describe.each([
-  ["e2e-nightly.yml", "nightly", "e2e-fuzz", "e2e-artifacts"],
+  // The run_attempt suffix: upload-artifact refuses a duplicate name, so a re-run attempt would upload nothing
+  // and the filed issue would point at an artifact that never existed.
+  ["e2e-nightly.yml", "nightly", "e2e-fuzz", `e2e-artifacts-\${{ github.run_attempt }}`],
   ["nightly-fuzz.yml", "fuzz", "fuzz-nightly", `fuzz-failures-\${{ github.run_attempt }}`],
 ])("%s issue + auto-assign path", (file, job, label, artifactName) => {
   const wf = workflow(file);
