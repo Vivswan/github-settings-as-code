@@ -56,6 +56,10 @@ const TAG_FETCH = ["--filter=blob:none"];
  * a prefix match would let "chore(main): release pipeline documentation" impersonate one and park the boundary check. */
 const RELEASE_SUBJECT = /^chore\(main\): release (\d+\.\d+\.\d+)(?: \(#\d+\))?$/;
 
+/** The one spelling of a commit the pipeline writes and compares: chain lookups match the Source trailer as a string
+ * against rev-list's output, so an abbreviated, uppercase, or symbolic name git would resolve is still not a match. */
+const FULL_SHA = /^[0-9a-f]{40}$/;
+
 function git(cwd: string, ...args: string[]): string {
   return gitWithEnv(cwd, {}, ...args);
 }
@@ -434,6 +438,12 @@ interface BuildTip {
   mainHead: string;
 }
 
+/** A chain commit and the main commit its Source trailer names, as a full sha. */
+interface ChainCommit {
+  commit: string;
+  source: string;
+}
+
 /** The chain is rooted, so a blobless fetch of build brings only chain commits and their trees. Main's head rides
  * along because the tip's source can be newer than this checkout knows (a stale rerun, a lost push race) and a
  * Source trailer is no ancestry edge: "on main" is granted only to a source reachable from that head. */
@@ -478,6 +488,11 @@ function validateTip(cwd: string, tip: string, mainHead: string): string {
   if (tipSource === "") {
     throw new Error(
       `${BUILD_REF} is at ${tip}, which carries no Source trailer, so this pipeline did not mint it; ${BY_HAND}`,
+    );
+  }
+  if (!FULL_SHA.test(tipSource)) {
+    throw new Error(
+      `${BUILD_REF} is at ${tip}, whose Source trailer ${JSON.stringify(tipSource)} is not a full commit sha, so this pipeline did not mint it; ${BY_HAND}`,
     );
   }
   if (!isAncestor(cwd, tipSource, mainHead)) {
@@ -1047,8 +1062,11 @@ function publishLatest(cwd: string, attempts: number): { sha: string; reason: st
         `${BUILD_REF} vanished after this run appended to it; inspect origin by hand.`,
       );
     }
-    validateTip(cwd, build.tip, build.mainHead);
-    const target = chainCommitOfNewestSource(cwd, build.mainHead);
+    const tipSource = validateTip(cwd, build.tip, build.mainHead);
+    const target = chainCommitOfNewestSource(cwd, build.mainHead, {
+      commit: build.tip,
+      source: tipSource,
+    });
     if (target.commit !== build.tip) {
       assertPackages(
         cwd,
@@ -1095,22 +1113,18 @@ function observeRemote(cwd: string, ref: string): { id: string; peeled: string }
 }
 
 /** The chain commit packaging the newest main source, in MAIN's order rather than the chain's: a release-hook
- * backfill appends an older source behind newer ones. A trailer naming a commit off main, or none, packages nothing
- * this can name. */
-function chainCommitOfNewestSource(
-  cwd: string,
-  mainHead: string,
-): { commit: string; source: string } {
+ * backfill appends an older source behind newer ones. The validated tip is the floor: its source is on main under
+ * its full sha, so only the main commits newer than it are searched and the tip stands when none is packaged. */
+function chainCommitOfNewestSource(cwd: string, mainHead: string, tip: ChainCommit): ChainCommit {
   const packaging = chainPackaging(cwd);
-  for (const source of git(cwd, "rev-list", "--topo-order", mainHead).split("\n")) {
+  const newer = git(cwd, "rev-list", "--topo-order", `${tip.source}..${mainHead}`);
+  for (const source of newer.split("\n")) {
     const commit = packaging.get(source);
     if (commit !== undefined) {
       return { commit, source };
     }
   }
-  throw new Error(
-    `no commit on ${BUILD_REF} packages a commit on main's history (head ${mainHead}); ${BY_HAND}`,
-  );
+  return tip;
 }
 
 /** The ruleset-protected chain is the trust boundary: a detached commit with the right tree, bytes, and Source
@@ -1162,7 +1176,7 @@ export function prereleaseVersion(
       `the run number ${JSON.stringify(runNumber)} is not a decimal integer; refusing to mint a pre-release version from it.`,
     );
   }
-  if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
+  if (!FULL_SHA.test(sourceSha)) {
     throw new Error(
       `the source ${JSON.stringify(sourceSha)} is not a full commit sha; refusing to mint a pre-release version from it.`,
     );
