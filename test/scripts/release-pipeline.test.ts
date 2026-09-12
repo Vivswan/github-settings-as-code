@@ -7,7 +7,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   advanceBuild,
   anchorCheck,
@@ -106,6 +106,41 @@ describe("the fixture push guard", () => {
     const fx = seedFixture();
     git(fx.work, "push", "--quiet", "origin", `${fx.seedSha}:refs/heads/control`);
     expect(git(fx.origin, "rev-parse", "refs/heads/control")).toBe(fx.seedSha);
+  });
+});
+
+describe("the fixture repositories", () => {
+  /** The commands the git processes of a push from `fx.work` to `remote` spawn, as trace2 records them. */
+  function spawnedByPush(fx: Fixture, remote: string): string[] {
+    const trace = join(fx.root, `push-trace-${basename(remote)}.json`);
+    execFileSync("git", ["push", "--quiet", remote, `${fx.seedSha}:refs/heads/probe`], {
+      cwd: fx.work,
+      env: { ...process.env, GIT_TRACE2_EVENT: trace },
+    });
+    return readFileSync(trace, "utf8")
+      .split("\n")
+      .filter((line) => line.includes('"event":"child_start"'))
+      .map((line) => (JSON.parse(line) as { argv: string[] }).argv.join(" "));
+  }
+  const MAINTENANCE = expect.stringContaining("maintenance run --auto");
+
+  test("a push into the fixture origin spawns no background maintenance", () => {
+    const fx = seedFixture();
+    const spawned = spawnedByPush(fx, fx.origin);
+    expect(spawned).toContainEqual(expect.stringContaining("receive-pack"));
+    expect(spawned).not.toContainEqual(MAINTENANCE);
+  });
+
+  test("a push into a bare repository with maintenance on does (negative control)", () => {
+    const fx = seedFixture();
+    const plain = join(fx.root, "plain.git");
+    execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", plain]);
+    // Pinned rather than inherited, so a developer's global gitconfig cannot turn the control off.
+    git(plain, "config", "maintenance.auto", "true");
+    git(plain, "config", "receive.autogc", "true");
+    // Synchronous, so the maintenance run ends before the fixture root goes.
+    git(plain, "config", "maintenance.autoDetach", "false");
+    expect(spawnedByPush(fx, plain)).toContainEqual(MAINTENANCE);
   });
 });
 
