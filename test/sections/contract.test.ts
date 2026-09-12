@@ -277,7 +277,9 @@ describe("readGating", () => {
 
 /** A synthetic write declaration carrying just the context fields under test. */
 function endpoint(
-  extra: Partial<Pick<EndpointDecl, "hints" | "denialHint" | "permission" | "statuses">>,
+  extra: Partial<
+    Pick<EndpointDecl, "hints" | "denialHint" | "permission" | "statuses" | "rejections">
+  >,
 ): EndpointDecl {
   return { route: "POST /repos/{owner}/{repo}/rulesets", statuses: { 201: "created" }, ...extra };
 }
@@ -413,6 +415,73 @@ describe("throwFor context enrichment", () => {
       'the token was denied creating ruleset "quality" failed - POST /repos/o/r/rulesets: 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
     );
   });
+
+  test.each([
+    [
+      "the declared status and body",
+      { status: 404, message: "Branch not found" },
+      {
+        error:
+          'rulesets: protecting "x" failed - PUT /repos/o/r/branches/x/protection: 404 Branch not found. The declared branch does not exist; create it',
+      },
+    ],
+    [
+      "the declared status with a denial body",
+      { status: 404, message: "Not Found" },
+      {
+        denied:
+          'the token was denied protecting "x" failed - PUT /repos/o/r/branches/x/protection: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
+      },
+    ],
+    [
+      "the declared body as a prefix of a longer one",
+      { status: 404, message: "Branch not found on fork" },
+      {
+        denied:
+          'the token was denied protecting "x" failed - PUT /repos/o/r/branches/x/protection: 404 Branch not found on fork (a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
+      },
+    ],
+    [
+      "the declared body on the other denial status",
+      { status: 403, message: "Branch not found" },
+      {
+        denied:
+          'the token was denied protecting "x" failed - PUT /repos/o/r/branches/x/protection: 403 Branch not found. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
+      },
+    ],
+  ] as const)(
+    "a declared definitive rejection is claimed back from the permission branch by status AND message: %s",
+    (_case, error, expected) => {
+      const op = endpoint({
+        rejections: [
+          {
+            status: 404,
+            message: "Branch not found",
+            advice: "the declared branch does not exist; create it",
+          },
+        ],
+      });
+      let thrown: unknown;
+      try {
+        throwFor(
+          section,
+          "PUT",
+          "/repos/o/r/branches/x/protection",
+          { ...error, body: "" },
+          { operation: 'protecting "x"', op },
+        );
+      } catch (caught) {
+        thrown = caught;
+      }
+      if ("error" in expected) {
+        expect(thrown).not.toBeInstanceOf(PermissionDenied);
+        expect(thrown).toEqual(new Error(expected.error));
+      } else {
+        expect(thrown).toBeInstanceOf(PermissionDenied);
+        expect((thrown as PermissionDenied).detail).toBe(expected.denied);
+      }
+    },
+  );
 
   test("denialHint is appended to the permission branch, and only there", () => {
     let thrown: unknown;

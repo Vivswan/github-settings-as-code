@@ -164,6 +164,7 @@ describe("the public entry", () => {
       "readGating",
       "readLayerFiles",
       "readSettingsFile",
+      "redactRanges",
       "renderMergedYaml",
       "resolveCentralTargets",
       "runForRepo",

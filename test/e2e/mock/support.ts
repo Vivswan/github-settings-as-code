@@ -6,7 +6,10 @@
  */
 
 import type { SectionKey } from "../../../src/schema.js";
-import { endpointPath } from "../../../src/sections/contract/endpoints.js";
+import {
+  type DefinitiveRejection,
+  endpointPath,
+} from "../../../src/sections/contract/endpoints.js";
 import type { GraphqlTolerableError } from "../../../src/sections/contract/graphql.js";
 import { type NameKey, nameKey } from "../../../src/sections/labels/index.js";
 import type {
@@ -111,6 +114,11 @@ export function ok(body: unknown): MockResponse {
 /** A 204 empty reply (the client normalizes an empty body to null). */
 export function noContent(): MockResponse {
   return { status: 204, body: null };
+}
+
+/** A section's declared definitive rejection, served from the declaration so the wire body cannot drift from the classifier. */
+export function rejected(rejection: DefinitiveRejection): MockResponse {
+  return { status: rejection.status, body: { message: rejection.message } };
 }
 
 /** The precondition every branch-policy pattern endpoint shares; they answer 404 otherwise, like GitHub. */

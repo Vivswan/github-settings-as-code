@@ -862,6 +862,15 @@ interface Io extends MaskPair {
 }
 export declare function maskRegistry(sink: (value: string) => void): MaskPair;
 /**
+ * `text` with every occurrence of every masked value replaced by `***`: the
+ * one redactor for the Ios that mask text themselves (collectingIo, the CLI's
+ * streams) where the action leaves it to the runner. Occurrences are located
+ * in the original text and overlapping or touching ones are merged, so two
+ * values that overlap (a prefix of another, or "ABC" and "BCD" across "ABCD")
+ * leave no fragment, as replacing one value after another would.
+ */
+export declare function redactRanges(text: string, masked: ReadonlySet<string>): string;
+/**
  * Only annotate and log take the prefix: the debug trace, summary, and outputs are rendered by their writers, and the
  * mask pair registers raw values, not rendered lines.
  */
@@ -870,7 +879,11 @@ interface CollectedLine {
   level?: AnnotationLevel;
   line: string;
 }
-/** An Io that records instead of printing. The debug trace is dropped, as a runner without step debugging drops it. */
+/**
+ * An Io that records instead of printing. Every captured line, output, and summary block is redacted against the
+ * values registered so far, as a runner masks its log, so a library caller that prints the capture cannot leak
+ * a secret. The debug trace is dropped, as a runner without step debugging drops it.
+ */
 export declare function collectingIo(): {
   io: Io;
   lines: CollectedLine[];
@@ -879,6 +892,51 @@ export declare function collectingIo(): {
 };
 /** An Io that drops everything. Fresh per call, so one caller's masks never reach another's registry. */
 export declare function silentIo(): Io;
+//#endregion
+//#region src/github/scheduler.d.ts
+/**
+ * The limiter class the throttling plugin schedules through, injectable so a test run keeps the plugin's rate-limit
+ * decisions while skipping Bottleneck's pacing: each Bottleneck limiter yields through several zero-delay timers per
+ * job, around 11 ms on every request across the plugin's three limiters, and the notification limiter spaces issue
+ * creates by three real seconds whatever the plugin's time unit.
+ *
+ * TIMERS_SCHEDULER     -> Bottleneck itself: real pacing, real Retry-After sleeps
+ * IMMEDIATE_SCHEDULER  -> every job runs at once; a request the plugin decides to retry is retried without sleeping
+ *
+ * The plugin's own limiter groups (global, auth, search, notifications) are process-wide singletons built from the
+ * FIRST instance's scheduler; a process mixing schedulers paces those groups by whichever came first.
+ */
+/**
+ * Bottleneck's "failed" contract: a numeric return is the wait before a retry; anything else, a handler that throws
+ * included, fails the job with the ORIGINAL error. The throttling plugin's handler reads `error.response.headers` on
+ * a transport error that has no response, so a propagated handler exception would replace "socket hang up".
+ */
+type FailedHandler = (error: unknown, info: {
+  retryCount: number;
+  args: unknown[];
+  options: unknown;
+}) => unknown;
+interface SchedulerLimiter {
+  on(name: string, handler: FailedHandler): unknown;
+  /** Both Bottleneck call shapes: `schedule(fn, ...args)` and `schedule(options, fn, ...args)`. */
+  schedule(...call: unknown[]): Promise<unknown>;
+}
+/**
+ * The slice of Bottleneck's class the throttling plugin calls on the class it is handed, declared structurally so the
+ * library's public declarations never name `bottleneck/light.js`, which publishes no types of its own.
+ */
+interface Scheduler {
+  new (): SchedulerLimiter;
+  Group: new (options: {
+    id: string;
+    maxConcurrent?: number;
+    minTime?: number;
+  }) => {
+    key(id: string): SchedulerLimiter;
+  };
+  /** The plugin attaches its rate-limit listeners to a plain object through this emitter. */
+  Events: new (target: object) => unknown;
+}
 //#endregion
 //#region src/github/api.d.ts
 interface ApiError {
@@ -950,10 +1008,12 @@ interface GithubApiOptions {
   baseUrl?: string;
   apiVersion?: string;
   /**
-   * An explicit value forces the RETRY_BASE_MS scale (unit tests constructing the client directly); undefined reads
-   * the knob from the environment once.
+   * Real milliseconds in one plugin second: Retry-After units, the retry backoff step, and the write limiter's gap.
+   * Undefined reads RETRY_BASE_MS once; the plugin topology is the same at every value.
    */
   retryBaseMs?: number;
+  /** The limiter the throttling plugin paces through; TIMERS_SCHEDULER unless RETRY_BASE_MS selects the immediate one. */
+  scheduler?: Scheduler;
   /** Passed to octokit verbatim; octokit-core's own agent string when omitted. */
   userAgent?: string;
 }
@@ -992,7 +1052,11 @@ export declare class GithubApi implements GithubClient {
  * error, whose 200 the mapper rewrites to 403.
  */
 export declare function isRateLimitError(error: ApiError): boolean;
-/** True when an error means the token lacks access, as opposed to a bad payload. */
+/**
+ * True when an error means the token lacks access, as opposed to a bad payload: a status fold, blind
+ * to the body. A message an endpoint declares as a definitive rejection (sections/contract/endpoints.ts)
+ * is classified ahead of this in throwFor, where the endpoint is known.
+ */
 export declare function isPermissionError(error: ApiError): boolean;
 //#endregion
 //#region src/private-open.d.ts
@@ -1126,10 +1190,27 @@ type SupplementalRoute = Extract<GapUnion, {
 /** `keyof Endpoints` makes a typo'd path or wrong method a compile error; SupplementalRoute covers routes octokit lags (src/upstream-gaps). */
 type Route = keyof Endpoints | SupplementalRoute;
 /**
- * 403 and 404 are excluded: throwFor's permission branch swallows them for a granted operation (where
- * `denialHint` carries any ambiguity), and a public ("none") operation's 403/404 is never a payload rejection.
+ * The statuses throwFor's permission branch swallows for a granted operation. A `hints` key on one is
+ * dead advice (HintableStatus excludes them); `denialHint` carries an ambiguity, and `rejections` claims
+ * back the one message GitHub reserves for a definite meaning.
  */
+type DenialStatus = 403 | 404;
+/** A public ("none") operation's 403/404 is never a payload rejection either, so the exclusion holds for it too. */
 type HintableStatus = 400 | 412 | 422;
+/**
+ * A response whose status a denial shares but whose exact message GitHub reserves for one definite
+ * meaning: the protection PUT's 404 "Branch not found". throwFor classifies a match ahead of its
+ * permission branch as a hard section error, so no on-missing-permission policy can skip it and the
+ * grant advice never renders for it. The message must be one no denial body spells; the registry
+ * test pins every declaration against the e2e mock's denial responses.
+ */
+interface DefinitiveRejection {
+  readonly status: DenialStatus;
+  /** Compared whole, never as a substring: "Not Found" is a fine-grained denial. */
+  readonly message: string;
+  /** What to fix, as a lowercase clause without a trailing period; throwFor starts a sentence with it. */
+  readonly advice: string;
+}
 type GetRoute = Extract<Route, `GET ${string}`>;
 /**
  * `statuses` keys are the outcomes the handler treats as normal (the e2e mock reads the keys); its 4xx keys
@@ -1199,9 +1280,12 @@ interface EndpointDeclFields {
   readonly hints?: Readonly<Partial<Record<HintableStatus, string>>>;
   /**
    * Appended to the PermissionDenied message (which never reads `hints`) when a 403/404 can mean
-   * something other than a missing grant (Git LFS disabled account-wide). One sentence, no trailing period.
+   * something other than a missing grant (Git LFS disabled account-wide) and the body does not tell
+   * the readings apart; a body that does is a `rejections` entry. One sentence, no trailing period.
    */
   readonly denialHint?: string;
+  /** The endpoint's definitive rejections (see DefinitiveRejection); the e2e mock serves the same declarations. */
+  readonly rejections?: readonly DefinitiveRejection[];
   /**
    * When GitHub caps per_page below the standard 100 (the Actions variables list: 30). The page loop
    * requests exactly this many and treats a shorter page as the last, so a request GitHub would silently
@@ -2156,7 +2240,6 @@ type EnvironmentsOp = PlannedOp<typeof ENDPOINTS$1, typeof GRAPHQL_OPS>;
 type EnvironmentsPlan = SectionPlan<EnvironmentsOp>;
 //#endregion
 //#region src/sections/branches/endpoints.d.ts
-/** The REST endpoint dictionary both index.ts and graphql-rules.ts derive their plan context type from. */
 declare const ENDPOINTS: {
   readonly getProtection: {
     readonly route: "GET /repos/{owner}/{repo}/branches/{branch}/protection";
@@ -2173,7 +2256,7 @@ declare const ENDPOINTS: {
     readonly statuses: {
       readonly 200: "protection replaced";
     };
-    readonly denialHint: "a 404 answering \"Branch not found\" means the declared branch does not exist on the repo; create the branch, or remove it from the settings file";
+    readonly rejections: readonly [DefinitiveRejection];
     readonly hints: {
       readonly 422: string;
     };
@@ -3772,7 +3855,7 @@ declare const byKey: {
         readonly statuses: {
           readonly 200: "protection replaced";
         };
-        readonly denialHint: "a 404 answering \"Branch not found\" means the declared branch does not exist on the repo; create the branch, or remove it from the settings file";
+        readonly rejections: readonly [DefinitiveRejection];
         readonly hints: {
           readonly 422: string;
         };
@@ -3941,7 +4024,7 @@ declare const byKey: {
         readonly statuses: {
           readonly 200: "protection replaced";
         };
-        readonly denialHint: "a 404 answering \"Branch not found\" means the declared branch does not exist on the repo; create the branch, or remove it from the settings file";
+        readonly rejections: readonly [DefinitiveRejection];
         readonly hints: {
           readonly 422: string;
         };

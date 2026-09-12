@@ -10,8 +10,9 @@ import { Octokit } from "@octokit/core";
 import { requestLog } from "@octokit/plugin-request-log";
 import { retry } from "@octokit/plugin-retry";
 import { throttling } from "@octokit/plugin-throttling";
-import Bottleneck from "bottleneck/light.js";
+import type Bottleneck from "bottleneck/light.js";
 import { type Io, maskRegistry } from "../io.js";
+import { IMMEDIATE_SCHEDULER, type Scheduler, TIMERS_SCHEDULER } from "./scheduler.js";
 import { redactSecretPayloadSafe } from "./secret-scan.js";
 
 export interface ApiError {
@@ -255,10 +256,14 @@ function isHttpError(error: unknown): error is OctokitHttpError {
   );
 }
 
-function testRetryBaseMs(): number | undefined {
+/** RETRY_BASE_MS is the one knob the e2e runner sets: millisecond plugin units and the immediate scheduler for the spawned bundle. */
+function envRetryBaseMs(): number | undefined {
   const value = Number(process.env.RETRY_BASE_MS ?? "");
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
+
+/** Among the 4xx only 408 is retried here; 429 and the rate-limit 403s belong to the throttling plugin, which honors Retry-After. */
+const DO_NOT_RETRY = Array.from({ length: 100 }, (_, i) => 400 + i).filter((s) => s !== 408);
 
 /**
  * Shared by tryRequest and tryGraphql. For a secret-carrying request the response is replaced wholesale (a 4xx body may
@@ -358,10 +363,12 @@ export interface GithubApiOptions {
   baseUrl?: string;
   apiVersion?: string;
   /**
-   * An explicit value forces the RETRY_BASE_MS scale (unit tests constructing the client directly); undefined reads
-   * the knob from the environment once.
+   * Real milliseconds in one plugin second: Retry-After units, the retry backoff step, and the write limiter's gap.
+   * Undefined reads RETRY_BASE_MS once; the plugin topology is the same at every value.
    */
   retryBaseMs?: number;
+  /** The limiter the throttling plugin paces through; TIMERS_SCHEDULER unless RETRY_BASE_MS selects the immediate one. */
+  scheduler?: Scheduler;
   /** Passed to octokit verbatim; octokit-core's own agent string when omitted. */
   userAgent?: string;
 }
@@ -378,19 +385,10 @@ export class GithubApi implements GithubClient {
     this.baseUrl = options.baseUrl ?? process.env.GITHUB_API_URL ?? "https://api.github.com";
     this.apiVersion = options.apiVersion ?? DEFAULT_API_VERSION;
     this.trace = new TraceRedaction(options.io ?? SILENT_TRACE);
-    // `retryBaseMs` scales the plugins' Retry-After units, the retry backoff, and the write limiter's gap (1000 = real
-    // seconds); RETRY_BASE_MS is the test knob, read once.
-    const envKnob = testRetryBaseMs();
+    const envKnob = envRetryBaseMs();
     const retryBaseMs = options.retryBaseMs ?? envKnob ?? 1000;
-    const underTestKnob = envKnob !== undefined;
-    // Bottleneck paces every request and adds real per-request latency even at minTime 0, which a many-request test run
-    // cannot afford, so throttling is off under the knob and the retry plugin takes over 429 recovery below.
-    const throttleEnabled = !underTestKnob;
-    // Among the 4xx only 408 is retried, plus 429 under the knob. The retry plugin IGNORES Retry-After and backs off
-    // quadratically (attempt n waits n^2 * retryBaseMs); production keeps 429 with the throttling plugin, which honors it.
-    const doNotRetry = Array.from({ length: 100 }, (_, i) => 400 + i).filter(
-      (s) => s !== 408 && !(underTestKnob && s === 429),
-    );
+    const scheduler =
+      options.scheduler ?? (envKnob === undefined ? TIMERS_SCHEDULER : IMMEDIATE_SCHEDULER);
     this.octokit = new ActionOctokit({
       auth: options.token,
       baseUrl: this.baseUrl,
@@ -400,18 +398,19 @@ export class GithubApi implements GithubClient {
       // Each plugin reads retryAfterBaseValue from its own options section.
       request: { retryAfterBaseValue: retryBaseMs },
       retry: {
-        doNotRetry,
+        doNotRetry: DO_NOT_RETRY,
         retries: MAX_RETRIES,
         retryAfterBaseValue: retryBaseMs,
       },
       throttle: {
-        enabled: throttleEnabled,
+        // The plugin's option types name Bottleneck's whole class; a Scheduler is the slice of it the plugin calls.
+        Bottleneck: scheduler as unknown as typeof Bottleneck,
         retryAfterBaseValue: retryBaseMs,
-        write: new Bottleneck.Group({
+        write: new scheduler.Group({
           id: "octokit-write",
           maxConcurrent: 1,
           minTime: retryBaseMs,
-        }),
+        }) as Bottleneck.Group,
         onRateLimit: throttleCallback("rate limit", this.trace),
         onSecondaryRateLimit: throttleCallback("secondary rate limit", this.trace),
       },
@@ -685,7 +684,11 @@ export function isRateLimitError(error: ApiError): boolean {
   );
 }
 
-/** True when an error means the token lacks access, as opposed to a bad payload. */
+/**
+ * True when an error means the token lacks access, as opposed to a bad payload: a status fold, blind
+ * to the body. A message an endpoint declares as a definitive rejection (sections/contract/endpoints.ts)
+ * is classified ahead of this in throwFor, where the endpoint is known.
+ */
 export function isPermissionError(error: ApiError): boolean {
   if (isRateLimitError(error)) {
     return false;

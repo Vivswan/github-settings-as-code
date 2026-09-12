@@ -1,6 +1,6 @@
 import type { ApiError } from "../../github/api.js";
 import { isPermissionError, isRateLimitError } from "../../github/api.js";
-import type { HintableStatus } from "./endpoints.js";
+import { definitiveRejection, type HintableStatus } from "./endpoints.js";
 import { toleratedGraphqlErrors } from "./graphql.js";
 import {
   endpointPermission,
@@ -38,6 +38,11 @@ export function overrideAdviceLevel(
     : "read";
 }
 
+/** Outcome and rejection prose is lowercase (it doubles as the declaration's description); in a message it starts a sentence. */
+function sentence(clause: string): string {
+  return clause.charAt(0).toUpperCase() + clause.slice(1);
+}
+
 export function throwFor(
   section: SectionMeta,
   method: string,
@@ -63,7 +68,13 @@ export function throwFor(
       `${section.key}: ${cause}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
     );
   }
-  const effective = context?.op ? endpointPermission(section, context.op) : undefined;
+  const op = context?.op;
+  // Ahead of the permission branch: the status is a denial's, the message is not.
+  const rejection = op !== undefined && "route" in op ? definitiveRejection(op, error) : undefined;
+  if (rejection !== undefined) {
+    throw new Error(`${section.key}: ${cause}. ${sentence(rejection.advice)}`);
+  }
+  const effective = op ? endpointPermission(section, op) : undefined;
   if (isPermissionError(error) && effective !== "none") {
     const alsoMissing =
       error.status === 404 ? " (a 404 here can also mean the resource does not exist)" : "";
@@ -89,7 +100,6 @@ export function throwFor(
     );
   }
   // A GraphQL rejection carries error types, not a status; its declared outcomes stand in for status-keyed hints.
-  const op = context?.op;
   const advice =
     op === undefined
       ? undefined
@@ -98,8 +108,7 @@ export function throwFor(
             .filter((type) => error.graphqlTypes?.includes(type))
             .map((type) => op.outcomes[type])
             .filter((outcome): outcome is string => outcome !== undefined)
-            // Outcome prose is lowercase (it doubles as the declaration's description); here it starts a sentence.
-            .map((outcome) => outcome.charAt(0).toUpperCase() + outcome.slice(1))
+            .map(sentence)
             .join(". ")
         : op.hints?.[error.status as HintableStatus];
   const hint = advice ? `. ${advice}` : "";

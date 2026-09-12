@@ -19,6 +19,7 @@ import {
   type MaskPair,
   maskRegistry,
   type OutputName,
+  redactRanges,
 } from "../index.js";
 
 export interface CliStreams {
@@ -49,45 +50,6 @@ class RedactingStream extends Writable {
       this.target.once("drain", callback);
     }
   }
-}
-
-/**
- * `text` with every occurrence of every masked value replaced by `***`.
- * Occurrences are located in the original text and overlapping or touching
- * ones are merged, so two values that overlap (a prefix of another, or
- * "ABC" and "BCD" across "ABCD") leave no fragment, as replacing one value
- * after another would.
- */
-function redactRanges(text: string, masked: ReadonlySet<string>): string {
-  const ranges: Array<[number, number]> = [];
-  for (const value of masked) {
-    if (value === "") {
-      continue;
-    }
-    for (let at = text.indexOf(value); at !== -1; at = text.indexOf(value, at + 1)) {
-      ranges.push([at, at + value.length]);
-    }
-  }
-  ranges.sort((a, b) => a[0] - b[0]);
-  let out = "";
-  let cursor = 0;
-  let open: [number, number] | undefined;
-  for (const [start, end] of ranges) {
-    if (open !== undefined && start <= open[1]) {
-      open[1] = Math.max(open[1], end);
-      continue;
-    }
-    if (open !== undefined) {
-      out += `${text.slice(cursor, open[0])}***`;
-      cursor = open[1];
-    }
-    open = [start, end];
-  }
-  if (open !== undefined) {
-    out += `${text.slice(cursor, open[0])}***`;
-    cursor = open[1];
-  }
-  return out + text.slice(cursor);
 }
 
 /**
