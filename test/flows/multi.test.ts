@@ -606,7 +606,7 @@ describe("runMulti private-report: issue wiring", () => {
   const MARKER = "settings-as-code-report";
   const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
   const listPath = (slug: string) =>
-    `GET /repos/${slug}/issues?state=all&labels=${MARKER}&per_page=100`;
+    `GET /repos/${slug}/issues?state=all&labels=${MARKER}&per_page=100&page=1`;
 
   /**
    * A private drifting target whose report issue already exists, so delivery is a single PATCH; the drift carries a CANARY the report body must
@@ -838,9 +838,9 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
   const MARKER = "settings-as-code-report";
   const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
   const allListPath = (slug: string) =>
-    `GET /repos/${slug}/issues?state=all&labels=${MARKER}&per_page=100`;
+    `GET /repos/${slug}/issues?state=all&labels=${MARKER}&per_page=100&page=1`;
   const openListPath = (slug: string) =>
-    `GET /repos/${slug}/issues?state=open&labels=${MARKER}&per_page=100`;
+    `GET /repos/${slug}/issues?state=open&labels=${MARKER}&per_page=100&page=1`;
   const issue7 = { number: 7, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/7" };
 
   test("a needs-attention target delivers exactly like the issue channel (opened)", async () => {
@@ -902,7 +902,7 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
     expect(api.mutations()).toEqual([]);
     const issueCalls = api.calls.filter((c) => c.path.includes("/issues"));
     expect(issueCalls.map((c) => `${c.method} ${c.path}`)).toEqual([
-      `GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100`,
+      `GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100&page=1`,
     ]);
   });
 

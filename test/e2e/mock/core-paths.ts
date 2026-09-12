@@ -2,7 +2,7 @@
  * The core-path handlers: the non-section routes the action calls, served by routes.ts before section matching.
  *   GET /user/repos                             -> multi-repo discovery
  *   GET .../contents/{path}, .../git/ref/{ref}  -> the settings-file fetch and the proof that a missing file is missing
- *   /user, .../issues, .../labels (marker POST)  -> the private-report issue channel
+ *   .../issues, .../labels (marker POST)        -> the private-report issue channel
  *
  * Also the redaction visibility probe model, read by the report delivery rule and by the pipeline's denial-barrier exemption.
  */
@@ -139,7 +139,7 @@ export function gitRefResponse(multi: MultiMockState, slug: string, ref: string)
 // --- Private-report issue channel (core paths, not a section) --------------
 //
 // Report delivery writes even in check mode, so these routes are served before section matching, gated on
-// ISSUE_REPORT_PERMISSION. GET /user is a user-level call and ungated; the report module reads only `login`.
+// ISSUE_REPORT_PERMISSION.
 
 /** A repo's proven visibility from its mock state (defaults public via the fixture). */
 function visibilityOfState(state: MockState | undefined): string {
@@ -226,6 +226,8 @@ function issueMatchesQuery(issue: Json, query: Record<string, string>): boolean 
   if (query.state && query.state !== "all" && String(issue.state) !== query.state) {
     return false;
   }
+  // Modelled although the action no longer sends it: a creator-scoped scan reintroduced by mistake must miss the
+  // reattach scenario's former-token-user issue here exactly as it would on GitHub.
   if (query.creator) {
     const login = (issue.user as { login?: unknown } | undefined)?.login;
     if (login !== query.creator) {
@@ -337,7 +339,6 @@ export type IssueReportOutcome =
 /**
  * Null when the path is not an issue-channel route, so the caller falls through to section matching. `takeCoreFault` is
  * consulted per route after target resolution and before the permission gate and any state mutation, the section order.
- *   GET   /user                            -> the token user (ungated)
  *   POST  /repos/{o}/{r}/labels (marker)   -> ensure-create (Issues: write)
  *   GET   /repos/{o}/{r}/issues            -> list (Issues: read)
  *   POST  /repos/{o}/{r}/issues            -> create (Issues: write)
@@ -354,21 +355,6 @@ export function handleIssueReport(
   faults: FaultOption[] | undefined,
   takeCoreFault: (key: CoreFaultKey) => PipelineResult | null,
 ): IssueReportOutcome | null {
-  // GET /user is report traffic only when the run enables an issue channel; otherwise it falls through to a loud
-  // no-route violation.
-  if (matchesTemplate("/user", pathname)) {
-    if (method !== "GET" || !usesIssueChannel(scenario)) {
-      return null;
-    }
-    const faulted = takeCoreFault("core.userGet");
-    if (faulted) {
-      return { faulted };
-    }
-    return {
-      response: ok({ login: TOKEN_USER_LOGIN, id: 1, type: "User" }),
-      coreKey: "core.userGet",
-    };
-  }
   // The marker-label ensure-create writes even in check mode, so it is served here, before the check-mode barrier, but
   // only for the marker name on a delivery target; any other marker POST falls through to the labels.create section
   // route and its barrier.
