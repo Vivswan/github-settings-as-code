@@ -8,7 +8,7 @@
  */
 
 import type { z } from "zod";
-import { snapshotSecretReference } from "../../engine/secret-reference.js";
+import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile } from "../../schema.js";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsSecretConfig } from "../actions_secrets/schema.js";
