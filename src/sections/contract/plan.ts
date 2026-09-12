@@ -1,12 +1,7 @@
 /**
- * The plan-returning section contract: a section READS through a typed port
- * and returns the operations that would converge the repository, and the
- * engine decides what to do with them - render them as drift in check mode,
- * execute them in apply mode. A section cannot write on its own: the read
- * port binds only the roles that READ on the wire (GET routes and GraphQL
- * queries - an accessGrade override changes what GitHub gates, not what the
- * request does), and a planned operation can only name a write role, so
- * "check mode issued a write" is unrepresentable instead of guarded.
+ * A section cannot write on its own: the read port binds only the roles that READ on the wire (GET routes
+ * and GraphQL queries; an accessGrade override changes what GitHub gates, not what the request does), and a
+ * planned operation can only name a write role, so "check mode issued a write" is unrepresentable.
  */
 
 import type { RepoRef } from "../../discovery/targets.js";
@@ -38,10 +33,8 @@ import {
 } from "./requests.js";
 
 /**
- * JSON-plain request data: what a payload thunk may produce and what the
- * transport serializes verbatim. `undefined` values are allowed inside
- * objects because JSON drops them (a declared optional field the settings
- * file omits).
+ * What a payload thunk may produce and the transport serializes verbatim. `undefined` is allowed inside
+ * objects because JSON drops it (a declared optional the file omits).
  */
 export type PlainData =
   | string
@@ -52,9 +45,8 @@ export type PlainData =
   | { readonly [key: string]: PlainData | undefined };
 
 /**
- * A declared passthrough mapping as request data: parsed YAML is JSON-plain
- * by construction, but the loose schemas type it `unknown`, so this ONE walk
- * proves it instead of a cast per section. A non-JSON value is a bug.
+ * The loose schemas type a declared value `unknown`, and YAML can spell what JSON cannot (an alias cycle,
+ * a tagged scalar), so this ONE walk proves plainness instead of a cast per section.
  */
 export function plainData(value: unknown): PlainData {
   const render = (path: readonly (string | number)[]): string =>
@@ -74,9 +66,7 @@ export function plainData(value: unknown): PlainData {
       `BUG: a planned payload carries a value JSON cannot carry at ${render(path)}: ${reason}; request data must be plain`,
     );
   };
-  // The containers on the path from the root to the node being checked: a
-  // YAML alias to an ancestor parses to a cycle, which JSON cannot carry
-  // either (a shared alias to a sibling is fine and is visited twice).
+  // A YAML alias to an ancestor parses to a cycle, which JSON cannot carry (a shared alias to a sibling is fine and is visited twice).
   const ancestors = new Set<object>();
   const plain = (node: unknown, path: readonly (string | number)[]): void => {
     if (node === undefined || node === null || typeof node === "string") {
@@ -105,7 +95,6 @@ export function plainData(value: unknown): PlainData {
       if (Object.getPrototypeOf(node) !== Array.prototype) {
         reject(path, "a list of a subclass, which JSON serializes as a plain list");
       }
-      // Own names must be exactly the indices (enumerable) plus `length`.
       const indices = new Set(Array.from(node.keys(), String));
       if (Object.getOwnPropertyNames(node).some((n) => n !== "length" && !indices.has(n))) {
         reject(path, "a list carrying named properties, which JSON drops");
@@ -138,27 +127,21 @@ export function plainData(value: unknown): PlainData {
 }
 
 /**
- * What a thunk may compute at EXECUTION time only: the plaintext behind a
- * `$NAME` reference (resolved and masked up front, so check mode never sees
- * one). A thunk may also await the read-only port plan() closed over, and it
- * alone holds this token, which the port's execution-phase reads demand.
+ * The plaintext behind a `$NAME` reference is resolved and masked up front, so check mode never sees one.
+ * Only a thunk holds this token, which the port's execution-phase reads demand.
  */
 export interface ExecTools {
   resolveSecret(reference: string): string;
 }
 
-/**
- * The bound helpers of an execution-phase read: each takes the ExecTools
- * token first. A plan() body has no token, so the call does not compile
- * there; a thunk passes the one it received.
- */
+/** A plan() body has no ExecTools token, so an execution-phase read does not compile there; a thunk passes the one it received. */
 type Gated<T> = {
   readonly [K in keyof T]: T[K] extends (...args: infer A) => infer R
     ? (exec: ExecTools, ...args: A) => R
     : T[K];
 };
 
-/** Gate a bound helper set at runtime: the runtime twin of Gated. */
+/** The runtime shape of Gated; the token is discarded, so the gate is the type alone. */
 function gated<T extends object>(bound: T): Gated<T> {
   return Object.fromEntries(
     Object.entries(bound).map(([name, helper]) => [
@@ -170,32 +153,23 @@ function gated<T extends object>(bound: T): Gated<T> {
   ) as Gated<T>;
 }
 
-/** The roles of a REST dictionary whose route reads on the wire (a GET). */
 type ReadRole<E extends EndpointDict> = {
   [R in keyof E & string]: E[R]["route"] extends `GET ${string}` ? R : never;
 }[keyof E & string];
 
-/** The roles of a REST dictionary whose route writes on the wire. */
 type WriteRole<E extends EndpointDict> = Exclude<keyof E & string, ReadRole<E>>;
 
-/** The roles of a GraphQL dictionary declared `kind: "read"`. */
 type GraphqlReadRole<G extends GraphqlDict> = {
   [R in keyof G & string]: G[R] extends { readonly kind: "read" } ? R : never;
 }[keyof G & string];
 
-/** The roles of a GraphQL dictionary declared `kind: "write"`. */
 type GraphqlWriteRole<G extends GraphqlDict> = Exclude<keyof G & string, GraphqlReadRole<G>>;
 
-/**
- * The request helpers (contract/requests.ts) bound to ONE read endpoint, minus the declaration
- * argument (the role already named it) and minus any payload (a GET carries none).
- */
+/** The request helpers (./requests.ts) bound to ONE read endpoint, minus the declaration argument and any payload. */
 interface BoundRead<E extends EndpointDecl> {
-  /** GET that must succeed; every error classifies through throwFor. */
   call(
     ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; describe?: string }>
   ): Promise<unknown>;
-  /** GET whose declared tolerable statuses come back as `{ error }`. */
   tryCall(
     ...args: OptsArg<
       E,
@@ -206,7 +180,6 @@ interface BoundRead<E extends EndpointDecl> {
       }
     >
   ): Promise<{ data: unknown } | { error: ApiError }>;
-  /** GET whose declared tolerable statuses read as `{ missing: true }`. */
   probeAbsent(
     ...args: OptsArg<
       E,
@@ -218,16 +191,13 @@ interface BoundRead<E extends EndpointDecl> {
       }
     >
   ): Promise<{ data: unknown } | { missing: true }>;
-  /** Every page of a bare-array list. */
   listAll(...args: OptsArg<E, { query?: Readonly<Record<string, string>> }>): Promise<unknown[]>;
-  /** Every page of a `{total_count, <key>: []}` enveloped list. */
   listAllEnveloped(
     envelopeKey: string,
     ...args: OptsArg<E, { query?: Readonly<Record<string, string>> }>
   ): Promise<unknown[]>;
 }
 
-/** The GraphQL request helpers bound to ONE read operation. */
 type BoundGraphqlRead<O extends GraphqlOpDecl> = {
   call(
     variables: Readonly<GraphqlVariablesOf<O>>,
@@ -250,12 +220,8 @@ type BoundGraphqlRead<O extends GraphqlOpDecl> = {
   : { listConnection?: never });
 
 /**
- * A section's read port: one bound helper set per READ role, REST and
- * GraphQL alike. Write roles are absent from the type, so a plan() body that
- * reaches for `ctx.read.<writeRole>` does not compile - the reads a section
- * may issue are exactly its declared GETs and GraphQL queries. A REST role
- * declaring a `primaryRead` posture exposes only the helpers that honor it;
- * a role declaring `phase: "execution"` exposes them Gated.
+ * Write roles are absent from the type, so `ctx.read.<writeRole>` does not compile. A role with a
+ * `primaryRead` posture exposes only the helpers that honor it; a `phase: "execution"` role exposes them Gated.
  */
 type BoundReads<E extends EndpointDict, G extends GraphqlDict> = {
   readonly [R in ReadRole<E>]: ReadPort<E[R]>;
@@ -263,16 +229,13 @@ type BoundReads<E extends EndpointDict, G extends GraphqlDict> = {
   readonly [R in GraphqlReadRole<G>]: GraphqlReadPort<G[R]>;
 };
 
-/** A GraphQL read's bound helpers, Gated when the declaration is execution-phase. */
 type GraphqlReadPort<O extends GraphqlOpDecl> = O extends { readonly phase: "execution" }
   ? Gated<BoundGraphqlRead<O>>
   : BoundGraphqlRead<O>;
 
 /**
- * The helpers a read role exposes, narrowed by its declaration: an advisory
- * read (no failure may abort the section) offers only tryCall, a "denied"
- * primary read only the throwing helpers, an "absent" one only the tolerant;
- * an execution-phase read offers its set Gated behind the ExecTools token.
+ * Only the helpers that honor the declaration's posture are exposed, so a handler cannot bypass an
+ * advisory, denied, or absent posture by picking another helper.
  */
 type ReadPort<E extends EndpointDecl> = E extends { readonly phase: "execution" }
   ? Gated<PlanReadPort<E>>
@@ -286,7 +249,6 @@ type PlanReadPort<E extends EndpointDecl> = E extends { readonly advisory: true 
       ? Pick<BoundRead<E>, "probeAbsent" | "tryCall">
       : BoundRead<E>;
 
-/** What a plan() body sees: the target and its typed read port. Nothing else. */
 export interface PlanContext<
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
@@ -297,50 +259,38 @@ export interface PlanContext<
 }
 
 /**
- * The facets every planned operation carries, whichever role it names. `D`
- * is the drift type its arm demands: an ordinary operation must justify
- * itself with at least one drift line (see DriftFor), so "check reported
- * clean while apply mutated" is unrepresentable.
+ * `D` is the drift type its arm demands: an ordinary operation must justify itself with at least one
+ * drift line (DriftFor), so "check reported clean while apply mutated" is unrepresentable.
  */
 export interface PlannedOpBase<D extends Justification = Justification> {
   /**
-   * The drift lines this operation resolves, in the check-mode prose
-   * ("labels[bug]: color d73a4a != live ffffff; apply will update it"), or
-   * an Unverifiable facet. Check mode renders them; apply mode renders `change`.
+   * Check mode renders these; apply renders `change`.
+   *   labels[bug]: color d73a4a != live ffffff; apply will update it
    */
   readonly drift: D;
   /**
-   * What apply renders once the operation succeeds: the line itself, or a
-   * thunk over the response (one line or several, never none) when the line
-   * depends on what the server echoed; a throw is the verification failure.
+   * A thunk when the line depends on what the server echoed (one line or several, never none); a throw
+   * is the verification failure.
    */
   readonly change: string | ((response: unknown) => string | readonly [string, ...string[]]);
-  /**
-   * The operation in settings-file terms ("arming the interaction limit"),
-   * for the failure prose when the request is rejected - the `describe`
-   * passed to the request helpers.
-   */
+  /** The operation in settings-file terms ("arming the interaction limit"), for the failure prose; the `describe` the request helpers take. */
   readonly describe?: string;
   /**
-   * Receives the response body, for a server-assigned value (a created
-   * environment's node id) a subsequent operation's thunk reads from where
-   * the hook stores it. It must not render; a throw fails the operation.
+   * For a server-assigned value (a created environment's node id) a later operation's thunk reads from
+   * where the hook stores it. It must not render; a throw fails the operation.
    */
   readonly capture?: (response: unknown) => void;
   /**
-   * Execution-time reads run before this operation's request is sealed and
-   * issued (bypass actors' node ids, pinned ahead of the first write so a
-   * bad input fails while live state is untouched). Never runs in check
-   * mode, like every Late facet. A throw fails the operation with its
-   * request never sent.
+   * Execution-time reads before the request is sealed and issued (bypass actors' node ids, pinned ahead
+   * of the first write so a bad input fails while live state is untouched). A throw fails the operation
+   * with its request never sent.
    */
   readonly before?: Late<void>;
 }
 
 /**
- * The reason check mode cannot verify a write (a secret GitHub never echoes back), rendered as a
- * check-mode note beside whatever drift lines the operation does resolve. It occupies the drift slot
- * and is admitted only on an endpoint declaring `unverifiable: true` (DriftFor).
+ * Occupies the drift slot, rendered as a check-mode note beside the drift lines the op does resolve;
+ * admitted only on an endpoint declaring `unverifiable: true` (DriftFor).
  */
 export interface Unverifiable {
   readonly unverifiable: string;
@@ -349,21 +299,16 @@ export interface Unverifiable {
 
 export type Justification = readonly string[] | Unverifiable;
 
-/** The drift lines an operation resolves, whichever justification it carries. */
 export function driftOf(op: Pick<PlannedOpBase, "drift">): readonly string[] {
   return "unverifiable" in op.drift ? op.drift.lines : op.drift;
 }
 
-/**
- * A request facet sealed at execution time, the ONLY place a plan may touch
- * a secret; async so it can read a value an earlier operation created.
- */
+/** The ONLY place a plan may touch a secret; async so it can read a value an earlier operation created. */
 export type Late<T> = (exec: ExecTools) => T | Promise<T>;
 
 /**
- * What a tolerated status means for the operation that met it (it did not
- * apply): a note in place of its change line, or a failure carrying the
- * section's own advice where throwFor's generic text would mislead.
+ * A tolerated status means the operation did not apply: a note in place of its change line, or a
+ * failure carrying the section's own advice where throwFor's generic text would mislead.
  */
 export type ToleratedOutcome =
   | { readonly note: string; readonly failure?: never }
@@ -375,15 +320,13 @@ export interface Tolerance<E extends EndpointDecl> {
   readonly outcome: (error: ApiError) => ToleratedOutcome;
 }
 
-/** The narrowing a plan performs on a computed drift list: non-empty means an operation is due. */
 export function hasDrift(lines: readonly string[]): lines is readonly [string, ...string[]] {
   return lines.length > 0;
 }
 
 /**
- * The drift a REST operation must carry: none is legal only on an alwaysRewrite endpoint (a write
- * that recurs by declaration, so check has nothing to report), an Unverifiable facet only on an
- * endpoint declaring `unverifiable`; every other write exists because live state diverged.
+ * Empty drift is legal only on an alwaysRewrite write (it recurs by declaration) or inside an Unverifiable
+ * facet; everywhere else "check reported clean while apply mutated" stays unrepresentable.
  */
 type DriftFor<E extends EndpointDecl> =
   | (E extends { readonly alwaysRewrite: true }
@@ -391,20 +334,15 @@ type DriftFor<E extends EndpointDecl> =
       : readonly [string, ...string[]])
   | (E extends { readonly unverifiable: true } ? Unverifiable : never);
 
-/**
- * The params facet of a REST operation, required exactly when the route
- * has path params beyond owner/repo - the OptsArg rule, applied per role.
- */
+/** Required exactly when the route has path params beyond owner/repo (the OptsArg rule, per role). */
 type RestParams<R extends string> = [PathParams<R>] extends [never]
   ? { readonly params?: undefined }
   : { readonly params: Readonly<Record<PathParams<R>, string>> };
 
-/** A planned REST write under one specific role of a literal dictionary. */
 type PlannedRestOp<E extends EndpointDict, R extends WriteRole<E>> = PlannedOpBase<DriftFor<E[R]>> &
   RestParams<E[R]["route"]> & {
     readonly role: R;
     readonly query?: Readonly<Record<string, string>>;
-    /** The request body, or a Late thunk sealing it at execution time. */
     readonly payload?: PlainData | Late<PlainData>;
     readonly tolerate?: Tolerance<E[R]>;
     readonly variables?: never;
@@ -428,10 +366,8 @@ type PlannedGraphqlOp<G extends GraphqlDict, R extends GraphqlWriteRole<G>> = Pl
 };
 
 /**
- * The erased view the engine executes: every literal operation is assignable
- * to it, and the executor resolves `role` against the section's declarations
- * at runtime (REST first, then GraphQL; the registry asserts the two role
- * spaces are disjoint).
+ * The view the engine executes; it resolves `role` against the section's declarations at runtime
+ * (REST first, then GraphQL; ../registry.ts asserts the two role spaces are disjoint).
  */
 interface ErasedPlannedOp extends PlannedOpBase {
   readonly role: string;
@@ -446,14 +382,11 @@ interface ErasedPlannedOp extends PlannedOpBase {
 }
 
 /**
- * One operation a plan asks the engine to execute. Against a section's
- * LITERAL dictionaries (the `as const` ENDPOINTS a module passes to
- * SectionModule) the type is exact: `role` must be a declared WRITE role, a
- * REST op's `params` carry exactly the route's path params, and a GraphQL
- * op's `variables` match its declaration. The GraphQL arm exists only for a
- * LITERAL `G`: under the wide default (a REST-only section, or one that
- * forgot `typeof GRAPHQL`) it collapses to never. Against the erased
- * dictionaries (the engine's view) the type widens to ErasedPlannedOp.
+ * Against a section's LITERAL dictionaries the type is exact: `role` must be a declared WRITE role, a REST
+ * op's `params` carry exactly the route's path params, a GraphQL op's `variables` match its declaration.
+ *
+ *   wide default `G` (REST-only, or a forgotten `typeof GRAPHQL`)  -> the GraphQL arm collapses to never
+ *   erased dictionaries (the engine's view)                         -> widens to ErasedPlannedOp
  */
 export type PlannedOp<
   E extends EndpointDict = EndpointDict,
@@ -467,14 +400,9 @@ export type PlannedOp<
           : { [R in GraphqlWriteRole<G>]: PlannedGraphqlOp<G, R> }[GraphqlWriteRole<G>]);
 
 /**
- * What plan() returns, parametrized on the operation type so a plan over a
- * section's literal dictionaries erases to the engine's view structurally
- * (`PlannedOp<E, G>` is assignable to ErasedPlannedOp). `ops` run in order
- * in apply mode and render their drift in check mode. `notes` are
- * mode-neutral (unmanaged resources left alone, skips) and render in both
- * modes. `drift` holds the op-less drift lines - a finding no operation can
- * fix (a declared workflow whose file does not exist) - which check mode
- * reports as drift and apply mode surfaces as notes, so it is never silent.
+ * `ops` run in order in apply mode and render their drift in check mode; `notes` render in both modes.
+ * `drift` holds the op-less lines, a finding no operation can fix (a declared workflow whose file does
+ * not exist): check mode reports it as drift, apply surfaces it as notes, so it is never silent.
  */
 export interface SectionPlan<Op extends PlannedOpBase = ErasedPlannedOp> {
   ops: Op[];
@@ -482,12 +410,10 @@ export interface SectionPlan<Op extends PlannedOpBase = ErasedPlannedOp> {
   drift: string[];
 }
 
-/** The check-mode drift list of a plan: every op's drift lines, then the op-less lines. */
 export function planDrift(plan: SectionPlan): string[] {
   return [...plan.ops.flatMap(driftOf), ...plan.drift];
 }
 
-/** The check-mode notes of a plan: every op's unverifiable reason, then the mode-neutral notes. */
 export function planCheckNotes(plan: SectionPlan): string[] {
   return [
     ...plan.ops.flatMap((op) => ("unverifiable" in op.drift ? [op.drift.unverifiable] : [])),
@@ -496,9 +422,8 @@ export function planCheckNotes(plan: SectionPlan): string[] {
 }
 
 /**
- * A frozen deep copy of a declaration, taken at bind time. The bound helpers
- * close over the copy, so a declaration object mutated after binding (its
- * route or kind rewritten to a write) cannot change what a read issues.
+ * The bound helpers close over a frozen copy, so a declaration mutated after binding (its route
+ * rewritten to a write) cannot change what a read issues.
  */
 function snapshot<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -513,20 +438,15 @@ function snapshot<T>(value: T): T {
 }
 
 /**
- * Bind a section's READ roles to the request helpers over one client and
- * target. Only GET endpoints and GraphQL queries are bound, so the returned
- * port cannot issue a write however it is called - the runtime twin of the
- * BoundReads type. The single cast at the end is the construction boundary:
- * the record is built by iterating the declarations the type was derived
- * from.
+ * Only GETs and GraphQL queries are bound, so the port cannot issue a write however it is called: the
+ * runtime twin of BoundReads. The cast at the end is the construction boundary.
  */
 function boundReads<E extends EndpointDict, G extends GraphqlDict>(
   meta: SectionMeta<SectionKey, E, G>,
   api: GithubClient,
   repo: RepoRef,
 ): BoundReads<E, G> {
-  // The helpers take a SectionContext; reads are the check arm's whole
-  // capability, so that is the arm they get.
+  // Reads are the check arm's whole capability, so that is the arm the helpers get.
   const ctx: SectionContext = { api, repo, check: true };
   const port: Record<string, object> = {};
   for (const [role, declaration] of Object.entries(meta.endpoints)) {
@@ -564,11 +484,7 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
   return Object.freeze(port) as BoundReads<E, G>;
 }
 
-/**
- * The context a plan() body receives for one target. `E` and `G` infer from
- * the module itself, so the port is typed by the declarations it is built
- * from - a caller cannot ask for a port the section never declared.
- */
+/** `E` and `G` infer from the module, so a caller cannot ask for a port the section never declared. */
 export function planContext<E extends EndpointDict, G extends GraphqlDict>(
   meta: SectionMeta<SectionKey, E, G>,
   api: GithubClient,

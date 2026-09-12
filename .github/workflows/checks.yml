@@ -1,10 +1,8 @@
-# Repo-owned CI checks, called by the managed ci.yml inside the all-green
-# gate: every job here must pass before all-green goes green. Never
-# overwritten by template sync, so edit freely.
-#
-# Two limits from running inside the `checks` caller: jobs here get no
-# secrets and are capped at the caller's permissions (contents: read), and
-# all-green only sees the aggregate result.
+# Repo-owned, never overwritten by sync; the managed ci.yml calls it inside the all-green gate, so every job here
+# must pass before all-green goes green. Three limits come with running inside the `checks` caller:
+#   secrets      -> none reach these jobs
+#   permissions  -> capped at the caller's contents: read
+#   all-green    -> sees only the aggregate result
 
 name: Checks
 
@@ -35,16 +33,11 @@ jobs:
       - name: Test
         run: bun run test
 
-  # The freshness tripwire behind the single-tag scheme's boundary (the
-  # anchor half lives in update-release-pr.yml): last-release-sha in
-  # release-please-config.json must be the newest release merge on main or
-  # its parent - version tags live off main, so a lost anchor would have
-  # every release PR refresh computed from a stale boundary. Gating here
-  # parks the release job (it needs all-green) before release-please can
-  # build a garbage release PR. The skip lives on the STEPS, per side:
-  # all-green treats a skipped needed job as failure, and the main-side
-  # check must judge only main (the release PR deliberately carries the
-  # anchored NEXT boundary, which anchor-check below validates instead).
+  # The freshness tripwire behind the boundary anchor (update-release-pr.yml): version tags live off main, so a lost
+  # anchor would have every release PR refresh computed from a stale boundary, and gating here parks the release job
+  # before release-please can build a garbage release PR.
+  #   on main          -> boundary-check: last-release-sha is the newest release merge or its parent
+  #   on a release PR  -> anchor-check: the PR carries the anchored NEXT boundary, which the main-side rule would reject
   boundary-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -61,11 +54,8 @@ jobs:
       - name: Confirm last-release-sha matches the newest release merge
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: bun .github/scripts/release-pipeline.ts boundary-check
-      # The PR-side half, on release PRs only: the merge must land the
-      # anchor, and the managed release-freshness gate proves only that the
-      # PR contains main's tip - not that the anchor commit survived the
-      # last release-please force-push. An unanchored release PR must be
-      # unmergeable here, not park the pipeline after its merge.
+      # The PR-side half, on release PRs only: an unanchored release PR must be unmergeable here, not park the
+      # pipeline after its merge.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -76,8 +66,6 @@ jobs:
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
         run: bun .github/scripts/release-pipeline.ts anchor-check
 
-  # lib/settings.schema.json is the committed settings.yml JSON Schema,
-  # generated from the SettingsFile types in src/; fail if it drifts.
   schema-check:
     runs-on: ubuntu-latest
     steps:
@@ -136,11 +124,8 @@ jobs:
             *) echo "::error::action crashed (no result output)"; exit 1 ;;
           esac
 
-  # Diff-aware e2e smoke: on a PR, run only the scenarios and fuzz for the
-  # sections the PR touched (docs-only PRs skip; core or cross-cutting changes
-  # run every section). The action bundle runs under node24, so the smoke job
-  # installs node too. Non-PR events (push, dispatch) have no PR base to diff
-  # against, so they run the full corpus.
+  # The action bundle runs under node24, so node is installed beside bun. A non-PR event (push, dispatch) has no base
+  # to diff against, so it runs the full corpus.
   e2e-smoke:
     runs-on: ubuntu-latest
     steps:
@@ -167,8 +152,8 @@ jobs:
           fi
           echo "sections=$SECTIONS" >> "$GITHUB_OUTPUT"
           echo "selected sections: $SECTIONS"
-      # The harness validates mock responses against the fetched, gitignored spec;
-      # the composite restores or fetches it, skipped with the run on a docs-only PR.
+      # The harness validates mock responses against the fetched, gitignored spec; the composite restores or fetches
+      # it, skipped with the run when the selector picks nothing.
       - uses: ./.github/actions/fetch-test-artifacts
         if: steps.select.outputs.sections != 'none'
       - name: Run scenarios and fuzz
@@ -184,14 +169,9 @@ jobs:
             bun test/e2e/fuzz.ts --iterations 25 --sections "$SECTIONS"
           fi
 
-  # Endpoint-coverage tripwire: every "section.role" route in allEndpoints()
-  # and allGraphqlOps() must be hit at least once by the curated corpus. The
-  # nightly also runs this, but a PR that adds an endpoint without a scenario
-  # reaching it must fail on that PR, not the next night. The checker runs
-  # the full corpus itself (the diff-aware smoke job may run a subset) - the
-  # ~10 minutes are skipped only when the section selector proves the PR
-  # touched no route-bearing code (docs-only). The action bundle runs under
-  # node24, so node is installed here too.
+  # A PR that adds an endpoint without a scenario reaching it must fail on that PR, not the next night. Coldness is a
+  # whole-corpus property (deleting one scenario can chill any route), so the full corpus runs (~10 minutes) unless
+  # the selector finds nothing settings-related in the diff.
   endpoint-coverage:
     runs-on: ubuntu-latest
     steps:
@@ -206,11 +186,8 @@ jobs:
           node-version: 24
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      # The same selector e2e-smoke uses, but only its "none" answer matters
-      # here: coldness is a whole-corpus property (deleting one scenario can
-      # chill any route), so any code change runs the full sweep, and only a
-      # provably docs-only PR skips it. Non-PR events run it always. It runs
-      # BEFORE the spec cache/fetch so a docs-only PR skips the download too.
+      # Only the selector's "none" answer matters here. It runs BEFORE the spec cache/fetch so a PR that selects
+      # nothing skips the download too.
       - name: Check whether the diff can affect route coverage
         id: select
         env:
@@ -223,7 +200,6 @@ jobs:
           fi
           echo "sections=$SECTIONS" >> "$GITHUB_OUTPUT"
           echo "selected sections: $SECTIONS"
-      # The same fetched artifacts as e2e-smoke above, skipped with the sweep.
       - uses: ./.github/actions/fetch-test-artifacts
         if: steps.select.outputs.sections != 'none'
       - name: Endpoint-coverage tripwire

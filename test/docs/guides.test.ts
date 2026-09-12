@@ -1,14 +1,3 @@
-/**
- * Guides contract tests: docs/ pages are walkthroughs whose settings examples
- * must stay real. Every fenced block tagged `yaml settings` runs through the
- * full document validation (a schema change that invalidates a guide example
- * fails CI). The fence vocabulary is closed: fences are column-zero triple
- * backticks, and every opening info string must come from a known list, with
- * plain `yaml` reserved for workflow files - so a settings example cannot
- * dodge validation by dropping or misspelling its tag. The guide set itself
- * is pinned (a page cannot silently disappear while links to it remain).
- */
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
@@ -79,7 +68,6 @@ function guidePages(): string[] {
  *   yaml layer    -> one layer of a merge, valid once its null markers are stripped
  *   yaml          -> a workflow file
  *   mermaid       -> a diagram, pinned to real code in diagrams.test.ts
- *   ts            -> a library consumer's TypeScript
  *   text, bash    -> never yaml
  */
 const ALLOWED_FENCE_INFO = new Set([
@@ -102,9 +90,7 @@ function fenceViolations(markdown: string, allowed: ReadonlySet<string>): string
   let open = false;
   for (const [index, line] of markdown.split("\n").entries()) {
     if (open) {
-      // Inside a block, only the exact bare closer counts; fence-like body
-      // lines (a guide showing markdown) are content. A malformed closer
-      // therefore surfaces as the unclosed-fence problem at the end.
+      // Fence-like body lines (a guide showing markdown) are content, so a malformed closer surfaces as the unclosed-fence problem at the end.
       if (line === "```") {
         open = false;
       }
@@ -117,9 +103,7 @@ function fenceViolations(markdown: string, allowed: ReadonlySet<string>): string
         );
         continue;
       }
-      // No trim of LEADING whitespace: "``` yaml settings" would pass a
-      // trimmed allowlist check while being invisible to fencedBlocks,
-      // letting the example dodge validation.
+      // No leading trim: "``` yaml settings" would pass a trimmed check while fencedBlocks cannot see it.
       const info = line.slice(3).trimEnd();
       if (!allowed.has(info)) {
         problems.push(
@@ -148,10 +132,8 @@ function githubSlug(heading: string): string {
 }
 
 /**
- * The lines of a document that sit outside fenced code blocks. Tolerates
- * indented fences (the README nests them in list items), unlike the guides'
- * stricter column-zero policy, so it is safe over every markdown file the
- * anchor test scans.
+ * The lines outside fenced code blocks. Indented fences count here (the README nests them in list items), unlike the guides' column-zero policy, so
+ * every scanned markdown file is safe.
  */
 function linesOutsideFences(markdown: string, source: string): string[] {
   const lines: string[] = [];
@@ -172,30 +154,23 @@ function linesOutsideFences(markdown: string, source: string): string[] {
     }
   }
   if (opener !== null) {
-    // An unclosed fence would silently swallow every heading and link after
-    // it; the guides' own fence policy catches this for docs/ pages, but the
-    // root files in the scan set have no such check, so fail here instead.
+    // The root files in the scan set have no fence-policy test, so an unclosed fence swallowing every later heading and link fails here.
     throw new Error(`unclosed ${opener} fence in ${source} swallows the rest of the document`);
   }
   return lines;
 }
 
 /**
- * An attribute value as a browser reads it: HTMLRewriter hands back the source text, so every
- * character reference (numeric, or any of the HTML5 named entities, semicolon-less legacy forms
- * included) is decoded here under the spec's attribute-value rules.
+ * HTMLRewriter hands back the attribute's source text, so character references (semicolon-less legacy named entities included) are decoded here under
+ * the spec's attribute-value rules.
  */
 function decodeAttribute(raw: string): string {
   return decodeHTML(raw, DecodingMode.Attribute);
 }
 
 /**
- * Every `href` and `src` attribute value in `markdown`, as the rendered page
- * carries it: the markdown is rendered to HTML (so every CommonMark destination
- * form, including entities, backslash escapes, angle brackets, multi-line
- * labels, and raw HTML tags, resolves the way a site build would) and the two
- * attributes are read back from every element carrying them (a, img, video,
- * source, iframe, link, ...) and HTML-unescaped.
+ * Every `href` and `src` value in the rendered page. Rendering first means every CommonMark destination form (entities, backslash escapes, angle
+ * brackets, multi-line labels, raw HTML) resolves as a site build would.
  */
 async function linkDestinations(markdown: string): Promise<string[]> {
   const destinations: string[] = [];
@@ -216,9 +191,7 @@ async function linkDestinations(markdown: string): Promise<string[]> {
 }
 
 /**
- * The stand-in site the guard resolves against: docs/ served under a path no
- * real link names, so a destination that climbs out of it (and even one that
- * climbs out and back into a literal "docs/") lands outside that prefix.
+ * docs/ served under a path no real link names, so a destination that climbs out (even back into a literal "docs/") lands outside the prefix.
  */
 const SITE_ORIGIN = "https://docs-site.invalid";
 const SITE_ROOT = "/docs-root-7c1e/";
@@ -266,15 +239,12 @@ async function linksLeavingDocs(markdown: string, page: string): Promise<string[
 function headingSlugs(markdown: string, source: string): Set<string> {
   const slugs = new Set<string>();
   for (const line of linesOutsideFences(markdown, source)) {
-    // ATX headings may carry a closing hash run ("## Setup ##"), which is
-    // not part of the heading text GitHub slugs.
+    // A closing hash run ("## Setup ##") is not part of the text GitHub slugs.
     const heading = line.match(/^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/);
     if (!heading) {
       continue;
     }
-    // GitHub resolves a duplicate by probing -1, -2, ... until the slug is
-    // free, so an explicit "Setup-1" heading pushes a later duplicate
-    // "Setup" to setup-2 rather than colliding on setup-1.
+    // GitHub probes -1, -2, ... until the slug is free, so an explicit "Setup-1" heading pushes a later duplicate "Setup" to setup-2.
     const base = githubSlug(heading[1] ?? "");
     let slug = base;
     for (let n = 1; slugs.has(slug); n++) {
@@ -297,10 +267,7 @@ interface RefusalRow {
   readonly quoted: string;
 }
 
-/**
- * The cells of one GFM table row: the outer pipes are optional, so a row
- * written without them (or with only one) is still a row and still pinned.
- */
+/** The cells of one GFM row; GFM makes the outer pipes optional, so a row written without them is still pinned. */
 function tableCells(line: string): string[] {
   let body = line.trim();
   if (body.startsWith("|")) {
@@ -318,17 +285,12 @@ function isDelimiterRow(line: string | undefined): boolean {
 }
 
 /**
- * The rows of the layering guide's two refusal tables. The page is the single
- * source: a row's first cell ends with the layer that triggers it, as one code
- * span in parentheses (or several joined by "or" when the page names
- * alternatives), and its second cell quotes the message the engine emits, in
- * one code span. Rows are recognized more permissively than GFM renders them:
- * a header line followed by a delimiter row opens a table (the delimiter's
- * cell count is not checked, so `|---|` under a two-cell header opens one here
- * and renders as prose), every non-blank line after that is a row (outer pipes
- * optional; a list item shaped like a row counts), and a blank line closes it.
- * Every divergence adds a pin, never loses one. A row missing its input or its
- * message fails here by name, so a new row cannot land unpinned.
+ * The layering guide's refusal tables are the single source; a row missing its input or its message fails here by name.
+ * Rows are recognized more permissively than GFM renders them, so every divergence adds a pin and never loses one.
+ *
+ *   first cell              -> ends with the triggering layer as a code span in parentheses, or several joined by "or"
+ *   second cell             -> quotes the engine's message in one code span
+ *   header + delimiter row  -> opens a table (the delimiter's cell count is not checked); a blank line closes it
  */
 function refusalRows(section: readonly string[], source: string): RefusalRow[] {
   const GATES: Record<string, RefusalRow["gate"]> = {
@@ -390,10 +352,7 @@ function refusalRows(section: readonly string[], source: string): RefusalRow[] {
 }
 
 /**
- * The validator's wrapper around its problem list. The page quotes the problem
- * alone ("with the same messages a standalone file gets"); holding the whole
- * error to the wrapper around ONE quoted problem proves the row's layer raises
- * that problem and nothing else.
+ * The validator's wrapper around ONE problem, whole, so a row's layer is proved to raise that problem and nothing else.
  */
 function malformedSectionEntries(layer: string, problem: string): string {
   return (
@@ -406,17 +365,11 @@ function malformedSectionEntries(layer: string, problem: string): string {
 
 describe("docs/ guide pages", () => {
   test("every required guide page exists, and no page exists outside the set", () => {
-    // Exact equality, not inclusion: after the tree restructure this is what
-    // proves the old folders actually disappeared instead of lingering as
-    // orphaned copies next to the new pages.
+    // Equality, not inclusion: an orphaned page left beside the required set fails too.
     expect(guidePages()).toEqual([...REQUIRED_PAGES].sort());
   });
 
-  /**
-   * Every markdown file whose outbound links the two link tests verify: the
-   * guides plus the root pages that link into docs/ (README, COVERAGE,
-   * CONTRIBUTING, SECURITY), which would otherwise go unchecked.
-   */
+  /** The guides plus the root pages that link into docs/, whose outbound links would otherwise go unchecked. */
   const linkScanFiles = () => [
     ...guidePages().map((page) => ({ label: `docs/${page}`, path: join(DOCS, page) })),
     { label: "README.md", path: join(ROOT, "README.md") },
@@ -426,10 +379,6 @@ describe("docs/ guide pages", () => {
   ];
 
   test("every relative link in the guides, README, and COVERAGE resolves to a real file", () => {
-    // The guides moved into group folders, so every cross-link is a relative
-    // path that a rename or move can silently break. Resolve each one
-    // against its file's directory (anchors stripped; external and
-    // in-page links skipped) and require the target to exist.
     const broken: string[] = [];
     for (const file of linkScanFiles()) {
       const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
@@ -452,8 +401,6 @@ describe("docs/ guide pages", () => {
   });
 
   test("no guide links outside docs/", async () => {
-    // The docs site is built from docs/ alone: every relative link must land
-    // on a page inside it, and the repository's root files are reached by URL.
     const leaving: string[] = [];
     for (const page of guidePages()) {
       leaving.push(...(await linksLeavingDocs(readFileSync(join(DOCS, page), "utf8"), page)));
@@ -462,11 +409,6 @@ describe("docs/ guide pages", () => {
   });
 
   test("every relative link with a #fragment points at a real heading", () => {
-    // The existence check above ignores fragments, so a heading rename or a
-    // section moved to another page used to break silently. Here every
-    // relative link carrying a fragment (same-page `#fragment` links
-    // included) from the guides, the README, or COVERAGE.md must match a
-    // GitHub-slugified heading of its target file.
     const files = linkScanFiles();
     const slugCache = new Map<string, Set<string>>();
     const slugsOf = (path: string): Set<string> => {
@@ -508,9 +450,7 @@ describe("docs/ guide pages", () => {
   });
 
   test("headings in scanned files carry no markdown links, HTML, or brackets", () => {
-    // githubSlug slugs RAW heading text, so a markdown link, HTML tag, or
-    // entity inside a heading would slug to garbage the anchor test then
-    // trusts. Keep headings plain text and the slugger stays honest.
+    // githubSlug slugs RAW heading text, so a link, tag, or entity in a heading slugs to garbage the anchor test then trusts.
     const offenders: string[] = [];
     for (const file of linkScanFiles()) {
       for (const line of linesOutsideFences(readFileSync(file.path, "utf8"), file.label)) {
@@ -523,12 +463,7 @@ describe("docs/ guide pages", () => {
     expect(offenders).toEqual([]);
   });
 
-  /**
-   * Every file the release-please generic updater may rewrite: root-level
-   * markdown, the guide pages, and the issue templates. The marker/extra-files
-   * equality test and the first-digit hazard guard both iterate this one
-   * list, so widening the scan set updates them together.
-   */
+  /** Every file release-please's generic updater may rewrite; both marker tests iterate this one list. */
   function markerScanFiles(): Array<{ label: string; path: string }> {
     const rootPages = readdirSync(ROOT)
       .filter((name) => name.endsWith(".md"))
@@ -565,9 +500,7 @@ describe("docs/ guide pages", () => {
   });
 
   test("package.json's version is the one json extra-file", () => {
-    // The npm manifest carries no marker: release-please's json updater
-    // rewrites $.version, and test/package-json.test.ts holds it equal to
-    // the manifest, so a dropped or duplicated entry is seen here.
+    // The npm manifest carries no marker (release-please's json updater rewrites $.version), so a dropped or duplicated entry is seen here.
     const updaters = releaseExtraFiles().filter((entry) => typeof entry !== "string");
     expect(updaters).toEqual([{ type: "json", path: "package.json", jsonpath: "$.version" }]);
   });
@@ -577,8 +510,7 @@ describe("docs/ guide pages", () => {
 
     test(`docs/${page}: every \`yaml settings\` block is a valid settings document`, () => {
       for (const block of fencedBlocks(markdown, "yaml settings")) {
-        // Unlike the README heuristic, a tagged block gets no benefit of the
-        // doubt: a parse error or an unknown key is a failure, not a skip.
+        // Unlike the README heuristic, a tagged block gets no benefit of the doubt: a parse error or an unknown key fails rather than skips.
         let doc: unknown;
         try {
           doc = parseYaml(block);
@@ -590,11 +522,7 @@ describe("docs/ guide pages", () => {
     });
 
     test(`docs/${page}: every \`yaml layer\` block is a valid layer`, () => {
-      // A layer is judged exactly as the merge step judges it: the nulls the
-      // fold reads as markers are dropped first (src/engine/layers.ts
-      // stripNulls), then the same document validation apply runs, then the
-      // fold's own gates (a duplicate key within the layer, a layering
-      // directive on a section without a layering key) admit it alone.
+      // Judged as the merge step judges a layer: stripNulls first, then document validation, then the fold's own gates.
       for (const block of fencedBlocks(markdown, "yaml layer")) {
         let doc: unknown;
         try {
@@ -613,11 +541,7 @@ describe("docs/ guide pages", () => {
     });
 
     test(`docs/${page}: plain yaml blocks are workflow files, everything else is tagged`, () => {
-      // Guides carry two kinds of yaml: workflow files (plain ```yaml) and
-      // settings documents (```yaml settings, validated above). Requiring
-      // every plain block to parse as a workflow means a settings example
-      // cannot dodge validation by dropping the tag, even with every section
-      // key misspelled.
+      // Requiring every plain yaml block to parse as a workflow means a settings example cannot dodge validation by dropping its tag.
       for (const block of fencedBlocks(markdown, "yaml")) {
         let doc: unknown;
         try {
@@ -625,10 +549,7 @@ describe("docs/ guide pages", () => {
         } catch {
           doc = null;
         }
-        // A workflow file, structurally: a mapping whose top-level keys all
-        // come from the workflow vocabulary, with a non-null jobs mapping.
-        // A settings document smuggled in with a decorative jobs key still
-        // fails on its section keys.
+        // A settings document smuggled in with a decorative jobs key still fails on its section keys.
         const WORKFLOW_TOP_KEYS = new Set([
           "name",
           "run-name",
@@ -653,9 +574,7 @@ describe("docs/ guide pages", () => {
           `docs/${page} has a plain yaml block that is not a workflow file (starts "${block.split("\n")[0]}"); tag settings examples as \`\`\`yaml settings`,
         ).toBe(true);
       }
-      // `text` is for log output, the one fence kind that is never yaml. A
-      // text block that parses to a mapping carrying a section key is a
-      // settings example hiding from validation.
+      // A text block that parses to a mapping carrying a section key is a settings example hiding from validation.
       const known = new Set<string>(SECTION_KEYS);
       for (const block of fencedBlocks(markdown, "text")) {
         let doc: unknown;
@@ -678,10 +597,6 @@ describe("docs/ guide pages", () => {
   }
 
   test("the examples cookbook shows every section at least once", () => {
-    // Every section shows at least one cookbook block, derived from
-    // SECTION_KEYS so a new section cannot skip the cookbook silently.
-    // Nested environment lists ride the same pin (they live inside the
-    // environments block).
     const markdown = readFileSync(join(DOCS, "start", "examples.md"), "utf8");
     const fences = fencedBlocks(markdown, "yaml settings").join("\n");
     for (const key of SECTION_KEYS) {
@@ -711,10 +626,6 @@ describe("docs/ guide pages", () => {
   ])(
     'the layering guide\'s "%s" folds to the merged document it shows',
     (heading, count, notices) => {
-      // The `yaml layer` fences under the heading are the layers, lowest first,
-      // and the section's one `yaml settings` fence is the result; the real
-      // fold must produce exactly that result, so the page cannot describe a
-      // dialect the engine does not implement.
       const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
       const section = sectionLines(markdown, heading, "docs/operate/layering.md").join("\n");
       const layers: Layer[] = fencedBlocks(section, "yaml layer").map((block, index) => ({
@@ -731,9 +642,7 @@ describe("docs/ guide pages", () => {
   );
 
   test("the layering guide's inputs table names every input mode: merge rejects", () => {
-    // The rejected set is derived from the input declarations, so a new
-    // apply/check-time input is rejected by the merge the moment it is
-    // declared; the table must name it, or the page under-reports the refusal.
+    // MERGE_REJECTED_INPUTS grows with the input declarations, so the table must name each one or the page under-reports the refusal.
     const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
     const section = sectionLines(markdown, "Inputs in mode: merge", "docs/operate/layering.md");
     const rejectedRow = section.find((line) => line.includes("| Rejected"));
@@ -745,18 +654,14 @@ describe("docs/ guide pages", () => {
   });
 
   describe("the layering guide's refusal tables quote the messages the merge step emits", () => {
-    // Each row's layer runs through the merge step's own gates in the page's
-    // order (per-layer validation, then the fold), and the row's quoted
-    // message must equal the whole error, so neither table can drift from the
-    // engine and no row can quote a message its own layer does not raise.
+    // The quoted message is compared against the whole error its layer raises (wrapped in that layer's prefix), so no row can quote a message its
+    // own layer does not raise.
     const PAGE = "docs/operate/layering.md";
     const section = sectionLines(
       readFileSync(join(DOCS, "operate", "layering.md"), "utf8"),
       "Refusals",
       PAGE,
     );
-    // The page names the refused layer in the fold's prefix it quotes
-    // (`layer "<name>": ...`); every row's layer is folded under that name.
     const prefix = section.join("\n").match(/`layer "([^"`]+)": \.\.\.`/);
     if (!prefix) {
       throw new Error(
@@ -796,8 +701,7 @@ describe("docs/ guide pages", () => {
   });
 
   test("the v2-to-v3 guide quotes the complete wrapper-key rename error the validator emits", () => {
-    // The guide's text fence is the reader's search string, so it is held to
-    // the error the validator emits for a v2 wrapper, not to a source substring.
+    // The fence is the reader's search string, so it is held to the emitted error, not a source substring.
     const guide = readFileSync(join(DOCS, "upgrading", "v2-to-v3.md"), "utf8");
     const result = validateSettingsDoc(
       { labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] } },
@@ -814,9 +718,6 @@ describe("docs/ guide pages", () => {
   });
 
   test("the troubleshooting guide quotes the stale-version hint verbatim", () => {
-    // The page quotes the hint character for character; pin the quote to the
-    // exported constant so editing the hint cannot leave the page silently
-    // wrong.
     const markdown = readFileSync(join(DOCS, "operate", "troubleshooting.md"), "utf8");
     expect(
       markdown.replace(/\n/g, " ").includes(STALE_VERSION_HINT),
@@ -825,9 +726,7 @@ describe("docs/ guide pages", () => {
   });
 
   test("fencedBlocks sees every tagged settings example the guides carry", () => {
-    // The per-page corpus tests validate what fencedBlocks returns, so a
-    // blind fencedBlocks would pass them vacuously. Count the openers with
-    // an independent scan and pin the one page that must carry an example.
+    // The per-page corpus tests validate what fencedBlocks returns, so a blind fencedBlocks would pass them vacuously.
     const seen = Object.fromEntries(
       guidePages().map((page) => {
         const markdown = readFileSync(join(DOCS, page), "utf8");
@@ -845,11 +744,8 @@ describe("docs/ guide pages", () => {
   });
 
   test("the undeclared-policy guide names every nested per-environment knob", () => {
-    // The guides' "carry the same wrapped form" enumerations are prose; this
-    // pins them to NESTED_KEYS (the single source the reconciler loops over),
-    // so adding a nested knob without documenting its policy fails here
-    // instead of rotting silently. check-mode.md carries the same
-    // enumeration in its not-verifiable list, so both pages are pinned.
+    // The nested-knob enumerations are prose; NESTED_KEYS is the single source the reconciler loops over. check-mode.md carries the same list in its
+    // not-verifiable section.
     for (const path of [
       ["reference", "undeclared-policy.md"],
       ["operate", "check-mode.md"],
@@ -865,12 +761,8 @@ describe("docs/ guide pages", () => {
   });
 
   test("the guides enumerate every delete-by-default section", () => {
-    // The set is derived from the registry so a new delete-by-default
-    // section fails here until the prose follows; getting-started drifted
-    // to three of five sections once already.
+    // getting-started drifted to three of five delete-by-default sections once already.
     const deleteKeys = SECTIONS.filter((s) => s.undeclaredDefault === "delete").map((s) => s.key);
-    // getting-started names section KEYS in backticks: the paragraph must
-    // name exactly the delete-by-default set - no more, no fewer.
     const gettingStarted = readFileSync(join(DOCS, "start", "getting-started.md"), "utf8");
     const paragraph = gettingStarted
       .split("\n\n")
@@ -893,8 +785,7 @@ describe("docs/ guide pages", () => {
         ).toBe(false);
       }
     }
-    // The migration guide's deletion paragraph uses display names, checked
-    // through the shared map in claims.ts.
+    // The migration guide names sections by display name, so it goes through the shared map in claims.ts.
     const migration = readFileSync(join(DOCS, "start", "migrating-from-probot.md"), "utf8");
     const deletions = migration.split("\n\n").find((p) => p.includes("Deletions still exist"));
     expect(
@@ -905,9 +796,7 @@ describe("docs/ guide pages", () => {
   });
 
   test("workflow snippets reference the current major tag", () => {
-    // README pins exact versions inside release-please markers; guides use
-    // the moving major tag instead so they do not rot per patch release. This
-    // pin makes a major-version bump fail here, forcing the guides to follow.
+    // Guides pin the moving major tag, not exact versions, so they do not rot per patch release; a major bump fails here until they follow.
     const pins = stalePins(
       guidePages().map((page) => ({
         label: `docs/${page}`,
@@ -917,8 +806,7 @@ describe("docs/ guide pages", () => {
     if (pins === null) {
       return; // nothing released yet, no tag can be right
     }
-    // The guides carry workflow snippets, so zero matches means the pattern
-    // rotted, not that the docs went snippet-free.
+    // Zero matches means the pattern rotted, not that the docs went snippet-free.
     expect(pins.references).toBeGreaterThan(0);
     const stale = pins.stale.map((pin) => `${pin.label}:${pin.line} pins @${pin.ref}: ${pin.text}`);
     expect(
@@ -932,13 +820,8 @@ describe("docs/ guide pages", () => {
   });
 
   test("every x-release-please-major line keeps its version digit first", () => {
-    // release-please's generic updater rewrites the FIRST digit run on an
-    // annotated line (MAJOR_VERSION_REGEX with String.replace). Every
-    // annotated line in every file the updater may rewrite - root markdown,
-    // guides, and issue templates alike (markerScanFiles) - must therefore
-    // keep its major-version digit first, reached as an @v pin, a /v path
-    // segment (the schema hint URLs), or backtick-v prose, or the next
-    // major's release PR silently rewrites the wrong number.
+    // release-please rewrites the FIRST digit run on an annotated line (MAJOR_VERSION_REGEX with String.replace), so a digit before the version token
+    // gets rewritten instead of the version.
     for (const file of markerScanFiles()) {
       const content = readFileSync(file.path, "utf8");
       for (const [index, line] of content.split("\n").entries()) {
@@ -954,11 +837,6 @@ describe("docs/ guide pages", () => {
 });
 
 describe("links-leaving-docs guard (mutation checks)", () => {
-  // Every CommonMark way of writing a destination that climbs out of docs/ is
-  // named with its page and line, whatever element carries it (a, img, video,
-  // source, iframe, link); links that stay inside docs/ from any depth,
-  // fenced or inline-code look-alikes, absolute URLs, and in-page fragments
-  // never are.
   const page = [
     "# Title",
     "",
@@ -1000,8 +878,8 @@ describe("links-leaving-docs guard (mutation checks)", () => {
     "",
     '<a href="&period;&period;/&period;&period;/GOVERNANCE.md">named</a> <a href="&period;&period;&sol;&period;&period;&sol;CODEOWNERS.md">named slashes</a> <a href="../&amp/../../LEGACY.md">legacy bare</a>',
     "",
-    // The control: a browser decodes a semicolon-less entity only from the legacy list, so
-    // `&period` stays literal and this link resolves inside docs/, escaping nothing.
+    // The control: a browser decodes a semicolon-less entity only from the legacy list, so `&period` stays literal and this link resolves inside
+    // docs/.
     '<a href="&period&period/&period&period/MAINTAINERS.md">non-legacy bare</a>',
     "",
   ].join("\n");
@@ -1045,8 +923,6 @@ describe("links-leaving-docs guard (mutation checks)", () => {
 });
 
 describe("refusal table parser (mutation checks)", () => {
-  // Each mutation is a realistic authoring slip on the layering guide's
-  // refusal tables; the parser must pin or reject every one, never skip a row.
   const header = ["| The layer has | The fold says |", "|---|---|"];
   const row = (has: string, says = "`the message`"): string => `| ${has} | ${says} |`;
 
@@ -1056,8 +932,7 @@ describe("refusal table parser (mutation checks)", () => {
   });
 
   test("a row without its outer pipes is parsed as a row, not prose", () => {
-    // GFM renders a row with no leading pipe (or no trailing one) as a row,
-    // so a last row appended that way must be pinned rather than skipped.
+    // GFM renders a row without its leading or trailing pipe as a row, so it must be pinned rather than skipped.
     const unpiped = "New refusal (`_layering: union`) | `WRONG MESSAGE` |";
     const bare = "Bare (`a: 1`) | `also wrong`";
     const rows = refusalRows([...header, row("First (`labels: oops`)"), unpiped, bare], "page");
@@ -1168,9 +1043,7 @@ describe("fence policy guard (mutation checks)", () => {
 });
 
 describe("github heading slugger", () => {
-  // Real headings from this repo's pages, covering the punctuation GitHub
-  // strips: backticks, $, parentheses, slashes, dots, and quotes. A wrong
-  // slugging rule fails here, not as a false anchor break in the link test.
+  // Real headings from this repo's pages; a wrong slugging rule fails here rather than as a false anchor break in the link test.
   const CASES: Record<string, string> = {
     "The `$NAME` pattern": "the-name-pattern",
     "Behavior does not match src/ (missing or stale bundle)":
