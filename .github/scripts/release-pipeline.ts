@@ -3,7 +3,7 @@
  * consumer names points at a packaged commit on the `build` branch (the tags cut before that branch existed point
  * at main commits from when main still committed the bundle).
  *
- *   packaged commit    = source tree - .github/workflows - package.json's prepare script + lib/index.js + lib/pkg/, `Source: <sha>` trailer
+ *   packaged commit    = source tree - .github/workflows - package.json's preparation scripts + lib/index.js + lib/pkg/, `Source: <sha>` trailer
  *   refs/heads/build   root (no parent) -> chain commit -> chain commit ...   only ever advances
  *   refs/tags/latest   -> the newest source among build's tip, the publishing run's own chain commit, and where latest already points
  *   refs/tags/vX.Y.Z   -> the chain commit whose source is the release's merge commit; never moved
@@ -273,19 +273,25 @@ function treePlusBundle(
 
 const MANIFEST = "package.json";
 
-/** sourceSha's package.json without scripts.prepare, written to the object store; null when the source has no such
- * script. npm's git fetcher runs prepare (installing devDependencies first) on a `github:` install whenever the
- * script exists, and the packaged commit ships the build already. */
+/** The scripts npm's git fetcher (pacote) takes as a signal to run `npm install --include=dev` and the prepare
+ * lifecycle in a `github:` dependency's checkout; the packaged commit ships the build already. */
+const PREPARATION_SCRIPTS = ["prepare", "prepack", "build", "preinstall", "install", "postinstall"];
+
+/** sourceSha's package.json without its preparation scripts, written to the object store; null when it has none. */
 function strippedManifestBlob(cwd: string, sourceSha: string): string | null {
   const text = tryGit(cwd, "show", `${sourceSha}:${MANIFEST}`);
   if (text === null) {
     return null;
   }
   const pkg = JSON.parse(text) as { scripts?: Record<string, unknown> };
-  if (pkg.scripts === undefined || !("prepare" in pkg.scripts)) {
+  const scripts = pkg.scripts;
+  const present = PREPARATION_SCRIPTS.filter((name) => scripts !== undefined && name in scripts);
+  if (scripts === undefined || present.length === 0) {
     return null;
   }
-  delete pkg.scripts.prepare;
+  for (const name of present) {
+    delete scripts[name];
+  }
   return execFileSync("git", ["hash-object", "-w", "--stdin"], {
     cwd,
     input: `${JSON.stringify(pkg, null, 2)}\n`,
@@ -317,13 +323,19 @@ function assertPackages(
   };
   const expected = treePlusBundle(cwd, source, stage);
   const actual = git(cwd, "rev-parse", `${packaged}^{tree}`);
-  // The chain commits minted before the prepare strip carry the source's package.json as is; they stay valid parents
-  // and latest targets.
-  if (actual !== expected && actual !== treePlusBundle(cwd, source, stage, "source")) {
+  // The chain commits minted before the library rode along carry the source's package.json as is and stay valid
+  // parents and latest targets; a commit that carries lib/pkg/ was minted after the strip and is held to it.
+  const legacy =
+    !entries.some(({ path }) => path.startsWith("lib/pkg/")) &&
+    actual === treePlusBundle(cwd, source, stage, "source");
+  if (actual !== expected && !legacy) {
     // An unchanged workflow file never shows in the diff against the source, so every workflow path still in the tree
-    // is listed as kept; package.json is listed unless it is exactly the source's minus the prepare script.
+    // is listed as kept; package.json is listed unless it is exactly the source's minus its preparation scripts.
     const stripped = strippedManifestBlob(cwd, source);
     const manifestBlob = tryGit(cwd, "rev-parse", `${packaged}:${MANIFEST}`);
+    // Kept preparation scripts leave package.json identical to the source's, so the diff cannot list it either.
+    const keptPrepare =
+      stripped !== null && manifestBlob === tryGit(cwd, "rev-parse", `${source}:${MANIFEST}`);
     const changed = git(cwd, "diff", "--no-renames", "--name-only", source, packaged)
       .split("\n")
       .filter(
@@ -333,13 +345,14 @@ function assertPackages(
           !path.startsWith(`${WORKFLOWS_DIR}/`) &&
           !(path === MANIFEST && stripped !== null && manifestBlob === stripped),
       )
-      .concat(workflowPaths(cwd, packaged).map((path) => `${path} (kept)`));
+      .concat(workflowPaths(cwd, packaged).map((path) => `${path} (kept)`))
+      .concat(keptPrepare ? [`${MANIFEST} (preparation scripts kept)`] : []);
     const listed =
       changed.length === 0
         ? "none (an entry a path diff cannot list, such as an empty subtree)"
         : changed.join(", ");
     throw new Error(
-      `${ref} is not ${source} plus ${PACKAGED}, minus ${MANIFEST}'s prepare script, and the removal of ${WORKFLOWS_DIR}/ alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ${source}: ${listed}); ${remedy}`,
+      `${ref} is not ${source} plus ${PACKAGED}, minus ${MANIFEST}'s preparation scripts, and the removal of ${WORKFLOWS_DIR}/ alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ${source}: ${listed}); ${remedy}`,
     );
   }
 }

