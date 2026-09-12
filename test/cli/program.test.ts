@@ -10,10 +10,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { CLI_COMMANDS } from "../../src/cli/program.js";
-import { type ConfigEnv, sectionGrant, sectionModule } from "../../src/index.js";
+import type { CliHost } from "../../src/cli/commands.js";
+import { CLI_COMMANDS, main } from "../../src/cli/program.js";
+import { type ConfigEnv, type GithubClient, sectionGrant, sectionModule } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
-import { runCli } from "./streams.js";
+import { memoryStream, runCli } from "./streams.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const SINGLE = join(ROOT, "test", "fixtures", "single.yml");
@@ -37,6 +38,30 @@ const cli = runCli;
 
 describe("check and apply", () => {
   const target = ["--repository", "o/r", "--settings-file", SINGLE, "--token", TOKEN];
+
+  test("a host written as a method keeps its receiver through the executor", async () => {
+    class MethodHost implements CliHost {
+      readonly env = {};
+      constructor(private readonly api: GithubClient) {}
+      createClient(): GithubClient {
+        return this.api;
+      }
+    }
+    const stdout = memoryStream();
+    const stderr = memoryStream();
+    const code = await main(["node", "gsac", "check", ...target], {
+      host: new MethodHost(
+        new MockApi({ "GET /repos/o/r": { data: { has_wiki: false, private: false } } }),
+      ),
+      streams: { stdout: stdout.stream, stderr: stderr.stream },
+      colors: false,
+    });
+    expect({ code, stdout: stdout.text(), stderr: stderr.text() }).toEqual({
+      code: 0,
+      stdout: "result: clean\nskipped-sections=\nresult=clean\n",
+      stderr: "",
+    });
+  });
 
   test("check: clean exits 0 with result=clean, drift exits 1 with result=drift", async () => {
     // `private: false` proves the target public, so its lines print in the clear
