@@ -98,6 +98,18 @@ An existing settings file is refused (init never replaces the file you author) u
 A document that would declare no section is never written: the refusal names each selected section and why it declares nothing.
 The notes print in the clear, as the file holds the same names: init has no `--private-repos`.
 
+With `--json`, stdout is one object. After a write:
+
+| Field | Holds |
+|---|---|
+| `file`, `repository` | The written path and the `owner/name` it was read from |
+| `result` | `snapshot`, or `partial` when a section was skipped or failed |
+| `skippedSections` | Sections skipped under `--on-missing-permission warn`; the file omits them |
+| `failedSections` | Sections that failed on their own; the file omits them, the errors on stderr say why |
+| `grant` | One entry per declared section: its key and the grant line printed above |
+
+A refusal or a failure exits 1 with `{"result":"failed","problem":"<the line stderr carries>"}` instead.
+
 ### validate
 
 ```bash
