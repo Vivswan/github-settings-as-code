@@ -1,11 +1,12 @@
 # The marker-reattach witness: a human stripped the marker label from the OPEN
 # report issue on svc-reattach (seeded without it, carrying only a human-added
-# "keep-me" label), and the marker LABEL itself is gone from the repo too. This
-# run drifts (undeclared REATTACHLEAK-sentinel), so the on-failure channel takes
-# the attention path: the marker label is ensure-created, the label-filtered
-# lookup misses, the fallback creator scan (GET /user) finds the issue by title,
-# and the upsert PATCH reattaches the marker WITHOUT clobbering the human label -
-# no duplicate issue is ever created. (Future label-filtered lookups finding the
+# "keep-me" label), and the marker LABEL itself is gone from the repo too. The
+# issue was created by a PREVIOUS token user (the PAT has since been rotated).
+# This run drifts (undeclared REATTACHLEAK-sentinel), so the on-failure channel
+# takes the attention path: the marker label is ensure-created, the label-filtered
+# lookup misses, the fallback title scan finds the issue regardless of its
+# creator, and the upsert PATCH reattaches the marker WITHOUT clobbering the
+# human label - no duplicate issue is ever created. (Future label-filtered lookups finding the
 # issue again is the fix's point, but that next run is outside this scenario;
 # the PATCH's labels array is what is pinned here.)
 name: multi-report-issue-on-failure-reattach
@@ -36,7 +37,7 @@ repos:
           labels:
             - name: keep-me
           user:
-            login: e2e-token-user
+            login: former-token-user
           html_url: "https://github.com/e2e-owner/svc-reattach/issues/9"
     permissions:
       issues: write
@@ -62,10 +63,10 @@ expect:
   stdout_lacks:
     - "svc-reattach"
     - "REATTACHLEAK-sentinel"
-  # The stripped marker forces the fallback creator scan before any create.
+  # The stripped marker forces the fallback title scan (oldest first, every
+  # creator) before any create.
   requests_contain:
-    - "GET /user"
-    - "creator=e2e-token-user"
+    - "GET /repos/e2e-owner/svc-reattach/issues?state=all&sort=created&direction=asc"
   # The upsert PATCH reattaches the marker after the human label, zero creates,
   # opened because the run drifted.
   issue_report:

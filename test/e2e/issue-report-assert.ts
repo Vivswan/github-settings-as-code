@@ -46,7 +46,7 @@ export function assertIssueReport(
     failures.push(`issue_report: title "${String(created.title)}" != expected "${spec.title}"`);
   }
   // The marker label is the lookup key for one-issue-per-repo reuse. A reuse PATCH re-sends labels only when
-  // the creator fallback scan found the marker stripped (the labels check below pins that), so the create carries the assertion.
+  // the title fallback scan found the marker stripped (the labels check below pins that), so the create carries the assertion.
   if (created) {
     const labels = Array.isArray(created.labels) ? created.labels.map(String) : [];
     if (!labels.includes(MARKER_LABEL)) {
@@ -55,7 +55,7 @@ export function assertIssueReport(
       );
     }
   }
-  // Pins that the label-filtered lookup happened at all; the creator scan is a fallback after a miss, not a replacement.
+  // Pins that the label-filtered lookup happened at all; the title scan is a fallback after a miss, not a replacement.
   if (spec.lookup_by_label) {
     const listedByLabel = requests.some(
       (r) =>

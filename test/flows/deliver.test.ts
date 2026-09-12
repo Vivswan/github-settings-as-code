@@ -93,7 +93,7 @@ const SHOWN: Exposure = { kind: "shown" };
 
 const issueRoutes = {
   "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
-  [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100`]: {
+  [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: {
     data: [{ number: 7, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/7" }],
   },
   "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
@@ -224,7 +224,7 @@ describe("withDelivery", () => {
         );
         expect(events).toEqual([
           "api POST /repos/o/priv/labels",
-          `api GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100`,
+          `api GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`,
           "api PATCH /repos/o/priv/issues/7",
           `warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
         ]);

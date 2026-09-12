@@ -16,10 +16,12 @@ import { MockApi, type Route } from "../mock-api.js";
 const SLUG = { owner: "o", name: "private-repo", slug: "o/private-repo" };
 const LABEL_CREATE = "POST /repos/o/private-repo/labels";
 const LABEL_LOOKUP =
-  "GET /repos/o/private-repo/issues?state=all&labels=settings-as-code-report&per_page=100";
+  "GET /repos/o/private-repo/issues?state=all&labels=settings-as-code-report&per_page=100&page=1";
+const LABEL_LOOKUP_PAGE_2 =
+  "GET /repos/o/private-repo/issues?state=all&labels=settings-as-code-report&per_page=100&page=2";
 const ISSUE_CREATE = "POST /repos/o/private-repo/issues";
-const CREATOR_SCAN =
-  "GET /repos/o/private-repo/issues?state=all&creator=bot&sort=created&direction=asc&per_page=100&page=1";
+const TITLE_SCAN =
+  "GET /repos/o/private-repo/issues?state=all&sort=created&direction=asc&per_page=100&page=1";
 
 const reportIssue = (number: number) => ({
   number,
@@ -46,6 +48,31 @@ describe("deliverIssueReport", () => {
     expect(patch?.payload).toEqual({ body: "the report body", state: "open" });
   });
 
+  test("a marker issue on page 2 of the label lookup is found, not duplicated", async () => {
+    // 100 marker-labelled pull requests fill page 1; a single-page lookup would miss the issue and create a second one.
+    const labelled = Array.from({ length: 100 }, (_, i) => ({
+      ...reportIssue(100 + i),
+      pull_request: { url: `pr-${i}` },
+      labels: [MARKER_LABEL],
+    }));
+    const api = new MockApi({
+      [LABEL_CREATE]: { error: { status: 422, message: "already_exists", body: "" } },
+      [LABEL_LOOKUP]: { data: labelled },
+      [LABEL_LOOKUP_PAGE_2]: { data: [reportIssue(7)] },
+      "PATCH /repos/o/private-repo/issues/7": { data: reportIssue(7) },
+    });
+    const result = await deliverIssueReport(api, SLUG, "the report body", true, "always");
+    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/7" });
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      LABEL_CREATE,
+      LABEL_LOOKUP,
+      LABEL_LOOKUP_PAGE_2,
+      "PATCH /repos/o/private-repo/issues/7",
+    ]);
+    const patch = api.calls.find((c) => c.method === "PATCH");
+    expect(patch?.payload).toEqual({ body: "the report body", state: "open" });
+  });
+
   test("a healthy result closes the issue on update", async () => {
     const api = new MockApi({
       [LABEL_CREATE]: { error: { status: 422, message: "already_exists", body: "" } },
@@ -66,8 +93,7 @@ describe("deliverIssueReport", () => {
           { ...reportIssue(2), title: `${ISSUE_TITLE} (fork)` },
         ],
       },
-      "GET /user": { data: { login: "bot" } },
-      [CREATOR_SCAN]: { data: [] },
+      [TITLE_SCAN]: { data: [] },
       [ISSUE_CREATE]: { data: reportIssue(9) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
@@ -76,13 +102,12 @@ describe("deliverIssueReport", () => {
     expect(create?.payload).toEqual({ title: ISSUE_TITLE, body: "body", labels: [MARKER_LABEL] });
   });
 
-  test("label-lookup miss runs the creator scan BEFORE any create, avoiding duplicates", async () => {
+  test("label-lookup miss runs the title scan BEFORE any create, avoiding duplicates", async () => {
     const api = new MockApi({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: { data: [] },
-      "GET /user": { data: { login: "bot" } },
       // The label was stripped by a human; the scan still finds the issue.
-      [CREATOR_SCAN]: { data: [reportIssue(3)] },
+      [TITLE_SCAN]: { data: [reportIssue(3)] },
       "PATCH /repos/o/private-repo/issues/3": { data: reportIssue(3) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
@@ -90,22 +115,30 @@ describe("deliverIssueReport", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
-      "GET /user",
-      CREATOR_SCAN,
+      TITLE_SCAN,
       "PATCH /repos/o/private-repo/issues/3",
     ]);
   });
 
-  test("a fallback-scan hit without the marker reattaches it on the upsert PATCH", async () => {
-    // The marker was stripped by a human; without relabeling here, every future label-filtered lookup would miss this issue forever.
+  test("a fallback-scan hit without the marker is reclaimed and relabelled, whoever created it", async () => {
+    // A human stripped the marker and the PAT was since rotated to another account: the scan matches the title, not the
+    // creator, and the upsert PATCH reattaches the marker (without it, every future label-filtered lookup misses forever).
     const api = new MockApi({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: { data: [] },
-      "GET /user": { data: { login: "bot" } },
-      [CREATOR_SCAN]: { data: [{ ...reportIssue(3), labels: ["bug"] }] },
+      [TITLE_SCAN]: {
+        data: [{ ...reportIssue(3), labels: ["bug"], user: { login: "former-bot" } }],
+      },
       "PATCH /repos/o/private-repo/issues/3": { data: reportIssue(3) },
     });
-    await deliverIssueReport(api, SLUG, "body", true, "always");
+    const result = await deliverIssueReport(api, SLUG, "body", true, "always");
+    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/3" });
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      LABEL_CREATE,
+      LABEL_LOOKUP,
+      TITLE_SCAN,
+      "PATCH /repos/o/private-repo/issues/3",
+    ]);
     const patch = api.calls.find((c) => c.method === "PATCH");
     expect(patch?.payload).toEqual({ body: "body", state: "open", labels: ["bug", MARKER_LABEL] });
   });
@@ -129,8 +162,7 @@ describe("deliverIssueReport", () => {
     const api = new MockApi({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: { data: [] },
-      "GET /user": { data: { login: "bot" } },
-      [CREATOR_SCAN]: { data: [{ ...reportIssue(3), labels: [{ name: "bug" }] }] },
+      [TITLE_SCAN]: { data: [{ ...reportIssue(3), labels: [{ name: "bug" }] }] },
       "PATCH /repos/o/private-repo/issues/3": { data: reportIssue(3) },
     });
     await deliverIssueReport(api, SLUG, "body", false, "always");
@@ -142,7 +174,7 @@ describe("deliverIssueReport", () => {
     });
   });
 
-  test("the creator scan early-exits once a page contains the issue", async () => {
+  test("the title scan early-exits once a page contains the issue", async () => {
     const filler = Array.from({ length: 100 }, (_, i) => ({
       number: 100 + i,
       title: i === 50 ? ISSUE_TITLE : `noise ${i}`,
@@ -152,8 +184,7 @@ describe("deliverIssueReport", () => {
     const api = new MockApi({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: { data: [] },
-      "GET /user": { data: { login: "bot" } },
-      [CREATOR_SCAN]: { data: filler },
+      [TITLE_SCAN]: { data: filler },
       "PATCH /repos/o/private-repo/issues/150": { data: null },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
@@ -162,8 +193,7 @@ describe("deliverIssueReport", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
-      "GET /user",
-      CREATOR_SCAN,
+      TITLE_SCAN,
       "PATCH /repos/o/private-repo/issues/150",
     ]);
   });
@@ -172,8 +202,7 @@ describe("deliverIssueReport", () => {
     const api = new MockApi({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: { data: [] },
-      "GET /user": { data: { login: "bot" } },
-      [CREATOR_SCAN]: { data: [] },
+      [TITLE_SCAN]: { data: [] },
       [ISSUE_CREATE]: { data: reportIssue(9) },
       "PATCH /repos/o/private-repo/issues/9": { data: null },
     });
@@ -182,8 +211,7 @@ describe("deliverIssueReport", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
-      "GET /user",
-      CREATOR_SCAN,
+      TITLE_SCAN,
       ISSUE_CREATE,
       "PATCH /repos/o/private-repo/issues/9",
     ]);
@@ -195,8 +223,7 @@ describe("deliverIssueReport", () => {
     const api = new MockApi({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: { data: [] },
-      "GET /user": { data: { login: "bot" } },
-      [CREATOR_SCAN]: { data: [] },
+      [TITLE_SCAN]: { data: [] },
       [ISSUE_CREATE]: { data: reportIssue(9) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
@@ -204,8 +231,7 @@ describe("deliverIssueReport", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
-      "GET /user",
-      CREATOR_SCAN,
+      TITLE_SCAN,
       ISSUE_CREATE,
     ]);
   });
@@ -261,16 +287,16 @@ describe("deliverIssueReport", () => {
     expect(result).toEqual({
       warning:
         "could not deliver the private report: the report-issue lookup returned a non-list " +
-        'response. Check the "api-version" input, or set private-report: none',
+        'page. Check the "api-version" input, or set private-report: none',
     });
   });
 });
 
 describe("deliverIssueReport under mode: on-failure", () => {
   const OPEN_LOOKUP =
-    "GET /repos/o/private-repo/issues?state=open&labels=settings-as-code-report&per_page=100";
+    "GET /repos/o/private-repo/issues?state=open&labels=settings-as-code-report&per_page=100&page=1";
   const OPEN_LOOKUP_PATH =
-    "/repos/o/private-repo/issues?state=open&labels=settings-as-code-report&per_page=100";
+    "/repos/o/private-repo/issues?state=open&labels=settings-as-code-report&per_page=100&page=1";
 
   test("healthy with no open issue: exactly one read, zero writes, skipped", async () => {
     const api = new MockApi({ [OPEN_LOOKUP]: { data: [] } });
@@ -327,7 +353,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
     expect(result).toEqual({
       warning:
         "could not deliver the private report: the open-issue lookup returned a non-list " +
-        'response. Check the "api-version" input, or set private-report: none',
+        'page. Check the "api-version" input, or set private-report: none',
     });
   });
 
@@ -346,12 +372,11 @@ describe("deliverIssueReport under mode: on-failure", () => {
     const patched = await sequence(patchRoutes(), "on-failure");
     expect(patched).toEqual(await sequence(patchRoutes(), "always"));
     expect(patched.some((c) => c.method === "PATCH")).toBe(true);
-    // path 2: nothing anywhere -> ensure-create, lookup, creator scan, POST create
+    // path 2: nothing anywhere -> ensure-create, lookup, title scan, POST create
     const createRoutes = (): Record<string, Route> => ({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: { data: [] },
-      "GET /user": { data: { login: "bot" } },
-      [CREATOR_SCAN]: { data: [] },
+      [TITLE_SCAN]: { data: [] },
       [ISSUE_CREATE]: { data: reportIssue(9) },
     });
     const created = await sequence(createRoutes(), "on-failure");
