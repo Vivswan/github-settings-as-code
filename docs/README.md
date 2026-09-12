@@ -18,6 +18,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 | Scope the token | [reference/permissions.md](reference/permissions.md) |
 | Predict what an apply or a check will do | [reference/semantics.md](reference/semantics.md) |
 | See how the action works, module by module | [reference/architecture.md](reference/architecture.md) |
+| Use the engine from your own code | [reference/library.md](reference/library.md) |
 | Detect drift on a schedule | [operate/check-mode.md](operate/check-mode.md) |
 | Fold several settings files into one | [operate/layering.md](operate/layering.md) |
 | Manage a fleet from one repository | [operate/multi-repo.md](operate/multi-repo.md) |
@@ -42,6 +43,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 - [The undeclared policy](reference/undeclared-policy.md): the `_undeclared` knob on the list sections, per-section defaults, the milestone-deletion caveat, and how the policy layers in `mode: merge`.
 - [Forward compatibility](reference/forward-compatibility.md): where payloads pass through verbatim and which sections are deliberately closed.
 - [Secrets and vaults](reference/secrets-and-vaults.md): the `$NAME` references secret fields take, wiring them from GitHub Secrets or a vault action, and what check mode can and cannot verify.
+- [Library](reference/library.md): the npm package `@vivswan/github-settings-as-code`, how it is built, the API by group with one example each, and how its version tracks the action's.
 
 ## operate: day-to-day operation
 
