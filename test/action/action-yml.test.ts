@@ -56,14 +56,20 @@ describe("input declarations <-> discovery defaults", () => {
 });
 
 describe("output declarations", () => {
-  test("the result description mentions every RepoResult value, the merge result, and the snapshot results", () => {
-    // MERGE_RESULT and SNAPSHOT_RESULTS are the values outside REPO_RESULTS (neither mode has a target).
-    const missing = [...REPO_RESULTS, MERGE_RESULT, ...SNAPSHOT_RESULTS].filter(
-      (value) => !OUTPUT_DECLS.result.description.includes(value),
+  test("the result description enumerates exactly the RepoResult values, the merge result, and the snapshot results", () => {
+    // The enumerated values are the `a | b | c` chains; a value named only in prose ("in mode: snapshot") does not count.
+    const { description } = OUTPUT_DECLS.result;
+    const enumerated = (description.match(/[a-z]+(?: \| [a-z]+)+/g) ?? []).flatMap((chain) =>
+      chain.split(" | "),
     );
-    expect(
-      missing,
-      `the "result" output description omits result value(s): ${missing.join(", ")}`,
-    ).toEqual([]);
+    expect(new Set(enumerated)).toEqual(
+      new Set([...REPO_RESULTS.filter((value) => value !== "skipped"), ...SNAPSHOT_RESULTS]),
+    );
+    expect(description).toContain("where skipped can also appear");
+    expect(description).toContain(`${MERGE_RESULT} in mode: merge`);
+    // SNAPSHOT_RESULTS is worst-first; the description reads best-first like the RepoResult chain.
+    expect(description).toContain(
+      `${[...SNAPSHOT_RESULTS].reverse().join(" | ")} in mode: snapshot`,
+    );
   });
 });

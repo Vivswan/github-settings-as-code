@@ -156,7 +156,7 @@ jobs:
 
 Copy the directory in as your `repos-dir` to bring the fleet under management, one reviewable file per repository. The step summary lists every target with its result and file, then one section table per target, and the `repos-result` output carries the per-repository results as JSON.
 
-Private and internal targets are redacted by default, exactly as in a multi-repo apply (see [private repositories](private-repositories.md)): their file is written like the others, but the public surfaces know them only as `private repository #N`, with the file name and every detail hidden. Their notes are in their file header; there is no report channel in snapshot mode.
+Private and internal targets are redacted by default, exactly as in a multi-repo apply (see [private repositories](private-repositories.md)): their file is written like the others, but the public surfaces know them only as `private repository #N`, with the file name and every detail hidden. Their notes are in their file header; there is no report channel in snapshot mode. The uploaded `snapshots` artifact therefore holds those targets' full documents in the clear, and an artifact inherits the admin repository's visibility, so on a public admin repository encrypt it or skip the upload (see [what redaction does and does not protect](private-repositories.md#what-redaction-does-and-does-not-protect)).
 
 ## Inputs in mode: snapshot
 

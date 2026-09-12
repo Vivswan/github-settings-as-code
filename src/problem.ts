@@ -413,7 +413,7 @@ export function describeProblem(problem: Problem): string {
         `the ${quoteList(problem.inputs)} input(s) do not apply to mode: snapshot, which only reads the ` +
         "target repositories' live settings into snapshot-file or snapshot-dir: it applies no " +
         "document, folds no layers, and delivers no report. Remove the input(s), or move them to " +
-        "the apply or check step that runs the snapshot"
+        "the apply, check, or merge step they belong to"
       );
     case "input-snapshot-destination-missing":
       return 'mode: snapshot needs exactly one of the "snapshot-file" input (one repository\'s settings written to that file) or the "snapshot-dir" input (one <owner>/<name>.yml per repos or repos-dir target under that directory). Set one of them';

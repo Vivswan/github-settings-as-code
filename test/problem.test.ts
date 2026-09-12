@@ -100,7 +100,7 @@ const SPECIMENS = {
     'the "settings-file", "layering" input(s) do not apply to mode: snapshot, which only reads the ' +
       "target repositories' live settings into snapshot-file or snapshot-dir: it applies no " +
       "document, folds no layers, and delivers no report. Remove the input(s), or move them to " +
-      "the apply or check step that runs the snapshot",
+      "the apply, check, or merge step they belong to",
   ],
   "input-snapshot-destination-missing": [
     { code: "input-snapshot-destination-missing" },

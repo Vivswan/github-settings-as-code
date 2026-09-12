@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_RESULTS, type RepoResult } from "../../src/engine/orchestrate.js";
 import { MERGE_RESULT } from "../../src/flows/deliver.js";
+import { SNAPSHOT_RESULTS } from "../../src/flows/snapshot.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import {
   type SectionMeta,
@@ -239,8 +240,12 @@ const RESULT_DISPLAY: Record<RepoResult, "any mode" | "multi-repo only"> = {
 
 const WORST_OF = "; worst-of across targets in multi-repo mode";
 const CAN_ALSO_APPEAR = " can also appear";
-/** The merge-mode result, a value outside RepoResult, closes the enumeration. */
+/** The merge- and snapshot-mode results, values outside RepoResult, close the enumeration. */
 const MERGE_ONLY = `; \`${MERGE_RESULT}\` in mode: merge`;
+const SNAPSHOT_ONLY = `; ${[...SNAPSHOT_RESULTS]
+  .reverse()
+  .map((value) => `\`${value}\``)
+  .join(" / ")} in mode: snapshot`;
 
 export function renderOutputsList(results: readonly RepoResult[]): string {
   const ordered = (Object.keys(RESULT_DISPLAY) as RepoResult[]).filter((value) =>
@@ -254,7 +259,7 @@ export function renderOutputsList(results: readonly RepoResult[]): string {
   const lead = `${anyMode.join(" / ")}${WORST_OF}`;
   const withMulti =
     multiOnly.length === 0 ? lead : `${lead}, where ${multiOnly.join(" and ")}${CAN_ALSO_APPEAR}`;
-  return `${withMulti}${MERGE_ONLY}`;
+  return `${withMulti}${MERGE_ONLY}${SNAPSHOT_ONLY}`;
 }
 
 export type TaggedOperation = Pick<SectionOperation, "role" | "grade" | "permission"> & {
@@ -337,7 +342,7 @@ function outputsListRegion(name: string, heading: string): GeneratedRegion {
     body: new RegExp(
       String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where ` +
         String.raw`\x60[a-z]+\x60(?: and ` +
-        String.raw`\x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?(?:${escapeRe(MERGE_ONLY)})?)?$`,
+        String.raw`\x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?(?:${escapeRe(MERGE_ONLY)})?(?:${escapeRe(SNAPSHOT_ONLY)})?)?$`,
     ),
     render: () => renderOutputsList(REPO_RESULTS),
   };

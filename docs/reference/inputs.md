@@ -41,7 +41,7 @@ The discovery-only inputs apply to `repos: "*"`; the [multi-repo guide](../opera
 
 ## Outputs
 
-- `result`: <!-- BEGIN GENERATED: outputs-list (bun run build:docs; derived from REPO_RESULTS in src/engine/orchestrate.ts) -->`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear; `merged` in mode: merge<!-- END GENERATED: outputs-list -->. In `mode: snapshot` it reads `snapshot`, `partial`, or `failed`; the [snapshot guide](../operate/snapshot.md) has that table.
+- `result`: <!-- BEGIN GENERATED: outputs-list (bun run build:docs; derived from REPO_RESULTS in src/engine/orchestrate.ts) -->`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear; `merged` in mode: merge; `snapshot` / `partial` / `failed` in mode: snapshot<!-- END GENERATED: outputs-list -->. The [snapshot guide](../operate/snapshot.md) has the snapshot values' exit-code table.
 - `skipped-sections`: the sections skipped for missing permissions under `on-missing-permission: warn`, comma-separated (a deduped union across targets in multi-repo mode).
 - `repos-result`: multi-repo mode only, a JSON map of `owner/name` to `{result, source, skippedSections}`. A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](../operate/private-repositories.md).
 
