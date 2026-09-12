@@ -1,0 +1,28 @@
+name: teams-check-clean
+description: >-
+  Check mode on an organization repo whose team already holds the declared
+  role reads CLEAN at exit 0. The role comes from the access probe's
+  role_name, which GitHub serves only under the repository media type. A
+  probe without it is answered 204 like GitHub, and since the section
+  declares only 200 and 404 the realism rule fails the run, so a product
+  probe that drops the media type cannot pass.
+settings:
+  teams:
+    - name: platform
+      permission: push
+inputs:
+  mode: check
+owner_kind: org
+live_state:
+  teams:
+    platform:
+      role_name: write
+expect:
+  exit_code: 0
+  result: clean
+  outcomes:
+    teams: clean
+  requests_contain:
+    - "GET /orgs/e2e-owner/teams/platform/repos/"
+  never:
+    - "PUT /orgs/e2e-owner/teams/platform/repos/{repo}"

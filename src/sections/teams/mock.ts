@@ -15,6 +15,9 @@ import {
 } from "../../../test/e2e/mock/support.js";
 import { permissionForRole } from "../shared/roles.js";
 
+/** The Accept media type the probe's role_name body is served under; the section sends it (probeTeamRole, index.ts). */
+export const TEAM_REPOSITORY_MEDIA_TYPE = "application/vnd.github.v3.repository+json";
+
 /** The base roles the listing's `permission` can spell; a custom role collapses to "push" there. */
 const BASE_PERMISSIONS: ReadonlySet<string> = new Set([
   "pull",
@@ -68,14 +71,20 @@ function repoTeams(state: {
 export const teamsMockHandlers: SectionRestHandlers<"teams"> = {
   "teams.org": orgProbeHandler,
   "teams.list": ({ state, query }) => ok(slicePage(repoTeams(state), query)),
-  "teams.probe": ({ state, param }) => {
+  "teams.probe": ({ state, param, headers }) => {
     const slug = param("team_slug");
     const access = state.teams[slug];
     if (!access) {
       // The spec documents this 404 with NO response content.
       return { status: 404, body: null };
     }
-    // The repository media type makes this return the repo object with the team's role_name folded in.
+    // GitHub, "Check team permissions for a repository" (docs.github.com/rest/teams/teams): the 200 body with the
+    // repository and the team's role_name is the "Alternative response with repository permissions", served for the
+    // application/vnd.github.v3.repository+json media type; the 204 is "the response when the repository media type
+    // hasn't been provided in the Accept header". So a client that drops its Accept header reads no role here.
+    if (!(headers.accept ?? "").includes(TEAM_REPOSITORY_MEDIA_TYPE)) {
+      return noContent();
+    }
     return ok({ ...restRepoSurface(state.repo), role_name: access.role_name });
   },
   "teams.grant": ({ state, param, body }) => {

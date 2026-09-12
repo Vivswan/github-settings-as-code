@@ -1215,6 +1215,7 @@ function liveRepo(liveState: LiveState): GithubClient & { writes: string[] } {
         param: paramAccessor(matched.key, matched.endpoint, matched.params),
         query: Object.fromEntries(new URLSearchParams(search)),
         body: payload,
+        headers: {},
         grants: () => true,
       });
       if (response.status >= 400) {

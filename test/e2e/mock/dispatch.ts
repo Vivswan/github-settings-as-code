@@ -63,6 +63,17 @@ function matchTemplateParams(
   return params;
 }
 
+/**
+ * The ONE minter of HandlerContext.headers: web Headers iteration lower-cases every name and joins repeats
+ * with ", ", so a handler reads `headers.accept` whatever casing the client sent; frozen so no handler can
+ * mutate the request it was handed.
+ */
+export function requestHeaders(
+  init: Headers | Record<string, string>,
+): Readonly<Record<string, string>> {
+  return Object.freeze(Object.fromEntries(new Headers(init)));
+}
+
 export function paramAccessor(
   key: string,
   endpoint: TaggedEndpoint,

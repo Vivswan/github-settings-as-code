@@ -38,6 +38,7 @@ import {
   graphqlOpForBody,
   matchEndpoint,
   paramAccessor,
+  requestHeaders,
   slugFromPath,
   statusAllowed,
 } from "./dispatch.js";
@@ -596,6 +597,7 @@ export function runPipeline(
     param: paramAccessor(key, endpoint, matched.params),
     query: request.query,
     body: request.body,
+    headers: requestHeaders(request.headers),
     grants: (kind) => gradeRequirement(mask, { permission: requirement.permission, kind }).allowed,
   });
 
