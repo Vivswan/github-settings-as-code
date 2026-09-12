@@ -37,8 +37,8 @@ import { classicViewOfRule } from "./graphql-rules.js";
 /**
  * GitHub's fnmatch (Ruby's, FNM_PATHNAME) for classic rule patterns: `*` and `?` stop at a slash,
  * only a double star followed by a slash crosses one (a bare double star is `*`), a bracket class
- * passes through with fnmatch's `!` negation spelled as the regex `^`; every other character is
- * literal. Exported for its own case table in branches.test.ts.
+ * follows Ruby (`!` or `^` negates, a leading `]` closes it), a backslash escapes the next
+ * character; every other character is literal. Exported for its own case table in branches.test.ts.
  */
 export function wildcardMatches(pattern: string, branch: string): boolean {
   let regex = "";
@@ -54,6 +54,13 @@ export function wildcardMatches(pattern: string, branch: string): boolean {
       }
     } else if (ch === "?") {
       regex += "[^/]";
+    } else if (ch === "\\") {
+      // A backslash escapes the next character (Ruby has no FNM_NOESCAPE here); a trailing one is dropped.
+      const next = pattern[i + 1];
+      if (next !== undefined) {
+        regex += next.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+        i++;
+      }
     } else if (ch === "[") {
       // Ruby negates on "!" or "^"; a leading "]" closes the class at once (an empty class matches nothing).
       const negated = pattern[i + 1] === "!" || pattern[i + 1] === "^";

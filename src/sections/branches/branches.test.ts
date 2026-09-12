@@ -1623,6 +1623,11 @@ describe("branches snapshot", () => {
     ["v[^1]", "v2", true],
     ["v[^1]", "v1", false],
     ["a.b", "axb", false],
+    ["release/\\a", "release/a", true],
+    ["release/\\a", "release/\\a", false],
+    ["release/\\*", "release/*", true],
+    ["release/\\*", "release/x", false],
+    ["a\\", "a", true],
   ])("the mock's fnmatch: %s against %s -> %p", (pattern, branch, matches) => {
     expect(wildcardMatches(pattern, branch)).toBe(matches);
   });

@@ -70,8 +70,9 @@ coverage:
       normalizes the same way); a listed branch
       whose protection read answers 404 (a ruleset protects it) is left out. The snapshot's own
       rules read (BranchProtectionRulesSnapshot, the planner's selection under a declaration that
-      tolerates no denial, so a concealed 404 skips the section with the grant advice instead of
-      reading as no rules) supplies the GraphQL-only surface: a literal entry carries its
+      tolerates no denial, so a concealed 404 is a PermissionDenied naming the grant, which the
+      engine turns into a skipped section under on-missing-permission: warn and a failed run under
+      fail, instead of reading as no rules) supplies the GraphQL-only surface: a literal entry carries its
       force_push_bypassers (actor strings in the file's spelling, sorted) and required_deployments
       when set, an empty allowance list and an off requirement omitted since an absent routed key
       leaves the live value untouched; every wildcard rule is written as its own entry with the
