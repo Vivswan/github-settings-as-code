@@ -142,7 +142,7 @@ describe("check and apply", () => {
     [
       "the artifact channel",
       ["check", ...target, "--private-report", "artifact"],
-      '"--private-report artifact" uploads through the Actions artifact service, which the command line has no access to. Use "--private-report issue" or "issue-on-failure" (a report on each private target repository), or "none"',
+      'the "private-report" input is "artifact", which is not a supported private-report channel from the command line (the artifact upload needs the Actions runner). Set it to "none" (default), "issue", "issue-on-failure"',
     ],
   ])("%s fails with a remedy a terminal can follow", async (_case, args, message) => {
     const api = new MockApi({});
@@ -228,15 +228,32 @@ describe("merge", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toEndWith("result: merged\nskipped-sections=\nresult=merged\n");
-    // Only the fold produces this shape: team.yml's label joins fleet.yml's two under
-    // the explicit policy wrapper, and its `has_projects: null` removes fleet.yml's key.
-    const merged = parseYaml(readFileSync(out, "utf8")) as {
-      repository: Record<string, unknown>;
-      labels: { _undeclared: string; entries: Array<{ name: string }> };
-    };
-    expect(merged.repository).toEqual({ has_wiki: false });
-    expect(merged.labels._undeclared).toBe("delete");
-    expect(merged.labels.entries.map((label) => label.name)).toEqual(["bug", "docs", "team"]);
+    // The whole document only the fold produces: team.yml's label and rule join
+    // fleet.yml's under explicit policy wrappers, its `has_projects: null` removes
+    // fleet.yml's key, and pages passes through untouched.
+    expect(parseYaml(readFileSync(out, "utf8"))).toEqual({
+      repository: { has_wiki: false },
+      labels: {
+        _undeclared: "delete",
+        entries: [
+          { name: "bug", color: "d73a4a" },
+          { name: "docs", color: "0075ca" },
+          { name: "team", color: "00ff00" },
+        ],
+      },
+      rulesets: {
+        _undeclared: "keep",
+        entries: [
+          {
+            name: "main",
+            target: "branch",
+            enforcement: "active",
+            rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
+          },
+        ],
+      },
+      pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
+    });
   });
 
   test("a merge without merged-file fails with the action's line", async () => {

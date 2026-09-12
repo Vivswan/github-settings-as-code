@@ -11,7 +11,9 @@ import {
   describeProblem,
   failRun,
   type GithubClient,
+  INPUT_DECLS,
   type Io,
+  PRIVATE_REPORT_CHANNELS,
   type Problem,
   type RunConfig,
   readSettingsFile,
@@ -133,16 +135,15 @@ export function describeCliProblem(problem: Problem): string {
   }
 }
 
-/** The one report channel a terminal cannot serve: the artifact upload needs the Actions runner. */
-export const ARTIFACT_UNSUPPORTED =
-  '"--private-report artifact" uploads through the Actions artifact service, which the command line has no access to. ' +
-  'Use "--private-report issue" or "issue-on-failure" (a report on each private target repository), or "none"';
-
-/** End a run on a problem the library has no code for, exactly as failRun ends one. */
-export function failCli(io: Io, message: string): number {
-  io.annotate("error", message);
-  io.output("skipped-sections", "");
-  io.output("result", "failed");
-  io.log("result: failed");
-  return 1;
-}
+/**
+ * The one report channel a terminal cannot serve: the artifact upload needs
+ * the Actions runner. Worded as the unsupported value it is from here.
+ */
+export const ARTIFACT_REFUSED: Problem = {
+  code: "input-unsupported-value",
+  input: "private-report",
+  value: "artifact",
+  noun: "private-report channel from the command line (the artifact upload needs the Actions runner)",
+  allowed: PRIVATE_REPORT_CHANNELS.filter((channel) => channel !== "artifact"),
+  fallback: INPUT_DECLS["private-report"].default,
+};

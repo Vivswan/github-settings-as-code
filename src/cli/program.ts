@@ -8,6 +8,7 @@
 import { Command, CommanderError, Option } from "commander";
 import pc from "picocolors";
 import {
+  failRun,
   GithubApi,
   INPUT_DECLS,
   type Io,
@@ -16,10 +17,9 @@ import {
   type RunConfig,
 } from "../index.js";
 import {
-  ARTIFACT_UNSUPPORTED,
+  ARTIFACT_REFUSED,
   type CliHost,
   describeCliProblem,
-  failCli,
   permissionsFor,
   type Rendered,
   runConfig,
@@ -145,10 +145,10 @@ export function buildProgram(options: ProgramOptions): {
       // Refused before parseConfig, which would otherwise ask for the channel's age key first.
       exitCode =
         read("private-report") === "artifact"
-          ? failCli(io, ARTIFACT_UNSUPPORTED)
+          ? failRun(io, ARTIFACT_REFUSED, describeCliProblem)
           : await parseConfig(read, host.env).match(
               (cfg) => execute(cfg, io),
-              async (problem) => failCli(io, describeCliProblem(problem)),
+              async (problem) => failRun(io, problem, describeCliProblem),
             );
       flush();
     });

@@ -10,7 +10,7 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
-import { ARTIFACT_UNSUPPORTED, describeCliProblem } from "../../src/cli/commands.js";
+import { ARTIFACT_REFUSED, describeCliProblem } from "../../src/cli/commands.js";
 import {
   CLI_UNSUPPORTED_INPUTS,
   exposedInputs,
@@ -161,7 +161,7 @@ function cases(): Case[] {
         "private-report": "artifact",
       },
       env: { GITHUB_REPOSITORY: "o/admin" },
-      cliRefuses: ARTIFACT_UNSUPPORTED,
+      cliRefuses: describeCliProblem(ARTIFACT_REFUSED),
     },
     {
       name: "merge, layers as repeated flags",
@@ -458,20 +458,22 @@ describe("the per-mode flag split", () => {
         if (!exposed.has(name)) {
           continue; // the mode is the subcommand; an unsupported input has no flag
         }
-        const flag =
-          name === "token"
-            ? ["check", "--repository", "o/r"]
-            : inputsForMode("check").includes(name)
-              ? check
-              : ["merge"];
+        // The base argv minus this flag, so the two repeats below are its only occurrences.
+        const base = inputsForMode("check").includes(name) || name === "token" ? check : ["merge"];
+        const flag = base.filter((argument, index) => {
+          const value = index > 0 && base[index - 1] === `--${name}`;
+          return argument !== `--${name}` && !value;
+        });
         // Long values: a token value is masked, and a one-letter mask would eat the message.
         const actual = await throughArgv(
           [...flag, `--${name}`, "first-value", `--${name}`, "second-value"],
           {},
         );
+        // The token's echoed value is masked (registered before the parse); the rest print as given.
+        const echoed = name === "token" ? "***" : "second-value";
         expect(actual.code, name).toBe(1);
-        expect(actual.stderr, name).toContain(
-          `--${name} takes one value and was given more than once`,
+        expect(actual.stderr, name).toBe(
+          `error: option '--${name} <value>' argument '${echoed}' is invalid. --${name} takes one value and was given more than once\n`,
         );
         continue;
       }
