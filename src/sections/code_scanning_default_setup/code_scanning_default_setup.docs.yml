@@ -11,8 +11,8 @@ coverage:
       rolls the change out in a configuration run, which the log names. Check compares declared keys
       only, languages as a set. Needs GitHub Advanced Security on private repositories; a 403 can
       mean that (or an archived repository) rather than a missing permission.
-      Snapshot reads the GET body back on the declared keys; a null the slice does not take (a not-
-      configured setup's runner_type) is omitted.
+      Snapshot reads the GET body back on the declared keys; a null the slice does not take (a
+      not-configured setup's runner_type) is omitted.
 schema:
   SettingsFile.code_scanning_default_setup: Code scanning default setup (CodeQL).
   CodeScanningDefaultSetupConfig: PATCH /repos/{r}/code-scanning/default-setup, sent verbatim.

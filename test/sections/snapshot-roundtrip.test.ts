@@ -479,6 +479,20 @@ describe("snapshot round trip", () => {
     );
   });
 
+  test("a secret listed in lowercase reads back under its uppercase key, so the reference grammar holds and the plan converges", async () => {
+    const api = registryFake({ actions_secrets: [{ name: "npm_token", ...STAMPS }] });
+    const { snapshot } = await proveSnapshotRoundTrip(actionsSecretsSection, api);
+    expect(snapshot).toEqual({
+      value: {
+        _undeclared: "keep",
+        entries: [{ name: "NPM_TOKEN", value: "$SECRET_ACTIONS_NPM_TOKEN" }],
+      },
+      notes: [
+        "actions_secrets[NPM_TOKEN]: value of NPM_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_NPM_TOKEN before apply",
+      ],
+    });
+  });
+
   test("a hook without a config.url is noted and left out; alone, it leaves nothing to declare", async () => {
     const api = registryFake({ hooks: [{ id: 7, config: {} }] });
     const snapshot = await webhooksSection.snapshot(planContext(webhooksSection, api, REPO));
@@ -490,19 +504,8 @@ describe("snapshot round trip", () => {
     });
   });
 
-  test("no Pages site reads back as nothing to declare, with the permission ambiguity noted", async () => {
-    const api = registryFake({});
-    const snapshot = await pagesSection.snapshot(planContext(pagesSection, api, REPO));
-    expect(snapshot).toEqual({
-      value: undefined,
-      notes: [
-        "pages: GitHub reports no Pages site. A fine-grained token missing the Pages permission gets the same answer; if this repository does have a Pages site, grant the token Pages read and snapshot again",
-      ],
-    });
-  });
-
   test("sections without live state read back as nothing to declare", async () => {
-    // The mock's defaults: no limit with the cap disabled and nobody bypassing it,
+    // The mock's defaults: no Pages site, no limit with the cap disabled and nobody bypassing it,
     // no custom property values, every list empty.
     const api = registryFake({});
     for (const key of [
@@ -510,6 +513,7 @@ describe("snapshot round trip", () => {
       "autolinks",
       "actions_secrets",
       "workflows",
+      "pages",
       "milestones",
       "interaction_limits",
       "actions_variables",

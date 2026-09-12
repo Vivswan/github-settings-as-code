@@ -10,7 +10,11 @@ import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { SectionKey } from "../schema.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
-import { type SectionSnapshot, snapshotUnsupportedNote } from "../sections/contract/module.js";
+import {
+  concealedAbsenceNote,
+  type SectionSnapshot,
+  snapshotUnsupportedNote,
+} from "../sections/contract/module.js";
 import { planContext } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import { deniedSectionStatus, type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
@@ -107,10 +111,16 @@ export async function snapshotRepository(
       io.annotate("notice", `${section.key}: ${note}`);
     }
     if (snapshot.value === undefined) {
+      // Chosen at the engine level so every absent-posture section behaves alike: the 404 keeps
+      // its "nothing exists" reading, and the note names the denial it could also be.
+      const concealed = concealedAbsenceNote(section);
+      if (concealed !== null) {
+        io.annotate("notice", concealed);
+      }
       outcomes.push({
         key: section.key,
         status: "snapshot",
-        detail: [...snapshot.notes, NOTHING_TO_DECLARE],
+        detail: [...snapshot.notes, ...(concealed === null ? [] : [concealed]), NOTHING_TO_DECLARE],
       });
       continue;
     }

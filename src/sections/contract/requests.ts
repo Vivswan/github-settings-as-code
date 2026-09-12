@@ -350,8 +350,7 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
 }
 
 /**
- * Every pair of items resolving to the same natural key, as `"first" and "second"` prose; the
- * declared-side and live-side rejections both read it.
+ * Shared by the declared-side and live-side duplicate rejections, so both name a collision the same way.
  */
 export function collidingPairs<T>(
   items: readonly T[],

@@ -73,6 +73,8 @@ const opts = (policy: "fail" | "warn" = "fail") => ({
   onMissingPermission: policy,
 });
 
+const NOTHING = "nothing exists on the repository, so the section is omitted";
+
 /** The sections without a snapshot handler, read off the registry so the test cannot go stale. */
 const UNSUPPORTED = SECTIONS.filter((section) => section.snapshot === undefined).map((s) => s.key);
 
@@ -134,11 +136,37 @@ describe("snapshotRepository", () => {
     expect(result.outcomes.find((o) => o.key === "milestones")).toEqual({
       key: "milestones",
       status: "snapshot",
-      detail: ["nothing exists on the repository, so the section is omitted"],
+      detail: [NOTHING],
     });
     expect(annotations).toContain(
       "notice: actions_secrets: actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
     );
+  });
+
+  test("a 404 on a gated absent-posture read keeps its empty reading and notes the denial it could be; a public probe and a present resource get no note", async () => {
+    const denied = denying(registryFake(LIVE), /\/repos\/o\/r\/pages$/);
+    const { io, annotations } = captureIo();
+    const result = await snapshotRepository(
+      denied,
+      { ...opts(), onlySections: new Set(["pages", "custom_properties"]) },
+      io,
+    );
+    const note =
+      'pages: GitHub answered GET /repos/{owner}/{repo}/pages with 404, read here as nothing to snapshot. A fine-grained token missing the grant gets the same answer; if the repository does have this resource, grant "Pages" (read and write) under the PAT\'s Repository permissions, then snapshot again';
+    expect(result.result).toBe("snapshot");
+    expect(result.outcomes).toEqual([
+      { key: "pages", status: "snapshot", detail: [note, NOTHING] },
+      // The org probe is public: its 404 has one reading, so no such note.
+      { key: "custom_properties", status: "snapshot", detail: [NOTHING] },
+    ]);
+    expect(annotations).toEqual([`notice: ${note}`]);
+    // The control: a present site reads back and carries no note.
+    const present = await snapshotRepository(
+      registryFake({ pages: { build_type: "workflow", source: { branch: "main", path: "/" } } }),
+      { ...opts(), onlySections: new Set(["pages"]) },
+      captureIo().io,
+    );
+    expect(present.outcomes).toEqual([{ key: "pages", status: "snapshot", detail: [] }]);
   });
 
   test("the sections allowlist limits the run to the named sections", async () => {

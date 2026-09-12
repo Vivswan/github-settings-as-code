@@ -33,6 +33,7 @@ import {
   rejectDuplicateSecretNames,
   type SecretEntry,
   type SecretsPlanScope,
+  secretKey,
 } from "./secrets-engine.js";
 import { knobbedSnapshot } from "./snapshot-helpers.js";
 
@@ -251,7 +252,8 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
   };
 
   // GitHub lists names only, so each entry carries the per-store reference the operator must
-  // export before an apply, and a note says so per secret.
+  // export before an apply, and a note says so per secret. Names are read through secretKey, the
+  // uppercase form GitHub stores and the planner compares by, so the reference grammar holds.
   const snapshot = async (ctx: PlanContext<WideEndpoints>): Promise<WideSnapshot> => {
     const live = parseLive(
       section,
@@ -263,8 +265,8 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
       return { value: undefined, notes: [] };
     }
     const references = live.map(({ name }) => ({
-      name,
-      ...snapshotSecretReference(pathSegment, name),
+      name: secretKey(name),
+      ...snapshotSecretReference(pathSegment, secretKey(name)),
     }));
     const entries = references.map(({ name, reference }) => ({ name, value: reference }));
     const notes = references.map(

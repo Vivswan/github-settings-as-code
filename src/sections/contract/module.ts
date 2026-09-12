@@ -7,6 +7,7 @@ import {
   type EndpointDecl,
   endpointKind,
   endpointMethod,
+  endpointPath,
   type GatedReadDecl,
   type Route,
 } from "./endpoints.js";
@@ -218,6 +219,22 @@ export function denialPosture(section: SectionMeta): DenialPosture {
     );
   }
   return "absent";
+}
+
+/**
+ * The note a snapshot carries when a section whose primary read tolerates 404 ("absent") read
+ * nothing: a fine-grained token missing the grant is answered with the same 404, and unlike
+ * plan() no write follows to surface the denial. Null when the read is public (a 404 there has
+ * one reading) or the section classifies a 404 as a denial already.
+ */
+export function concealedAbsenceNote(section: SectionMeta): string | null {
+  const primary = Object.values(section.endpoints).find(
+    (endpoint) => endpoint.primaryRead?.notFound === "absent",
+  );
+  if (primary === undefined || endpointPermission(section, primary) === "none") {
+    return null;
+  }
+  return `${section.key}: GitHub answered GET ${endpointPath(primary.route)} with 404, read here as nothing to snapshot. A fine-grained token missing the grant gets the same answer; if the repository does have this resource, ${sectionGrant(section)}, then snapshot again`;
 }
 
 type FlattenedOperationDictionaries = "endpoints" | "graphql";

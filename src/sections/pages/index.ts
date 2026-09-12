@@ -126,17 +126,12 @@ export const pagesSection = {
     }
     return plan;
   },
-  // No site is nothing to declare (not `pages: null`, which would DISABLE Pages on apply). The
-  // 404 is ambiguous with a fine-grained token lacking the Pages permission, so the note says so.
+  // No site is nothing to declare (not `pages: null`, which would DISABLE Pages on apply); the
+  // engine notes the 404's other reading (a token without the Pages grant).
   async snapshot(ctx) {
     const probe = await ctx.read.get.probeAbsent();
     if ("missing" in probe) {
-      return {
-        value: undefined,
-        notes: [
-          "pages: GitHub reports no Pages site. A fine-grained token missing the Pages permission gets the same answer; if this repository does have a Pages site, grant the token Pages read and snapshot again",
-        ],
-      };
+      return { value: undefined, notes: [] };
     }
     return { value: projectOntoSchema(PagesConfig, probe.data), notes: [] };
   },

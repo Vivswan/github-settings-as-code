@@ -16,8 +16,8 @@ coverage:
       set. ASSUMPTION: the GET is graded as a plain read under the Administration permission,
       mirroring code scanning - the fine-grained grading of these endpoints is not verified against
       production. The sibling /code-quality/findings endpoints are read-only and stay out of scope.
-      Snapshot reads the GET body back on the declared keys; a null the slice does not take (a not-
-      configured setup's runner_type) is omitted.
+      Snapshot reads the GET body back on the declared keys; a null the slice does not take (a
+      not-configured setup's runner_type) is omitted.
 schema:
   SettingsFile.code_quality_setup: Code quality analysis setup.
   CodeQualitySetupConfig: PATCH /repos/{r}/code-quality/setup, sent verbatim.
