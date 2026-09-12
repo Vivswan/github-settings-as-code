@@ -1,7 +1,6 @@
 /**
- * The collaborators fuzz fragment: the entry generator walks the CollaboratorConfig slice (a new
- * schema field is fuzzed without an edit here) with the unique-login invariant on top, and the
- * pending-invitation live-state seeder beside it. Imports only the test-tree seams, never the bundle.
+ * The collaborators fuzz generator fragment and the pending-invitation live-state seeder. It imports
+ * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {
@@ -25,7 +24,6 @@ const genCollaborator = generatorFromSlice(CollaboratorConfig, {
 
 export function genCollaborators(rng: Rng): EntriesForm {
   const collaborators = Array.from({ length: rng.int(3) + 1 }, () => genCollaborator(rng));
-  // The section's own rule: one entry per login, case-insensitively.
   return maybeWrapUndeclared(
     rng,
     uniqueBy(collaborators, ["username"], (login) => login.toLowerCase()),
@@ -36,9 +34,8 @@ export function genCollaborators(rng: Rng): EntriesForm {
 const UNDECLARED_INVITEE = "zz-undeclared-invitee";
 
 /**
- * Pending-invitation live state for the declared collaborators: some get a pending invitation
- * (matching, mismatched, or expired) and sometimes an undeclared invitee rides along. Every relation
- * converges under a fully-granted apply, so the fixpoint gates hold without a collaborators witness kind.
+ * Every relation seeded here (matching, mismatched, expired, or an undeclared invitee) converges
+ * under a fully-granted apply, so the fixpoint gates hold without a collaborators witness kind.
  */
 export function genInvitationsState(rng: Rng, declared: Json[]): Json[] {
   const out: Json[] = [];

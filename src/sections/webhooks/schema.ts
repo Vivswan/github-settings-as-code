@@ -7,8 +7,8 @@ const WebhookDeliveryConfig = z
     url: z.string(),
     content_type: z.string().optional(),
     secret: z.string().optional(),
-    // Values pass through as-is beyond the type: GitHub is the authority on
-    // what it accepts, and it stores numbers as their string form.
+    // Values pass through beyond the type: GitHub is the authority on what it accepts, and it
+    // stores numbers as their string form.
     insecure_ssl: z.union([z.string(), z.number()]).optional(),
   })
   .catchall(z.unknown())
@@ -22,13 +22,9 @@ export const WebhookConfig = z
     active: z.boolean().optional(),
   })
   .superRefine((entry, refineCtx) => {
-    // The secret lives under config; an ENTRY-level secret would pass the
-    // loose runtime shape, ship the raw reference text verbatim, and create
-    // a silently unauthenticated hook - the exact failure this feature
-    // exists to prevent - so the misplacement is rejected by name (the
-    // `name: "web"` pin precedent). Only the loosen()ed runtime shape can
-    // see the undeclared key - which is the only shape that ever parses
-    // documents.
+    // An ENTRY-level secret would pass the loose shape, ship the raw reference text verbatim, and
+    // create a silently unauthenticated hook, the exact failure this feature exists to prevent. The
+    // strict type hides the key; only the loosen()ed shape that parses documents lets it reach here.
     if ((entry as Record<string, unknown>).secret !== undefined) {
       refineCtx.addIssue({
         code: "custom",

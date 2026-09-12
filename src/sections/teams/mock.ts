@@ -1,6 +1,6 @@
 /**
- * The teams section's mock handler fragment (see test/e2e/mock/sections.ts
- * for the aggregation and the deliberate src -> test import direction).
+ * The teams e2e mock fragment (aggregated in test/e2e/mock/sections.ts). It imports the test-tree
+ * seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import { restRepoSurface, teamRepoFromPut } from "../../../test/e2e/mock/state.js";
@@ -18,12 +18,10 @@ export const teamsMockHandlers: SectionRestHandlers<"teams"> = {
     const slug = param("team_slug");
     const access = state.teams[slug];
     if (!access) {
-      // The spec documents this 404 ("team does not have permission for the
-      // repository") with NO response content, so the body is empty.
+      // The spec documents this 404 with NO response content.
       return { status: 404, body: null };
     }
-    // The repository media type makes this return the repo object with the
-    // team's role_name folded in.
+    // The repository media type makes this return the repo object with the team's role_name folded in.
     return ok({ ...restRepoSurface(state.repo), role_name: access.role_name });
   },
   "teams.grant": ({ state, param, body }) => {

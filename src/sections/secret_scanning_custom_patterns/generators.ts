@@ -1,7 +1,6 @@
 /**
- * The secret_scanning_custom_patterns fuzz fragment: the entry generator walks the slice, so only
- * the pools and the exact-name uniqueness rule live here. Imports only the test-tree seams; the
- * bundle entry is src/main.ts, so this never reaches lib/index.js.
+ * The secret_scanning_custom_patterns fuzz generator fragment. It imports test-tree seams on purpose:
+ * the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {
@@ -18,8 +17,8 @@ const NAMES = ["internal-api-token", "staging-key", "vendor-secret", "license-ke
 const PATTERNS = ["int_[a-z0-9]{8}", "key-[0-9]{6}", "tok_[A-Za-z0-9]{12}"] as const;
 
 export function genSecretScanningPatterns(rng: Rng): EntriesForm {
-  // The index suffix keeps names unique under the exact-name natural key,
-  // applied inside the pool so the slice validates the final name.
+  // The index suffix keeps names unique under the exact-name natural key; applied inside the pool
+  // so the slice validates the final name.
   let index = 0;
   const genPattern = generatorFromSlice(SecretScanningPatternConfig, {
     fields: {

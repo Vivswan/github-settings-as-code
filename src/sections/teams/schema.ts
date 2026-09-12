@@ -9,5 +9,4 @@ const TeamConfig = z
   })
   .meta({ id: "TeamConfig" });
 
-/** The `teams:` document slice: the entry list the document composes from. */
 export const TeamsConfig = z.array(TeamConfig);

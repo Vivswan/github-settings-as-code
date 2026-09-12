@@ -1,7 +1,6 @@
 /**
- * The collaborators section's mock handler fragment (see
- * test/e2e/mock/sections.ts for the aggregation and the deliberate
- * src -> test import direction).
+ * The collaborators e2e mock fragment (aggregated in test/e2e/mock/sections.ts). It imports the
+ * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {
@@ -27,13 +26,11 @@ export const collaboratorsMockHandlers: SectionRestHandlers<"collaborators"> = {
     );
     if (existing) {
       Object.assign(existing, collaboratorFromPut(username, asObject(body)));
-      return noContent(); // 204: already a collaborator, access updated
+      return noContent();
     }
-    // Matching real GitHub, a PUT for a non-collaborator does NOT grant
-    // access: it creates (or refreshes) a pending invitation and answers 201
-    // with the repository-invitation body, whose `permissions` is a STRING
-    // (read/write/admin/...), not the collaborator role object. The user
-    // joins state.collaborators only in a scenario that seeds them there.
+    // Like real GitHub, a PUT for a non-collaborator does NOT grant access: it creates or refreshes
+    // a pending invitation and answers 201 with the invitation body, whose `permissions` is a
+    // STRING (read/write/admin/...), not the collaborator role object.
     const pending = state.invitations.find(
       (i) =>
         String((i.invitee as Json | undefined)?.login).toLowerCase() === username.toLowerCase(),
@@ -70,8 +67,7 @@ export const collaboratorsMockHandlers: SectionRestHandlers<"collaborators"> = {
     if (!invitation) {
       return { status: 404, body: { message: "Not Found" } };
     }
-    // The PATCH speaks the invitation's own read vocabulary (read/write/...),
-    // so the body's `permissions` is stored verbatim.
+    // The PATCH speaks the invitation's own read vocabulary (read/write/...), so `permissions` is stored verbatim.
     const permissions = asObject(body).permissions;
     if (permissions !== undefined) {
       invitation.permissions = permissions;

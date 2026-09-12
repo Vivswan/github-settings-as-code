@@ -1,10 +1,3 @@
-/**
- * The nested `deployment_protection_rules` key: plan one environment's
- * custom deployment protection rules - GitHub App gates, enable/disable
- * only, declared by App slug and resolved to the integration id at apply
- * time.
- */
-
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
 import { parseLive } from "../contract/live.js";
@@ -13,22 +6,14 @@ import { ENDPOINTS, type EnvironmentsRestContext } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentProtectionRuleConfig, EnvironmentConfig } from "./schema.js";
 
-// "keep" like the secret families, for a security reason instead of an
-// unrecoverable one: Apps can enable themselves as deployment gates, and
-// silently disabling a gate the file never named would weaken a
-// protection nobody asked to weaken. Disabling is opt-in via the wrapped
-// form.
+// "keep" for a security reason: Apps can enable themselves as deployment gates, and silently
+// disabling a gate the file never named would weaken a protection nobody asked to weaken.
 export const PROTECTION_RULES_DEFAULT_POLICY: UndeclaredPolicy = "keep";
 
 /**
- * The fields of a live custom deployment protection rule this section reads.
- * The spec marks every field required, but the identity fields are still
- * extracted loudly (the livePolicyName precedent): a rule without an App
- * slug has no identity to reconcile by, and silently skipping it would let
- * check report falsely clean. The endpoint documents that it returns
- * enabled rules only, so presence in the list is the enablement signal;
- * `enabled` is read anyway as a belt over that contract - a rule the API
- * ever reported as disabled must not satisfy a declared gate.
+ * The endpoint documents enabled rules only, so presence is the enablement signal; `enabled` is
+ * read as a belt over that, since a rule the API ever reported disabled must not satisfy a declared
+ * gate. An enabled rule without an App slug fails loudly: it has no identity to reconcile by.
  */
 const LiveProtectionRule = z.looseObject({
   id: z.number().optional(),
@@ -37,7 +22,6 @@ const LiveProtectionRule = z.looseObject({
 });
 type LiveProtectionRule = z.infer<typeof LiveProtectionRule>;
 
-/** The App slug a rule reconciles by, or a loud error when the response omitted it. */
 function liveRuleSlug(rule: LiveProtectionRule, envName: string): string {
   const slug = rule.app?.slug;
   if (typeof slug !== "string") {
@@ -48,10 +32,8 @@ function liveRuleSlug(rule: LiveProtectionRule, envName: string): string {
   return slug;
 }
 
-/** The id a disable addresses, or a loud error when the response omitted it. */
 function liveRuleId(rule: LiveProtectionRule, envName: string): string {
-  // Only a real number may address the DELETE: a null or string id would
-  // otherwise serialize into the path (".../deployment_protection_rules/null").
+  // A null or string id would serialize into the DELETE path (".../deployment_protection_rules/null").
   if (typeof rule.id !== "number") {
     throw new Error(
       `environments: the deployment protection rule list for environment "${envName}" returned a rule without a numeric id, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
@@ -61,11 +43,9 @@ function liveRuleId(rule: LiveProtectionRule, envName: string): string {
 }
 
 /**
- * The enabled rules of one environment. A single call(), NOT
- * listAllEnveloped: this endpoint documents no page/per_page parameters, so
- * the page loop would append a query GitHub never specified. Both envelope
- * keys are optional in the spec, so an ABSENT list reads as empty - but a
- * PRESENT off-shape value is a contract break parseLive fails loudly.
+ * A single call(), NOT listAllEnveloped: this endpoint documents no page/per_page parameters, so
+ * the page loop would append a query GitHub never specified. Both envelope keys are optional in the
+ * spec, so an ABSENT list reads as empty, while a PRESENT off-shape value fails loudly in parseLive.
  */
 async function listProtectionRules(
   ctx: EnvironmentsRestContext,
@@ -87,11 +67,7 @@ async function listProtectionRules(
   return data?.custom_deployment_protection_rules ?? [];
 }
 
-/**
- * Resolve a declared App slug to its integration id via the available-Apps
- * listing; an unlisted slug is a hard error naming the available ones (the
- * App is not installed, which no call this section may make can change).
- */
+/** An unlisted slug means the App is not installed, which nothing this section may call can change. */
 function resolveIntegrationId(
   apps: readonly LiveProtectionRuleApp[],
   slug: string,
@@ -110,14 +86,12 @@ function resolveIntegrationId(
   return app.id;
 }
 
-/** The fields of an available protection-rule App this section reads. */
 const LiveProtectionRuleApp = z.looseObject({ id: z.number(), slug: z.string() });
 type LiveProtectionRuleApp = z.infer<typeof LiveProtectionRuleApp>;
 
 /**
- * The available-Apps listing, parsed loudly at the boundary: an App without
- * a slug or id could neither be offered in the unknown-slug error nor
- * resolve a declared rule, so parseLive rejects the whole listing.
+ * An App without a slug or id could neither be offered in the unknown-slug error nor resolve a
+ * declared rule, so parseLive rejects the whole listing.
  */
 async function listProtectionRuleApps(
   ctx: EnvironmentsRestContext,
@@ -136,10 +110,6 @@ async function listProtectionRuleApps(
   );
 }
 
-/**
- * Upfront rejection of duplicate declared App slugs: the same gate enabled
- * twice would fight itself on every run.
- */
 export function validateProtectionRules(
   env: EnvironmentConfig,
   entries: readonly DeploymentProtectionRuleConfig[],
@@ -160,11 +130,7 @@ export function validateProtectionRules(
   }
 }
 
-/**
- * Plan one environment's protection rules (enable/disable only): a missing
- * rule is enabled, an undeclared one follows the policy, and the FIRST enable's
- * thunk resolves EVERY missing slug from one Apps read before any POST leaves.
- */
+/** Every missing slug resolves from one Apps read before the first POST leaves, so an unlisted slug fails before any rule is half-enabled. */
 export async function planProtectionRules(
   ctx: EnvironmentsRestContext,
   section: SectionMeta,
@@ -177,11 +143,9 @@ export async function planProtectionRules(
   const live = liveEnv === undefined ? [] : await listProtectionRules(ctx, section, envName);
   const liveBySlug = new Map<string, LiveProtectionRule>();
   for (const rule of live) {
-    // The map models gates that are ON (see the LiveProtectionRule JSDoc):
-    // skipping a disabled rule makes apply re-enable a declared gate instead
-    // of reading falsely clean, and in the undeclared direction a disabled
-    // rule is not an active gate, so neither the keep-note nor the disable
-    // applies to it.
+    // The map holds gates that are ON: a disabled declared rule must be re-enabled rather than read
+    // as clean, and a disabled undeclared rule is no active gate, so neither the keep-note nor the
+    // disable applies to it.
     if (rule.enabled === false) {
       continue;
     }

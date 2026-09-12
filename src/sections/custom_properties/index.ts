@@ -1,7 +1,7 @@
 /**
- * `custom_properties:` section - values of organization-defined custom properties, set per
- * repository through ONE bulk PATCH. Definitions are org-scoped, so only values are managed;
- * a personal account no-ops with a note, and `value: null` unsets (reverting to the org default).
+ * `custom_properties:` section: values of organization-defined custom properties, set through ONE
+ * bulk PATCH. Definitions are org-scoped, so only values are managed; a personal account no-ops
+ * with a note, and `value: null` unsets (reverting to the org default).
  */
 
 import { z } from "zod";
@@ -23,13 +23,9 @@ import { CustomPropertyConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["custom_properties"] };
 
-/** A value as GitHub stores and returns it: strings, string lists, or unset. */
 type WireValue = string | string[] | null;
 
-/**
- * A declared value in the form GitHub stores: booleans and numbers become their string form
- * (true_false values travel as "true"/"false"), lists are copied, null (unset) passes through.
- */
+/** GitHub stores true_false values as the strings "true"/"false" and numbers as their string form. */
 export function normalizeValue(value: CustomPropertyConfig["value"]): WireValue {
   if (value === null) {
     return null;
@@ -41,9 +37,8 @@ export function normalizeValue(value: CustomPropertyConfig["value"]): WireValue 
 }
 
 /**
- * Lists compare by SET MEMBERSHIP: a multi_select value is a set, so a reordered declaration is
- * not drift, and a live-side duplicate GitHub would collapse still converges instead of
- * re-writing forever (declared-side duplicates are rejected before any read).
+ * Lists compare by SET MEMBERSHIP: a multi_select value is a set, so a reordered declaration is not
+ * drift, and a live-side duplicate GitHub would collapse still converges instead of re-writing forever.
  */
 function sameValue(a: WireValue, b: WireValue): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
@@ -54,15 +49,14 @@ function sameValue(a: WireValue, b: WireValue): boolean {
   return a === b;
 }
 
-/** Render a normalized value for drift lines ("unset" for null). */
 function show(value: WireValue): string {
   return value === null ? "unset" : JSON.stringify(value);
 }
 
 /**
- * A repeated multi_select option is a typo the set comparison would hide forever; an empty list
- * is rejected because GitHub does not document whether [] stores or normalizes to unset, so it
- * could re-write on every apply (value: null is the documented unset).
+ * A repeated option is a typo the set comparison would hide forever. An empty list is rejected
+ * because GitHub does not document whether [] stores or normalizes to unset, so it could re-write
+ * on every apply; value: null is the documented unset.
  */
 function rejectMalformedList(property: CustomPropertyConfig): void {
   if (!Array.isArray(property.value)) {
@@ -85,17 +79,15 @@ function rejectMalformedList(property: CustomPropertyConfig): void {
 }
 
 const ENDPOINTS = {
-  // GET /orgs/{org} is public, so it needs no token permission. Its 404 is the
-  // personal-account signal (no custom properties exist), and the only 404 the
-  // section can meet: the values GET is Metadata-gated, which every token holds.
+  // GET /orgs/{org} is public, so no token permission. Its 404 is the personal-account signal and
+  // the only 404 the section can meet: the values GET is Metadata-gated, which every token holds.
   org: {
     route: "GET /orgs/{org}",
     statuses: { 200: "the organization", 404: "not an organization (a personal account)" },
     permission: "none",
     primaryRead: { notFound: "absent" },
   },
-  // Metadata (read) only, so it can never be permission-denied; only the PATCH
-  // needs the Custom properties grant.
+  // Metadata (read) only, so it can never be permission-denied; only the PATCH needs the grant.
   list: {
     route: "GET /repos/{owner}/{repo}/properties/values",
     statuses: { 200: "the custom property values" },
@@ -112,17 +104,11 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/**
- * One live entry, parsed loudly at the boundary: both fields are REQUIRED on the wire, so an
- * entry without a string property_name (or a value outside string/string[]/null) is a contract
- * violation parseLive rejects, not something to guess around.
- */
 const LiveProperty = z.looseObject({
   property_name: z.string(),
   value: z.union([z.string(), z.array(z.string()), z.null()]),
 });
 
-/** One property the bulk PATCH writes, with the line each mode renders for it. */
 interface PendingUpdate {
   readonly property_name: string;
   readonly value: WireValue;
@@ -134,13 +120,13 @@ export const customPropertiesSection = {
   key: "custom_properties",
   undeclaredDefault: "keep",
   permission,
-  // Custom properties exist only under an organization owner; the org probe
-  // in plan() implements the personal-account no-op this declares.
+  // Custom properties exist only under an organization owner; the org probe in plan() implements
+  // the personal-account no-op this declares.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(CustomPropertyConfig)),
-  // Closed surface: the bulk PATCH body is built from exactly property_name
-  // and value, so an extra key has no destination and is always a typo.
+  // The bulk PATCH body is built from exactly property_name and value, so an extra key has no
+  // destination and is always a typo.
   closedSurface: {
     known: { property_name: true, value: true },
     describe: (p) => p.property_name,
@@ -149,8 +135,7 @@ export const customPropertiesSection = {
   },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
-    // Exact-name matching: GitHub documents no case folding for property
-    // names, so entries are duplicates only when they match verbatim.
+    // GitHub documents no case folding for property names, so entries are duplicates only when they match verbatim.
     rejectDuplicates(
       this,
       desired,

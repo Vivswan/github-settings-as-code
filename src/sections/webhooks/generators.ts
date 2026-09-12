@@ -1,8 +1,6 @@
 /**
- * The webhooks section's fuzz generator fragment, aggregated by
- * test/e2e/generators.ts. Imports only the test-tree leaf seams
- * (gen-support.ts, prng.ts) - the src -> test inversion is deliberate; the
- * bundle entry is src/main.ts, so this file never reaches lib/index.js.
+ * The webhooks fuzz generator fragment, aggregated by test/e2e/generators.ts. It imports only the
+ * test-tree leaf seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {
@@ -13,7 +11,6 @@ import {
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 
-/** The whole-value references the webhook generator draws from. */
 const E2E_SECRET_REFS = Object.keys(E2E_SECRET_ENV).map((name) => `$${name}`);
 
 export function genWebhooks(rng: Rng): EntriesForm {
@@ -25,8 +22,8 @@ export function genWebhooks(rng: Rng): EntriesForm {
     if (rng.bool(0.6)) {
       config.content_type = rng.pick(["json", "form"]);
     }
-    // Both spellings on purpose: GitHub stores insecure_ssl as a string, so
-    // a declared number exercises the compare-side normalization.
+    // Both spellings on purpose: GitHub stores insecure_ssl as a string, so a declared number
+    // exercises the compare-side normalization.
     if (rng.bool(0.4)) {
       config.insecure_ssl = rng.pick(["0", "1", 0, 1] as const);
     }

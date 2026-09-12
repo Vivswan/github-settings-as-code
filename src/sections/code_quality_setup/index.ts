@@ -1,8 +1,3 @@
-/**
- * `code_quality_setup:` section - the code quality setup configuration,
- * PATCHed verbatim by the shared setup factory (../shared/setup-section.ts).
- */
-
 import { setupSection } from "../shared/setup-section.js";
 
 export const codeQualitySetupSection = setupSection({

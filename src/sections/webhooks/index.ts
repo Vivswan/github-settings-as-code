@@ -1,7 +1,7 @@
 /**
- * `webhooks:` section - repository webhooks, at most ONE per config.url (a changed url is a NEW
- * hook; the old one turns undeclared and is kept by default). Hook urls are configuration and appear
- * in drift on purpose; the secret never does, and a declared one rides the config PATCH every run.
+ * `webhooks:` section: repository webhooks, at most ONE per config.url (a changed url is a NEW
+ * hook; the old one turns undeclared). Hook urls are configuration and appear in drift on purpose;
+ * the secret never does, and a declared one is re-sent on every run.
  */
 
 import { z } from "zod";
@@ -31,7 +31,6 @@ import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { WebhookConfig } from "./schema.js";
 
-/** The fields of a live hook this section reads; extras ride along. */
 const LiveHook = z.looseObject({
   id: z.number(),
   name: z.string().optional(),
@@ -77,7 +76,6 @@ function normalizeInsecureSsl(value: unknown): unknown {
   return typeof value === "number" ? String(value) : value;
 }
 
-/** A config copy with insecure_ssl normalized and the secret REMOVED (never diffed). */
 function comparableConfig(config: Record<string, unknown>): Record<string, unknown> {
   const { secret: _secret, ...rest } = config;
   if ("insecure_ssl" in rest) {
@@ -86,17 +84,14 @@ function comparableConfig(config: Record<string, unknown>): Record<string, unkno
   return rest;
 }
 
-/** Events compared as sets: GitHub does not define an order (topics precedent). */
+/** Compared as sets: GitHub does not define an event order. */
 function eventsMatch(declared: readonly string[], live: readonly string[]): boolean {
   const declaredSet = new Set(declared);
   const liveSet = new Set(live);
   return declaredSet.size === liveSet.size && [...declaredSet].every((event) => liveSet.has(event));
 }
 
-/**
- * The declared config with the secret reference swapped for its resolved plaintext, sealed at
- * execution time: the engine resolved every reference up front, so the lookup cannot miss.
- */
+/** The engine resolved every reference up front, so the lookup cannot miss. */
 function resolvedConfig(exec: ExecTools, hook: WebhookConfig): PlainData {
   if (hook.config.secret === undefined) {
     return plainData({ ...hook.config });
@@ -105,13 +100,9 @@ function resolvedConfig(exec: ExecTools, hook: WebhookConfig): PlainData {
 }
 
 /**
- * The declared value of every entry's config.secret, for the engine's
- * up-front resolution, each labelled with its hook's url (configuration
- * that appears in drift lines on purpose - never a secret). DEFENSIVE by
- * contract: a malformed container
- * (webhooks: null, a scalar, entries that are not mappings) returns []
- * instead of throwing, so the actionable error always comes from shape
- * validation, never a TypeError from here.
+ * Each label carries its hook's url (configuration that appears in drift lines on purpose, never a
+ * secret). A malformed container returns [] instead of throwing, so the actionable error always
+ * comes from shape validation.
  */
 function secretValues(declared: unknown): DeclaredSecretValue[] {
   const container = declared as WebhookConfig[] | UndeclaredPolicyList<WebhookConfig>;
@@ -138,7 +129,6 @@ function secretValues(declared: unknown): DeclaredSecretValue[] {
   });
 }
 
-/** How an undeclared live hook is named in notes and drift (its url, or its id). */
 function describeHook(hook: LiveHook): string {
   const url = hook.config?.url;
   return typeof url === "string" && url !== "" ? `"${url}"` : `id ${hook.id} (no config.url)`;
@@ -152,9 +142,8 @@ export const webhooksSection = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  // name is pinned to "web" upfront: it is the only value GitHub's hooks API
-  // accepts today, and any other value could only be a typo or a legacy
-  // service hook this section does not manage.
+  // name is pinned to "web", the only value GitHub's hooks API accepts today; any other value is a
+  // typo or a legacy service hook this section does not manage.
   shape: loosen(knobbed(WebhookConfig)),
   secretValues,
   async plan(ctx, declared) {
@@ -168,14 +157,13 @@ export const webhooksSection = {
     const live = parseLive(this, ENDPOINTS.list, z.array(LiveHook), await ctx.read.list.listAll());
     const declaredUrls = new Set(desired.map((hook) => hook.config.url));
 
-    // Every ambiguous url is collected before the one throw: each fix is
-    // manual GitHub cleanup, so N ambiguities must cost one run to discover.
+    // Every ambiguous url is collected before the one throw: each fix is manual GitHub cleanup, so
+    // N ambiguities must cost one run to discover.
     const ambiguous: string[] = [];
     for (const hook of desired) {
       const matches = live.filter((candidate) => candidate.config?.url === hook.config.url);
       if (matches.length > 1) {
-        // No silent collapse: updating one of N same-url hooks (or all of
-        // them) is a guess either way, so the user resolves it by hand once.
+        // Updating one of N same-url hooks, or all of them, is a guess either way.
         ambiguous.push(
           `"${hook.config.url}" matches ${matches.length} live hooks (ids ${matches
             .map((candidate) => candidate.id)
@@ -198,7 +186,7 @@ export const webhooksSection = {
       const general = {
         ...(events === undefined ? {} : { events }),
         ...(active === undefined ? {} : { active }),
-        ...extraKeys, // passthrough hook fields ride verbatim
+        ...extraKeys,
       };
       if (existing === undefined) {
         const missing = `webhooks["${url}"]: missing - declared in the settings file but not on the repo; apply will create it`;
@@ -220,9 +208,9 @@ export const webhooksSection = {
         comparableConfig(hook.config),
         comparableConfig(existing.config ?? {}),
       ).map((delta) => renderDelta(`webhooks["${url}"].config`, delta));
-      // Config drift - and a declared secret, unconditionally - go through the
-      // config SUB-endpoint, which updates named fields only: the general PATCH
-      // would replace the whole config and drop an undeclared live secret.
+      // Config drift, and a declared secret unconditionally, go through the config SUB-endpoint,
+      // which updates named fields only: the general PATCH would replace the whole config and drop
+      // an undeclared live secret.
       const configOp = {
         role: "updateConfig",
         params: { hook_id: String(existing.id) },
@@ -243,8 +231,8 @@ export const webhooksSection = {
         });
       }
 
-      // events/active (and passthrough extras) go through the general PATCH
-      // WITHOUT a config key, so the whole-config replacement never fires.
+      // events/active (and passthrough extras) go through the general PATCH WITHOUT a config key,
+      // so the whole-config replacement never fires.
       const generalDrift = [
         ...(events !== undefined && !eventsMatch(events, existing.events ?? [])
           ? [
@@ -270,8 +258,8 @@ export const webhooksSection = {
       }
     }
 
-    // Undeclared hooks are kept by default: integrations own their hooks, and
-    // deleting one silently would break a service nobody named in this file.
+    // Undeclared hooks are kept by default: integrations own their hooks, and deleting one silently
+    // would break a service nobody named in this file.
     for (const hook of live) {
       const url = hook.config?.url;
       if (typeof url === "string" && declaredUrls.has(url)) {

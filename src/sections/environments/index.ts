@@ -1,9 +1,3 @@
-/**
- * `environments:` section - upsert deployment environments by name via PUT
- * (undeclared ones untouched); the nested lists and the routed `pinned`
- * scalar plan per environment after the PUT (see nested.ts and pins.ts).
- */
-
 import { subsetDiff } from "../../engine/diff.js";
 import { type DeclaredSecretValue, loosen, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
@@ -24,15 +18,8 @@ import { type EnvironmentConfig, EnvironmentsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["environments"] };
 
-/**
- * The grant caveat for the branch-policy pattern and protection-rule
- * endpoints, which GitHub gates OUTSIDE the Environments permission
- * (verified against the fine-grained permissions reference): the pattern
- * list and the protection-rule list need Actions read, while the available
- * protection-rule Apps read and the writes of both families need
- * Administration. Appended to the section grant so a denial anywhere in the
- * section names the extra grants.
- */
+// GitHub gates the pattern and protection-rule endpoints outside the Environments permission (per
+// the fine-grained permissions reference); appended to the grant so any denial in the section names them.
 const NESTED_OVERRIDES_CAVEAT =
   'declared "deployment_branch_policies" and "deployment_protection_rules" keys additionally need "Actions" (read) and "Administration" (read and write)';
 
@@ -45,13 +32,9 @@ export const environmentsSection = {
   graphql: GRAPHQL_OPS,
   shape: loosen(EnvironmentsConfig),
   /**
-   * The declared value of every entry's secrets list, across all declared
-   * environments, for the engine's up-front reference resolution - each
-   * label carries the ENVIRONMENT alongside the secret name, since several
-   * environments can declare same-named secrets. DEFENSIVE
-   * like the shared extractor: a malformed container contributes nothing
-   * instead of throwing, so the actionable error always comes from shape
-   * validation.
+   * Labels carry the environment: sibling environments can declare same-named secrets.
+   * A malformed container contributes nothing rather than throwing, so the actionable error
+   * always comes from shape validation.
    */
   secretValues(declared: unknown): DeclaredSecretValue[] {
     if (!Array.isArray(declared)) {
@@ -77,9 +60,8 @@ export const environmentsSection = {
       (env) => env.name.toLowerCase(),
       (env) => env.name,
     );
-    // Validate every nested list before any operation is planned: a duplicate
-    // found mid-loop would waste the earlier reads, and apply must never start
-    // on a document one entry invalidates.
+    // Every nested list is validated before the first read: apply must never start on a document
+    // one entry invalidates.
     for (const env of desired) {
       for (const key of NESTED_KEYS) {
         validateNested(key, env);
@@ -100,9 +82,8 @@ export const environmentsSection = {
               `environments[${name}]: missing - declared in the settings file but not on the repo; apply will create it`,
             ]
           : subsetDiff(settings, flattenEnvironment(live), `environments[${name}]`);
-      // The node id the pin mutations address: the probed body's field, or a
-      // created environment's off its PUT response when that operation runs;
-      // no body is kept, and a converged pin state never validates it.
+      // The pin mutations' node id, off the probe or a created environment's PUT response. A probed
+      // body is validated only when a mutation needs it.
       const probedNodeId = live === undefined ? undefined : { node_id: nodeIdField(live) };
       let createdNodeId: string | undefined;
       const nodeId = (): string => {
@@ -135,18 +116,14 @@ export const environmentsSection = {
       if (routed.pinned !== undefined) {
         pins.push({ name, pinned: routed.pinned, nodeId });
       }
-      // The nested planners are the seam the shared engines' plan-shaped
-      // entry points slot into; each contributes its operations after the
-      // environment's own, in NESTED_KEYS order.
       for (const key of NESTED_KEYS) {
         const planned = await planNested(ctx, this, key, name, nested, live);
         plan.ops.push(...planned.ops);
         plan.notes.push(...planned.notes);
       }
     }
-    // Pins plan after every environment op (a created environment's id comes
-    // from its PUT, which runs first). Key-gated: without a `pinned` key the
-    // section never touches /graphql.
+    // Pins plan after every environment op: a created environment's id comes from its PUT.
+    // Without a `pinned` key the section never touches /graphql.
     if (pins.length > 0) {
       const pinned = await planPinned(ctx, pins);
       plan.ops.push(...pinned.ops);
@@ -157,11 +134,9 @@ export const environmentsSection = {
 } satisfies SectionModule<"environments", typeof ENDPOINTS, typeof GRAPHQL_OPS>;
 
 /**
- * GET /environments/{name} nests wait_timer / prevent_self_review / reviewers
- * inside protection_rules[]; translate back into the PUT request shape so
- * check mode compares like with like. Exported so the e2e state tests assert
- * their environmentFromPut transformer inverts this exact function (not a
- * lookalike copy).
+ * GET nests wait_timer / prevent_self_review / reviewers inside protection_rules[]; translated back
+ * to the PUT shape so check compares like with like. Exported so the e2e state tests can assert
+ * their environmentFromPut inverts this exact function.
  */
 export function flattenEnvironment(live: unknown): Record<string, unknown> {
   const raw = (live ?? {}) as Record<string, unknown>;
@@ -180,8 +155,7 @@ export function flattenEnvironment(live: unknown): Record<string, unknown> {
       }>;
       out.reviewers = reviewers.map((r) => ({ type: r.type, id: r.reviewer?.id }));
     } else {
-      // Future rule types: un-nest their payload keys generically so check
-      // mode can compare declared settings instead of reporting false drift.
+      // Unknown rule types un-nest generically, or a declared setting of theirs would read as drift.
       for (const [key, value] of Object.entries(rule)) {
         if (!["id", "node_id", "type", "url"].includes(key)) {
           out[key] = value;

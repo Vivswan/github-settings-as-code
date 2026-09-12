@@ -1,9 +1,6 @@
 /**
- * The milestones section's e2e mock fragment: one handler per
- * "milestones.<role>" key in the section's ENDPOINTS, registered in
- * test/e2e/mock/sections.ts. Imports only the leaf seams (mock/support.ts,
- * mock/state.ts) - never routes.ts or sections.ts; the bundle entry is
- * src/main.ts, so this fragment never reaches lib/index.js.
+ * The milestones e2e mock fragment (registered in test/e2e/mock/sections.ts). It imports the
+ * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {

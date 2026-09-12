@@ -1,8 +1,6 @@
 /**
- * Pinned environments (the routed `pinned` scalar): the pins GraphQL
- * operations and the pin/unpin/reorder planning. plan() gates the call on a
- * declared `pinned` key, so a pin-free settings file stays REST-only and
- * never touches /graphql.
+ * Pinned environments (the routed `pinned` scalar): the GraphQL operations and the pin/unpin/reorder
+ * planning. plan() gates the call on a declared `pinned` key, so a pin-free file never touches /graphql.
  */
 
 import { repoVariables } from "../contract/endpoints.js";
@@ -25,9 +23,8 @@ const PINS_QUERY = graphqlOp<{ owner: string; repo: string }>()({
 });
 
 /**
- * Pin or unpin one environment by the node id its REST body carries. Verified
- * live: a new pin lands at the TAIL (so appends are modelled locally), and
- * UNPROCESSABLE is GitHub's cap rejection, the belt under the plan's own gate.
+ * Verified live: a new pin lands at the TAIL (so appends are modelled locally), and UNPROCESSABLE
+ * is GitHub's cap rejection, the belt under the plan's own gate.
  */
 const PIN_ENVIRONMENT = graphqlOp<{ environmentId: string; pinned: boolean }>()({
   name: "PinEnvironment",
@@ -45,11 +42,9 @@ const PIN_ENVIRONMENT = graphqlOp<{ environmentId: string; pinned: boolean }>()(
 });
 
 /**
- * Move one pinned environment to a 1-based RANK; verified against live
- * GitHub, this is also the only mutation that renormalizes the position
- * numbers (the whole list reads back contiguous afterwards). The reconciler
- * only ever moves a pin LEFT (toward rank 1), where remove-and-insert
- * semantics are unambiguous.
+ * Verified live: the position is a 1-based RANK, and this is the only mutation that renumbers the
+ * list (it reads back contiguous afterwards). The reconciler only ever moves a pin LEFT, toward
+ * rank 1, where remove-and-insert semantics are unambiguous.
  */
 const REORDER_ENVIRONMENT = graphqlOp<{ environmentId: string; position: number }>()({
   name: "ReorderEnvironment",
@@ -65,44 +60,31 @@ export const GRAPHQL_OPS = {
   reorder: REORDER_ENVIRONMENT,
 } as const satisfies Record<string, GraphqlOpDecl>;
 
-/** The section's full plan context: the REST read port plus the pins read. */
 export type EnvironmentsPlanContext = PlanContext<typeof ENDPOINTS, typeof GRAPHQL_OPS>;
 
-/** A planned operation of this section, REST or GraphQL. */
 export type EnvironmentsOp = PlannedOp<typeof ENDPOINTS, typeof GRAPHQL_OPS>;
 
-/** What plan() returns for this section. */
 export type EnvironmentsPlan = SectionPlan<EnvironmentsOp>;
 
-/** One entry's declared pin state, in settings-file order. */
 export interface PinDeclaration {
   name: string;
   pinned: boolean;
-  /**
-   * The node id off the body the plan has for the environment (the probe, or a
-   * created environment's PUT response once run); throws when the body lacks it.
-   */
+  /** Throws when the body lacks a node_id; the plan calls it only from a mutation thunk. */
   nodeId: () => string;
 }
 
-/** The fields of one live pin this section reads off the pins connection. */
 interface LivePin {
   /**
-   * The ordering sort key. Verified against live GitHub as possibly
-   * NON-CONTIGUOUS (unpinning leaves a hole, a new pin appends via a
-   * monotonic counter; only a reorder renormalizes), so it is never compared
-   * as a literal slot number - only its RANK in the sorted list matters.
+   * Possibly NON-CONTIGUOUS on live GitHub (unpinning leaves a hole, a new pin appends via a
+   * monotonic counter, only a reorder renumbers), so only its RANK in the sorted list is compared.
    */
   position: number;
-  /** The pinned environment's name. */
   name: string;
 }
 
 /**
- * One pins-connection node, with the identity fields extracted loudly (the
- * livePolicyName posture): a pin without a numeric position and a name has
- * no identity to reconcile by, and silently skipping it would let check
- * report falsely clean while apply reordered blind.
+ * A pin without a numeric position and a name has no identity to reconcile by, and silently
+ * skipping it would let check report falsely clean while apply reordered blind.
  */
 function livePin(node: unknown): LivePin {
   const pin = node as { position?: unknown; environment?: { name?: unknown } } | null;
@@ -120,11 +102,9 @@ function livePin(node: unknown): LivePin {
 }
 
 /**
- * The live pins in rank order (sorted by their position field). A tolerated
- * NOT_FOUND - how GraphQL delivers a fine-grained denial on the repository -
- * reads as "no pins", the same absent posture as the section's REST probe,
- * so the denial surfaces on the first pin write instead of failing the read
- * pass.
+ * A tolerated NOT_FOUND (how GraphQL delivers a fine-grained denial on the repository) reads as
+ * "no pins", the same absent posture as the REST probe, so the denial surfaces on the first pin
+ * write instead of failing the read pass.
  */
 async function listLivePins(ctx: EnvironmentsPlanContext): Promise<LivePin[]> {
   const listed = await ctx.read.pins.listConnection(repoVariables(ctx));
@@ -134,36 +114,31 @@ async function listLivePins(ctx: EnvironmentsPlanContext): Promise<LivePin[]> {
   return listed.items.map(livePin).sort((a, b) => a.position - b.position);
 }
 
-/** The pin key: environment names are case-insensitive, like the natural key. */
+/** Environment names are case-insensitive on GitHub. */
 function pinKey(name: string): string {
   return name.toLowerCase();
 }
 
 /**
- * The complete mutation plan for the declared pin states against one live
- * pinned list - a PURE computation shared by both modes: check renders its
- * drift lines from the plan and apply executes exactly its mutations, so the
- * two cannot disagree. Semantics: entries declaring `pinned: true` must LEAD
- * the pinned list in declaration order (compared by rank - live position
- * numbers may carry holes); `pinned: false` unpins; pins with no declared pin
- * state are never unpinned, and one sitting among the leading ranks the
- * declared block claims is moved after them (`interleaved`, noted in both modes).
+ * A PURE computation both modes share: check renders its drift lines from the plan and apply
+ * executes exactly its mutations, so the two cannot disagree. Ranks are compared, never the live
+ * position numbers (they may carry holes).
+ *
+ * pinned: true    -> leads the pinned list, in declaration order
+ * pinned: false   -> unpinned
+ * no declaration  -> never unpinned; moved after the declared block when it sits among the leading ranks
  */
 function planPins(
   declarations: readonly PinDeclaration[],
   live: readonly LivePin[],
 ): {
-  /** Display names to unpin (declared pinned: false AND live-pinned). */
   unpins: string[];
-  /** Display names to pin (declared pinned: true, not live), file order. */
   pins: string[];
-  /** The reorder mutations, each a leftward move to a 1-based rank. */
+  /** Each a leftward move to a 1-based rank. */
   reorders: Array<{ name: string; rank: number }>;
-  /** Live pins with no declared pin state sitting among the leading ranks. */
   interleaved: string[];
-  /** The pinned count once the plan has run (never transiently exceeded). */
+  /** The pinned count once the plan has run; the cap is never transiently exceeded. */
   finalCount: number;
-  /** The live names in rank order, for the order-drift line. */
   liveOrder: string[];
 } {
   const desired = declarations.filter((entry) => entry.pinned).map((entry) => entry.name);
@@ -178,8 +153,8 @@ function planPins(
     .map((entry) => entry.name);
   const pins = desired.filter((name) => !liveKeys.has(pinKey(name)));
 
-  // The rank order once the unpins are gone and the missing pins have
-  // appended at the tail (verified live) - the state the reorder loop starts from.
+  // The rank order once the unpins are gone and the missing pins have appended at the tail
+  // (verified live): the state the reorder loop starts from.
   const postUnpin = live
     .filter((pin) => !unpinKeys.has(pinKey(pin.name)))
     .map((pin) => pinKey(pin.name));
@@ -195,9 +170,6 @@ function planPins(
     .map((pin) => pin.name);
 
   const reorders: Array<{ name: string; rank: number }> = [];
-  // Each reorder pulls desired[i] LEFT into rank i+1: ranks 0..i-1 already
-  // hold desired[0..i-1], so the target can only sit further right, which
-  // makes remove-then-insert unambiguous and one mutation per pin sufficient.
   desired.forEach((name, index) => {
     const key = pinKey(name);
     if (order[index] === key) {
@@ -219,9 +191,8 @@ function planPins(
 }
 
 /**
- * The node id of every environment the plan will mutate, resolved by the
- * FIRST pin thunk (after every environment PUT): a body without node_id fails
- * with zero pins half-applied, and a converged pin state never resolves one.
+ * Resolved by the FIRST pin thunk, after every environment PUT: a body without node_id fails with
+ * zero pins half-applied, and a converged pin state never resolves one.
  */
 function resolvePinIds(
   declarations: readonly PinDeclaration[],
@@ -241,7 +212,6 @@ function resolvePinIds(
   );
 }
 
-/** An environment body's `node_id` field as a string, or the loud error when it is not one. */
 export function environmentNodeId(name: string, body: unknown): string {
   const nodeId = nodeIdField(body);
   if (typeof nodeId !== "string") {
@@ -252,15 +222,13 @@ export function environmentNodeId(name: string, body: unknown): string {
   return nodeId;
 }
 
-/** The `node_id` field of a body, unvalidated: the one value a plan keeps off a body. */
 export function nodeIdField(body: unknown): unknown {
   return (body as { node_id?: unknown } | null | undefined)?.node_id;
 }
 
 /**
- * Plan the declared pin states from planPins in cap-safe order (unpins, pins,
- * leftward reorders); the live overflow is a note in both modes and fails the
- * first pin thunk, and order drift is one section-level line plus continuations.
+ * Mutations in cap-safe order: unpins, then pins, then leftward reorders. An overflow is a note
+ * in both modes and fails the first pin thunk.
  */
 export async function planPinned(
   ctx: EnvironmentsPlanContext,
@@ -290,8 +258,6 @@ export async function planPinned(
     notes.push(`apply will fail: ${overflow}`);
   }
 
-  // The gate every mutation's thunk passes: the overflow refusal, then the
-  // ids of EVERY planned mutation, resolved once and shared.
   let ids: ReadonlyMap<string, string> | undefined;
   const idOf = (name: string): string => {
     if (overflow !== undefined) {

@@ -1,9 +1,7 @@
 /**
- * agents_secrets mock fragment: the section's e2e handlers, minted by the
- * shared secrets-family factory (support.ts, where the sealed-secret
- * semantics live) and registered in test/e2e/mock/sections.ts. Imports only
- * the test-tree leaf seams - the src -> test inversion is deliberate; the
- * bundle entry is src/main.ts, so this file never reaches lib/index.js.
+ * The agents_secrets e2e mock fragment, minted by the shared secrets-family factory in
+ * test/e2e/mock/support.ts. It imports the test-tree seams on purpose: the bundle entry is
+ * src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {

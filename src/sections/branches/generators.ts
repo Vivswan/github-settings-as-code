@@ -1,9 +1,6 @@
 /**
- * The branches section's fuzz generator fragment, aggregated by
- * test/e2e/generators.ts. Imports only the test-tree leaf seams
- * (gen-support.ts, mock/state.ts, prng.ts) - the src -> test inversion is
- * deliberate; the bundle entry is src/main.ts, so this file never reaches
- * lib/index.js.
+ * The branches fuzz generator fragment, aggregated by test/e2e/generators.ts. It imports only the
+ * test-tree leaf seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import type { Json } from "../../../test/e2e/gen-support.js";
@@ -14,7 +11,6 @@ import {
 } from "../../../test/e2e/mock/state.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 
-/** The four core branch-protection keys the classic PUT requires. */
 const PROTECTION_CORE_KEYS = [
   "required_status_checks",
   "enforce_admins",
@@ -23,21 +19,17 @@ const PROTECTION_CORE_KEYS = [
 ] as const;
 
 export function genBranches(rng: Rng): Json[] {
-  // The required_signatures draws are NEW, so they live on a forked stream:
-  // the main stream stays stable and recorded seeds keep reproducing.
+  // Later families fork their own streams so recorded seeds keep reproducing. The GraphQL rule
+  // surface is gated onto a MINORITY of entries so most iterations stay pure-REST and the
+  // zero-GraphQL guarantee for existing users keeps getting exercised.
   const sigRng = rng.fork("required-signatures");
-  // The wildcard/bypassers/deployments draws are NEWER still - the GraphQL
-  // rule surface - forked for the same stability reason, and gated onto a
-  // MINORITY of entries so most iterations stay pure-REST (the
-  // zero-GraphQL-for-existing-users guarantee keeps getting exercised).
   const bprRng = rng.fork("bpr");
   return Array.from({ length: rng.int(2) + 1 }, (_, i) => {
     const name = `${rng.pick(["main", "release", "dev"])}-${i}`;
     if (rng.bool(0.3)) {
       return { name, protection: null };
     }
-    // A random subset of the four core protection keys, with realistic values;
-    // the handler null-fills the omitted ones, so any subset is valid input.
+    // The handler null-fills the omitted core keys, so any subset is valid input.
     const protection: Json = {};
     if (rng.bool(0.6)) {
       protection.required_pull_request_reviews = {
@@ -53,7 +45,6 @@ export function genBranches(rng: Rng): Json[] {
     if (rng.bool(0.3)) {
       protection.restrictions = null;
     }
-    // Guarantee at least one core key so the payload is not empty.
     if (Object.keys(protection).length === 0) {
       const key = rng.pick(PROTECTION_CORE_KEYS);
       protection[key] = key === "enforce_admins" ? true : null;
@@ -61,11 +52,10 @@ export function genBranches(rng: Rng): Json[] {
     if (sigRng.bool(0.3)) {
       protection.required_signatures = sigRng.bool();
     }
-    // The first entry stays literal so every generated document reaches the
-    // protection read (the fault target); the draw is consumed either way.
+    // The first entry stays literal so every generated document reaches the protection read (the
+    // fault target); the draw is consumed either way.
     if (bprRng.bool(0.25) && i > 0) {
-      // A WILDCARD entry replaces the literal one: only translated keys, so
-      // the whole entry reconciles through the GraphQL rule mutations.
+      // A wildcard entry may declare only keys with GraphQL twins.
       const wildcard: Json = {};
       if (bprRng.bool(0.6)) {
         wildcard.enforce_admins = bprRng.bool();
@@ -95,11 +85,9 @@ export function genBranches(rng: Rng): Json[] {
 }
 
 /**
- * The minority draws for the two GraphQL-routed protection keys, shared by
- * literal and wildcard entries. Actors come from the mock's known rosters so
- * a generated allowance always resolves; deployment environment names come
- * from the fixed pool presenceLiveState seeds as live environments, so the
- * mutation's silent drop never fires on a generated document.
+ * Actors come from the mock's known rosters so a generated allowance always resolves; environment
+ * names come from the pool presenceLiveState seeds as live environments, so the mutation's silent
+ * drop never fires on a generated document.
  */
 function addRoutedGraphqlKeys(bprRng: Rng, protection: Json): void {
   if (bprRng.bool(0.25)) {
@@ -123,9 +111,7 @@ function addRoutedGraphqlKeys(bprRng: Rng, protection: Json): void {
 }
 
 /**
- * The deployment environments a generated required_deployments key may name.
- * presenceLiveState seeds every one of them as a live environment, so the
- * verified silent-drop behavior (the mock keeps only EXISTING names) never
- * turns a fully-granted apply into a read-back failure.
+ * presenceLiveState seeds every one of these as a live environment, so the verified silent-drop
+ * behavior (the mock keeps only EXISTING names) never turns a fully-granted apply into a read-back failure.
  */
 export const FUZZ_DEPLOYMENT_ENVIRONMENTS = ["fuzz-deploy-a", "fuzz-deploy-b"] as const;

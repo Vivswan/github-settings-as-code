@@ -1,6 +1,6 @@
 /**
- * The repository section's mock handler fragment (see test/e2e/mock/sections.ts
- * for the aggregation and the deliberate src -> test import direction).
+ * The repository e2e mock fragment (aggregated in test/e2e/mock/sections.ts). It imports the
+ * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import { decodeNodeId } from "../../../test/e2e/mock/node-id.js";
@@ -17,9 +17,8 @@ import {
   type SectionRestHandlers,
 } from "../../../test/e2e/mock/support.js";
 
-// Every repo body a REST handler serves - and the PATCH body it accepts -
-// goes through restRepoSurface, which strips the GraphQL-only fields
-// (state.ts), so the REST paths stay as blind to them as real GitHub's.
+// Every repo body a REST handler serves, and the PATCH body it accepts, goes through
+// restRepoSurface, which strips the GraphQL-only fields, so the REST paths stay as blind to them as GitHub's.
 export const repositoryMockHandlers: SectionRestHandlers<"repository"> = {
   "repository.get": ({ state }) => ok(restRepoSurface(state.repo)),
   "repository.update": ({ state, body }) => {
@@ -57,9 +56,8 @@ export const repositoryMockHandlers: SectionRestHandlers<"repository"> = {
     return noContent();
   },
   "repository.privateVulnerabilityReportingGet": ({ state }) => {
-    // When the feature is not applicable to this repository (observed on
-    // private repos), the GET answers 404 - one of its declared statuses. The
-    // section reads that as "not enabled". Flag set via live_state.repo.
+    // Where the feature is not applicable (observed on private repos) the GET answers its declared
+    // 404, which the section reads as "not enabled"; the flag is set via live_state.repo.
     if (state.repo.private_vulnerability_reporting_not_applicable === true) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -70,9 +68,8 @@ export const repositoryMockHandlers: SectionRestHandlers<"repository"> = {
     return noContent();
   },
   "repository.privateVulnerabilityReportingRemove": ({ state }) => {
-    // Disabling where the feature does not apply is already the declared state;
-    // the DELETE answers 404 (a declared "already off / not applicable" status)
-    // rather than 204, which the section tolerates.
+    // Disabling where the feature does not apply answers the declared 404 ("already off") rather
+    // than 204, which the section tolerates.
     if (state.repo.private_vulnerability_reporting_not_applicable === true) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -105,10 +102,7 @@ export const repositoryMockHandlers: SectionRestHandlers<"repository"> = {
   "repository.lfsRemove": () => noContent(),
 };
 
-// The two GraphQL-only repo settings, stored on state.repo but invisible to
-// every REST handler (restRepoSurface): the read serves both plus the repo's
-// canonical minted node id, the mutation resolves its target back through
-// the codec.
+// The two GraphQL-only repo settings are stored on state.repo but invisible to every REST handler.
 export const repositoryMockGraphqlHandlers: SectionGraphqlHandlers<"repository"> = {
   "repository.featuresQuery": ({ state }) => ({
     data: { repository: { id: repoNodeId(state), ...repoFeatureFields(state) } },
@@ -119,10 +113,8 @@ export const repositoryMockGraphqlHandlers: SectionGraphqlHandlers<"repository">
       hasSponsorshipsEnabled?: unknown;
       issueCreationPolicy?: unknown;
     };
-    // The pipeline already resolved the id to this state's slug; the family
-    // is this handler's own concern - a decodable non-repo id (say an
-    // environment's) would silently update the wrong resource, so it is a
-    // loud mock failure instead.
+    // The pipeline already resolved the id to this state's slug; the family is this handler's own
+    // concern, since a decodable non-repo id (an environment's, say) would silently update the wrong resource.
     const decoded = decodeNodeId(String(repositoryId ?? ""));
     if (decoded?.family !== "repo") {
       throw new Error(

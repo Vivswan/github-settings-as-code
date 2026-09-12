@@ -1,23 +1,10 @@
 /**
- * `secret_scanning_custom_patterns:` section - repository-level secret
- * scanning custom patterns, matched by exact name. The name is immutable
- * upstream (the update PATCH takes no name field), so a renamed entry is
- * created under the new name while the old pattern follows the undeclared
- * policy: deleted under `_undeclared: delete`, kept and noted under the
- * default keep. Undeclared patterns are KEPT by default:
- * removing a pattern disposes of its alerts, so deletion stays a human
- * opt-in through the wrapped `_undeclared: delete` form. Every delete this
- * action issues asks GitHub to RESOLVE the pattern's alerts
- * (post_delete_action: "resolve_alerts"), never to delete them: a settings
- * change must not destroy alert history, and resolved alerts keep the
- * audit trail.
+ * The pattern name is immutable upstream (the PATCH takes no name field), so a renamed entry is a
+ * create under the new name while the old pattern follows the undeclared policy.
  *
- * Writes ride the pattern's custom_pattern_version (optimistic
- * concurrency) whenever GitHub supplies one: the list GET carries each live
- * pattern's version, the PATCH/DELETE send it back, and a pattern edited on
- * GitHub between this run's read and its write answers 412 instead of
- * clobbering the edit. A version-less live pattern (the GET marks the field
- * optional and nullable) writes without the check, as the API allows.
+ * undeclared pattern  -> KEPT by default: removing a pattern disposes of its alerts
+ * every DELETE        -> post_delete_action "resolve_alerts", never delete_alerts: a settings change must not destroy alert history
+ * PATCH and DELETE    -> carry custom_pattern_version when GitHub supplies one; a pattern edited between read and write answers 412
  */
 
 import { z } from "zod";
@@ -39,7 +26,7 @@ import { SecretScanningPatternConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["secret_scanning_alerts"] };
 
-/** The subset of the known entry keys the update PATCH accepts (everything but the immutable name). */
+/** The known entry keys the update PATCH accepts: everything but the immutable name. */
 const UPDATABLE_KEYS = [
   "pattern",
   "start_delimiter",
@@ -49,17 +36,10 @@ const UPDATABLE_KEYS = [
 ] as const;
 type UpdatableKey = (typeof UPDATABLE_KEYS)[number];
 
-/**
- * A 403/404 on this family is ambiguous: it can also mean secret scanning
- * itself is off for the repository, not that the token lacks the grant.
- */
 const NOT_ENABLED_HINT =
   "a 404 can also mean secret scanning is not enabled for the repository (it requires GitHub Advanced Security on private repositories)";
 
-/**
- * The 412 advice both versioned writes share (see the module doc); exported
- * so the troubleshooting guide's verbatim quote is test-pinned.
- */
+/** Exported so the troubleshooting guide's verbatim quote is test-pinned. */
 export const STALE_VERSION_HINT =
   "the pattern changed on GitHub between this run's read and its write (stale custom_pattern_version); re-run the workflow";
 
@@ -92,7 +72,6 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/** The live GET-shape fields the planner reads; parsed at the boundary below. */
 interface LivePattern {
   id: number;
   name: string;
@@ -100,18 +79,14 @@ interface LivePattern {
   fields: Partial<Record<UpdatableKey, unknown>>;
 }
 
-/**
- * One live list entry, parsed loudly at the boundary: an entry without a string name or a
- * numeric id cannot be reconciled at all. The version is genuinely optional (a version-less
- * pattern forgoes optimistic concurrency), but a PRESENT non-string one must not bypass it.
- */
+// A null or absent version is the API's own version-less form (no optimistic concurrency), but a
+// PRESENT value of any other type must not bypass it.
 const LivePatternEntry = z.looseObject({
   id: z.number(),
   name: z.string(),
   custom_pattern_version: z.string().nullish(),
 });
 
-/** Project one parsed entry onto the fields the reconciliation reads. */
 function liveFrom(entry: z.infer<typeof LivePatternEntry>): LivePattern {
   const fields: Partial<Record<UpdatableKey, unknown>> = {};
   for (const key of UPDATABLE_KEYS) {
@@ -128,7 +103,6 @@ function liveFrom(entry: z.infer<typeof LivePatternEntry>): LivePattern {
   };
 }
 
-/** The declared updatable fields of an entry, as the write bodies carry them. */
 function declaredFields(declared: SecretScanningPatternConfig): Record<string, string | string[]> {
   return Object.fromEntries(
     UPDATABLE_KEYS.flatMap((key) => {
@@ -138,23 +112,17 @@ function declaredFields(declared: SecretScanningPatternConfig): Record<string, s
   );
 }
 
-/** The bulk-create entry for one declared pattern: name, pattern, and the declared optionals. */
 function createBody(declared: SecretScanningPatternConfig): Record<string, string | string[]> {
   return { name: declared.name, pattern: declared.pattern, ...declaredFields(declared) };
 }
 
-/** The bulk-delete entry for one live pattern; a version-less pattern omits the optional version. */
 function deleteBody(pattern: LivePattern): { pattern_id: number; custom_pattern_version?: string } {
   return pattern.version === undefined
     ? { pattern_id: pattern.id }
     : { pattern_id: pattern.id, custom_pattern_version: pattern.version };
 }
 
-/**
- * Whether a declared value matches its live counterpart: serialized, so the must_match lists
- * compare in order like every full-payload list. A live null/absent LIST equals a declared []
- * (the GET marks the lists nullable, so [] against null would otherwise PATCH on every run).
- */
+/** The GET marks the lists nullable, so a live null/absent LIST equals a declared [], or [] would PATCH on every run. */
 function matches(declaredValue: string | string[], liveValue: unknown): boolean {
   const liveComparable =
     Array.isArray(declaredValue) && (liveValue === undefined || liveValue === null)
@@ -171,8 +139,7 @@ export const secretScanningPatternsSection = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(SecretScanningPatternConfig)),
-  // Closed surface: the POST/PATCH bodies carry only the six declared
-  // fields, so an extra key has no destination and can only be a typo.
+  // The POST/PATCH bodies carry only the six declared fields, so an extra key has no destination and can only be a typo.
   closedSurface: {
     known: {
       name: true,
@@ -204,9 +171,6 @@ export const secretScanningPatternsSection = {
     const declaredNames = new Set(desired.map((p) => p.name));
 
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    // Only DECLARED fields are compared: an omitted optional keeps whatever
-    // the live pattern carries. Each PATCH sends the live version plus only
-    // the divergent fields; the missing patterns share ONE bulk POST.
     const toCreate: SecretScanningPatternConfig[] = [];
     const updates: PlannedOp<typeof ENDPOINTS>[] = [];
     for (const entry of desired) {
@@ -230,8 +194,8 @@ export const secretScanningPatternsSection = {
       updates.push({
         role: "update",
         params: { pattern_id: String(existing.id) },
-        // The PATCH body REQUIRES the version key but accepts null: a
-        // version-less live pattern writes without the concurrency check.
+        // The PATCH body REQUIRES the version key but accepts null: a version-less live pattern
+        // writes without the concurrency check.
         payload: {
           custom_pattern_version: existing.version ?? null,
           ...Object.fromEntries(divergent),
@@ -242,8 +206,6 @@ export const secretScanningPatternsSection = {
       });
     }
 
-    // No rename inference: a declared name matching nothing is a create even
-    // when an undeclared live pattern carries identical fields.
     const toDelete: LivePattern[] = [];
     for (const pattern of live) {
       if (declaredNames.has(pattern.name)) {
@@ -285,9 +247,8 @@ export const secretScanningPatternsSection = {
         });
       const deleted = (p: LivePattern): string =>
         `DELETED undeclared secret scanning custom pattern "${p.name}" (alerts resolved, not deleted)`;
-      // ONE bulk DELETE. post_delete_action is ALWAYS "resolve_alerts", by
-      // policy: this action never destroys alert history (upstream defaults
-      // to delete_alerts), and there is no user knob.
+      // post_delete_action is ALWAYS "resolve_alerts": this action never destroys alert history
+      // (upstream defaults to delete_alerts), and there is no user knob.
       plan.ops.push({
         role: "remove",
         payload: { patterns: toDelete.map(deleteBody), post_delete_action: "resolve_alerts" },

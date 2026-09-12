@@ -1,9 +1,4 @@
-/**
- * `rulesets:` section - upsert by name with full-payload PUT (a partial PUT
- * silently narrows a ruleset). Undeclared rulesets are NEVER deleted by
- * default; they are listed as notes so removal stays an explicit human
- * action. The wrapped `_undeclared: delete` form hardens that to deletion.
- */
+/** `rulesets:` section: upsert by name with a full-payload PUT, because a partial PUT silently narrows a ruleset. */
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
@@ -24,9 +19,8 @@ import { knobbed } from "../shared/schema-helpers.js";
 import { RulesetConfig } from "./schema.js";
 
 /**
- * Ruleset ref includes/excludes: the file may use short names ("staging",
- * "templates/*"); the API wants full refs. Native tokens (~DEFAULT_BRANCH,
- * ~ALL) and already-qualified refs pass through untouched.
+ * The file may use short names ("staging", "templates/*") where the API wants full refs; native
+ * tokens (~DEFAULT_BRANCH, ~ALL) and already-qualified refs pass through untouched.
  */
 export function normalizeRefName(value: string, target: string): string {
   if (value.startsWith("~") || value.startsWith("refs/")) {
@@ -38,11 +32,10 @@ export function normalizeRefName(value: string, target: string): string {
   if (target === "branch") {
     return `refs/heads/${value}`;
   }
-  // Unknown (future) targets: never guess a prefix - pass through verbatim.
+  // Never guess a prefix for an unknown (future) target.
   return value;
 }
 
-/** Deep-copy a ruleset with normalized ref conditions (never mutates input). */
 export function normalizeRuleset(ruleset: RulesetConfig): RulesetConfig {
   const copy = structuredClone(ruleset);
   copy.target = copy.target ?? "branch";
@@ -61,7 +54,6 @@ export function normalizeRuleset(ruleset: RulesetConfig): RulesetConfig {
   return copy;
 }
 
-/** The fields of a live ruleset summary this section reads; extras ride along. */
 const LiveRulesetSummary = z.looseObject({
   id: z.number(),
   name: z.string(),
@@ -72,10 +64,8 @@ const permission: SectionPermission = { repo: ["administration"] };
 
 /**
  * GitHub returns a ruleset's bypass_actors only to a token with write access to the ruleset
- * (Administration at write); any other GET omits the KEY (never `[]`). The declared list is then
- * unobservable: it leaves the comparison
- * so it reads as neither drift nor a phantom key. The write payload stays the full declaration.
- * Returns the input itself when nothing is hidden, so the caller can tell the two apart.
+ * (Administration at write); any other GET omits the KEY, never `[]`. Returns the input itself when
+ * nothing is hidden, so the caller can tell the two apart by identity.
  */
 function observableRuleset(ruleset: RulesetConfig, live: unknown): RulesetConfig {
   const hidden =
@@ -90,12 +80,8 @@ function observableRuleset(ruleset: RulesetConfig, live: unknown): RulesetConfig
   return visible;
 }
 
-/**
- * Rules and bypass_actors pass through verbatim (future rule types included),
- * so a typo'd rules[].type reaches GitHub unchanged and comes back as a 422.
- * The hint names that failure class; the valid types live in the endpoint
- * docs, not here, so they cannot go stale.
- */
+// Rules pass through verbatim, so a typo'd rules[].type reaches GitHub unchanged and comes back as
+// a 422; the valid types live in the endpoint docs, not here, so they cannot go stale.
 const RULES_HINT =
   'Usually this means a rules[].type GitHub does not recognize, or "parameters" that do not fit that rule type (rules pass through verbatim, so a typo reaches GitHub unchanged)';
 
@@ -131,7 +117,6 @@ export const rulesetsSection = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(RulesetConfig)),
-  // Same-name rulesets merge key by key; their rules pair by type, a rule replacing wholesale.
   layering: {
     keys: (entry) => (typeof entry.name === "string" ? [entry.name] : null),
     keyField: "name",
@@ -147,8 +132,7 @@ export const rulesetsSection = {
   async plan(ctx, declared) {
     const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     const desired = entries.map(normalizeRuleset);
-    // Upsert matches by exact name, so two entries with the same name would
-    // fight each other (create twice, then trade updates) on every run.
+    // Two entries with the same name would fight each other (create twice, then trade updates) on every run.
     rejectDuplicates(
       this,
       desired,
@@ -161,11 +145,9 @@ export const rulesetsSection = {
       z.array(LiveRulesetSummary),
       await ctx.read.list.listAll(),
     );
-    // Match and update anything not explicitly owned by another source (the
-    // pre-knob upsert semantics; source_type is optional in the API type).
-    // Deletion is gated harder below: only a summary the API explicitly
-    // marks source_type "Repository" is ever deleted - a missing field is
-    // not proof of ownership, and deletion cannot be undone.
+    // Anything not explicitly owned by another source is matched and updated (source_type is
+    // optional in the API type). Deletion is gated harder below: only a summary the API explicitly
+    // marks source_type "Repository" is ever deleted, since a missing field is not proof of ownership.
     const repoRulesets = summaries.filter((r) => (r.source_type ?? "Repository") === "Repository");
     const idByName = new Map(repoRulesets.map((r) => [r.name, r.id]));
 

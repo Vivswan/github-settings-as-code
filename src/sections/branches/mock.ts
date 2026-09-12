@@ -1,6 +1,6 @@
 /**
- * The branches section's mock handler fragment (see test/e2e/mock/sections.ts
- * for the aggregation and the deliberate src -> test import direction).
+ * The branches e2e mock fragment (aggregated in test/e2e/mock/sections.ts). It imports the
+ * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import { decodeNodeId, mintNodeId } from "../../../test/e2e/mock/node-id.js";
@@ -44,13 +44,10 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
       return { status: 404, body: { message: "Branch not found" } };
     }
     const stored = protectionFromPut(asObject(body));
-    // The signed-commit requirement is its own sub-resource and absent from
-    // the PUT's request schema (protectionFromPut drops any
-    // required_signatures the body smuggles in). Whether GitHub's PUT
-    // PRESERVES an existing requirement is not documented; the mock carries
-    // it across as the conservative reading, and the user-facing docs tell
-    // anyone relying on the requirement to DECLARE the toggle, which pins
-    // the state under either upstream behavior.
+    // required_signatures is its own sub-resource and absent from the PUT's request schema. Whether
+    // GitHub's PUT PRESERVES an existing requirement is undocumented; the mock carries it across as
+    // the conservative reading, and the docs tell users to DECLARE the toggle, which pins the state
+    // under either upstream behavior.
     const previous = state.branch_protection[branch];
     if (previous && previous.required_signatures !== undefined) {
       stored.required_signatures = previous.required_signatures;
@@ -61,8 +58,7 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   "branches.removeProtection": ({ state, param }) => {
     const branch = param("branch");
     state.branch_protection[branch] = null;
-    // GitHub deletes the whole underlying RULE: a later re-protect starts
-    // clean, so the GraphQL-only extras must not survive the delete.
+    // GitHub deletes the whole underlying RULE, so the GraphQL-only extras must not survive the delete.
     delete state.branch_protection_graphql[branch];
     return noContent();
   },
@@ -73,8 +69,8 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
       return { status: 404, body: { message: "Branch not protected" } };
     }
     protection.required_signatures = { enabled: true };
-    // The documented 200 body carries {url, enabled}; the url stays out of
-    // the stored state so the flattener sees the same shape a GET serves.
+    // The documented 200 body carries {url, enabled}; the url stays out of the stored state so the
+    // flattener sees the same shape a GET serves.
     return ok({
       url: `https://api.github.com/repos/${state.slug}/branches/${branch}/protection/required_signatures`,
       enabled: true,
@@ -86,8 +82,8 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
     if (!protection) {
       return { status: 404, body: { message: "Branch not protected" } };
     }
-    // The GET shape OMITS the field when signatures are not required, so a
-    // delete removes the key instead of storing {enabled: false}.
+    // The GET shape OMITS the field when signatures are not required, so a delete removes the key
+    // instead of storing {enabled: false}.
     delete protection.required_signatures;
     return noContent();
   },
@@ -100,17 +96,15 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   },
   "branches.appLookup": ({ param }) => {
     const slug = param("app_slug");
-    // Slug matching is case-insensitive like GitHub's; the body echoes the
-    // canonical roster slug.
+    // Slug matching is case-insensitive like GitHub's; the body echoes the canonical roster slug.
     const app = PROTECTION_RULE_APPS.find(
       (entry) => String(entry.slug).toLowerCase() === slug.toLowerCase(),
     );
     if (!app) {
       return { status: 404, body: { message: "Not Found" } };
     }
-    // The served node_id is MINTED (never the fixture's realistic-looking
-    // one): the section feeds it into bypassForcePushActorIds, and mutation
-    // handlers reject any id the codec cannot decode.
+    // The served node_id is MINTED, never the fixture's realistic-looking one: the section feeds it
+    // into bypassForcePushActorIds, and the mutation handlers reject any id the codec cannot decode.
     return ok(integrationBody(app));
   },
 };
@@ -131,9 +125,8 @@ export const branchesMockGraphqlHandlers: SectionGraphqlHandlers<"branches"> = {
   }),
   "branches.actorUser": ({ state, variables }) => {
     const login = String((variables as Json).login ?? "");
-    // GitHub logins are case-insensitive; the lookup resolves any spelling
-    // and the minted id carries the CANONICAL roster login, so read-backs
-    // echo the canonical form exactly like production.
+    // GitHub logins are case-insensitive: any spelling resolves, and the minted id carries the
+    // CANONICAL roster login so read-backs echo the canonical form like production.
     const canonical = BYPASS_ACTOR_USERS.find(
       (known) => known.toLowerCase() === login.toLowerCase(),
     );
@@ -174,8 +167,8 @@ export const branchesMockGraphqlHandlers: SectionGraphqlHandlers<"branches"> = {
     const repository = { id: repoNodeId(state) };
     const canonical = BYPASS_ACTOR_TEAMS.find((entry) => entry.toLowerCase() === combinedFold);
     if (canonical === undefined) {
-      // A known org with an unknown team is a NULLABLE-FIELD miss, not an
-      // errors[] entry, matching GitHub's Organization.team shape.
+      // A known org with an unknown team is a NULLABLE-FIELD miss, not an errors[] entry, matching
+      // GitHub's Organization.team shape.
       return { data: { repository, organization: { team: null } } };
     }
     const slug = state.slug;
@@ -248,8 +241,7 @@ export const branchesMockGraphqlHandlers: SectionGraphqlHandlers<"branches"> = {
           ],
         };
       }
-      // The id embeds the pattern, so a pattern change re-mints it, exactly
-      // like stampNodeIds would.
+      // The id embeds the pattern, so a pattern change re-mints it, exactly like stampNodeIds would.
       wildcard.id = mintNodeId("rule", slug, String(wildcard.pattern));
       return {
         data: { updateBranchProtectionRule: { branchProtectionRule: ruleWireNode(wildcard) } },
@@ -302,8 +294,8 @@ export const branchesMockGraphqlHandlers: SectionGraphqlHandlers<"branches"> = {
     if (index >= 0) {
       state.branch_protection_rules.splice(index, 1);
     } else if (state.branch_protection[pattern]) {
-      // Deleting a literal rule through GraphQL removes the protection the
-      // REST view serves, GitHub's one underlying rule.
+      // Deleting a literal rule through GraphQL removes the protection the REST view serves:
+      // GitHub's one underlying rule.
       state.branch_protection[pattern] = null;
       delete state.branch_protection_graphql[pattern];
     } else {

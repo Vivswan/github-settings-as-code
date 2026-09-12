@@ -1,15 +1,10 @@
-/**
- * `autolinks:` section - autolinks cannot be edited, so a changed one is
- * deleted and recreated. Undeclared autolinks are DELETED by default; the
- * wrapped `_undeclared: keep` form softens that to notes.
- */
+/** `autolinks:` section. GitHub cannot edit an autolink, so a changed one is deleted and recreated. */
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { listSection } from "../shared/list-section.js";
 import { AutolinkConfig } from "./schema.js";
 
-/** The fields of a live autolink this section reads; extras ride along. */
 const LiveAutolink = z.looseObject({ id: z.number(), key_prefix: z.string() });
 
 const ENDPOINTS = {
