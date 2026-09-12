@@ -13,7 +13,7 @@ import {
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
-import { parseRepoSlug } from "../discovery/targets.js";
+import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import type { Layering } from "../engine/layers.js";
 import { SectionSelection } from "../engine/section-selection.js";
 import { DEFAULT_API_VERSION } from "../github/api.js";
@@ -27,6 +27,7 @@ import type { MergeConfig } from "./merge.js";
 import { DEFAULT_SETTINGS_FILE, type MultiConfig } from "./multi.js";
 import { PRIVATE_REPOS_POLICIES, type PrivateReposPolicy } from "./redact.js";
 import type { SingleConfig } from "./single.js";
+import type { SnapshotConfig } from "./snapshot.js";
 
 /** Default `private-repos`, pinned against action.yml by the contract test. */
 export const DEFAULT_PRIVATE_REPOS = "redact" satisfies PrivateReposPolicy;
@@ -93,14 +94,20 @@ export const INPUT_DECLS = {
   },
   mode: {
     description:
-      "apply (mutate), check (report drift, exit 1 on any), or merge (fold the settings-file " +
-      "layers into one document written to merged-file, with no token and no GitHub API call; " +
-      "merge reads only settings-file, merged-file, and layering, ignores token, and rejects every " +
-      "other input set to a non-default value, since each controls an apply or check run). check " +
+      "apply (mutate), check (report drift, exit 1 on any), merge (fold the settings-file layers " +
+      "into one document written to merged-file, with no token and no GitHub API call; merge reads " +
+      "only settings-file, merged-file, and layering, ignores token, and rejects every other input " +
+      "set to a non-default value, since each controls an apply or check run), or snapshot (read " +
+      "the live settings of the target repositories back and write each as a settings document to " +
+      "snapshot-file or under snapshot-dir; nothing is written to GitHub, the document reaches only " +
+      "the file, and every input that controls an apply, a check, or a merge is rejected). check " +
       "makes no settings changes, though a private report may still be delivered.",
     default: "apply",
     summary:
-      "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `merge` folds the settings-file layers into merged-file without touching GitHub",
+      "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a " +
+      "private report may still be delivered); `merge` folds the settings-file layers into " +
+      "merged-file without touching GitHub; `snapshot` writes the live settings to snapshot-file " +
+      "or snapshot-dir",
   },
   "merged-file": {
     description:
@@ -114,6 +121,35 @@ export const INPUT_DECLS = {
     default: "",
     summary:
       "`mode: merge` only (required there): where the merged document is written, exactly what `apply` would run",
+  },
+  "snapshot-file": {
+    description:
+      "mode: snapshot only, and exactly one of snapshot-file and snapshot-dir is required there: " +
+      "the path one repository's live settings are written to as a settings document (parent " +
+      "directories are created). The target is the repository input, defaulting to the current " +
+      "repository, so it cannot be combined with repos or repos-dir. The header pins the schema, " +
+      "names the repository and the moment, and lists every section note; secret values GitHub " +
+      "never reveals become $NAME references to export before an apply. Must not be " +
+      ".github/settings.yml, the file apply and check read: the snapshot would overwrite the " +
+      "document you author, so write it beside that file and copy it over deliberately. Fails " +
+      "when set in apply, check, or merge.",
+    default: "",
+    summary:
+      "`mode: snapshot` only (one of the two required there): where one repository's live settings are written as a settings document",
+  },
+  "snapshot-dir": {
+    description:
+      "mode: snapshot only, and exactly one of snapshot-file and snapshot-dir is required there: " +
+      "the directory the multi-repo targets' live settings are written under, one " +
+      "<owner>/<name>.yml per target (the repos-dir layout, so the directory can later serve as a " +
+      "repos-dir). The targets come from repos and repos-dir exactly as in a multi-repo apply, " +
+      "discovery filters included; defaults-file does not apply. Must be disjoint from the " +
+      "repos-dir (not the same directory, not above it, not below it): the snapshots would " +
+      "overwrite the central files or be read back as central files. Fails when set in apply, " +
+      "check, or merge.",
+    default: "",
+    summary:
+      "`mode: snapshot` only (one of the two required there): directory receiving one `<owner>/<name>.yml` per multi-repo target",
   },
   "on-missing-permission": {
     description:
@@ -133,10 +169,10 @@ export const INPUT_DECLS = {
   },
   sections: {
     description:
-      "Optional comma-separated allowlist of sections to process. apply and check only: mode: merge writes every section its layers declare, so the allowlist belongs on the step that runs the merged document and fails the merge when set.",
+      "Optional comma-separated allowlist of sections to process. apply, check, and snapshot only: mode: merge writes every section its layers declare, so the allowlist belongs on the step that runs the merged document and fails the merge when set.",
     default: "",
     summary:
-      "Comma-separated allowlist of sections to process (apply and check only; rejected in `mode: merge`)",
+      "Comma-separated allowlist of sections to process (apply, check, and snapshot; rejected in `mode: merge`)",
     shownDefault: "(all declared)",
     list: true,
   },
@@ -358,7 +394,7 @@ function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
-export const MODES = ["apply", "check", "merge"] as const;
+export const MODES = ["apply", "check", "merge", "snapshot"] as const;
 
 export type Mode = (typeof MODES)[number];
 
@@ -370,6 +406,10 @@ type _UnlistedLayering = MustBeNever<Exclude<Layering, (typeof LAYERINGS)[number
  * reject a set one instead of silently ignoring it.
  */
 const MERGE_ONLY_INPUTS = ["merged-file", "layering"] as const satisfies readonly InputName[];
+const SNAPSHOT_ONLY_INPUTS = [
+  "snapshot-file",
+  "snapshot-dir",
+] as const satisfies readonly InputName[];
 
 function readSectionSelection(input: Inputs): Result<SectionSelection, Problem> {
   const sectionInputs = ["required-sections", "sections"] as const;
@@ -420,7 +460,8 @@ interface CommonConfig extends RunFlowConfig {
 
 export type RunConfig =
   | (CommonConfig & (({ kind: "single" } & SingleConfig) | ({ kind: "multi" } & MultiConfig)))
-  | ({ kind: "merge" } & MergeConfig);
+  | ({ kind: "merge" } & MergeConfig)
+  | ({ kind: "snapshot" } & Pick<CommonConfig, "token" | "apiVersion"> & SnapshotConfig);
 
 /**
  * `token` is tolerated unread (a workflow commonly sets it on every step). Every declared input NOT listed here is an
@@ -468,23 +509,22 @@ function parseMergeConfig(input: Inputs): Result<Extract<RunConfig, { kind: "mer
   });
 }
 
-export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig, Problem> {
-  const input = inputs(read);
+/** The token the API modes call with: the input, else the environment's. */
+function readToken(input: Inputs, env: ConfigEnv): Result<string, Problem> {
+  const token = input.value("token") || env.GITHUB_TOKEN || "";
+  return token ? ok(token) : err({ code: "input-token-missing" });
+}
+
+/** The policies every API mode reads, each validated against its own vocabulary. */
+function readPolicies(input: Inputs): Result<
+  {
+    onMissingPermission: "fail" | "warn";
+    sections: SectionSelection;
+    privateRepos: PrivateReposPolicy;
+  },
+  Problem
+> {
   return safeTry(function* () {
-    // The mode decides which inputs exist at all, so it is read first: a merge never needs the token.
-    const mode = yield* readEnum(input, "mode", MODES, INPUT_DECLS.mode.default, "mode");
-    if (mode === "merge") {
-      return parseMergeConfig(input);
-    }
-    const mergeOnly = MERGE_ONLY_INPUTS.filter((name) => input.value(name) !== "");
-    if (mergeOnly.length > 0) {
-      return err({ code: "input-merge-only", inputs: mergeOnly, mode });
-    }
-    const token = input.value("token") || env.GITHUB_TOKEN || "";
-    if (!token) {
-      return err({ code: "input-token-missing" });
-    }
-    const githubRepository = env.GITHUB_REPOSITORY ?? "";
     const onMissingPermission = yield* readEnum(
       input,
       "on-missing-permission",
@@ -493,7 +533,6 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
       "policy",
     );
     const sections = yield* readSectionSelection(input);
-    const apiVersion = input.orDefault("api-version");
     const privateRepos = yield* readEnum(
       input,
       "private-repos",
@@ -501,37 +540,15 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
       INPUT_DECLS["private-repos"].default,
       "private-repository policy",
     );
-    const privateReport = yield* readEnum(
-      input,
-      "private-report",
-      PRIVATE_REPORT_CHANNELS,
-      INPUT_DECLS["private-report"].default,
-      "private-report channel",
-    );
-    // A report channel only ever runs for a REDACTED target, so combined with private-repos: show it would silently deliver nothing.
-    if (privateReport !== "none" && privateRepos === "show") {
-      return err({ code: "input-report-without-redaction" });
-    }
-    const reportPublicKey = yield* resolveReportPublicKey(input, privateReport);
-    const serverUrl = env.GITHUB_SERVER_URL ?? "";
-    const runId = env.GITHUB_RUN_ID ?? "";
-    const runUrl =
-      serverUrl && githubRepository && runId
-        ? `${serverUrl}/${githubRepository}/actions/runs/${runId}`
-        : "";
-    const common: CommonConfig = {
-      token,
-      mode,
-      onMissingPermission,
-      sections,
-      apiVersion,
-      privateRepos,
-      privateReport,
-      reportPublicKey,
-      selfSlug: githubRepository,
-      runUrl,
-    };
+    return ok({ onMissingPermission, sections, privateRepos });
+  });
+}
 
+/** The validated filters plus the names the workflow set explicitly, which the misuse rejections name. */
+function readDiscoveryFilters(
+  input: Inputs,
+): Result<{ discoveryFilters: DiscoveryFilters; discoveryFiltersSet: string[] }, Problem> {
+  return safeTry(function* () {
     const discoveryFiltersSet = FILTER_INPUTS.filter((name) => input.value(name) !== "");
     const visibility = yield* readEnum(
       input,
@@ -581,6 +598,170 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
       topics: input.list("topics").map((topic) => topic.toLowerCase()),
       exclude,
     };
+    return ok({ discoveryFilters, discoveryFiltersSet });
+  });
+}
+
+/** The single-repo target: the repository input, else the workflow's own repository. */
+function readSingleTarget(input: Inputs, githubRepository: string): Result<RepoRef, Problem> {
+  const rawRepo = input.value("repository") || githubRepository;
+  return parseRepoSlug(rawRepo).mapErr(
+    (): Problem => ({ code: "input-repository-not-slug", value: rawRepo }),
+  );
+}
+
+/**
+ * Every declared input NOT listed here is an apply, check, or merge control, so the snapshot rejects it unless it
+ * holds its declared default, which the runner supplies whether or not the workflow set the input.
+ */
+export const SNAPSHOT_INPUTS = [
+  "token",
+  "repository",
+  "mode",
+  "snapshot-file",
+  "snapshot-dir",
+  "on-missing-permission",
+  "sections",
+  "api-version",
+  "repos",
+  "repos-dir",
+  "private-repos",
+  ...FILTER_INPUTS,
+] as const satisfies readonly InputName[];
+
+/**
+ * Derived from the declarations, so a future input is rejected by the snapshot until listed in SNAPSHOT_INPUTS;
+ * exported so the snapshot guide's table is pinned to the whole set.
+ */
+export const SNAPSHOT_REJECTED_INPUTS: readonly InputName[] = (
+  Object.keys(INPUT_DECLS) as InputName[]
+).filter((name) => !(SNAPSHOT_INPUTS as readonly string[]).includes(name));
+
+/** Read and validate the mode: snapshot inputs; the first problem wins. */
+function parseSnapshotConfig(
+  input: Inputs,
+  env: ConfigEnv,
+): Result<Extract<RunConfig, { kind: "snapshot" }>, Problem> {
+  return safeTry(function* () {
+    const rejected = SNAPSHOT_REJECTED_INPUTS.filter((name) => {
+      const value = input.value(name);
+      return value !== "" && value !== INPUT_DECLS[name].default;
+    });
+    if (rejected.length > 0) {
+      return err({ code: "input-rejected-in-snapshot", inputs: rejected });
+    }
+    const snapshotFile = input.value("snapshot-file");
+    const snapshotDir = input.value("snapshot-dir");
+    if (snapshotFile && snapshotDir) {
+      return err({ code: "input-snapshot-destinations-both" });
+    }
+    if (!snapshotFile && !snapshotDir) {
+      return err({ code: "input-snapshot-destination-missing" });
+    }
+    const token = yield* readToken(input, env);
+    const githubRepository = env.GITHUB_REPOSITORY ?? "";
+    const policies = yield* readPolicies(input);
+    const filters = yield* readDiscoveryFilters(input);
+    const base = {
+      kind: "snapshot" as const,
+      token,
+      apiVersion: input.orDefault("api-version"),
+      onMissingPermission: policies.onMissingPermission,
+      sections: policies.sections,
+      privateRepos: policies.privateRepos,
+      selfSlug: githubRepository,
+    };
+    const reposInput = input.value("repos");
+    const reposDir = input.value("repos-dir");
+    if (snapshotFile) {
+      if (reposInput || reposDir) {
+        return err({ code: "input-snapshot-file-with-multi" });
+      }
+      if (filters.discoveryFiltersSet.length > 0) {
+        return err({
+          code: "discovery-filters-without-wildcard",
+          filters: filters.discoveryFiltersSet,
+          targets: "snapshot-file",
+        });
+      }
+      const repo = yield* readSingleTarget(input, githubRepository);
+      return ok({ ...base, form: "file" as const, repo, snapshotFile });
+    }
+    if (input.value("repository")) {
+      return err({ code: "input-repository-with-snapshot-dir" });
+    }
+    if (!reposInput && !reposDir) {
+      return err({ code: "input-snapshot-dir-without-targets" });
+    }
+    return ok({
+      ...base,
+      form: "dir" as const,
+      snapshotDir,
+      reposInput,
+      reposDir,
+      adminOwner: githubRepository.split("/")[0] ?? "",
+      discoveryFilters: filters.discoveryFilters,
+      discoveryFiltersSet: filters.discoveryFiltersSet,
+    });
+  });
+}
+
+/** Read and validate every input through `read`; the first problem wins. */
+export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig, Problem> {
+  const input = inputs(read);
+  return safeTry(function* () {
+    // The mode decides which inputs exist at all, so it is read first: a merge never needs the token.
+    const mode = yield* readEnum(input, "mode", MODES, INPUT_DECLS.mode.default, "mode");
+    if (mode === "merge") {
+      return parseMergeConfig(input);
+    }
+    if (mode === "snapshot") {
+      return parseSnapshotConfig(input, env);
+    }
+    const mergeOnly = MERGE_ONLY_INPUTS.filter((name) => input.value(name) !== "");
+    if (mergeOnly.length > 0) {
+      return err({ code: "input-merge-only", inputs: mergeOnly, mode });
+    }
+    const snapshotOnly = SNAPSHOT_ONLY_INPUTS.filter((name) => input.value(name) !== "");
+    if (snapshotOnly.length > 0) {
+      return err({ code: "input-snapshot-only", inputs: snapshotOnly, mode });
+    }
+    const token = yield* readToken(input, env);
+    const githubRepository = env.GITHUB_REPOSITORY ?? "";
+    const { onMissingPermission, sections, privateRepos } = yield* readPolicies(input);
+    const apiVersion = input.orDefault("api-version");
+    const privateReport = yield* readEnum(
+      input,
+      "private-report",
+      PRIVATE_REPORT_CHANNELS,
+      INPUT_DECLS["private-report"].default,
+      "private-report channel",
+    );
+    // A report channel only ever runs for a REDACTED target, so combined with private-repos: show it would silently deliver nothing.
+    if (privateReport !== "none" && privateRepos === "show") {
+      return err({ code: "input-report-without-redaction" });
+    }
+    const reportPublicKey = yield* resolveReportPublicKey(input, privateReport);
+    const serverUrl = env.GITHUB_SERVER_URL ?? "";
+    const runId = env.GITHUB_RUN_ID ?? "";
+    const runUrl =
+      serverUrl && githubRepository && runId
+        ? `${serverUrl}/${githubRepository}/actions/runs/${runId}`
+        : "";
+    const common: CommonConfig = {
+      token,
+      mode,
+      onMissingPermission,
+      sections,
+      apiVersion,
+      privateRepos,
+      privateReport,
+      reportPublicKey,
+      selfSlug: githubRepository,
+      runUrl,
+    };
+
+    const { discoveryFilters, discoveryFiltersSet } = yield* readDiscoveryFilters(input);
 
     const reposInput = input.value("repos");
     const reposDir = input.value("repos-dir");
@@ -621,10 +802,7 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
     if (LIST_SEPARATOR.test(settingsFile)) {
       return err({ code: "input-settings-file-is-list", value: settingsFile, mode });
     }
-    const rawRepo = input.value("repository") || githubRepository;
-    const repo = yield* parseRepoSlug(rawRepo).mapErr(
-      (): Problem => ({ code: "input-repository-not-slug", value: rawRepo }),
-    );
+    const repo = yield* readSingleTarget(input, githubRepository);
     return ok({ ...common, kind: "single", repo, settingsFile });
   });
 }

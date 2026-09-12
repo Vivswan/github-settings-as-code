@@ -1,21 +1,38 @@
 import type { RepoResult, SectionOutcome } from "../engine/orchestrate.js";
+import type { SnapshotResult } from "../engine/snapshot.js";
 import type { Io } from "../io.js";
 import { markdownCell } from "../report/markdown.js";
 import type { PublicDetail, PublicTargetView } from "./redact.js";
+import type { SnapshotTargetView } from "./snapshot.js";
 
 type SummaryIo = Pick<Io, "summary">;
 
-const STATUS_ICON: Record<SectionOutcome["status"] | RepoResult, string> = {
+const STATUS_ICON: Record<
+  | SectionOutcome["status"]
+  | RepoResult
+  | SnapshotResult["result"]
+  | SnapshotResult["outcomes"][number]["status"],
+  string
+> = {
   applied: "white_check_mark",
   clean: "white_check_mark",
+  snapshot: "white_check_mark",
   drift: "warning",
   partial: "warning",
   skipped: "fast_forward",
   excluded: "fast_forward",
+  unsupported: "fast_forward",
   failed: "x",
 };
 
-function outcomeRows(outcomes: PublicDetail["outcomes"]): string[] {
+/** A section row as every mode renders it: the key, a status the icon map knows, its detail lines. */
+interface SectionRow {
+  key: string;
+  status: keyof typeof STATUS_ICON;
+  detail: string[];
+}
+
+function outcomeRows(outcomes: readonly SectionRow[]): string[] {
   const rows = ["| Section | Status | Detail |", "|---|---|---|"];
   for (const outcome of outcomes) {
     const detail = outcome.detail.map(markdownCell).join("<br>") || "-";
@@ -74,6 +91,52 @@ export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode
     if (view.note) {
       lines.push(markdownCell(view.note), "");
     }
+    if (view.outcomes.length > 0) {
+      lines.push(...outcomeRows(view.outcomes));
+    }
+  }
+  io.summary(lines.join("\n"));
+}
+
+/** The single-repo mode: snapshot summary: the result and where the file went, then the section table. */
+export function writeSnapshotSummary(io: SummaryIo, view: SnapshotTargetView): void {
+  const lines = [
+    "## github-settings-as-code (snapshot)",
+    "",
+    `:${STATUS_ICON[view.result]}: ${view.result} - ${markdownCell(view.note)}`,
+    "",
+    ...outcomeRows(view.outcomes),
+  ];
+  io.summary(lines.join("\n"));
+}
+
+/** The snapshot-dir summary: the fleet rollup with each target's file, then one section table per target. */
+export function writeSnapshotDirSummary(
+  io: SummaryIo,
+  views: readonly SnapshotTargetView[],
+  snapshotDir: string,
+): void {
+  const lines = [
+    `## github-settings-as-code (snapshot, ${views.length} repositories)`,
+    "",
+    `Snapshots written under ${markdownCell(snapshotDir)}.`,
+    "",
+    "| Repository | Source | Result | File |",
+    "|---|---|---|---|",
+  ];
+  for (const view of views) {
+    lines.push(
+      `| ${markdownCell(view.display)} | ${view.source ?? "-"} | :${STATUS_ICON[view.result]}: ${view.result} | ${markdownCell(view.file ?? "-")} |`,
+    );
+  }
+  for (const view of views) {
+    lines.push(
+      "",
+      `### ${markdownCell(view.display)} (${view.result})`,
+      "",
+      markdownCell(view.note),
+      "",
+    );
     if (view.outcomes.length > 0) {
       lines.push(...outcomeRows(view.outcomes));
     }

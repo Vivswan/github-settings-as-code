@@ -6,7 +6,7 @@ import { ok } from "neverthrow";
 import { parse as parseYaml } from "yaml";
 import { type Layer, mergeLayers, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import { MERGE_REJECTED_INPUTS } from "../../src/flows/inputs.js";
+import { MERGE_REJECTED_INPUTS, SNAPSHOT_REJECTED_INPUTS } from "../../src/flows/inputs.js";
 import { foldLayers } from "../../src/flows/layers.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
@@ -38,6 +38,7 @@ const REQUIRED_PAGES = [
   "reference/architecture.md",
   "reference/library.md",
   "operate/check-mode.md",
+  "operate/snapshot.md",
   "operate/multi-repo.md",
   "operate/layering.md",
   "operate/private-repositories.md",
@@ -464,11 +465,14 @@ describe("docs/ guide pages", () => {
     expect(offenders).toEqual([]);
   });
 
-  /** Every file release-please's generic updater may rewrite; both marker tests iterate this one list. */
+  /** Every file release-please's generic updater may rewrite, the snapshot flow's schema-hint source included; both marker tests iterate this one list. */
   function markerScanFiles(): Array<{ label: string; path: string }> {
     const rootPages = readdirSync(ROOT)
       .filter((name) => name.endsWith(".md"))
-      .map((name) => ({ label: name, path: join(ROOT, name) }));
+      .map((name) => ({ label: name, path: join(ROOT, name) }))
+      .concat([
+        { label: "src/flows/snapshot.ts", path: join(ROOT, "src", "flows", "snapshot.ts") },
+      ]);
     const templateDir = join(ROOT, ".github", "ISSUE_TEMPLATE");
     const templates = readdirSync(templateDir)
       .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
@@ -652,6 +656,20 @@ describe("docs/ guide pages", () => {
     }
     const named = [...rejectedRow.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
     expect(new Set(named)).toEqual(new Set(MERGE_REJECTED_INPUTS));
+  });
+
+  test("the snapshot guide's inputs table names every input mode: snapshot rejects", () => {
+    // Same derivation as the merge pin: a new apply/check-time input is
+    // rejected by the snapshot the moment it is declared, and the table must
+    // name it or the page under-reports the refusal.
+    const markdown = readFileSync(join(DOCS, "operate", "snapshot.md"), "utf8");
+    const section = sectionLines(markdown, "Inputs in mode: snapshot", "docs/operate/snapshot.md");
+    const rejectedRow = section.find((line) => line.includes("| Rejected"));
+    if (rejectedRow === undefined) {
+      throw new Error('docs/operate/snapshot.md has no "Rejected" row in its inputs table');
+    }
+    const named = [...rejectedRow.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
+    expect(new Set(named)).toEqual(new Set(SNAPSHOT_REJECTED_INPUTS));
   });
 
   describe("the layering guide's refusal tables quote the messages the merge step emits", () => {

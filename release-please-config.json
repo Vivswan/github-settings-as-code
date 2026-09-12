@@ -14,6 +14,7 @@
         "README.md",
         "docs/start/getting-started.md",
         "docs/operate/check-mode.md",
+        "docs/operate/snapshot.md",
         "docs/operate/multi-repo.md",
         "docs/operate/layering.md",
         "docs/start/migrating-from-probot.md",
@@ -25,6 +26,7 @@
         "docs/reference/secrets-and-vaults.md",
         "docs/upgrading/README.md",
         ".github/ISSUE_TEMPLATE/bug_report.yml",
+        "src/flows/snapshot.ts",
         {
           "type": "json",
           "path": "package.json",

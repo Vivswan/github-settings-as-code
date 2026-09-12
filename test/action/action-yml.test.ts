@@ -9,6 +9,7 @@ import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
 import { MERGE_RESULT } from "../../src/flows/deliver.js";
 import { FILTER_INPUTS, INPUT_DECLS, type InputDecl } from "../../src/flows/inputs.js";
+import { SNAPSHOT_RESULTS } from "../../src/flows/snapshot.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -55,9 +56,9 @@ describe("input declarations <-> discovery defaults", () => {
 });
 
 describe("output declarations", () => {
-  test("the result description mentions every RepoResult value and the merge result", () => {
-    // MERGE_RESULT is the one value outside REPO_RESULTS (a merge has no target).
-    const missing = [...REPO_RESULTS, MERGE_RESULT].filter(
+  test("the result description mentions every RepoResult value, the merge result, and the snapshot results", () => {
+    // MERGE_RESULT and SNAPSHOT_RESULTS are the values outside REPO_RESULTS (neither mode has a target).
+    const missing = [...REPO_RESULTS, MERGE_RESULT, ...SNAPSHOT_RESULTS].filter(
       (value) => !OUTPUT_DECLS.result.description.includes(value),
     );
     expect(

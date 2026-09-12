@@ -2,6 +2,7 @@ import {
   type ArtifactUploader,
   concludeMerge,
   concludeRun,
+  concludeSnapshot,
   failRun,
   GithubApi,
   type GithubClient,
@@ -9,6 +10,7 @@ import {
   runMerge,
   runMulti,
   runSingle,
+  runSnapshot,
 } from "../index.js";
 import { actionsArtifactUploader } from "./artifact.js";
 import { parseActionConfig } from "./inputs.js";
@@ -37,6 +39,12 @@ export async function run(overrides?: {
   }
   const api = overrides?.api ?? new GithubApi({ token: cfg.token, io, apiVersion: cfg.apiVersion });
 
+  if (cfg.kind === "snapshot") {
+    return runSnapshot(api, cfg, io).match(
+      (finished) => concludeSnapshot(io, finished),
+      (problem) => failRun(io, problem),
+    );
+  }
   if (cfg.kind === "multi") {
     return runMulti(api, cfg, io, uploader).match(
       (targets) => concludeRun(io, { kind: "multi", mode: cfg.mode, targets }),

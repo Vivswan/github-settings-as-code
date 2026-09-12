@@ -53,13 +53,20 @@ function scenarioDocs(): CorpusDoc[] {
     const name = basename(file);
     push(`${name} settings`, scenario.settings);
     push(`${name} defaults_file`, scenario.defaults_file);
-    const repos = scenario.repos as Record<string, { settings?: unknown }> | undefined;
+    // A pinned snapshot document is what mode: snapshot writes for a later
+    // apply to read, so both validators must accept it like any settings file.
+    const expected = scenario.expect as { snapshot?: unknown } | undefined;
+    push(`${name} expect.snapshot`, expected?.snapshot);
+    const repos = scenario.repos as
+      | Record<string, { settings?: unknown; expect?: { snapshot?: unknown } }>
+      | undefined;
     for (const [repo, entry] of Object.entries(repos ?? {})) {
       push(`${name} ${repo} settings`, entry?.settings);
+      push(`${name} ${repo} expect.snapshot`, entry?.expect?.snapshot);
     }
   }
   // The corpus size is pinned exactly so a loader that silently drops a root, a file, or a document kind cannot pass.
-  expect(docs.length).toBe(262);
+  expect(docs.length).toBe(305);
   return docs;
 }
 

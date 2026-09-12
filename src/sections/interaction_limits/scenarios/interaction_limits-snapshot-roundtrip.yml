@@ -1,0 +1,36 @@
+name: interaction_limits-snapshot-roundtrip
+description: "mode: snapshot reads the live interaction_limits back into snapshot.yml and writes nothing to GitHub. The live limit, the pull-request creation cap, and its bypass list read back; the expiry cannot (GitHub reports only the computed expires_at), which the header notes. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  interaction_limits:
+    limit: collaborators_only
+    origin: repository
+    expires_at: 2027-01-02T00:00:00Z
+  pull_creation_cap:
+    enabled: true
+    max_open_pull_requests: 5
+  pull_bypass_list:
+    - login: octocat
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: interaction_limits
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    interaction_limits: snapshot
+  snapshot:
+    interaction_limits:
+      limit: collaborators_only
+      pull_request_creation_cap:
+        enabled: true
+        max_open_pull_requests: 5
+      pull_request_creation_bypass:
+        - octocat
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

@@ -14,11 +14,13 @@ Every `with:` input the action accepts, and the outputs it sets for the steps af
 | `token` | `github.token` | Token for the API calls (see [Token permissions](permissions.md)) |
 | `repository` | current repo | Target `owner/name` (single-repo mode only) |
 | `settings-file` | `.github/settings.yml` | Settings file path (single-repo mode); in `mode: merge`, the ordered list of layers to fold, low to high |
-| `mode` | `apply` | `apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `merge` folds the settings-file layers into merged-file without touching GitHub |
+| `mode` | `apply` | `apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `merge` folds the settings-file layers into merged-file without touching GitHub; `snapshot` writes the live settings to snapshot-file or snapshot-dir |
 | `merged-file` | (empty) | `mode: merge` only (required there): where the merged document is written, exactly what `apply` would run |
+| `snapshot-file` | (empty) | `mode: snapshot` only (one of the two required there): where one repository's live settings are written as a settings document |
+| `snapshot-dir` | (empty) | `mode: snapshot` only (one of the two required there): directory receiving one `<owner>/<name>.yml` per multi-repo target |
 | `on-missing-permission` | `fail` | `warn` skips sections the token cannot access (partial success) |
 | `required-sections` | (empty) | Sections that must fully apply even under `warn` |
-| `sections` | (all declared) | Comma-separated allowlist of sections to process (apply and check only; rejected in `mode: merge`) |
+| `sections` | (all declared) | Comma-separated allowlist of sections to process (apply, check, and snapshot; rejected in `mode: merge`) |
 | `api-version` | `2022-11-28` | `X-GitHub-Api-Version` header; override to opt into a newer REST API version |
 | `repos` | (empty) | Multi-repo remote mode: `owner/name` list (comma/newline), or `*` to discover owned repos |
 | `repos-dir` | (empty) | Multi-repo central mode: directory of per-repo settings files in this repo |
@@ -39,7 +41,7 @@ The discovery-only inputs apply to `repos: "*"`; the [multi-repo guide](../opera
 
 ## Outputs
 
-- `result`: <!-- BEGIN GENERATED: outputs-list (bun run build:docs; derived from REPO_RESULTS in src/engine/orchestrate.ts) -->`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear; `merged` in mode: merge<!-- END GENERATED: outputs-list -->.
+- `result`: <!-- BEGIN GENERATED: outputs-list (bun run build:docs; derived from REPO_RESULTS in src/engine/orchestrate.ts) -->`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear; `merged` in mode: merge<!-- END GENERATED: outputs-list -->. In `mode: snapshot` it reads `snapshot`, `partial`, or `failed`; the [snapshot guide](../operate/snapshot.md) has that table.
 - `skipped-sections`: the sections skipped for missing permissions under `on-missing-permission: warn`, comma-separated (a deduped union across targets in multi-repo mode).
 - `repos-result`: multi-repo mode only, a JSON map of `owner/name` to `{result, source, skippedSections}`. A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](../operate/private-repositories.md).
 

@@ -6,6 +6,7 @@ import { countWord } from "../../.github/scripts/lib/count-word.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
 import { DEFAULT_PRIVATE_REPOS } from "../../src/flows/inputs.js";
 import { REDACTED_DETAIL } from "../../src/flows/redact.js";
+import { SNAPSHOT_SCHEMA_URL } from "../../src/flows/snapshot.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import { PRIVATE_REPORT_CHANNELS } from "../../src/report/delivery.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS } from "../../src/schema.js";
@@ -196,7 +197,11 @@ describe("schema $schema hints and $id", () => {
     const EXPECTED_HINTS: Record<string, number> = {
       "README.md": 1, // the quick-start settings example
       "docs/start/getting-started.md": 1,
+      "docs/operate/snapshot.md": 1, // the example snapshot file
     };
+    // The hint every snapshot file starts with is the same URL: the file a
+    // reader gets from mode: snapshot validates exactly as the quick start's does.
+    expect(SNAPSHOT_SCHEMA_URL).toBe(expectedHint);
     for (const page of hintPages()) {
       const markdown = readFileSync(page.path, "utf8");
       const hints = [...markdown.matchAll(/yaml-language-server: \$schema=(\S+)/g)];

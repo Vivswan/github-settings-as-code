@@ -47,7 +47,11 @@ export {
   worstOf,
 } from "./engine/orchestrate.js";
 export { SectionSelection } from "./engine/section-selection.js";
-
+export {
+  type RenderableSnapshot,
+  renderSnapshotYaml,
+  type SnapshotResult,
+} from "./engine/snapshot.js";
 export {
   concludeMerge,
   concludeRun,
@@ -70,6 +74,8 @@ export {
   type Mode,
   parseConfig,
   type RunConfig,
+  SNAPSHOT_INPUTS,
+  SNAPSHOT_REJECTED_INPUTS,
 } from "./flows/inputs.js";
 export { foldLayers, readLayerFiles } from "./flows/layers.js";
 export {
@@ -77,10 +83,21 @@ export {
   checkRepository,
   type RepoRunReport,
   renderMergedYaml,
+  type SnapshotLibraryOptions,
+  type SnapshotReport,
+  snapshotRepositories,
+  snapshotRepository,
   validateSettings,
 } from "./flows/library.js";
 export { type MergeConfig, runMerge } from "./flows/merge.js";
-export { DEFAULT_SETTINGS_FILE, type MultiConfig, runMulti } from "./flows/multi.js";
+export {
+  DEFAULT_SETTINGS_FILE,
+  type MultiConfig,
+  type ResolvedTargets,
+  resolveTargets,
+  runMulti,
+  type TargetsConfig,
+} from "./flows/multi.js";
 export {
   capturingIo,
   PRIVATE_REPOS_POLICIES,
@@ -93,7 +110,16 @@ export {
 } from "./flows/redact.js";
 export { parseSettingsDoc, readSettingsFile } from "./flows/settings-read.js";
 export { runSingle, type SingleConfig, type SingleOutcome } from "./flows/single.js";
-
+export {
+  concludeSnapshot,
+  type FinishedSnapshot,
+  runSnapshot,
+  SNAPSHOT_RESULTS,
+  SNAPSHOT_SCHEMA_URL,
+  type SnapshotConfig,
+  type SnapshotRunResult,
+  type SnapshotTargetView,
+} from "./flows/snapshot.js";
 export {
   type ApiError,
   DEFAULT_API_VERSION,

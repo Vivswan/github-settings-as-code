@@ -36,7 +36,7 @@ export interface SingleConfig extends RunFlowConfig {
 }
 
 /** Redaction fails closed: the target is hidden unless the probe proves it public (the self repository and the `show` policy skip the probe). */
-async function openSingleRepoChannel(
+export async function openSingleRepoChannel(
   api: GithubClient,
   cfg: Pick<SingleConfig, "privateRepos" | "repo" | "selfSlug">,
   io: Io,
