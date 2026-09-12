@@ -11,6 +11,7 @@ import {
   REDACTED_RESPONSE_WITHHELD,
   SECRET_RESPONSE_WITHHELD,
 } from "../../src/github/api.js";
+import { IMMEDIATE_SCHEDULER, TIMERS_SCHEDULER } from "../../src/github/scheduler.js";
 import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
@@ -150,31 +151,14 @@ describe("tryGraphql errors[] mapping", () => {
   });
 
   test("a malformed errors value fails closed even beside valid-looking data", async () => {
-    // {data, errors: {...}} must never read as "no errors". With the throttling plugin on, ITS graphql inspection trips first; under the
-    // RETRY_BASE_MS knob (the e2e configuration) OUR guard carries the invariant alone, so both paths are pinned.
+    // {data, errors: {...}} must never read as "no errors". The throttling plugin's own graphql inspection trips on the non-array first;
+    // the client's guard behind it carries the same invariant should the plugin stop looking.
     stubFetch([
       () => graphql({ data: { repository: { id: "R_1" } }, errors: { type: "NOT_FOUND" } }),
     ]);
     await expect(api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).rejects.toThrow(
       /GRAPHQL RepoToggles/,
     );
-    process.env.RETRY_BASE_MS = "1";
-    try {
-      const knobApi = new GithubApi({
-        token: "t",
-        io: traceIo().io,
-        baseUrl: "https://api.test",
-        apiVersion: "2022-11-28",
-      });
-      stubFetch([
-        () => graphql({ data: { repository: { id: "R_1" } }, errors: { type: "NOT_FOUND" } }),
-      ]);
-      await expect(knobApi.tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).rejects.toThrow(
-        /GRAPHQL RepoToggles returned a malformed errors value/,
-      );
-    } finally {
-      delete process.env.RETRY_BASE_MS;
-    }
   });
 
   test("an empty errors array fails closed (present means non-empty)", async () => {
@@ -447,12 +431,28 @@ describe("tryGraphql tracing and redaction", () => {
     expect(trace).not.toContain("hunter2");
   });
 
-  test("a network-level failure throws with the GRAPHQL label and rerun advice", async () => {
-    globalThis.fetch = (async () => {
-      throw new Error("socket hang up");
-    }) as unknown as typeof fetch;
-    await expect(api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).rejects.toThrow(
-      /GRAPHQL RepoToggles failed: socket hang up\. Check network connectivity/,
-    );
-  });
+  test.each([
+    ["timers", TIMERS_SCHEDULER],
+    ["immediate", IMMEDIATE_SCHEDULER],
+  ])(
+    "a network-level failure throws with the GRAPHQL label and rerun advice (%s scheduler)",
+    async (_label, scheduler) => {
+      // The throttling plugin inspects every failed /graphql request and reads `error.response.headers`, which a transport error lacks; the
+      // original error must survive that handler under both schedulers.
+      globalThis.fetch = (async () => {
+        throw new Error("socket hang up");
+      }) as unknown as typeof fetch;
+      const client = new GithubApi({
+        token: "t",
+        io: traceIo().io,
+        baseUrl: "https://api.test",
+        apiVersion: "2022-11-28",
+        retryBaseMs: 1,
+        scheduler,
+      });
+      await expect(client.tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).rejects.toThrow(
+        /GRAPHQL RepoToggles failed: socket hang up\. Check network connectivity/,
+      );
+    },
+  );
 });

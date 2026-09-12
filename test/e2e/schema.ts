@@ -259,7 +259,7 @@ const DiscoverySchema = z
  * failures the permission and handler layers cannot:
  *
  *   rate_limit_403   -> 403 with "rate limit" in the body; the client must read it as throttling, not a denial
- *   429_then_200     -> the secondary-rate-limit shape; the runner's RETRY_BASE_MS knob disables throttling, so the retry plugin recovers it
+ *   429_then_200     -> the secondary-rate-limit shape; the throttling plugin honors its Retry-After (in RETRY_BASE_MS units under the runner)
  *   server_error     -> 5xx rotating 500/502/503 per firing; times 1 recovers, times >= 3 (1 + MAX_RETRIES) fails
  *   connection_drop  -> the socket dies before any response, a network failure surfaced after the retries
  */

@@ -1089,8 +1089,8 @@ function faultClassLabel(key: string, kind: FaultKind, fatal: boolean): string {
 }
 
 /**
- * rate_limit_403 kills on its FIRST firing whatever the budget: 403 is on the client's doNotRetry list and
- * throttling is off under the RETRY_BASE_MS knob the runner sets (src/github/api.ts), so nothing absorbs it.
+ * rate_limit_403 kills on its FIRST firing whatever the budget: the mock's 403 carries neither the secondary-rate
+ * phrase nor a zero-quota header, so the throttling plugin declines it, and 403 is on the retry plugin's doNotRetry list.
  */
 function faultKills(kind: FaultKind, exhausting: boolean): boolean {
   return exhausting || kind === "rate_limit_403";

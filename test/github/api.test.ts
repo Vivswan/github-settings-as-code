@@ -6,11 +6,17 @@ import {
   isPermissionError,
   isRateLimitError,
   MAX_RETRIES,
+  MAX_RETRY_WAIT_S,
   redactingOctokitLog,
   SECRET_RESPONSE_WITHHELD,
   TraceRedaction,
   withheld,
 } from "../../src/github/api.js";
+import {
+  IMMEDIATE_SCHEDULER,
+  type Scheduler,
+  TIMERS_SCHEDULER,
+} from "../../src/github/scheduler.js";
 import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);
@@ -114,7 +120,7 @@ describe("retry and throttling", () => {
   }, 20_000); // Two fixed-backoff retries (~1s + ~4s) before the final failure.
 });
 
-describe("throttle plugin honors the test knob", () => {
+describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plugin topology", () => {
   const saved = process.env.RETRY_BASE_MS;
   afterEach(() => {
     if (saved === undefined) {
@@ -124,17 +130,14 @@ describe("throttle plugin honors the test knob", () => {
     }
   });
 
-  test("under RETRY_BASE_MS, many writes complete without the write limiter's ~1s spacing", async () => {
-    // The write limiter spaces mutations by ~1000ms in production. Constructed WITHOUT retryBaseMs so the client reads the env exactly as the spawned
-    // bundle does.
+  /** Constructed WITHOUT retryBaseMs so the client reads the env exactly as the spawned e2e bundle does. */
+  const envKnobClient = (io: ReturnType<typeof traceIo>["io"]) =>
+    new GithubApi({ token: "t", io, baseUrl: "https://api.test", apiVersion: "2022-11-28" });
+
+  test("many writes complete without the write limiter's ~1s spacing", async () => {
     process.env.RETRY_BASE_MS = "1";
     stubFetch([() => new Response(null, { status: 204 })]);
-    const client = new GithubApi({
-      token: "t",
-      io: traceIo().io,
-      baseUrl: "https://api.test",
-      apiVersion: "2022-11-28",
-    });
+    const client = envKnobClient(traceIo().io);
     const started = Date.now();
     for (let i = 0; i < 12; i++) {
       await client.tryRequest("PATCH", `/repos/o/r${i}`, { i });
@@ -144,46 +147,69 @@ describe("throttle plugin honors the test knob", () => {
     expect(Date.now() - started).toBeLessThan(8000);
   }, 30_000); // Lets a broken (production-spaced, ~11s) run reach the elapsed assertion.
 
-  test("without the knob the throttle plugin stays enabled (429s are retried)", async () => {
-    delete process.env.RETRY_BASE_MS;
-    // A 429 that resolves on retry proves the throttle plugin is active.
-    const state = stubFetch([rateLimited, okJson]);
-    const client = new GithubApi({
-      token: "t",
-      io: traceIo().io,
-      baseUrl: "https://api.test",
-      apiVersion: "2022-11-28",
-      retryBaseMs: 1,
+  const secondaryLimit = (retryAfter: string) => () =>
+    new Response('{"message":"You have exceeded a secondary rate limit. Please wait."}', {
+      status: 429,
+      headers: { "retry-after": retryAfter, "x-ratelimit-remaining": "0" },
     });
-    const result = await client.tryRequest("GET", "/rl");
+
+  test("a 429 is recovered by the throttling plugin under the immediate scheduler the knob selects", async () => {
+    // The retry plugin never sees a 429 (doNotRetry) and would ignore Retry-After if it did; only the throttling plugin's callback writes this
+    // trace line, so the line pins which plugin owned the recovery. At 5ms units the plugin asks for a 60-unit wait, a real 300ms under
+    // timers; finishing well under that proves the knob selected the immediate scheduler.
+    process.env.RETRY_BASE_MS = "5";
+    const state = stubFetch([secondaryLimit("60"), okJson]);
+    const trace = traceIo();
+    const started = Date.now();
+    const result = await envKnobClient(trace.io).tryRequest("GET", "/rl");
     expect(state.calls).toBe(2);
     expect("data" in result && result.data).toEqual({ ok: true });
+    expect(trace.lines).toContain(
+      `secondary rate limit on GET /rl; retry 1/${MAX_RETRIES} after 60s`,
+    );
+    expect(Date.now() - started).toBeLessThan(150);
   });
 
-  test("UNDER the knob a 429-then-200 recovers on quadratic backoff, ignoring Retry-After", async () => {
-    // Under the knob the retry plugin owns 429 (dropped from doNotRetry) and IGNORES Retry-After, backing off n^2 * retryBaseMs instead; fast
-    // recovery despite a 30s Retry-After is the observable proof.
-    process.env.RETRY_BASE_MS = "1";
-    const rateLimitedSlowHeader = () =>
-      new Response('{"message":"rate limited"}', {
-        status: 429,
-        headers: { "retry-after": "30", "x-ratelimit-remaining": "0" },
+  test("the scheduler alone decides whether Retry-After is slept: immediate at production units, timers at knob units", async () => {
+    const recover = async (
+      retryAfter: string,
+      options: { retryBaseMs: number; scheduler: Scheduler },
+    ) => {
+      const state = stubFetch([secondaryLimit(retryAfter), okJson]);
+      const trace = traceIo();
+      const started = Date.now();
+      const client = new GithubApi({
+        token: "t",
+        io: trace.io,
+        baseUrl: "https://api.test",
+        ...options,
       });
-    const state = stubFetch([rateLimitedSlowHeader, okJson]);
-    const client = new GithubApi({
-      token: "t",
-      io: traceIo().io,
-      baseUrl: "https://api.test",
-      apiVersion: "2022-11-28",
-    });
-    const started = Date.now();
-    const result = await client.tryRequest("GET", "/rl");
-    expect(state.calls).toBe(2);
-    expect("data" in result && result.data).toEqual({ ok: true });
-    // Honoring the 30s header would floor recovery at 30s, so 10s discriminates; the band is wide because a loaded machine starves even stubbed
-    // awaits for seconds (2s flaked under parallel gate runs).
-    expect(Date.now() - started).toBeLessThan(10_000);
-  }, 60_000); // Lets a broken (header-honoring, ~30s) run reach the elapsed assertion.
+      const result = await client.tryRequest("GET", "/rl");
+      expect(state.calls).toBe(2);
+      expect("data" in result && result.data).toEqual({ ok: true });
+      expect(trace.lines).toContain(
+        `secondary rate limit on GET /rl; retry 1/${MAX_RETRIES} after ${retryAfter}s`,
+      );
+      return Date.now() - started;
+    };
+    // Production units (a 30s header) under the immediate scheduler: the plugin still asks for the retry, nothing sleeps.
+    expect(await recover("30", { retryBaseMs: 1000, scheduler: IMMEDIATE_SCHEDULER })).toBeLessThan(
+      5000,
+    );
+    // Real timers at 5ms units: the plugin's 60-unit wait is a real 300ms. Scheduling overhead alone measured under 40ms,
+    // so a run that skipped the wait stays far below the floor.
+    expect(
+      await recover("60", { retryBaseMs: 5, scheduler: TIMERS_SCHEDULER }),
+    ).toBeGreaterThanOrEqual(250);
+  });
+
+  test("a 429 whose Retry-After exceeds the wait cap fails at once instead of being retried blind", async () => {
+    process.env.RETRY_BASE_MS = "1";
+    const state = stubFetch([secondaryLimit(String(MAX_RETRY_WAIT_S + 1)), okJson]);
+    const result = await envKnobClient(traceIo().io).tryRequest("GET", "/rl");
+    expect(state.calls).toBe(1);
+    expect("error" in result && result.error).toMatchObject({ status: 429, rateLimited: true });
+  });
 });
 
 describe("response shaping", () => {
