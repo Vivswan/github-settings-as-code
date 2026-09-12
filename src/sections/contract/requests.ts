@@ -1,5 +1,3 @@
-/** Declaration-driven request helpers: REST and GraphQL calls, probes, and page loops. */
-
 import { type ApiError, isRateLimitError } from "../../github/api.js";
 import { paginate } from "../../github/paginate.js";
 import {
@@ -21,25 +19,17 @@ import {
 import type { SectionContext, SectionMeta } from "./module.js";
 
 /**
- * The trailing options argument for a request helper, whose optionality
- * depends on the route. With no path params (owner/repo aside) the options
- * object is optional and `params` is forbidden; with params it is REQUIRED
- * and must carry `params` with exactly the route's keys. Modeling this as a
- * rest tuple (not an optional object param) is what makes omitting the whole
- * argument a compile error for a route that needs params - the `[never]`
- * trick alone cannot forbid an omitted argument. `Extra` carries per-helper
- * extras (query/payload/tolerate/accept).
+ * A rest tuple, not an optional object param: that is what makes omitting the whole argument a compile
+ * error for a route that needs params (the `[never]` trick alone cannot forbid an omitted argument).
+ * `Extra` carries per-helper extras (query/payload/tolerate/accept).
  */
 export type OptsArg<E extends EndpointDecl, Extra> = [PathParams<E["route"]>] extends [never]
   ? [opts?: { params?: undefined } & Extra]
   : [opts: { params: Readonly<Record<PathParams<E["route"]>, string>> } & Extra];
 
 /**
- * Call the API; convert permission failures into PermissionDenied (handled
- * by the orchestrator's partial-success policy), everything else into a
- * hard error carrying the API's message verbatim. The path is built from
- * the endpoint declaration, so a section can only ever call what it
- * declares, with exactly the params the route requires.
+ * Permission failures become PermissionDenied (the orchestrator's partial-success policy handles them);
+ * everything else is a hard error carrying the API's message (withheld for a secret-bearing request, see github/api.ts).
  */
 export async function call<E extends EndpointDecl>(
   ctx: SectionContext,
@@ -54,11 +44,8 @@ export async function call<E extends EndpointDecl>(
 }
 
 /**
- * The erased core of call(): the same request, classification, and path
- * expansion over a declaration whose route type is no longer literal. The
- * plan executor reaches it with an endpoint resolved from a planned role,
- * whose params were typed against the route when the plan was built; a
- * handler calls call() instead, where the route type checks the params.
+ * The erased core of call(): the plan executor reaches it with an endpoint resolved from a planned role,
+ * whose params were typed when the plan was built; a handler calls call(), where the route type checks the params.
  */
 export async function callDeclared(
   ctx: SectionContext,
@@ -83,11 +70,7 @@ export async function callDeclared(
   return result.data;
 }
 
-/**
- * Like call(), but tolerated statuses (declaredTolerance) come back as
- * { error } for the caller to interpret; every other error classifies through
- * throwFor. An explicit `tolerate` only ever tolerates FEWER than declared.
- */
+/** Tolerated statuses come back as { error }; an explicit `tolerate` only ever tolerates FEWER than declared. */
 export async function tryCall<E extends EndpointDecl>(
   ctx: SectionContext,
   section: SectionMeta,
@@ -110,9 +93,8 @@ export async function tryCall<E extends EndpointDecl>(
 }
 
 /**
- * The tolerated set of one request, resolved ONCE for every tolerant caller.
- * An explicit list may only name declared tolerable statuses (the erased
- * executor could spell another, so this boundary refuses it); advisory tolerates all.
+ * An explicit list may only name declared tolerable statuses (the erased executor could spell another,
+ * so this boundary refuses it); advisory tolerates all.
  */
 export function declaredTolerance(
   endpoint: EndpointDecl,
@@ -135,11 +117,7 @@ export function declaredTolerance(
   return (status) => declared.includes(status);
 }
 
-/**
- * The erased core of tryCall() (the callDeclared sibling), taking its
- * tolerated set as a predicate (declaredTolerance). A rate limit is a
- * transport failure whatever status carries it: never tolerated.
- */
+/** The erased core of tryCall(). A rate limit is a transport failure whatever status carries it: never tolerated. */
 export async function tryCallDeclared(
   ctx: SectionContext,
   section: SectionMeta,
@@ -168,11 +146,8 @@ export async function tryCallDeclared(
 }
 
 /**
- * GET a resource whose absence is a normal state: tolerated statuses come
- * back as { missing: true }, every other error classifies through throwFor.
- * The shared idiom behind "does this branch/site/environment/toggle exist"
- * probes. The tolerated set resolves through declaredTolerance; pass an
- * explicit `tolerate` only to tolerate FEWER than declared.
+ * The shared idiom behind "does this branch/site/environment/toggle exist" probes: tolerated statuses
+ * read as { missing: true }. Pass `tolerate` only to tolerate FEWER than declared.
  */
 export async function probeAbsent<E extends EndpointDecl>(
   ctx: SectionContext,
@@ -205,11 +180,7 @@ export async function probeAbsent<E extends EndpointDecl>(
   return { data: result.data };
 }
 
-/**
- * Section-flavored pagination: delegate the page loop to github/paginate,
- * classify errors through throwFor; `extract` adapts the response shape
- * (bare array, or a {total_count, <key>: []} envelope).
- */
+/** `extract` adapts the response shape (bare array, or a {total_count, <key>: []} envelope). */
 async function listPages(
   ctx: SectionContext,
   section: SectionMeta,
@@ -230,7 +201,6 @@ async function listPages(
   return result.items;
 }
 
-/** GET every page of a bare-array list endpoint. */
 export async function listAll<E extends EndpointDecl>(
   ctx: SectionContext,
   section: SectionMeta,
@@ -249,10 +219,7 @@ export async function listAll<E extends EndpointDecl>(
   );
 }
 
-/**
- * Like listAll, for endpoints that wrap the list in an envelope object
- * (e.g. GET /actions/workflows returns {total_count, workflows: []}).
- */
+/** For endpoints wrapping the list in an envelope (GET /actions/workflows returns {total_count, workflows: []}). */
 export async function listAllEnveloped<E extends EndpointDecl>(
   ctx: SectionContext,
   section: SectionMeta,
@@ -275,14 +242,7 @@ export async function listAllEnveloped<E extends EndpointDecl>(
   );
 }
 
-/**
- * Issue a GraphQL operation; convert permission failures into
- * PermissionDenied, everything else into a hard error carrying the API's
- * message - the GraphQL sibling of call(). The failing request renders as
- * `GRAPHQL <opName>` where a REST error shows its method and path. The
- * variables are typed by the declaration's own `V`, so a call site cannot
- * omit or misname what the query expects.
- */
+/** The GraphQL sibling of call(); the failing request renders as `GRAPHQL <opName>` where a REST error shows method and path. */
 export async function callGraphql<O extends GraphqlOpDecl>(
   ctx: SectionContext,
   section: SectionMeta,
@@ -298,14 +258,9 @@ export async function callGraphql<O extends GraphqlOpDecl>(
 }
 
 /**
- * Whether an ApiError is tolerable under a set of declared error types: it
- * must carry the transport's graphqlTypes (an untyped or HTTP-level failure
- * is never tolerable) and EVERY observed type must be declared - the HTTP
- * status is a lossy fold (a mixed [FORBIDDEN, UNPROCESSABLE] response and a
- * pure FORBIDDEN both land on 403), so only the full type set can say what
- * actually happened. RATE_LIMITED and INSUFFICIENT_SCOPES can never appear
- * in `tolerate` (the type excludes them), so both always classify through
- * throwFor.
+ * EVERY observed type must be declared: the HTTP status is a lossy fold (a mixed [FORBIDDEN, UNPROCESSABLE]
+ * response and a pure FORBIDDEN both land on 403), so only the full type set says what happened. An
+ * untyped or HTTP-level failure is never tolerable.
  */
 function graphqlErrorTolerated(
   error: ApiError,
@@ -320,12 +275,9 @@ function graphqlErrorTolerated(
 }
 
 /**
- * Like callGraphql, but tolerated error types come back as { error } for the
- * caller to interpret; every other error classifies through throwFor. The
- * tolerated set defaults to the operation's declared error outcomes; pass an
- * explicit `tolerate` only to tolerate FEWER than declared. Tolerance reads
- * the error's OBSERVED GraphQL types (see graphqlErrorTolerated), never the
- * folded HTTP status.
+ * Tolerated error types come back as { error }; the set defaults to the declared outcomes, and an explicit
+ * `tolerate` only tolerates FEWER. Tolerance reads the OBSERVED GraphQL types (graphqlErrorTolerated),
+ * never the folded HTTP status.
  */
 export async function tryCallGraphql<O extends GraphqlOpDecl>(
   ctx: SectionContext,
@@ -333,10 +285,7 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
   op: O,
   variables: Readonly<GraphqlVariablesOf<O>>,
   opts?: {
-    // The graphqlOp constructor preserves the literal `outcomes` keys, so
-    // this keyof pins the DECLARED subset at compile time: a tolerate
-    // naming an undeclared type does not compile (the REST
-    // `as const satisfies` symmetry).
+    // graphqlOp preserves the literal `outcomes` keys, so a tolerate naming an undeclared type does not compile.
     tolerate?: readonly (keyof O["outcomes"] & GraphqlTolerableError)[];
     describe?: string;
   },
@@ -352,22 +301,15 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
 }
 
 /**
- * Collect every node of a GraphQL connection, the sibling of listAll: the
- * cursor loop lives here so paging cannot drift between sections. The loop
- * owns `$cursor` (null first, then each page's endCursor) and walks the
- * declared `connection.path` to the nodes. The operation's DECLARED error
- * outcomes come back as { error }, as tryCallGraphql tolerates them (the
- * pins read declares NOT_FOUND, so a fine-grained denial reads as absence),
- * but only on the FIRST page: absence describes the whole resource, and a
- * tolerated type mid-walk means the connection vanished under the loop.
+ * The cursor loop lives here so paging cannot drift between sections. Declared error outcomes come back
+ * as { error } only on the FIRST page: absence describes the whole resource, and a tolerated type
+ * mid-walk means the connection vanished under the loop.
  */
 export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
   ctx: SectionContext,
   section: SectionMeta,
   op: O,
-  // The `cursor?: never` pin makes a call site that supplies its own cursor
-  // uncompilable - the loop below owns the variable; the paginated arm's
-  // query type already proved $cursor exists at the declaration.
+  // The `cursor?: never` pin: the loop owns the variable, so a call site supplying its own does not compile.
   variables: Readonly<GraphqlVariablesOf<O>> & { cursor?: never },
 ): Promise<{ items: unknown[] } | { error: ApiError }> {
   const path = op.connection.path;
@@ -398,8 +340,7 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
     }
     const endCursor = pageInfo.endCursor;
     if (typeof endCursor !== "string" || endCursor === cursor) {
-      // hasNextPage without a fresh endCursor can only loop forever; treat it
-      // as the same broken-connection shape as a missing pageInfo.
+      // hasNextPage without a fresh endCursor would loop forever.
       throw new Error(
         `${section.key}: GRAPHQL ${op.name} reported hasNextPage without a new endCursor at "${path.join(".")}", so the pagination cannot advance. The operation's query must select pageInfo{hasNextPage, endCursor}`,
       );
@@ -409,10 +350,8 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
 }
 
 /**
- * Reject two declared entries that resolve to the same natural key; they
- * would fight each other on every run instead of converging. The sweep
- * collects EVERY colliding pair and fails once with the full list, so N
- * duplicates cost one run to discover, not N.
+ * Two entries resolving to one natural key would fight each other on every run. Every collision is
+ * collected and reported once (each against the first entry under its key), so N duplicates cost one run to discover.
  */
 export function rejectDuplicates<T>(
   section: SectionMeta,

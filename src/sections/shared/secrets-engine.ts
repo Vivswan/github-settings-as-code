@@ -1,9 +1,4 @@
-/**
- * The shared secrets engine: existence reconciliation (values never read
- * back; every declared secret re-sealed on each apply) over route-free scopes
- * the section builds: planSecrets() returns the operations, and the section
- * places each under its own role.
- */
+/** Existence reconciliation over route-free scopes: values are never read back, and every declared secret is re-sealed on each apply. */
 
 import { z } from "zod";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
@@ -19,7 +14,6 @@ import type { ExecTools, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { decodeBase64, SEALED_BOX_PUBLIC_KEY_BYTES, sealForGithub } from "./sealed-box.js";
 
-/** One declared secret entry, as every family's settings shape spells it. */
 export interface SecretEntry {
   name: string;
   value: string;
@@ -39,10 +33,8 @@ export type SealedSecretPayload = {
   key_id: string;
 };
 
-/** The erased planned-op view; the scopes are generic over the section's exact arms. */
 type AnyPlannedOp = SectionPlan["ops"][number];
 
-/** How a scope names itself in output. */
 interface SecretsScopeProse {
   /** The drift-line prefix, e.g. "actions_secrets" or "environments[prod].secrets". */
   label: string;
@@ -54,11 +46,7 @@ interface SecretsScopeProse {
   changeSuffix?: string;
 }
 
-/**
- * One planned sealed PUT's facets, for the section to place under its put
- * role. The payload thunk resolves and seals only when executed, so the plan
- * carries the `$NAME` reference and nothing derived from a value.
- */
+/** The payload thunk resolves and seals only when executed, so the plan carries the `$NAME` reference and nothing derived from a value. */
 interface SealedSecretWrite {
   /** The secret's uppercase name - the write path's {secret_name}. */
   readonly name: string;
@@ -71,7 +59,6 @@ interface SealedSecretWrite {
   readonly change: string;
 }
 
-/** The facets of one planned DELETE of an undeclared live secret. */
 interface UndeclaredSecretDeletion {
   /** The live name as the API listed it. */
   readonly name: string;
@@ -81,11 +68,7 @@ interface UndeclaredSecretDeletion {
   readonly change: string;
 }
 
-/**
- * The plan contract's scope: reads over the section's typed port, and
- * builders placing each write under the section's own role. `Put`/`Remove`
- * are its exact PlannedOp arms, so a wrong role or params fails to compile.
- */
+/** `Put`/`Remove` are the section's exact PlannedOp arms, so a wrong role or params fails to compile. */
 export interface SecretsPlanScope<Put extends AnyPlannedOp, Remove extends AnyPlannedOp>
   extends SecretsScopeProse {
   /** The parsed {name} identities of the enveloped secrets list, all pages. */
@@ -96,7 +79,6 @@ export interface SecretsPlanScope<Put extends AnyPlannedOp, Remove extends AnyPl
   readonly publicKeyEndpoint: EndpointDecl;
   /** The planned sealed PUT; function-valued so a builder demanding an unsupplied facet fails. */
   readonly put: (write: SealedSecretWrite) => Put;
-  /** The planned DELETE of one undeclared live secret. */
   readonly remove: (deletion: UndeclaredSecretDeletion) => Remove;
 }
 
@@ -106,13 +88,9 @@ export function secretKey(name: string): string {
 }
 
 /**
- * The declared `value` of every entry in one {name, value} secret list -
- * plain-array or wrapped form - for the engine's up-front reference
- * resolution (SectionModule.secretValues), each labelled with its entry's
- * secret NAME so a validation error can point at the offending entry.
- * DEFENSIVE by contract: a
- * malformed container returns [] instead of throwing, so the actionable
- * error always comes from shape validation, never a TypeError from here.
+ * Each value is labelled with its entry's secret NAME so a validation error can point at it. DEFENSIVE by
+ * contract: a malformed container returns [] instead of throwing, so the actionable error always comes
+ * from shape validation, never a TypeError here.
  */
 export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
   const container = declared as SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
@@ -124,7 +102,7 @@ export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
   if (!Array.isArray(container) && !isWrapper) {
     return [];
   }
-  // The default policy is irrelevant here: only the entries are read.
+  // "keep" is a placeholder: only the entries are read.
   const { entries } = undeclaredPolicy(container, "keep");
   return entries.flatMap((entry) => {
     if (typeof entry !== "object" || entry === null || typeof entry.value !== "string") {
@@ -138,11 +116,7 @@ export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
   });
 }
 
-/**
- * Reject two declared entries that resolve to the same uppercase secret name
- * upfront; GitHub would fold them into one secret and the last write would
- * silently win on every run.
- */
+/** GitHub folds two names equal uppercased into one secret, so the last write would silently win on every run. */
 export function rejectDuplicateSecretNames(
   section: SectionMeta,
   entries: readonly SecretEntry[],
@@ -155,18 +129,13 @@ export function rejectDuplicateSecretNames(
   );
 }
 
-/** A parsed sealing key, ready to seal any number of values synchronously. */
 export interface SealingKey {
   readonly keyId: string;
   /** Seal one ALREADY-RESOLVED plaintext into the {encrypted_value, key_id} PUT body. */
   seal(plaintext: string): SealedSecretPayload;
 }
 
-/**
- * Parse a public-key response down to a usable sealing key, so a malformed
- * key fails here with the endpoint and scope named rather than as a bare
- * primitive error inside a seal.
- */
+/** A malformed key fails here with the endpoint and scope named, rather than as a bare primitive error inside a seal. */
 export function parseSealingKey(
   section: SectionMeta,
   scope: Pick<SecretsScopeProse, "label">,
@@ -184,8 +153,6 @@ export function parseSealingKey(
     typeof publicKey !== "string" ||
     publicKey === ""
   ) {
-    // Name the exact defect (which field, absent vs wrong type vs empty),
-    // like the base64 and byte-length rejections below.
     const fieldDefect = (label: string, value: unknown): string | null =>
       value === undefined
         ? `${label} is missing`
@@ -226,7 +193,6 @@ export function parseSealingKey(
   };
 }
 
-/** The check-mode line for a declared secret the listing does not carry. */
 function missingSecretDrift(scope: SecretsScopeProse, name: string): string {
   return `${scope.label}[${name}]: missing - declared in the settings file but not on ${scope.home ?? "the repo"}; apply will create it`;
 }
@@ -236,7 +202,6 @@ function cannotVerifyNote(scope: SecretsScopeProse): string {
   return `${scope.noun} values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run`;
 }
 
-/** The keep-note for a live secret the settings file does not declare. */
 function undeclaredSecretNote(scope: SecretsScopeProse, liveName: string): string {
   return undeclaredNote({
     subject: `${scope.noun} "${liveName}"`,
@@ -245,7 +210,6 @@ function undeclaredSecretNote(scope: SecretsScopeProse, liveName: string): strin
   });
 }
 
-/** The deletion drift for a live secret the settings file does not declare. */
 function undeclaredSecretDrift(
   scope: SecretsScopeProse,
   defaultPolicy: UndeclaredPolicy,
@@ -266,11 +230,6 @@ function liveSecretsByKey(live: readonly LiveSecretName[]): Map<string, string> 
   return liveByKey;
 }
 
-/**
- * Plan one scope: a sealed PUT per declared secret (drift only when missing),
- * one cannot-verify note, and a keep-note or planned DELETE per undeclared
- * live one. The key is read here and closed over; values resolve in thunks.
- */
 export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPlannedOp>(
   section: SectionMeta,
   scope: SecretsPlanScope<Put, Remove>,
@@ -278,9 +237,8 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
     entries: readonly SecretEntry[];
     policy: UndeclaredPolicy;
     /**
-     * The DEFAULT the caller unwrapped `policy` against (the section's
-     * undeclaredDefault, or environments' fixed nested default), from which
-     * undeclaredDrift derives its explicit-knob clause.
+     * The DEFAULT `policy` was unwrapped against (the section's undeclaredDefault, or environments'
+     * fixed nested default); undeclaredDrift derives its knob clause from it.
      */
     defaultPolicy: UndeclaredPolicy;
   },

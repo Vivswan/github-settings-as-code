@@ -347,7 +347,6 @@ export interface Unverifiable {
   readonly lines: readonly string[];
 }
 
-/** What a planned operation offers check mode: its drift lines, or an unverifiable facet. */
 export type Justification = readonly string[] | Unverifiable;
 
 /** The drift lines an operation resolves, whichever justification it carries. */
@@ -370,11 +369,7 @@ export type ToleratedOutcome =
   | { readonly note: string; readonly failure?: never }
   | { readonly failure: string; readonly note?: never };
 
-/**
- * The declared statuses a REST operation absorbs, and how each is reported.
- * `statuses` defaults to the endpoint's tolerable set; the non-empty tuple
- * may name only those, so an undeclared tolerance cannot compile.
- */
+/** `statuses` defaults to the endpoint's tolerable set and may name only those, so an undeclared tolerance cannot compile. */
 export interface Tolerance<E extends EndpointDecl> {
   readonly statuses?: readonly [DeclaredErrorStatus<E>, ...DeclaredErrorStatus<E>[]];
   readonly outcome: (error: ApiError) => ToleratedOutcome;

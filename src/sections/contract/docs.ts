@@ -1,9 +1,6 @@
 /**
- * The prose a section contributes to the generated artifacts: its cells in the Sections table on
- * docs/reference/sections.md, its COVERAGE.md Supported rows, and the descriptions of its fields
- * in the published JSON Schema. Declared beside the section module as
- * src/sections/<key>/<key>.docs.yml and loaded by the docs registry. Documentation only: nothing
- * bundled from src/main.ts may import this file or the registry (a unit test walks the import graph).
+ * Declared beside each section as src/sections/<key>/<key>.docs.yml and loaded by the docs registry.
+ * Documentation only: nothing bundled from src/main.ts may import this file or the registry (a unit test walks the import graph).
  */
 
 import { readFileSync } from "node:fs";
@@ -24,13 +21,11 @@ const CoverageRow = z
   .readonly();
 
 /**
- * Field descriptions for the published schema, keyed as
- * .github/scripts/lib/schema-descriptions.ts spells a site (`LabelConfig.color`,
+ * Keyed as .github/scripts/lib/schema-descriptions.ts spells a site (`LabelConfig.color`,
  * `SettingsFile.labels`, `UndeclaredPolicyList<*>.entries`).
  */
 const SchemaDescriptions = z.record(z.string().min(1), z.string().min(1)).readonly();
 
-/** The docs shape's error map: a file still keyed `readme` fails with the rename in hand. */
 const sectionDocsKeyError = renamedKeyError(
   "Sections table cells",
   "readme",
@@ -50,9 +45,7 @@ export const SectionDocs = z
           notes: z.string().min(1),
         })
         .readonly(),
-      // The section's rows in the COVERAGE.md Supported table, in display order. At least one: a
-      // section with no coverage row does not exist to the inventory, so the shape (and the type it
-      // infers, a non-empty tuple) refuses [].
+      // At least one: a section with no coverage row does not exist to the inventory, so the shape refuses [].
       coverage: z.tuple([CoverageRow], CoverageRow).readonly(),
       /** The section's own property on the document root and every definition its slice declares. */
       schema: SchemaDescriptions,
@@ -65,11 +58,6 @@ export type SectionDocs = z.infer<typeof SectionDocs>;
 /** A docs file carrying schema descriptions only: the shared factories' and the document root's. */
 export const SchemaOnlyDocs = z.strictObject({ schema: SchemaDescriptions }).readonly();
 
-/**
- * The YAML document at `path`, validated against `schema`. A missing file throws the read error
- * (which names the path); unparseable YAML or a document off the shape throws naming the path
- * and the issues.
- */
 export function readDocsYaml<T>(path: string, schema: z.ZodType<T>): T {
   let loaded: unknown;
   try {
