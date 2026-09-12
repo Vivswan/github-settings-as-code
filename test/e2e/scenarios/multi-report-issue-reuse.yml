@@ -31,7 +31,7 @@ repos:
       issues:
         - number: 7
           title: "[automated] settings-as-code: private settings report"
-          body: "OLD REPORT BODY"
+          body: "# settings-as-code private report: e2e-owner/svc-reuse\n\nOLD REPORT BODY"
           state: open
           labels:
             - name: settings-as-code-report

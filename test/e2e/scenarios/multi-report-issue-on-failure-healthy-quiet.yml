@@ -53,6 +53,9 @@ expect:
     - "POST /repos/e2e-owner/svc-quiet/issues"
     - "PATCH /repos/e2e-owner/svc-quiet/issues"
     - "POST /repos/e2e-owner/svc-quiet/labels"
+    # Both create-guard reads (the state=all label lookup and the title scan) share
+    # the open lookup's path; their state=all query is what sets them apart.
+    - "GET /repos/e2e-owner/svc-quiet/issues?state=all"
   # The single read: an indexed lookup for an OPEN report issue by the marker.
   requests_contain:
     - "GET /repos/e2e-owner/svc-quiet/issues?state=open&labels=settings-as-code-report&per_page=100"

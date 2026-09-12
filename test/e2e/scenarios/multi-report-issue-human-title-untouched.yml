@@ -1,0 +1,99 @@
+# Two same-titled issues a human opened by hand on svc-human, one closed (#1)
+# and one open (#9, the newest), around the real report issue (#5, closed by
+# the last healthy run, marker stripped). This run drifts (undeclared
+# HUMANLEAK-sentinel), so the attention path's title scan sees all three: only
+# #5 carries the report heading, so #5 is repaired (marker reattached) and
+# reopened, and neither human issue is written. The title alone used to reclaim
+# a human's issue (the oldest one), PATCHing the report over their text and
+# reopening it; and without the body check the open-over-closed rule would take
+# #9 instead.
+name: multi-report-issue-human-title-untouched
+settings: {}
+inputs:
+  mode: check
+  private_report: issue
+repos:
+  e2e-owner/svc-human:
+    settings:
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: settings-as-code-report
+          color: "0e2a47"
+          description: "managed by settings-as-code private reporting - do not remove"
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      labels:
+        - name: declared
+          color: "00ff00"
+        - name: settings-as-code-report
+          color: "0e2a47"
+          description: "managed by settings-as-code private reporting - do not remove"
+        - name: HUMANLEAK-sentinel
+          color: "abcdef"
+      issues:
+        - number: 1
+          title: "[automated] settings-as-code: private settings report"
+          body: "Opened by hand to discuss the private report; please do not overwrite."
+          state: closed
+          labels: []
+          user:
+            login: a-human
+          html_url: "https://github.com/e2e-owner/svc-human/issues/1"
+        - number: 5
+          title: "[automated] settings-as-code: private settings report"
+          body: "# settings-as-code private report: e2e-owner/svc-human\n\nOLD REPORT BODY"
+          state: closed
+          labels: []
+          user:
+            login: e2e-token-user
+          html_url: "https://github.com/e2e-owner/svc-human/issues/5"
+        - number: 9
+          title: "[automated] settings-as-code: private settings report"
+          body: "Is the report above still current? Asking here so it stays private."
+          state: open
+          labels: []
+          user:
+            login: a-human
+          html_url: "https://github.com/e2e-owner/svc-human/issues/9"
+    permissions:
+      issues: write
+      contents: read
+      administration: read
+expect:
+  exit_code: 1
+  result: drift
+  repos_result:
+    "private repository #1": drift
+  # The real report is repaired in place; neither human issue is touched and
+  # no second report is created.
+  mutations:
+    - "PATCH /repos/e2e-owner/svc-human/issues/5"
+  never:
+    - "POST /repos/e2e-owner/svc-human/issues"
+    - "PATCH /repos/e2e-owner/svc-human/issues/1"
+    - "PATCH /repos/e2e-owner/svc-human/issues/9"
+  summary_contains:
+    - "private repository #1"
+  summary_lacks:
+    - "svc-human"
+    - "HUMANLEAK-sentinel"
+  stdout_lacks:
+    - "svc-human"
+    - "HUMANLEAK-sentinel"
+  # All three are markerless, so the label lookup misses and the title scan
+  # (newest first) sees them on one page.
+  requests_contain:
+    - "GET /repos/e2e-owner/svc-human/issues?state=all&sort=created&direction=desc"
+  issue_report:
+    slug: e2e-owner/svc-human
+    created_count: 0
+    state: open
+    lookup_by_label: true
+    labels:
+      - "settings-as-code-report"
+    body_contains:
+      - "e2e-owner/svc-human"
+      - "HUMANLEAK-sentinel"

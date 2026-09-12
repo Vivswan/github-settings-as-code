@@ -530,7 +530,6 @@ export async function runScenario(
         }
       }
     }
-    const pathLog = handle.requests.map((r) => renderRequest(r, false));
     const writes = handle.requests.filter(isWriteRequest).map((r) => renderRequest(r, false));
     if (exp.mutations) {
       const want = exp.mutations.map(expandRepo);
@@ -540,8 +539,10 @@ export async function runScenario(
         );
       }
     }
+    // Matched with the query, so a pattern can forbid one lookup on a path other lookups share.
+    const fullLog = handle.requests.map((r) => renderRequest(r, true));
     if (exp.never) {
-      for (const pattern of forbiddenPresent(exp.never.map(expandRepo), pathLog)) {
+      for (const pattern of forbiddenPresent(exp.never.map(expandRepo), fullLog)) {
         failures.push(`forbidden request present: ${pattern}`);
       }
     }
@@ -581,8 +582,6 @@ export async function runScenario(
       ),
     ];
     const leakNeedles = [...new Set([...secretNeedles, ...(exp.leaks_nowhere ?? [])])];
-    // requests_contain may assert on a query string, so match the full form.
-    const fullLog = handle.requests.map((r) => renderRequest(r, true));
     for (const needle of exp.requests_contain ?? []) {
       if (!fullLog.some((entry) => entry.includes(needle))) {
         failures.push(`no request contains: ${needle}`);

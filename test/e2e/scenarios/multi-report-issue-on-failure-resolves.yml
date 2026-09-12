@@ -31,7 +31,7 @@ repos:
       issues:
         - number: 7
           title: "[automated] settings-as-code: private settings report"
-          body: "OLD REPORT BODY"
+          body: "# settings-as-code private report: e2e-owner/svc-resolve\n\nOLD REPORT BODY"
           state: open
           labels:
             - name: settings-as-code-report
@@ -65,5 +65,8 @@ expect:
   never:
     - "POST /repos/e2e-owner/svc-resolve/issues"
     - "POST /repos/e2e-owner/svc-resolve/labels"
+    # Both create-guard reads (the state=all label lookup and the title scan) share
+    # the open lookup's path; their state=all query is what sets them apart.
+    - "GET /repos/e2e-owner/svc-resolve/issues?state=all"
   requests_contain:
     - "PATCH /repos/e2e-owner/svc-resolve/issues/7"
