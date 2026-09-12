@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { runForRepo, validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import type { SectionKey } from "../../src/schema.js";
@@ -237,8 +238,7 @@ describe("check-mode purity", () => {
         settings: verdict.value,
         mode: "check",
         onMissingPermission: "fail",
-        requiredSections: new Set(),
-        onlySections: new Set(),
+        sections: SectionSelection.ALL,
       },
       silentIo(),
     );

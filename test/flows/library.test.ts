@@ -8,6 +8,7 @@ import {
   describeProblem,
   parseRepoSlug,
   renderMergedYaml,
+  SectionSelection,
   type ValidatedSettings,
   validateSettings,
 } from "../../src/index.js";
@@ -63,8 +64,7 @@ describe("checkRepository and applyRepository", () => {
       repo,
       settings,
       onMissingPermission: "fail",
-      requiredSections: new Set(),
-      onlySections: new Set(),
+      sections: SectionSelection.ALL,
     });
     expect(api.mutations()).toEqual([]);
     expect(result).toEqual({
@@ -89,8 +89,7 @@ describe("checkRepository and applyRepository", () => {
         repo,
         settings,
         onMissingPermission: "fail",
-        requiredSections: new Set(),
-        onlySections: new Set(),
+        sections: SectionSelection.ALL,
       },
       collected.io,
     );
@@ -107,6 +106,24 @@ describe("checkRepository and applyRepository", () => {
       log: [],
     });
     expect(collected.lines).toEqual([{ line: "repository: patched repository fields: has_wiki" }]);
+  });
+});
+
+describe("the section selection a library call runs under", () => {
+  test("a required section outside the allowlist is the problem, and no check runs", async () => {
+    // The engine reports an excluded section without attempting it, so this
+    // pair would pass green having proven nothing; the selection refuses it
+    // before checkRepository can be given one.
+    const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: true } } });
+    const outcome = await SectionSelection.of({
+      only: ["repository"],
+      required: ["labels"],
+    }).match(
+      (sections) => checkRepository(api, { repo, settings, onMissingPermission: "fail", sections }),
+      (problem) => problem,
+    );
+    expect(outcome).toEqual({ code: "required-sections-excluded", excluded: ["labels"] });
+    expect(api.calls).toEqual([]);
   });
 });
 

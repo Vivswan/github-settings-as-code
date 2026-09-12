@@ -17,6 +17,7 @@ import {
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { SectionSelection } from "../../engine/section-selection.js";
 import { describeProblem } from "../../problem.js";
 import { driftOf, type ExecTools, type PlannedOp, planContext } from "../contract/plan.js";
 import { actionsSecretsSection } from "./index.js";
@@ -420,8 +421,7 @@ describe("actions_secrets execution", () => {
         settings: validated.value,
         mode: "apply",
         onMissingPermission: "fail",
-        requiredSections: new Set(),
-        onlySections: new Set(),
+        sections: SectionSelection.ALL,
         secretEnv: { DEPLOY_TOKEN: "s3cret-plaintext" },
       },
       io,

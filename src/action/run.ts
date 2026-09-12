@@ -33,7 +33,7 @@ import {
   runSingle,
 } from "../index.js";
 import { actionsArtifactUploader } from "./artifact.js";
-import { parseConfig } from "./inputs.js";
+import { parseActionConfig } from "./inputs.js";
 import { actionsIo } from "./io.js";
 
 /**
@@ -48,7 +48,7 @@ export async function run(overrides?: {
   const io = overrides?.io ?? actionsIo;
   const uploader = overrides?.uploader ?? actionsArtifactUploader;
 
-  const parsed = parseConfig();
+  const parsed = parseActionConfig();
   if (parsed.isErr()) {
     return failRun(io, parsed.error);
   }

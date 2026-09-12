@@ -87,7 +87,7 @@ export function runSingle(
 ): ResultAsync<SingleOutcome, Problem> {
   return requireUploader(cfg, uploader)
     .andThen(() => readSettingsFile(cfg.settingsFile, "settings-file"))
-    .andThen((doc) => validateSettingsDoc(doc, cfg.settingsFile, cfg.onlySections, io))
+    .andThen((doc) => validateSettingsDoc(doc, cfg.settingsFile, cfg.sections.only, io))
     .asyncAndThen((settings) =>
       ResultAsync.fromSafePromise(runTarget(api, cfg, io, settings, uploader)),
     );
@@ -120,8 +120,7 @@ async function runTarget(
                 settings: injected.settings,
                 mode: cfg.mode,
                 onMissingPermission: cfg.onMissingPermission,
-                requiredSections: cfg.requiredSections,
-                onlySections: cfg.onlySections,
+                sections: cfg.sections,
               },
               channel.io,
             ),

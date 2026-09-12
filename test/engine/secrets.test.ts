@@ -6,6 +6,7 @@ import {
 } from "../../src/engine/orchestrate.js";
 import type { SettingsSource } from "../../src/engine/secret-refs.js";
 import { collectSecretValues } from "../../src/engine/secrets.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
@@ -172,8 +173,7 @@ describe("runForRepo provenance", () => {
     repo: { owner: "o", name: "r", slug: "o/r" },
     settings: validated(settings),
     onMissingPermission: "fail" as const,
-    requiredSections: new Set<SectionKey>(),
-    onlySections: new Set<SectionKey>(),
+    sections: SectionSelection.ALL,
   });
   /** A remote target's own document, run the way multi.ts runs it. */
   const targetOpts = (targetDoc: SettingsFile) => ({
@@ -246,7 +246,7 @@ describe("runForRepo provenance", () => {
       {
         ...targetOpts(targetDoc),
         mode: "check" as const,
-        onlySections: new Set(["labels"]),
+        sections: SectionSelection.of({ only: ["labels"] })._unsafeUnwrap(),
       },
       io,
     );

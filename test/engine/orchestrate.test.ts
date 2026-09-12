@@ -10,6 +10,7 @@ import {
   validateSettingsDoc,
   worstOf,
 } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import type { Io } from "../../src/io.js";
 import { maskRegistry, prefixedIo } from "../../src/io.js";
 import { describeProblem, type TopLevelShape } from "../../src/problem.js";
@@ -67,8 +68,7 @@ function opts(overrides: Partial<RepoRunOptions> = {}): RepoRunOptions {
     settings: validated({ repository: { has_wiki: false } }),
     mode: "apply" as const,
     onMissingPermission: "fail" as const,
-    requiredSections: new Set(),
-    onlySections: new Set(),
+    sections: SectionSelection.ALL,
     ...overrides,
   };
 }
@@ -325,7 +325,7 @@ describe("runForRepo secret references", () => {
           ...webhookSettings("a-literal-that-would-fail"),
           repository: { has_wiki: false },
         }),
-        onlySections: new Set(["repository"]),
+        sections: SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(),
       }),
       io,
     );

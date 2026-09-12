@@ -265,6 +265,7 @@ graph TD
   flows --> problem
   flows --> report
   flows --> schema
+  flows --> types
   engine --> discovery
   engine --> github
   engine --> io
@@ -295,6 +296,7 @@ graph TD
   report --> types
   problem --> github
   problem --> plain_data
+  problem --> schema
   schema --> sections
   schema --> types
   upstream_gaps --> types

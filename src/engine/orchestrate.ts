@@ -22,6 +22,7 @@ import type { MustBeNever } from "../types.js";
 import { executePlan } from "./execute.js";
 import { resolveSecretRefs, type SettingsSource, validateSecretRef } from "./secret-refs.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
+import type { SectionSelection } from "./section-selection.js";
 import { validateSectionShapes } from "./validate.js";
 
 /**
@@ -64,8 +65,8 @@ export interface RepoRunOptions {
   settings: ValidatedSettings;
   mode: "apply" | "check";
   onMissingPermission: "fail" | "warn";
-  requiredSections: ReadonlySet<SectionKey>;
-  onlySections: ReadonlySet<SectionKey>;
+  /** Which sections run and which must fully apply, validated together at construction. */
+  sections: SectionSelection;
   /**
    * Who authored the settings document. Omitted, "operator" (the single-repo
    * settings file, central files, and the defaults document are all
@@ -244,7 +245,7 @@ export async function runForRepo(
     if (settings[key] === undefined) {
       return "absent"; // declared-keys-only: absent section = untouched
     }
-    if (opts.onlySections.size > 0 && !opts.onlySections.has(key)) {
+    if (opts.sections.only.size > 0 && !opts.sections.only.has(key)) {
       return "excluded";
     }
     return "active";
@@ -418,7 +419,7 @@ export async function runForRepo(
       }
       const before = [...produced.notes, ...produced.changes];
       if (error instanceof PermissionDenied) {
-        const required = opts.requiredSections.has(section.key);
+        const required = opts.sections.required.has(section.key);
         // A denial after some operations landed is a partial mutation, never
         // a skip: the warn policy applies only when nothing was written.
         const landed = produced.landed;

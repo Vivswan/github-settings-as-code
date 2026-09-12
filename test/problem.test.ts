@@ -48,8 +48,8 @@ const SPECIMENS = {
     `unknown section "nope" in the "required-sections" input; it matches none of: ${KNOWN}. Fix the name in the workflow's input list; ` +
       `unknown sections "typo", "nope" in the "sections" input; each matches none of: ${KNOWN}. Fix the names in the workflow's input list`,
   ],
-  "input-required-sections-excluded": [
-    { code: "input-required-sections-excluded", excluded: ["labels", "milestones"] },
+  "required-sections-excluded": [
+    { code: "required-sections-excluded", excluded: ["labels", "milestones"] },
     'the "required-sections" entries "labels", "milestones" are excluded by the "sections" allowlist, so the run would pass without ever attempting them. Add them to the "sections" input, or remove them from "required-sections"',
   ],
   "input-report-key-unused": [
@@ -289,7 +289,7 @@ describe("describeProblem", () => {
   test.each<[what: string, problem: Problem, line: string]>([
     [
       "one excluded required section reads in the singular",
-      { code: "input-required-sections-excluded", excluded: ["labels"] },
+      { code: "required-sections-excluded", excluded: ["labels"] },
       'the "required-sections" entry "labels" is excluded by the "sections" allowlist, so the run would pass without ever attempting it. Add it to the "sections" input, or remove it from "required-sections"',
     ],
     [

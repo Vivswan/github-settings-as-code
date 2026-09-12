@@ -13,6 +13,7 @@ import {
   skippedSectionKeys,
   worstOf,
 } from "../engine/orchestrate.js";
+import type { SectionSelection } from "../engine/section-selection.js";
 import type { GithubClient } from "../github/api.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
@@ -25,7 +26,6 @@ import {
   type PrivateReportChannel,
   type RunConclusion,
 } from "../report/delivery.js";
-import type { SectionKey } from "../schema.js";
 import {
   emitRedactedResult,
   isPrivateVisibility,
@@ -111,8 +111,7 @@ export interface DeliveryConfig {
 /** The inputs the single- and multi-repo flows share: the engine options, the redaction policy, and the delivery inputs. */
 export interface RunFlowConfig extends DeliveryConfig {
   onMissingPermission: "fail" | "warn";
-  requiredSections: Set<SectionKey>;
-  onlySections: Set<SectionKey>;
+  sections: SectionSelection;
   /** Whether to hide private/internal targets from the public view. */
   privateRepos: PrivateReposPolicy;
 }

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runMulti } from "../../src/flows/multi.js";
 import type { TargetOutcome } from "../../src/flows/redact.js";
 import { type Io, maskRegistry } from "../../src/io.js";
@@ -14,7 +15,6 @@ import {
   ARTIFACT_NAME,
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
-import type { SectionKey } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 
 function captureIo(): {
@@ -85,8 +85,7 @@ function cfg(overrides: Partial<Parameters<typeof runMulti>[1]> = {}) {
     adminOwner: "o",
     mode: "apply" as const,
     onMissingPermission: "fail" as const,
-    requiredSections: new Set<SectionKey>(),
-    onlySections: new Set<SectionKey>(),
+    sections: SectionSelection.ALL,
     discoveryFilters: DEFAULT_DISCOVERY_FILTERS,
     discoveryFiltersSet: [],
     // Existing scenarios predate redaction and assert on raw slugs; default
@@ -214,7 +213,10 @@ describe("runMulti", () => {
     const { io, annotations } = captureIo();
     const targets = await runTargets(
       api,
-      cfg({ reposInput: "o/a", onlySections: new Set(["repository"]) }),
+      cfg({
+        reposInput: "o/a",
+        sections: SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(),
+      }),
       io,
     );
     expect(targets[0]?.result).toBe("failed");

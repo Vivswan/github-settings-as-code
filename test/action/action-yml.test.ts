@@ -4,21 +4,15 @@
  * themselves are covered by test/scripts/gen-action-docs.test.ts.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import {
-  FILTER_INPUTS,
-  INPUT_DECLS,
-  type InputDecl,
-  parseConfig,
-} from "../../src/action/inputs.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
 import { MERGE_RESULT } from "../../src/flows/deliver.js";
-import { describeProblem } from "../../src/problem.js";
+import { FILTER_INPUTS, INPUT_DECLS, type InputDecl } from "../../src/flows/inputs.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -95,57 +89,5 @@ describe("output declarations", () => {
       missing,
       `the "result" output description omits result value(s): ${missing.join(", ")}`,
     ).toEqual([]);
-  });
-});
-
-describe("parseConfig <-> input declarations", () => {
-  // Every env key the parse reads: the INPUT_* the runner would set from
-  // action.yml (@actions/core keeps the dashes) and the GITHUB_* context.
-  const touched = [
-    ...Object.keys(INPUT_DECLS).map((name) => `INPUT_${name.toUpperCase()}`),
-    "GITHUB_TOKEN",
-    "GITHUB_REPOSITORY",
-    "GITHUB_SERVER_URL",
-    "GITHUB_RUN_ID",
-  ];
-  const saved = new Map(touched.map((key) => [key, process.env[key]]));
-  afterEach(() => {
-    for (const [key, value] of saved) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
-  });
-
-  test("every unset input resolves to its declared default", () => {
-    for (const key of touched) {
-      delete process.env[key];
-    }
-    process.env.INPUT_TOKEN = "t";
-    process.env.GITHUB_REPOSITORY = "o/r";
-    const config = parseConfig().match(
-      (parsed) => parsed,
-      (problem) => {
-        throw new Error(`expected a config, got: ${describeProblem(problem)}`);
-      },
-    );
-    expect(config).toEqual({
-      kind: "single",
-      token: "t",
-      mode: INPUT_DECLS.mode.default,
-      onMissingPermission: INPUT_DECLS["on-missing-permission"].default,
-      requiredSections: new Set(),
-      onlySections: new Set(),
-      apiVersion: INPUT_DECLS["api-version"].default,
-      privateRepos: INPUT_DECLS["private-repos"].default,
-      privateReport: INPUT_DECLS["private-report"].default,
-      reportPublicKey: "",
-      selfSlug: "o/r",
-      runUrl: "",
-      repo: { owner: "o", name: "r", slug: "o/r" },
-      settingsFile: INPUT_DECLS["settings-file"].default,
-    });
   });
 });

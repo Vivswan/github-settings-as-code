@@ -10,6 +10,7 @@
 
 import { RERUN_ADVICE } from "./github/api.js";
 import { isPlainObject } from "./plain-data.js";
+import type { SectionKey } from "./schema.js";
 
 /** Names as an error message lists them: each quoted, comma-separated. */
 export function quoteList(names: readonly string[]): string {
@@ -70,7 +71,6 @@ export type Problem =
       }>;
       readonly known: readonly string[];
     }
-  | { readonly code: "input-required-sections-excluded"; readonly excluded: readonly string[] }
   | { readonly code: "input-report-key-unused"; readonly channel: string }
   | { readonly code: "input-report-key-missing" }
   | { readonly code: "input-report-key-invalid"; readonly reason: string }
@@ -162,6 +162,8 @@ export type Problem =
       readonly first: number;
       readonly second: number;
     }
+  // The section selection
+  | { readonly code: "required-sections-excluded"; readonly excluded: readonly SectionKey[] }
   // The run flows
   | { readonly code: "artifact-uploader-missing" }
   | {
@@ -327,7 +329,7 @@ export function describeProblem(problem: Problem): string {
       return problem.unknown
         .map((unknown) => describeUnknownSectionInput(unknown, problem.known))
         .join("; ");
-    case "input-required-sections-excluded": {
+    case "required-sections-excluded": {
       const one = problem.excluded.length === 1;
       const [noun, pronoun] = one ? ["entry", "it"] : ["entries", "them"];
       return (

@@ -122,8 +122,7 @@ async function processTarget(ctx: {
         settings: injected.settings,
         mode: cfg.mode,
         onMissingPermission: cfg.onMissingPermission,
-        requiredSections: cfg.requiredSections,
-        onlySections: cfg.onlySections,
+        sections: cfg.sections,
         secretSource,
       },
       channel.io,
@@ -170,7 +169,7 @@ async function processTarget(ctx: {
   const validated = validateSettingsDoc(
     parsed.value,
     read.sourceLabel,
-    cfg.onlySections,
+    cfg.sections.only,
     channel.unprefixed,
   );
   if (validated.isErr()) {
@@ -287,7 +286,7 @@ export function runMulti(
     let defaults: ValidatedSettings | null = null;
     if (cfg.defaultsFile) {
       const doc = yield* readSettingsFile(cfg.defaultsFile, "defaults-file");
-      defaults = yield* validateSettingsDoc(doc, cfg.defaultsFile, cfg.onlySections, io);
+      defaults = yield* validateSettingsDoc(doc, cfg.defaultsFile, cfg.sections.only, io);
     }
 
     let central: CentralTarget[] = [];

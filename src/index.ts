@@ -49,6 +49,7 @@ export {
   validateSettingsDoc,
   worstOf,
 } from "./engine/orchestrate.js";
+export { SectionSelection } from "./engine/section-selection.js";
 // The run flows
 export {
   concludeMerge,
@@ -58,6 +59,21 @@ export {
   MERGE_RESULT,
   type RunFlowConfig,
 } from "./flows/deliver.js";
+export {
+  type ConfigEnv,
+  DEFAULT_PRIVATE_REPOS,
+  FILTER_INPUTS,
+  INPUT_DECLS,
+  type InputDecl,
+  type InputName,
+  type InputReader,
+  MERGE_INPUTS,
+  MERGE_REJECTED_INPUTS,
+  MODES,
+  type Mode,
+  parseConfig,
+  type RunConfig,
+} from "./flows/inputs.js";
 export { foldLayers, readLayerFiles } from "./flows/layers.js";
 export {
   applyRepository,

@@ -5,6 +5,7 @@ import {
   parseRepoSlug,
   runMulti,
   runSingle,
+  SectionSelection,
   type SingleConfig,
 } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
@@ -16,8 +17,7 @@ const cfg = (overrides: Partial<SingleConfig> = {}): SingleConfig => ({
   settingsFile: "test/fixtures/single.yml",
   mode: "check",
   onMissingPermission: "fail",
-  requiredSections: new Set(),
-  onlySections: new Set(),
+  sections: SectionSelection.ALL,
   privateRepos: "show",
   privateReport: "none",
   reportPublicKey: "",

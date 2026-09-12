@@ -6,9 +6,9 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
-import type { InputDecl } from "../../src/action/inputs.js";
-import { INPUT_DECLS } from "../../src/action/inputs.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
+import type { InputDecl } from "../../src/flows/inputs.js";
+import { INPUT_DECLS } from "../../src/flows/inputs.js";
 import { UNDECLARED_POLICY_SECTIONS, type UndeclaredPolicySection } from "../../src/schema.js";
 import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
