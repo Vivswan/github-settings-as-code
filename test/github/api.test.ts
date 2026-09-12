@@ -155,9 +155,9 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
 
   test("a 429 is recovered by the throttling plugin under the immediate scheduler the knob selects", async () => {
     // The retry plugin never sees a 429 (doNotRetry) and would ignore Retry-After if it did; only the throttling plugin's callback writes this
-    // trace line, so the line pins which plugin owned the recovery. At 5ms units the plugin asks for a 60-unit wait, a real 300ms under
-    // timers; finishing well under that proves the knob selected the immediate scheduler.
-    process.env.RETRY_BASE_MS = "5";
+    // trace line, so the line pins which plugin owned the recovery. At 50ms units the plugin asks for a 60-unit wait, a real 3s under timers;
+    // finishing within 1s proves the knob selected the immediate scheduler, with room for a loaded machine.
+    process.env.RETRY_BASE_MS = "50";
     const state = stubFetch([secondaryLimit("60"), okJson]);
     const trace = traceIo();
     const started = Date.now();
@@ -167,8 +167,30 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
     expect(trace.lines).toContain(
       `secondary rate limit on GET /rl; retry 1/${MAX_RETRIES} after 60s`,
     );
-    expect(Date.now() - started).toBeLessThan(150);
-  });
+    expect(Date.now() - started).toBeLessThan(1000);
+  }, 10_000); // Lets a broken (timer-paced, ~3s) run reach the elapsed assertion.
+
+  test("each client is paced by its own scheduler's groups, whichever scheduler came first", async () => {
+    // The plugin's shared groups are module singletons built from the first client's scheduler unless every group is passed in; the
+    // notification group spaces issue creates by 3s under timers, so two creates per client pin whose groups paced it.
+    const twoIssueCreates = async (scheduler: Scheduler) => {
+      stubFetch([() => new Response('{"number":1}', { status: 201 })]);
+      const client = new GithubApi({
+        token: "t",
+        io: traceIo().io,
+        baseUrl: "https://api.test",
+        retryBaseMs: 1,
+        scheduler,
+      });
+      const started = Date.now();
+      await client.tryRequest("POST", "/repos/o/r/issues", { title: "a" });
+      await client.tryRequest("POST", "/repos/o/r/issues", { title: "b" });
+      return Date.now() - started;
+    };
+    expect(await twoIssueCreates(IMMEDIATE_SCHEDULER)).toBeLessThan(1000);
+    expect(await twoIssueCreates(TIMERS_SCHEDULER)).toBeGreaterThanOrEqual(2500);
+    expect(await twoIssueCreates(IMMEDIATE_SCHEDULER)).toBeLessThan(1000);
+  }, 20_000);
 
   test("the scheduler alone decides whether Retry-After is slept: immediate at production units, timers at knob units", async () => {
     const recover = async (
