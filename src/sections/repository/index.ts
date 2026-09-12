@@ -181,7 +181,6 @@ type _SnapshotPatchFieldsComplete = MustBeNever<
   Exclude<keyof RepoPatchBody, (typeof SNAPSHOT_PATCH_FIELDS)[number] | "name">
 >;
 
-/** The nested security_and_analysis object as the PATCH body accepts it. */
 type SecurityAndAnalysisPatch = NonNullable<RepoPatchBody["security_and_analysis"]>;
 
 /** A nested key the API accepts (see the coverage notes) that the descriptor's PATCH body omits. */

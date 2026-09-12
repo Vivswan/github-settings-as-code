@@ -1,0 +1,65 @@
+name: rulesets-snapshot-bypass-hidden
+description: "mode: snapshot under a read-grade token, whose ruleset GETs omit bypass_actors. An entry without that key would clear the bypass list on the next full-payload update, so every repository ruleset is left out with a note and the section writes the empty keep wrapper, never a false 'nothing exists'; the organization's inherited ruleset is a note too. The written file, fed back to a check run against the same state, reads clean without a write."
+settings: {}
+live_state:
+  rulesets:
+    - id: 41
+      name: build
+      source_type: Repository
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["refs/heads/build"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors: []
+    - id: 42
+      name: protect-main
+      source_type: Repository
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
+    - id: 900
+      name: org-baseline
+      source_type: Organization
+      target: branch
+      enforcement: active
+      rules:
+        - type: non_fast_forward
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: rulesets
+token_permissions:
+  administration: read
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    rulesets: snapshot
+  snapshot:
+    rulesets:
+      _undeclared: keep
+      entries: []
+  stdout_contains:
+    - "rulesets[org-baseline]: inherited from the organization"
+    - "rulesets[build]: bypass_actors is not visible to this token"
+    - "rulesets[protect-main]: bypass_actors is not visible to this token"
+    - "so the ruleset is left out of the snapshot (kept undeclared)"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

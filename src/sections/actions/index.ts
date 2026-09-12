@@ -246,7 +246,6 @@ export function endpointRouted<K extends keyof ActionsConfig, N extends string>(
   };
 }
 
-/** The live body of one routed key projected onto its slice of the section shape. */
 function sliceOf<K extends keyof ActionsConfig>(key: K): (live: unknown) => ActionsConfig[K] {
   const slice: z.ZodType = ActionsConfig.shape[key];
   return (live) => projectOntoSchema(slice, live) as ActionsConfig[K];
