@@ -275,7 +275,14 @@ const MANIFEST = "package.json";
 
 /** The scripts npm's git fetcher (pacote) takes as a signal to run `npm install --include=dev` and the prepare
  * lifecycle in a `github:` dependency's checkout; the packaged commit ships the build already. */
-const PREPARATION_SCRIPTS = ["prepare", "prepack", "build", "preinstall", "install", "postinstall"];
+export const PREPARATION_SCRIPTS = [
+  "prepare",
+  "prepack",
+  "build",
+  "preinstall",
+  "install",
+  "postinstall",
+];
 
 /** sourceSha's package.json without its preparation scripts, written to the object store; null when it has none. */
 function strippedManifestBlob(cwd: string, sourceSha: string): string | null {
@@ -1290,9 +1297,9 @@ export function stablePublishVerdict(version: string, packument: Packument | nul
     return { publish: false, version, reason: `${version} is already on the registry` };
   }
   const latest = packument["dist-tags"].latest;
-  // A pre-release on latest is a state the hand bootstrap can leave behind (npm's docs are silent on what a
-  // package's FIRST publish under --tag does to latest). A release must take latest over from it, so only a newer
-  // RELEASE holds one back; an absent latest publishes too.
+  // The hand bootstrap leaves a pre-release on latest: a packument always carries that key (npm/registry
+  // REGISTRY-API.md, "dist-tags: an object with at least one key, latest"), so a first publish gets it whatever
+  // --tag asked for. A release must take latest over from it, so only a newer RELEASE holds one back.
   if (
     latest !== undefined &&
     parseMinted(latest).pre === null &&

@@ -25,6 +25,7 @@ import {
   nextPublishVerdict,
   npmVerdict,
   type Packument,
+  PREPARATION_SCRIPTS,
   type PublishVerdict,
   packageRelease,
   prereleaseVersion,
@@ -154,13 +155,12 @@ function stageBuild(cwd: string): void {
   git(cwd, "add", "-f", "--", "lib/index.js", "lib/pkg");
 }
 
-/** The fixture's package.json as the real one is shaped: preparation scripts (prepare, build) beside one that is not. */
+/** The fixture's package.json: one of each script pacote takes as a preparation trigger, beside one that is not. */
 function manifestJson(version: string, scripts: Record<string, string> = FIXTURE_SCRIPTS): string {
   return `${JSON.stringify({ name: "@scope/pkg", version, scripts }, null, 2)}\n`;
 }
 const FIXTURE_SCRIPTS = {
-  prepare: "lefthook install || true",
-  build: "bun run build:lib",
+  ...Object.fromEntries(PREPARATION_SCRIPTS.map((name) => [name, `echo ${name}`])),
   test: "bun test",
 };
 /** FIXTURE_SCRIPTS after the pipeline's strip: the preparation scripts gone, the rest kept. */
@@ -171,15 +171,16 @@ function stripPrepare(cwd: string): void {
   const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as {
     scripts?: Record<string, string>;
   };
-  delete pkg.scripts?.prepare;
-  delete pkg.scripts?.build;
+  for (const name of PREPARATION_SCRIPTS) {
+    delete pkg.scripts?.[name];
+  }
   write(cwd, "package.json", `${JSON.stringify(pkg, null, 2)}\n`);
   git(cwd, "add", "package.json");
 }
 
-/** Whether planted files include the library build, which only commits minted after the prepare strip carry; a
- * planted package.json says what the manifest is instead. */
-function carriesLibrary(files: Record<string, unknown>): boolean {
+/** Whether a planter should strip the manifest as the pipeline does: the files include the library build (only
+ * commits minted after the strip carry it) and no explicit package.json says what the manifest is instead. */
+function shouldStripManifest(files: Record<string, unknown>): boolean {
   return (
     Object.keys(files).some((file) => file.startsWith("lib/pkg/")) && !("package.json" in files)
   );
@@ -746,7 +747,7 @@ describe("packageRelease", () => {
       write(planter, file, content);
       git(planter, "add", "-f", file);
     }
-    if (carriesLibrary(files)) {
+    if (shouldStripManifest(files)) {
       stripPrepare(planter);
     }
     git(planter, "commit", "--quiet", "--allow-empty", ...message.flatMap((m) => ["-m", m]));
@@ -1957,7 +1958,7 @@ describe("advanceBuild", () => {
       }
       git(planter, "add", "-f", file);
     }
-    if (carriesLibrary(files)) {
+    if (shouldStripManifest(files)) {
       stripPrepare(planter);
     }
     const paragraphs = message.flatMap((paragraph) => ["-m", paragraph]);
@@ -2244,6 +2245,19 @@ describe("advanceBuild", () => {
     expect(() => advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha })).toThrow(error);
     expect(buildTip(fx)).toBe(planted);
     expect(remoteRef(fx, "refs/tags/latest")).toBe(latestBefore);
+  });
+
+  test("the preparation triggers are the six pacote reads before it prepares a git dependency", () => {
+    // Pinned as a literal: the fixture derives from the exported list, so a name dropped there would vanish
+    // from the fixture too and the manifest test below could not see it go.
+    expect(PREPARATION_SCRIPTS).toEqual([
+      "prepare",
+      "prepack",
+      "build",
+      "preinstall",
+      "install",
+      "postinstall",
+    ]);
   });
 
   test("a chain commit's package.json is the source's without its preparation scripts, and a rerun holds it there", () => {
