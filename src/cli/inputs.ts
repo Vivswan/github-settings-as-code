@@ -99,7 +99,7 @@ export function exposedInputs(): InputName[] {
 }
 
 /** `text` as the declaration spells it; a reworded declaration fails here rather than leave the help stale. */
-function declared(input: InputName, text: string): string {
+export function declared(input: InputName, text: string): string {
   if (!INPUT_DECLS[input].description.includes(text)) {
     throw new Error(
       `BUG: the ${input} input's description no longer says "${text}"; reword the CLI's clause with it`,

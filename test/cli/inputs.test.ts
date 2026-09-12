@@ -13,6 +13,7 @@ import { generateX25519Identity, identityToRecipient } from "age-encryption";
 import { ARTIFACT_REFUSED, describeCliProblem } from "../../src/cli/commands.js";
 import {
   CLI_UNSUPPORTED_INPUTS,
+  declared,
   exposedInputs,
   INIT_SUBCOMMAND,
   inputDescription,
@@ -31,6 +32,7 @@ import {
   type InputName,
   MODES,
   type Mode,
+  PRIVATE_REPORT_CHANNELS,
   parseConfig,
   parseReposInput,
   type RunConfig,
@@ -702,16 +704,35 @@ describe("the help text", () => {
     );
   });
 
-  test("the private-report flag's help offers only the channels the CLI accepts", () => {
-    // No subcommand exposes report-public-key, so the artifact channel leaves the value list too.
+  test("the private-report flag's help offers exactly the channels the CLI accepts", () => {
+    // The CLI's refusal is the source: its value leaves the list, its allowed channels stay.
+    if (ARTIFACT_REFUSED.code !== "input-unsupported-value") {
+      throw new Error("ARTIFACT_REFUSED no longer names the refused value");
+    }
     const check = inputDescription("private-report", modeSubcommand("check"));
-    expect(check).toStartWith("none (default), issue, or issue-on-failure. ");
-    expect(check).not.toContain("artifact");
+    const opening = check.slice(0, check.indexOf(". ") + 1);
+    const named: string[] = PRIVATE_REPORT_CHANNELS.filter((channel) =>
+      new RegExp(`(?<![\\w-])${channel}(?![\\w-])`).test(opening),
+    );
+    expect([...named]).toEqual([...ARTIFACT_REFUSED.allowed]);
+    // The derivation admits a stray extra word; the exact sentence does not.
+    expect(opening).toBe("none (default), issue, or issue-on-failure.");
+    expect(check).not.toContain(ARTIFACT_REFUSED.value);
     // With the key flag present the declaration stands whole, so the removal is the clause's alone.
     const withKey = { ...modeSubcommand("check"), flags: new Set(exposedInputs()) };
     withKey.flags.add("report-public-key");
     expect(inputDescription("private-report", withKey)).toBe(
       INPUT_DECLS["private-report"].description,
+    );
+  });
+
+  test("declared() refuses a clause the declaration no longer carries", () => {
+    // The negative control for the load-time pin: a stale clause must throw, not pass through.
+    expect(() => declared("repository", "a sentence the declaration never had")).toThrow(
+      /^BUG: the repository input's description no longer says "a sentence the declaration never had"/,
+    );
+    expect(declared("repository", "Target repository (owner/name).")).toBe(
+      "Target repository (owner/name).",
     );
   });
 });
