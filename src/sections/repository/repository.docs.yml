@@ -18,7 +18,15 @@ coverage:
       PATCH /repos/{owner}/{repo} verbatim passthrough (src/sections/repository/index.ts). Any field
       GitHub adds to the repo PATCH body, now or in any release to come, works day one with no
       action update, the forward-compatibility tenet's strongest case. Check mode = subsetDiff of
-      declared keys against GET /repos.
+      declared keys against GET /repos. Snapshot reads back every documented PATCH field the GET
+      reports except `name` (the repository's identity; a reused file would rename its target) and
+      any null field, plus has_discussions; inside security_and_analysis only the sub-keys the PATCH
+      accepts (dependabot_security_updates is enable_automated_security_fixes' own state); the GET's server fields (ids, urls, counts,
+      has_downloads) are not PATCHable and fall away. Topics are read back when any are set, each
+      readable toggle as GitHub reports it (an owner-enforced immutable-releases toggle is noted as
+      immovable; when every toggle GET answers 404 the four are left out under a note, since a
+      fine-grained token missing the grant is answered the same way), and the two GraphQL keys; Git LFS has no read and is noted, and a toggle or
+      GraphQL read the token is denied is noted and left out.
   - area: >-
       [security_and_analysis](https://docs.github.com/en/rest/repos/repos) (GitHub Advanced
       Security, secret scanning, push protection, and any nested toggle GitHub adds)

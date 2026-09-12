@@ -12,6 +12,7 @@ import {
   plainData,
   type SectionPlan,
 } from "../contract/plan.js";
+import { projectOntoSchema, readOrNote } from "../shared/snapshot-helpers.js";
 import { ActionsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -181,9 +182,12 @@ function sameClaimKeyOrder(declared: readonly string[], live: readonly string[])
 // subsetDiff as passthrough.
 const LiveOidcSub = z.looseObject({ include_claim_keys: z.array(z.string()).nullish() });
 
+/** The base-permissions keys as the primary read reports them; the allowlist read hangs off the policy. */
+type BasePermissions = Pick<ActionsConfig, "enabled" | "allowed_actions">;
+
 /**
- * The routing table holds the handler itself, so a routed key without a handler cannot exist.
- * A function-valued property, not method shorthand, so the per-key value types check strictly.
+ * The routing table holds the handlers themselves, so a routed key without one cannot exist.
+ * Function-valued properties, not method shorthand, so the per-key value types check strictly.
  */
 interface RoutedDestination<K extends keyof ActionsConfig> {
   plan: (
@@ -192,6 +196,16 @@ interface RoutedDestination<K extends keyof ActionsConfig> {
     declared: NonNullable<ActionsConfig[K]>,
     plan: ActionsPlan,
   ) => Promise<void>;
+  /**
+   * Read the live state back as the settings file would declare it; undefined when none applies.
+   * A destination over several GETs notes a denied one itself, so its siblings survive.
+   */
+  snapshot: (
+    ctx: ActionsContext,
+    section: SectionMeta,
+    base: BasePermissions,
+    notes: string[],
+  ) => Promise<ActionsConfig[K]>;
 }
 
 /** `N` is inferred from the GET alone, so a PUT of another name does not compile. */
@@ -204,6 +218,8 @@ export function endpointRouted<K extends keyof ActionsConfig, N extends string>(
     /** The change line apply reports after the PUT lands. */
     applied: string;
     describe?: string;
+    /** The GET body as the settings file declares the key (the inverse of `body`). */
+    read: (live: unknown) => ActionsConfig[K];
   } & (NonNullable<ActionsConfig[K]> extends Record<string, unknown>
     ? { body?: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown> }
     : { body: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown> }),
@@ -226,7 +242,14 @@ export function endpointRouted<K extends keyof ActionsConfig, N extends string>(
         });
       }
     },
+    snapshot: async (ctx) => wiring.read(await ctx.read[wiring.get].call()),
   };
+}
+
+/** The live body of one routed key projected onto its slice of the section shape. */
+function sliceOf<K extends keyof ActionsConfig>(key: K): (live: unknown) => ActionsConfig[K] {
+  const slice: z.ZodType = ActionsConfig.shape[key];
+  return (live) => projectOntoSchema(slice, live) as ActionsConfig[K];
 }
 
 // Every DECLARED key names its destination, so the mapped `satisfies` makes a schema field with no
@@ -255,6 +278,15 @@ const KEY_DESTINATION = {
         });
       }
     },
+    // The allowlist exists only under the "selected" policy (the GET 409s otherwise), so no
+    // other policy reads it: an allowlist beside another policy is a document the shape rejects.
+    snapshot: async (ctx, _section, base) => {
+      if (base.allowed_actions !== "selected") {
+        return undefined;
+      }
+      const probe = await ctx.read.getSelected.probeAbsent();
+      return "missing" in probe ? undefined : sliceOf("selected_actions")(probe.data);
+    },
   },
   default_workflow_permissions: "workflow",
   can_approve_pull_request_reviews: "workflow",
@@ -264,6 +296,7 @@ const KEY_DESTINATION = {
     label: "actions.access",
     applied: "applied workflows access level",
     body: (value) => ({ access_level: value }),
+    read: (live) => sliceOf("access_level")((live as { access_level?: unknown }).access_level),
   }),
   artifact_and_log_retention: endpointRouted({
     get: "getRetention",
@@ -271,6 +304,7 @@ const KEY_DESTINATION = {
     label: "actions.artifact_and_log_retention",
     applied: "applied artifact and log retention",
     describe: "setting the artifact and log retention window",
+    read: sliceOf("artifact_and_log_retention"),
   }),
   cache: {
     plan: async (ctx, _section, declared, plan) => {
@@ -292,6 +326,20 @@ const KEY_DESTINATION = {
           });
         }
       }
+    },
+    // Each limit is its own GET, and a 403 on one can be an org-managed policy on that limit alone,
+    // so a denied limit is noted by key while the other still reads back.
+    snapshot: async (ctx, _section, _base, notes) => {
+      const limits: Record<string, unknown> = {};
+      for (const [key, wiring] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
+        const read = await readOrNote(notes, `actions.cache.${key}`, () =>
+          ctx.read[wiring.get].call(),
+        );
+        if (!("denied" in read)) {
+          Object.assign(limits, read.value);
+        }
+      }
+      return Object.keys(limits).length === 0 ? undefined : sliceOf("cache")(limits);
     },
   },
   oidc_customization_sub: {
@@ -325,6 +373,10 @@ const KEY_DESTINATION = {
         });
       }
     },
+    snapshot: async (ctx, section) =>
+      sliceOf("oidc_customization_sub")(
+        parseLive(section, ENDPOINTS.getOidcSub, LiveOidcSub, await ctx.read.getOidcSub.call()),
+      ),
   },
   fork_pr_contributor_approval: endpointRouted({
     get: "getForkPrApproval",
@@ -332,6 +384,7 @@ const KEY_DESTINATION = {
     label: "actions.fork_pr_contributor_approval",
     applied: "applied the fork PR contributor approval policy",
     describe: "setting the fork PR contributor approval policy",
+    read: sliceOf("fork_pr_contributor_approval"),
   }),
   fork_pr_workflows_private_repos: endpointRouted({
     get: "getForkPrPrivate",
@@ -339,6 +392,7 @@ const KEY_DESTINATION = {
     label: "actions.fork_pr_workflows_private_repos",
     applied: "applied the private-repo fork PR workflow settings",
     describe: "setting the private-repo fork PR workflow settings",
+    read: sliceOf("fork_pr_workflows_private_repos"),
   }),
 } satisfies { [K in keyof ActionsConfig]-?: "base" | "workflow" | RoutedDestination<K> };
 
@@ -367,6 +421,20 @@ async function planRouted<K extends RoutedKey>(
     return;
   }
   await ROUTED_DESTINATIONS[key].plan(ctx, section, declared, plan);
+}
+
+/** Read one routed key back; generic so the handler and the value stay correlated to one key. */
+async function snapshotRouted<K extends RoutedKey>(
+  key: K,
+  ctx: ActionsContext,
+  section: SectionMeta,
+  base: BasePermissions,
+  notes: string[],
+): Promise<ActionsConfig[K]> {
+  const read = await readOrNote(notes, `actions.${key}`, () =>
+    ROUTED_DESTINATIONS[key].snapshot(ctx, section, base, notes),
+  );
+  return "denied" in read ? undefined : read.value;
 }
 
 function keysTo(destination: "base" | "workflow"): Set<string> {
@@ -459,5 +527,25 @@ export const actionsSection = {
       await planRouted(key, ctx, this, desired, plan);
     }
     return plan;
+  },
+  // The base permissions are the primary read, so their denial classifies the section; every
+  // other key the token cannot read is a note naming it.
+  async snapshot(ctx) {
+    const notes: string[] = [];
+    const base = projectOntoSchema(ActionsConfig, await ctx.read.getPermissions.call());
+    const value: Record<string, unknown> = { ...base };
+    const workflow = await readOrNote(notes, `actions.${[...WORKFLOW_KEYS].join("/")}`, () =>
+      ctx.read.getWorkflow.call(),
+    );
+    if (!("denied" in workflow)) {
+      Object.assign(value, projectOntoSchema(ActionsConfig, workflow.value));
+    }
+    for (const key of ROUTED_KEYS) {
+      const read = await snapshotRouted(key, ctx, this, base, notes);
+      if (read !== undefined) {
+        value[key] = read;
+      }
+    }
+    return { value: value as ActionsConfig, notes };
   },
 } satisfies SectionModule<"actions", typeof ENDPOINTS>;

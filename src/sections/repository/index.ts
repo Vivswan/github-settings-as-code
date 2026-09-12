@@ -1,5 +1,7 @@
+import type { operations } from "@octokit/openapi-types";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import type { MustBeNever } from "../../types.js";
 import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, type GraphqlVariablesOf, graphqlOp } from "../contract/graphql.js";
 import { parseLive } from "../contract/live.js";
@@ -8,6 +10,7 @@ import {
   requirePlainMapping,
   type SectionMeta,
   type SectionModule,
+  sectionGrant,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
@@ -17,6 +20,7 @@ import {
   plainData,
   type SectionPlan,
 } from "../contract/plan.js";
+import { readOrNote } from "../shared/snapshot-helpers.js";
 import { RepositoryConfig } from "./schema.js";
 
 export function normalizeTopics(raw: unknown): string[] {
@@ -128,6 +132,97 @@ const ENDPOINTS = {
 
 // GitHub may return topics as null or omit them; the rest of the body rides into subsetDiff as passthrough.
 const LiveRepository = z.looseObject({ topics: z.array(z.string()).nullish() });
+
+/** The repo PATCH body as GitHub documents it: the fields the passthrough can send back. */
+type RepoPatchBody = NonNullable<
+  operations["repos/update"]["requestBody"]
+>["content"]["application/json"];
+
+/** PATCH fields the API accepts (verified live) that its OpenAPI descriptor omits, so the pin cannot see them. */
+type UndocumentedPatchField = "has_discussions";
+
+/**
+ * The GET also reports what nobody can PATCH (ids, urls, counts, has_downloads) and the passthrough
+ * slice cannot tell those apart, so the PATCH fields are spelled out and pinned below.
+ * `name` stays out: a settings file reused on another repository would rename it.
+ */
+const SNAPSHOT_PATCH_FIELDS = [
+  "description",
+  "homepage",
+  "private",
+  "visibility",
+  "security_and_analysis",
+  "has_issues",
+  "has_projects",
+  "has_wiki",
+  "has_discussions",
+  "has_pull_requests",
+  "pull_request_creation_policy",
+  "is_template",
+  "default_branch",
+  "allow_squash_merge",
+  "allow_merge_commit",
+  "allow_rebase_merge",
+  "allow_auto_merge",
+  "delete_branch_on_merge",
+  "allow_update_branch",
+  "use_squash_pr_title_as_default",
+  "squash_merge_commit_title",
+  "squash_merge_commit_message",
+  "merge_commit_title",
+  "merge_commit_message",
+  "archived",
+  "allow_forking",
+  "web_commit_signoff_required",
+] as const satisfies readonly (keyof RepoPatchBody | UndocumentedPatchField)[];
+
+/** A PATCH field octokit documents that the list above neither reads back nor leaves out by name. */
+type _SnapshotPatchFieldsComplete = MustBeNever<
+  Exclude<keyof RepoPatchBody, (typeof SNAPSHOT_PATCH_FIELDS)[number] | "name">
+>;
+
+/** The nested security_and_analysis object as the PATCH body accepts it. */
+type SecurityAndAnalysisPatch = NonNullable<RepoPatchBody["security_and_analysis"]>;
+
+/** A nested key the API accepts (see the coverage notes) that the descriptor's PATCH body omits. */
+type UndocumentedSecurityField = "secret_scanning_validity_checks";
+
+/**
+ * The GET's dependabot_security_updates is the automated-security-fixes toggle, already emitted from
+ * its own endpoint, and the PATCH rejects an unknown sub-key, so the nested object is pinned too.
+ */
+const SECURITY_AND_ANALYSIS_PATCH_FIELDS = [
+  "advanced_security",
+  "code_security",
+  "secret_scanning",
+  "secret_scanning_push_protection",
+  "secret_scanning_ai_detection",
+  "secret_scanning_non_provider_patterns",
+  "secret_scanning_delegated_alert_dismissal",
+  "secret_scanning_delegated_bypass",
+  "secret_scanning_delegated_bypass_options",
+  "secret_scanning_validity_checks",
+] as const satisfies readonly (keyof SecurityAndAnalysisPatch | UndocumentedSecurityField)[];
+
+/** A nested PATCH sub-key octokit documents that the list above does not read back. */
+type _SecurityAndAnalysisFieldsComplete = MustBeNever<
+  Exclude<keyof SecurityAndAnalysisPatch, (typeof SECURITY_AND_ANALYSIS_PATCH_FIELDS)[number]>
+>;
+
+/** The live security_and_analysis object narrowed to its PATCHable sub-keys; undefined when none. */
+function snapshotSecurityAndAnalysis(live: unknown): Record<string, unknown> | undefined {
+  if (typeof live !== "object" || live === null || Array.isArray(live)) {
+    return undefined;
+  }
+  const out: Record<string, unknown> = {};
+  for (const field of SECURITY_AND_ANALYSIS_PATCH_FIELDS) {
+    const value = (live as Record<string, unknown>)[field];
+    if (value !== undefined && value !== null) {
+      out[field] = value;
+    }
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
+}
 
 const FEATURES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   name: "RepositoryFeatures",
@@ -337,6 +432,12 @@ const GRAPHQL_ROUTED_KEYS = [
   },
 ] as const satisfies readonly RoutedKey[];
 
+/** Why a routed field's live value cannot be read into the settings vocabulary. */
+function unreadableRoutedValue(entry: RoutedKey, raw: unknown, opName: string): string {
+  const hint = entry.unreadableHint ? `; ${entry.unreadableHint}` : "";
+  return `GRAPHQL ${opName} returned ${entry.field} ${JSON.stringify(raw)}, which this section cannot read as a repository.${entry.key} value${hint}`;
+}
+
 /**
  * Strictness is scoped to the DECLARED keys: an unreadable value (the SDL-nullable policy, a future
  * enum member) must fail loudly for a key the file declares and must not fail a run that never declared it.
@@ -350,9 +451,8 @@ function decodeRoutedFields(
   for (const entry of routed) {
     const decoded = entry.decode(fields[entry.field]);
     if (decoded === undefined) {
-      const hint = entry.unreadableHint ? `; ${entry.unreadableHint}` : "";
       throw new Error(
-        `repository: GRAPHQL ${opName} returned ${entry.field} ${JSON.stringify(fields[entry.field])}, which this section cannot read as a repository.${entry.key} value${hint}. Drop the key, or update the action if GitHub's vocabulary moved`,
+        `repository: ${unreadableRoutedValue(entry, fields[entry.field], opName)}. Drop the key, or update the action if GitHub's vocabulary moved`,
       );
     }
     values[entry.key] = decoded;
@@ -365,17 +465,22 @@ interface LiveRoutedState {
   values: Record<string, unknown>;
 }
 
-async function fetchRoutedState(
-  ctx: RepositoryContext,
-  routed: readonly RoutedKey[],
-): Promise<LiveRoutedState> {
-  const data = await ctx.read.featuresQuery.call(repoVariables(ctx));
+/** The Repository object of a features read, with the node id the mutation addresses. */
+function repositoryNode(data: Record<string, unknown>): Record<string, unknown> & { id: string } {
   const repository = (data as { repository?: Record<string, unknown> }).repository;
   if (!repository || typeof repository.id !== "string") {
     throw new Error(
       `repository: GRAPHQL ${FEATURES_QUERY.name} returned no repository object with an id, so the ${GRAPHQL_ROUTED_KEYS.map((entry) => entry.key).join("/")} state cannot be read. Check the token's repository access`,
     );
   }
+  return repository as Record<string, unknown> & { id: string };
+}
+
+async function fetchRoutedState(
+  ctx: RepositoryContext,
+  routed: readonly RoutedKey[],
+): Promise<LiveRoutedState> {
+  const repository = repositoryNode(await ctx.read.featuresQuery.call(repoVariables(ctx)));
   return { id: repository.id, values: decodeRoutedFields(repository, routed, FEATURES_QUERY.name) };
 }
 
@@ -552,5 +657,82 @@ export const repositorySection = {
       }
     }
     return plan;
+  },
+  // A null PATCH field is GitHub's "unset", so it is left out rather than declared as null.
+  async snapshot(ctx) {
+    const notes: string[] = [];
+    const live = parseLive(this, ENDPOINTS.get, LiveRepository, await ctx.read.get.call());
+    const value: Record<string, unknown> = {};
+    for (const field of SNAPSHOT_PATCH_FIELDS) {
+      const read =
+        field === "security_and_analysis" ? snapshotSecurityAndAnalysis(live[field]) : live[field];
+      if (read !== undefined && read !== null) {
+        value[field] = read;
+      }
+    }
+    if (live.topics !== undefined && live.topics !== null && live.topics.length > 0) {
+      value.topics = [...live.topics];
+    }
+    const probes: Array<{
+      toggle: ReadableToggle;
+      live: LiveToggle | undefined;
+      concealable: boolean;
+    }> = [];
+    for (const toggle of READABLE_TOGGLES) {
+      const read = await readOrNote(notes, `repository.${toggle.key}`, async () => {
+        const answer = await ctx.read[toggle.get].tryCall();
+        if ("error" in answer) {
+          // The declared 422 ("not applicable") is answered only to a granted token.
+          return { live: undefined, concealable: answer.error.status === 404 };
+        }
+        const live = parseLive(this, ENDPOINTS[toggle.get], toggle.live, answer.data);
+        return { live, concealable: false };
+      });
+      if (!("denied" in read)) {
+        probes.push({ toggle, ...read.value });
+      }
+    }
+    // The toggle GETs share one grant and answer 404 for "off", the same 404 a fine-grained token
+    // missing the grant is concealed behind. One other answer proves the grant; all 404s prove
+    // nothing, so the toggles are left out rather than written as off.
+    if (probes.length > 0 && probes.every((probe) => probe.concealable)) {
+      notes.push(
+        `repository.${probes.map((probe) => probe.toggle.key).join("/")}: every toggle GET answered 404, which reads as off but is also how a fine-grained token missing the grant is answered, so they are left out; if the token does ${sectionGrant(this)}, they are all off and can be declared false`,
+      );
+    } else {
+      for (const { toggle, live } of probes) {
+        const enabled = live === undefined ? false : toggle.isEnabled(live);
+        value[toggle.key] = enabled;
+        if (live !== undefined && toggle.isEnforced?.(live) === true) {
+          notes.push(
+            `repository.${toggle.key}: ${OWNER_ENFORCED}, so it reads back as ${enabled} but cannot be changed from the repository`,
+          );
+        }
+      }
+    }
+    for (const toggle of WRITE_ONLY_TOGGLES) {
+      notes.push(
+        `repository.${toggle.key}: GitHub exposes no endpoint to read ${toggle.label} back, so the snapshot leaves it out; declare it yourself to manage it`,
+      );
+    }
+    const routed = await readOrNote(
+      notes,
+      GRAPHQL_ROUTED_KEYS.map((entry) => `repository.${entry.key}`).join(" and "),
+      () => ctx.read.featuresQuery.call(repoVariables(ctx)),
+    );
+    if (!("denied" in routed)) {
+      const repository = repositoryNode(routed.value);
+      for (const entry of GRAPHQL_ROUTED_KEYS) {
+        const decoded = entry.decode(repository[entry.field]);
+        if (decoded === undefined) {
+          notes.push(
+            `repository.${entry.key}: ${unreadableRoutedValue(entry, repository[entry.field], FEATURES_QUERY.name)}, so the snapshot leaves it out`,
+          );
+          continue;
+        }
+        value[entry.key] = decoded;
+      }
+    }
+    return { value: value as RepositoryConfig, notes };
   },
 } satisfies SectionModule<"repository", typeof ENDPOINTS, typeof GRAPHQL_OPS>;

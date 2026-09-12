@@ -16,6 +16,11 @@ import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
+import {
+  knobbedSnapshot,
+  projectOntoSchema,
+  rejectLiveDuplicates,
+} from "../shared/snapshot-helpers.js";
 import { RulesetConfig } from "./schema.js";
 
 /**
@@ -60,20 +65,33 @@ const LiveRulesetSummary = z.looseObject({
   source_type: z.string().optional(),
 });
 
+type LiveRulesetSummary = z.infer<typeof LiveRulesetSummary>;
+
 const permission: SectionPermission = { repo: ["administration"] };
 
 /**
- * GitHub returns a ruleset's bypass_actors only to a token with write access to the ruleset
- * (Administration at write); any other GET omits the KEY, never `[]`. Returns the input itself when
- * nothing is hidden, so the caller can tell the two apart by identity.
+ * A summary this section may manage: anything not explicitly owned by another source (source_type
+ * is optional in the API type). Deletion is gated harder in plan(): only an explicit "Repository"
+ * is ever deleted, since a missing field is not proof.
+ */
+function ownedByRepository(summary: LiveRulesetSummary): boolean {
+  return (summary.source_type ?? "Repository") === "Repository";
+}
+
+const BYPASS_HIDDEN =
+  "bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset)";
+
+/** GitHub omits the bypass_actors KEY (never `[]`) from a GET the token lacks write access for. */
+function bypassActorsVisible(live: unknown): boolean {
+  return typeof live === "object" && live !== null && Object.hasOwn(live, "bypass_actors");
+}
+
+/**
+ * The declared ruleset minus a bypass_actors list the token cannot observe, so it reads as neither
+ * drift nor a phantom key. Returns the input itself when nothing is hidden, so the caller can tell.
  */
 function observableRuleset(ruleset: RulesetConfig, live: unknown): RulesetConfig {
-  const hidden =
-    Object.hasOwn(ruleset, "bypass_actors") &&
-    typeof live === "object" &&
-    live !== null &&
-    !Object.hasOwn(live, "bypass_actors");
-  if (!hidden) {
+  if (!Object.hasOwn(ruleset, "bypass_actors") || bypassActorsVisible(live)) {
     return ruleset;
   }
   const { bypass_actors: _hidden, ...visible } = ruleset;
@@ -145,10 +163,7 @@ export const rulesetsSection = {
       z.array(LiveRulesetSummary),
       await ctx.read.list.listAll(),
     );
-    // Anything not explicitly owned by another source is matched and updated (source_type is
-    // optional in the API type). Deletion is gated harder below: only a summary the API explicitly
-    // marks source_type "Repository" is ever deleted, since a missing field is not proof of ownership.
-    const repoRulesets = summaries.filter((r) => (r.source_type ?? "Repository") === "Repository");
+    const repoRulesets = summaries.filter(ownedByRepository);
     const idByName = new Map(repoRulesets.map((r) => [r.name, r.id]));
 
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
@@ -172,7 +187,7 @@ export const rulesetsSection = {
       const compared = observableRuleset(ruleset, live);
       if (compared !== ruleset) {
         plan.notes.push(
-          `rulesets[${ruleset.name}]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), so drift on it cannot be judged here; grant Administration write to check it`,
+          `rulesets[${ruleset.name}]: ${BYPASS_HIDDEN}, so drift on it cannot be judged here; grant Administration write to check it`,
         );
       }
       const drift = subsetDiff(compared, live, `rulesets[${ruleset.name}]`);
@@ -227,5 +242,47 @@ export const rulesetsSection = {
       plan.notes.push(undeclaredNote({ subject: `ruleset "${live.name}"`, action: "DELETE it" }));
     }
     return plan;
+  },
+  // A GET without the bypass_actors key means the token cannot see them; an entry without the
+  // key would erase them on the next full-payload PUT, so the ruleset stays undeclared (kept).
+  async snapshot(ctx) {
+    const summaries = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveRulesetSummary),
+      await ctx.read.list.listAll(),
+    );
+    const notes = summaries
+      .filter((summary) => !ownedByRepository(summary))
+      .map(
+        (summary) =>
+          `rulesets[${summary.name}]: inherited from the ${String(summary.source_type).toLowerCase()} (source_type "${summary.source_type}"), so it is not part of the repository's snapshot; manage it where it is defined`,
+      );
+    const owned = summaries.filter(ownedByRepository);
+    // plan() upserts by name, so two live rulesets under one name have no declarable form.
+    rejectLiveDuplicates(
+      this,
+      "ruleset",
+      owned,
+      (summary) => summary.name,
+      (summary) => `${summary.name} (id ${summary.id})`,
+    );
+    const entries: RulesetConfig[] = [];
+    for (const summary of owned) {
+      const live = await ctx.read.get.call({ params: { ruleset_id: String(summary.id) } });
+      if (!bypassActorsVisible(live)) {
+        notes.push(
+          `rulesets[${summary.name}]: ${BYPASS_HIDDEN}, and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); grant Administration write to read it back`,
+        );
+        continue;
+      }
+      entries.push(projectOntoSchema(RulesetConfig, live));
+    }
+    // Owned rulesets that were all left out still exist: an empty keep wrapper says so, where
+    // `undefined` would render as "nothing exists on the repository".
+    if (owned.length === 0) {
+      return { value: undefined, notes };
+    }
+    return { value: knobbedSnapshot(this, entries), notes };
   },
 } satisfies SectionModule<"rulesets", typeof ENDPOINTS>;
