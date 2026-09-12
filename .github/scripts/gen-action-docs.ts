@@ -376,7 +376,10 @@ function knobbedSections(): KnobbedSection[] {
   });
 }
 
-/** A block body's shape: its opening newline, then `lines` (a source over newline-terminated lines), an empty rendering's second newline, or nothing (a freshly placed region). */
+/**
+ * A block body's shape: its opening newline, then `lines` (a source over newline-terminated
+ * lines), an empty rendering's second newline, or nothing (a freshly placed region).
+ */
 function blockShape(lines: string): RegExp {
   return new RegExp(String.raw`^\n(?:${lines}|\n)?$`);
 }
@@ -400,8 +403,15 @@ const YAML_ENTRY_KEY = String.raw`  (?:${PLAIN_KEY}|${QUOTED_KEY}):\n`;
 /** A folded `description: >-` block at four spaces with its six-space lines, each starting on a word. */
 const YAML_DESCRIPTION = String.raw`    description: >-\n(?:      \S[^\n]*\n)+`;
 
-/** One gated-reads bullet in any form renderGatedReads() writes: a wholly gated section ("even the ... reads", its own or a named grant) or a partly gated one (routes named, "to verify what they return"). */
-const GATED_READ_BULLET = String.raw`- GitHub gates (?:even )?the [^\n]+ reads at write, so \x60[a-z_]+\x60 needs (?:its|the)(?: [^\n]+)? write grant in check mode (?:too|to verify what they return)\.\n`;
+/**
+ * One gated-reads bullet in any form renderGatedReads() writes: a wholly gated section ("even
+ * the ... reads", its own or a named grant) or a partly gated one (routes named, "to verify what
+ * they return").
+ */
+const GATED_READ_BULLET =
+  String.raw`- GitHub gates (?:even )?the [^\n]+ reads at write, so \x60[a-z_]+\x60 needs ` +
+  String.raw`(?:its|the)(?: [^\n]+)? write grant in check mode (?:too|to verify what they ` +
+  String.raw`return)\.\n`;
 
 /** A block region's renderer: the rendered lines on lines of their own between the markers. */
 function block(render: () => string): () => string {

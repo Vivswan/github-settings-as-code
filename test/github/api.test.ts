@@ -777,7 +777,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     }
     // The withholding clause replaces the transport's own text wholesale.
     expect(thrown.message).toBe(
-      "PATCH /repos/hookco/hookrepo/hooks/1/config failed: the transport failed before an HTTP response arrived (details withheld: the request carried a secret field). Check network connectivity from the runner to https://api.test, then re-run the workflow",
+      "PATCH /repos/hookco/hookrepo/hooks/1/config failed: the transport failed before an HTTP " +
+        "response arrived (details withheld: the request carried a secret field). Check network " +
+        "connectivity from the runner to https://api.test, then re-run the workflow",
     );
   });
 

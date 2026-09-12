@@ -59,7 +59,10 @@ describe("getRepoFile", () => {
       const result = await getRepoFile(api(), "o/r", FILE);
       expect(state.paths).toEqual([CONTENTS, REPO, REF]);
       expect(result).toEqual({
-        unproven: `cannot prove ${FILE} is absent: reading the default branch ref heads/main returned ${status}. Grant the token Contents: read on this repository, or initialize its default branch; a repository whose file cannot be read never receives the defaults`,
+        unproven:
+          `cannot prove ${FILE} is absent: reading the default branch ref heads/main returned ` +
+          `${status}. Grant the token Contents: read on this repository, or initialize its ` +
+          `default branch; a repository whose file cannot be read never receives the defaults`,
       });
     },
   );
