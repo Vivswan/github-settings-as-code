@@ -5,6 +5,8 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { err, ok, type Result } from "neverthrow";
+import type { CentralFileProblem, ProblemOf } from "../problem.js";
 import { type CentralTarget, SLUG_RE } from "./targets.js";
 
 const YAML_EXT = /\.ya?ml$/;
@@ -16,32 +18,29 @@ const YAML_EXT = /\.ya?ml$/;
 export function resolveCentralTargets(
   reposDir: string,
   adminOwner: string,
-): { targets: CentralTarget[]; warnings: string[] } | { error: string } {
+): Result<
+  { targets: CentralTarget[]; warnings: string[] },
+  ProblemOf<"repos-dir-missing" | "repos-dir-unreadable" | "repos-dir-invalid-files">
+> {
   if (!existsSync(reposDir)) {
-    return {
-      error: `repos-dir "${reposDir}" does not exist in the workspace, so there are no central settings files to read. Add an actions/checkout step before this action, or fix the repos-dir path`,
-    };
+    return err({ code: "repos-dir-missing", reposDir });
   }
   const targets: CentralTarget[] = [];
   const warnings: string[] = [];
   // Invalid filenames and duplicate slugs are collected across the WHOLE
   // walk and reported once: each fix is a file rename or deletion, so N bad
   // files must cost one run to discover, not N.
-  const errors: string[] = [];
+  const errors: CentralFileProblem[] = [];
   const seen = new Map<string, string>(); // lowercased slug -> origin
   const addTarget = (slug: string, filePath: string): void => {
     if (!SLUG_RE.test(slug)) {
-      errors.push(
-        `${filePath} resolves to the target "${slug}", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes`,
-      );
+      errors.push({ kind: "not-a-slug", filePath, slug });
       return;
     }
     const key = slug.toLowerCase();
     const existing = seen.get(key);
     if (existing) {
-      errors.push(
-        `duplicate target ${slug}: defined by both ${existing} and ${filePath}. Keep exactly one settings file per repository`,
-      );
+      errors.push({ kind: "duplicate", slug, first: existing, second: filePath });
       return;
     }
     seen.set(key, filePath);
@@ -90,19 +89,13 @@ export function resolveCentralTargets(
       addTarget(`${adminOwner}/${entry.replace(YAML_EXT, "")}`, entryPath);
     }
     if (ownerlessFiles.length > 0) {
-      errors.push(
-        `cannot resolve ${ownerlessFiles.join(", ")}: top-level repos-dir files use the current repository's owner, which is unknown outside GitHub Actions. Use the <owner>/<name>.yml layout instead`,
-      );
+      errors.push({ kind: "ownerless", files: ownerlessFiles });
     }
   } catch (error) {
-    return {
-      error: `cannot read repos-dir "${reposDir}": ${String(error)}. Check that it is a readable directory of settings files`,
-    };
+    return err({ code: "repos-dir-unreadable", reposDir, reason: String(error) });
   }
   if (errors.length > 0) {
-    return {
-      error: `repos-dir "${reposDir}" has ${errors.length} invalid settings file(s):\n- ${errors.join("\n- ")}`,
-    };
+    return err({ code: "repos-dir-invalid-files", reposDir, files: errors });
   }
-  return { targets, warnings };
+  return ok({ targets, warnings });
 }

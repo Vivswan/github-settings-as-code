@@ -4,16 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runMulti } from "../../src/flows/multi.js";
 import type { TargetOutcome } from "../../src/flows/redact.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
+import { describeProblem, type Problem } from "../../src/problem.js";
 import {
   ARTIFACT_FILE,
   ARTIFACT_NAME,
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
-import type { SectionKey } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 
 function captureIo(): {
@@ -56,6 +57,26 @@ function captureIo(): {
 const redacted = (target: TargetOutcome | undefined): boolean =>
   target !== undefined && isPrivate(target.detail);
 
+/** The run's targets; a fatal problem fails the test with its rendered line. */
+async function runTargets(...args: Parameters<typeof runMulti>): Promise<TargetOutcome[]> {
+  return (await runMulti(...args)).match(
+    (targets) => targets,
+    (problem) => {
+      throw new Error(describeProblem(problem));
+    },
+  );
+}
+
+/** The fatal problem a run ends in before any target executes. */
+async function runFatal(...args: Parameters<typeof runMulti>): Promise<Problem> {
+  return (await runMulti(...args)).match(
+    (targets) => {
+      throw new Error(`expected a fatal problem, got ${targets.length} target(s)`);
+    },
+    (problem) => problem,
+  );
+}
+
 function cfg(overrides: Partial<Parameters<typeof runMulti>[1]> = {}) {
   return {
     reposDir: "",
@@ -64,8 +85,7 @@ function cfg(overrides: Partial<Parameters<typeof runMulti>[1]> = {}) {
     adminOwner: "o",
     mode: "apply" as const,
     onMissingPermission: "fail" as const,
-    requiredSections: new Set<SectionKey>(),
-    onlySections: new Set<SectionKey>(),
+    sections: SectionSelection.ALL,
     discoveryFilters: DEFAULT_DISCOVERY_FILTERS,
     discoveryFiltersSet: [],
     // Existing scenarios predate redaction and assert on raw slugs; default
@@ -111,8 +131,7 @@ describe("runMulti", () => {
       "GET /repos/o/a/contents/.github/settings.yml": { data: HOOK_WITH_REF },
     });
     const { io, annotations } = captureIo();
-    const { fatal, targets } = await runMulti(api, cfg({ reposInput: "o/a", mode: "check" }), io);
-    expect(fatal).toBeNull();
+    const targets = await runTargets(api, cfg({ reposInput: "o/a", mode: "check" }), io);
     expect(targets.map((t) => [t.display, t.result])).toEqual([["o/a", "failed"]]);
     expect(api.calls.filter((c) => c.path.includes("/hooks"))).toEqual([]);
     expect(annotations.some((a) => a.includes("target-fetched settings file"))).toBe(true);
@@ -126,12 +145,11 @@ describe("runMulti", () => {
         "GET /repos/o/c/hooks?per_page=100&page=1": { data: [] },
       });
       const { io, annotations } = captureIo();
-      const { fatal, targets } = await runMulti(
+      const targets = await runTargets(
         api,
         cfg({ reposInput: "o/c", defaultsFile: join(dir, "defaults.yml"), mode: "check" }),
         io,
       );
-      expect(fatal).toBeNull();
       expect(targets.map((t) => [t.display, t.result])).toEqual([["o/c", "drift"]]);
       expect(annotations.filter((a) => a.includes("target-fetched"))).toEqual([]);
     });
@@ -144,12 +162,11 @@ describe("runMulti", () => {
         "GET /repos/o/api/hooks?per_page=100&page=1": { data: [] },
       });
       const { io, annotations } = captureIo();
-      const { fatal, targets } = await runMulti(
+      const targets = await runTargets(
         api,
         cfg({ reposDir: join(dir, "repos"), adminOwner: "o", mode: "check" }),
         io,
       );
-      expect(fatal).toBeNull();
       expect(targets.map((t) => [t.display, t.result])).toEqual([["o/api", "drift"]]);
       expect(annotations.filter((a) => a.includes("target-fetched"))).toEqual([]);
     });
@@ -175,12 +192,11 @@ describe("runMulti", () => {
       "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
     }).allowMutations("PATCH /repos/o/a");
     const { io, annotations } = captureIo();
-    const { fatal, targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/a, o/b, o/c", onMissingPermission: "warn" }),
       io,
     );
-    expect(fatal).toBeNull();
     const bySlug = Object.fromEntries(targets.map((t) => [t.display, t.result]));
     expect(bySlug).toEqual({ "o/a": "applied", "o/b": "failed", "o/c": "skipped" });
     expect(annotations.some((a) => a.includes("o/c: skipped - the repository has no"))).toBe(true);
@@ -195,9 +211,12 @@ describe("runMulti", () => {
       "PATCH /repos/o/a": { error: { status: 500, message: "boom", body: "" } },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
-      cfg({ reposInput: "o/a", onlySections: new Set(["repository"]) }),
+      cfg({
+        reposInput: "o/a",
+        sections: SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(),
+      }),
       io,
     );
     expect(targets[0]?.result).toBe("failed");
@@ -218,12 +237,11 @@ describe("runMulti", () => {
       "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
     }).allowMutations("PATCH /repos/o/c");
     const { io, annotations } = captureIo();
-    const { fatal, targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/c", defaultsFile: "test/fixtures/defaults.yml" }),
       io,
     );
-    expect(fatal).toBeNull();
     expect(targets.map((t) => [t.display, t.result])).toEqual([["o/c", "applied"]]);
     expect(api.mutations().map((m) => [m.method, m.path, m.payload])).toEqual([
       ["PATCH", "/repos/o/c", { has_projects: false }],
@@ -243,12 +261,11 @@ describe("runMulti", () => {
       },
     }).allowMutations("PATCH /repos/o/a");
     const { io, annotations } = captureIo();
-    const { fatal, targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/a", defaultsFile: "test/fixtures/defaults.yml" }),
       io,
     );
-    expect(fatal).toBeNull();
     expect(targets.map((t) => [t.display, t.result])).toEqual([["o/a", "applied"]]);
     expect(api.mutations().map((m) => [m.method, m.path, m.payload])).toEqual([
       ["PATCH", "/repos/o/a", { has_wiki: false }],
@@ -262,8 +279,7 @@ describe("runMulti", () => {
       "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
     });
     const { io, annotations } = captureIo();
-    const { fatal, targets } = await runMulti(api, cfg({ reposInput: "o/c" }), io);
-    expect(fatal).toBeNull();
+    const targets = await runTargets(api, cfg({ reposInput: "o/c" }), io);
     expect(targets.map((t) => [t.display, t.result])).toEqual([["o/c", "skipped"]]);
     expect(api.mutations()).toEqual([]);
     expect(annotations).toEqual([
@@ -281,7 +297,7 @@ describe("runMulti", () => {
       "GET /repos/octo/web": { data: { has_wiki: true, has_projects: true } },
     }).allowMutations("PATCH /repos/viv/api", "PATCH /repos/octo/web");
     const { io } = captureIo();
-    const { fatal, targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({
         reposDir: "test/fixtures/repos",
@@ -291,7 +307,6 @@ describe("runMulti", () => {
       }),
       io,
     );
-    expect(fatal).toBeNull();
     expect(targets.map((t) => [t.display, t.result]).sort()).toEqual([
       ["octo/web", "applied"],
       ["viv/api", "applied"],
@@ -309,8 +324,10 @@ describe("runMulti", () => {
   test("no targets at all is a fatal config error", async () => {
     const api = new MockApi({});
     const { io } = captureIo();
-    const { fatal } = await runMulti(api, cfg({ reposInput: " ,  " }), io);
-    expect(fatal).toContain("no targets");
+    expect(await runFatal(api, cfg({ reposInput: " ,  " }), io)).toEqual({
+      code: "no-targets",
+      filteredOut: 0,
+    });
   });
 
   test("a token-invisible repo fails loudly instead of skipping", async () => {
@@ -318,8 +335,7 @@ describe("runMulti", () => {
     // which is how a fine-grained token reports lost access.
     const api = new MockApi({});
     const { io, annotations } = captureIo();
-    const { fatal, targets } = await runMulti(api, cfg({ reposInput: "o/x" }), io);
-    expect(fatal).toBeNull();
+    const targets = await runTargets(api, cfg({ reposInput: "o/x" }), io);
     expect(targets[0]?.result).toBe("failed");
     expect(annotations.some((a) => a.includes("the token was denied"))).toBe(true);
   });
@@ -333,12 +349,11 @@ describe("runMulti", () => {
       "GET /repos/o/x": { data: { default_branch: "main", has_projects: true } },
     });
     const { io, annotations } = captureIo();
-    const { fatal, targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/x", defaultsFile: "test/fixtures/defaults.yml" }),
       io,
     );
-    expect(fatal).toBeNull();
     expect(targets.map((t) => [t.display, t.result])).toEqual([["o/x", "failed"]]);
     expect(api.mutations()).toEqual([]);
     expect(annotations).toEqual([
@@ -352,13 +367,16 @@ describe("runMulti", () => {
   test("discovery filters with repos-dir-only targets are fatal", async () => {
     const api = new MockApi({});
     const { io, annotations } = captureIo();
-    const { fatal } = await runMulti(
+    const fatal = await runFatal(
       api,
       cfg({ reposDir: "test/fixtures/repos", adminOwner: "viv", discoveryFiltersSet: ["forks"] }),
       io,
     );
-    expect(fatal).toContain("repos-dir");
-    expect(fatal).toContain('"forks"');
+    expect(fatal).toEqual({
+      code: "discovery-filters-without-wildcard",
+      filters: ["forks"],
+      targets: "repos-dir",
+    });
     // Finding D: central-resolution warnings buffered before this fatal return
     // must still be emitted, not silently swallowed. The fixture's README.md
     // (non-yaml) and octo/deep/ (too deep) each produce an "ignoring" warning.
@@ -375,7 +393,7 @@ describe("runMulti", () => {
       },
     });
     const { io } = captureIo();
-    const { fatal } = await runMulti(
+    const fatal = await runFatal(
       api,
       cfg({
         reposInput: "*",
@@ -384,8 +402,7 @@ describe("runMulti", () => {
       }),
       io,
     );
-    expect(fatal).toContain("discovery filters removed all of them");
-    expect(fatal).toContain("2 repositories");
+    expect(fatal).toEqual({ code: "no-targets", filteredOut: 2 });
   });
 
   test("skip notices list at most 20 slugs, then a count of the rest", async () => {
@@ -403,7 +420,7 @@ describe("runMulti", () => {
       },
     });
     const { io, annotations } = captureIo();
-    const { fatal } = await runMulti(
+    await runTargets(
       api,
       cfg({
         reposInput: "*",
@@ -412,7 +429,6 @@ describe("runMulti", () => {
       }),
       io,
     );
-    expect(fatal).toBeNull();
     const notice = annotations.find((a) => a.includes("forks=exclude"));
     expect(notice).toContain("skipped 21 repositories");
     expect(notice).toContain("o/fork-19");
@@ -439,8 +455,7 @@ describe("runMulti under on-missing-permission: fail", () => {
       },
     }).allowMutations("PATCH /repos/o/a");
     const { io, annotations } = captureIo();
-    const { fatal, targets } = await runMulti(api, cfg({ reposInput: "o/a, o/d" }), io);
-    expect(fatal).toBeNull();
+    const targets = await runTargets(api, cfg({ reposInput: "o/a, o/d" }), io);
     const bySlug = Object.fromEntries(targets.map((t) => [t.display, t.result]));
     expect(bySlug).toEqual({ "o/a": "applied", "o/d": "failed" });
     expect(api.mutations().every((m) => m.path.startsWith("/repos/o/a"))).toBe(true);
@@ -468,7 +483,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
   test("a private target is masked before the first emission, and never leaks its slug", async () => {
     const api = mixApi();
     const { io, annotations, logs, masks, events } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/pub, o/priv", mode: "check", privateRepos: "redact" }),
       io,
@@ -527,7 +542,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
       },
     });
     const { io, annotations, masks } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/self", mode: "check", privateRepos: "redact", selfSlug: "o/self" }),
       io,
@@ -559,7 +574,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
       },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "*", mode: "check", privateRepos: "redact" }),
       io,
@@ -581,7 +596,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
     // must be generic, never naming the slug.
     const api = new MockApi({});
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/mystery", privateRepos: "redact" }),
       io,
@@ -605,7 +620,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
       "GET /repos/o/p2/contents/.github/settings.yml": { data: "repository:\n  has_wiki: false\n" },
     });
     const { io } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/p1, o/pub, o/p2", mode: "check", privateRepos: "redact" }),
       io,
@@ -653,7 +668,7 @@ describe("runMulti private-report: issue wiring", () => {
   test("delivers the full report to the target issue; body has detail+transcript, public surfaces do not", async () => {
     const api = reportApi();
     const { io, annotations, logs } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({
         reposInput: "o/priv",
@@ -719,7 +734,7 @@ describe("runMulti private-report: issue wiring", () => {
       },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({
         reposInput: "o/priv",
@@ -784,7 +799,7 @@ describe("runMulti private-report: issue wiring", () => {
       },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "*", mode: "check", privateRepos: "redact", privateReport: "issue" }),
       io,
@@ -814,7 +829,7 @@ describe("runMulti private-report: issue wiring", () => {
       "POST /repos/o/maybe/labels": { error: { status: 422, message: "exists", body: "" } },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/maybe", mode: "check", privateRepos: "redact", privateReport: "issue" }),
       io,
@@ -855,7 +870,7 @@ describe("runMulti private-report: issue wiring", () => {
       "GET /repos/o/priv/contents/.github/settings.yml": { data: "repository: [oops\n" },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({ reposInput: "o/priv", mode: "apply", privateRepos: "redact", privateReport: "issue" }),
       io,
@@ -895,7 +910,7 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
       "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
     });
     const { io, annotations, logs } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({
         reposInput: "o/priv",
@@ -927,7 +942,7 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
       [openListPath("o/priv")]: { data: [] },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({
         reposInput: "o/priv",
@@ -1051,7 +1066,7 @@ describe("runMulti private-report: artifact wiring", () => {
       },
     });
     const { io, annotations, logs } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({
         reposInput: "o/a, o/b",
@@ -1099,7 +1114,7 @@ describe("runMulti private-report: artifact wiring", () => {
       },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({
         reposInput: "o/known, o/maybe",
@@ -1164,7 +1179,7 @@ describe("runMulti private-report: artifact wiring", () => {
       },
     });
     const { io, annotations } = captureIo();
-    const { targets } = await runMulti(
+    const targets = await runTargets(
       api,
       cfg({
         reposInput: "o/priv",

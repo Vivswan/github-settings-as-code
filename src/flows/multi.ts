@@ -18,6 +18,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { type Err, err, ok, type ResultAsync, safeTry } from "neverthrow";
 import { resolveCentralTargets } from "../discovery/central.js";
 import { type DiscoveryFilters, discoverRepos, formatSkipNotice } from "../discovery/discover.js";
 import { parseReposInput } from "../discovery/repos-input.js";
@@ -31,19 +32,20 @@ import {
 } from "../discovery/targets.js";
 import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
 import type { SettingsSource } from "../engine/secret-refs.js";
-import { type GithubClient, isPermissionError, RERUN_ADVICE } from "../github/api.js";
+import { type GithubClient, isPermissionError } from "../github/api.js";
 import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import type { Private } from "../private.js";
+import { describeProblem, type Problem, RERUN_ADVICE } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import { applyMarkerInjection } from "../report/delivery.js";
 import {
   engineOutcome,
   failedTarget,
-  missingUploaderProblem,
   type OpenedTarget,
   type RunFlowConfig,
+  requireUploader,
   type TargetResult,
   targetFailure,
   withDelivery,
@@ -61,14 +63,9 @@ import { parseSettingsDoc, readSettingsFile } from "./settings-read.js";
 /**
  * The settings file a remote target is read from, and the action's default
  * `settings-file`: the single source for the action.yml default, the
- * multi-repo override guard in src/action/inputs.ts, and the prose below.
+ * multi-repo override guard in src/flows/inputs.ts, and the prose below.
  */
 export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
-
-/** Names as an error message lists them: each quoted, comma-separated. */
-export function quoteList(names: string[]): string {
-  return names.map((name) => `"${name}"`).join(", ");
-}
 
 export interface MultiConfig extends RunFlowConfig {
   reposDir: string;
@@ -125,8 +122,7 @@ async function processTarget(ctx: {
         settings: injected.settings,
         mode: cfg.mode,
         onMissingPermission: cfg.onMissingPermission,
-        requiredSections: cfg.requiredSections,
-        onlySections: cfg.onlySections,
+        sections: cfg.sections,
         secretSource,
       },
       channel.io,
@@ -161,23 +157,25 @@ async function processTarget(ctx: {
   }
 
   const parsed = parseSettingsDoc(read.raw);
-  if ("error" in parsed) {
-    return fail(`cannot parse ${read.sourceLabel}: ${parsed.error}. Fix the YAML in that file`);
+  if (parsed.isErr()) {
+    return fail(
+      `cannot parse ${read.sourceLabel}: ${parsed.error.reason}. Fix the YAML in that file`,
+    );
   }
 
   // validateSettingsDoc names sourceLabel (the slug for remote targets) in
   // its own warnings, so they go through the unprefixed sink. Its branded
   // return is the engine's admission ticket.
   const validated = validateSettingsDoc(
-    parsed.doc,
+    parsed.value,
     read.sourceLabel,
-    cfg.onlySections,
+    cfg.sections.only,
     channel.unprefixed,
   );
-  if ("error" in validated) {
-    return fail(validated.error);
+  if (validated.isErr()) {
+    return fail(describeProblem(validated.error));
   }
-  return run(validated.settings, read.source);
+  return run(validated.value, read.source);
 }
 
 /**
@@ -192,7 +190,7 @@ function openTarget(
   visibilityOf: (slug: string) => RepoVisibility,
 ): OpenedTarget {
   return {
-    repo: parseRepoSlug(slug),
+    repo: parseRepoSlug(slug).unwrapOr(null),
     channel: openTargetChannel(plan, io, slug),
     exposure: plan.isRedacted(slug)
       ? { kind: "redacted", visibility: visibilityOf(slug) }
@@ -250,22 +248,23 @@ async function readTargetSettings(
 
 /**
  * Multi-repo orchestration. Config-level problems (bad defaults file, no
- * targets, duplicate definitions, discovery failure) return `fatal` before
- * any target executes; per-target problems mark that target failed or
+ * targets, duplicate definitions, discovery failure) come back as the error
+ * before any target executes; per-target problems mark that target failed or
  * skipped and never stop the others.
  */
-export async function runMulti(
+export function runMulti(
   api: GithubClient,
   cfg: MultiConfig,
   io: Io,
   uploader?: ArtifactUploader,
-): Promise<{ fatal: string | null; targets: TargetOutcome[] }> {
+): ResultAsync<TargetOutcome[], Problem> {
   // Central-resolution warnings are buffered so nothing emits before the
   // redaction mask is registered. Every exit path - fatal or not - flushes
-  // them through this one helper, so a fatal config error later in setup can
-  // never silently swallow a warning about a repos-dir file. Central warnings
-  // name repos-dir paths and slugs, which are self-disclosed (checked into the
-  // public admin repo), so flushing them before masking leaks nothing.
+  // them through this one helper (the fatal ones via orTee), so a fatal config
+  // error later in setup can never silently swallow a warning about a
+  // repos-dir file. Central warnings name repos-dir paths and slugs, which are
+  // self-disclosed (checked into the public admin repo), so flushing them
+  // before masking leaks nothing.
   const bufferedWarnings: string[] = [];
   let warningsFlushed = false;
   const flushWarnings = (): void => {
@@ -277,193 +276,167 @@ export async function runMulti(
       io.annotate("warning", warning);
     }
   };
-  const fail = (message: string): { fatal: string; targets: TargetOutcome[] } => {
-    flushWarnings();
-    return { fatal: message, targets: [] };
-  };
+  // Typed so a literal's `code` stays a literal inside the generator, where no
+  // return type narrows it.
+  const fail = (problem: Problem): Err<never, Problem> => err(problem);
 
-  const noUploader = missingUploaderProblem(cfg, uploader);
-  if (noUploader !== null) {
-    return fail(noUploader);
-  }
+  return safeTry(async function* () {
+    yield* requireUploader(cfg, uploader);
 
-  let defaults: ValidatedSettings | null = null;
-  if (cfg.defaultsFile) {
-    const read = readSettingsFile(cfg.defaultsFile);
-    if ("error" in read) {
-      return fail(
-        `cannot read the defaults file ${cfg.defaultsFile}: ${read.error}. Check the "defaults-file" path and that the file is valid YAML`,
-      );
+    let defaults: ValidatedSettings | null = null;
+    if (cfg.defaultsFile) {
+      const doc = yield* readSettingsFile(cfg.defaultsFile, "defaults-file");
+      defaults = yield* validateSettingsDoc(doc, cfg.defaultsFile, cfg.sections.only, io);
     }
-    const validated = validateSettingsDoc(read.doc, cfg.defaultsFile, cfg.onlySections, io);
-    if ("error" in validated) {
-      return fail(validated.error);
-    }
-    defaults = validated.settings;
-  }
 
-  let central: CentralTarget[] = [];
-  if (cfg.reposDir) {
-    const resolved = resolveCentralTargets(cfg.reposDir, cfg.adminOwner);
-    if ("error" in resolved) {
-      return fail(resolved.error);
+    let central: CentralTarget[] = [];
+    if (cfg.reposDir) {
+      const resolved = yield* resolveCentralTargets(cfg.reposDir, cfg.adminOwner);
+      bufferedWarnings.push(...resolved.warnings);
+      central = resolved.targets;
     }
-    bufferedWarnings.push(...resolved.warnings);
-    central = resolved.targets;
-  }
 
-  let remote: RemoteTarget[] = [];
-  let filteredOutCount = 0;
-  const skipGroups: Array<{
-    reason: string;
-    repos: Parameters<typeof formatSkipNotice>[0]["repos"];
-  }> = [];
-  // Visibility learned from discovery (authoritative for those repos), so the
-  // per-target probe is skipped for them.
-  const knownVisibility = new Map<string, RepoVisibility>();
-  // Private slugs that discovery filtered out (sealed): masked, never placeholdered.
-  const filteredPrivateSlugs: Private<string>[] = [];
-  if (cfg.reposInput) {
-    const parsed = parseReposInput(cfg.reposInput);
-    if ("error" in parsed) {
-      return fail(parsed.error);
-    }
-    let slugs = parsed.slugs;
-    let origin = 'the "repos" input';
-    if (parsed.discover) {
-      const discovered = await discoverRepos(api, cfg.discoveryFilters);
-      if ("error" in discovered) {
-        return fail(discovered.error);
-      }
-      for (const group of discovered.filtered) {
-        skipGroups.push(group);
-        filteredOutCount += group.repos.length;
-        for (const repo of group.repos) {
-          if (repo.visibility !== "public") {
-            filteredPrivateSlugs.push(repo.slug);
+    let remote: RemoteTarget[] = [];
+    let filteredOutCount = 0;
+    const skipGroups: Array<{
+      reason: string;
+      repos: Parameters<typeof formatSkipNotice>[0]["repos"];
+    }> = [];
+    // Visibility learned from discovery (authoritative for those repos), so the
+    // per-target probe is skipped for them.
+    const knownVisibility = new Map<string, RepoVisibility>();
+    // Private slugs that discovery filtered out (sealed): masked, never placeholdered.
+    const filteredPrivateSlugs: Private<string>[] = [];
+    if (cfg.reposInput) {
+      const parsed = yield* parseReposInput(cfg.reposInput);
+      let slugs = parsed.slugs;
+      let origin = 'the "repos" input';
+      if (parsed.discover) {
+        const discovered = yield* discoverRepos(api, cfg.discoveryFilters);
+        for (const group of discovered.filtered) {
+          skipGroups.push(group);
+          filteredOutCount += group.repos.length;
+          for (const repo of group.repos) {
+            if (repo.visibility !== "public") {
+              filteredPrivateSlugs.push(repo.slug);
+            }
           }
         }
+        for (const repo of discovered.repos) {
+          knownVisibility.set(repo.slug.toLowerCase(), repo.visibility);
+        }
+        slugs = discovered.repos.map((repo) => repo.slug);
+        origin = 'repos: "*" discovery';
+      } else if (cfg.discoveryFiltersSet.length > 0) {
+        return fail({
+          code: "discovery-filters-without-wildcard",
+          filters: cfg.discoveryFiltersSet,
+          targets: "explicit-repos",
+        });
       }
-      for (const repo of discovered.repos) {
-        knownVisibility.set(repo.slug.toLowerCase(), repo.visibility);
-      }
-      slugs = discovered.repos.map((repo) => repo.slug);
-      origin = 'repos: "*" discovery';
+      remote = slugs.map((slug) => ({ slug, source: "remote" as const, origin }));
     } else if (cfg.discoveryFiltersSet.length > 0) {
-      return fail(
-        `the discovery filter input(s) ${quoteList(cfg.discoveryFiltersSet)} only apply when repos is "*", but the "repos" input lists explicit repositories. Set repos: "*", or remove the filter input(s)`,
-      );
+      return fail({
+        code: "discovery-filters-without-wildcard",
+        filters: cfg.discoveryFiltersSet,
+        targets: "repos-dir",
+      });
     }
-    remote = slugs.map((slug) => ({ slug, source: "remote" as const, origin }));
-  } else if (cfg.discoveryFiltersSet.length > 0) {
-    return fail(
-      `the discovery filter input(s) ${quoteList(cfg.discoveryFiltersSet)} only apply to repos: "*" discovery, but targets come only from repos-dir files. Set repos: "*", or remove the filter input(s)`,
-    );
-  }
 
-  const redact = cfg.privateRepos === "redact";
-  const self = cfg.selfSlug.toLowerCase();
+    const redact = cfg.privateRepos === "redact";
+    const self = cfg.selfSlug.toLowerCase();
 
-  // Resolve visibility for every distinct target slug before the plan: use
-  // the discovery-supplied value when present, else one probe. Skipped
-  // entirely under `show` and for the self slug. The resolved visibility (not
-  // just a boolean) drives TWO decisions: redaction fails closed (redact unless
-  // proven public), but report DELIVERY fails closed the other way (deliver only
-  // when proven private or internal) - an unknown must never post a private
-  // report to a repo that might be public.
-  const resolveVisibility = createVisibilityResolver(api);
-  const orderedSlugs = [...central, ...remote].map((t) => t.slug);
-  const visibilityBySlug = new Map<string, RepoVisibility>();
-  if (redact) {
-    for (const slug of orderedSlugs) {
-      const key = slug.toLowerCase();
-      if (visibilityBySlug.has(key)) {
-        continue;
+    // Resolve visibility for every distinct target slug before the plan: use
+    // the discovery-supplied value when present, else one probe. Skipped
+    // entirely under `show` and for the self slug. The resolved visibility (not
+    // just a boolean) drives TWO decisions: redaction fails closed (redact unless
+    // proven public), but report DELIVERY fails closed the other way (deliver only
+    // when proven private or internal) - an unknown must never post a private
+    // report to a repo that might be public.
+    const resolveVisibility = createVisibilityResolver(api);
+    const orderedSlugs = [...central, ...remote].map((t) => t.slug);
+    const visibilityBySlug = new Map<string, RepoVisibility>();
+    if (redact) {
+      for (const slug of orderedSlugs) {
+        const key = slug.toLowerCase();
+        if (visibilityBySlug.has(key)) {
+          continue;
+        }
+        if (key === self) {
+          visibilityBySlug.set(key, "public");
+          continue;
+        }
+        const known = knownVisibility.get(key);
+        visibilityBySlug.set(key, known ?? (await resolveVisibility(slug)));
       }
-      if (key === self) {
-        visibilityBySlug.set(key, "public");
-        continue;
-      }
-      const known = knownVisibility.get(key);
-      visibilityBySlug.set(key, known ?? (await resolveVisibility(slug)));
     }
-  }
-  // Under `redact` the map holds every target slug, so the fallback only
-  // fires under `show` (where visibility is never consulted) - but it still
-  // fails CLOSED: an unresolved slug is "unknown", which redaction treats as
-  // private and delivery treats as unproven, never "public".
-  const visibilityOf = (slug: string): RepoVisibility =>
-    visibilityBySlug.get(slug.toLowerCase()) ?? "unknown";
+    // Under `redact` the map holds every target slug, so the fallback only
+    // fires under `show` (where visibility is never consulted) - but it still
+    // fails CLOSED: an unresolved slug is "unknown", which redaction treats as
+    // private and delivery treats as unproven, never "public".
+    const visibilityOf = (slug: string): RepoVisibility =>
+      visibilityBySlug.get(slug.toLowerCase()) ?? "unknown";
 
-  const plan = planRedaction(
-    cfg.privateRepos,
-    orderedSlugs,
-    filteredPrivateSlugs,
-    (slug) => visibilityOf(slug) !== "public",
-    cfg.selfSlug,
-  );
-
-  // Mask every hidden slug BEFORE the first annotate/log/output; the API
-  // trace reads the same registry.
-  for (const slug of plan.maskedSlugs) {
-    io.mask(slug);
-  }
-
-  // Now safe to emit: buffered central warnings (flushed exactly once here on
-  // the happy path; the fail() helper flushes them on every fatal path), then
-  // the (redacting) skip notices.
-  flushWarnings();
-  for (const group of skipGroups) {
-    io.annotate("notice", formatSkipNotice(group, redact));
-  }
-
-  const targets = dedupeTargets(
-    central,
-    remote,
-    (message) => io.annotate("notice", message),
-    (slug) => plan.display(slug),
-    (slug) => plan.isRedacted(slug),
-  );
-  if (targets.length === 0) {
-    if (filteredOutCount > 0) {
-      return fail(
-        `multi-repo mode found no targets: repos: "*" discovery found ${filteredOutCount} ` +
-          `${filteredOutCount === 1 ? "repository" : "repositories"}, but the discovery filters ` +
-          `removed all of them (see the notices above). Relax the filter inputs, or add per-repo ` +
-          `files to the repos-dir`,
-      );
-    }
-    return fail(
-      `multi-repo mode found no targets: repos-dir yielded no settings files and the "repos" input resolved to no repositories. Add per-repo files to the repos-dir, or list repositories in the "repos" input`,
+    const plan = planRedaction(
+      cfg.privateRepos,
+      orderedSlugs,
+      filteredPrivateSlugs,
+      (slug) => visibilityOf(slug) !== "public",
+      cfg.selfSlug,
     );
-  }
 
-  const results = await withDelivery({ api, cfg, io, uploader }, async (delivery) => {
-    const delivered: TargetOutcome[] = [];
-    for (const target of targets) {
-      // The channel is opened BEFORE any processing so a read/parse/validation
-      // failure lands in a redacted target's transcript too; it is the only sink
-      // processing sees.
-      const opened = openTarget(plan, io, target.slug, visibilityOf);
-      const { channel, repo } = opened;
-      // A crash mid-processing never stops the rest of the fleet; it becomes
-      // this target's failure and still closes through the same delivery.
-      const closed = await delivery.target(opened, async (injectMarker) =>
-        repo === null
-          ? targetFailure(
-              channel.io,
-              `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be targeted`,
-            )
-          : attempt(
-              channel,
-              () => processTarget({ api, target, repo, defaults, cfg, injectMarker, channel }),
-              failedTarget,
-            ),
-      );
-      delivered.push({ source: target.source, ...closed });
+    // Mask every hidden slug BEFORE the first annotate/log/output; the API
+    // trace reads the same registry.
+    for (const slug of plan.maskedSlugs) {
+      io.mask(slug);
     }
-    return delivered;
-  });
 
-  return { fatal: null, targets: results };
+    // Now safe to emit: buffered central warnings (flushed exactly once here on
+    // the happy path; orTee below flushes them on every fatal path), then the
+    // (redacting) skip notices.
+    flushWarnings();
+    for (const group of skipGroups) {
+      io.annotate("notice", formatSkipNotice(group, redact));
+    }
+
+    const targets = dedupeTargets(
+      central,
+      remote,
+      (message) => io.annotate("notice", message),
+      (slug) => plan.display(slug),
+      (slug) => plan.isRedacted(slug),
+    );
+    if (targets.length === 0) {
+      return fail({ code: "no-targets", filteredOut: filteredOutCount });
+    }
+
+    const results = await withDelivery({ api, cfg, io, uploader }, async (delivery) => {
+      const delivered: TargetOutcome[] = [];
+      for (const target of targets) {
+        // The channel is opened BEFORE any processing so a read/parse/validation
+        // failure lands in a redacted target's transcript too; it is the only sink
+        // processing sees.
+        const opened = openTarget(plan, io, target.slug, visibilityOf);
+        const { channel, repo } = opened;
+        // A crash mid-processing never stops the rest of the fleet; it becomes
+        // this target's failure and still closes through the same delivery.
+        const closed = await delivery.target(opened, async (injectMarker) =>
+          repo === null
+            ? targetFailure(
+                channel.io,
+                `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be targeted`,
+              )
+            : attempt(
+                channel,
+                () => processTarget({ api, target, repo, defaults, cfg, injectMarker, channel }),
+                failedTarget,
+              ),
+        );
+        delivered.push({ source: target.source, ...closed });
+      }
+      return delivered;
+    });
+
+    return ok(results);
+  }).orTee(flushWarnings);
 }

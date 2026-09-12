@@ -6,7 +6,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { runForRepo, validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
+import { describeProblem } from "../../src/problem.js";
 import type { SectionKey } from "../../src/schema.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../e2e/mock/secrets.js";
@@ -226,18 +228,17 @@ describe("check-mode purity", () => {
     // Brand the fixture document through the REAL boundary: an invalid
     // fixture fails loudly here instead of riding a cast into runForRepo.
     const verdict = validateSettingsDoc(FIXTURES, "purity fixtures", new Set(), silentIo());
-    if ("error" in verdict) {
-      throw new Error(`purity fixtures failed validation: ${verdict.error}`);
+    if (verdict.isErr()) {
+      throw new Error(`purity fixtures failed validation: ${describeProblem(verdict.error)}`);
     }
     const result = await runForRepo(
       api,
       {
         repo: { owner: "o", name: "r", slug: "o/r" },
-        settings: verdict.settings,
+        settings: verdict.value,
         mode: "check",
         onMissingPermission: "fail",
-        requiredSections: new Set(),
-        onlySections: new Set(),
+        sections: SectionSelection.ALL,
       },
       silentIo(),
     );

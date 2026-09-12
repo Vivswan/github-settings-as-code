@@ -6,7 +6,9 @@ import {
 } from "../../src/engine/orchestrate.js";
 import type { SettingsSource } from "../../src/engine/secret-refs.js";
 import { collectSecretValues } from "../../src/engine/secrets.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { type Io, maskRegistry } from "../../src/io.js";
+import { describeProblem } from "../../src/problem.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { MockApi } from "../mock-api.js";
@@ -162,17 +164,16 @@ describe("runForRepo provenance", () => {
       ...maskRegistry(() => {}),
     };
     const verdict = validateSettingsDoc(doc, "fixture", new Set(), silent);
-    if ("error" in verdict) {
-      throw new Error(`fixture failed validation: ${verdict.error}`);
+    if (verdict.isErr()) {
+      throw new Error(`fixture failed validation: ${describeProblem(verdict.error)}`);
     }
-    return verdict.settings;
+    return verdict.value;
   };
   const baseOpts = (settings: unknown) => ({
     repo: { owner: "o", name: "r", slug: "o/r" },
     settings: validated(settings),
     onMissingPermission: "fail" as const,
-    requiredSections: new Set<SectionKey>(),
-    onlySections: new Set<SectionKey>(),
+    sections: SectionSelection.ALL,
   });
   /** A remote target's own document, run the way multi.ts runs it. */
   const targetOpts = (targetDoc: SettingsFile) => ({
@@ -245,7 +246,7 @@ describe("runForRepo provenance", () => {
       {
         ...targetOpts(targetDoc),
         mode: "check" as const,
-        onlySections: new Set(["labels"]),
+        sections: SectionSelection.of({ only: ["labels"] })._unsafeUnwrap(),
       },
       io,
     );

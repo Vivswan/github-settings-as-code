@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { err } from "neverthrow";
 import {
   DEFAULT_DISCOVERY_FILTERS,
   type DiscoveredRepoRef,
@@ -9,6 +10,7 @@ import {
   formatSkipNotice,
 } from "../../src/discovery/discover.js";
 import { markPrivate } from "../../src/private.js";
+import { describeProblem } from "../../src/problem.js";
 import { MockApi } from "../mock-api.js";
 
 describe("excludeMatches", () => {
@@ -44,11 +46,12 @@ describe("discoverRepos", () => {
     routes: ConstructorParameters<typeof MockApi>[0],
     overrides: Partial<DiscoveryFilters> = {},
   ) => {
-    const discovered = await discoverRepos(new MockApi(routes), filters(overrides));
-    if ("error" in discovered) {
-      throw new Error(discovered.error);
-    }
-    return discovered;
+    return (await discoverRepos(new MockApi(routes), filters(overrides))).match(
+      (discovered) => discovered,
+      (problem) => {
+        throw new Error(describeProblem(problem));
+      },
+    );
   };
   const slugs = (repos: DiscoveredRepoRef[]) => repos.map((repo) => repo.slug);
   /** Filtered refs by reason; a non-public one compares against its sealed slug (`hidden`). */
@@ -227,15 +230,15 @@ describe("discoverRepos", () => {
         error: { status: 403, message: "Resource not accessible", body: "" },
       },
     });
-    const discovered = await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS);
-    expect(discovered).toEqual({
-      error:
-        'cannot discover repositories for repos: "*": GET /user/repos?affiliation=owner failed: ' +
-        "403 Resource not accessible. " +
-        "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
-        "cannot enumerate a user's repositories. List the target repositories explicitly in the " +
-        '"repos" input',
-    });
+    expect(await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS)).toEqual(
+      err({
+        code: "discovery-request-failed",
+        path: "/user/repos?affiliation=owner",
+        status: 403,
+        message: "Resource not accessible",
+        denied: true,
+      }),
+    );
   });
 
   test("a rate-limit 403 gets re-run advice, not PAT advice", async () => {
@@ -247,13 +250,15 @@ describe("discoverRepos", () => {
         error: { status: 403, message: "API rate limit exceeded for user", body: "" },
       },
     });
-    const discovered = await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS);
-    expect(discovered).toEqual({
-      error:
-        'cannot discover repositories for repos: "*": GET /user/repos?affiliation=owner failed: ' +
-        "403 API rate limit exceeded for user. " +
-        "This is not a permission problem; re-run the workflow, and retry later if it persists",
-    });
+    expect(await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS)).toEqual(
+      err({
+        code: "discovery-request-failed",
+        path: "/user/repos?affiliation=owner",
+        status: 403,
+        message: "API rate limit exceeded for user",
+        denied: false,
+      }),
+    );
   });
 
   test("an expired-token 401 explains the PAT requirement", async () => {
@@ -262,15 +267,15 @@ describe("discoverRepos", () => {
         error: { status: 401, message: "Bad credentials", body: "" },
       },
     });
-    const discovered = await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS);
-    expect(discovered).toEqual({
-      error:
-        'cannot discover repositories for repos: "*": GET /user/repos?affiliation=owner failed: ' +
-        "401 Bad credentials. " +
-        "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
-        "cannot enumerate a user's repositories. List the target repositories explicitly in the " +
-        '"repos" input',
-    });
+    expect(await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS)).toEqual(
+      err({
+        code: "discovery-request-failed",
+        path: "/user/repos?affiliation=owner",
+        status: 401,
+        message: "Bad credentials",
+        denied: true,
+      }),
+    );
   });
 
   test("a server error gets re-run advice, not PAT advice", async () => {
@@ -279,13 +284,15 @@ describe("discoverRepos", () => {
         error: { status: 500, message: "boom", body: "" },
       },
     });
-    const discovered = await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS);
-    expect(discovered).toEqual({
-      error:
-        'cannot discover repositories for repos: "*": GET /user/repos?affiliation=owner failed: ' +
-        "500 boom. " +
-        "This is not a permission problem; re-run the workflow, and retry later if it persists",
-    });
+    expect(await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS)).toEqual(
+      err({
+        code: "discovery-request-failed",
+        path: "/user/repos?affiliation=owner",
+        status: 500,
+        message: "boom",
+        denied: false,
+      }),
+    );
   });
 });
 

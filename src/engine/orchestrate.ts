@@ -4,9 +4,11 @@
  * All output goes through the Io sink; callers decide how (or whether) to tag lines per repository.
  */
 
+import { err, type Result } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
+import type { SettingsProblem, TopLevelShape } from "../problem.js";
 import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
 import {
@@ -20,6 +22,7 @@ import type { MustBeNever } from "../types.js";
 import { executePlan } from "./execute.js";
 import { resolveSecretRefs, type SettingsSource, validateSecretRef } from "./secret-refs.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
+import type { SectionSelection } from "./section-selection.js";
 import { validateSectionShapes } from "./validate.js";
 
 /**
@@ -62,8 +65,8 @@ export interface RepoRunOptions {
   settings: ValidatedSettings;
   mode: "apply" | "check";
   onMissingPermission: "fail" | "warn";
-  requiredSections: ReadonlySet<SectionKey>;
-  onlySections: ReadonlySet<SectionKey>;
+  /** Which sections run and which must fully apply, validated together at construction. */
+  sections: SectionSelection;
   /**
    * Who authored the settings document. Omitted, "operator" (the single-repo
    * settings file, central files, and the defaults document are all
@@ -118,20 +121,22 @@ export function skippedSectionKeys(
  * Top-level shape validation for one settings document (the unknown-key
  * policy from run()): the ONE boundary that turns a raw parsed document into
  * a ValidatedSettings the engine will accept. Returns the branded document,
- * or an error message (caller fails the run or the repo); the
- * sections-allowlist case downgrades to a warning. `sourceLabel` names the
- * file the message points at.
+ * or the problem (caller fails the run or the repo); the sections-allowlist
+ * case downgrades to a warning. `sourceLabel` names the file the problem
+ * points at.
  */
 export function validateSettingsDoc(
   settings: unknown,
   sourceLabel: string,
   onlySections: ReadonlySet<SectionKey>,
   io: Io,
-): { settings: ValidatedSettings } | { error: string } {
+): Result<ValidatedSettings, SettingsProblem> {
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
-    return {
-      error: `${sourceLabel} must be a YAML mapping of section names to settings, but its top level parsed as ${Array.isArray(settings) ? "a list" : `a ${settings === null ? "null" : typeof settings}`}. Rewrite the top level as "section: ..." keys`,
-    };
+    return err({
+      code: "settings-not-mapping",
+      source: sourceLabel,
+      shape: nonMappingShape(settings),
+    });
   }
   // Only a PLAIN mapping may pass: an explicit YAML tag (!!timestamp, !!set,
   // !!binary) parses to a Date/Set/Uint8Array, which is an object with no
@@ -140,9 +145,7 @@ export function validateSettingsDoc(
   // to section values.
   const proto = Object.getPrototypeOf(settings);
   if (proto !== Object.prototype && proto !== null) {
-    return {
-      error: `${sourceLabel} must be a plain YAML mapping of section names to settings, but its top level parsed as another type (a YAML-tagged value like !!timestamp parses to a Date). Rewrite the top level as "section: ..." keys`,
-    };
+    return err({ code: "settings-not-plain-mapping", source: sourceLabel });
   }
   const knownSections = new Set<string>(SECTION_KEYS);
   // The allowlist holds SectionKeys, but the DOCUMENT's unknown keys are
@@ -157,9 +160,12 @@ export function validateSettingsDoc(
   );
   if (unknownKeys.length > 0) {
     if (onlySections.size === 0 || unknownKeys.some((key) => allowed.has(key))) {
-      return {
-        error: `unknown top-level section(s) in ${sourceLabel}: ${unknownKeys.join(", ")} (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or prefix private keys with "_", or set the "sections" input to limit processing`,
-      };
+      return err({
+        code: "settings-unknown-sections",
+        source: sourceLabel,
+        unknown: unknownKeys,
+        known: SECTION_KEYS,
+      });
     }
     // A `sections` allowlist lets an older action version coexist with a
     // config written for a newer one: unknown keys OUTSIDE the allowlist
@@ -169,14 +175,21 @@ export function validateSettingsDoc(
       `ignoring unknown top-level section(s) outside the "sections" allowlist: ${unknownKeys.join(", ")}. Upgrade the action to a version that knows them, or remove them from ${sourceLabel}`,
     );
   }
-  const parsed = validateSectionShapes(settings as Record<string, unknown>, sourceLabel);
-  if ("error" in parsed) {
-    return { error: parsed.error };
-  }
   // The one place the brand is minted: everything above proved the document
   // is a mapping of known (or allowlist-tolerated/underscored) sections, and
   // the parsed document holds exactly the known ones as their shapes' output.
-  return { settings: parsed.settings as ValidatedSettings };
+  return validateSectionShapes(settings as Record<string, unknown>, sourceLabel).map(
+    (parsed) => parsed as ValidatedSettings,
+  );
+}
+
+/** A non-mapping document's top level in typeof terms; the only object left by the caller's guard is null. */
+function nonMappingShape(value: unknown): TopLevelShape {
+  if (Array.isArray(value)) {
+    return "list";
+  }
+  const kind = typeof value;
+  return kind === "object" ? "null" : kind;
 }
 
 /**
@@ -232,7 +245,7 @@ export async function runForRepo(
     if (settings[key] === undefined) {
       return "absent"; // declared-keys-only: absent section = untouched
     }
-    if (opts.onlySections.size > 0 && !opts.onlySections.has(key)) {
+    if (opts.sections.only.size > 0 && !opts.sections.only.has(key)) {
       return "excluded";
     }
     return "active";
@@ -406,7 +419,7 @@ export async function runForRepo(
       }
       const before = [...produced.notes, ...produced.changes];
       if (error instanceof PermissionDenied) {
-        const required = opts.requiredSections.has(section.key);
+        const required = opts.sections.required.has(section.key);
         // A denial after some operations landed is a partial mutation, never
         // a skip: the warn policy applies only when nothing was written.
         const landed = produced.landed;

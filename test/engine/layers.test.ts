@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "neverthrow";
 import { type Layer, type Layering, mergeLayers, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { silentIo } from "../../src/io.js";
+import { describeProblem, type LayerProblem } from "../../src/problem.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { MockApi } from "../mock-api.js";
@@ -26,8 +28,12 @@ function layer(name: string, doc: unknown): Layer {
   return { name, doc: deepFreeze(doc) };
 }
 
+/** The fold's verdict as the tests pin it: the merged document, or the refusal's code and its prose. */
 function merge(layers: Layer[], layering: Layering = "merge") {
-  return mergeLayers(layers, { layering });
+  return mergeLayers(layers, { layering }).match(
+    (folded) => folded,
+    (problem) => ({ code: problem.code, error: describeProblem(problem) }),
+  );
 }
 
 const MAIN_RULESET = {
@@ -644,95 +650,112 @@ describe("mergeLayers: the _layering directive", () => {
 describe("mergeLayers: layer-boundary refusals", () => {
   const fleet = layer("fleet", { labels: [{ name: "fleet" }], milestones: [{ title: "v0" }] });
 
-  test.each([
+  test.each<[string, unknown, LayerProblem["code"], string]>([
     [
       "a rule without a type",
       { rulesets: [{ name: "main", rules: [{ parameters: {} }] }] },
+      "layer-no-key",
       'layer "repo": rulesets[0].rules[0] carries no string "type", which every entry needs to layer by',
     ],
     [
       "a duplicate rule type in one ruleset",
       { rulesets: [{ name: "main", rules: [{ type: "deletion" }, { type: "deletion" }] }] },
+      "layer-duplicate-key",
       'layer "repo": rulesets[0].rules[0] and rulesets[0].rules[1] both claim one type; each type belongs to one entry within a layer',
     ],
     [
       "a non-mapping rule",
       { rulesets: [{ name: "main", rules: ["deletion"] }] },
+      "layer-wrong-shape",
       'layer "repo": rulesets[0].rules[0] must be a mapping; got a string',
     ],
     [
       "a non-mapping rule in the second ruleset, after a mapping rule",
       { rulesets: [{ name: "tags" }, { name: "main", rules: [{ type: "deletion" }, 7] }] },
+      "layer-wrong-shape",
       'layer "repo": rulesets[1].rules[1] must be a mapping; got a number',
     ],
     [
       "duplicate label names, case-folded",
       { labels: [{ name: "Bug" }, { name: "bug" }] },
+      "layer-duplicate-key",
       'layer "repo": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer',
     ],
     [
       "a label renaming into a sibling's name in one layer",
       { labels: [{ name: "bug", new_name: "Defect" }, { name: "docs" }, { name: "defect" }] },
+      "layer-duplicate-key",
       'layer "repo": labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer',
     ],
     [
       "duplicate ruleset names",
       { rulesets: [{ name: "main" }, { name: "main" }] },
+      "layer-duplicate-key",
       'layer "repo": rulesets[0] and rulesets[1] both claim one name; each name belongs to one entry within a layer',
     ],
     [
       "a nameless label",
       { labels: [{ name: "ok" }, { color: "ffffff" }] },
+      "layer-no-key",
       'layer "repo": labels[1] carries no string "name", which every entry needs to layer by',
     ],
     [
       "a scalar where a list belongs",
       { labels: "oops" },
+      "layer-wrong-shape",
       'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a string',
     ],
     [
       "a wrapper without entries",
       { labels: { _undeclared: "keep" } },
+      "layer-wrong-shape",
       'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
     ],
     [
       "a YAML-tagged value where a list belongs",
       { milestones: new Date(0) },
+      "layer-wrong-shape",
       'layer "repo": milestones must be a list of mappings or an {_undeclared, entries} wrapper; got a Date value',
     ],
     [
       "a non-mapping entry in a section without a layering key",
       { milestones: [{ title: "v1" }, "v2"] },
+      "layer-wrong-shape",
       'layer "repo": milestones[1] must be a mapping; got a string',
     ],
     [
       "an invalid top-level directive",
       { _layering: "union", labels: [{ name: "mine" }] },
+      "layer-bad-directive",
       'layer "repo": _layering must be "merge" or "replace"; got a string that is neither',
     ],
     [
       "an invalid wrapper directive",
       { labels: { _layering: "union", entries: [{ name: "mine" }] } },
+      "layer-bad-directive",
       'layer "repo": labels._layering must be "merge" or "replace"; got a string that is neither',
     ],
     [
       "a non-string wrapper directive",
       { labels: { _layering: true, entries: [{ name: "mine" }] } },
+      "layer-bad-directive",
       'layer "repo": labels._layering must be "merge" or "replace"; got a boolean',
     ],
     [
       "a wrapper merge directive on a section without a layering key",
       { milestones: { _layering: "merge", entries: [{ title: "v1" }] } },
+      "layer-no-layering-key",
       'layer "repo": milestones has no layering key, so it cannot be layered by "merge"; declare _layering: replace or drop the directive',
     ],
     [
       "a file-level merge directive reaching a section without a layering key",
       { _layering: "merge", milestones: [{ title: "v1" }] },
+      "layer-no-layering-key",
       'layer "repo": milestones has no layering key, so it cannot be layered by "merge"; declare _layering: replace or drop the directive',
     ],
-  ])("%s is refused naming the layer", (_case, doc, error) => {
-    expect(merge([fleet, layer("repo", doc)])).toEqual({ error });
-    expect(merge([fleet, layer("repo", doc)], "replace")).toEqual({ error });
+  ])("%s is refused naming the layer", (_case, doc, code, error) => {
+    expect(merge([fleet, layer("repo", doc)])).toEqual({ code, error });
+    expect(merge([fleet, layer("repo", doc)], "replace")).toEqual({ code, error });
   });
 
   test("a section without a layering key merges under the run default without complaint", () => {
@@ -753,25 +776,29 @@ describe("mergeLayers: layer-boundary refusals", () => {
     const M = "ZZ_MARKER";
     const cyclic: Record<string, unknown> = { [M]: M };
     cyclic[`${M}_self`] = cyclic;
-    const shaped: [string, unknown, string][] = [
+    const shaped: [string, unknown, LayerProblem["code"], string][] = [
       [
         "a scalar section",
         { labels: M },
+        "layer-wrong-shape",
         'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a string',
       ],
       [
         "a wrapper without entries",
         { labels: { _undeclared: M, [M]: M } },
+        "layer-wrong-shape",
         'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
       ],
       [
         "a scalar entry",
         { rulesets: [{ name: M, rules: [M] }] },
+        "layer-wrong-shape",
         'layer "repo": rulesets[0].rules[0] must be a mapping; got a string',
       ],
       [
         "a directive that is a marker",
         { labels: { _layering: M, entries: [{ name: M }] } },
+        "layer-bad-directive",
         'layer "repo": labels._layering must be "merge" or "replace"; got a string that is neither',
       ],
     ];
@@ -785,8 +812,8 @@ describe("mergeLayers: layer-boundary refusals", () => {
       ["two entries claiming one key", { labels: [{ name: M }, { name: M.toLowerCase() }] }],
       ["a cycle", { repository: cyclic }],
     ];
-    for (const [, doc, error] of shaped) {
-      expect(merge([fleet, layer("repo", doc)])).toEqual({ error });
+    for (const [, doc, code, error] of shaped) {
+      expect(merge([fleet, layer("repo", doc)])).toEqual({ code, error });
     }
     for (const [name, doc] of [...shaped, ...kinded]) {
       const result = merge([fleet, layer("repo", doc)]);
@@ -822,10 +849,13 @@ describe("mergeLayers: cyclic documents", () => {
   ])(
     "a layer that includes itself through %s is refused by name, before any merge",
     (_kind, make) => {
-      const error =
-        'layer "repo": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees';
-      expect(merge([fleet, layer("repo", make())])).toEqual({ error });
-      expect(merge([layer("repo", make()), fleet])).toEqual({ error });
+      const refused = {
+        code: "layer-cycle" as const,
+        error:
+          'layer "repo": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees',
+      };
+      expect(merge([fleet, layer("repo", make())])).toEqual(refused);
+      expect(merge([layer("repo", make()), fleet])).toEqual(refused);
     },
   );
 
@@ -973,10 +1003,14 @@ describe("stripNulls", () => {
     // Widened so the whole verdict can be pinned by value; the brand is opaque to toEqual.
     const validate = (doc: unknown): unknown =>
       validateSettingsDoc(doc, "repo", new Set(), silentIo());
-    expect(validate(upper)).toEqual({
-      error: expect.stringContaining("rulesets"),
-    });
-    expect(validate(stripNulls(upper))).toEqual({ settings: { rulesets: [{ name: "main" }] } });
+    expect(validate(upper)).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "repo",
+        issues: [expect.stringContaining("rulesets")],
+      }),
+    );
+    expect(validate(stripNulls(upper))).toEqual(ok({ rulesets: [{ name: "main" }] }));
     const merged = merge([layer("fleet", lower), layer("repo", upper)]);
     expect(merged).toEqual({
       settings: { rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } },
@@ -985,9 +1019,9 @@ describe("stripNulls", () => {
     if ("error" in merged) {
       throw new Error(merged.error);
     }
-    expect(validate(merged.settings)).toEqual({
-      settings: { rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } },
-    });
+    expect(validate(merged.settings)).toEqual(
+      ok({ rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } }),
+    );
   });
 
   test("a key named __proto__ survives as an own property", () => {

@@ -13,10 +13,13 @@
  * Pure: no Io, no GitHub. The helpers merge.ts shares live here too.
  */
 
+import { err, ok, type Result } from "neverthrow";
+import { isPlainObject } from "../plain-data.js";
+import type { LayerProblem } from "../problem.js";
 import { UNDECLARED_POLICY_SECTIONS, type UndeclaredPolicySection } from "../schema.js";
 import { defaultUndeclaredPolicy, type KeyedListLayering } from "../sections/contract/module.js";
 import { sectionModule } from "../sections/registry.js";
-import type { UndeclaredPolicy } from "../types.js";
+import type { DistributiveOmit, UndeclaredPolicy } from "../types.js";
 
 /** One settings document in the stack, named for notices and refusals. */
 export interface Layer {
@@ -40,22 +43,6 @@ const LAYERINGS: readonly Layering[] = ["merge", "replace"];
 
 function isLayering(value: unknown): value is Layering {
   return LAYERINGS.some((layering) => layering === value);
-}
-
-/**
- * A PLAIN mapping only: the prototype must be Object.prototype or null. A
- * YAML explicit tag (!!timestamp, !!set) parses to a Date or Set, which is
- * an object too - treating one as a mapping would spread it into `{}` and
- * quietly hand the merge (or a knobbed-section normalization) a document
- * nobody wrote. Non-plain objects REPLACE like scalars, surviving the merge
- * as written for post-merge validation to reject.
- */
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
 }
 
 /**
@@ -218,73 +205,26 @@ export function stripNulls(doc: unknown): unknown {
   return out;
 }
 
-/**
- * The kinds of problem the layer boundary refuses. Each carries only what
- * its prose needs: the prose fragments are literal unions, the positions are
- * numbers, and a document value enters only as `actual`, which the prose
- * describes by SHAPE. The one free string, `keyField`, is passed from the
- * module's declared key field, never read from a document.
- */
-type Problem =
-  | { readonly kind: "cycle" }
-  | {
-      readonly kind: "wrong-shape";
-      readonly expected: "a mapping" | "a list of mappings or an {_undeclared, entries} wrapper";
-      readonly actual: unknown;
-      readonly detail?: " without an entries list";
-    }
-  | { readonly kind: "bad-directive"; readonly actual: unknown }
-  | { readonly kind: "no-layering-key" }
-  | { readonly kind: "no-key"; readonly keyField: string }
-  | {
-      readonly kind: "duplicate-key";
-      readonly keyField: string;
-      readonly first: number;
-      readonly second: number;
-    };
-
-/** A layer the merge refuses at its boundary; worded by describeRefusal alone. */
-class LayerRefusal extends Error {}
+/** A layer refusal minus its position: the boundary adds the layer and site where it fires. */
+type Refusal = DistributiveOmit<LayerProblem, "layer" | "site">;
 
 /**
- * The ONE place a refusal is worded, and with describeOptOut the only prose
- * the merge produces. INVARIANT: a message names the layer as the layer list
- * names it, the site's key path, and the kind of problem - never a value from
- * the document. mode: merge has no private-repos redaction context, so a
- * value echoed here (a label name, a rule type, a mis-shaped section body)
- * could land a private repository's settings in a public log.
- * What the types enforce: a Problem's prose fragments are literal unions and
- * its positions are numbers, so `actual` and `keyField` are the only fields
- * that could carry a document string. What stays the code's invariant,
- * pinned by the marker test in test/engine/layers.test.ts: `actual` reaches
- * the prose only through describeShape; `keyField` is the module's declared
- * key field; `site` is built from section keys, entry indices,
+ * A refusal at `site` of `layer`. INVARIANT, pinned by the marker test in
+ * test/engine/layers.test.ts: `actual` is the only document value a refusal
+ * carries (describeProblem describes it by shape); `keyField` is the module's
+ * declared key field; `site` is built from section keys, entry indices,
  * module-declared field names, LAYERING_KEY, and the fixed phrase "the
- * document".
+ * document". A document key or value never enters the prose.
  */
-function describeRefusal(layer: string, site: string, problem: Problem): string {
-  const at = `layer ${quote(layer)}: ${site}`;
-  switch (problem.kind) {
-    case "cycle":
-      return `${at} contains a reference cycle (a YAML anchor that includes itself); layers must be trees`;
-    case "wrong-shape":
-      return `${at} must be ${problem.expected}; got ${describeShape(problem.actual)}${problem.detail ?? ""}`;
-    case "bad-directive":
-      return `${at} must be "merge" or "replace"; got ${describeShape(problem.actual)}${typeof problem.actual === "string" ? " that is neither" : ""}`;
-    case "no-layering-key":
-      return `${at} has no layering key, so it cannot be layered by "merge"; declare ${LAYERING_KEY}: replace or drop the directive`;
-    case "no-key":
-      return `${at} carries no string ${quote(problem.keyField)}, which every entry needs to layer by`;
-    case "duplicate-key":
-      return `${at}[${problem.first}] and ${site}[${problem.second}] both claim one ${problem.keyField}; each ${problem.keyField} belongs to one entry within a layer`;
-  }
+function refuse(layer: string, site: string, refusal: Refusal): Result<never, LayerProblem> {
+  return err({ layer, site, ...refusal });
 }
 
-function refuse(layer: string, site: string, problem: Problem): never {
-  throw new LayerRefusal(describeRefusal(layer, site, problem));
-}
-
-/** An opt-out notice's prose; value-free under the same invariant as describeRefusal. */
+/**
+ * An opt-out notice's prose; value-free under the same invariant as the
+ * refusals (mode: merge has no redaction context, so no document value may
+ * reach a log through the merge).
+ */
 export function describeOptOut(notice: OptOutNotice): string {
   return `${notice.layer}: null removed ${notice.path} declared by a lower layer`;
 }
@@ -313,27 +253,6 @@ interface AdmittedLayer {
   readonly sections: ReadonlyMap<string, AdmittedSection>;
 }
 
-function quote(value: unknown): string {
-  return JSON.stringify(String(value));
-}
-
-/** A value's kind for refusal prose: what it is, not what it contains. */
-function describeShape(value: unknown): string {
-  if (value === null) {
-    return "null";
-  }
-  if (Array.isArray(value)) {
-    return "a list";
-  }
-  if (isPlainObject(value)) {
-    return "a mapping";
-  }
-  if (typeof value === "object") {
-    return `a ${value.constructor?.name ?? "tagged"} value`;
-  }
-  return `a ${typeof value}`;
-}
-
 /** The entries as mappings, or null when one is not. */
 function asMappings(list: readonly unknown[]): readonly Readonly<Record<string, unknown>>[] | null {
   return list.every(isPlainObject) ? list : null;
@@ -347,14 +266,14 @@ function admitEntries(
   layer: string,
   path: string,
   list: readonly unknown[],
-): readonly Readonly<Record<string, unknown>>[] {
+): Result<readonly Readonly<Record<string, unknown>>[], LayerProblem> {
   const mappings = asMappings(list);
   if (mappings !== null) {
-    return mappings;
+    return ok(mappings);
   }
   const index = list.findIndex((entry) => !isPlainObject(entry));
   return refuse(layer, `${path}[${index}]`, {
-    kind: "wrong-shape",
+    code: "layer-wrong-shape",
     expected: "a mapping",
     actual: list[index],
   });
@@ -373,18 +292,18 @@ function checkKeyed(
   entries: readonly Readonly<Record<string, unknown>>[],
   keyed: KeyedListLayering,
   path: string,
-): void {
+): Result<void, LayerProblem> {
   const seen = new Map<string, number>();
-  entries.forEach((entry, index) => {
+  for (const [index, entry] of entries.entries()) {
     const keys = keyed.keys(entry);
     if (keys === null) {
-      refuse(layer, `${path}[${index}]`, { kind: "no-key", keyField: keyed.keyField });
+      return refuse(layer, `${path}[${index}]`, { code: "layer-no-key", keyField: keyed.keyField });
     }
     for (const key of keys) {
       const first = seen.get(key);
       if (first !== undefined) {
-        refuse(layer, path, {
-          kind: "duplicate-key",
+        return refuse(layer, path, {
+          code: "layer-duplicate-key",
           keyField: keyed.keyField,
           first,
           second: index,
@@ -398,24 +317,33 @@ function checkKeyed(
         continue;
       }
       const nestedPath = `${path}[${index}].${field}`;
-      checkKeyed(layer, admitEntries(layer, nestedPath, value), nested, nestedPath);
+      const checked = admitEntries(layer, nestedPath, value).andThen((mappings) =>
+        checkKeyed(layer, mappings, nested, nestedPath),
+      );
+      if (checked.isErr()) {
+        return checked;
+      }
     }
-  });
+  }
+  return ok();
 }
 
 /**
  * The top-level `_layering` of a document, validated; undefined when absent.
  * Consumed here, so it never reaches the merged document.
  */
-function fileLayering(layer: string, doc: Readonly<Record<string, unknown>>): Layering | undefined {
+function fileLayering(
+  layer: string,
+  doc: Readonly<Record<string, unknown>>,
+): Result<Layering | undefined, LayerProblem> {
   const value = doc[LAYERING_KEY];
   if (value === undefined) {
-    return undefined;
+    return ok(undefined);
   }
   if (!isLayering(value)) {
-    refuse(layer, LAYERING_KEY, { kind: "bad-directive", actual: value });
+    return refuse(layer, LAYERING_KEY, { code: "layer-bad-directive", actual: value });
   }
-  return value;
+  return ok(value);
 }
 
 /** One knobbed section past the boundary, or a refusal naming the layer and the section. */
@@ -424,29 +352,33 @@ function admitSection(
   key: UndeclaredPolicySection,
   value: unknown,
   fallback: { readonly file: Layering | undefined; readonly run: Layering },
-): AdmittedSection {
+): Result<AdmittedSection, LayerProblem> {
   if (!isPlainObject(value) || !Array.isArray(value.entries)) {
-    refuse(layer, key, {
-      kind: "wrong-shape",
+    return refuse(layer, key, {
+      code: "layer-wrong-shape",
       expected: "a list of mappings or an {_undeclared, entries} wrapper",
       actual: value,
       detail: isPlainObject(value) ? " without an entries list" : undefined,
     });
   }
-  const entries = admitEntries(layer, key, value.entries);
-  const { entries: _entries, [LAYERING_KEY]: directive, ...knobs } = value;
-  if (directive !== undefined && !isLayering(directive)) {
-    refuse(layer, `${key}.${LAYERING_KEY}`, { kind: "bad-directive", actual: directive });
-  }
-  const explicit = directive ?? fallback.file;
-  const keyed = sectionModule(key).layering;
-  if (keyed === undefined && explicit === "merge") {
-    refuse(layer, key, { kind: "no-layering-key" });
-  }
-  if (keyed !== undefined) {
-    checkKeyed(layer, entries, keyed, key);
-  }
-  return { knobs, entries, layering: explicit ?? fallback.run, keyed };
+  return admitEntries(layer, key, value.entries).andThen((entries) => {
+    const { entries: _entries, [LAYERING_KEY]: directive, ...knobs } = value;
+    if (directive !== undefined && !isLayering(directive)) {
+      return refuse(layer, `${key}.${LAYERING_KEY}`, {
+        code: "layer-bad-directive",
+        actual: directive,
+      });
+    }
+    const explicit = directive ?? fallback.file;
+    const keyed = sectionModule(key).layering;
+    if (keyed === undefined && explicit === "merge") {
+      return refuse(layer, key, { code: "layer-no-layering-key" });
+    }
+    const section: AdmittedSection = { knobs, entries, layering: explicit ?? fallback.run, keyed };
+    return keyed === undefined
+      ? ok(section)
+      : checkKeyed(layer, entries, keyed, key).map(() => section);
+  });
 }
 
 /**
@@ -480,23 +412,29 @@ function hasCycle(value: unknown, descent: WeakSet<object>, walked: WeakSet<obje
  * it); a mapping has its directive and every knobbed section checked once, so
  * the fold below never meets an unkeyed or duplicated entry.
  */
-function admit(layer: Layer, run: Layering): AdmittedLayer | null {
+function admit(layer: Layer, run: Layering): Result<AdmittedLayer | null, LayerProblem> {
   if (hasCycle(layer.doc, new WeakSet(), new WeakSet())) {
-    refuse(layer.name, "the document", { kind: "cycle" });
+    return refuse(layer.name, "the document", { code: "layer-cycle" });
   }
   const doc = normalizeKnobbedSections(layer.doc);
   if (!isPlainObject(doc)) {
-    return null;
+    return ok(null);
   }
-  const file = fileLayering(layer.name, doc);
-  const sections = new Map<string, AdmittedSection>();
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
-    const value = doc[key];
-    if (value !== undefined && value !== null) {
-      sections.set(key, admitSection(layer.name, key, value, { file, run }));
+  return fileLayering(layer.name, doc).andThen((file) => {
+    const sections = new Map<string, AdmittedSection>();
+    for (const key of UNDECLARED_POLICY_SECTIONS) {
+      const value = doc[key];
+      if (value === undefined || value === null) {
+        continue;
+      }
+      const admitted = admitSection(layer.name, key, value, { file, run });
+      if (admitted.isErr()) {
+        return err(admitted.error);
+      }
+      sections.set(key, admitted.value);
     }
-  }
-  return { name: layer.name, doc, sections };
+    return ok({ name: layer.name, doc, sections });
+  });
 }
 
 function childPath(path: string, key: string): string {
@@ -709,27 +647,26 @@ function mergeStep(acc: unknown, layer: AdmittedLayer, notices: OptOutNotice[]):
  * or for the whole document with a top-level one, both consumed here. The
  * result carries every knobbed section resolved to an explicit policy and
  * never a `_layering` key. Inputs are never mutated; a layer the boundary
- * refuses comes back as an error naming it.
+ * refuses comes back as the problem naming it.
  */
 export function mergeLayers(
   layers: readonly Layer[],
   options: { readonly layering: Layering },
-): { settings: unknown; notices: OptOutNotice[] } | { error: string } {
+): Result<{ settings: unknown; notices: OptOutNotice[] }, LayerProblem> {
   const notices: OptOutNotice[] = [];
   let acc: unknown = {};
-  try {
-    for (const layer of layers) {
-      const admitted = admit(layer, options.layering);
-      acc = admitted === null ? structuredClone(layer.doc) : mergeStep(acc, admitted, notices);
+  for (const layer of layers) {
+    const admitted = admit(layer, options.layering);
+    if (admitted.isErr()) {
+      return err(admitted.error);
     }
-  } catch (error) {
-    if (error instanceof LayerRefusal) {
-      return { error: error.message };
-    }
-    throw error;
+    acc =
+      admitted.value === null
+        ? structuredClone(layer.doc)
+        : mergeStep(acc, admitted.value, notices);
   }
   if (isPlainObject(acc)) {
     resolveUndeclaredPolicies(acc);
   }
-  return { settings: acc, notices };
+  return ok({ settings: acc, notices });
 }

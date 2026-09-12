@@ -65,11 +65,7 @@ class TracingApi extends MockApi {
 }
 
 function repo(slug: string): RepoRef {
-  const parsed = parseRepoSlug(slug);
-  if (parsed === null) {
-    throw new Error(`test slug ${slug} must parse`);
-  }
-  return parsed;
+  return parseRepoSlug(slug)._unsafeUnwrap();
 }
 
 const FAILED_LABELS: SectionOutcome[] = [
@@ -404,12 +400,12 @@ describe("concludeRun", () => {
     expect(events.join("\n")).not.toContain("o/priv");
   });
 
-  test("failRun: the error line, then the conclusion a failed target gets, with no summary", () => {
+  test("failRun: the problem's line, then the conclusion a failed target gets, with no summary", () => {
     const { io, events, outputs } = eventIo();
-    expect(failRun(io, "the token input is required")).toBe(1);
+    expect(failRun(io, { code: "input-token-missing" })).toBe(1);
     expect(outputs).toEqual({ "skipped-sections": "", result: "failed" });
     expect(events).toEqual([
-      "error: the token input is required",
+      'error: cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
       "output skipped-sections=",
       "output result=failed",
       "log: result: failed",

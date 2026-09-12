@@ -239,6 +239,7 @@ graph TD
   report["src/report/"]
   schema["src/schema.ts"]
   io["src/io.ts"]
+  problem["src/problem.ts"]
   types["src/types.ts"]
   plain_data["src/plain-data.ts"]
   private["src/private.ts<br>src/private-open.ts"]
@@ -250,6 +251,7 @@ graph TD
   library --> flows
   library --> github
   library --> io
+  library --> problem
   library --> report
   library --> schema
   library --> sections
@@ -258,13 +260,17 @@ graph TD
   flows --> engine
   flows --> github
   flows --> io
+  flows --> plain_data
   flows --> private
+  flows --> problem
   flows --> report
   flows --> schema
+  flows --> types
   engine --> discovery
   engine --> github
   engine --> io
   engine --> plain_data
+  engine --> problem
   engine --> schema
   engine --> sections
   engine --> types
@@ -278,14 +284,18 @@ graph TD
   github --> plain_data
   discovery --> github
   discovery --> private
+  discovery --> problem
   report --> discovery
   report --> engine
   report --> github
   report --> io
   report --> private
+  report --> problem
   report --> schema
   report --> sections
   report --> types
+  problem --> plain_data
+  problem --> schema
   schema --> sections
   schema --> types
   upstream_gaps --> types

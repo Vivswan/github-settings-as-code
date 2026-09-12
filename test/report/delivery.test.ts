@@ -10,6 +10,7 @@ import { runOutcome } from "../../src/flows/deliver.js";
 import { redactedChannel } from "../../src/flows/redact.js";
 import { type Io, maskRegistry, silentIo } from "../../src/io.js";
 import { isPrivate, type Private } from "../../src/private.js";
+import { describeProblem } from "../../src/problem.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import {
   applyMarkerInjection,
@@ -58,11 +59,7 @@ function sealed(slug: string, outcomes: SectionOutcome[]): Private<RedactedDetai
 }
 
 function repo(slug: string): RepoRef {
-  const parsed = parseRepoSlug(slug);
-  if (parsed === null) {
-    throw new Error(`test slug ${slug} must parse`);
-  }
-  return parsed;
+  return parseRepoSlug(slug)._unsafeUnwrap();
 }
 
 /** A drifting redacted target, concluded as a check-mode run (exit 1) or an apply (exit 0) would. */
@@ -230,10 +227,10 @@ describe("applyMarkerInjection", () => {
   // here instead of riding a cast into the injection.
   const validated = (doc: SettingsFile): ValidatedSettings => {
     const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silentIo());
-    if ("error" in verdict) {
-      throw new Error(`test fixture failed validation: ${verdict.error}`);
+    if (verdict.isErr()) {
+      throw new Error(`test fixture failed validation: ${describeProblem(verdict.error)}`);
     }
-    return verdict.settings;
+    return verdict.value;
   };
   const bug = { name: "bug", color: "d73a4a" };
   const marker = { name: MARKER, color: "0e2a47" };

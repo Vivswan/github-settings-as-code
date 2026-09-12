@@ -30,3 +30,9 @@ export interface UndeclaredPolicyList<E> {
  * orchestrate.ts, inputs.ts), so the idiom cannot drift between them.
  */
 export type MustBeNever<T extends never> = T;
+
+/**
+ * Omit distributed over a union: `Omit<A | B, K>` collapses to the common
+ * keys, losing each member's own fields, while this keeps one member per arm.
+ */
+export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;

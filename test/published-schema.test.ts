@@ -12,6 +12,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
+import { ok } from "neverthrow";
 import { validateSectionShapes } from "../src/engine/validate.js";
 import { SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
 import { FLAG_PAIRING_FIXTURES } from "./fixtures/environment-flag-pairing.js";
@@ -325,6 +326,6 @@ describe("the document-level _layering directive", () => {
   test("the apply-path shape validation copies only sections, so the directive never reaches the engine", () => {
     expect(
       validateSectionShapes({ _layering: "replace", labels: [{ name: "bug" }] }, "settings.yml"),
-    ).toEqual({ settings: { labels: [{ name: "bug" }] } });
+    ).toEqual(ok({ labels: [{ name: "bug" }] }));
   });
 });

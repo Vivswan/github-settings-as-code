@@ -4,8 +4,8 @@
  * (engine/layers.ts), and validate the result. Nothing here reaches GitHub.
  */
 
+import { ok, Result } from "neverthrow";
 import {
-  isPlainObject,
   type Layer,
   type Layering,
   mergeLayers,
@@ -14,22 +14,22 @@ import {
 } from "../engine/layers.js";
 import { type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
 import type { Io } from "../io.js";
+import { isPlainObject } from "../plain-data.js";
+import type { LayerProblem, ProblemOf, SettingsProblem } from "../problem.js";
 import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../schema.js";
 import { readSettingsFile } from "./settings-read.js";
 
-/** Read and parse every layer, in order; the first unreadable path fails, named. */
-export function readLayerFiles(paths: readonly string[]): { layers: Layer[] } | { error: string } {
-  const layers: Layer[] = [];
-  for (const path of paths) {
-    const read = readSettingsFile(path);
-    if ("error" in read) {
-      return {
-        error: `cannot read the settings layer ${path}: ${read.error}. Check that every path in the "settings-file" input exists and is valid YAML`,
-      };
-    }
-    layers.push({ name: path, doc: read.doc });
-  }
-  return { layers };
+/** Read and parse every layer, in order; the first unreadable path fails, named, and the rest are not read. */
+export function readLayerFiles(
+  paths: readonly string[],
+): Result<Layer[], ProblemOf<"settings-file-unreadable">> {
+  return paths.reduce<Result<Layer[], ProblemOf<"settings-file-unreadable">>>(
+    (layers, path) =>
+      layers.andThen((read) =>
+        readSettingsFile(path, "layer").map((doc) => [...read, { name: path, doc }]),
+      ),
+    ok([]),
+  );
 }
 
 const KNOWN_SECTIONS: ReadonlySet<string> = new Set(SECTION_KEYS);
@@ -79,20 +79,20 @@ export function foldLayers(
   sourceLabel: string,
   layering: Layering,
   io: Io,
-): { settings: ValidatedSettings; notices: OptOutNotice[] } | { error: string } {
-  for (const layer of layers) {
-    const standalone = validateSettingsDoc(standaloneView(layer.doc), layer.name, NO_ALLOWLIST, io);
-    if ("error" in standalone) {
-      return { error: standalone.error };
-    }
-  }
-  const merged = mergeLayers(layers, { layering });
-  if ("error" in merged) {
-    return { error: merged.error };
-  }
-  const validated = validateSettingsDoc(merged.settings, sourceLabel, NO_ALLOWLIST, io);
-  if ("error" in validated) {
-    return { error: validated.error };
-  }
-  return { settings: validated.settings, notices: merged.notices };
+): Result<
+  { settings: ValidatedSettings; notices: OptOutNotice[] },
+  SettingsProblem | LayerProblem
+> {
+  return Result.combine(
+    layers.map((layer) =>
+      validateSettingsDoc(standaloneView(layer.doc), layer.name, NO_ALLOWLIST, io),
+    ),
+  )
+    .andThen(() => mergeLayers(layers, { layering }))
+    .andThen((merged) =>
+      validateSettingsDoc(merged.settings, sourceLabel, NO_ALLOWLIST, io).map((settings) => ({
+        settings,
+        notices: merged.notices,
+      })),
+    );
 }
