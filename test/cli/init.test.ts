@@ -272,41 +272,6 @@ describe("init: the written file and the printed grant", () => {
     });
   });
 
-  test("a selection the snapshot cannot read back writes an empty document under a header that says so", async () => {
-    const file = join(tempDir(), "settings.yml");
-    const api = new MockApi({});
-    const result = await cli(
-      [
-        "init",
-        "--token",
-        TOKEN,
-        "--repository",
-        "o/r",
-        "--settings-file",
-        file,
-        "--sections",
-        "check_suite_preferences",
-      ],
-      api,
-    );
-    expect(api.calls).toHaveLength(0);
-    expect(result).toEqual({
-      code: 0,
-      stdout: [
-        `${file} written from o/r: 0 section(s) declared ()`,
-        "not read back: check_suite_preferences (the file's header says why; declare them by hand to manage them)",
-        "Token permissions the file needs:",
-        "",
-      ].join("\n"),
-      stderr: "",
-    });
-    const written = readFileSync(file, "utf8");
-    expect(written).toContain(
-      "\n# check_suite_preferences: GitHub exposes no read endpoint for this section",
-    );
-    expect(parseYaml(written)).toEqual({});
-  });
-
   test("a denied section under warn is skipped: partial, the file omits it, the line says so, exit 0", async () => {
     const file = join(tempDir(), "settings.yml");
     // No variables route: the read answers 404, the fine-grained denial.
@@ -405,25 +370,46 @@ describe("init: an existing settings file", () => {
   });
 
   const SERVER_ERROR = { error: { status: 500, message: "Server Error", body: "" } };
-  test.each<[string, string, Record<string, typeof SERVER_ERROR>]>([
-    ["every section failed", "labels", {}],
-    // custom_properties reads back "nothing live" (no /orgs/o route), so it counts as read while declaring nothing.
-    ["the only section that read back declares nothing", "labels,custom_properties", {}],
+  const LABELS_500 = { "GET /repos/o/r/labels?per_page=100&page=1": SERVER_ERROR };
+  const NO_MILESTONES = { "GET /repos/o/r/milestones?state=all&per_page=100&page=1": { data: [] } };
+  test.each<[string, string, Record<string, unknown>, string, number | undefined]>([
+    [
+      "no selected section can be read back",
+      "check_suite_preferences",
+      {},
+      "cannot be read back: check_suite_preferences",
+      0,
+    ],
+    ["every section failed", "labels", LABELS_500, "failed: labels", undefined],
+    // custom_properties reads back "nothing live" (no /orgs/o route): read, declaring nothing.
+    [
+      "the only section that read back declares nothing",
+      "labels,custom_properties",
+      LABELS_500,
+      "failed: labels; nothing exists on the repository: custom_properties",
+      undefined,
+    ],
+    [
+      "nothing exists for the selected sections",
+      "milestones",
+      NO_MILESTONES,
+      "nothing exists on the repository: milestones",
+      undefined,
+    ],
   ])(
-    "survives --force when %s: the partial document is empty, exit 1",
-    async (_case, sections, routes) => {
+    "never writes an empty document, --force or not: %s, exit 1",
+    async (_case, sections, routes, why, apiCalls) => {
       const file = join(tempDir(), "settings.yml");
       writeFileSync(file, "repository:\n  has_wiki: false\n");
-      // A 500 fails the section without failing the run: the snapshot is partial.
-      const api = new MockApi({
-        "GET /repos/o/r/labels?per_page=100&page=1": SERVER_ERROR,
-        ...routes,
-      });
+      const api = new MockApi(routes as ConstructorParameters<typeof MockApi>[0]);
       const result = await cli([...target(file).slice(0, -1), sections, "--force"], api);
+      if (apiCalls !== undefined) {
+        expect(api.calls).toHaveLength(apiCalls);
+      }
       expect(result.code).toBe(1);
       expect(result.stdout).toBe("");
       expect(result.stderr).toEndWith(
-        `error: the snapshot of o/r is partial and its document is empty (the warnings and errors above name the sections that were skipped or failed), so ${file} was not written\n`,
+        `error: the snapshot of o/r declares no section (${why}), so ${file} was not written. Choose sections init can read back, or drop --sections to read every section\n`,
       );
       expect(readFileSync(file, "utf8")).toBe("repository:\n  has_wiki: false\n");
     },

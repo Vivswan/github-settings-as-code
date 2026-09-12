@@ -95,6 +95,7 @@ Token permissions the file needs:
 The file is the one [snapshot mode](../operate/snapshot.md) writes, schema hint first; commit it, and `gsac check` reads clean against the repository it came from.
 An existing settings file is refused (init never replaces the file you author) unless `--force` is passed; `--settings-file` writes elsewhere.
 `--sections` and `--on-missing-permission` narrow the snapshot as they do under `snapshot`; a section the token cannot read is skipped under `warn` and listed on stdout, and the file's header names every section the snapshot does not read back.
+A document that would declare no section is never written: the refusal names each selected section and why it declares nothing.
 The notes print in the clear, as the file holds the same names: init has no `--private-repos`.
 
 ### validate
@@ -152,7 +153,7 @@ The exit codes are the action's:
 |---|---|
 | `check` | drift, or a failure |
 | `apply`, `merge`, `snapshot` | a failure |
-| `init` | a failure, a partial snapshot whose document is empty, or a settings file it refuses to replace |
+| `init` | a failure, a document that would declare no section, or a settings file it refuses to replace |
 | `validate` | the file is invalid |
 | `permissions` | never for a valid file |
 

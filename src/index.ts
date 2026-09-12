@@ -74,10 +74,12 @@ export {
   MODES,
   type Mode,
   parseConfig,
+  parseSnapshotFileConfig,
   type RunConfig,
   SNAPSHOT_INPUTS,
   SNAPSHOT_ONLY_INPUTS,
   SNAPSHOT_REJECTED_INPUTS,
+  type SnapshotFileConfig,
 } from "./flows/inputs.js";
 export { foldLayers, readLayerFiles } from "./flows/layers.js";
 export {
