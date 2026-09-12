@@ -18,7 +18,10 @@ coverage:
       PATCH /repos/{owner}/{repo} verbatim passthrough (src/sections/repository/index.ts). Any field
       GitHub adds to the repo PATCH body, now or in any release to come, works day one with no
       action update, the forward-compatibility tenet's strongest case. Check mode = subsetDiff of
-      declared keys against GET /repos.
+      declared keys against GET /repos. Snapshot reads back the documented PATCH fields the GET
+      reports, the topics, each readable toggle, and the two GraphQL keys; the server-only fields
+      (ids, urls, counts, has_downloads) fall away. The fields it leaves out or notes are listed in
+      docs/operate/snapshot.md.
   - area: >-
       [security_and_analysis](https://docs.github.com/en/rest/repos/repos) (GitHub Advanced
       Security, secret scanning, push protection, and any nested toggle GitHub adds)

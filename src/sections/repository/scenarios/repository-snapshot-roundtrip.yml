@@ -1,0 +1,73 @@
+name: repository-snapshot-roundtrip
+description: "mode: snapshot reads the live repository back into snapshot.yml and writes nothing to GitHub. The GET's documented PATCH fields, the topics, every readable security toggle, and the two GraphQL-only keys read back; ids, urls, counts, the owner, the license, and has_downloads fall away, and Git LFS is noted since GitHub exposes no read for it. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  repo:
+    homepage: https://example.com/docs
+    allow_forking: true
+    security_and_analysis:
+      secret_scanning:
+        status: enabled
+    automated_security_fixes_enabled: true
+    vulnerability_alerts_enabled: true
+    private_vulnerability_reporting_enabled: false
+    immutable_releases_enabled: true
+    has_sponsorships_enabled: true
+    issue_creation_policy: COLLABORATORS_ONLY
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: repository
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    repository: snapshot
+  snapshot:
+    repository:
+      description: End-to-end fixture repository for settings-as-code.
+      homepage: https://example.com/docs
+      private: false
+      visibility: public
+      security_and_analysis:
+        secret_scanning:
+          status: enabled
+      has_issues: true
+      has_projects: true
+      has_wiki: true
+      has_discussions: false
+      is_template: false
+      default_branch: main
+      allow_squash_merge: true
+      allow_merge_commit: false
+      allow_rebase_merge: true
+      allow_auto_merge: false
+      delete_branch_on_merge: true
+      allow_update_branch: true
+      use_squash_pr_title_as_default: true
+      squash_merge_commit_title: PR_TITLE
+      squash_merge_commit_message: PR_BODY
+      merge_commit_title: MERGE_MESSAGE
+      merge_commit_message: PR_TITLE
+      archived: false
+      allow_forking: true
+      web_commit_signoff_required: false
+      topics:
+        - settings-as-code
+        - automation
+      enable_vulnerability_alerts: true
+      enable_automated_security_fixes: true
+      enable_private_vulnerability_reporting: false
+      enable_immutable_releases: true
+      enable_sponsorships: true
+      issue_creation_policy: collaborators_only
+  stdout_contains:
+    - "repository.enable_git_lfs: GitHub exposes no endpoint to read Git LFS back"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

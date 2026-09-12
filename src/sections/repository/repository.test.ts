@@ -8,6 +8,7 @@ import { REPO } from "../../../test/sections/section-run.js";
 import { validateSectionShapes } from "../../engine/validate.js";
 import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
+import { sectionGrant } from "../contract/module.js";
 import { FEATURE_TOGGLES, normalizeTopics, repositorySection } from "./index.js";
 
 function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
@@ -787,5 +788,182 @@ describe("repository GraphQL-routed keys", () => {
         `"${name}" must be rejected`,
       ).toContain("repository.issue_creation_policy");
     }
+  });
+});
+
+describe("repository snapshot", () => {
+  const snapshot = (api: GithubClient) =>
+    repositorySection.snapshot(planContext(repositorySection, api, REPO));
+  const LFS_NOTE =
+    "repository.enable_git_lfs: GitHub exposes no endpoint to read Git LFS back, so the snapshot leaves it out; declare it yourself to manage it";
+
+  test("reads the PATCH fields, topics, toggles, and GraphQL keys back; what nobody can PATCH and a null field fall away", async () => {
+    const api = liveRepo({
+      repo: {
+        id: 500,
+        node_id: "R_kgDOHdPQ2A",
+        name: "r",
+        full_name: "o/r",
+        owner: { login: "o", id: 9 },
+        html_url: "https://github.com/o/r",
+        forks_count: 3,
+        has_downloads: true,
+        permissions: { admin: true },
+        description: "Docs",
+        homepage: null,
+        private: false,
+        visibility: "public",
+        security_and_analysis: { secret_scanning: { status: "enabled" } },
+        has_issues: true,
+        has_wiki: false,
+        default_branch: "main",
+        allow_squash_merge: true,
+        squash_merge_commit_title: "PR_TITLE",
+        archived: false,
+        topics: ["ci", "tooling"],
+      },
+      toggles: { "vulnerability-alerts": true, "automated-security-fixes": true },
+      features: { hasSponsorshipsEnabled: true, issueCreationPolicy: "COLLABORATORS_ONLY" },
+    });
+    expect(await snapshot(api)).toEqual({
+      value: {
+        description: "Docs",
+        private: false,
+        visibility: "public",
+        security_and_analysis: { secret_scanning: { status: "enabled" } },
+        has_issues: true,
+        has_wiki: false,
+        default_branch: "main",
+        allow_squash_merge: true,
+        squash_merge_commit_title: "PR_TITLE",
+        archived: false,
+        topics: ["ci", "tooling"],
+        enable_vulnerability_alerts: true,
+        enable_automated_security_fixes: true,
+        enable_private_vulnerability_reporting: false,
+        enable_immutable_releases: false,
+        enable_sponsorships: true,
+        issue_creation_policy: "collaborators_only",
+      },
+      notes: [LFS_NOTE],
+    });
+    expect(api.writes).toEqual([]);
+  });
+
+  test("security_and_analysis keeps only its PATCHable sub-keys: dependabot_security_updates is the toggle's, not the passthrough's", async () => {
+    const api = liveRepo({
+      repo: {
+        security_and_analysis: {
+          secret_scanning: { status: "enabled" },
+          secret_scanning_push_protection: { status: "disabled" },
+          dependabot_security_updates: { status: "enabled" },
+        },
+        topics: [],
+      },
+      toggles: { "automated-security-fixes": true },
+    });
+    const { value } = await snapshot(api);
+    expect(value?.security_and_analysis).toEqual({
+      secret_scanning: { status: "enabled" },
+      secret_scanning_push_protection: { status: "disabled" },
+    });
+    expect(value?.enable_automated_security_fixes).toBe(true);
+    // Only the toggle's own key carries the state, so nothing about it is declared twice.
+    const bare = liveRepo({
+      repo: {
+        security_and_analysis: { dependabot_security_updates: { status: "enabled" } },
+        topics: [],
+      },
+    });
+    expect((await snapshot(bare)).value).not.toHaveProperty("security_and_analysis");
+  });
+
+  test("a denied toggle probe is a note, an owner-enforced toggle reads back with a note, and an unreadable policy is left out", async () => {
+    const api = new MockApi({
+      [GET]: { data: { description: "x", topics: [] } },
+      "GET /repos/o/r/private-vulnerability-reporting": {
+        error: { status: 403, message: "Forbidden", body: "" },
+      },
+      "GET /repos/o/r/immutable-releases": { data: { enabled: true, enforced_by_owner: true } },
+      ...features({ issueCreationPolicy: "NOBODY" }),
+    });
+    expect(await snapshot(api)).toEqual({
+      value: {
+        description: "x",
+        enable_vulnerability_alerts: false,
+        enable_automated_security_fixes: false,
+        enable_immutable_releases: true,
+        enable_sponsorships: false,
+      },
+      notes: [
+        `repository.enable_private_vulnerability_reporting: left out of the snapshot - the token was denied GET /repos/o/r/private-vulnerability-reporting: 403 Forbidden. To fix, ${sectionGrant(repositorySection)}`,
+        "repository.enable_immutable_releases: the repository owner enforces immutable releases, so it reads back as true but cannot be changed from the repository",
+        LFS_NOTE,
+        'repository.issue_creation_policy: GRAPHQL RepositoryFeatures returned issueCreationPolicy "NOBODY", ' +
+          "which this section cannot read as a repository.issue_creation_policy value; a null policy means " +
+          "GitHub reported no issue creation policy for this repository; otherwise the field vocabulary may " +
+          "have changed, so the snapshot leaves it out",
+      ],
+    });
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("four toggle 404s are left out under one note, since a concealed denial answers the same; one other answer proves the grant", async () => {
+    // Every unrouted GET answers 404, as a fine-grained token without the grant is answered.
+    const allOff = new MockApi({ [GET]: { data: { topics: [] } }, ...features() });
+    expect(await snapshot(allOff)).toEqual({
+      value: { enable_sponsorships: false, issue_creation_policy: "all" },
+      notes: [
+        "repository.enable_vulnerability_alerts/enable_automated_security_fixes/enable_private_vulnerability_reporting/enable_immutable_releases: " +
+          "every toggle GET answered 404, which reads as off but is also how a fine-grained token missing the grant is answered, so they are left out; " +
+          `if the token does ${sectionGrant(repositorySection)}, they are all off and can be declared false`,
+        LFS_NOTE,
+      ],
+    });
+    const oneOn = new MockApi({
+      [GET]: { data: { topics: [] } },
+      "GET /repos/o/r/immutable-releases": { data: { enabled: true, enforced_by_owner: false } },
+      ...features(),
+    });
+    expect((await snapshot(oneOn)).value).toMatchObject({
+      enable_vulnerability_alerts: false,
+      enable_automated_security_fixes: false,
+      enable_private_vulnerability_reporting: false,
+      enable_immutable_releases: true,
+    });
+    // The declared 422 ("not applicable") is answered only to a granted token, so it proves it too.
+    const notApplicable = new MockApi({
+      [GET]: { data: { topics: [] } },
+      "GET /repos/o/r/private-vulnerability-reporting": {
+        error: { status: 422, message: "Unprocessable", body: "" },
+      },
+      ...features(),
+    });
+    expect((await snapshot(notApplicable)).value).toMatchObject({
+      enable_vulnerability_alerts: false,
+      enable_automated_security_fixes: false,
+      enable_private_vulnerability_reporting: false,
+      enable_immutable_releases: false,
+    });
+  });
+
+  test("a denied features query leaves both GraphQL keys out under one note", async () => {
+    const api = new MockApi({
+      [GET]: { data: { topics: [] } },
+      "GET /repos/o/r/private-vulnerability-reporting": { data: { enabled: false } },
+      "GRAPHQL RepositoryFeatures": { error: { status: 403, message: "Forbidden", body: "" } },
+    });
+    expect(await snapshot(api)).toEqual({
+      value: {
+        enable_vulnerability_alerts: false,
+        enable_automated_security_fixes: false,
+        enable_private_vulnerability_reporting: false,
+        enable_immutable_releases: false,
+      },
+      notes: [
+        LFS_NOTE,
+        `repository.enable_sponsorships and repository.issue_creation_policy: left out of the snapshot - the token was denied GRAPHQL RepositoryFeatures: 403 Forbidden. To fix, ${sectionGrant(repositorySection)}`,
+      ],
+    });
   });
 });

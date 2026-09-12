@@ -88,7 +88,9 @@ describe("snapshotRepository", () => {
     expect(api.writes).toEqual([]);
     // The document holds exactly the sections with live state, in registry order.
     expect(Object.keys(result.settings ?? {})).toEqual([
+      "repository",
       "labels",
+      "actions",
       "actions_secrets",
       "workflows",
       "code_scanning_default_setup",
@@ -106,11 +108,8 @@ describe("snapshotRepository", () => {
     // Every registered section has exactly one outcome, unsupported ones with their reason.
     expect(result.outcomes.map((o) => o.key)).toEqual(SECTIONS.map((s) => s.key));
     expect(UNSUPPORTED).toEqual([
-      "repository",
-      "rulesets",
       "environments",
       "branches",
-      "actions",
       "check_suite_preferences",
       "collaborators",
       "teams",
@@ -204,14 +203,16 @@ describe("snapshotRepository", () => {
       api,
       {
         ...opts(),
-        sections: SectionSelection.of({ only: ["labels", "repository"] })._unsafeUnwrap(),
+        sections: SectionSelection.of({
+          only: ["labels", "check_suite_preferences"],
+        })._unsafeUnwrap(),
       },
       captureIo().io,
     );
     expect(result.result).toBe("snapshot");
     expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([
-      ["repository", "unsupported"],
       ["labels", "snapshot"],
+      ["check_suite_preferences", "unsupported"],
     ]);
     expect(Object.keys(result.settings ?? {})).toEqual(["labels"]);
   });

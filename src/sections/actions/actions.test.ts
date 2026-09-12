@@ -7,6 +7,7 @@ import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js"
 import { REPO } from "../../../test/sections/section-run.js";
 import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
+import { sectionGrant } from "../contract/module.js";
 import { grantFor } from "../contract/permissions.js";
 import { actionsSection, endpointRouted } from "./index.js";
 // The `as ActionsConfig` casts below simulate keys GitHub adds: the shape passes unknown keys through verbatim, which the static config type cannot
@@ -547,6 +548,7 @@ describe("actions", () => {
       label: "actions.access",
       applied: "applied",
       body: (value) => ({ access_level: value }),
+      read: () => "none",
     });
     expect(typeof paired.plan).toBe("function");
     endpointRouted<"access_level", "Access">({
@@ -556,6 +558,7 @@ describe("actions", () => {
       label: "actions.access",
       applied: "applied",
       body: (value) => ({ access_level: value }),
+      read: () => "none",
     });
     // @ts-expect-error an enum-valued key cannot be PUT bare: body is required
     endpointRouted<"access_level", "Access">({
@@ -563,6 +566,7 @@ describe("actions", () => {
       put: "putAccess",
       label: "actions.access",
       applied: "applied",
+      read: () => "none",
     });
   });
 
@@ -574,5 +578,152 @@ describe("actions", () => {
     const silent = { role: "putPermissions", drift: [], change: "" } as const;
     // @ts-expect-error a write on a non-alwaysRewrite endpoint must carry drift
     const _silent: Op = silent;
+  });
+});
+
+describe("actions snapshot", () => {
+  const snapshot = (api: GithubClient) =>
+    actionsSection.snapshot(planContext(actionsSection, api, REPO));
+  /** The note a sub-read the fake has no body for produces: its 404 classifies as a denial. */
+  const leftOut = (key: string, path: string, grant = sectionGrant(actionsSection)) =>
+    `actions.${key}: left out of the snapshot - the token was denied GET ${path}: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, ${grant}`;
+
+  test("reads every endpoint back onto its key, dropping the server fields each GET adds", async () => {
+    const api = liveActions({
+      [BASE]: {
+        enabled: true,
+        allowed_actions: "selected",
+        selected_actions_url: `https://api.github.com${BASE}/selected-actions`,
+      },
+      [`${BASE}/selected-actions`]: {
+        github_owned_allowed: true,
+        verified_allowed: false,
+        patterns_allowed: ["actions/*"],
+      },
+      [`${BASE}/workflow`]: {
+        default_workflow_permissions: "read",
+        can_approve_pull_request_reviews: false,
+      },
+      [`${BASE}/access`]: { access_level: "organization" },
+      [`${BASE}/artifact-and-log-retention`]: { days: 30, maximum_allowed_days: 400 },
+      "/repos/o/r/actions/cache/retention-limit": { max_cache_retention_days: 5 },
+      "/repos/o/r/actions/cache/storage-limit": { max_cache_size_gb: 20 },
+      "/repos/o/r/actions/oidc/customization/sub": {
+        use_default: false,
+        include_claim_keys: ["repo", "context"],
+      },
+      [`${BASE}/fork-pr-contributor-approval`]: { approval_policy: "first_time_contributors" },
+      [`${BASE}/fork-pr-workflows-private-repos`]: {
+        run_workflows_from_fork_pull_requests: true,
+        send_write_tokens_to_workflows: false,
+        send_secrets_and_variables: false,
+        require_approval_for_fork_pr_workflows: true,
+      },
+    });
+    expect(await snapshot(api)).toEqual({
+      value: {
+        enabled: true,
+        allowed_actions: "selected",
+        default_workflow_permissions: "read",
+        can_approve_pull_request_reviews: false,
+        selected_actions: {
+          github_owned_allowed: true,
+          verified_allowed: false,
+          patterns_allowed: ["actions/*"],
+        },
+        access_level: "organization",
+        artifact_and_log_retention: { days: 30 },
+        cache: { max_cache_retention_days: 5, max_cache_size_gb: 20 },
+        oidc_customization_sub: { use_default: false, include_claim_keys: ["repo", "context"] },
+        fork_pr_contributor_approval: { approval_policy: "first_time_contributors" },
+        fork_pr_workflows_private_repos: {
+          run_workflows_from_fork_pull_requests: true,
+          send_write_tokens_to_workflows: false,
+          send_secrets_and_variables: false,
+          require_approval_for_fork_pr_workflows: true,
+        },
+      },
+      notes: [],
+    });
+    expect(api.writes).toEqual([]);
+  });
+
+  test("a denied sub-read is a note naming its key with the read's own grant; the allowlist is skipped off the selected policy", async () => {
+    const live = liveActions({
+      [BASE]: { enabled: true, allowed_actions: "all" },
+      [`${BASE}/artifact-and-log-retention`]: { days: 90, maximum_allowed_days: 400 },
+      "/repos/o/r/actions/cache/retention-limit": { max_cache_retention_days: 7 },
+      "/repos/o/r/actions/cache/storage-limit": { max_cache_size_gb: 10 },
+      [`${BASE}/fork-pr-contributor-approval`]: { approval_policy: "all_external_contributors" },
+    });
+    const requested: string[] = [];
+    const api: GithubClient = {
+      tryRequest: (method, path, payload) => {
+        requested.push(`${method} ${path}`);
+        return live.tryRequest(method, path, payload);
+      },
+      tryGraphql: live.tryGraphql,
+    };
+    const read = await snapshot(api);
+    expect(read).toEqual({
+      value: {
+        enabled: true,
+        allowed_actions: "all",
+        artifact_and_log_retention: { days: 90 },
+        cache: { max_cache_retention_days: 7, max_cache_size_gb: 10 },
+        fork_pr_contributor_approval: { approval_policy: "all_external_contributors" },
+      },
+      notes: [
+        leftOut(
+          "default_workflow_permissions/can_approve_pull_request_reviews",
+          `${BASE}/workflow`,
+        ),
+        leftOut("access_level", `${BASE}/access`),
+        leftOut(
+          "oidc_customization_sub",
+          "/repos/o/r/actions/oidc/customization/sub",
+          grantFor({ repo: ["actions"] }, undefined, "write"),
+        ),
+        `${leftOut("fork_pr_workflows_private_repos", `${BASE}/fork-pr-workflows-private-repos`)}. Note: the fork PR workflow settings are documented for private repositories, so a denial here can also mean the repository is public`,
+      ],
+    });
+    // Off the "selected" policy there is no allowlist to read, so the GET is never issued.
+    expect(requested).not.toContain(`GET ${BASE}/selected-actions`);
+    expect(live.writes).toEqual([]);
+  });
+
+  test("a denied cache limit is noted by its own key while the readable sibling limit survives", async () => {
+    const api = liveActions({
+      [BASE]: { enabled: true, allowed_actions: "all" },
+      [`${BASE}/workflow`]: { default_workflow_permissions: "read" },
+      [`${BASE}/access`]: { access_level: "none" },
+      [`${BASE}/artifact-and-log-retention`]: { days: 90 },
+      "/repos/o/r/actions/cache/retention-limit": { max_cache_retention_days: 7 },
+      "/repos/o/r/actions/oidc/customization/sub": { use_default: true },
+      [`${BASE}/fork-pr-contributor-approval`]: { approval_policy: "first_time_contributors" },
+      [`${BASE}/fork-pr-workflows-private-repos`]: {
+        run_workflows_from_fork_pull_requests: false,
+        send_write_tokens_to_workflows: false,
+        send_secrets_and_variables: false,
+        require_approval_for_fork_pr_workflows: true,
+      },
+    });
+    const read = await snapshot(api);
+    expect(read.value?.cache).toEqual({ max_cache_retention_days: 7 });
+    expect(read.notes).toEqual([
+      leftOut("cache.max_cache_size_gb", "/repos/o/r/actions/cache/storage-limit"),
+    ]);
+  });
+
+  test("a denied primary read fails the section like any other, carrying the grant advice", async () => {
+    const api = liveActions({});
+    let thrown: unknown;
+    try {
+      await snapshot(api);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    expect((thrown as PermissionDenied).detail).toContain(sectionGrant(actionsSection));
   });
 });
