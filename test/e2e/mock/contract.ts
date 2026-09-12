@@ -7,8 +7,8 @@ import type { MockResponse } from "./support.js";
 
 /**
  * One logged request, the audit trail the runner asserts against. `pathname` and `query` stay separate fields because
- * the runner's two rules read different spellings: mutations/never prefix-match "METHOD pathname", requests_contain
- * substring-matches "METHOD pathname?query".
+ * the runner's rules read different spellings: mutations prefix-match "METHOD pathname", never prefix-matches and
+ * requests_contain substring-matches "METHOD pathname?query".
  */
 export interface LoggedRequest {
   method: string;

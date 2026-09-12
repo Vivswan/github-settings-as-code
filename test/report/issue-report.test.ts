@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
+import { REPORT_HEADING } from "../../src/report/composer.js";
 import {
   deliverIssueReport,
   ISSUE_TITLE,
@@ -21,13 +22,22 @@ const LABEL_LOOKUP_PAGE_2 =
   "GET /repos/o/private-repo/issues?state=all&labels=settings-as-code-report&per_page=100&page=2";
 const ISSUE_CREATE = "POST /repos/o/private-repo/issues";
 const TITLE_SCAN =
-  "GET /repos/o/private-repo/issues?state=all&sort=created&direction=asc&per_page=100&page=1";
+  "GET /repos/o/private-repo/issues?state=all&sort=created&direction=desc&per_page=100&page=1";
 
-const reportIssue = (number: number) => ({
+/** An issue the action itself wrote: the exact title over a body opening with the report heading. */
+const reportIssue = (number: number, state: "open" | "closed" = "open") => ({
   number,
   title: ISSUE_TITLE,
-  state: "open",
+  body: `${REPORT_HEADING} o/private-repo\n\nan earlier report`,
+  state,
   html_url: `https://github.com/o/private-repo/issues/${number}`,
+});
+
+/** A same-titled issue a human opened by hand: no report heading anywhere in the body. */
+const humanIssue = (number: number, state: "open" | "closed") => ({
+  ...reportIssue(number, state),
+  body: "Opened by hand to discuss the private report; please do not overwrite.",
+  user: { login: "a-human" },
 });
 
 describe("deliverIssueReport", () => {
@@ -60,6 +70,8 @@ describe("deliverIssueReport", () => {
       [LABEL_LOOKUP]: { data: labelled },
       [LABEL_LOOKUP_PAGE_2]: { data: [reportIssue(7)] },
       "PATCH /repos/o/private-repo/issues/7": { data: reportIssue(7) },
+      [TITLE_SCAN]: { data: [] },
+      [ISSUE_CREATE]: { data: reportIssue(8) },
     });
     const result = await deliverIssueReport(api, SLUG, "the report body", true, "always");
     expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/7" });
@@ -84,13 +96,14 @@ describe("deliverIssueReport", () => {
     expect(patch?.payload).toEqual({ body: "body", state: "closed" });
   });
 
-  test("pull requests and other titles never match, even with the marker label", async () => {
+  test("pull requests, other titles, and human-written bodies never match, even with the marker label", async () => {
     const api = new MockApi({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: {
         data: [
           { ...reportIssue(1), pull_request: { url: "pr" } },
           { ...reportIssue(2), title: `${ISSUE_TITLE} (fork)` },
+          { ...humanIssue(3, "open"), labels: [MARKER_LABEL] },
         ],
       },
       [TITLE_SCAN]: { data: [] },
@@ -130,6 +143,7 @@ describe("deliverIssueReport", () => {
         data: [{ ...reportIssue(3), labels: ["bug"], user: { login: "former-bot" } }],
       },
       "PATCH /repos/o/private-repo/issues/3": { data: reportIssue(3) },
+      [ISSUE_CREATE]: { data: reportIssue(8) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/3" });
@@ -175,12 +189,9 @@ describe("deliverIssueReport", () => {
   });
 
   test("the title scan early-exits once a page contains the issue", async () => {
-    const filler = Array.from({ length: 100 }, (_, i) => ({
-      number: 100 + i,
-      title: i === 50 ? ISSUE_TITLE : `noise ${i}`,
-      state: "closed",
-      html_url: `https://github.com/o/private-repo/issues/${100 + i}`,
-    }));
+    const filler = Array.from({ length: 100 }, (_, i) =>
+      i === 50 ? reportIssue(150, "closed") : humanIssue(100 + i, "closed"),
+    );
     const api = new MockApi({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: { data: [] },
@@ -197,6 +208,78 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/150",
     ]);
   });
+
+  const policyCases: Array<{
+    name: string;
+    lookup: "label" | "title";
+    listed: Array<Record<string, unknown>>;
+    picks: number;
+  }> = [
+    {
+      name: "a human's closed same-titled issue is never reclaimed over the real open report",
+      lookup: "title",
+      listed: [reportIssue(9), humanIssue(1, "closed")],
+      picks: 9,
+    },
+    {
+      name: "a human's OPEN same-titled issue, newer than the closed real report, is never reclaimed either",
+      lookup: "title",
+      listed: [humanIssue(9, "open"), reportIssue(3, "closed")],
+      picks: 3,
+    },
+    {
+      name: "a human's open issue wearing the marker label loses to the closed real report by the label lookup too",
+      lookup: "label",
+      listed: [humanIssue(9, "open"), reportIssue(2, "closed")],
+      picks: 2,
+    },
+    {
+      name: "two reports: the open one wins over a newer closed one",
+      lookup: "title",
+      listed: [reportIssue(9, "closed"), reportIssue(3)],
+      picks: 3,
+    },
+    {
+      name: "two open reports: the newest wins",
+      lookup: "title",
+      listed: [reportIssue(9), reportIssue(3)],
+      picks: 9,
+    },
+    {
+      name: "two closed reports: the newest wins",
+      lookup: "label",
+      listed: [reportIssue(9, "closed"), reportIssue(3, "closed")],
+      picks: 9,
+    },
+  ];
+  for (const { name, lookup, listed, picks } of policyCases) {
+    test(`candidate policy: ${name}`, async () => {
+      // Both lookups walk newest first and share one policy: a report body, then open over closed, then newest. The
+      // loser is never written: a same-titled human issue used to be PATCHed with the report, reopened, and relabelled.
+      const listedWithMarker = listed.map((issue) => ({ ...issue, labels: [MARKER_LABEL] }));
+      const api = new MockApi({
+        [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
+        [LABEL_LOOKUP]: { data: lookup === "label" ? listedWithMarker : [] },
+        [TITLE_SCAN]: { data: lookup === "title" ? listed : [] },
+        [ISSUE_CREATE]: { data: reportIssue(50) },
+        "PATCH /repos/o/private-repo/issues/*": { data: null },
+      });
+      const result = await deliverIssueReport(api, SLUG, "body", true, "always");
+      expect(result).toEqual({ url: `https://github.com/o/private-repo/issues/${picks}` });
+      expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+        LABEL_CREATE,
+        LABEL_LOOKUP,
+        ...(lookup === "title" ? [TITLE_SCAN] : []),
+        `PATCH /repos/o/private-repo/issues/${picks}`,
+      ]);
+      const patch = api.calls.find((c) => c.method === "PATCH");
+      expect(patch?.payload).toEqual(
+        lookup === "title"
+          ? { body: "body", state: "open", labels: [MARKER_LABEL] }
+          : { body: "body", state: "open" },
+      );
+    });
+  }
 
   test("nothing anywhere: POST with the marker label, then close when healthy", async () => {
     const api = new MockApi({
@@ -318,6 +401,15 @@ describe("deliverIssueReport under mode: on-failure", () => {
     ]);
     const patch = api.calls.find((c) => c.method === "PATCH");
     expect(patch?.payload).toEqual({ body: "the report body", state: "closed" });
+  });
+
+  test("healthy with only a human's open same-titled issue under the marker label: skipped, untouched", async () => {
+    const api = new MockApi({
+      [OPEN_LOOKUP]: { data: [{ ...humanIssue(4, "open"), labels: [MARKER_LABEL] }] },
+    });
+    const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
+    expect(result).toEqual({ skipped: true });
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([`GET ${OPEN_LOOKUP_PATH}`]);
   });
 
   test("a failing quiet-path lookup is a safe warning, never the slug", async () => {

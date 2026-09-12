@@ -15,6 +15,7 @@ import {
   ARTIFACT_NAME,
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
+import { REPORT_HEADING } from "../../src/report/composer.js";
 import { MockApi } from "../mock-api.js";
 
 function captureIo(): {
@@ -625,7 +626,14 @@ describe("runMulti private-report: issue wiring", () => {
       },
       "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
       [listPath("o/priv")]: {
-        data: [{ number: 7, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/7" }],
+        data: [
+          {
+            number: 7,
+            title: ISSUE_TITLE,
+            body: `${REPORT_HEADING} o/priv`,
+            html_url: "https://github.com/o/priv/issues/7",
+          },
+        ],
       },
       "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
       ...overrides,
@@ -841,7 +849,12 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
     `GET /repos/${slug}/issues?state=all&labels=${MARKER}&per_page=100&page=1`;
   const openListPath = (slug: string) =>
     `GET /repos/${slug}/issues?state=open&labels=${MARKER}&per_page=100&page=1`;
-  const issue7 = { number: 7, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/7" };
+  const issue7 = {
+    number: 7,
+    title: ISSUE_TITLE,
+    body: `${REPORT_HEADING} o/priv`,
+    html_url: "https://github.com/o/priv/issues/7",
+  };
 
   test("a needs-attention target delivers exactly like the issue channel (opened)", async () => {
     const api = new MockApi({

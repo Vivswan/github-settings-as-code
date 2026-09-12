@@ -21,6 +21,7 @@ import {
 import { type Io, maskRegistry } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
+import { REPORT_HEADING } from "../../src/report/composer.js";
 import type { PrivateReportChannel } from "../../src/report/delivery.js";
 import { MockApi } from "../mock-api.js";
 
@@ -94,7 +95,14 @@ const SHOWN: Exposure = { kind: "shown" };
 const issueRoutes = {
   "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
   [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: {
-    data: [{ number: 7, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/7" }],
+    data: [
+      {
+        number: 7,
+        title: ISSUE_TITLE,
+        body: `${REPORT_HEADING} o/priv`,
+        html_url: "https://github.com/o/priv/issues/7",
+      },
+    ],
   },
   "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
 };

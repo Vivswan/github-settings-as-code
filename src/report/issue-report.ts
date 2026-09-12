@@ -20,6 +20,7 @@ import { grantFor, type SectionPermission } from "../sections/contract/permissio
 import { nameKey } from "../sections/labels/index.js";
 import type { LabelConfig } from "../sections/labels/schema.js";
 import type { UndeclaredPolicyList } from "../types.js";
+import { REPORT_HEADING } from "./composer.js";
 
 /** The lookup key: one exact-titled report issue per repo, forever reused. */
 export const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
@@ -74,13 +75,17 @@ function malformedWarning(what: string): { warning: string } {
   };
 }
 
-type ReportIssue = { number: number; url: string; labels: string[] };
+type ReportIssue = { number: number; url: string; labels: string[]; open: boolean };
 
 /**
- * The issues list includes pull requests, so they are skipped. The label names ride along so a fallback-scan hit can
- * reattach the stripped marker without clobbering human-added labels.
+ * A candidate is one of the action's own reports: an issue (the list includes pull requests) with the exact title and
+ * a body line starting with the report heading; the title alone matched an issue a human opened by hand. A human issue
+ * that pastes a report verbatim under that title is a candidate too, and is overwritten: the accepted trade-off for
+ * recognizing every report ever written. The label names ride along so a fallback-scan hit can reattach the stripped
+ * marker without clobbering human-added labels.
  */
-function reportIssueIn(items: unknown[]): ReportIssue | null {
+function reportCandidatesIn(items: unknown[]): ReportIssue[] {
+  const candidates: ReportIssue[] = [];
   for (const item of items) {
     if (typeof item !== "object" || item === null) {
       continue;
@@ -89,7 +94,7 @@ function reportIssueIn(items: unknown[]): ReportIssue | null {
     if (issue.pull_request !== undefined || issue.title !== ISSUE_TITLE) {
       continue;
     }
-    if (typeof issue.number !== "number") {
+    if (typeof issue.number !== "number" || !isReportBody(issue.body)) {
       continue;
     }
     const labels = Array.isArray(issue.labels)
@@ -101,18 +106,33 @@ function reportIssueIn(items: unknown[]): ReportIssue | null {
           return typeof name === "string" ? [name] : [];
         })
       : [];
-    return {
+    candidates.push({
       number: issue.number,
       url: typeof issue.html_url === "string" ? issue.html_url : "",
       labels,
-    };
+      open: issue.state === "open",
+    });
   }
-  return null;
+  return candidates;
+}
+
+function isReportBody(body: unknown): boolean {
+  return (
+    typeof body === "string" && body.split(/\r?\n/).some((line) => line.startsWith(REPORT_HEADING))
+  );
+}
+
+/** Among several reports (a duplicate an earlier run left behind), the one still open wins, then the newest. */
+function pickReportIssue(candidates: ReportIssue[]): ReportIssue | null {
+  const ranked = [...candidates].sort(
+    (a, b) => Number(b.open) - Number(a.open) || b.number - a.number,
+  );
+  return ranked[0] ?? null;
 }
 
 /**
- * Walks the issue list page by page until the report issue turns up; `lookup` names the query in the malformed
- * warning without exposing the expanded path.
+ * Walks the issue list newest first, page by page, until a page carries a candidate, then picks among the candidates
+ * seen; `lookup` names the query in the malformed warning without exposing the expanded path.
  */
 async function findReportIssue(
   api: GithubClient,
@@ -121,26 +141,32 @@ async function findReportIssue(
   lookup: string,
 ): Promise<{ found: ReportIssue | null } | { warning: string }> {
   const path = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, query);
-  const page = await paginate(api, path, undefined, (items) => reportIssueIn(items) !== null);
+  const page = await paginate(
+    api,
+    path,
+    undefined,
+    (items) => reportCandidatesIn(items).length > 0,
+  );
   if ("error" in page) {
     return deliveryWarning(page.error);
   }
   if ("malformed" in page) {
     return malformedWarning(`${lookup} returned a non-list page`);
   }
-  return { found: reportIssueIn(page.items) };
+  return { found: pickReportIssue(reportCandidatesIn(page.items)) };
 }
 
 /**
- * For a human-stripped marker label: scans every issue by title, oldest first, and runs BEFORE any create so a
- * stripped label never causes a duplicate. The creator is deliberately not a filter: a rotated PAT belongs to a
- * different user, and a creator-scoped scan under it would miss the issue and open a second one.
+ * For a human-stripped marker label: scans every issue by title and runs BEFORE any create so a stripped label never
+ * causes a duplicate. The creator is deliberately not a filter: a rotated PAT belongs to a different user, and a
+ * creator-scoped scan under it would miss the issue and open a second one. The sort is GitHub's default, spelled out
+ * so the scan walks the same end of the list as the label lookup.
  */
 function fallbackScan(api: GithubClient, ref: { repo: RepoRef }) {
   return findReportIssue(
     api,
     ref,
-    { state: "all", sort: "created", direction: "asc" },
+    { state: "all", sort: "created", direction: "desc" },
     "the issue list (title scan)",
   );
 }
