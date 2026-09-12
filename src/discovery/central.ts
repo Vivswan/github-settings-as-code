@@ -11,10 +11,6 @@ import { type CentralTarget, SLUG_RE } from "./targets.js";
 
 const YAML_EXT = /\.ya?ml$/;
 
-/**
- * Read the repos-dir layout: `<name>.yml` (owner = the admin repo's owner)
- * at the top level, `<owner>/<name>.yml` one directory deep.
- */
 export function resolveCentralTargets(
   reposDir: string,
   adminOwner: string,
@@ -27,11 +23,10 @@ export function resolveCentralTargets(
   }
   const targets: CentralTarget[] = [];
   const warnings: string[] = [];
-  // Invalid filenames and duplicate slugs are collected across the WHOLE
-  // walk and reported once: each fix is a file rename or deletion, so N bad
-  // files must cost one run to discover, not N.
+  // Invalid filenames and duplicate slugs are collected across the WHOLE walk: each fix is a rename or deletion, so N
+  // bad files must cost one run to discover, not N.
   const errors: CentralFileProblem[] = [];
-  const seen = new Map<string, string>(); // lowercased slug -> origin
+  const seen = new Map<string, string>();
   const addTarget = (slug: string, filePath: string): void => {
     if (!SLUG_RE.test(slug)) {
       errors.push({ kind: "not-a-slug", filePath, slug });
@@ -67,8 +62,7 @@ export function resolveCentralTargets(
   };
 
   try {
-    // Top-level files needing an owner share ONE root cause when it is
-    // unknown; they are collected and reported as one error below.
+    // Top-level files needing an unknown owner share ONE root cause and are reported as one error below.
     const ownerlessFiles: string[] = [];
     for (const entry of readdirSync(reposDir).sort()) {
       const entryPath = join(reposDir, entry);

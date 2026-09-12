@@ -1,7 +1,6 @@
 /**
- * Where every run ends, single- or multi-repo. Each target closes its channel
- * and delivers here, and the run's summary, outputs, and exit code are
- * decided here, so the two flows cannot drift in what they report.
+ * Where every run ends. Each target closes its channel and delivers here, and the summary, outputs, and exit code are
+ * decided here, so the single- and multi-repo flows cannot drift in what they report.
  */
 
 import { err, ok, type Result } from "neverthrow";
@@ -39,7 +38,7 @@ import {
 } from "./redact.js";
 import { writeMergeSummary, writeMultiSummary, writeSummary } from "./summary.js";
 
-/** One target's end state before its channel closes: the engine result and the rich detail. */
+
 export interface TargetResult {
   result: RepoResult;
   outcomes: SectionOutcome[];
@@ -47,25 +46,17 @@ export interface TargetResult {
   note?: string;
 }
 
-/** A target that produced no outcomes because `message` stopped it. */
 export function failedTarget(message: string): TargetResult {
   return { result: "failed", outcomes: [], note: message };
 }
 
-/**
- * Record a failure that happened before the engine ran; the rich message goes
- * to the target's channel (public in the clear, captured when redacted).
- */
+/** A failure before the engine ran; the rich message goes to the target's channel (public in the clear, captured when redacted). */
 export function targetFailure(channelIo: Io, richMessage: string): TargetResult {
   channelIo.annotate("error", richMessage);
   return failedTarget(richMessage);
 }
 
-/**
- * The engine's result as the target's end state. A preflight denial refused
- * to write anything; its one line goes through the channel and its note heads
- * the target's (otherwise empty) summary.
- */
+/** A preflight denial refused to write anything; its one line goes through the channel and its note heads the target's otherwise empty summary. */
 export function engineOutcome(run: RepoRunResult, channelIo: Io): TargetResult {
   const denied = run.preflightDenied.length;
   if (denied === 0) {
@@ -83,9 +74,8 @@ export function engineOutcome(run: RepoRunResult, channelIo: Io): TargetResult {
 }
 
 /**
- * The one outcome predicate: the `result` output is the worst target result,
- * and the run exits 1 exactly when that result is failed or a check-mode
- * drift. A single target's report opens under the same rule.
+ * The one outcome predicate: the run exits 1 exactly when the worst target result is failed or a check-mode drift. A
+ * single target's report opens under the same rule.
  */
 export function runOutcome(
   results: ReadonlyArray<{ result: RepoResult }>,
@@ -96,7 +86,6 @@ export function runOutcome(
   return { result, exitCode } as RunConclusion;
 }
 
-/** The run inputs the delivery reads; both run flows' configs carry them. */
 export interface DeliveryConfig {
   mode: "apply" | "check";
   privateReport: PrivateReportChannel;
@@ -108,7 +97,7 @@ export interface DeliveryConfig {
   runUrl: string;
 }
 
-/** The inputs the single- and multi-repo flows share: the engine options, the redaction policy, and the delivery inputs. */
+
 export interface RunFlowConfig extends DeliveryConfig {
   onMissingPermission: "fail" | "warn";
   sections: SectionSelection;
@@ -116,10 +105,7 @@ export interface RunFlowConfig extends DeliveryConfig {
   privateRepos: PrivateReposPolicy;
 }
 
-/**
- * The `artifact` channel cannot open without an upload port. Both flows check
- * this before any API work; openReportChannel asserts the same rule.
- */
+/** Both flows check this before any API work; openReportChannel asserts the same rule as its backstop. */
 export function requireUploader(
   cfg: Pick<DeliveryConfig, "privateReport">,
   uploader: ArtifactUploader | undefined,
@@ -129,10 +115,7 @@ export function requireUploader(
     : ok();
 }
 
-/**
- * How a target appears in the public view: in the clear, or hidden behind
- * its placeholder together with the visibility the probe resolved for it.
- */
+
 export type Exposure = { kind: "shown" } | { kind: "redacted"; visibility: RepoVisibility };
 
 /** One target as it enters delivery; `repo` is null when the slug did not parse (the issue channel has nowhere to post). */
@@ -144,9 +127,8 @@ export interface OpenedTarget {
 
 export interface Delivery {
   /**
-   * Run `work` (told whether to inject the issue channel's marker label), then
-   * close the target: a redacted target proven private or internal gets its
-   * report, an unproven one the withheld notice, and its public line is closed-value only.
+   * `work` is told whether to inject the issue channel's marker label. On close, a redacted target proven private or
+   * internal gets its report, an unproven one the withheld notice, and its public line is closed-value only.
    */
   target(
     opened: OpenedTarget,
@@ -154,17 +136,13 @@ export interface Delivery {
   ): Promise<Omit<TargetOutcome, "source">>;
 }
 
-/**
- * Run `body` with the run's delivery open, then flush it even when `body` throws:
- * the artifact channel uploads every accumulated report as ONE document here.
- */
+/** The delivery is flushed even when `body` throws: the artifact channel uploads every accumulated report as ONE document there. */
 export async function withDelivery<T>(
   run: { api: GithubClient; cfg: DeliveryConfig; io: Io; uploader?: ArtifactUploader },
   body: (delivery: Delivery) => Promise<T>,
 ): Promise<T> {
   const { api, cfg, io, uploader } = run;
   const check = cfg.mode === "check";
-  // One timestamp for the whole run, so every target's report shares it.
   const meta = {
     adminRepo: cfg.selfSlug,
     runUrl: cfg.runUrl,
@@ -179,9 +157,8 @@ export async function withDelivery<T>(
     io,
     uploader,
   );
-  // Redaction fails closed (hidden unless proven public), but delivery fails
-  // closed the other way: a report reaches a target only when it is proven
-  // private or internal, never one that might be public.
+  // Redaction fails closed (hidden unless proven public), but delivery fails closed the other way: a report reaches a
+  // target only when it is proven private or internal, never one that might be public.
   const deliverable = (exposure: Exposure): boolean =>
     reports !== null && exposure.kind === "redacted" && isPrivateVisibility(exposure.visibility);
   const delivery: Delivery = {
@@ -207,21 +184,17 @@ export async function withDelivery<T>(
   try {
     return await body(delivery);
   } finally {
-    // The artifact's single upload deliberately follows every target's public
-    // line (each is redaction-safe on its own); a crash still flushes what accumulated.
+    // The artifact's single upload deliberately follows every target's public line (each is redaction-safe on its own);
+    // a crash still flushes what accumulated.
     await reports?.flush();
   }
 }
 
-/** The finished run as the two flows hand it over: one target, or every multi-repo target in order. */
 export type FinishedRun =
   | { kind: "single"; mode: DeliveryConfig["mode"]; target: Omit<TargetOutcome, "source"> }
   | { kind: "multi"; mode: DeliveryConfig["mode"]; targets: TargetOutcome[] };
 
-/**
- * Every run that reached its targets ends here: summary, outputs, result line,
- * exit code. The public view is projected first, so nothing below carries a redacted slug.
- */
+/** The public view is projected first, so nothing below carries a redacted slug. */
 export function concludeRun(io: Io, run: FinishedRun): number {
   if (run.kind === "single") {
     const view = publicDetail(run.target.detail);
@@ -244,12 +217,7 @@ export function concludeRun(io: Io, run: FinishedRun): number {
   return conclude(io, views, run.mode === "check");
 }
 
-/**
- * A run that failed before any target ran (bad inputs, an unreadable settings
- * file, a fatal multi-repo setup error): the problem's line, then the
- * conclusion a failed target gets. There is no summary, since nothing ran.
- * The one place the action's fatal problems become text.
- */
+/** A run that failed before any target ran gets a failed target's conclusion and no summary; the one place a fatal problem becomes text. */
 export function failRun(io: Io, problem: Problem): number {
   const message = describeProblem(problem);
   io.annotate("error", message);
@@ -257,20 +225,14 @@ export function failRun(io: Io, problem: Problem): number {
   return conclude(io, [failedTarget(message)], false);
 }
 
-/**
- * The `result` output of a mode: merge run. Not a RepoResult: a merge has no
- * target, so it never enters worstOf and never appears beside the per-repo
- * values.
- */
+/** Not a RepoResult: a merge has no target, so it never enters worstOf and never appears beside the per-repo values. */
 export const MERGE_RESULT = "merged";
 
-/** A finished mode: merge run as runMerge hands it over: what was folded and where it went. */
 export interface FinishedMerge {
   layers: readonly string[];
   mergedFile: string;
 }
 
-/** A finished mode: merge run: the summary, the outputs, and the result line a merge earns, exit 0. */
 export function concludeMerge(io: Io, run: FinishedMerge): number {
   writeMergeSummary(io, run.layers, run.mergedFile);
   io.log(`merged ${run.layers.length} layer(s) into ${run.mergedFile}`);

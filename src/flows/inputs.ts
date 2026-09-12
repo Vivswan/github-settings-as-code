@@ -1,10 +1,7 @@
 /**
- * The run's inputs: their declarations (the single source action.yml and the
- * inputs reference page are generated from) and parseConfig(), which reads
- * every input in a stable order through a caller-supplied port, validates it
- * (each problem names the input and the fix), and returns the typed RunConfig
- * the run executes - so no execution code touches raw inputs, and a CLI reads
- * the same declarations the action does.
+ * parseConfig() validates every input read through a caller-supplied port (each problem names the input and the fix)
+ * into the RunConfig the run executes, so no execution code touches a raw input and a CLI reads the same declarations
+ * the action does.
  */
 
 import { err, ok, type Result, safeTry } from "neverthrow";
@@ -38,10 +35,8 @@ export const DEFAULT_PRIVATE_REPOS = "redact" satisfies PrivateReposPolicy;
 const DEFAULT_PRIVATE_REPORT = "none" satisfies PrivateReportChannel;
 
 /**
- * One action input: its action.yml entry (description, default) and its
- * row in the generated Inputs table (summary, shown default) on the inputs
- * reference page, docs/reference/inputs.md. The runner applies the
- * defaults; parseConfig() falls back to them outside the runner.
+ * One input's action.yml entry and its row in the generated Inputs table on docs/reference/inputs.md. The runner
+ * applies the defaults; parseConfig() falls back to them outside the runner.
  */
 export interface InputDecl {
   /** The action.yml description; the generator folds it to width. */
@@ -51,18 +46,15 @@ export interface InputDecl {
   /** The Inputs table's Meaning cell: the one-line gist. */
   readonly summary: string;
   /**
-   * The Inputs table's Default cell when the raw default is not what a reader should
-   * see: an expression, a prose fallback, or the effective value the code
-   * supplies for an empty raw default (the discovery filters).
+   * The Inputs table's Default cell when the raw default is not what a reader should see: an expression, a prose
+   * fallback, or the effective value for an empty raw default.
    */
   readonly shownDefault?: string;
 }
 
 /**
- * Every input parseConfig() reads, in the order the inputs reference page
- * and action.yml list them: the single source both are generated from
- * (bun run build:action-docs), so adding an input here is the whole declaration.
- * A new mode's inputs go beside their mode's, so declarations stay adjacent.
+ * The single source the inputs reference page and action.yml are generated from (bun run build:action-docs), in their
+ * listing order; adding an input here is the whole declaration. A new mode's inputs go beside their mode's.
  */
 export const INPUT_DECLS = {
   token: {
@@ -289,17 +281,16 @@ export type InputName = keyof typeof INPUT_DECLS;
 export type InputReader = (name: InputName) => string;
 
 /**
- * The environment parseConfig reads beside the inputs, in process.env's shape.
- * Four keys are read: GITHUB_TOKEN (the token fallback), GITHUB_REPOSITORY
- * (the workflow's own repository), GITHUB_SERVER_URL and GITHUB_RUN_ID (the
- * run URL). A caller outside Actions passes what it has, or nothing.
+ * process.env's shape; a caller outside Actions passes what it has, or nothing.
+ *   GITHUB_TOKEN                       -> the token fallback
+ *   GITHUB_REPOSITORY                  -> the workflow's own repository
+ *   GITHUB_SERVER_URL, GITHUB_RUN_ID   -> the run URL
  */
 export type ConfigEnv = Readonly<Record<string, string | undefined>>;
 
 /** The reader plus the declared-default fallback, so every helper reads one way. */
 interface Inputs {
   readonly value: InputReader;
-  /** The input, or its declared default when the step (or a local run) left it unset. */
   readonly orDefault: (name: InputName) => string;
 }
 
@@ -309,14 +300,6 @@ function inputs(read: InputReader): Inputs {
   return { value, orDefault: (name) => value(name) || INPUT_DECLS[name].default };
 }
 
-/**
- * Every discovery-filter input name, the single source both the FilterInput
- * type and the discoveryFiltersSet scan derive from. `satisfies readonly
- * (keyof DiscoveryFilters)[]` pins each entry to a real filter field, and the
- * MustBeNever check below fails compilation if a DiscoveryFilters field is
- * ever added without a matching input name here - the same exhaustiveness
- * idiom SECTION_KEYS uses in schema.ts.
- */
 export const FILTER_INPUTS = [
   "visibility",
   "archived",
@@ -326,16 +309,10 @@ export const FILTER_INPUTS = [
   "affiliation",
 ] as const satisfies readonly (keyof DiscoveryFilters)[];
 
-/** A discovery filter input name, a subset of the declared inputs. */
 type FilterInput = (typeof FILTER_INPUTS)[number];
 
-/** Compile-time lockstep: a DiscoveryFilters field missing from FILTER_INPUTS fails here. */
 type _UnlistedFilter = MustBeNever<Exclude<keyof DiscoveryFilters, FilterInput>>;
 
-/**
- * Read an enum-valued input against the allowed list its type derives
- * from, so the type, the check, and the problem's list cannot drift apart.
- */
 function readEnum<T extends string>(
   input: Inputs,
   name: InputName,
@@ -354,7 +331,6 @@ function readEnum<T extends string>(
 /** What separates the entries of a list input; a single path can never contain one. */
 const LIST_SEPARATOR = /[\n,]/;
 
-/** A comma- or newline-separated list input, trimmed, empty entries dropped. */
 function splitList(value: string): string[] {
   return value
     .split(LIST_SEPARATOR)
@@ -362,27 +338,19 @@ function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
-/** The run kinds the `mode` input selects; apply and check run the engine, merge only folds files. */
 export const MODES = ["apply", "check", "merge"] as const;
 
 export type Mode = (typeof MODES)[number];
 
-/** The `layering` input's values, locked to the engine's Layering type. */
 const LAYERINGS = ["merge", "replace"] as const satisfies readonly Layering[];
 type _UnlistedLayering = MustBeNever<Exclude<Layering, (typeof LAYERINGS)[number]>>;
 
 /**
- * The inputs only mode: merge reads. Their declared defaults are empty so
- * "explicitly set" is detectable, as with the discovery filters; apply and
- * check reject a set one instead of silently ignoring it.
+ * Their declared defaults are empty so "explicitly set" is detectable, as with the discovery filters; apply and check
+ * reject a set one instead of silently ignoring it.
  */
 const MERGE_ONLY_INPUTS = ["merged-file", "layering"] as const satisfies readonly InputName[];
 
-/**
- * The `required-sections` and `sections` inputs as one validated selection:
- * every unknown name in each is reported at once, against its own input name;
- * SectionSelection.of then refuses a required section the allowlist excludes.
- */
 function readSectionSelection(input: Inputs): Result<SectionSelection, Problem> {
   const sectionInputs = ["required-sections", "sections"] as const;
   const names = sectionInputs.map((name) => ({
@@ -399,21 +367,14 @@ function readSectionSelection(input: Inputs): Result<SectionSelection, Problem> 
   if (unknown.length > 0) {
     return err({ code: "input-unknown-sections", unknown, known: SECTION_KEYS });
   }
-  // Past the rejection above every name is a known key, so the narrowed sets
-  // are honest - the guard is the proof, not a cast.
   const isSectionKey = (name: string): name is SectionKey => knownSections.has(name);
   const [required = [], only = []] = names.map((entry) => entry.names.filter(isSectionKey));
   return SectionSelection.of({ only, required });
 }
 
 /**
- * Resolve and validate the `report-public-key` input against the chosen
- * channel. The key is the age recipient the `artifact` channel encrypts to, so
- * it is required exactly when the channel is `artifact` and rejected otherwise
- * (a key set for `none`/`issue` would silently do nothing). A supplied key is
- * validated through the age library at parse time, so a malformed recipient
- * fails the run before any API work rather than at upload. Returns the trimmed
- * key (empty for the non-artifact channels) or the problem.
+ * The key is required exactly when the channel is `artifact` and rejected otherwise (set for another channel it would
+ * silently do nothing); it is parsed through the age library here so a malformed recipient fails before any API work.
  */
 function resolveReportPublicKey(
   input: Inputs,
@@ -431,30 +392,20 @@ function resolveReportPublicKey(
     .mapErr((invalid) => ({ code: "input-report-key-invalid", reason: invalid.reason }));
 }
 
-/**
- * The inputs shared by the two engine modes (apply and check): the flow
- * config plus what only the action reads. selfSlug (GITHUB_REPOSITORY) and
- * runUrl (GITHUB_SERVER_URL/GITHUB_REPOSITORY/GITHUB_RUN_ID) are read from
- * the environment once here, so the run flows stay env-free.
- */
+/** selfSlug (GITHUB_REPOSITORY) and runUrl are read from the environment once here, so the run flows stay env-free. */
 interface CommonConfig extends RunFlowConfig {
   token: string;
   apiVersion: string;
 }
 
-/** Everything run() needs, already validated; `kind` picks the mode. */
 export type RunConfig =
   | (CommonConfig & (({ kind: "single" } & SingleConfig) | ({ kind: "multi" } & MultiConfig)))
   | ({ kind: "merge" } & MergeConfig);
 
 /**
- * The inputs a mode: merge run reads, plus `token`, which it tolerates unread
- * (a workflow commonly sets it on every step). Every OTHER declared input is
- * an apply/check-time control - a target, the API, a report, the section
- * allowlist - so the merge rejects it unless it holds its declared default,
- * which the runner supplies whether or not the workflow set the input.
- * Derived from the declarations, so a future input is rejected here until it
- * is listed as one the merge reads.
+ * `token` is tolerated unread (a workflow commonly sets it on every step). Every declared input NOT listed here is an
+ * apply/check control, so the merge rejects it unless it holds its declared default, which the runner supplies whether
+ * or not the workflow set the input.
  */
 export const MERGE_INPUTS = [
   "mode",
@@ -465,15 +416,13 @@ export const MERGE_INPUTS = [
 ] as const satisfies readonly InputName[];
 
 /**
- * The inputs mode: merge rejects when set to a non-default value: every
- * declared input MERGE_INPUTS does not list. Exported so the layering guide's
- * table is pinned to the whole set.
+ * Derived from the declarations, so a future input is rejected by the merge until listed in MERGE_INPUTS; exported so
+ * the layering guide's table is pinned to the whole set.
  */
 export const MERGE_REJECTED_INPUTS: readonly InputName[] = (
   Object.keys(INPUT_DECLS) as InputName[]
 ).filter((name) => !(MERGE_INPUTS as readonly string[]).includes(name));
 
-/** Read and validate the mode: merge inputs; the first problem wins. */
 function parseMergeConfig(input: Inputs): Result<Extract<RunConfig, { kind: "merge" }>, Problem> {
   return safeTry(function* () {
     const rejected = MERGE_REJECTED_INPUTS.filter((name) => {
@@ -499,12 +448,10 @@ function parseMergeConfig(input: Inputs): Result<Extract<RunConfig, { kind: "mer
   });
 }
 
-/** Read and validate every input through `read`; the first problem wins. */
 export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig, Problem> {
   const input = inputs(read);
   return safeTry(function* () {
-    // The mode decides which inputs exist at all, so it is read before any of
-    // them: a merge never needs the token the engine modes require first.
+    // The mode decides which inputs exist at all, so it is read first: a merge never needs the token.
     const mode = yield* readEnum(input, "mode", MODES, INPUT_DECLS.mode.default, "mode");
     if (mode === "merge") {
       return parseMergeConfig(input);
@@ -517,8 +464,6 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
     if (!token) {
       return err({ code: "input-token-missing" });
     }
-    // The workflow's own repository, read once and reused for the self slug, the
-    // run URL, the central-mode admin owner, and the single-repo fallback target.
     const githubRepository = env.GITHUB_REPOSITORY ?? "";
     const onMissingPermission = yield* readEnum(
       input,
@@ -543,9 +488,7 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
       INPUT_DECLS["private-report"].default,
       "private-report channel",
     );
-    // A report channel only ever runs for a REDACTED target, so combining it with
-    // private-repos: show (which redacts nothing) would silently deliver no
-    // report - a silent no-op violates the loud-failure promise, so reject it.
+    // A report channel only ever runs for a REDACTED target, so combined with private-repos: show it would silently deliver nothing.
     if (privateReport !== "none" && privateRepos === "show") {
       return err({ code: "input-report-without-redaction" });
     }
@@ -626,7 +569,7 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
     const settingsFile = input.orDefault("settings-file");
 
     if (reposInput || reposDir) {
-      // Multi-repo mode: the single-repo inputs make no sense here.
+  
       if (input.value("repository")) {
         return err({ code: "input-repository-with-multi" });
       }
@@ -646,7 +589,7 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
       });
     }
 
-    // Single-repo mode (unchanged legacy behavior).
+  
     if (discoveryFiltersSet.length > 0) {
       return err({
         code: "discovery-filters-without-wildcard",
@@ -657,8 +600,7 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
     if (defaultsFile) {
       return err({ code: "input-defaults-file-without-multi" });
     }
-    // Only a merge folds a list; the engine modes read exactly one file, so
-    // even a stray separator ("only.yml,") is rejected rather than repaired.
+    // The engine modes read exactly one file, so even a stray separator ("only.yml,") is rejected rather than repaired.
     if (LIST_SEPARATOR.test(settingsFile)) {
       return err({ code: "input-settings-file-is-list", value: settingsFile, mode });
     }

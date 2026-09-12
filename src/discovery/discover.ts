@@ -17,7 +17,6 @@ type DiscoveredRepo = Pick<
   "full_name" | "archived" | "fork" | "topics" | "visibility" | "private"
 >;
 
-/** One discovered repository the run will address: its slug plus the visibility the listing reported. */
 export interface DiscoveredRepoRef {
   slug: string;
   visibility: "public" | "private" | "internal";
@@ -38,18 +37,11 @@ function sealFiltered(ref: DiscoveredRepoRef): FilteredRepoRef {
 }
 
 /**
- * Narrow the listing's visibility for the REDACTION decision, failing closed.
- * `visibility` is a plain string in the API schema and optional on GHES; the
- * always-present `private` flag is the authority. A repo is treated as private
- * whenever `private === true` (even if a stale/forged `visibility` says
- * "public"), and when BOTH fields are missing (an unknown repo is hidden, never
- * exposed). Only `private === false` (or a trustworthy non-public visibility)
- * yields a non-private classification. `internal` survives when `visibility`
- * names it and `private` does not contradict it.
+ * Fails closed for the REDACTION decision. `visibility` is a plain string in the API schema and optional on GHES, so
+ * the always-present `private` flag is the authority: private === true wins over any `visibility` (even a stale
+ * "public"), and with BOTH fields missing the repo is hidden, never exposed.
  */
 function normalizeVisibility(repo: DiscoveredRepo): DiscoveredRepoRef["visibility"] {
-  // private === true always wins: it is the field the API guarantees, and a
-  // repo the token can see as private must never be classed public.
   if (repo.private === true) {
     return "internal" === repo.visibility ? "internal" : "private";
   }
@@ -57,7 +49,6 @@ function normalizeVisibility(repo: DiscoveredRepo): DiscoveredRepoRef["visibilit
   if (visibility === "public" || visibility === "private" || visibility === "internal") {
     return visibility;
   }
-  // visibility absent: trust an explicit private === false, else fail closed.
   return repo.private === false ? "public" : "private";
 }
 
@@ -68,10 +59,8 @@ export const FORKS_FILTERS = ["include", "exclude", "only"] as const;
 export const AFFILIATIONS = ["owner", "collaborator", "organization_member"] as const;
 
 /**
- * The filter reason tag for a repo skipped because it is archived. Shared by
- * the discovery rule that emits it and formatSkipNotice, which special-cases
- * it for the unarchive-to-manage prose - a literal in one place and not the
- * other would silently drop that guidance.
+ * Shared by the rule that emits it and formatSkipNotice, which special-cases it for the unarchive-to-manage prose; a
+ * literal in one place and not the other would silently drop that guidance.
  */
 const ARCHIVED_REASON = "archived";
 
@@ -94,17 +83,11 @@ export const DEFAULT_DISCOVERY_FILTERS: DiscoveryFilters = {
   exclude: [],
 };
 
-/** Compile a "*"-only wildcard into an anchored, case-insensitive RegExp. */
 function compileExcludePattern(pattern: string): RegExp {
   const escaped = pattern.replace(/[.+^${}()|[\]\\?]/g, "\\$&").replace(/\*/g, ".*");
   return new RegExp(`^${escaped}$`, "i");
 }
 
-/**
- * True when the pattern excludes this owner/name slug. A pattern containing
- * "/" matches the full slug; otherwise it matches the name alone (same
- * split as the repos-dir <name>.yml vs <owner>/<name>.yml layout).
- */
 export function excludeMatches(pattern: string, slug: string): boolean {
   const candidate = pattern.includes("/") ? slug : (slug.split("/")[1] ?? slug);
   return compileExcludePattern(pattern).test(candidate);
@@ -112,16 +95,13 @@ export function excludeMatches(pattern: string, slug: string): boolean {
 
 export interface DiscoveryResult {
   repos: DiscoveredRepoRef[];
-  /** Repositories dropped by a filter, grouped by the first reason that hit. */
   filtered: Array<{ reason: string; repos: FilteredRepoRef[] }>;
 }
 
-/** What discovery can fail with: the request, the transport, or a response that is not a list. */
 export type DiscoveryProblem = ProblemOf<
   "discovery-request-failed" | "discovery-transport-failed" | "discovery-response-not-a-list"
 >;
 
-/** Discover the repositories the token's user can see, applying the filters. */
 export function discoverRepos(
   api: GithubClient,
   filters: DiscoveryFilters,
@@ -142,10 +122,8 @@ export function discoverRepos(
     }),
   ).andThen((page) => {
     if ("error" in page) {
-      // The PAT advice fits genuine denials only. A rate-limit 403 is NOT a
-      // permission problem (isPermissionError excludes it), so it must not
-      // tell the operator to swap tokens and abandon "*" discovery for
-      // nothing. 401 is an invalid/expired token, which the PAT advice covers.
+      // A rate-limit 403 is NOT a permission problem (isPermissionError excludes it), so it never reads as denied and
+      // never tells the operator to swap tokens; 401 (an invalid or expired token) does.
       return err<DiscoveryResult, DiscoveryProblem>({
         code: "discovery-request-failed",
         path,
@@ -169,8 +147,7 @@ function applyFilters(
   repos: readonly DiscoveredRepo[],
   filters: DiscoveryFilters,
 ): DiscoveryResult {
-  // One rule per filter, in reporting-attribution order; the first reason
-  // returned is the one a skipped repo is grouped under.
+
   const rules: Array<(repo: DiscoveredRepo) => string | null> = [
     (repo) => {
       const isInternal = repo.visibility === "internal";
@@ -246,11 +223,8 @@ function applyFilters(
 }
 
 /**
- * One aggregate notice per filter reason: with "*" fleets, per-repo notices
- * would flood the annotations UI (GitHub caps annotations per step).
- * `redactPrivate` keeps private and internal repository names out of the
- * notice: only public slugs are listed, hidden ones become a count, and a
- * group with no public repos renders as a count with no names at all. Under
+ * One aggregate notice per filter reason: per-repo notices for a "*" fleet would flood the annotations UI (GitHub caps
+ * annotations per step). Under `redactPrivate` only public slugs are listed and hidden ones become a count; under
  * `show` the operator opted into naming them, so the seal opens here.
  */
 export function formatSkipNotice(

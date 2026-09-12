@@ -5,7 +5,6 @@
  * (architecture.yml declares that as its one edge).
  */
 
-// Discovery
 export { resolveCentralTargets } from "./discovery/central.js";
 export {
   AFFILIATIONS,
@@ -18,7 +17,6 @@ export {
   VISIBILITY_FILTERS,
 } from "./discovery/discover.js";
 export { parseReposInput } from "./discovery/repos-input.js";
-// Check and apply one repository
 export {
   type CentralTarget,
   dedupeTargets,
@@ -27,7 +25,6 @@ export {
   type RepoRef,
   type Target,
 } from "./discovery/targets.js";
-// Validate and merge
 export {
   describeOptOut,
   type Layer,
@@ -50,7 +47,7 @@ export {
   worstOf,
 } from "./engine/orchestrate.js";
 export { SectionSelection } from "./engine/section-selection.js";
-// The run flows
+
 export {
   concludeMerge,
   concludeRun,
@@ -96,7 +93,7 @@ export {
 } from "./flows/redact.js";
 export { parseSettingsDoc, readSettingsFile } from "./flows/settings-read.js";
 export { runSingle, type SingleConfig, type SingleOutcome } from "./flows/single.js";
-// The client
+
 export {
   type ApiError,
   DEFAULT_API_VERSION,
@@ -109,7 +106,6 @@ export {
 } from "./github/api.js";
 export { getRepoFile } from "./github/repo-file.js";
 export { createVisibilityResolver, type RepoVisibility } from "./github/repo-visibility.js";
-// The Io port
 export {
   type AnnotationLevel,
   type CollectedLine,
@@ -134,7 +130,7 @@ export {
   type SettingsProblem,
   type TopLevelShape,
 } from "./problem.js";
-// The private report
+
 export {
   type ArtifactUploader,
   deliverArtifactReport,
@@ -149,7 +145,6 @@ export {
   type PrivateReportChannel,
 } from "./report/delivery.js";
 export { ISSUE_TITLE, MARKER_LABEL, MARKER_LABEL_CONFIG } from "./report/issue-report.js";
-// The settings document
 export {
   DOCUMENT_DIRECTIVE_KEYS,
   PROBOT_PARITY_KEYS,
@@ -160,7 +155,6 @@ export {
   type UndeclaredPolicySection,
 } from "./schema.js";
 
-// Section metadata
 export {
   type EndpointDecl,
   endpointMethod,

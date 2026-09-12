@@ -1,8 +1,4 @@
-/**
- * The action-side boundary of mode: merge: read the layer files off the local
- * filesystem, validate each on its own, fold them with the pure engine
- * (engine/layers.ts), and validate the result. Nothing here reaches GitHub.
- */
+/** The action-side boundary of mode: merge; nothing here reaches GitHub. */
 
 import { ok, Result } from "neverthrow";
 import {
@@ -19,7 +15,6 @@ import type { LayerProblem, ProblemOf, SettingsProblem } from "../problem.js";
 import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../schema.js";
 import { readSettingsFile } from "./settings-read.js";
 
-/** Read and parse every layer, in order; the first unreadable path fails, named, and the rest are not read. */
 export function readLayerFiles(
   paths: readonly string[],
 ): Result<Layer[], ProblemOf<"settings-file-unreadable">> {
@@ -35,12 +30,11 @@ export function readLayerFiles(
 const KNOWN_SECTIONS: ReadonlySet<string> = new Set(SECTION_KEYS);
 
 /**
- * The layer as the standalone validation sees it. A null on a known section
- * is an opt-out marker, not a setting to judge, and a knobbed wrapper's
- * `_layering` is a directive the fold validates and consumes with a message
- * naming the layer and the site; neither may reach the section shapes. A null
- * on an unknown key opts out of nothing, and only this per-layer pass can name
- * the file that misspelled it (a private `_` key's null is ignored either way).
+ * The layer as the standalone validation sees it; neither marker below may reach the section shapes.
+ *
+ * null on a known section  -> dropped: an opt-out marker, not a setting to judge
+ * a wrapper's `_layering`  -> dropped: a directive the fold validates itself
+ * null on an unknown key   -> kept: it opts out of nothing, and only this per-layer pass can name the file that misspelled it
  */
 function standaloneView(doc: unknown): unknown {
   const stripped = stripNulls(doc);
@@ -62,18 +56,12 @@ function standaloneView(doc: unknown): unknown {
 }
 
 /**
- * A merge has no `sections` allowlist: the merged document is applied later by
- * a step whose allowlist this run cannot know, so every unknown top-level key
- * is an error naming the layer, as it would be for an apply.
+ * A merge has no `sections` allowlist: the merged document is applied later by a step whose allowlist this run cannot
+ * know, so an unknown top-level section is an error naming the layer, as in an apply.
  */
 const NO_ALLOWLIST: ReadonlySet<SectionKey> = new Set();
 
-/**
- * Validate every layer on its own terms, fold them low to high, and validate
- * the result: a layer must be a valid settings document before it may
- * contribute, so the merge can never complete a broken declaration into a
- * valid one. `sourceLabel` names the merged document in its own errors.
- */
+/** A layer must be a valid document before it may contribute, so the merge can never complete a broken declaration into a valid one. */
 export function foldLayers(
   layers: readonly Layer[],
   sourceLabel: string,

@@ -1,7 +1,6 @@
 /**
- * Per-repository orchestration: the section pipeline (active-section filter, preflight barrier,
- * section loop) that drives one repository, so the single- and multi-repo flows share one engine.
- * All output goes through the Io sink; callers decide how (or whether) to tag lines per repository.
+ * The per-repository pipeline (active-section filter, preflight barrier, section loop) the single- and multi-repo flows
+ * share. All output goes through the Io sink; callers decide how to tag lines per repository.
  */
 
 import { err, type Result } from "neverthrow";
@@ -26,12 +25,8 @@ import type { SectionSelection } from "./section-selection.js";
 import { validateSectionShapes } from "./validate.js";
 
 /**
- * One section's end state, discriminated on `status` so an HTTP code can
- * only exist where it means something: `httpStatus` is the safe code of the
- * PermissionDenied behind a failed/skipped section (the redacted view
- * surfaces it as `HTTP 403` in place of the hidden detail), and the
- * `?: never` pin on the healthy arm makes a code on an applied/clean row
- * unrepresentable instead of merely filtered out.
+ * `httpStatus` is the safe code of the PermissionDenied behind a failed or skipped section (the redacted view shows it
+ * as `HTTP 403` in place of the hidden detail); the `?: never` pin makes a code on a healthy row unrepresentable.
  */
 export type SectionOutcome =
   | {
@@ -49,46 +44,29 @@ export type SectionOutcome =
     };
 
 /**
- * A settings document that passed validateSettingsDoc, and nothing else: the
- * brand has exactly one construction site (the success return below), so a
- * RepoRunOptions built from an unvalidated document is a compile error - the
- * "validate before run" ordering is carried by the type, not by call-site
- * discipline. The value is the PARSED document validateSectionShapes built
- * from zod's output, never the caller's object.
+ * The brand has exactly one construction site (validateSettingsDoc's success return), so a RepoRunOptions built from an
+ * unvalidated document is a compile error. The value is the PARSED document zod built, never the caller's object.
  */
 declare const validatedSettings: unique symbol;
 export type ValidatedSettings = SettingsFile & { readonly [validatedSettings]: true };
 
 export interface RepoRunOptions {
-  /** The target repository, parsed at the caller's validated boundary. */
   repo: RepoRef;
   settings: ValidatedSettings;
   mode: "apply" | "check";
   onMissingPermission: "fail" | "warn";
   /** Which sections run and which must fully apply, validated together at construction. */
   sections: SectionSelection;
-  /**
-   * Who authored the settings document. Omitted, "operator" (the single-repo
-   * settings file, central files, and the defaults document are all
-   * operator-authored). The multi-repo flow passes "target" for a target
-   * repository's own settings.yml, so its secret references are refused.
-   */
+  /** Omitted, "operator". The multi-repo flow passes "target" for a target's own settings.yml, so its secret references are refused. */
   secretSource?: SettingsSource;
-  /**
-   * The environment secret references resolve from in apply mode. Tests
-   * inject a record; production omits it and process.env applies.
-   */
   secretEnv?: Record<string, string | undefined>;
 }
 
 export type RepoResult = "applied" | "partial" | "clean" | "drift" | "failed" | "skipped";
 
 /**
- * Every RepoResult value, in the worst-first ranking worstOf() applies.
- * The single source for the aggregate ranking and for the action.yml
- * `result` output docs (the contract test imports this). The satisfies
- * clause and the exhaustiveness check below keep it locked to RepoResult:
- * a new result value that is not listed here fails to compile.
+ * Worst-first, the ranking worstOf() applies; the single source for the action.yml `result` output docs too (the
+ * contract test imports it). The lockstep below keeps it locked to RepoResult.
  */
 export const REPO_RESULTS = [
   "failed",
@@ -99,7 +77,6 @@ export const REPO_RESULTS = [
   "clean",
 ] as const satisfies readonly RepoResult[];
 
-/** Compile-time lockstep: a RepoResult value missing from REPO_RESULTS fails here. */
 type _UnlistedResult = MustBeNever<Exclude<RepoResult, (typeof REPO_RESULTS)[number]>>;
 
 export interface RepoRunResult {
@@ -110,7 +87,6 @@ export interface RepoRunResult {
   preflightDenied: string[];
 }
 
-/** The keys of the skipped outcomes, derived at the read site. */
 export function skippedSectionKeys(
   outcomes: ReadonlyArray<Pick<SectionOutcome, "key" | "status">>,
 ): SectionKey[] {
@@ -118,12 +94,8 @@ export function skippedSectionKeys(
 }
 
 /**
- * Top-level shape validation for one settings document (the unknown-key
- * policy from run()): the ONE boundary that turns a raw parsed document into
- * a ValidatedSettings the engine will accept. Returns the branded document,
- * or the problem (caller fails the run or the repo); the sections-allowlist
- * case downgrades to a warning. `sourceLabel` names the file the problem
- * points at.
+ * The ONE boundary that turns a raw parsed document into the ValidatedSettings the engine accepts. Unknown top-level
+ * keys are errors, except outside a non-empty `sections` allowlist, where they downgrade to a warning.
  */
 export function validateSettingsDoc(
   settings: unknown,
@@ -138,23 +110,16 @@ export function validateSettingsDoc(
       shape: nonMappingShape(settings),
     });
   }
-  // Only a PLAIN mapping may pass: an explicit YAML tag (!!timestamp, !!set,
-  // !!binary) parses to a Date/Set/Uint8Array, which is an object with no
-  // meaningful keys - branding it valid would turn the document into a
-  // silent green no-op. The same prototype rule requirePlainMapping applies
-  // to section values.
+  // A YAML tag (!!timestamp, !!set, !!binary) parses to a Date, Set, or Uint8Array: an object with no meaningful keys,
+  // which branded valid would turn the document into a silent green no-op.
   const proto = Object.getPrototypeOf(settings);
   if (proto !== Object.prototype && proto !== null) {
     return err({ code: "settings-not-plain-mapping", source: sourceLabel });
   }
   const knownSections = new Set<string>(SECTION_KEYS);
-  // The allowlist holds SectionKeys, but the DOCUMENT's unknown keys are
-  // arbitrary strings; the widened view keeps the lookup honest without a
-  // cast per key.
   const allowed: ReadonlySet<string> = onlySections;
-  // A misspelled section silently doing nothing would violate the loud-
-  // failure promise; unknown top-level keys are hard errors (prefix custom
-  // keys with underscore to keep private notes in the file).
+  // A misspelled section silently doing nothing would break the loud-failure promise; underscore-prefixed keys are the
+  // sanctioned place for private notes.
   const unknownKeys = Object.keys(settings).filter(
     (key) => !knownSections.has(key) && !key.startsWith("_"),
   );
@@ -167,17 +132,12 @@ export function validateSettingsDoc(
         known: SECTION_KEYS,
       });
     }
-    // A `sections` allowlist lets an older action version coexist with a
-    // config written for a newer one: unknown keys OUTSIDE the allowlist
-    // are warnings, not errors.
+    // A `sections` allowlist lets an older action version coexist with a config written for a newer one.
     io.annotate(
       "warning",
       `ignoring unknown top-level section(s) outside the "sections" allowlist: ${unknownKeys.join(", ")}. Upgrade the action to a version that knows them, or remove them from ${sourceLabel}`,
     );
   }
-  // The one place the brand is minted: everything above proved the document
-  // is a mapping of known (or allowlist-tolerated/underscored) sections, and
-  // the parsed document holds exactly the known ones as their shapes' output.
   return validateSectionShapes(settings as Record<string, unknown>, sourceLabel).map(
     (parsed) => parsed as ValidatedSettings,
   );
@@ -192,11 +152,7 @@ function nonMappingShape(value: unknown): TopLevelShape {
   return kind === "object" ? "null" : kind;
 }
 
-/**
- * Probe every active section by planning it and collect the permission denials as "key: detail"
- * lines; empty means every section is accessible. A plan section has no write capability, so
- * planning IS the read-only probe and the plan is discarded. `active` is injectable for tests.
- */
+/** A plan section has no write capability, so planning IS the read-only probe; `active` is injectable for tests. */
 export async function preflightProbe(
   api: GithubClient,
   repo: RepoRef,
@@ -207,9 +163,7 @@ export async function preflightProbe(
   for (const section of active) {
     const declared = settings[section.key];
     if (declared === undefined) {
-      // `active` is filtered to declared sections, so this can only fire on
-      // a caller bug (the parameter is injectable for tests); probing
-      // nothing silently would make such a test pass vacuously.
+      // `active` is filtered to declared sections; probing nothing silently would let an injected test list pass vacuously.
       throw new Error(
         `BUG: preflightProbe was given section "${section.key}" but the settings document does not declare it; the active list must be filtered to declared sections`,
       );
@@ -220,14 +174,12 @@ export async function preflightProbe(
       if (error instanceof PermissionDenied) {
         denied.push(`${section.key}: ${error.detail}`);
       }
-      // Other preflight errors are ignored here; the section loop surfaces
-      // them with full context.
+      // Other preflight errors are left for the section loop, which surfaces them with full context.
     }
   }
   return denied;
 }
 
-/** Run the full section pipeline against one repository. */
 export async function runForRepo(
   api: GithubClient,
   opts: RepoRunOptions,
@@ -237,13 +189,10 @@ export async function runForRepo(
   const repo = opts.repo;
   const settings = opts.settings;
 
-  // The ONE statement of what runs: a section is absent (not declared),
-  // excluded (declared but outside a non-empty `sections` allowlist), or
-  // active. The preflight filter and the section loop below both read this,
-  // so the two can never disagree about which sections are live.
+  // The ONE statement of what runs: the preflight filter and the section loop both read it, so they can never disagree.
   const disposition = (key: SectionKey): "absent" | "excluded" | "active" => {
     if (settings[key] === undefined) {
-      return "absent"; // declared-keys-only: absent section = untouched
+      return "absent";
     }
     if (opts.sections.only.size > 0 && !opts.sections.only.has(key)) {
       return "excluded";
@@ -252,11 +201,8 @@ export async function runForRepo(
   };
   const active = SECTIONS.filter((section) => disposition(section.key) === "active");
 
-  // Secret references, phase (a): collect every declared secret-field value
-  // from the ACTIVE sections (a section excluded by `sections` never runs, so
-  // its references must not fail the run) and validate syntax and provenance
-  // in BOTH modes, before the preflight barrier. No environment is read here:
-  // check mode and preflight see syntax only.
+  // Secret references are collected from the ACTIVE sections only (an excluded section's references must not fail the
+  // run) and their syntax and provenance checked in BOTH modes, before the preflight barrier and with no environment read.
   const secretValues = collectSecretValues(settings, active, opts.secretSource ?? "operator");
   const secretFailure = (errorsBySection: Map<SectionKey, string[]>): RepoRunResult => {
     const outcomes: SectionOutcome[] = [];
@@ -289,12 +235,9 @@ export async function runForRepo(
     return secretFailure(syntaxErrors);
   }
 
-  // Preflight barrier: the API has no transactions, so a mid-apply
-  // permission failure would leave settings half-applied. Under the strict
-  // policy, probe every declared section read-only FIRST and refuse to
-  // write anything when any of them is inaccessible. (A token with read
-  // but not write access can still fail mid-apply; the engine is
-  // idempotent, so re-running after fixing the token converges.)
+  // The API has no transactions, so a mid-apply permission failure would leave settings half-applied: under the strict
+  // policy every active section is probed read-only FIRST. A token with read but not write access can still fail
+  // mid-apply; the engine is idempotent, so re-running after fixing the token converges.
   if (!check && opts.onMissingPermission === "fail") {
     const denied = await preflightProbe(api, repo, active, settings);
     if (denied.length > 0) {
@@ -310,9 +253,8 @@ export async function runForRepo(
     }
   }
 
-  // Apply resolves EVERY secret reference up front, after the read-only preflight and before the
-  // first mutation, and masks each plaintext before the resolver exists; check mode executes
-  // nothing and builds no tools. An empty map in apply proves no legitimate lookup exists.
+  // Apply resolves EVERY secret reference after the read-only preflight and before the first mutation, and masks each
+  // plaintext before the resolver exists; check mode builds no tools. An empty map in apply proves no legitimate lookup exists.
   let tools: ExecTools | null = null;
   if (!check) {
     const resolved: Record<string, string> = {};
@@ -374,9 +316,8 @@ export async function runForRepo(
     }
     const desired = settings[section.key];
     if (desired === undefined) {
-      // disposition() already classified this section "active", which
-      // requires a declared value; reaching here is an engine bug, and
-      // planning on undefined would violate plan()'s SectionInput contract.
+      // disposition() classified this section active, which requires a declared value; planning on undefined would
+      // break plan()'s SectionInput contract.
       throw new Error(
         `BUG: section "${section.key}" was classified active but the settings document does not declare it`,
       );
@@ -384,28 +325,22 @@ export async function runForRepo(
     let result:
       | { check: true; drift: string[]; notes: string[] }
       | { check: false; changes: string[]; notes: string[] };
-    // What a plan section produced before an operation failed, reported with
-    // the failure instead of vanishing. `landed` counts accepted requests: a
-    // change thunk can fail after its request landed, so lines undercount.
+    // What the section produced before an operation failed, reported with the failure instead of vanishing. `landed`
+    // counts accepted requests: a change thunk can fail after its request landed, so the lines cannot stand in for it.
     let produced: { notes: readonly string[]; changes: readonly string[]; landed: number } = {
       notes: [],
       changes: [],
       landed: 0,
     };
     try {
-      // plan() runs in both modes over the read port; the mode decides
-      // what the plan becomes (drift lines plus the cannot-verify notes, or
-      // executed changes), and op-less drift surfaces as apply notes.
       const plan = await section.plan(planContext(section, api, repo), desired);
       if (tools === null) {
         result = { check: true, drift: planDrift(plan), notes: planCheckNotes(plan) };
       } else {
         const execution = await executePlan(plan, section, api, repo, tools);
-        // The execution's notes are the tolerated operations' outcomes.
         const notes = [...plan.notes, ...plan.drift, ...execution.notes];
         produced = { notes, changes: execution.changes, landed: execution.landed };
         if (execution.status === "failed") {
-          // Already classified by the request helpers; the catch below reports it.
           throw execution.error;
         }
         result = { check: false, changes: [...execution.changes], notes };
@@ -420,8 +355,7 @@ export async function runForRepo(
       const before = [...produced.notes, ...produced.changes];
       if (error instanceof PermissionDenied) {
         const required = opts.sections.required.has(section.key);
-        // A denial after some operations landed is a partial mutation, never
-        // a skip: the warn policy applies only when nothing was written.
+        // A denial after some operations landed is a partial mutation, never a skip: the warn policy applies only when nothing was written.
         const landed = produced.landed;
         if (opts.onMissingPermission === "warn" && !required && landed === 0) {
           io.annotate("warning", `${section.key}: skipped - ${error.detail}`);
@@ -453,8 +387,7 @@ export async function runForRepo(
         failed = true;
         continue;
       }
-      // throwFor()-raised errors already carry section, cause, and fix;
-      // prefix anything else so the failing section is still named. A landed
+      // throwFor()-raised errors already carry section, cause, and fix; anything else gets the section prefixed. A landed
       // request is a real mutation with or without its line, so say so.
       const message = error instanceof Error ? error.message : String(error);
       const prefixed = message.startsWith(`${section.key}:`)
@@ -472,8 +405,6 @@ export async function runForRepo(
     for (const note of result.notes) {
       io.annotate("notice", `${section.key}: ${note}`);
     }
-    // Narrowing on the result's own discriminant lets each branch read only
-    // the list its mode can carry: a check-mode result has no changes to misreport.
     if (result.check) {
       if (result.drift.length > 0) {
         drifted = true;
@@ -491,9 +422,8 @@ export async function runForRepo(
       outcomes.push({
         key: section.key,
         status: "applied",
-        // A section that changed nothing but left notes (a tolerated 409, a
-        // personal-account skip) is NOT "already in the desired state"; show
-        // the notes instead of claiming no changes were needed.
+        // A section that changed nothing but left notes (a tolerated 409, a personal-account skip) is NOT "already in
+        // the desired state"; the notes are shown instead of claiming no changes were needed.
         detail:
           result.changes.length > 0
             ? result.changes
@@ -524,7 +454,6 @@ export async function runForRepo(
   };
 }
 
-/** Aggregate result across targets: the worst outcome wins. */
 export function worstOf(results: Array<{ result: RepoResult }>, check: boolean): RepoResult {
   for (const rank of REPO_RESULTS) {
     if (results.some((r) => r.result === rank)) {
