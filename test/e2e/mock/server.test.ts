@@ -608,6 +608,26 @@ describe("route matching and wire contract", () => {
     expect(h.violations).toHaveLength(0);
   });
 
+  // A name every plain object inherits must be a MISS in a name-keyed state dictionary, not Object.prototype's member.
+  //   branch protection  -> served the function as a 200 body
+  //   team access        -> 200 with role_name undefined
+  //   environment        -> .map on the function, a 500 for a 404
+  test.each([
+    [
+      "branch",
+      `/repos/${OWNER}/${REPO}/branches/toString/protection`,
+      { message: "Branch not protected" },
+    ],
+    ["team", `/orgs/${OWNER}/teams/constructor/repos/${OWNER}/${REPO}`, null],
+    ["environment", `/repos/${OWNER}/${REPO}/environments/toString`, { message: "Not Found" }],
+  ] as const)("an inherited name is an absent %s", async (_kind, path, body) => {
+    const h = await start(scenario());
+    const res = await call(h, "GET", path);
+    const text = await res.text();
+    expect([res.status, text === "" ? null : JSON.parse(text)]).toEqual([404, body]);
+    expect(h.violations).toHaveLength(0);
+  });
+
   test("the contents core path answers a not-implemented violation", async () => {
     const h = await start(scenario());
     // The contents match is prefix-based, so the real nested {path} (.github/settings.yml) routes.

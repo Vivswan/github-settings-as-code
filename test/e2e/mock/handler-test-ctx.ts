@@ -5,7 +5,7 @@
 
 import { allEndpoints, type SectionEndpointKey } from "../../../src/sections/registry.js";
 import { GRADE_RANK, type MaskGrade } from "../schema.js";
-import type { MockState } from "./state.js";
+import { type MockState, named } from "./state.js";
 import type { Handler } from "./support.js";
 
 export function handlerTestContext(
@@ -20,14 +20,12 @@ export function handlerTestContext(
   } = {},
 ): Parameters<Handler>[0] {
   const endpoint = allEndpoints()[key];
+  const params = named(opts.params);
   return {
     state,
     endpoint,
     param: (name: string): string => {
-      const value =
-        opts.params !== undefined && Object.hasOwn(opts.params, name)
-          ? opts.params[name]
-          : undefined;
+      const value = params[name];
       if (value === undefined) {
         throw new Error(
           `handlerTestContext: no "${name}" param supplied for ${key} (${endpoint.route})`,

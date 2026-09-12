@@ -8,7 +8,7 @@
 
 import { mintNodeId } from "../../../test/e2e/mock/node-id.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../../../test/e2e/mock/secrets.js";
-import { environmentFromPut, PROTECTION_RULE_APPS } from "../../../test/e2e/mock/state.js";
+import { environmentFromPut, named, PROTECTION_RULE_APPS } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
   branchPoliciesEnabled,
@@ -154,7 +154,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     }
     let digests = state.environment_secret_digests[env];
     if (!digests) {
-      digests = {};
+      digests = named();
       state.environment_secret_digests[env] = digests;
     }
     return sealedSecretPut(state, list, digests, name, body);
