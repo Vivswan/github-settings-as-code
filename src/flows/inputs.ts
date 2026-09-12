@@ -285,7 +285,7 @@ export const INPUT_DECLS = {
 
 export type InputName = keyof typeof INPUT_DECLS;
 
-/** The port parseConfig reads inputs through: the raw trimmed value, empty when unset. */
+/** The port parseConfig reads inputs through: the raw value, empty when unset; parseConfig trims it. */
 export type InputReader = (name: InputName) => string;
 
 /**
@@ -304,7 +304,9 @@ interface Inputs {
 }
 
 function inputs(read: InputReader): Inputs {
-  return { value: read, orDefault: (name) => read(name) || INPUT_DECLS[name].default };
+  // The runner's getInput trims; a CLI's port may not. Trimming here gives every port one rule.
+  const value: InputReader = (name) => read(name).trim();
+  return { value, orDefault: (name) => value(name) || INPUT_DECLS[name].default };
 }
 
 /**

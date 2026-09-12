@@ -32,4 +32,20 @@ describe("SectionSelection.of", () => {
   test("ALL is the empty selection", () => {
     expect(SectionSelection.ALL).toEqual(SectionSelection.of({})._unsafeUnwrap());
   });
+
+  test("a spread or a literal is not a selection: the fields are private, so only `of` mints one", () => {
+    // Public fields would make the spread typecheck; its directive then reports unused.
+    // @ts-expect-error a spread keeps no private members, so it is not a SectionSelection
+    const spread: SectionSelection = {
+      ...SectionSelection.ALL,
+      only: new Set<SectionKey>(["repository"]),
+      required: new Set<SectionKey>(["labels"]),
+    };
+    // @ts-expect-error an object literal cannot supply private members
+    const literal: SectionSelection = {
+      only: new Set<SectionKey>(),
+      required: new Set<SectionKey>(),
+    };
+    expect([spread.only, literal.only]).toEqual([new Set(["repository"]), new Set()]);
+  });
 });

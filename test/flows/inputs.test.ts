@@ -86,6 +86,22 @@ describe("the declared defaults", () => {
     expect(engineConfig(single({}, { GITHUB_TOKEN: "env" })).token).toBe("t");
     expect(rejection(parse({ repository: "o/r" }))).toEqual({ code: "input-token-missing" });
   });
+
+  test("every input is trimmed, so a whitespace-only token is unset and the env token applies", () => {
+    const config = engineConfig(
+      parse(
+        { token: "  ", repository: " o/r ", "settings-file": " conf/only.yml " },
+        {
+          GITHUB_TOKEN: "env",
+        },
+      ),
+    );
+    expect([
+      config.token,
+      config.kind === "single" ? config.repo.slug : "",
+      config.kind === "single" ? config.settingsFile : "",
+    ]).toEqual(["env", "o/r", "conf/only.yml"]);
+  });
 });
 
 describe("required-sections x sections cross-validation", () => {
