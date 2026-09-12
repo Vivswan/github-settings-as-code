@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ok } from "neverthrow";
 import { parseRecipient } from "../../src/report/artifact-report.js";
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
 import {
@@ -54,7 +55,7 @@ describe("ARTIFACT_TEST_RECIPIENT", () => {
     // ever stops parsing, every artifact-delivery scenario would silently fall
     // into the config-rejection path instead. Pin it against the same validator
     // the action uses at config parse.
-    expect(parseRecipient(ARTIFACT_TEST_RECIPIENT)).toEqual({ ok: true });
+    expect(parseRecipient(ARTIFACT_TEST_RECIPIENT)).toEqual(ok());
   });
 });
 

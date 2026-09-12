@@ -12,6 +12,7 @@ export {
   ARCHIVED_FILTERS,
   DEFAULT_DISCOVERY_FILTERS,
   type DiscoveryFilters,
+  type DiscoveryProblem,
   discoverRepos,
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
@@ -48,8 +49,31 @@ export {
   validateSettingsDoc,
   worstOf,
 } from "./engine/orchestrate.js";
+export { SectionSelection } from "./engine/section-selection.js";
 // The run flows
-export { concludeRun, failRun, MERGE_RESULT, type RunFlowConfig } from "./flows/deliver.js";
+export {
+  concludeMerge,
+  concludeRun,
+  type FinishedMerge,
+  failRun,
+  MERGE_RESULT,
+  type RunFlowConfig,
+} from "./flows/deliver.js";
+export {
+  type ConfigEnv,
+  DEFAULT_PRIVATE_REPOS,
+  FILTER_INPUTS,
+  INPUT_DECLS,
+  type InputDecl,
+  type InputName,
+  type InputReader,
+  MERGE_INPUTS,
+  MERGE_REJECTED_INPUTS,
+  MODES,
+  type Mode,
+  parseConfig,
+  type RunConfig,
+} from "./flows/inputs.js";
 export { foldLayers, readLayerFiles } from "./flows/layers.js";
 export {
   applyRepository,
@@ -59,7 +83,7 @@ export {
   validateSettings,
 } from "./flows/library.js";
 export { type MergeConfig, runMerge } from "./flows/merge.js";
-export { DEFAULT_SETTINGS_FILE, type MultiConfig, quoteList, runMulti } from "./flows/multi.js";
+export { DEFAULT_SETTINGS_FILE, type MultiConfig, runMulti } from "./flows/multi.js";
 export {
   capturingIo,
   PRIVATE_REPOS_POLICIES,
@@ -71,7 +95,7 @@ export {
   toPublicView,
 } from "./flows/redact.js";
 export { parseSettingsDoc, readSettingsFile } from "./flows/settings-read.js";
-export { runSingle, type SingleConfig } from "./flows/single.js";
+export { runSingle, type SingleConfig, type SingleOutcome } from "./flows/single.js";
 // The client
 export {
   type ApiError,
@@ -81,7 +105,6 @@ export {
   type GraphqlOp,
   isPermissionError,
   isRateLimitError,
-  RERUN_ADVICE,
   type TraceIo,
 } from "./github/api.js";
 export { getRepoFile } from "./github/repo-file.js";
@@ -98,6 +121,19 @@ export {
   prefixedIo,
   silentIo,
 } from "./io.js";
+// Problems
+export {
+  type CentralFileProblem,
+  describeProblem,
+  type LayerProblem,
+  type Problem,
+  type ProblemOf,
+  quoteList,
+  RERUN_ADVICE,
+  type SettingsFileRole,
+  type SettingsProblem,
+  type TopLevelShape,
+} from "./problem.js";
 // The private report
 export {
   type ArtifactUploader,

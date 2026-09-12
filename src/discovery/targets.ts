@@ -5,6 +5,9 @@
  * artifact; the remote file is self-service.
  */
 
+import { err, ok, type Result } from "neverthrow";
+import type { ProblemOf } from "../problem.js";
+
 interface TargetBase {
   slug: string; // owner/name, original casing
   /** Where this target came from, for messages: a file path or the input name. */
@@ -36,18 +39,18 @@ export interface RepoRef {
 }
 
 /**
- * Parse an owner/name slug into a RepoRef, or null when it is not one. The
- * smart constructor lives beside SLUG_RE so every boundary (the repository
- * input, the repos list, discovery's full_name) validates and splits through
- * the same definition; internal code then carries the parsed proof instead
- * of a bare string.
+ * Parse an owner/name slug into a RepoRef, or the problem when it is not one.
+ * The smart constructor lives beside SLUG_RE so every boundary (the
+ * repository input, the repos list, discovery's full_name) validates and
+ * splits through the same definition; internal code then carries the parsed
+ * proof instead of a bare string.
  */
-export function parseRepoSlug(raw: string): RepoRef | null {
+export function parseRepoSlug(raw: string): Result<RepoRef, ProblemOf<"repo-slug-invalid">> {
   if (!SLUG_RE.test(raw)) {
-    return null;
+    return err({ code: "repo-slug-invalid", value: raw });
   }
   const separator = raw.indexOf("/");
-  return { owner: raw.slice(0, separator), name: raw.slice(separator + 1), slug: raw };
+  return ok({ owner: raw.slice(0, separator), name: raw.slice(separator + 1), slug: raw });
 }
 
 /**

@@ -5,6 +5,7 @@ import { driftOf, type PlannedOp, planContext } from "../../../src/sections/cont
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { grantFor } from "../contract/permissions.js";
 import { actionsSection, endpointRouted } from "./index.js";
@@ -15,8 +16,7 @@ import type { ActionsConfig } from "./schema.js";
 
 /** The verdict's error prose, or null when the document validated. */
 function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
-  const verdict = validateSectionShapes(doc, sourceLabel);
-  return "error" in verdict ? verdict.error : null;
+  return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
 }
 
 const BASE = "/repos/o/r/actions/permissions";

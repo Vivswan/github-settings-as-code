@@ -1,37 +1,28 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "neverthrow";
 import { parseReposInput } from "../../src/discovery/repos-input.js";
 
 describe("parseReposInput", () => {
   test("splits on commas and newlines", () => {
-    expect(parseReposInput("o/a, o/b\no/c")).toEqual({
-      slugs: ["o/a", "o/b", "o/c"],
-      discover: false,
-    });
+    expect(parseReposInput("o/a, o/b\no/c")).toEqual(
+      ok({ slugs: ["o/a", "o/b", "o/c"], discover: false }),
+    );
   });
 
   test("* alone switches to discovery", () => {
-    expect(parseReposInput("*")).toEqual({ slugs: [], discover: true });
+    expect(parseReposInput("*")).toEqual(ok({ slugs: [], discover: true }));
   });
 
-  test("* mixed with slugs is an error", () => {
-    expect(parseReposInput("*, o/a")).toEqual({
-      error:
-        'the "repos" input mixes "*" with explicit repositories. Use "*" alone to discover every ' +
-        "repository the token owns, or list the repositories without it",
-    });
+  test("* mixed with slugs is refused", () => {
+    expect(parseReposInput("*, o/a")).toEqual(err({ code: "repos-input-wildcard-mixed" }));
   });
 
-  test("bad slugs and duplicates are reported once, together, with counts", () => {
-    expect(parseReposInput("not-a-slug")).toEqual({
-      error:
-        'the "repos" input has 1 invalid entry: "not-a-slug" is not an owner/name slug (use values like "octocat/hello-world", comma- or newline-separated). Or use "*" alone to discover repositories',
-    });
-    expect(parseReposInput("o/a, O/A, bad, bad, worse")).toEqual({
-      error:
-        'the "repos" input has 3 invalid entries: "bad", "worse" are not owner/name slugs (use ' +
-        'values like "octocat/hello-world", comma- or newline-separated); "O/A" is listed more ' +
-        'than once (keep exactly one entry per repository). Or use "*" alone to discover ' +
-        "repositories",
-    });
+  test("bad slugs and duplicates are reported once, together, each pasted twice counting once", () => {
+    expect(parseReposInput("not-a-slug")).toEqual(
+      err({ code: "repos-input-invalid-entries", invalid: ["not-a-slug"], duplicated: [] }),
+    );
+    expect(parseReposInput("o/a, O/A, bad, bad, worse")).toEqual(
+      err({ code: "repos-input-invalid-entries", invalid: ["bad", "worse"], duplicated: ["O/A"] }),
+    );
   });
 });

@@ -22,8 +22,8 @@ import {
   type RegionSpec,
   regionBounds,
 } from "../../.github/scripts/lib/generated-regions.js";
-import { INPUT_DECLS } from "../../src/action/inputs.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
+import { INPUT_DECLS } from "../../src/flows/inputs.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { relocatedRegion } from "./relocated-region.js";

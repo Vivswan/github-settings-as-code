@@ -1,35 +1,37 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "neverthrow";
 import { stringify as stringifyYaml } from "yaml";
 import {
   applyRepository,
   checkRepository,
   collectingIo,
+  describeProblem,
   parseRepoSlug,
   renderMergedYaml,
+  SectionSelection,
   type ValidatedSettings,
   validateSettings,
 } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
 
-const repo = parseRepoSlug("o/r") as NonNullable<ReturnType<typeof parseRepoSlug>>;
+const repo = parseRepoSlug("o/r")._unsafeUnwrap();
 
 /** The brand is minted only by validation, so the tests' documents pass through it. */
 function branded(doc: unknown): ValidatedSettings {
-  const validated = validateSettings(doc);
-  if (!validated.ok) {
-    throw new Error(validated.error);
-  }
-  return validated.settings;
+  return validateSettings(doc).match(
+    (validated) => validated.settings,
+    (problem) => {
+      throw new Error(describeProblem(problem));
+    },
+  );
 }
 const settings = branded({ repository: { has_wiki: false } });
 
 describe("validateSettings", () => {
   test("a valid document comes back branded with no warnings", () => {
-    expect(validateSettings({ repository: { has_wiki: false } })).toEqual({
-      ok: true,
-      settings,
-      warnings: [],
-    });
+    expect(validateSettings({ repository: { has_wiki: false } })).toEqual(
+      ok({ settings, warnings: [] }),
+    );
   });
 
   test("an unknown key outside the sections allowlist is a returned warning, not a printed one", () => {
@@ -38,21 +40,20 @@ describe("validateSettings", () => {
         { repository: { has_wiki: false }, typo: 1 },
         { source: "fleet.yml", sections: new Set(["repository"]) },
       ),
-    ).toEqual({
-      ok: true,
-      settings,
-      warnings: [
-        'ignoring unknown top-level section(s) outside the "sections" allowlist: typo. Upgrade the action to a version that knows them, or remove them from fleet.yml',
-      ],
-    });
+    ).toEqual(
+      ok({
+        settings,
+        warnings: [
+          'ignoring unknown top-level section(s) outside the "sections" allowlist: typo. Upgrade the action to a version that knows them, or remove them from fleet.yml',
+        ],
+      }),
+    );
   });
 
-  test("an invalid document names the default source in its error", () => {
-    expect(validateSettings([1])).toEqual({
-      ok: false,
-      error:
-        'the settings document must be a YAML mapping of section names to settings, but its top level parsed as a list. Rewrite the top level as "section: ..." keys',
-    });
+  test("an invalid document comes back as its problem, naming the default source", () => {
+    expect(validateSettings([1])).toEqual(
+      err({ code: "settings-not-mapping", source: "the settings document", shape: "list" }),
+    );
   });
 });
 
@@ -63,8 +64,7 @@ describe("checkRepository and applyRepository", () => {
       repo,
       settings,
       onMissingPermission: "fail",
-      requiredSections: new Set(),
-      onlySections: new Set(),
+      sections: SectionSelection.ALL,
     });
     expect(api.mutations()).toEqual([]);
     expect(result).toEqual({
@@ -89,8 +89,7 @@ describe("checkRepository and applyRepository", () => {
         repo,
         settings,
         onMissingPermission: "fail",
-        requiredSections: new Set(),
-        onlySections: new Set(),
+        sections: SectionSelection.ALL,
       },
       collected.io,
     );
@@ -107,6 +106,24 @@ describe("checkRepository and applyRepository", () => {
       log: [],
     });
     expect(collected.lines).toEqual([{ line: "repository: patched repository fields: has_wiki" }]);
+  });
+});
+
+describe("the section selection a library call runs under", () => {
+  test("a required section outside the allowlist is the problem, and no check runs", async () => {
+    // The engine reports an excluded section without attempting it, so this
+    // pair would pass green having proven nothing; the selection refuses it
+    // before checkRepository can be given one.
+    const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: true } } });
+    const outcome = await SectionSelection.of({
+      only: ["repository"],
+      required: ["labels"],
+    }).match(
+      (sections) => checkRepository(api, { repo, settings, onMissingPermission: "fail", sections }),
+      (problem) => problem,
+    );
+    expect(outcome).toEqual({ code: "required-sections-excluded", excluded: ["labels"] });
+    expect(api.calls).toEqual([]);
   });
 });
 

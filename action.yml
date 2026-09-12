@@ -6,7 +6,7 @@ branding:
   color: blue
 
 inputs:
-  # BEGIN GENERATED: action-inputs (bun run build:action-docs; edit src/action/inputs.ts)
+  # BEGIN GENERATED: action-inputs (bun run build:action-docs; edit src/flows/inputs.ts)
   token:
     description: >-
       Token used for the API calls. Most sections need a fine-grained PAT with

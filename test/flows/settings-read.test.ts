@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "neverthrow";
 import { parseSettingsDoc } from "../../src/flows/settings-read.js";
 
 /**
@@ -75,7 +76,7 @@ describe("parseSettingsDoc", () => {
     "a document with $name parses to the same object and prints nothing",
     async ({ raw, doc }) => {
       expect(await captureOutput(() => parseSettingsDoc(raw))).toEqual({
-        result: { doc },
+        result: ok(doc),
         warnings: [],
         stderr: "",
       });
@@ -86,12 +87,12 @@ describe("parseSettingsDoc", () => {
     expect(
       await captureOutput(() => parseSettingsDoc("repository:\n  name: x\nlabels:\n  - name: a\n")),
     ).toEqual({
-      result: { doc: { repository: { name: "x" }, labels: [{ name: "a" }] } },
+      result: ok({ repository: { name: "x" }, labels: [{ name: "a" }] }),
       warnings: [],
       stderr: "",
     });
     expect(await captureOutput(() => parseSettingsDoc(""))).toEqual({
-      result: { doc: {} },
+      result: ok({}),
       warnings: [],
       stderr: "",
     });
@@ -100,9 +101,10 @@ describe("parseSettingsDoc", () => {
   test("a syntax error still fails through the error path, not a partial parse", async () => {
     const captured = await captureOutput(() => parseSettingsDoc("labels: [oops, unclosed\n"));
     expect(captured).toEqual({
-      result: {
-        error: expect.stringMatching(/^YAMLParseError: Flow sequence in block collection/),
-      },
+      result: err({
+        code: "yaml-invalid",
+        reason: expect.stringMatching(/^YAMLParseError: Flow sequence in block collection/),
+      }),
       warnings: [],
       stderr: "",
     });

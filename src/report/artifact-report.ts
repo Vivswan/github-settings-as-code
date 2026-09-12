@@ -10,6 +10,8 @@
  */
 
 import { Encrypter } from "age-encryption";
+import { err, ok, type Result } from "neverthrow";
+import type { ProblemOf } from "../problem.js";
 
 export const ARTIFACT_NAME = "settings-as-code-private-report";
 export const ARTIFACT_FILE = "private-report.md.age";
@@ -19,12 +21,17 @@ export const ARTIFACT_FILE = "private-report.md.age";
  * at config parse: a malformed `report-public-key` must be rejected before
  * any API work. Accepts exactly what the age library accepts (`age1...`).
  */
-export function parseRecipient(recipient: string): { ok: true } | { ok: false; error: string } {
+export function parseRecipient(
+  recipient: string,
+): Result<void, ProblemOf<"age-recipient-invalid">> {
   try {
     new Encrypter().addRecipient(recipient);
-    return { ok: true };
+    return ok();
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return err({
+      code: "age-recipient-invalid",
+      reason: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

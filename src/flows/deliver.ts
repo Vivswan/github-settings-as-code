@@ -4,6 +4,7 @@
  * decided here, so the two flows cannot drift in what they report.
  */
 
+import { err, ok, type Result } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import {
   type RepoResult,
@@ -12,19 +13,19 @@ import {
   skippedSectionKeys,
   worstOf,
 } from "../engine/orchestrate.js";
+import type { SectionSelection } from "../engine/section-selection.js";
 import type { GithubClient } from "../github/api.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import { isPrivate } from "../private.js";
+import { describeProblem, type Problem, type ProblemOf } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import {
-  ARTIFACT_NEEDS_UPLOADER,
   isIssueChannel,
   openReportChannel,
   type PrivateReportChannel,
   type RunConclusion,
 } from "../report/delivery.js";
-import type { SectionKey } from "../schema.js";
 import {
   emitRedactedResult,
   isPrivateVisibility,
@@ -36,7 +37,7 @@ import {
   toPublicView,
   WITHHELD_REPORT_NOTICE,
 } from "./redact.js";
-import { writeMultiSummary, writeSummary } from "./summary.js";
+import { writeMergeSummary, writeMultiSummary, writeSummary } from "./summary.js";
 
 /** One target's end state before its channel closes: the engine result and the rich detail. */
 export interface TargetResult {
@@ -110,23 +111,22 @@ export interface DeliveryConfig {
 /** The inputs the single- and multi-repo flows share: the engine options, the redaction policy, and the delivery inputs. */
 export interface RunFlowConfig extends DeliveryConfig {
   onMissingPermission: "fail" | "warn";
-  requiredSections: Set<SectionKey>;
-  onlySections: Set<SectionKey>;
+  sections: SectionSelection;
   /** Whether to hide private/internal targets from the public view. */
   privateRepos: PrivateReposPolicy;
 }
 
 /**
- * The fatal message when the `artifact` channel has no upload port, null otherwise.
- * Both flows check it before any API work; openReportChannel asserts the same rule.
+ * The `artifact` channel cannot open without an upload port. Both flows check
+ * this before any API work; openReportChannel asserts the same rule.
  */
-export function missingUploaderProblem(
+export function requireUploader(
   cfg: Pick<DeliveryConfig, "privateReport">,
   uploader: ArtifactUploader | undefined,
-): string | null {
+): Result<void, ProblemOf<"artifact-uploader-missing">> {
   return cfg.privateReport === "artifact" && uploader === undefined
-    ? ARTIFACT_NEEDS_UPLOADER
-    : null;
+    ? err({ code: "artifact-uploader-missing" })
+    : ok();
 }
 
 /**
@@ -246,10 +246,12 @@ export function concludeRun(io: Io, run: FinishedRun): number {
 
 /**
  * A run that failed before any target ran (bad inputs, an unreadable settings
- * file, a fatal multi-repo setup error): the error line, then the conclusion a
- * failed target gets. There is no summary, since nothing ran.
+ * file, a fatal multi-repo setup error): the problem's line, then the
+ * conclusion a failed target gets. There is no summary, since nothing ran.
+ * The one place the action's fatal problems become text.
  */
-export function failRun(io: Io, message: string): number {
+export function failRun(io: Io, problem: Problem): number {
+  const message = describeProblem(problem);
   io.annotate("error", message);
   // The mode may be unknown here (a config error); a failure exits 1 under either.
   return conclude(io, [failedTarget(message)], false);
@@ -262,8 +264,15 @@ export function failRun(io: Io, message: string): number {
  */
 export const MERGE_RESULT = "merged";
 
-/** A finished mode: merge run: the outputs and result line a merge earns, exit 0. */
-export function concludeMerge(io: Io, run: { layers: string[]; mergedFile: string }): number {
+/** A finished mode: merge run as runMerge hands it over: what was folded and where it went. */
+export interface FinishedMerge {
+  layers: readonly string[];
+  mergedFile: string;
+}
+
+/** A finished mode: merge run: the summary, the outputs, and the result line a merge earns, exit 0. */
+export function concludeMerge(io: Io, run: FinishedMerge): number {
+  writeMergeSummary(io, run.layers, run.mergedFile);
   io.log(`merged ${run.layers.length} layer(s) into ${run.mergedFile}`);
   io.output("skipped-sections", "");
   io.output("result", MERGE_RESULT);
