@@ -1,24 +1,14 @@
 /**
- * Graduate upstream-gap files whose routes @octokit/types now ships. Each
- * defineGap file under src/upstream-gaps/ carries a tripwire type that makes
- * `bun x tsc -p . --noEmit` fail with TS2344 inside that file the moment
- * upstream types one of its routes. This script turns that red build back
- * green, per the file's lifecycle: a documentedInSpec: true gap is deleted
- * outright, and a documentedInSpec: false gap (the pinned OpenAPI descriptor
- * also lags its routes) is rewritten to the spec-only lifecycle
- * (defineSpecOnlyGap: no tripwire, UNDOCUMENTED_ROUTES exemption kept). The
- * gaps index is then regenerated wholesale via gen-gaps-index.ts.
+ * Graduates upstream-gap files whose routes @octokit/types now ships: each defineGap file's tripwire type turns
+ * `tsc` red with TS2344 inside that file, and this script turns the build green again. TypeScript 7 (tsgo) has no
+ * in-process compiler API, so the CLI plus diagnostic-line parsing IS the design, not a stopgap.
  *
- * Run: `bun .github/scripts/graduate-upstream-gaps.ts` (from anywhere; it
- * compiles the repo root). A clean compile means nothing to graduate. Any
- * diagnostic that is not a TS2344 inside a gap file aborts the run untouched:
- * something else is broken, and a half-fix would bury it. A re-compile after
- * the deletions and rewrites must be green, or the run aborts for a human (a
- * gap file whose routes shipped only partially must be split by hand;
- * `git checkout -- src/upstream-gaps` restores the tree).
+ *   documentedInSpec: true                              -> the file is deleted
+ *   documentedInSpec: false                             -> rewritten to defineSpecOnlyGap (no tripwire; the UNDOCUMENTED_ROUTES exemption stays)
+ *   a diagnostic that is not a TS2344 inside a gap file -> abort untouched; a half-fix would bury whatever else broke
+ *   the re-compile still red                            -> abort for a human; a partially shipped file must be split by hand
  *
- * TypeScript 7 (tsgo) has no in-process compiler API, so the CLI plus
- * diagnostic-line parsing IS the design, not a stopgap.
+ * Run: `bun .github/scripts/graduate-upstream-gaps.ts`; `git checkout -- src/upstream-gaps` restores the tree.
  */
 
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -37,7 +27,6 @@ export interface Diagnostic {
   message: string;
 }
 
-/** What the diagnostics demand: the gap files to graduate, and everything else. */
 export interface GraduationPlan {
   /** Gap-file paths (repo-relative, deduplicated, sorted) with a TS2344. */
   gapFiles: string[];
@@ -45,14 +34,8 @@ export interface GraduationPlan {
   foreign: Diagnostic[];
 }
 
-/**
- * Parse `--pretty false` compiler output. Chained diagnostics continue on
- * indented lines ("The types of 'a.b' are incompatible..."), which belong to
- * the diagnostic above them. Non-empty lines that are neither diagnostics nor
- * continuations (a crash trace, a config error without a location) come back
- * in `unparsed` so the caller can refuse to act on output it does not
- * understand.
- */
+/** Chained diagnostics continue on indented lines, which belong to the diagnostic above them. Lines that are neither
+ * (a crash trace, a config error without a location) come back in `unparsed`, so the caller can refuse to act. */
 export function parseDiagnostics(output: string): {
   diagnostics: Diagnostic[];
   unparsed: string[];
@@ -87,11 +70,6 @@ export function parseDiagnostics(output: string): {
   return { diagnostics, unparsed };
 }
 
-/**
- * True for a path this script may graduate: a gap file directly under
- * src/upstream-gaps/ (per the generator's shared name predicate). A TS2344
- * anywhere else is foreign.
- */
 export function isGapFile(file: string): boolean {
   if (!file.startsWith(`${GAPS_DIR}/`)) {
     return false;
@@ -100,7 +78,6 @@ export function isGapFile(file: string): boolean {
   return !rest.includes("/") && isGapFileName(rest);
 }
 
-/** Split diagnostics into graduatable gap files and foreign noise. */
 export function planGraduation(diagnostics: readonly Diagnostic[]): GraduationPlan {
   const gapFiles = new Set<string>();
   const foreign: Diagnostic[] = [];
@@ -114,18 +91,13 @@ export function planGraduation(diagnostics: readonly Diagnostic[]): GraduationPl
   return { gapFiles: [...gapFiles].sort(), foreign };
 }
 
-/**
- * True for a gap whose routes the published OpenAPI description does not
- * document yet (documentedInSpec: false). Its tripwire firing means octokit
- * caught up but the descriptor did not: the file is rewritten to the
- * spec-only lifecycle instead of deleted, so its UNDOCUMENTED_ROUTES
- * exemption survives until a bumped UPSTREAM_REF documents the paths.
- */
-/** True for a spec-only gap source: octokit ships its routes already. */
+/** A spec-only gap source: octokit ships its routes already, so it carries no tripwire. */
 export function isSpecOnly(gapSource: string): boolean {
   return gapSource.includes("defineSpecOnlyGap(");
 }
 
+/** A documentedInSpec: false gap whose tripwire fired means octokit caught up but the pinned descriptor did not: it
+ * is rewritten rather than deleted, so its UNDOCUMENTED_ROUTES exemption survives until a bumped UPSTREAM_REF documents the paths. */
 export function isSpecPinned(gapSource: string): boolean {
   return /documentedInSpec:\s*false/.test(gapSource);
 }
@@ -139,13 +111,8 @@ function renderRoutes(routes: readonly string[]): string {
   return ["  routes: [", ...routes.map((route) => `    "${route}",`), "  ],"].join("\n");
 }
 
-/**
- * The rewritten GAP doc: the original comment's feature clause (its text up
- * to the first ";", which is where the octokit-lags prose starts), plus a
- * generated clause describing the spec-only state. Preserving the whole
- * original would keep a now-false "octokit does not carry these routes yet"
- * sentence in a bot-committed file.
- */
+/** Only the feature clause survives (the text up to the first ";", where the octokit-lags prose starts): preserving
+ * the whole original would keep a now-false "octokit does not carry these routes yet" sentence in a bot-committed file. */
 function specOnlyDoc(doc: string): string {
   const text = doc
     .replace(/^\/\*\*/, "")
@@ -158,18 +125,9 @@ function specOnlyDoc(doc: string): string {
   return `/** ${head}; @octokit/types ships these routes, but the pinned OpenAPI descriptor does not document them yet. */`;
 }
 
-/**
- * Rewrite a tripped documentedInSpec: false gap file to the spec-only
- * lifecycle: keep its GAP doc's feature clause and its routes, emit the
- * defineSpecOnlyGap template around them (no tripwire, no flag).
- * Deterministic generation from those two extracted parts - never line
- * surgery on the old source. Throws on a source that does not match the
- * defineGap shape.
- */
 export function toSpecOnlyGapSource(source: string, gapFile: string): string {
-  // (?:[^*]|\*(?!\/))* spans exactly one block comment (no */ inside), so a
-  // module-head comment earlier in the file can never be mistaken for the
-  // GAP doc: only the comment directly above the export matches.
+  // (?:[^*]|\*(?!\/))* spans exactly one block comment (no */ inside), so a module-head comment earlier in the file
+  // can never be mistaken for the GAP doc: only the comment directly above the export matches.
   const match =
     /(?<doc>\/\*\*(?:[^*]|\*(?!\/))*\*\/)\s*\nexport const GAP = defineGap\(\{(?<body>[\s\S]*?)\}\);/.exec(
       source,
@@ -189,9 +147,8 @@ export function toSpecOnlyGapSource(source: string, gapFile: string): string {
       `${gapFile} declares no parsable routes; rewrite it to defineSpecOnlyGap by hand`,
     );
   }
-  // Anything in the array besides plain string literals (an identifier, a
-  // comment, a template literal) would be dropped by the rewrite: refuse
-  // instead of silently losing it.
+  // Anything in the array besides plain string literals (an identifier, a comment, a template literal) would be
+  // dropped by the rewrite: refuse instead of silently losing it.
   const leftover = routesBody.replace(/"[^"]+"/g, "").replace(/[,\s]/g, "");
   if (leftover !== "") {
     throw new Error(
@@ -261,16 +218,14 @@ function main(): number {
       first.stderr,
     );
   }
-  // Classify and render everything BEFORE touching the disk, so an
-  // unparsable spec-pinned file aborts with the tree untouched.
+  // Classify and render everything BEFORE touching the disk, so an unparsable spec-pinned file aborts with the tree untouched.
   const deletions: string[] = [];
   const rewrites: { gapFile: string; next: string }[] = [];
   for (const gapFile of plan.gapFiles) {
     const source = readFileSync(join(ROOT, gapFile), "utf8");
     if (isSpecOnly(source)) {
-      // A spec-only gap carries no octokit tripwire, so a diagnostic inside
-      // one is not a graduation; deleting it would silently drop its
-      // UNDOCUMENTED_ROUTES exemption. Refuse instead of guessing.
+      // A spec-only gap carries no octokit tripwire, so a diagnostic inside one is not a graduation; deleting it
+      // would silently drop its UNDOCUMENTED_ROUTES exemption.
       abort(
         `${gapFile} is a spec-only gap but the compiler flagged it; that is not a graduation - fix the file by hand`,
         first.stdout,

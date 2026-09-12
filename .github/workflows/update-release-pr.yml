@@ -1,19 +1,10 @@
-# The release-PR hook of the release pipeline: repo-owned (a generated-once
-# starter upstream, so template sync never overwrites it), called by the
-# managed release.yml whenever release-please creates or refreshes the
-# release PR, independently of any release cut.
+# The release-PR hook of the release pipeline: repo-owned (a generated-once starter, never overwritten by sync),
+# called by the managed ci.yml whenever release-please creates or refreshes the release PR, independently of any
+# release cut. Its one job is the boundary anchor (anchorReleasePr in .github/scripts/release-pipeline.ts): called
+# in the run that refreshed the PR, GITHUB_SHA is exactly the main head the refresh was built on.
 #
-# This repository's job here is the single-tag scheme's boundary anchor
-# (see .github/scripts/release-pipeline.ts): called in the same run that
-# refreshed the release PR, GITHUB_SHA is exactly the main head the refresh
-# was built on, and the anchor commits it into the PR branch as
-# last-release-sha. The script re-verifies against origin - main still at
-# this head, the branch built on it - before committing, and rechecks main
-# before pushing; a push a release-please refresh overtakes is reapplied on
-# the refreshed branch, any other push failure stops the job.
-# Token caveat: pushes to the PR branch made with the default github.token
-# do NOT re-trigger the PR's CI checks (the close/reopen note in
-# release.yml); with REPO_PLATFORM_TOKEN they do.
+# The anchor is pushed with the default github.token, which starts no workflows, so the PR's checks do not re-run
+# on the anchored head; anchor-check's failure message says to close and reopen the PR.
 
 name: Update Release PR
 

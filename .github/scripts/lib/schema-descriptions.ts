@@ -1,15 +1,13 @@
 /**
- * Attaches the authored field descriptions to a generated JSON Schema. A description's key
- * names its site: the definition (`LabelConfig`), then `.field` for a property, `|N` for an
- * anyOf/oneOf arm, `[]` for array items, and `.*` for the additionalProperties schema
- * (`LabelConfig.color`, `EnvironmentConfig.deployment_branch_policy|0.protected_branches`,
- * `RepositoryConfig.*`). Two key patterns cover shapes minted for many definitions at once:
- * `<*>` in the definition name matches every generic instance (`UndeclaredPolicyList<*>.entries`),
- * and `{A,B}` lists alternatives (`{ActionsSecretConfig,AgentsSecretConfig}.name`). Every
- * definition and property must end up with exactly one description and every key must describe
- * something, so a renamed field, a forgotten sentence, and a double entry all fail the build. An
- * additionalProperties schema (`.*`) may carry a description but is not required to: it stands
- * for "any other key", which the parent's own description covers.
+ * Every definition and property must end up with exactly one description and every key must describe something, so
+ * a renamed field, a forgotten sentence, and a double entry all fail the build. The one exception is an
+ * additionalProperties schema (`.*`): it stands for "any other key", which the parent's own description covers.
+ *
+ *   LabelConfig.color                                                -> a property
+ *   EnvironmentConfig.deployment_branch_policy|0.protected_branches  -> arm 0 of an anyOf/oneOf
+ *   RepositoryConfig.*                                               -> the additionalProperties schema; `[]` is array items
+ *   UndeclaredPolicyList<*>.entries                                  -> every generic instance
+ *   {ActionsSecretConfig,AgentsSecretConfig}.name                    -> each listed alternative
  */
 
 export interface JsonSchemaNode {
@@ -22,24 +20,18 @@ export interface JsonSchemaNode {
   additionalProperties?: JsonSchemaNode | boolean;
 }
 
-/** One authored description and the file it came from (for the failure report). */
+/** `source` is the file it came from, for the failure report. */
 export interface SchemaDescription {
   readonly key: string;
   readonly text: string;
   readonly source: string;
 }
 
-/** A place a description attaches to; `required` is false for an additionalProperties schema. */
 export interface Site {
   readonly node: JsonSchemaNode;
   readonly required: boolean;
 }
 
-/**
- * Every site a description may attach to, keyed as the keys above spell it: each definition,
- * each property below it (through anyOf/oneOf arms, array items, and additionalProperties
- * schemas), and each additionalProperties schema itself.
- */
 export function describableSites(
   definitions: Readonly<Record<string, JsonSchemaNode>>,
 ): Map<string, Site> {
@@ -67,7 +59,6 @@ export function describableSites(
   return sites;
 }
 
-/** The `{A,B}` alternatives of a key, expanded; a key without braces is itself. */
 function expandBraces(key: string): string[] {
   const match = /^\{([^}]*)\}(.*)$/.exec(key);
   if (match === null) {
@@ -77,7 +68,6 @@ function expandBraces(key: string): string[] {
   return list.split(",").map((name) => `${name.trim()}${rest}`);
 }
 
-/** Whether `pattern` (after brace expansion, possibly carrying `<*>`) names `site`. */
 function keyMatches(pattern: string, site: string): boolean {
   const generic = pattern.indexOf("<*>");
   if (generic === -1) {
@@ -92,10 +82,7 @@ function keyMatches(pattern: string, site: string): boolean {
   return /^<[^<>]+>$/.test(instance);
 }
 
-/**
- * Attach every description to its site, in place. Throws one error listing every problem:
- * a key that names no site, a site that two descriptions claim, and a site nobody describes.
- */
+/** In place. Throws one error listing every problem, so a docs sweep fixes them in one pass. */
 export function attachDescriptions(
   definitions: Record<string, JsonSchemaNode>,
   descriptions: readonly SchemaDescription[],
@@ -135,9 +122,8 @@ export function attachDescriptions(
       const sources = claimed.map((d) => `${d.source} ("${d.key}")`).join(", ");
       problems.push(`${site} is described more than once: ${sources}`);
     } else {
-      // Description first, whatever order the generator emitted: one convention, stable diffs.
-      // A bare $ref takes no siblings in draft-7, so it moves under allOf, as zod itself emits
-      // a described reference.
+      // Description first, whatever order the generator emitted: one convention, stable diffs. A bare $ref takes no
+      // siblings in draft-7, so it moves under allOf, as zod itself emits a described reference.
       const rest = Object.fromEntries(Object.entries(node).filter(([k]) => k !== "description"));
       for (const key of Object.keys(node)) {
         delete node[key];

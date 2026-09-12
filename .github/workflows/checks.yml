@@ -90,11 +90,8 @@ jobs:
       - name: Regenerate the schema and compare
         run: bun run build:check
 
-  # The npm library gate: build lib/pkg/ (tsdown), judge the package shape
-  # (publint, attw), then install the packed tarball into a fresh consumer
-  # project and import it under Node and under tsc with skipLibCheck off, so
-  # a declaration leaking a devDependency type fails here, not on a
-  # consumer's machine. The consumer runs under node, so node is installed.
+  # The packed tarball is imported from a fresh consumer project under Node and under tsc with skipLibCheck off, so a
+  # declaration leaking a devDependency type fails here, not on a consumer's machine.
   package-smoke:
     runs-on: ubuntu-latest
     steps:
@@ -110,11 +107,8 @@ jobs:
       - name: Build, pack, install, import, and typecheck the library
         run: bun .github/scripts/package-smoke.ts
 
-  # Self-test: run the action from this checkout in check mode against this
-  # repository. The bundle is not committed, so build it first. Drift or
-  # permission skips are fine (the default token cannot read admin
-  # surfaces); a CRASH is not - assert the action produced a result output,
-  # which an exception never does.
+  # Drift and permission skips are fine here (the default token cannot read admin surfaces); a CRASH is not, and an
+  # exception never sets the result output.
   self-check:
     runs-on: ubuntu-latest
     steps:

@@ -1,20 +1,12 @@
 /**
- * Emits lib/settings.schema.json from the zod single source in src/schema.ts
- * (run by build:schema). z.toJSONSchema does the heavy lifting - .meta({id})
- * names the definitions, strict objects close with additionalProperties:
- * false - the descriptions come from the docs files (each section's
- * <key>.docs.yml, the shared factories', the document root's; see
- * lib/schema-descriptions.ts), and this script supplies the publication
- * posture around it:
- * - plain (strip) objects are OPENED by deleting the additionalProperties:
- *   false zod emits for them (the passthrough-first forward-compatibility
- *   tenet: GitHub-bound bodies must accept future fields; only strictObject
- *   declarations stay closed, exactly like the runtime);
- * - the root layout is zod's own (zod >= 4.5 emits an id'd root as a
- *   top-level $ref plus its definitions.SettingsFile), passed through
- *   verbatim;
- * - the stable $id is stamped (see SCHEMA_ID below);
- * - definitions are sorted so the committed file diffs deterministically.
+ * Emits lib/settings.schema.json from the zod single source in src/schema.ts (build:schema). z.toJSONSchema does the
+ * heavy lifting and the docs files supply the descriptions (lib/schema-descriptions.ts); this script adds the
+ * publication posture:
+ *
+ *   plain (strip) objects  -> OPENED: the additionalProperties: false zod emits is deleted, since GitHub-bound bodies
+ *                             must accept future fields; only strictObject declarations stay closed, like the runtime
+ *   root layout            -> zod's own, passed through verbatim
+ *   $id                    -> stamped (SCHEMA_ID); definitions sorted so the committed file diffs deterministically
  */
 
 import { writeFileSync } from "node:fs";
@@ -26,11 +18,8 @@ import { attachDescriptions, type JsonSchemaNode } from "./lib/schema-descriptio
 
 const ROOT = join(import.meta.dir, "..", "..");
 
-/**
- * The schema's identity: the raw copy at HEAD, naming no release. Editors pin
- * a version through the same URL at a release ref (see the README); a versioned
- * $id would need the schema regenerated on every major bump's release PR.
- */
+/** The raw copy at HEAD, naming no release: editors pin a version through the same URL at a release ref (see the
+ * README), and a versioned $id would need the schema regenerated on every major bump's release PR. */
 const SCHEMA_ID =
   "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/HEAD/lib/settings.schema.json";
 
@@ -44,21 +33,17 @@ const generated = z.toJSONSchema(SettingsFile, {
   override(ctx) {
     const def = (ctx.zodSchema as unknown as { _zod: { def: ZodDefView } })._zod.def;
     const json = ctx.jsonSchema as Record<string, unknown>;
-    // Open every plain (strip) object: zod emits additionalProperties: false
-    // for them, but the runtime passes unknown keys through to GitHub, and
-    // the published schema must not reject what the runtime accepts. Strict
-    // objects carry a catchall (z.never) and keep their false.
+    // The runtime passes unknown keys of a plain object through to GitHub, and the published schema must not reject
+    // what the runtime accepts. Strict objects carry a catchall (z.never) and keep their false.
     if (def.type === "object" && def.catchall === undefined) {
       delete json.additionalProperties;
     }
-    // z.record's propertyNames: {type: "string"} is a no-op in JSON (keys
-    // are always strings); dropped for a quieter document.
+    // z.record's propertyNames: {type: "string"} is a no-op in JSON (keys are always strings).
     if (def.type === "record" && JSON.stringify(json.propertyNames) === '{"type":"string"}') {
       delete json.propertyNames;
     }
-    // z.int()'s implicit safe-integer bounds are a JS implementation detail,
-    // not part of the documented file format; a deliberate .min()/.max()
-    // carries different values and stays.
+    // z.int()'s implicit safe-integer bounds are a JS implementation detail, not part of the documented file
+    // format; a deliberate .min()/.max() carries different values and stays.
     if (json.type === "integer") {
       if (json.minimum === Number.MIN_SAFE_INTEGER) {
         delete json.minimum;
@@ -70,14 +55,10 @@ const generated = z.toJSONSchema(SettingsFile, {
   },
 }) as Record<string, unknown> & { definitions?: Record<string, JsonSchemaNode> };
 
-// Every definition and property gets exactly one authored description, or the build fails
-// naming the site (see lib/schema-descriptions.ts for the key spelling).
 attachDescriptions(generated.definitions ?? {}, SCHEMA_DESCRIPTIONS);
 
-// The wrapper definition names carry "<" and ">"; percent-encode them inside
-// $ref pointers so the refs stay valid URI references for strict consumers
-// (ajv resolves both spellings; the previous generator emitted the encoded
-// form).
+// The wrapper definition names carry "<" and ">"; percent-encoded inside $ref pointers, the refs stay valid URI
+// references for strict consumers (ajv resolves both spellings).
 function encodeRefs(node: unknown): void {
   if (Array.isArray(node)) {
     for (const item of node) {
@@ -98,12 +79,8 @@ function encodeRefs(node: unknown): void {
 }
 encodeRefs(generated);
 
-// Pass zod's emitted layout through verbatim (zod >= 4.5 emits an id'd root
-// as a top-level $ref plus its own definitions.SettingsFile); only stamp the
-// stable $id and sort the definitions so the committed file diffs
-// deterministically. No layout assumption to guard: a future zod's shape
-// change surfaces as schema-check drift, and a structurally broken emission
-// fails the published-schema tests (ajv compile plus fixture round-trips).
+// No layout assumption is guarded here: a future zod's shape change surfaces as schema-check drift, and a broken
+// emission fails the published-schema tests (ajv compile plus fixture round-trips).
 const { definitions, ...rest } = generated;
 const sortedDefinitions = Object.fromEntries(
   Object.entries(definitions ?? {}).sort(([a], [b]) => (a < b ? -1 : 1)),
