@@ -7,6 +7,7 @@
 
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { replayBlockLines, replayFromReport } from "../../test/e2e/replay-block.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const ARTIFACTS = join(ROOT, "test", "e2e", ".artifacts");
@@ -74,19 +75,6 @@ export function capChars(text: string, max: number): string {
   return text.slice(0, keep) + marker;
 }
 
-/** Only `fuzz-<seed>` and `fuzz-multi-<seed>` are recognized; the other fuzz families (fuzz-discovery, fuzz-merge in
- * test/e2e/generators.ts, and fuzz.ts's own witness/input/chaos/fault names) fall through to a run.ts replay that
- * cannot find them. The seed comes ONLY from the name, so a corpus report containing the word "seed" cannot mislabel the replay. */
-export function seedFrom(name: string): string | undefined {
-  return name.match(/^fuzz(?:-multi)?-(\d+)$/)?.[1];
-}
-
-export function replayCommand(name: string, seed: string | undefined): string {
-  return seed
-    ? `bun test/e2e/fuzz.ts --iterations 1 --seed ${seed}`
-    : `bun test/e2e/run.ts --scenario ${name}`;
-}
-
 export function runUrl(env: NodeJS.ProcessEnv): string {
   const server = env.GITHUB_SERVER_URL;
   const repo = env.GITHUB_REPOSITORY;
@@ -140,15 +128,15 @@ export function buildBody(dirs: string[], env: NodeJS.ProcessEnv): string {
     const scenario = readIfPresent(dir, "scenario.yml");
     const report = readIfPresent(dir, "report.md");
     const name = report.split("\n")[0]?.replace(/^#\s*/, "").trim() || "scenario";
+    // A fuzz artifact's report already carries the replay its run wrote; a corpus artifact carries none.
+    const replay =
+      replayFromReport(report) === undefined
+        ? replayBlockLines(`bun test/e2e/run.ts --scenario ${name}`)
+        : [];
     const block = capChars(
       [
         `## ${name}`,
-        "",
-        "Replay:",
-        "",
-        "```bash",
-        replayCommand(name, seedFrom(name)),
-        "```",
+        ...replay,
         "",
         ...(report ? [head(report, REPORT_LINES), ""] : []),
         ...(scenario

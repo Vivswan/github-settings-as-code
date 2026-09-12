@@ -10,10 +10,16 @@ import {
   type GhRunner,
   head,
   issueNumberFromUrl,
-  replayCommand,
   runUrl,
-  seedFrom,
 } from "../../.github/scripts/file-fuzz-issue.js";
+import {
+  genDiscoveryScenario,
+  genMergeScenario,
+  genMultiScenario,
+  genScenario,
+} from "../e2e/generators.js";
+import { Rng } from "../e2e/prng.js";
+import { insertReplay } from "../e2e/runner.js";
 
 describe("head", () => {
   test("returns the text unchanged when under the limit", () => {
@@ -44,35 +50,6 @@ describe("capChars", () => {
     const out = capChars("x".repeat(1000), 50);
     expect(out.length).toBeLessThanOrEqual(50);
     expect(out.endsWith("... (truncated)")).toBe(true);
-  });
-});
-
-describe("seedFrom", () => {
-  test("reads the seed from a fuzz-<seed> scenario name", () => {
-    expect(seedFrom("fuzz-998877")).toBe("998877");
-  });
-
-  test("reads the seed from a fuzz-multi-<seed> scenario name", () => {
-    expect(seedFrom("fuzz-multi-4242")).toBe("4242");
-  });
-
-  test("returns undefined for a corpus name even if its report mentions a seed", () => {
-    expect(seedFrom("labels-drift")).toBeUndefined();
-    expect(seedFrom("seed-rotation-check")).toBeUndefined();
-  });
-});
-
-describe("replayCommand", () => {
-  test("a fuzz seed replays the exact iteration", () => {
-    expect(replayCommand("whatever", "998877")).toBe(
-      "bun test/e2e/fuzz.ts --iterations 1 --seed 998877",
-    );
-  });
-
-  test("a corpus failure (no seed) replays by scenario name", () => {
-    expect(replayCommand("labels-drift", undefined)).toBe(
-      "bun test/e2e/run.ts --scenario labels-drift",
-    );
   });
 });
 
@@ -113,6 +90,7 @@ describe("buildBody", () => {
     mkdirSync(fuzz, { recursive: true });
     writeFileSync(join(fuzz, "report.md"), "# fuzz-314159\n\niter 7 FAIL\n");
     writeFileSync(join(fuzz, "scenario.yml"), "name: fuzz-314159\nsettings: {}\n");
+    insertReplay(fuzz, "bun test/e2e/fuzz.ts --seed 314159 --iterations 1");
   });
 
   afterAll(() => {
@@ -127,9 +105,44 @@ describe("buildBody", () => {
     expect(body).not.toContain("--seed \n");
   });
 
-  test("a fuzz failure gets a seeded fuzz replay", () => {
-    const body = buildBody(failureDirs(root), env);
-    expect(body).toContain("bun test/e2e/fuzz.ts --iterations 1 --seed 314159");
+  test("every fuzz family replays with the command its run wrote, never one derived from the name", () => {
+    const seed = 314159;
+    const master = 271828;
+    const minted = [
+      genScenario(new Rng(seed)).scenario.name,
+      genMultiScenario(new Rng(seed)).scenario.name,
+      genDiscoveryScenario(new Rng(seed)).scenario.name,
+      genMergeScenario(new Rng(seed)).scenario.name,
+    ];
+    const cases: Array<[name: string, replay: string]> = [
+      ...minted.map((name, i): [string, string] => [
+        name,
+        `bun test/e2e/fuzz.ts --seed ${seed} --iterations 1 --sections ${["labels", "actions", "rulesets", "pages"][i]}`,
+      ]),
+      // A battery entry replays the whole battery under the master seed; the seed in its name is never a replay.
+      [
+        `fuzz-witness-labels-drift-apply-${seed}`,
+        `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`,
+      ],
+    ];
+    const familyRoot = mkdtempSync(join(tmpdir(), "families-"));
+    try {
+      for (const [name, replay] of cases) {
+        const dir = join(familyRoot, `${name}-0`);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "report.md"), `# ${name}\n\n## Failures\n\n- exit code 1 != 0\n`);
+        writeFileSync(join(dir, "scenario.yml"), `name: ${name}\nsettings: {}\n`);
+        insertReplay(dir, replay);
+      }
+      const body = buildBody(failureDirs(familyRoot), env);
+      const commands = body.split("\n").filter((line) => line.startsWith("bun test/e2e/"));
+      expect(commands.sort()).toEqual(cases.map(([, replay]) => replay).sort());
+      for (const [name] of cases) {
+        expect(body).toContain(`## ${name}`);
+      }
+    } finally {
+      rmSync(familyRoot, { recursive: true, force: true });
+    }
   });
 
   test("includes the report, scenario, run link, and artifacts note", () => {
