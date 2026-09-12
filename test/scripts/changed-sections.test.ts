@@ -113,6 +113,27 @@ describe("changed-sections derived fan-out", () => {
       "variables-engine.ts": inKeyOrder("environments", "actions_variables", "agents_variables"),
       "repo-variables.ts": inKeyOrder("actions_variables", "agents_variables"),
       "setup-section.ts": inKeyOrder("code_scanning_default_setup", "code_quality_setup"),
+      // The snapshot projection and knobbed wrapper: every section with a snapshot() except
+      // workflows, whose two-field entry is spelled by hand.
+      "snapshot-helpers.ts": inKeyOrder(
+        "labels",
+        "autolinks",
+        "actions_secrets",
+        "dependabot_secrets",
+        "codespaces_secrets",
+        "agents_secrets",
+        "pages",
+        "code_scanning_default_setup",
+        "code_quality_setup",
+        "milestones",
+        "interaction_limits",
+        "actions_variables",
+        "agents_variables",
+        "webhooks",
+        "custom_properties",
+        "deploy_keys",
+        "secret_scanning_custom_patterns",
+      ),
       // src/schema.ts imports knobbed() too, but sections reach src/schema.ts only through type imports, which are not edges.
       "schema-helpers.ts": inKeyOrder(...UNDECLARED_POLICY_SECTIONS, "environments"),
       // The docs shape imports renamed-key.ts too, but nothing bundled reaches the docs shape.

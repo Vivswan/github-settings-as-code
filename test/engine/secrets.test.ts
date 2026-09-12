@@ -4,8 +4,8 @@ import {
   type ValidatedSettings,
   validateSettingsDoc,
 } from "../../src/engine/orchestrate.js";
-import type { SettingsSource } from "../../src/engine/secret-refs.js";
-import { collectSecretValues } from "../../src/engine/secrets.js";
+import { type SettingsSource, validateSecretRef } from "../../src/engine/secret-refs.js";
+import { collectSecretValues, snapshotSecretReference } from "../../src/engine/secrets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
@@ -242,5 +242,37 @@ describe("runForRepo provenance", () => {
       ["labels", "clean"],
       ["webhooks", "excluded"],
     ]);
+  });
+});
+
+describe("snapshotSecretReference", () => {
+  test("is injective across the names one store can hold and across stores holding one name", () => {
+    // INPUT_TOKEN and SECRET_INPUT_TOKEN are both legal GitHub secret names; a bare escape of the
+    // reserved INPUT_ prefix would have folded them into one variable.
+    const inStore = ["INPUT_TOKEN", "SECRET_INPUT_TOKEN", "GITHUB_PAT", "TOKEN"].map((name) =>
+      snapshotSecretReference("actions", name),
+    );
+    expect(inStore).toEqual([
+      { variable: "SECRET_ACTIONS_INPUT_TOKEN", reference: "$SECRET_ACTIONS_INPUT_TOKEN" },
+      {
+        variable: "SECRET_ACTIONS_SECRET_INPUT_TOKEN",
+        reference: "$SECRET_ACTIONS_SECRET_INPUT_TOKEN",
+      },
+      { variable: "SECRET_ACTIONS_GITHUB_PAT", reference: "$SECRET_ACTIONS_GITHUB_PAT" },
+      { variable: "SECRET_ACTIONS_TOKEN", reference: "$SECRET_ACTIONS_TOKEN" },
+    ]);
+    const acrossStores = ["dependabot", "codespaces", "agents"].map(
+      (store) => snapshotSecretReference(store, "TOKEN").variable,
+    );
+    expect(new Set([...inStore.map((r) => r.variable), ...acrossStores]).size).toBe(
+      inStore.length + acrossStores.length,
+    );
+    // Every minted reference passes the grammar the settings file enforces.
+    for (const { reference } of inStore) {
+      expect(validateSecretRef(reference, "operator", "x")).toEqual({
+        ok: true,
+        ref: { name: reference.slice(1) },
+      });
+    }
   });
 });

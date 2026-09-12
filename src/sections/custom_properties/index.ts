@@ -19,6 +19,7 @@ import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
+import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { CustomPropertyConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["custom_properties"] };
@@ -223,5 +224,35 @@ export const customPropertiesSection = {
       change: () => [first.change, ...rest.map((update) => update.change)] as const,
     });
     return plan;
+  },
+  // An unset (null) live value is the org default, which no declaration needs to restate; an empty
+  // list is read the same way (the planner refuses `[]`, whose storage GitHub leaves undocumented).
+  // A list reads back as the SET the planner compares, so a live duplicate option is dropped.
+  async snapshot(ctx) {
+    const orgProbe = await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } });
+    if ("missing" in orgProbe) {
+      return {
+        value: undefined,
+        notes: [
+          `custom_properties: owner "${ctx.repo.owner}" is a personal account, and custom properties require an organization-owned repository; nothing to snapshot`,
+        ],
+      };
+    }
+    const live = parseLive(this, ENDPOINTS.list, z.array(LiveProperty), await ctx.read.list.call());
+    const set = live.flatMap((property) => {
+      if (property.value === null) {
+        return [];
+      }
+      if (!Array.isArray(property.value)) {
+        return [property];
+      }
+      const options = [...new Set(property.value)];
+      return options.length === 0 ? [] : [{ ...property, value: options }];
+    });
+    if (set.length === 0) {
+      return { value: undefined, notes: [] };
+    }
+    const entries = set.map((property) => projectOntoSchema(CustomPropertyConfig, property));
+    return { value: knobbedSnapshot(this, entries), notes: [] };
   },
 } satisfies SectionModule<"custom_properties", typeof ENDPOINTS>;

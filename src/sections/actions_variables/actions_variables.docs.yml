@@ -15,6 +15,7 @@ coverage:
       per_page at 30 (not the usual 100), which the page loop honors so a large inventory is never
       truncated. Secrets are write-only material and deliberately NOT this section: they live in the
       `actions_secrets` section above.
+      Snapshot reads the variables back as name and value entries under the delete default.
 schema:
   SettingsFile.actions_variables: >-
     GitHub Actions repository variables, upserted by name; undeclared ones are DELETED by default

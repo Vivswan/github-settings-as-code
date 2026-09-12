@@ -19,6 +19,11 @@ import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
+import {
+  knobbedSnapshot,
+  projectOntoSchema,
+  rejectLiveDuplicates,
+} from "../shared/snapshot-helpers.js";
 import { MilestoneConfig } from "./schema.js";
 
 const LiveMilestone = z.looseObject({ number: z.number(), title: z.string() });
@@ -138,5 +143,25 @@ export const milestonesSection = {
       );
     }
     return plan;
+  },
+  async snapshot(ctx) {
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveMilestone),
+      await ctx.read.list.listAll({ query: { state: "all" } }),
+    );
+    if (live.length === 0) {
+      return { value: undefined, notes: [] };
+    }
+    rejectLiveDuplicates(
+      this,
+      "milestone",
+      live,
+      (milestone) => milestone.title,
+      (milestone) => `${milestone.title} (number ${milestone.number})`,
+    );
+    const entries = live.map((milestone) => projectOntoSchema(MilestoneConfig, milestone));
+    return { value: knobbedSnapshot(this, entries), notes: [] };
   },
 } satisfies SectionModule<"milestones", typeof ENDPOINTS>;

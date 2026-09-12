@@ -51,6 +51,19 @@ function shapeOf(plan: SectionPlan): unknown {
 }
 
 /**
+ * The operations a plan over CONVERGED state may not carry: every op that is neither alwaysRewrite
+ * by declaration (it recurs whatever the live state) nor an unverifiable facet whose drift lines
+ * are gone (it recurs for the facet alone). Empty means the section has settled.
+ */
+export function unconvergedOps(section: SectionModule, plan: SectionPlan): SectionPlan["ops"] {
+  return plan.ops.filter(
+    (op) =>
+      section.endpoints[op.role]?.alwaysRewrite !== true &&
+      !("unverifiable" in op.drift && op.drift.lines.length === 0),
+  );
+}
+
+/**
  * Plan, execute, re-plan, execute again over a STATEFUL fake. The second plan may carry only the
  * alwaysRewrite ops (all of them, request for request) and unverifiable ops whose lines converged;
  * op-less drift survives; a third plan matches the second. `tools` defaults to refusing every lookup.
@@ -103,13 +116,7 @@ export async function provePlanIdempotent<M extends SectionModule>(
   const second = await plan();
   // An unverifiable op recurs for its facet alone: any drift line it still carries is state the execution should have converged.
   expect(
-    second.ops
-      .filter(
-        (op) =>
-          section.endpoints[op.role]?.alwaysRewrite !== true &&
-          !("unverifiable" in op.drift && op.drift.lines.length === 0),
-      )
-      .map(identityOf),
+    unconvergedOps(section, second).map(identityOf),
     `${section.key}: the plan over just-applied state still carries operations that are neither alwaysRewrite by declaration nor unverifiable, so apply would not converge`,
   ).toEqual([]);
   expect(

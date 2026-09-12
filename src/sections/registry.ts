@@ -106,6 +106,31 @@ type MisdeclaredPlanModules = {
  */
 type _PlanModulesAreExact = MustBeNever<MisdeclaredPlanModules>;
 
+/** The dictionaries a module's snapshot() was TYPED over, or "absent" when it declares none. */
+type SnapshotTypedOver<M> = M extends {
+  snapshot: (ctx: PlanContext<infer E, infer G>) => unknown;
+}
+  ? { endpoints: E; graphql: G }
+  : "absent";
+
+/**
+ * `K` when module `M`'s snapshot() is typed over anything but its own dictionaries, never when it
+ * is exact or absent: the MisdeclaredPlanModule sibling for the read-back handler.
+ */
+export type MisdeclaredSnapshotModule<K extends SectionKey, M> =
+  SnapshotTypedOver<M> extends "absent"
+    ? never
+    : Invariant<SnapshotTypedOver<M>, Omit<ExpectedPlanDeclarations<K, M>, "desired">> extends true
+      ? never
+      : K;
+
+type MisdeclaredSnapshotModules = {
+  [K in SectionKey]: MisdeclaredSnapshotModule<K, SectionModules[K]>;
+}[SectionKey];
+
+/** Compile-time lockstep: a snapshot() over another section's dictionaries fails here by name. */
+type _SnapshotModulesAreExact = MustBeNever<MisdeclaredSnapshotModules>;
+
 /**
  * Derived from each module's literal ENDPOINTS, so every consumer (the mock handler tables, dispatch,
  * fault directives) tracks the declarations by construction.

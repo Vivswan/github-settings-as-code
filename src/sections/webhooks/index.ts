@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { deltas, renderDelta } from "../../engine/diff.js";
+import { mintSecretReference } from "../../engine/secrets.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
@@ -29,6 +30,11 @@ import {
 } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
+import {
+  knobbedSnapshot,
+  projectOntoSchema,
+  rejectLiveDuplicates,
+} from "../shared/snapshot-helpers.js";
 import { WebhookConfig } from "./schema.js";
 
 const LiveHook = z.looseObject({
@@ -36,7 +42,7 @@ const LiveHook = z.looseObject({
   name: z.string().optional(),
   active: z.boolean().optional(),
   events: z.array(z.string()).optional(),
-  config: z.record(z.string(), z.unknown()).optional(),
+  config: z.looseObject({ secret: z.string().optional() }).optional(),
 });
 type LiveHook = z.infer<typeof LiveHook>;
 
@@ -136,6 +142,18 @@ function describeHook(hook: LiveHook): string {
 
 const CANNOT_VERIFY_SECRET =
   'GitHub never reveals a webhook secret (reads echo "********"), so the declared value cannot be verified; apply re-sends it on every run so rotations propagate';
+
+/**
+ * The reference a snapshot writes for one live hook's secret, keyed by the hook's id (the number
+ * in its settings URL): a list position would rebind every later hook's variable to another
+ * hook's value once a hook is deleted and the repository is snapshotted again.
+ */
+function snapshotSecretReference(hook: LiveHook): { variable: string; reference: string } {
+  return mintSecretReference(
+    `WEBHOOK_SECRET_${hook.id}`,
+    `the webhook ${describeHook(hook)} secret`,
+  );
+}
 
 export const webhooksSection = {
   key: "webhooks",
@@ -285,5 +303,55 @@ export const webhooksSection = {
       );
     }
     return plan;
+  },
+  // A live hook reports a set secret as "********": the entry carries a `$WEBHOOK_SECRET_<id>`
+  // reference in its place, and a note asks for the value. A legacy service hook (name other
+  // than "web") and a hook without a config.url are outside what this section manages, so each is
+  // noted and left out.
+  async snapshot(ctx) {
+    const live = parseLive(this, ENDPOINTS.list, z.array(LiveHook), await ctx.read.list.listAll());
+    const notes: string[] = [];
+    const withUrl = live.filter((hook) => {
+      if (typeof hook.config?.url === "string" && hook.config.url !== "") {
+        return true;
+      }
+      notes.push(
+        `webhooks[${describeHook(hook)}]: the hook has no config.url, the natural key this section manages by, so it is left out of the snapshot`,
+      );
+      return false;
+    });
+    // Over every url-bearing hook, service hooks included: the planner matches a declared url
+    // against ALL live hooks, so a web hook sharing a url with a service hook cannot converge.
+    rejectLiveDuplicates(
+      this,
+      "webhook",
+      withUrl,
+      (hook) => String(hook.config?.url),
+      (hook) => `${String(hook.config?.url)} (id ${hook.id})`,
+    );
+    const addressable = withUrl.filter((hook) => {
+      if (hook.name === undefined || hook.name === "web") {
+        return true;
+      }
+      notes.push(
+        `webhooks[${describeHook(hook)}]: a "${hook.name}" service hook is not a web hook this section manages, so it is left out of the snapshot`,
+      );
+      return false;
+    });
+    if (addressable.length === 0) {
+      return { value: undefined, notes };
+    }
+    const entries = addressable.map((hook) => {
+      const entry = projectOntoSchema(WebhookConfig, hook);
+      if (entry.config.secret === undefined) {
+        return entry;
+      }
+      const { variable, reference } = snapshotSecretReference(hook);
+      notes.push(
+        `webhooks[${describeHook(hook)}].config.secret: the webhook secret is not readable; export a value as ${variable} into the environment before apply`,
+      );
+      return { ...entry, config: { ...entry.config, secret: reference } };
+    });
+    return { value: knobbedSnapshot(this, entries), notes };
   },
 } satisfies SectionModule<"webhooks", typeof ENDPOINTS>;

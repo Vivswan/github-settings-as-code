@@ -8,6 +8,7 @@
  */
 
 import type { z } from "zod";
+import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile } from "../../schema.js";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsSecretConfig } from "../actions_secrets/schema.js";
@@ -18,6 +19,7 @@ import {
   defaultUndeclaredPolicy,
   loosen,
   type SectionModule,
+  type SectionSnapshot,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
@@ -31,7 +33,9 @@ import {
   rejectDuplicateSecretNames,
   type SecretEntry,
   type SecretsPlanScope,
+  secretKey,
 } from "./secrets-engine.js";
+import { knobbedSnapshot } from "./snapshot-helpers.js";
 
 export type RepoSecretsKey =
   | "actions_secrets"
@@ -122,6 +126,9 @@ type SharedPlan = (
   declared: WideDeclared,
 ) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
 
+/** What every family's snapshot reads back: one shape, since the four entry slices are identical. */
+type WideSnapshot = { value: UndeclaredPolicyList<SecretEntry> | undefined; notes: string[] };
+
 type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 type _SharedPlanIsEveryFamilyPlan = MustBeNever<
@@ -157,6 +164,9 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
   readonly secretValues: typeof listSecretValues;
   readonly closedSurface: typeof CLOSED_SURFACE;
   readonly plan: RepoSecretsPlan<K>;
+  readonly snapshot: (
+    ctx: PlanContext<RepoSecretsEndpoints<SecretsSegment<K>>>,
+  ) => Promise<SectionSnapshot<K>>;
 }
 
 /**
@@ -241,6 +251,31 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     return planSecrets(section, scope, { entries, policy, defaultPolicy });
   };
 
+  // GitHub lists names only, so each entry carries the per-store reference the operator must
+  // export before an apply, and a note says so per secret. Names are read through secretKey, the
+  // uppercase form GitHub stores and the planner compares by, so the reference grammar holds.
+  const snapshot = async (ctx: PlanContext<WideEndpoints>): Promise<WideSnapshot> => {
+    const live = parseLive(
+      section,
+      wide.list,
+      LIVE_SECRET_NAMES,
+      await ctx.read.list.listAllEnveloped("secrets"),
+    );
+    if (live.length === 0) {
+      return { value: undefined, notes: [] };
+    }
+    const references = live.map(({ name }) => ({
+      name: secretKey(name),
+      ...snapshotSecretReference(pathSegment, secretKey(name)),
+    }));
+    const entries = references.map(({ name, reference }) => ({ name, value: reference }));
+    const notes = references.map(
+      ({ name, variable }) =>
+        `${key}[${name}]: value of ${name} is not readable; export it into the environment as ${variable} before apply`,
+    );
+    return { value: knobbedSnapshot(section, entries), notes };
+  };
+
   const section: RepoSecretsSectionModule<K> = {
     key,
     undeclaredDefault: "keep",
@@ -250,6 +285,8 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     secretValues: listSecretValues,
     closedSurface: CLOSED_SURFACE,
     plan,
+    // The family's port is the wide port at one segment; the cast is that boundary.
+    snapshot: (ctx) => snapshot(ctx as PlanContext<WideEndpoints>),
   };
   return section;
 }

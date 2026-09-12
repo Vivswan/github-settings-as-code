@@ -20,6 +20,8 @@ coverage:
       the property is not defined at the organization level. Undeclared live values are KEPT by
       default (an unset can revert to an org default the action does not model); the wrapped
       `_undeclared: delete` form opts into unsetting them.
+      Snapshot reads the set values back as entries under the keep default; unset (null) values are
+      omitted, and a personal account yields nothing with a note.
 schema:
   SettingsFile.custom_properties: >-
     Values of organization-defined custom properties, set per repository (the property DEFINITIONS

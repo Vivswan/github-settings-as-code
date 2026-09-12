@@ -21,6 +21,8 @@ coverage:
       repository per key, account-wide); the error says so. Undeclared keys are KEPT by default
       (deleting a live deploy key breaks whatever service authenticates with it, and deployment
       tooling installs its own keys); the wrapped `_undeclared: delete` form opts into deletion.
+      Snapshot reads the live keys back (title, comparable material, read_only) under the keep
+      default.
 schema:
   SettingsFile.deploy_keys: >-
     Deploy keys, matched by title. The declared material is a PUBLIC key, safe in a committed
