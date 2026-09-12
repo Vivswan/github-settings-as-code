@@ -421,6 +421,15 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+/**
+ * Every dictionary keyed by a caller-supplied name (a branch, an environment, a team slug, a secret, a path param)
+ * is built here, WITHOUT a prototype, so a handler's plain read of "toString" or "constructor" is a miss and a write
+ * of "__proto__" is an own key. The section mocks and dispatch.ts rely on it.
+ */
+export function named<T>(seed?: Record<string, T>): Record<string, T> {
+  return Object.assign(Object.create(null), seed === undefined ? {} : clone(seed));
+}
+
 function generateLabels(gen: LabelsGenerate): Json[] {
   return Array.from({ length: gen.count }, (_, i) => ({
     name: `${gen.prefix}-${i + 1}`,
@@ -646,22 +655,16 @@ export function buildState(
     repo,
     labels,
     rulesets: ls.rulesets ? clone(ls.rulesets) : [],
-    branch_protection: ls.branch_protection ? clone(ls.branch_protection) : {},
-    branch_protection_graphql: ls.branch_protection_graphql
-      ? clone(ls.branch_protection_graphql)
-      : {},
+    branch_protection: named(ls.branch_protection),
+    branch_protection_graphql: named(ls.branch_protection_graphql),
     branch_protection_rules: (ls.branch_protection_rules ?? []).map((rule) =>
       completeRule(clone(rule)),
     ),
     branches: ls.branches ? clone(ls.branches) : [],
-    environments: ls.environments ? clone(ls.environments) : {},
-    environment_variables: ls.environment_variables ? clone(ls.environment_variables) : {},
-    environment_branch_policies: ls.environment_branch_policies
-      ? clone(ls.environment_branch_policies)
-      : {},
-    environment_protection_rules: ls.environment_protection_rules
-      ? clone(ls.environment_protection_rules)
-      : {},
+    environments: named(ls.environments),
+    environment_variables: named(ls.environment_variables),
+    environment_branch_policies: named(ls.environment_branch_policies),
+    environment_protection_rules: named(ls.environment_protection_rules),
     pinned_environments: pinnedSeed,
     _pinned_position_counter: Math.max(0, ...pinnedSeed.map((pin) => pin.position)),
     autolinks: ls.autolinks ? clone(ls.autolinks) : [],
@@ -698,13 +701,13 @@ export function buildState(
     dependabot_secrets: ls.dependabot_secrets ? clone(ls.dependabot_secrets) : [],
     codespaces_secrets: ls.codespaces_secrets ? clone(ls.codespaces_secrets) : [],
     agents_secrets: ls.agents_secrets ? clone(ls.agents_secrets) : [],
-    environment_secrets: ls.environment_secrets ? clone(ls.environment_secrets) : {},
+    environment_secrets: named(ls.environment_secrets),
     _secret_write_counter: 0,
-    actions_secret_digests: {},
-    dependabot_secret_digests: {},
-    codespaces_secret_digests: {},
-    agents_secret_digests: {},
-    environment_secret_digests: {},
+    actions_secret_digests: named(),
+    dependabot_secret_digests: named(),
+    codespaces_secret_digests: named(),
+    agents_secret_digests: named(),
+    environment_secret_digests: named(),
     workflows: ls.workflows ? clone(ls.workflows) : [],
     pages: ls.pages !== undefined ? clone(ls.pages) : null,
     code_scanning: ls.code_scanning ? clone(ls.code_scanning) : {},
@@ -728,7 +731,7 @@ export function buildState(
     invitations: (ls.invitations ?? []).map((invitation) =>
       completeInvitation(clone(invitation), takeId(), repo, stateSlug),
     ),
-    teams: ls.teams ? clone(ls.teams) : {},
+    teams: named(ls.teams),
     milestones: ls.milestones ? clone(ls.milestones) : [],
     interaction_limits: ls.interaction_limits ? clone(ls.interaction_limits) : null,
     interaction_limits_org_override: ls.interaction_limits_org_override ?? false,

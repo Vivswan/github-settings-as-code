@@ -14,6 +14,7 @@ import {
   type TaggedGraphqlOp,
 } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "./contract.js";
+import { named } from "./state.js";
 
 export function matchEndpoint(
   method: string,
@@ -44,7 +45,7 @@ function matchTemplateParams(
   if (templateSegs.length !== pathSegs.length) {
     return null;
   }
-  const params: Record<string, string> = {};
+  const params = named<string>();
   for (let i = 0; i < templateSegs.length; i++) {
     const token = templateSegs[i] as string;
     const segment = pathSegs[i] as string;
