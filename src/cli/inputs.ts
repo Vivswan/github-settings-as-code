@@ -14,8 +14,11 @@ import {
   type InputName,
   type InputReader,
   MERGE_INPUTS,
+  MERGE_ONLY_INPUTS,
   MODES,
   type Mode,
+  SNAPSHOT_INPUTS,
+  SNAPSHOT_ONLY_INPUTS,
 } from "../index.js";
 
 /** Declaration order is the help order, as on the inputs reference page. */
@@ -30,19 +33,22 @@ const PROGRAM_INPUTS = ["mode", "token"] as const satisfies readonly InputName[]
  */
 export const CLI_UNSUPPORTED_INPUTS = ["report-public-key"] as const satisfies readonly InputName[];
 
-/**
- * The flags a mode's subcommand takes: the inputs its mode reads. `settings-file`
- * is the one input both the merge and the engine modes read.
- */
+/** The flags a mode's subcommand takes: the inputs its mode reads, in declaration order. */
 export function inputsForMode(mode: Mode): InputName[] {
-  const mergeReads = (name: InputName): boolean =>
-    (MERGE_INPUTS as readonly InputName[]).includes(name);
   const hidden: readonly InputName[] = [...PROGRAM_INPUTS, ...CLI_UNSUPPORTED_INPUTS];
-  return INPUT_NAMES.filter(
-    (name) =>
-      !hidden.includes(name) &&
-      (mode === "merge" ? mergeReads(name) : !mergeReads(name) || name === "settings-file"),
-  );
+  const modeOnly: readonly InputName[] = [...MERGE_ONLY_INPUTS, ...SNAPSHOT_ONLY_INPUTS];
+  const reads = (name: InputName): boolean => {
+    switch (mode) {
+      case "merge":
+        return (MERGE_INPUTS as readonly InputName[]).includes(name);
+      case "snapshot":
+        return (SNAPSHOT_INPUTS as readonly InputName[]).includes(name);
+      case "apply":
+      case "check":
+        return !modeOnly.includes(name);
+    }
+  };
+  return INPUT_NAMES.filter((name) => !hidden.includes(name) && reads(name));
 }
 
 /** Every input some subcommand or the program exposes; the mode is the subcommand itself. */

@@ -71,6 +71,71 @@ function cases(): Case[] {
       env: { GITHUB_TOKEN: "ghp_env" },
     },
     {
+      name: "snapshot, one repository to a file with an allowlist",
+      argv: [
+        "snapshot",
+        "--token",
+        "ghp_flag",
+        "--repository",
+        "o/r",
+        "--snapshot-file",
+        "snap.yml",
+        "--sections",
+        "labels",
+        "--on-missing-permission",
+        "warn",
+      ],
+      inputs: {
+        mode: "snapshot",
+        token: "ghp_flag",
+        repository: "o/r",
+        "snapshot-file": "snap.yml",
+        sections: "labels",
+        "on-missing-permission": "warn",
+      },
+    },
+    {
+      name: "snapshot, the fleet to a directory with a discovery filter",
+      argv: [
+        "snapshot",
+        "--token",
+        "ghp_flag",
+        "--repos",
+        "*",
+        "--snapshot-dir",
+        "snaps",
+        "--forks",
+        "exclude",
+      ],
+      inputs: {
+        mode: "snapshot",
+        token: "ghp_flag",
+        repos: "*",
+        "snapshot-dir": "snaps",
+        forks: "exclude",
+      },
+      env: { GITHUB_REPOSITORY: "o/admin" },
+    },
+    {
+      name: "snapshot, a merge-only flag is unknown to the subcommand",
+      argv: [
+        "snapshot",
+        "--token",
+        "ghp_flag",
+        "--snapshot-file",
+        "snap.yml",
+        "--layering",
+        "replace",
+      ],
+      inputs: {
+        mode: "snapshot",
+        token: "ghp_flag",
+        "snapshot-file": "snap.yml",
+        layering: "replace",
+      },
+      unknownFlag: "layering",
+    },
+    {
       name: "check, the workflow's own repository from GITHUB_REPOSITORY",
       argv: ["check", "--token", "ghp_flag"],
       inputs: { mode: "check", token: "ghp_flag" },
@@ -294,7 +359,7 @@ describe("argv -> config equals env -> config", () => {
         envToken++;
       }
     }
-    expect([...kinds].sort()).toEqual(["merge", "multi", "single"]);
+    expect([...kinds].sort()).toEqual(["merge", "multi", "single", "snapshot"]);
     expect(envToken).toBeGreaterThan(0);
     expect(rejected).toBeGreaterThanOrEqual(5);
   });
@@ -305,6 +370,8 @@ const VALID: Record<Exclude<InputName, "mode" | "token">, string> = {
   repository: "o/r",
   "settings-file": "s.yml",
   "merged-file": "out.yml",
+  "snapshot-file": "snap.yml",
+  "snapshot-dir": "snaps",
   "on-missing-permission": "warn",
   "required-sections": "labels",
   sections: "labels",
@@ -338,7 +405,39 @@ const COMPANIONS: Partial<Record<InputName, Inputs>> = {
 
 /** The smallest input set each mode accepts. */
 function base(mode: Mode): Inputs {
-  return mode === "merge" ? { mode, "merged-file": "out.yml" } : { mode, token: "ghp" };
+  switch (mode) {
+    case "merge":
+      return { mode, "merged-file": "out.yml" };
+    case "snapshot":
+      return { mode, token: "ghp", "snapshot-file": "snap.yml" };
+    default:
+      return { mode, token: "ghp" };
+  }
+}
+
+/**
+ * The snapshot's fleet inputs need the directory form: they unset the base's
+ * snapshot-file (an empty value reads as unset) and name a snapshot-dir.
+ */
+const SNAPSHOT_FLEET: Inputs = { "snapshot-file": "", "snapshot-dir": "snaps", repos: "*" };
+const SNAPSHOT_FLEET_INPUTS = new Set<InputName>([
+  "snapshot-dir",
+  "repos",
+  "repos-dir",
+  "visibility",
+  "archived",
+  "forks",
+  "exclude",
+  "topics",
+  "affiliation",
+]);
+
+/** The inputs a flag needs beside it under `mode`, on top of that mode's base. */
+function companions(mode: Mode, name: InputName): Inputs {
+  if (mode === "snapshot" && SNAPSHOT_FLEET_INPUTS.has(name)) {
+    return name === "repos-dir" ? { ...SNAPSHOT_FLEET, repos: "" } : SNAPSHOT_FLEET;
+  }
+  return COMPANIONS[name] ?? {};
 }
 
 describe("the per-mode flag split", () => {
@@ -350,7 +449,7 @@ describe("the per-mode flag split", () => {
         const value = name === "report-public-key" ? recipient : VALID[name];
         if (exposed.has(name)) {
           const result = parseConfig(
-            recordReader({ ...base(mode), ...COMPANIONS[name], [name]: value }),
+            recordReader({ ...base(mode), ...companions(mode, name), [name]: value }),
             env,
           );
           expect(
@@ -366,7 +465,9 @@ describe("the per-mode flag split", () => {
               (problem) => problem.code,
             ),
             `${mode} --${name}`,
-          ).toMatch(/^input-(merge-only|rejected-in-merge|report-key-unused)$/);
+          ).toMatch(
+            /^input-(merge-only|snapshot-only|rejected-in-merge|rejected-in-snapshot|report-key-unused)$/,
+          );
         }
       }
     }
@@ -397,6 +498,8 @@ describe("the per-mode flag split", () => {
     },
     mode: "single",
     "merged-file": "single",
+    "snapshot-file": "single",
+    "snapshot-dir": "single",
     "on-missing-permission": "single",
     "required-sections": {
       argv: check,
@@ -458,8 +561,14 @@ describe("the per-mode flag split", () => {
         if (!exposed.has(name)) {
           continue; // the mode is the subcommand; an unsupported input has no flag
         }
-        // The base argv minus this flag, so the two repeats below are its only occurrences.
-        const base = inputsForMode("check").includes(name) || name === "token" ? check : ["merge"];
+        // The base argv of the first subcommand exposing the flag, minus this flag, so the two
+        // repeats below are its only occurrences.
+        const base =
+          inputsForMode("check").includes(name) || name === "token"
+            ? check
+            : inputsForMode("merge").includes(name)
+              ? ["merge"]
+              : ["snapshot", "--token", "ghp"];
         const flag = base.filter((argument, index) => {
           const value = index > 0 && base[index - 1] === `--${name}`;
           return argument !== `--${name}` && !value;

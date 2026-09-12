@@ -69,12 +69,14 @@ export {
   type InputName,
   type InputReader,
   MERGE_INPUTS,
+  MERGE_ONLY_INPUTS,
   MERGE_REJECTED_INPUTS,
   MODES,
   type Mode,
   parseConfig,
   type RunConfig,
   SNAPSHOT_INPUTS,
+  SNAPSHOT_ONLY_INPUTS,
   SNAPSHOT_REJECTED_INPUTS,
 } from "./flows/inputs.js";
 export { foldLayers, readLayerFiles } from "./flows/layers.js";

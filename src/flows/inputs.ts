@@ -405,8 +405,11 @@ type _UnlistedLayering = MustBeNever<Exclude<Layering, (typeof LAYERINGS)[number
  * Their declared defaults are empty so "explicitly set" is detectable, as with the discovery filters; apply and check
  * reject a set one instead of silently ignoring it.
  */
-const MERGE_ONLY_INPUTS = ["merged-file", "layering"] as const satisfies readonly InputName[];
-const SNAPSHOT_ONLY_INPUTS = [
+export const MERGE_ONLY_INPUTS = [
+  "merged-file",
+  "layering",
+] as const satisfies readonly InputName[];
+export const SNAPSHOT_ONLY_INPUTS = [
   "snapshot-file",
   "snapshot-dir",
 ] as const satisfies readonly InputName[];

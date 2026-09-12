@@ -33,6 +33,7 @@ The package needs Node 22.14 or newer; `bunx` fetches it the same way and honors
 | `check` | Report drift between a settings file and the live repository; exits 1 on any drift | yes |
 | `apply` | Apply a settings file to the repository | yes |
 | `merge` | Fold an ordered list of settings files into one document | no |
+| `snapshot` | Write a repository's live settings as a settings file, or one file per multi-repo target | yes |
 | `validate <file>` | Validate a settings file against the schema | no |
 | `permissions <file>` | Print the PAT grant each section the file declares needs | no |
 
@@ -64,6 +65,15 @@ gsac merge --settings-file fleet.yml --settings-file team.yml --merged-file merg
 ```
 
 A repeated `--settings-file` builds the layer list, lowest first; a comma-separated value does the same. The merged file is exactly what `apply` would run ([layering](../operate/layering.md)).
+
+### snapshot
+
+```bash
+gsac snapshot --token "$ADMIN_TOKEN" --repository octocat/hello-world --snapshot-file settings.snapshot.yml
+gsac snapshot --token "$FLEET_TOKEN" --repos "*" --snapshot-dir snapshots
+```
+
+Exactly one of `--snapshot-file` (one repository) and `--snapshot-dir` (one `<owner>/<name>.yml` per target) is required; the fleet flags are the multi-repo ones. The written file is what `check` reads clean against the repository it came from ([snapshot mode](../operate/snapshot.md)).
 
 ### validate
 
@@ -114,7 +124,7 @@ With `--json` the outputs are one object instead, and stdout carries nothing els
 {"skipped-sections":"","result":"clean"}
 ```
 
-The exit codes are the action's: `check` exits 1 on drift or failure, `apply` and `merge` exit 1 on failure only, `validate` exits 1 on an invalid file, `permissions` exits 0 for a valid file.
+The exit codes are the action's: `check` exits 1 on drift or failure, `apply`, `merge`, and `snapshot` exit 1 on failure only, `validate` exits 1 on an invalid file, `permissions` exits 0 for a valid file.
 A flag the mode does not read is unknown to that subcommand and exits 1 with the parser's message, where the action rejects the same input by name;
 a value the mode refuses (a filter without `--repos "*"`, a `--repository` that is not a slug) fails with the action's own message, reworded where the action's remedy names the workflow step.
 The token passed on the command line is masked as `***` wherever a line would echo it.
