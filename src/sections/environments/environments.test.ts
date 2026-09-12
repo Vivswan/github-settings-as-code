@@ -168,11 +168,18 @@ describe("environments plan", () => {
     ctx.read.probe.call;
     // @ts-expect-error nor a list
     ctx.read.probe.listAll;
-    // The sealing key is an execution-phase read, so a plan() body cannot spell the call: the token comes first, and only a thunk holds one.
+    // The sealing key and the Apps listing are execution-phase reads, so a plan() body cannot spell either call: the token comes first, and
+    // only a thunk holds one.
     const options = { params: { environment_name: "prod" } };
     // @ts-expect-error a request options object is not the token
-    const forged: Parameters<typeof ctx.read.secretsPublicKey.call>[0] = options;
-    expect(Object.keys(forged)).toEqual(["params"]);
+    const forgedKey: Parameters<typeof ctx.read.secretsPublicKey.call>[0] = options;
+    // @ts-expect-error nor is the envelope key
+    const forgedApps: Parameters<typeof ctx.read.listProtectionRuleApps.listAllEnveloped>[0] =
+      "available_custom_deployment_protection_rule_integrations";
+    expect([Object.keys(forgedKey), String(forgedApps)]).toEqual([
+      ["params"],
+      "available_custom_deployment_protection_rule_integrations",
+    ]);
   });
 
   test("a planned operation can only name a declared write role, and must justify itself", () => {

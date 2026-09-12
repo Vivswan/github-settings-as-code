@@ -1148,7 +1148,7 @@ describe("handler contracts", () => {
     });
     expect(Object.fromEntries(byLateReads)).toEqual({
       branches: ["appLookup", "repoLookup", "actorUser", "actorTeam"],
-      environments: ["secretsPublicKey"],
+      environments: ["secretsPublicKey", "listProtectionRuleApps"],
     });
   });
 });

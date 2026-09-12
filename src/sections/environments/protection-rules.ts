@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
 import { parseLive } from "../contract/live.js";
 import { type SectionMeta, undeclaredDrift, undeclaredNote } from "../contract/module.js";
+import type { ExecTools } from "../contract/plan.js";
 import { ENDPOINTS, type EnvironmentsRestContext } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentProtectionRuleConfig, EnvironmentConfig } from "./schema.js";
@@ -92,6 +93,7 @@ type LiveProtectionRuleApp = z.infer<typeof LiveProtectionRuleApp>;
  */
 async function listProtectionRuleApps(
   ctx: EnvironmentsRestContext,
+  exec: ExecTools,
   section: SectionMeta,
   envName: string,
 ): Promise<LiveProtectionRuleApp[]> {
@@ -100,6 +102,7 @@ async function listProtectionRuleApps(
     ENDPOINTS.listProtectionRuleApps,
     z.array(LiveProtectionRuleApp),
     await ctx.read.listProtectionRuleApps.listAllEnveloped(
+      exec,
       "available_custom_deployment_protection_rule_integrations",
       { params: { environment_name: envName } },
     ),
@@ -153,8 +156,8 @@ export async function planProtectionRules(
 
   const missing = entries.filter((rule) => !liveBySlug.has(rule.app));
   let integrationIds: Promise<Map<string, number>> | undefined;
-  const resolveMissing = (): Promise<Map<string, number>> => {
-    integrationIds ??= listProtectionRuleApps(ctx, section, envName).then(
+  const resolveMissing = (exec: ExecTools): Promise<Map<string, number>> => {
+    integrationIds ??= listProtectionRuleApps(ctx, exec, section, envName).then(
       (apps) =>
         new Map(missing.map((rule) => [rule.app, resolveIntegrationId(apps, rule.app, envName)])),
     );
@@ -164,8 +167,8 @@ export async function planProtectionRules(
     planned.ops.push({
       role: "createProtectionRule",
       params,
-      payload: async () => {
-        const integrationId = (await resolveMissing()).get(rule.app);
+      payload: async (exec) => {
+        const integrationId = (await resolveMissing(exec)).get(rule.app);
         if (integrationId === undefined) {
           throw new Error(
             `BUG: environments: the protection rule App "${rule.app}" of environment "${envName}" was planned but not resolved`,

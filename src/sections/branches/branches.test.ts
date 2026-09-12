@@ -10,6 +10,7 @@ import {
   snapshotContext,
 } from "../../../src/sections/contract/plan.js";
 import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
+import type { MustBeNever } from "../../../src/types.js";
 import { buildState, type LiveState } from "../../../test/e2e/mock/state.js";
 import type { Json } from "../../../test/e2e/mock/support.js";
 import { MockApi } from "../../../test/mock-api.js";
@@ -24,6 +25,7 @@ import {
   pathSegments,
 } from "../contract/endpoints.js";
 import { PermissionDenied } from "../contract/errors.js";
+import { type ExplicitKeys, ROUTED_KEYS, type RoutedKey } from "./graphql-rules.js";
 import {
   branchesSection,
   type ClassifiedEntry,
@@ -31,6 +33,7 @@ import {
   protectionSnapshot,
 } from "./index.js";
 import { branchesMockGraphqlHandlers, branchesMockHandlers, wildcardMatches } from "./mock.js";
+import type { BranchProtectionConfig } from "./schema.js";
 
 type Desired = Parameters<typeof branchesSection.plan>[1];
 
@@ -1345,6 +1348,16 @@ describe("branches plan contract", () => {
     expect(
       [routedBypassers, routedDeployments, literal, unprotected].map((entry) => entry.kind),
     ).toEqual(["routed", "routed", "literal", "literal"]);
+  });
+
+  test("ROUTED_KEYS covers every key the schema spells out beside the signatures toggle", () => {
+    // Compile-time only: the tripwire in graphql-rules.ts fires through this same alias, so a tuple missing a key is shown failing here, beside
+    // the complete tuple that passes.
+    type Explicit = ExplicitKeys<BranchProtectionConfig>;
+    type _Complete = MustBeNever<Exclude<Explicit, RoutedKey | "required_signatures">>;
+    // @ts-expect-error a tuple that forgot required_deployments leaves that schema key uncovered
+    type _Short = MustBeNever<Exclude<Explicit, "force_push_bypassers" | "required_signatures">>;
+    expect(ROUTED_KEYS).toEqual(["force_push_bypassers", "required_deployments"]);
   });
 });
 

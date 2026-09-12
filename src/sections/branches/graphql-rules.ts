@@ -1,6 +1,7 @@
 /** index.ts decides which entries reach this module; nothing here classifies entries. */
 
 import { subsetDiff } from "../../engine/diff.js";
+import type { MustBeNever } from "../../types.js";
 import { repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import type { ExecTools, Late, PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
@@ -37,12 +38,37 @@ export const GRAPHQL_STATUS_CHECK_TWINS = {
   contexts: "requiredStatusCheckContexts",
 } as const;
 
+/**
+ * The keys no REST protection endpoint carries: they ride the updateBranchProtectionRule mutation
+ * alone. The ONE spelling; the routed types, the guard, the drift, and the snapshot derive from it.
+ */
+export const ROUTED_KEYS = [
+  "force_push_bypassers",
+  "required_deployments",
+] as const satisfies readonly (keyof BranchProtectionConfig)[];
+
+export type RoutedKey = (typeof ROUTED_KEYS)[number];
+
+const ROUTED_KEY_SET: ReadonlySet<string> = new Set(ROUTED_KEYS);
+
+/** The keys the schema names beside the index signature (a looseObject's keyof is every string). */
+export type ExplicitKeys<T> = keyof {
+  [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K];
+};
+
+/**
+ * Every key the schema spells out is a routed key or the signatures toggle (its own REST sub-endpoint);
+ * a new explicit key fails here until it is sorted into ROUTED_KEYS or named as REST-carried.
+ */
+type _RoutedKeysCoverSchema = MustBeNever<
+  Exclude<ExplicitKeys<BranchProtectionConfig>, RoutedKey | "required_signatures">
+>;
+
 export const WILDCARD_KEYS = [
   ...Object.keys(GRAPHQL_BOOLEAN_TWINS),
   "required_status_checks",
   "required_pull_request_reviews",
-  "force_push_bypassers",
-  "required_deployments",
+  ...ROUTED_KEYS,
 ] as const;
 
 export const WILDCARD_KEY_SET: ReadonlySet<string> = new Set(WILDCARD_KEYS);
@@ -228,18 +254,12 @@ export const GRAPHQL = {
   deleteRule: DELETE_RULE,
 } as const satisfies Record<string, GraphqlOpDecl>;
 
-/** A protection declaring at least one key only the GraphQL rule mutation carries (null counts: it turns required_deployments off). */
+/** A protection declaring at least one routed key (null counts: it turns required_deployments off). */
 export type RoutedProtection = BranchProtectionConfig &
-  (
-    | { force_push_bypassers: NonNullable<BranchProtectionConfig["force_push_bypassers"]> }
-    | { required_deployments: Exclude<BranchProtectionConfig["required_deployments"], undefined> }
-  );
+  { [K in RoutedKey]: { [P in K]: Exclude<BranchProtectionConfig[P], undefined> } }[RoutedKey];
 
 /** A protection the REST PUT (plus the signatures sub-endpoint) carries whole. */
-export type RestOnlyProtection = BranchProtectionConfig & {
-  force_push_bypassers?: undefined;
-  required_deployments?: undefined;
-};
+export type RestOnlyProtection = BranchProtectionConfig & { [K in RoutedKey]?: undefined };
 
 /**
  * The guard's parameter is this union, not BranchProtectionConfig: a guard narrows its false branch
@@ -251,10 +271,7 @@ export type SplitProtection = RestOnlyProtection | RoutedProtection;
 export function hasRoutedGraphqlKeys(
   protection: SplitProtection | null,
 ): protection is RoutedProtection {
-  return (
-    protection !== null &&
-    (protection.force_push_bypassers !== undefined || protection.required_deployments !== undefined)
-  );
+  return protection !== null && ROUTED_KEYS.some((key) => protection[key] !== undefined);
 }
 
 type RuleNode = Record<string, unknown>;
@@ -388,11 +405,9 @@ export function classicViewOfRule(node: RuleNode): Record<string, unknown> {
  * list and a requirement that is on. An omitted routed key leaves the live value untouched (unlike
  * the replacing PUT, which resets an omitted control), so the file pins what is set.
  */
-export function routedKeysSnapshot(
-  node: RuleNode,
-): Pick<BranchProtectionConfig, "force_push_bypassers" | "required_deployments"> {
+export function routedKeysSnapshot(node: RuleNode): Pick<BranchProtectionConfig, RoutedKey> {
   const view = classicViewOfRule(node);
-  const out: Pick<BranchProtectionConfig, "force_push_bypassers" | "required_deployments"> = {};
+  const out: Pick<BranchProtectionConfig, RoutedKey> = {};
   const actors = view.force_push_bypassers as string[];
   if (actors.length > 0) {
     out.force_push_bypassers = actors;
@@ -429,7 +444,7 @@ export function wildcardSnapshot(node: RuleNode): BranchProtectionConfig {
 function translateWildcardProtection(protection: BranchProtectionConfig): Record<string, unknown> {
   const input: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(protection)) {
-    if (key === "force_push_bypassers" || key === "required_deployments") {
+    if (ROUTED_KEY_SET.has(key)) {
       continue;
     }
     const booleanTwin = GRAPHQL_BOOLEAN_TWINS[key as keyof typeof GRAPHQL_BOOLEAN_TWINS];
@@ -555,7 +570,7 @@ function routedKeyDrift(
   const drift: string[] = [];
   if (rules === null) {
     // An unreadable view can never read as clean, so the declared value is written regardless.
-    for (const key of ["force_push_bypassers", "required_deployments"] as const) {
+    for (const key of ROUTED_KEYS) {
       if (protection[key] !== undefined) {
         drift.push(
           `${prefix}.${key}: the live rule cannot be read (the rules query answered not found); apply will set the declared value`,
@@ -813,10 +828,7 @@ export function planRoutedUpdate(
   const { force_push_bypassers: forcePushBypassers, required_deployments: requiredDeployments } =
     protection;
   const node = graphqlRun.rules?.get(name);
-  const routedKeys = [
-    ...(forcePushBypassers === undefined ? [] : ["force_push_bypassers"]),
-    ...(requiredDeployments === undefined ? [] : ["required_deployments"]),
-  ].join(" and ");
+  const routedKeys = ROUTED_KEYS.filter((key) => protection[key] !== undefined).join(" and ");
   const routedDrift = routedKeyDrift(prefix, protection, graphqlRun.rules, name);
   if (routedDrift.length === 0 && putPlanned) {
     routedDrift.push(
@@ -902,8 +914,9 @@ export async function planWildcardEntry(
     return;
   }
   const declared: Record<string, unknown> = { ...branch.protection };
-  delete declared.force_push_bypassers;
-  delete declared.required_deployments;
+  for (const key of ROUTED_KEYS) {
+    delete declared[key];
+  }
   const drift = justified([
     ...subsetDiff(declared, classicViewOfRule(node), prefix),
     ...routedKeyDrift(prefix, branch.protection, graphqlRun.rules, pattern),
