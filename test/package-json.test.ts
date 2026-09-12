@@ -19,6 +19,9 @@ describe("package.json as the npm manifest", () => {
 
   test("publishes publicly under the scoped name as an ESM package", () => {
     expect(pkg.name).toBe("@vivswan/github-settings-as-code");
+    expect(pkg.description).toBe(
+      "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more.",
+    );
     expect(pkg.license).toBe("SEE LICENSE IN LICENSE.md");
     expect("private" in pkg).toBe(false);
     expect(pkg.publishConfig).toEqual({ access: "public" });
