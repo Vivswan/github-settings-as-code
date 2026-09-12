@@ -153,7 +153,10 @@ describe("snapshotRepository", () => {
       io,
     );
     const note =
-      'pages: GitHub answered GET /repos/{owner}/{repo}/pages with 404, read here as nothing to snapshot. A fine-grained token missing the grant gets the same answer; if the repository does have this resource, grant "Pages" (read and write) under the PAT\'s Repository permissions, then snapshot again';
+      "pages: GitHub answered GET /repos/{owner}/{repo}/pages with 404, read here as nothing to " +
+      "snapshot. A fine-grained token missing the grant gets the same answer; if the repository " +
+      'does have this resource, grant "Pages" (read and write) under the PAT\'s Repository ' +
+      "permissions, then snapshot again";
     expect(result.result).toBe("snapshot");
     // The org probe is public and DID answer 404: a 404 there has one reading, so no such note.
     const personal =

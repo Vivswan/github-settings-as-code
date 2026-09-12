@@ -238,7 +238,11 @@ export function gatedAbsentRead(section: SectionMeta): EndpointDecl | null {
  * unlike plan(), no write follows to surface a denial, so the note names both readings.
  */
 export function concealedAbsenceNote(section: SectionMeta, read: EndpointDecl): string {
-  return `${section.key}: GitHub answered GET ${endpointPath(read.route)} with 404, read here as nothing to snapshot. A fine-grained token missing the grant gets the same answer; if the repository does have this resource, ${sectionGrant(section)}, then snapshot again`;
+  return (
+    `${section.key}: GitHub answered GET ${endpointPath(read.route)} with 404, read here as ` +
+    "nothing to snapshot. A fine-grained token missing the grant gets the same answer; if the " +
+    `repository does have this resource, ${sectionGrant(section)}, then snapshot again`
+  );
 }
 
 type FlattenedOperationDictionaries = "endpoints" | "graphql";
@@ -343,8 +347,10 @@ export interface SectionSnapshot<K extends SectionKey = SectionKey> {
 /**
  * plan() only READS (through the port in PlanContext) and returns the operations that would converge the
  * repository; the engine renders them as drift in check mode and executes them in apply mode.
- * snapshot() reads through the same port, so it cannot write either; a section without one is
- * unsupported by snapshot (see snapshotUnsupportedNote). Modules register in ../registry.ts.
+ * Modules register in ../registry.ts.
+ *
+ *   snapshot() present  -> reads through the same port, so it cannot write either
+ *   snapshot() absent   -> the section is unsupported by snapshot (snapshotUnsupportedNote)
  */
 export interface SectionModule<
   K extends SectionKey = SectionKey,
@@ -357,10 +363,7 @@ export interface SectionModule<
   run?: never;
 }
 
-/**
- * Why a section without snapshot() cannot be read back: a write-only section has nothing to read
- * (derived from its operations, like writeOnlyCheckNote), any other is simply not implemented yet.
- */
+/** Write-only is derived from the operations, as writeOnlyCheckNote does, so the two notes cannot disagree. */
 export function snapshotUnsupportedNote(section: SectionMeta): string {
   if (planningReads(section).length === 0) {
     return `${section.key}: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run`;
