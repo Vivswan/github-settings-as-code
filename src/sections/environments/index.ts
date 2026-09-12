@@ -1,9 +1,12 @@
+import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
+import { parseLive } from "../contract/live.js";
 import { type DeclaredSecretValue, loosen, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, plainData } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { listSecretValues } from "../shared/secrets-engine.js";
+import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { ENDPOINTS } from "./endpoints.js";
 import { NESTED_KEYS, planNested, splitEntry, validateNested } from "./nested.js";
 import {
@@ -14,7 +17,11 @@ import {
   type PinDeclaration,
   planPinned,
 } from "./pins.js";
-import { type EnvironmentConfig, EnvironmentsConfig } from "./schema.js";
+import { EnvironmentConfig, EnvironmentsConfig } from "./schema.js";
+import { PINNED_NOTE, sharedSecretNotes, snapshotNested } from "./snapshot.js";
+
+/** One item of the environment listing: the GET body plan() probes by name, so the name is pinned. */
+const LiveEnvironment = z.looseObject({ name: z.string() });
 
 const permission: SectionPermission = { repo: ["environments"] };
 
@@ -130,6 +137,27 @@ export const environmentsSection = {
       plan.notes.push(...pinned.notes);
     }
     return plan;
+  },
+  async snapshot(ctx) {
+    const listed = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveEnvironment),
+      await ctx.read.list.listAllEnveloped("environments"),
+    );
+    if (listed.length === 0) {
+      return { value: undefined, notes: [] };
+    }
+    const notes: string[] = [];
+    const entries: EnvironmentConfig[] = [];
+    for (const live of listed) {
+      const settings = projectOntoSchema(EnvironmentConfig, flattenEnvironment(live));
+      const { nested, notes: nestedNotes } = await snapshotNested(ctx, this, live.name, live);
+      entries.push({ ...settings, ...nested });
+      notes.push(...nestedNotes);
+    }
+    notes.push(...sharedSecretNotes(entries), PINNED_NOTE);
+    return { value: entries, notes };
   },
 } satisfies SectionModule<"environments", typeof ENDPOINTS, typeof GRAPHQL_OPS>;
 

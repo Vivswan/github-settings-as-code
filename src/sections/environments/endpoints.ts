@@ -12,6 +12,11 @@ const BRANCH_POLICIES_DENIAL_HINT =
 const PROTECTION_RULES_DENIAL_HINT = "a 404 here can also mean the environment does not exist";
 
 export const ENDPOINTS = {
+  // The snapshot's entry point; plan() addresses environments by name through the probe.
+  list: {
+    route: "GET /repos/{owner}/{repo}/environments",
+    statuses: { 200: "the environment list" },
+  },
   probe: {
     route: "GET /repos/{owner}/{repo}/environments/{environment_name}",
     statuses: { 200: "the environment", 404: "no such environment yet" },
