@@ -26,7 +26,7 @@ import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { isWriteRequest } from "./mock/dispatch.js";
 import { type ServerOptions, startMockServer } from "./mock/server.js";
 import { sharedValidator } from "./openapi/validate.js";
-import { type Scenario, settingsYamlFor } from "./schema.js";
+import { type Expect, type Scenario, settingsYamlFor } from "./schema.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 /**
@@ -436,6 +436,39 @@ export function forbiddenPresent(patterns: string[], log: string[]): string[] {
 }
 
 /**
+ * The three request-log rules over the recorded requests. A write's query is never part of its identity, so
+ * `mutations` match "METHOD /path"; `never` and `requests_contain` match "METHOD /path?query", so one lookup on a path
+ * other lookups share can be forbidden or required.
+ */
+export function requestLogFailures(
+  exp: Partial<Pick<Expect, "mutations" | "never" | "requests_contain">>,
+  requests: LoggedRequest[],
+): string[] {
+  const failures: string[] = [];
+  const writes = requests.filter(isWriteRequest).map((r) => renderRequest(r, false));
+  if (exp.mutations) {
+    const want = exp.mutations.map(expandRepo);
+    if (!isSubsequence(want, writes)) {
+      failures.push(
+        `mutations not found as a subsequence:\n  want: ${want.join(", ")}\n  writes: ${writes.join(", ")}`,
+      );
+    }
+  }
+  const fullLog = requests.map((r) => renderRequest(r, true));
+  if (exp.never) {
+    for (const pattern of forbiddenPresent(exp.never.map(expandRepo), fullLog)) {
+      failures.push(`forbidden request present: ${pattern}`);
+    }
+  }
+  for (const needle of exp.requests_contain ?? []) {
+    if (!fullLog.some((entry) => entry.includes(needle))) {
+      failures.push(`no request contains: ${needle}`);
+    }
+  }
+  return failures;
+}
+
+/**
  * Run one scenario end to end and dump an artifact directory on any failure. `opts.serverOptions`
  * merges over the scenario's own base_prefix, so the fuzz CLI can inject the chaos `corrupt` directive.
  */
@@ -530,22 +563,7 @@ export async function runScenario(
         }
       }
     }
-    const writes = handle.requests.filter(isWriteRequest).map((r) => renderRequest(r, false));
-    if (exp.mutations) {
-      const want = exp.mutations.map(expandRepo);
-      if (!isSubsequence(want, writes)) {
-        failures.push(
-          `mutations not found as a subsequence:\n  want: ${want.join(", ")}\n  writes: ${writes.join(", ")}`,
-        );
-      }
-    }
-    // Matched with the query, so a pattern can forbid one lookup on a path other lookups share.
-    const fullLog = handle.requests.map((r) => renderRequest(r, true));
-    if (exp.never) {
-      for (const pattern of forbiddenPresent(exp.never.map(expandRepo), fullLog)) {
-        failures.push(`forbidden request present: ${pattern}`);
-      }
-    }
+    failures.push(...requestLogFailures(exp, handle.requests));
     for (const needle of exp.summary_contains ?? []) {
       if (!first.summary.includes(needle)) {
         failures.push(`summary missing: ${needle}`);
@@ -582,11 +600,6 @@ export async function runScenario(
       ),
     ];
     const leakNeedles = [...new Set([...secretNeedles, ...(exp.leaks_nowhere ?? [])])];
-    for (const needle of exp.requests_contain ?? []) {
-      if (!fullLog.some((entry) => entry.includes(needle))) {
-        failures.push(`no request contains: ${needle}`);
-      }
-    }
     // Private-report issue delivery: the one channel where the private slug and sentinel may
     // legitimately appear, inside the target repo's own issue.
     if (exp.issue_report) {

@@ -79,8 +79,10 @@ type ReportIssue = { number: number; url: string; labels: string[]; open: boolea
 
 /**
  * A candidate is one of the action's own reports: an issue (the list includes pull requests) with the exact title and
- * a body line starting with the report heading; the title alone matched an issue a human opened by hand. The label
- * names ride along so a fallback-scan hit can reattach the stripped marker without clobbering human-added labels.
+ * a body line starting with the report heading; the title alone matched an issue a human opened by hand. A human issue
+ * that pastes a report verbatim under that title is a candidate too, and is overwritten: the accepted trade-off for
+ * recognizing every report ever written. The label names ride along so a fallback-scan hit can reattach the stripped
+ * marker without clobbering human-added labels.
  */
 function reportCandidatesIn(items: unknown[]): ReportIssue[] {
   const candidates: ReportIssue[] = [];
