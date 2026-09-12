@@ -297,10 +297,9 @@ async function planLiteralEntry(
   // fields, so a planned PUT re-applies every declared one.
   let putPlanned = false;
   if ("missing" in probe) {
-    // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart. A denied
-    // probe is a 404 as well (fine-grained tokens conceal denied reads) with the body "Not Found",
-    // and reading that as a missing branch once skipped protecting an existing branch on every
-    // apply, so only GitHub's own body counts and a denial keeps the plain unprotected reading.
+    // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart. A denied probe
+    // is a 404 "Not Found" as well (fine-grained tokens conceal denied reads), so only GitHub's own
+    // body counts and a denial keeps the plain unprotected reading.
     const branchProbe = await ctx.read.branchProbe.tryCall({ params });
     if ("error" in branchProbe && matchesRejection(MISSING_BRANCH, branchProbe.error)) {
       // The same failure the PUT raises without the Contents grant, so the outcome does not depend on it.

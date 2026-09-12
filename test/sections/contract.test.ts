@@ -434,6 +434,14 @@ describe("throwFor context enrichment", () => {
       },
     ],
     [
+      "the declared body as a prefix of a longer one",
+      { status: 404, message: "Branch not found on fork" },
+      {
+        denied:
+          'the token was denied protecting "x" failed - PUT /repos/o/r/branches/x/protection: 404 Branch not found on fork (a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
+      },
+    ],
+    [
       "the declared body on the other denial status",
       { status: 403, message: "Branch not found" },
       {
