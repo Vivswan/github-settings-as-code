@@ -338,6 +338,16 @@ describe("runSnapshot writes through a staging file", () => {
     expect(readFileSync(join(fileA, "keep"), "utf8")).toBe("authored\n");
     expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
     expect(existsSync(`${fileB}.tmp`)).toBe(false);
+    expect(collected.summary[0]?.split("\n").slice(0, 8)).toEqual([
+      "## github-settings-as-code (snapshot, 2 repositories)",
+      "",
+      `1 of 2 snapshots written under ${cfg.snapshotDir}.`,
+      "",
+      "| Repository | Source | Result | File |",
+      "|---|---|---|---|",
+      "| o/a | remote | :x: failed | - |",
+      `| o/b | remote | :white_check_mark: snapshot | ${fileB} |`,
+    ]);
   });
 });
 
@@ -496,6 +506,41 @@ describe("runSnapshot, dir form", () => {
       "../escape": { result: "failed", source: "remote", skippedSections: [] },
       "o/a": { result: "snapshot", source: "remote", skippedSections: [] },
     });
+  });
+
+  test("a fleet whose every target fails writes nothing and the summary says so", async () => {
+    // No labels route: the read answers 404, the denial that fails the target under the fail policy.
+    const api = new MockApi({});
+    const cfg = dirCfg({ reposInput: "o/a", privateRepos: "show" });
+    const collected = collectingIo();
+    expect(await run(api, cfg, collected.io)).toBe(1);
+    expect(existsSync(cfg.snapshotDir)).toBe(false);
+    expect(collected.outputs).toEqual({
+      "skipped-sections": "",
+      result: "failed",
+      "repos-result": JSON.stringify({
+        "o/a": { result: "failed", source: "remote", skippedSections: [] },
+      }),
+    });
+    expect(collected.summary).toEqual([
+      [
+        "## github-settings-as-code (snapshot, 1 repositories)",
+        "",
+        `No snapshot was written under ${cfg.snapshotDir}.`,
+        "",
+        "| Repository | Source | Result | File |",
+        "|---|---|---|---|",
+        "| o/a | remote | :x: failed | - |",
+        "",
+        "### o/a (failed)",
+        "",
+        "the snapshot failed, so no file was written",
+        "",
+        "| Section | Status | Detail |",
+        "|---|---|---|",
+        `| labels | :x: failed | the token was denied GET /repos/o/a/labels: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Issues" (read and write) under the PAT's Repository permissions |`,
+      ].join("\n"),
+    ]);
   });
 
   test("a fleet that resolves to no targets is fatal before any file is written", async () => {

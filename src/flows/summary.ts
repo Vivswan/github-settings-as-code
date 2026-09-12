@@ -116,10 +116,15 @@ export function writeSnapshotDirSummary(
   views: readonly SnapshotTargetView[],
   snapshotDir: string,
 ): void {
+  const written = views.filter((view) => view.file !== undefined).length;
   const lines = [
     `## github-settings-as-code (snapshot, ${views.length} repositories)`,
     "",
-    `Snapshots written under ${markdownCell(snapshotDir)}.`,
+    written === 0
+      ? `No snapshot was written under ${markdownCell(snapshotDir)}.`
+      : written === views.length
+        ? `Snapshots written under ${markdownCell(snapshotDir)}.`
+        : `${written} of ${views.length} snapshots written under ${markdownCell(snapshotDir)}.`,
     "",
     "| Repository | Source | Result | File |",
     "|---|---|---|---|",
