@@ -6676,7 +6676,10 @@ interface RedactionPlan {
 export declare function planRedaction(policy: PrivateReposPolicy, orderedTargetSlugs: string[], extraPrivateSlugs: Private<string>[], isPrivateSlug: (slug: string) => boolean, selfSlug: string): RedactionPlan;
 /**
  * Lets nothing textual out: annotate/log are recorded for the private report, debug/summary/output are dropped (those
- * surfaces are written from the public view), only the mask registry passes through.
+ * surfaces are written from the public view), only the mask registry passes through. The lines are recorded UNMASKED so
+ * the report can name the private slug; a masked secret never reaches them, because a resolved plaintext is consumed
+ * only inside payload thunks and sealing, and GithubApi withholds every error body and transport message of a
+ * secret-carrying request (the e2e runner's checkReportLeaks sweeps each delivered report for the run's secrets).
  */
 export declare function capturingIo(io: Io): {
   io: Io;

@@ -148,6 +148,21 @@ export function applyFault(
     const response: MockResponse = { status, body: { message: "Server Error" } };
     return { response, log: { ...log, status }, offSpecBody: true };
   }
+  if (kind === "echo_422") {
+    // A validation rejection that quotes the whole request body back, the shape the client's withholding exists for: a
+    // secret-carrying request must surface none of it, and a scenario proves that by hunting the plaintext downstream.
+    const response: MockResponse = {
+      status: 422,
+      body: {
+        message: "Validation Failed",
+        errors: [
+          { code: "custom", message: `rejected value: ${JSON.stringify(log.body ?? null)}` },
+        ],
+        documentation_url: "https://docs.github.com/rest",
+      },
+    };
+    return { response, log: { ...log, status: 422 }, offSpecBody: true };
+  }
   // connection_drop: server.ts destroys the socket before any bytes leave, a true network failure the client's fetch rejects on.
   return {
     response: { status: 0, body: null },
