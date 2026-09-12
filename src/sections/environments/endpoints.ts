@@ -53,9 +53,12 @@ export const ENDPOINTS = {
     route: "GET /repos/{owner}/{repo}/environments/{environment_name}/secrets",
     statuses: { 200: "the environment secrets list (names and timestamps; never values)" },
   },
+  // Read inside the secret PUT's payload thunk (nested.ts): in apply the environment PUT may only just
+  // have created the environment the key belongs to, so check mode never issues it.
   secretsPublicKey: {
     route: "GET /repos/{owner}/{repo}/environments/{environment_name}/secrets/public-key",
     statuses: { 200: "the environment sealing public key" },
+    phase: "execution",
   },
   putSecret: {
     route: "PUT /repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",

@@ -24,7 +24,12 @@ import {
   pathSegments,
 } from "../contract/endpoints.js";
 import { PermissionDenied } from "../contract/errors.js";
-import { branchesSection, flattenProtection, protectionSnapshot } from "./index.js";
+import {
+  branchesSection,
+  type ClassifiedEntry,
+  flattenProtection,
+  protectionSnapshot,
+} from "./index.js";
 import { branchesMockGraphqlHandlers, branchesMockHandlers, wildcardMatches } from "./mock.js";
 
 type Desired = Parameters<typeof branchesSection.plan>[1];
@@ -1300,6 +1305,46 @@ describe("branches plan contract", () => {
     const variableless = { role: "updateRule", drift: ["x"], change: "" } as const;
     // @ts-expect-error a mutation carries its declared variables
     const _variableless: Op = variableless;
+  });
+
+  test("a classified entry carries the GraphQL run exactly when its protection needs it", () => {
+    // Compile-time only. The routed keys (force_push_bypassers, required_deployments) plan through the rule mutation, which needs the run, so no
+    // literal shape may carry one; each rejected shape has an accepted twin beside it, so the rejection is for the key and not for the rest.
+    const run = { rules: new Map(), repoId: null, actorIds: new Map(), lateActors: [] };
+    const bypassers = {
+      name: "main",
+      protection: { enforce_admins: true, force_push_bypassers: ["octocat"] },
+    };
+    const staleBypassers = { kind: "literal" as const, branch: bypassers };
+    // @ts-expect-error a literal entry's protection carries no routed key
+    const _staleBypassers: ClassifiedEntry = staleBypassers;
+    const routedBypassers: ClassifiedEntry = { kind: "routed", branch: bypassers, graphqlRun: run };
+    const deploymentsOff = { name: "main", protection: { required_deployments: null } };
+    const staleDeployments = { kind: "literal" as const, branch: deploymentsOff };
+    // @ts-expect-error null turns required_deployments off through the mutation, so it is a routed key too
+    const _staleDeployments: ClassifiedEntry = staleDeployments;
+    const routedDeployments: ClassifiedEntry = {
+      kind: "routed",
+      branch: deploymentsOff,
+      graphqlRun: run,
+    };
+    const runless = { kind: "routed" as const, branch: bypassers };
+    // @ts-expect-error a routed entry plans through the run, so it cannot exist without one
+    const _runless: ClassifiedEntry = runless;
+    const restOnly = {
+      name: "main",
+      protection: { enforce_admins: true, required_signatures: true },
+    };
+    const literal: ClassifiedEntry = { kind: "literal", branch: restOnly };
+    // @ts-expect-error a REST-only protection needs no run, so the routed kind rejects it
+    const _routedRestOnly: ClassifiedEntry = { kind: "routed", branch: restOnly, graphqlRun: run };
+    const unprotected: ClassifiedEntry = {
+      kind: "literal",
+      branch: { name: "main", protection: null },
+    };
+    expect(
+      [routedBypassers, routedDeployments, literal, unprotected].map((entry) => entry.kind),
+    ).toEqual(["routed", "routed", "literal", "literal"]);
   });
 });
 

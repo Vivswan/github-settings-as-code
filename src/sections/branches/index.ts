@@ -30,8 +30,11 @@ import {
   justified,
   planRoutedUpdate,
   planWildcardEntry,
+  type RestOnlyProtection,
+  type RoutedProtection,
   resolveActorIds,
   routedKeysSnapshot,
+  type SplitProtection,
   WILDCARD_KEY_SET,
   WILDCARD_KEYS,
   wildcardSnapshot,
@@ -137,10 +140,19 @@ const unreachableLiteralRuleNote = (pattern: string): string =>
   "name (the branch is missing, or its protection is unreadable); create the branch or fix the " +
   "grant, then snapshot again";
 
-/** Built in the ONE place that decides whether the GraphQL run state exists, so no other site re-spells the predicate. */
-type ClassifiedEntry =
+/**
+ * Built in the ONE place that decides whether the GraphQL run state exists, so no other site re-spells the predicate.
+ * The run rides exactly the entries that need it: a literal entry's protection carries no routed key, so no
+ * shape says "routed keys without the run". Exported for the compile-time controls in branches.test.ts.
+ */
+export type ClassifiedEntry =
   | { kind: "wildcard"; branch: BranchConfig; graphqlRun: GraphqlRun }
-  | { kind: "literal"; branch: BranchConfig; routed: { graphqlRun: GraphqlRun } | null };
+  | {
+      kind: "routed";
+      branch: { name: string; protection: RoutedProtection };
+      graphqlRun: GraphqlRun;
+    }
+  | { kind: "literal"; branch: { name: string; protection: RestOnlyProtection | null } };
 
 const WILDCARD_KEY_ERROR = (name: string, key: string): string =>
   `the wildcard entry "${name}" declares protection.${key}, which this section does not manage on wildcard rules; ` +
@@ -217,14 +229,22 @@ export const branchesSection = {
       (b) => b.name,
     );
     const plan: BranchesPlan = { ops: [], notes: [], drift: [] };
-    // The SAME predicate that gates the one rules read classifies the entries, so every entry that
-    // needs the run state gets it attached right here.
-    const needsGraphql = (branch: BranchConfig): boolean =>
-      isWildcardPattern(branch.name) || hasRoutedGraphqlKeys(branch.protection);
-    let entries: ClassifiedEntry[];
-    const graphqlRun: GraphqlRun | null = desired.some(needsGraphql)
-      ? { rules: await fetchRules(ctx), repoId: null, actorIds: new Map(), lateActors: [] }
-      : null;
+    // The first entry that needs the GraphQL surface starts the one rules read, ahead of every REST
+    // probe; a pure-REST declaration never starts it, so no separate predicate gates the fetch.
+    let graphqlRun: GraphqlRun | null = null;
+    const entries: ClassifiedEntry[] = [];
+    for (const branch of desired) {
+      const protection: SplitProtection | null = branch.protection;
+      if (isWildcardPattern(branch.name)) {
+        graphqlRun ??= await startGraphqlRun(ctx);
+        entries.push({ kind: "wildcard", branch, graphqlRun });
+      } else if (hasRoutedGraphqlKeys(protection)) {
+        graphqlRun ??= await startGraphqlRun(ctx);
+        entries.push({ kind: "routed", branch: { name: branch.name, protection }, graphqlRun });
+      } else {
+        entries.push({ kind: "literal", branch: { name: branch.name, protection } });
+      }
+    }
     if (graphqlRun !== null) {
       const declaredPatterns = new Set(desired.map((branch) => branch.name));
       for (const pattern of [...(graphqlRun.rules?.keys() ?? [])].sort()) {
@@ -234,24 +254,13 @@ export const branchesSection = {
           );
         }
       }
-      entries = desired.map((branch) =>
-        isWildcardPattern(branch.name)
-          ? { kind: "wildcard", branch, graphqlRun }
-          : {
-              kind: "literal",
-              branch,
-              routed: hasRoutedGraphqlKeys(branch.protection) ? { graphqlRun } : null,
-            },
-      );
-    } else {
-      entries = desired.map((branch) => ({ kind: "literal", branch, routed: null }));
     }
     for (const entry of entries) {
       if (entry.kind === "wildcard") {
         await planWildcardEntry(ctx, entry.graphqlRun, entry.branch, plan);
         continue;
       }
-      await planLiteralEntry(ctx, this, entry.routed, entry.branch, plan);
+      await planLiteralEntry(ctx, this, entry, plan);
     }
     // Every actor a planned mutation resolves at execution resolves ahead of the plan's FIRST write,
     // whichever entry it belongs to: a misspelled actor fails while every branch's live protection
@@ -340,13 +349,17 @@ export function protectionSnapshot(live: Record<string, unknown>): BranchProtect
   return out as BranchProtectionConfig;
 }
 
+async function startGraphqlRun(ctx: BranchesContext): Promise<GraphqlRun> {
+  return { rules: await fetchRules(ctx), repoId: null, actorIds: new Map(), lateActors: [] };
+}
+
 async function planLiteralEntry(
   ctx: BranchesContext,
   section: SectionMeta,
-  routed: { graphqlRun: GraphqlRun } | null,
-  branch: BranchConfig,
+  entry: Exclude<ClassifiedEntry, { kind: "wildcard" }>,
   plan: BranchesPlan,
 ): Promise<void> {
+  const { branch } = entry;
   const params = { branch: branch.name };
   const prefix = `branches[${branch.name}].protection`;
   const probe = await ctx.read.getProtection.probeAbsent({ params });
@@ -480,10 +493,10 @@ async function planLiteralEntry(
       );
     }
   }
-  if (routed !== null) {
-    planRoutedUpdate(ctx, routed.graphqlRun, plan, {
+  if (entry.kind === "routed") {
+    planRoutedUpdate(ctx, entry.graphqlRun, plan, {
       name: branch.name,
-      protection: branch.protection,
+      protection: entry.branch.protection,
       prefix,
       putPlanned,
     });

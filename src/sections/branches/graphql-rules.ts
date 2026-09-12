@@ -228,7 +228,29 @@ export const GRAPHQL = {
   deleteRule: DELETE_RULE,
 } as const satisfies Record<string, GraphqlOpDecl>;
 
-export function hasRoutedGraphqlKeys(protection: BranchProtectionConfig | null): boolean {
+/** A protection declaring at least one key only the GraphQL rule mutation carries (null counts: it turns required_deployments off). */
+export type RoutedProtection = BranchProtectionConfig &
+  (
+    | { force_push_bypassers: NonNullable<BranchProtectionConfig["force_push_bypassers"]> }
+    | { required_deployments: Exclude<BranchProtectionConfig["required_deployments"], undefined> }
+  );
+
+/** A protection the REST PUT (plus the signatures sub-endpoint) carries whole. */
+export type RestOnlyProtection = BranchProtectionConfig & {
+  force_push_bypassers?: undefined;
+  required_deployments?: undefined;
+};
+
+/**
+ * The guard's parameter is this union, not BranchProtectionConfig: a guard narrows its false branch
+ * only against a union, and BranchProtectionConfig assigns to it, so the caller binds a protection to
+ * this type once and both arms come out narrowed (index.ts classifies entries that way).
+ */
+export type SplitProtection = RestOnlyProtection | RoutedProtection;
+
+export function hasRoutedGraphqlKeys(
+  protection: SplitProtection | null,
+): protection is RoutedProtection {
   return (
     protection !== null &&
     (protection.force_push_bypassers !== undefined || protection.required_deployments !== undefined)
@@ -782,7 +804,7 @@ export function planRoutedUpdate(
   plan: BranchesPlan,
   entry: {
     name: string;
-    protection: BranchProtectionConfig;
+    protection: RoutedProtection;
     prefix: string;
     putPlanned: boolean;
   },

@@ -168,6 +168,11 @@ describe("environments plan", () => {
     ctx.read.probe.call;
     // @ts-expect-error nor a list
     ctx.read.probe.listAll;
+    // The sealing key is an execution-phase read, so a plan() body cannot spell the call: the token comes first, and only a thunk holds one.
+    const options = { params: { environment_name: "prod" } };
+    // @ts-expect-error a request options object is not the token
+    const forged: Parameters<typeof ctx.read.secretsPublicKey.call>[0] = options;
+    expect(Object.keys(forged)).toEqual(["params"]);
   });
 
   test("a planned operation can only name a declared write role, and must justify itself", () => {

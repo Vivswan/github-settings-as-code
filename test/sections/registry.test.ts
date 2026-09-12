@@ -23,6 +23,7 @@ import {
   type SectionMeta,
   type SectionModule,
   sectionGrant,
+  sectionOperations,
 } from "../../src/sections/contract/module.js";
 import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
 import type {
@@ -1134,5 +1135,20 @@ describe("handler contracts", () => {
         ),
       ).map((s) => s.key),
     );
+  });
+
+  test("the execution-phase reads are exactly the thunk-issued lookups: the branches ids and the environment sealing key", () => {
+    // Check mode never issues these (the e2e mock fails a check-mode arrival), so a read that moves in or out of this list changes what a
+    // read-only token meets in check mode.
+    const byLateReads = SECTIONS.flatMap((section) => {
+      const roles = sectionOperations(section)
+        .filter((op) => op.phase === "execution")
+        .map((op) => op.role);
+      return roles.length === 0 ? [] : [[section.key, roles] as const];
+    });
+    expect(Object.fromEntries(byLateReads)).toEqual({
+      branches: ["appLookup", "repoLookup", "actorUser", "actorTeam"],
+      environments: ["secretsPublicKey"],
+    });
   });
 });

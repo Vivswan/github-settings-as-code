@@ -29,7 +29,9 @@ coverage:
       `_undeclared: keep` form keeps them as notes); names match case-insensitively, values are plain
       text by design. A declared per-environment `secrets` key reconciles that environment's Actions
       secrets the same way the shipped secret sections do - GET .../environments/{name}/secrets
-      (names + timestamps), GET .../secrets/public-key, sealed PUT/DELETE .../secrets/{secret_name}
+      (names + timestamps), GET .../secrets/public-key (issued at apply, inside the secret PUT,
+      since that PUT may follow the environment's own creation; check mode never reads it), sealed
+      PUT/DELETE .../secrets/{secret_name}
       - one sealing scope per environment, so same-named secrets in sibling environments resolve
       independently; undeclared secrets within a declared key are KEPT by default (values
       unrecoverable; `_undeclared: delete` opts in). A declared per-environment
