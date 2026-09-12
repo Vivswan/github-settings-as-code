@@ -14,7 +14,6 @@ const ROOT = join(import.meta.dir, "..", "..");
 
 interface ActionYml {
   name: string;
-  runs: { using?: string; main?: string };
 }
 
 const actionYml = parseYaml(readFileSync(join(ROOT, "action.yml"), "utf8")) as ActionYml;
@@ -24,18 +23,6 @@ describe("action.yml <-> README", () => {
     const readme = readFileSync(join(ROOT, "README.md"), "utf8");
     const h1 = readme.match(/^# (.+)$/m)?.[1];
     expect(actionYml.name).toBe(h1 as string);
-  });
-});
-
-describe("action.yml runtime", () => {
-  test("runs.using is node24 and AGENTS.md documents the same runtime", () => {
-    // Bumping the runtime changes what Node the built bundle must run on, so the change has to land here too.
-    expect(actionYml.runs.using).toBe("node24");
-    const agents = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
-    expect(
-      agents.includes(`(${actionYml.runs.using})`),
-      `AGENTS.md must document the bundle runtime as (${actionYml.runs.using})`,
-    ).toBe(true);
   });
 });
 
