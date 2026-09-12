@@ -128,7 +128,9 @@ export function plainData(value: unknown): PlainData {
 
 /**
  * The plaintext behind a `$NAME` reference is resolved and masked up front, so check mode never sees one.
- * Only a thunk holds this token, which the port's execution-phase reads demand.
+ * Only a thunk holds this token, which the port's execution-phase reads demand. A resolve marks the
+ * operation's request as secret-carrying (engine/execute.ts), so a plaintext is used inside the operation
+ * that resolved it, never stashed for another.
  */
 export interface ExecTools {
   resolveSecret(reference: string): string;
@@ -167,14 +169,20 @@ type GraphqlWriteRole<G extends GraphqlDict> = Exclude<keyof G & string, Graphql
 
 /** The request helpers (./requests.ts) bound to ONE read endpoint, minus the declaration argument and any payload. */
 interface BoundRead<E extends EndpointDecl> {
+  // `payload?: never` on both, as on the helpers they forward to: a read never carries a body, and a body that did
+  // reach the wire this way would be unmarked (requests.ts).
   call(
-    ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; describe?: string }>
+    ...args: OptsArg<
+      E,
+      { query?: Readonly<Record<string, string>>; payload?: never; describe?: string }
+    >
   ): Promise<unknown>;
   tryCall(
     ...args: OptsArg<
       E,
       {
         query?: Readonly<Record<string, string>>;
+        payload?: never;
         tolerate?: readonly DeclaredErrorStatus<E>[];
         describe?: string;
       }

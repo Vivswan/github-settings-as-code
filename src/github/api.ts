@@ -60,6 +60,16 @@ export interface GraphqlOp {
   readonly query: string;
 }
 
+/**
+ * `carriesSecret` marks a request whose payload or variables hold a resolved secret. The engine sets it from the act of
+ * resolving (engine/execute.ts) and withholds the request's error on its own side of this port whatever the client
+ * answers (sections/contract/requests.ts), so a caller-supplied client cannot leak an echoed value into an outcome or
+ * a report; GithubApi honors the mark too, beside its field-name scan, for its direct callers.
+ */
+export interface RequestMark {
+  carriesSecret?: boolean;
+}
+
 export interface GithubClient {
   /**
    * `redactTrace` holds the request's `/repos/<owner>/<repo>` slug redacted for the request's duration, for the
@@ -69,7 +79,7 @@ export interface GithubClient {
     method: string,
     path: string,
     payload?: unknown,
-    options?: { accept?: string; raw?: boolean; redactTrace?: boolean },
+    options?: RequestMark & { accept?: string; raw?: boolean; redactTrace?: boolean },
   ): Promise<{ data: unknown } | { error: ApiError }>;
   /**
    * Failures, including the errors[] GitHub delivers inside an HTTP 200, come back as the same ApiError the REST
@@ -80,6 +90,7 @@ export interface GithubClient {
     op: GraphqlOp,
     variables: Readonly<Record<string, unknown>>,
     slug: string,
+    options?: RequestMark,
   ): Promise<{ data: Record<string, unknown> } | { error: ApiError }>;
 }
 
@@ -341,23 +352,28 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
 }
 
 /**
- * `withholdReason`, when given, REPLACES the transport error's own message: some transport failures quote request
- * details in free text, where neither a field name nor the output mask finds a secret or a redacted slug.
+ * `reason` is the transport error's own message, or a withholding constant REPLACING it: some transport failures quote
+ * request details in free text, where neither a field name nor the output mask finds a secret or a redacted slug. The
+ * one renderer behind GithubApi's transport failures and the contract layer's (sections/contract/requests.ts).
  */
-function transportFailure(
-  label: string,
-  error: unknown,
-  withholdReason: string | undefined,
-  baseUrl: string,
-): Error {
-  const reason = withholdReason ?? (error instanceof Error ? error.message : String(error));
+export function transportFailure(label: string, reason: string, target: string): Error {
   return new Error(
-    `${label} failed: ${reason}. Check network connectivity from the runner to ${baseUrl}, then re-run the workflow`,
+    `${label} failed: ${reason}. Check network connectivity from the runner to ${target}, then re-run the workflow`,
   );
 }
 
-const SECRET_TRANSPORT_WITHHELD =
+function transportReason(error: unknown, withholdReason: string | undefined): string {
+  return withholdReason ?? (error instanceof Error ? error.message : String(error));
+}
+
+export const SECRET_TRANSPORT_WITHHELD =
   "the transport failed before an HTTP response arrived (details withheld: the request carried a secret field)";
+
+/**
+ * A marked payload is traced as this token, never field by field: the mark says a resolved secret is somewhere in it
+ * under a name the field scan may not know, and a JSON-escaped value slips the runner's exact-literal mask.
+ */
+const MARKED_PAYLOAD_TRACE = "<withheld: the request carried a resolved secret>";
 
 const REDACTED_TRANSPORT_WITHHELD =
   "the transport failed before an HTTP response arrived (details withheld: the repository is redacted)";
@@ -429,7 +445,7 @@ export class GithubApi implements GithubClient {
     method: string,
     path: string,
     payload?: unknown,
-    options?: { accept?: string; raw?: boolean; redactTrace?: boolean },
+    options?: RequestMark & { accept?: string; raw?: boolean; redactTrace?: boolean },
   ): Promise<{ data: unknown } | { error: ApiError }> {
     if (!options?.redactTrace) {
       return this.request(method, path, payload, options);
@@ -450,7 +466,7 @@ export class GithubApi implements GithubClient {
     method: string,
     path: string,
     payload: unknown,
-    options: { accept?: string; raw?: boolean } | undefined,
+    options: (RequestMark & { accept?: string; raw?: boolean }) | undefined,
   ): Promise<{ data: unknown } | { error: ApiError }> {
     const started = Date.now();
     // One serialization, one truth: the scan normalizes the payload and the request sends that SAME tree. A payload that
@@ -465,13 +481,18 @@ export class GithubApi implements GithubClient {
         `${method} ${path} was not sent: ${reason}, so it could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
       );
     }
+    // Either signal withholds: the caller's mark knows the value's origin, the scan knows the wire's field names.
+    const marked = options?.carriesSecret === true;
+    const carriesSecret = marked || secretScan.carriesSecret;
     const trace = (status: number): void => {
       const safe = this.trace.path(path);
       this.trace.debug(
         `${method} ${safe.path} -> ${status} (${Date.now() - started}ms)` +
           (safe.redacted || payload === undefined
             ? ""
-            : ` payload: ${JSON.stringify(secretScan.traced)}`),
+            : marked
+              ? ` payload: ${MARKED_PAYLOAD_TRACE}`
+              : ` payload: ${JSON.stringify(secretScan.traced)}`),
       );
     };
     try {
@@ -497,12 +518,11 @@ export class GithubApi implements GithubClient {
       if (isHttpError(error)) {
         trace(error.status);
         // Fail closed for a secret-carrying request: an error body may echo the rejected value.
-        return { error: apiErrorFromHttp(error, secretScan.carriesSecret) };
+        return { error: apiErrorFromHttp(error, carriesSecret) };
       }
       throw transportFailure(
         `${method} ${path}`,
-        error,
-        secretScan.carriesSecret ? SECRET_TRANSPORT_WITHHELD : undefined,
+        transportReason(error, carriesSecret ? SECRET_TRANSPORT_WITHHELD : undefined),
         this.baseUrl,
       );
     }
@@ -518,6 +538,7 @@ export class GithubApi implements GithubClient {
     op: GraphqlOp,
     variables: Readonly<Record<string, unknown>>,
     slug: string,
+    options?: RequestMark,
   ): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
     const started = Date.now();
     // The same one-serialization contract as tryRequest, so a future secret-bearing variable is masked and withheld like a REST payload field.
@@ -530,22 +551,25 @@ export class GithubApi implements GithubClient {
         `GRAPHQL ${op.name} was not sent: ${reason}, so they could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
       );
     }
+    const marked = options?.carriesSecret === true;
+    const carriesSecret = marked || scan.carriesSecret;
     // Read live at every emission, never snapshotted at request start: a mask registered mid-flight must redact what follows.
     const redacted = (): boolean => this.trace.isRedacted(slug);
     // The operation addresses its repository in the BODY, which the path redactor never sees: a redacted slug collapses
     // the ENTIRE line, since the variables carry the repository's live state.
+    const tracedVariables = marked ? MARKED_PAYLOAD_TRACE : JSON.stringify(scan.traced);
     const trace = (status: number, suffix = ""): void => {
       this.trace.debug(
         redacted()
           ? "<redacted>"
           : this.trace.message(
-              `GRAPHQL ${op.name} -> ${status} (${Date.now() - started}ms) variables: ${JSON.stringify(scan.traced)}${suffix}`,
+              `GRAPHQL ${op.name} -> ${status} (${Date.now() - started}ms) variables: ${tracedVariables}${suffix}`,
             ),
       );
     };
     // A redacted repository's GraphQL error is rebuilt from the allowlist: its messages quote the slug and live state
     // verbatim, which the exact-literal output mask cannot catch.
-    const withholdContent = (): boolean => scan.carriesSecret || redacted();
+    const withholdContent = (): boolean => carriesSecret || redacted();
     const forRedacted = (error: ApiError): ApiError =>
       redacted() ? withheld(error, REDACTED_RESPONSE_WITHHELD) : error;
     let response: { status: number; data: unknown };
@@ -580,12 +604,14 @@ export class GithubApi implements GithubClient {
       }
       throw transportFailure(
         `GRAPHQL ${op.name}`,
-        error,
-        scan.carriesSecret
-          ? SECRET_TRANSPORT_WITHHELD
-          : redacted()
-            ? REDACTED_TRANSPORT_WITHHELD
-            : undefined,
+        transportReason(
+          error,
+          carriesSecret
+            ? SECRET_TRANSPORT_WITHHELD
+            : redacted()
+              ? REDACTED_TRANSPORT_WITHHELD
+              : undefined,
+        ),
         this.baseUrl,
       );
     }
@@ -599,7 +625,7 @@ export class GithubApi implements GithubClient {
       response.status,
       Array.isArray(warnings) && warnings.length > 0
         ? // Warning entries are free text that can echo input values like error messages, so a secret-carrying request keeps only the count.
-          scan.carriesSecret
+          carriesSecret
           ? ` warnings: ${warnings.length} (details withheld: the request carried a secret field)`
           : ` warnings: ${JSON.stringify(warnings)}`
         : "",

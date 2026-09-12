@@ -1,4 +1,12 @@
-import { type ApiError, isRateLimitError } from "../../github/api.js";
+import {
+  type ApiError,
+  isRateLimitError,
+  type RequestMark,
+  SECRET_RESPONSE_WITHHELD,
+  SECRET_TRANSPORT_WITHHELD,
+  transportFailure,
+  withheld,
+} from "../../github/api.js";
 import { paginate } from "../../github/paginate.js";
 import {
   type DeclaredErrorStatus,
@@ -28,8 +36,43 @@ export type OptsArg<E extends EndpointDecl, Extra> = [PathParams<E["route"]>] ex
   : [opts: { params: Readonly<Record<PathParams<E["route"]>, string>> } & Extra];
 
 /**
- * Permission failures become PermissionDenied (the orchestrator's partial-success policy handles them);
- * everything else is a hard error carrying the API's message (withheld for a secret-bearing request, see github/api.ts).
+ * A request the executor marked as carrying a resolved secret has its failure rebuilt HERE, on the engine's side of
+ * the client port, so the guarantee holds for a library caller's own GithubClient: such a client's 422 body echoing a
+ * webhook secret would otherwise render through throwFor into outcomes[].detail and a delivered report. A throw is
+ * replaced too, since a transport error is free text that can quote the request body.
+ *
+ * The rate-limit classification is read from the message BEFORE the rebuild drops it: the port carries no headers,
+ * so a client may signal a limit only that way, and a limit misread as a denial is a silently skipped section under
+ * on-missing-permission: warn, where a denial misread as a limit still fails the run loudly.
+ */
+async function issue<D>(
+  label: string,
+  carriesSecret: boolean,
+  send: (mark: RequestMark | undefined) => Promise<{ data: D } | { error: ApiError }>,
+): Promise<{ data: D } | { error: ApiError }> {
+  if (!carriesSecret) {
+    return send(undefined);
+  }
+  let result: { data: D } | { error: ApiError };
+  try {
+    result = await send({ carriesSecret: true });
+  } catch {
+    throw transportFailure(label, SECRET_TRANSPORT_WITHHELD, "the GitHub API");
+  }
+  if (!("error" in result)) {
+    return result;
+  }
+  const classified = isRateLimitError(result.error)
+    ? { ...result.error, rateLimited: true as const }
+    : result.error;
+  return { error: withheld(classified, SECRET_RESPONSE_WITHHELD) };
+}
+
+/**
+ * Permission failures become PermissionDenied (the orchestrator's partial-success policy handles them); everything
+ * else is a hard error carrying the API's message. `payload?: never` (here and on tryCall) is what makes a payload
+ * reach the wire only through the erased executor cores, whose `carriesSecret` is required: an optional-absent key
+ * alone would still admit a widened variable, which excess-property checks do not see.
  */
 export async function call<E extends EndpointDecl>(
   ctx: SectionContext,
@@ -37,10 +80,10 @@ export async function call<E extends EndpointDecl>(
   endpoint: E,
   ...args: OptsArg<
     E,
-    { query?: Readonly<Record<string, string>>; payload?: unknown; describe?: string }
+    { query?: Readonly<Record<string, string>>; payload?: never; describe?: string }
   >
 ): Promise<unknown> {
-  return callDeclared(ctx, section, endpoint, args[0] ?? {});
+  return callDeclared(ctx, section, endpoint, { ...args[0], carriesSecret: false });
 }
 
 /**
@@ -55,12 +98,15 @@ export async function callDeclared(
     params?: Readonly<Record<string, string>>;
     query?: Readonly<Record<string, string>>;
     payload?: unknown;
+    carriesSecret: boolean;
     describe?: string;
   },
 ): Promise<unknown> {
   const method = endpointMethod(endpoint.route);
   const path = expand(endpoint, ctx, opts.params, opts.query);
-  const result = await ctx.api.tryRequest(method, path, opts.payload);
+  const result = await issue(`${method} ${path}`, opts.carriesSecret, (mark) =>
+    ctx.api.tryRequest(method, path, opts.payload, mark),
+  );
   if ("error" in result) {
     throwFor(section, method, path, result.error, {
       operation: opts.describe,
@@ -79,7 +125,7 @@ export async function tryCall<E extends EndpointDecl>(
     E,
     {
       query?: Readonly<Record<string, string>>;
-      payload?: unknown;
+      payload?: never;
       tolerate?: readonly DeclaredErrorStatus<E>[];
       describe?: string;
     }
@@ -88,6 +134,7 @@ export async function tryCall<E extends EndpointDecl>(
   const opts = args[0];
   return tryCallDeclared(ctx, section, endpoint, {
     ...opts,
+    carriesSecret: false,
     tolerated: declaredTolerance(endpoint, opts?.tolerate),
   });
 }
@@ -126,13 +173,16 @@ export async function tryCallDeclared(
     params?: Readonly<Record<string, string>>;
     query?: Readonly<Record<string, string>>;
     payload?: unknown;
+    carriesSecret: boolean;
     tolerated: (status: number) => boolean;
     describe?: string;
   },
 ): Promise<{ data: unknown } | { error: ApiError }> {
   const method = endpointMethod(endpoint.route);
   const path = expand(endpoint, ctx, opts.params, opts.query);
-  const result = await ctx.api.tryRequest(method, path, opts.payload);
+  const result = await issue(`${method} ${path}`, opts.carriesSecret, (mark) =>
+    ctx.api.tryRequest(method, path, opts.payload, mark),
+  );
   if (
     "error" in result &&
     (isRateLimitError(result.error) || !opts.tolerated(result.error.status))
@@ -248,9 +298,11 @@ export async function callGraphql<O extends GraphqlOpDecl>(
   section: SectionMeta,
   op: O,
   variables: Readonly<GraphqlVariablesOf<O>>,
-  opts?: { describe?: string },
+  opts?: { describe?: string; carriesSecret?: boolean },
 ): Promise<Record<string, unknown>> {
-  const result = await ctx.api.tryGraphql(op, variables, ctx.repo.slug);
+  const result = await issue(`GRAPHQL ${op.name}`, opts?.carriesSecret === true, (mark) =>
+    ctx.api.tryGraphql(op, variables, ctx.repo.slug, mark),
+  );
   if ("error" in result) {
     throwFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op });
   }

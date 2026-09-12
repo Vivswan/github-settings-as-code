@@ -831,6 +831,55 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     );
   });
 
+  test("the caller's mark withholds a payload the field-name scan cannot name; unmarked, the same request reads", async () => {
+    // `token` is no scanned field name, so the mark alone decides: the engine sets it from the act of resolving a secret.
+    const echo = () =>
+      new Response(JSON.stringify({ message: `rejected token ${hostileSecret}` }), {
+        status: 422,
+        headers: { "content-type": "application/json" },
+      });
+    const path = "/repos/hookco/hookrepo/hooks";
+    stubFetch([echo]);
+    const dbg = traceIo();
+    const marked = await api(dbg.io).tryRequest(
+      "POST",
+      path,
+      { token: hostileSecret },
+      { carriesSecret: true },
+    );
+    expect(marked).toEqual({
+      error: { status: 422, message: SECRET_RESPONSE_WITHHELD, body: SECRET_RESPONSE_WITHHELD },
+    });
+    // The trace too: the scan cannot mask a field it does not name, so the whole payload is withheld from the line.
+    // The request-log plugin's own "- 422 with id" line shares the prefix; only the arrow line carries the payload.
+    expect(dbg.lines.filter((line) => line.includes(" -> "))).toEqual([
+      expect.stringMatching(
+        /^POST \/repos\/hookco\/hookrepo\/hooks -> 422 \(\d+ms\) payload: <withheld: the request carried a resolved secret>$/,
+      ),
+    ]);
+    expect(dbg.lines.join("\n")).not.toContain("he said");
+    stubFetch([echo]);
+    const plain = traceIo();
+    const unmarked = await api(plain.io).tryRequest("POST", path, { token: hostileSecret });
+    expect("error" in unmarked && unmarked.error.message).toBe(`rejected token ${hostileSecret}`);
+    expect(plain.lines.join("\n")).toContain('"token":"he said');
+
+    globalThis.fetch = (async () => {
+      throw new Error(`request failed, body was: {"token":"${hostileSecret}"}`);
+    }) as unknown as typeof fetch;
+    const thrown = await api()
+      .tryRequest("POST", path, { token: hostileSecret }, { carriesSecret: true })
+      .then(
+        () => {
+          throw new Error("expected a thrown transport error");
+        },
+        (error: unknown) => String(error),
+      );
+    expect(thrown).toBe(
+      `Error: POST ${path} failed: the transport failed before an HTTP response arrived (details withheld: the request carried a secret field). Check network connectivity from the runner to https://api.test, then re-run the workflow`,
+    );
+  });
+
   test("a secret-carrying 403 rate limit still classifies as a rate limit", async () => {
     // The wholesale replacement destroys the message isRateLimitError reads, so the content-free flag must carry the classification;
     // apiErrorFromHttp classifies on the original body before replacing it.

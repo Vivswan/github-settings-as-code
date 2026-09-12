@@ -1,8 +1,12 @@
-import type { ApiError, GithubClient, GraphqlOp } from "../src/github/api.js";
+import type { ApiError, GithubClient, GraphqlOp, RequestMark } from "../src/github/api.js";
 
 export type Route = { data?: unknown; error?: ApiError };
 
 export type MockApiOptions = { unroutedMutations?: "throw" | "succeed" };
+
+function markOf(options: RequestMark | undefined): { carriesSecret?: true } {
+  return options?.carriesSecret === true ? { carriesSecret: true } : {};
+}
 
 /**
  * Duck-typed GithubClient over a route table. GraphQL operations route under `GRAPHQL <opName>` and record their declared kind, since every GraphQL
@@ -13,6 +17,8 @@ export class MockApi implements GithubClient {
     method: string;
     path: string;
     payload?: unknown;
+    /** Present exactly when the request arrived marked as carrying a resolved secret. */
+    carriesSecret?: true;
     graphqlKind?: "read" | "write";
   }> = [];
   private routes: Record<string, Route>;
@@ -53,9 +59,9 @@ export class MockApi implements GithubClient {
     method: string,
     path: string,
     payload?: unknown,
-    _options?: { accept?: string; raw?: boolean },
+    options?: RequestMark & { accept?: string; raw?: boolean },
   ): Promise<{ data: unknown } | { error: ApiError }> {
-    this.calls.push({ method, path, payload });
+    this.calls.push({ method, path, payload, ...markOf(options) });
     const route = this.lookup(method, path);
     if (!route) {
       if (method === "GET") {
@@ -78,8 +84,15 @@ export class MockApi implements GithubClient {
     op: GraphqlOp,
     variables: Readonly<Record<string, unknown>>,
     _slug: string,
+    options?: RequestMark,
   ): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
-    this.calls.push({ method: "GRAPHQL", path: op.name, payload: variables, graphqlKind: op.kind });
+    this.calls.push({
+      method: "GRAPHQL",
+      path: op.name,
+      payload: variables,
+      ...markOf(options),
+      graphqlKind: op.kind,
+    });
     const route = this.routes[`GRAPHQL ${op.name}`];
     if (!route) {
       if (op.kind === "read") {
