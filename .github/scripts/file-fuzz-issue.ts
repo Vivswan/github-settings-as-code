@@ -7,7 +7,7 @@
 
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { replayBlockLines, replayFromReport } from "../../test/e2e/replay-block.js";
+import { liftReplay, replayBlockLines } from "../../test/e2e/replay-block.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const ARTIFACTS = join(ROOT, "test", "e2e", ".artifacts");
@@ -126,17 +126,16 @@ export function buildBody(dirs: string[], env: NodeJS.ProcessEnv): string {
   let shown = 0;
   for (const dir of dirs) {
     const scenario = readIfPresent(dir, "scenario.yml");
-    const report = readIfPresent(dir, "report.md");
-    const name = report.split("\n")[0]?.replace(/^#\s*/, "").trim() || "scenario";
-    // A fuzz artifact's report already carries the replay its run wrote; a corpus artifact carries none.
-    const replay =
-      replayFromReport(report) === undefined
-        ? replayBlockLines(`bun test/e2e/run.ts --scenario ${name}`)
-        : [];
+    const raw = readIfPresent(dir, "report.md");
+    const name = raw.split("\n")[0]?.replace(/^#\s*/, "").trim() || "scenario";
+    // A fuzz artifact's report carries the replay its run wrote; a corpus artifact carries none.
+    const lifted = liftReplay(raw);
+    const replay = lifted?.replay ?? `bun test/e2e/run.ts --scenario ${name}`;
+    const report = lifted?.rest ?? raw;
     const block = capChars(
       [
         `## ${name}`,
-        ...replay,
+        ...replayBlockLines(replay),
         "",
         ...(report ? [head(report, REPORT_LINES), ""] : []),
         ...(scenario

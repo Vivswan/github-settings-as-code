@@ -108,17 +108,16 @@ describe("buildBody", () => {
   test("every fuzz family replays with the command its run wrote, never one derived from the name", () => {
     const seed = 314159;
     const master = 271828;
-    const minted = [
-      genScenario(new Rng(seed)).scenario.name,
-      genMultiScenario(new Rng(seed)).scenario.name,
-      genDiscoveryScenario(new Rng(seed)).scenario.name,
-      genMergeScenario(new Rng(seed)).scenario.name,
+    const iteration = (name: string, sections?: string): [string, string] => [
+      name,
+      `bun test/e2e/fuzz.ts --seed ${seed} --iterations 1${sections ? ` --sections ${sections}` : ""}`,
     ];
+    // Only the standard and merge modes draw from --sections, so only their replays carry it (fuzz.ts main()).
     const cases: Array<[name: string, replay: string]> = [
-      ...minted.map((name, i): [string, string] => [
-        name,
-        `bun test/e2e/fuzz.ts --seed ${seed} --iterations 1 --sections ${["labels", "actions", "rulesets", "pages"][i]}`,
-      ]),
+      iteration(genScenario(new Rng(seed)).scenario.name, "labels,actions"),
+      iteration(genMultiScenario(new Rng(seed)).scenario.name),
+      iteration(genDiscoveryScenario(new Rng(seed)).scenario.name),
+      iteration(genMergeScenario(new Rng(seed)).scenario.name, "rulesets"),
       // A battery entry replays the whole battery under the master seed; the seed in its name is never a replay.
       [
         `fuzz-witness-labels-drift-apply-${seed}`,
@@ -142,6 +141,67 @@ describe("buildBody", () => {
       }
     } finally {
       rmSync(familyRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("a replay block past the report head window still lands, once, right under the title", () => {
+    const deepRoot = mkdtempSync(join(tmpdir(), "deep-"));
+    try {
+      const dir = join(deepRoot, "fuzz-chaos-single-7-0");
+      mkdirSync(dir, { recursive: true });
+      const failures = Array.from({ length: 70 }, (_, i) => `- failure ${i}`);
+      const report = [
+        "# fuzz-chaos-single-7",
+        "",
+        "## Failures",
+        "",
+        ...failures,
+        "",
+        "## Replay",
+        "",
+        "```sh",
+        "bun test/e2e/fuzz.ts --seed 7 --iterations 1",
+        "```",
+        "",
+        "Exit code: 1",
+        "",
+      ];
+      writeFileSync(join(dir, "report.md"), report.join("\n"));
+      const body = buildBody(failureDirs(deepRoot), env);
+      const lines = body.split("\n");
+      const title = lines.indexOf("## fuzz-chaos-single-7");
+      expect(lines.slice(title, title + 8)).toEqual([
+        "## fuzz-chaos-single-7",
+        "",
+        "## Replay",
+        "",
+        "```sh",
+        "bun test/e2e/fuzz.ts --seed 7 --iterations 1",
+        "```",
+        "",
+      ]);
+      expect(body.split("## Replay")).toHaveLength(2);
+      expect(body).toContain("- failure 0");
+      expect(body).not.toContain("Exit code: 1");
+    } finally {
+      rmSync(deepRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("a replay heading with no one-command sh block under it fails the filing loudly", () => {
+    const badRoot = mkdtempSync(join(tmpdir(), "bad-"));
+    try {
+      const dir = join(badRoot, "fuzz-9-0");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "report.md"),
+        "# fuzz-9\n\n## Replay\n\n```bash\nbun test/e2e/fuzz.ts --seed 9\n```\n",
+      );
+      expect(() => buildBody(failureDirs(badRoot), env)).toThrow(
+        /"## Replay" heading but no ```sh block/,
+      );
+    } finally {
+      rmSync(badRoot, { recursive: true, force: true });
     }
   });
 
