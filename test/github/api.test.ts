@@ -653,9 +653,9 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   // The fixed tail of every unsent-payload abort, after the scan's reason clause.
   const NOT_SENT_TAIL =
     ", so it could not be safely inspected for secret fields. Replace that value with a plain string in the settings file";
-  // The reason when the scan has no typed rejection to name a field with: a hostile proxy, a bare bigint, a cycle.
+  // The reason when the scan has no typed rejection to name a field with: a hostile proxy, a bare bigint.
   const NOT_PLAIN_FALLBACK =
-    "its payload is not plain JSON data (a cyclic value, or a value carrying a function or exotic prototype)";
+    "its payload is not plain JSON data (a value carrying a function or exotic prototype)";
 
   test("config.secret is masked in the trace; the outgoing request is untouched", async () => {
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
@@ -1203,22 +1203,43 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(dbg.lines.join("")).not.toContain("he said");
   });
 
-  test("a cyclic payload aborts, never a stack overflow or a raw trace", async () => {
+  test("a cyclic payload aborts at the cycle's field, never a stack overflow or a raw trace", async () => {
+    // A YAML alias to an ancestor (config: &c { self: *c }) reaches the scan as a cycle.
     const cyclic: Record<string, unknown> = { url: "https://example.test", secret: hostileSecret };
     cyclic.self = cyclic;
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
     const dbg = traceIo();
+    // One descriptor read per container visited: the root, then the cycle is refused before its descriptors are read.
+    const visits = spyOn(Object, "getOwnPropertyDescriptors");
     let thrown: Error | undefined;
+    let visited: number;
     try {
       await api(dbg.io).tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", cyclic);
     } catch (error) {
       thrown = error as Error;
+    } finally {
+      visited = visits.mock.calls.length; // mockRestore clears the record
+      visits.mockRestore();
     }
     expect(thrown?.message).toBe(
-      `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: ${NOT_PLAIN_FALLBACK}${NOT_SENT_TAIL}`,
+      `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: the value at "self" is not plain JSON data (a reference back to one of its own containers)${NOT_SENT_TAIL}`,
     );
+    expect(visited).toBe(1);
     expect(sent.bodies).toHaveLength(0);
     expect(dbg.lines.join("")).not.toContain("he said");
+  });
+
+  test("a shared sibling alias is not a cycle: copied twice, scanned, sent", async () => {
+    const shared = { note: "same object under two keys" };
+    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+    const result = await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", {
+      a: shared,
+      b: [shared],
+    });
+    expect("data" in result).toBe(true);
+    expect(sent.bodies).toEqual([
+      '{"a":{"note":"same object under two keys"},"b":[{"note":"same object under two keys"}]}',
+    ]);
   });
 
   test("field-name matching is case-insensitive", async () => {
