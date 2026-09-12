@@ -13,6 +13,8 @@ const LIST = "GET /repos/o/r/collaborators?affiliation=direct&per_page=100&page=
 const INVITATIONS = "GET /repos/o/r/invitations?per_page=100&page=1";
 const plan = (api: MockApi, desired: Parameters<typeof collaboratorsSection.plan>[1]) =>
   collaboratorsSection.plan(planContext(collaboratorsSection, api, REPO), desired);
+const snapshot = (api: MockApi) =>
+  collaboratorsSection.snapshot(planContext(collaboratorsSection, api, REPO));
 const NO_SECRETS = {
   resolveSecret: (): string => {
     throw new Error("no secrets");
@@ -325,5 +327,89 @@ describe("collaborators", () => {
     // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
     ctx.read.list.probeAbsent;
     expect(typeof ctx.read.listInvitations.listAll).toBe("function");
+  });
+
+  describe("snapshot", () => {
+    test("reads collaborators then pending invitations back under the delete default; the owner, an expired invitation, and an email invitation are noted, not declared", async () => {
+      const api = new MockApi({
+        [LIST]: {
+          data: [
+            { login: "O", role_name: "admin" },
+            { login: "alice", role_name: "write" },
+            { login: "bob", role_name: "read" },
+            { login: "carol", role_name: "security-team" },
+          ],
+        },
+        [INVITATIONS]: {
+          data: [
+            { id: 7, invitee: { login: "dave" }, permissions: "write", expired: false },
+            { id: 8, invitee: { login: "erin" }, permissions: "read", expired: true },
+            { id: 9, invitee: null, permissions: "read", expired: false },
+          ],
+        },
+      });
+      expect(await snapshot(api)).toEqual({
+        value: {
+          _undeclared: "delete",
+          entries: [
+            { username: "alice", permission: "push" },
+            { username: "bob", permission: "pull" },
+            { username: "carol", permission: "security-team" },
+            { username: "dave", permission: "push" },
+          ],
+        },
+        notes: [
+          "collaborators[O]: the repository owner's access is implicit and never managed, so it is not declared",
+          "collaborators[erin]: the pending invitation has expired, so it is not declared; apply cancels it - add the entry to re-invite them",
+          "invitation 9 was sent by email, so no username can declare it; not declared, and apply leaves it untouched",
+        ],
+      });
+      expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST, INVITATIONS]);
+    });
+
+    test("only the owner, an expired invitation, and an email invitation snapshot as nothing to declare; the expired note says apply leaves it", async () => {
+      const api = new MockApi({
+        [LIST]: { data: [{ login: "o", role_name: "admin" }] },
+        [INVITATIONS]: {
+          data: [
+            { id: 8, invitee: { login: "erin" }, permissions: "read", expired: true },
+            { id: 9, invitee: null, permissions: "read", expired: false },
+          ],
+        },
+      });
+      expect(await snapshot(api)).toEqual({
+        value: undefined,
+        notes: [
+          "collaborators[o]: the repository owner's access is implicit and never managed, so it is not declared",
+          "collaborators[erin]: the pending invitation has expired, so it is not declared; nothing else is declared, so the section is omitted and apply leaves it - declare the entry to re-invite them",
+          "invitation 9 was sent by email, so no username can declare it; not declared, and apply leaves it untouched",
+        ],
+      });
+    });
+
+    test("a collaborator or invitation without a role, or with a role no declaration plans as, fails loudly instead of declaring a guess", async () => {
+      const roleless = new MockApi({
+        [LIST]: { data: [{ login: "alice" }] },
+        [INVITATIONS]: { data: [] },
+      });
+      await expect(snapshot(roleless)).rejects.toThrow(
+        "collaborators[alice]: GitHub reported no role_name for this collaborator, so their permission cannot be read back",
+      );
+      const blankInvitation = new MockApi({
+        [LIST]: { data: [] },
+        [INVITATIONS]: { data: [{ id: 7, invitee: { login: "dave" }, expired: false }] },
+      });
+      await expect(snapshot(blankInvitation)).rejects.toThrow(
+        "collaborators[dave]: GitHub reported no permissions on the pending invitation, so it cannot be read back",
+      );
+      // A custom role named "push": declaring "push" plans the write role, so the entry can never converge.
+      const collision = new MockApi({
+        [LIST]: { data: [{ login: "frank", role_name: "push" }] },
+        [INVITATIONS]: { data: [] },
+      });
+      await expect(snapshot(collision)).rejects.toThrow(
+        'collaborators[frank]: the live role "push" has no declaration that plans as itself ("push" in a settings file means the "write" role), so it cannot be read back',
+      );
+    });
   });
 });
