@@ -14,7 +14,9 @@ export const OUTPUT_DECLS = {
   },
   "repos-result": {
     description:
-      'Multi-repo mode (and the snapshot-dir form of mode: snapshot) only: JSON map of owner/name to {result, source, skippedSections}. A redacted private target is keyed by its "private repository #N" placeholder instead of its slug. Empty in single-repo mode.',
+      "Multi-repo mode (and the snapshot-dir form of mode: snapshot) only: JSON map of owner/name " +
+      "to {result, source, skippedSections}. A redacted private target is keyed by its " +
+      '"private repository #N" placeholder instead of its slug. Empty in single-repo mode.',
   },
 } as const satisfies Record<OutputName, { readonly description: string }>;
 

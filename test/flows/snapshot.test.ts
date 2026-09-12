@@ -202,6 +202,16 @@ describe("runSnapshot, file form", () => {
   });
 });
 
+/** The refusal a snapshot-dir gets when it is not disjoint from the repos-dir. */
+function disjointRefusal(snapshotDir: string, reposDir: string): string {
+  return (
+    `the "snapshot-dir" input "${snapshotDir}" is, contains, or sits inside the "repos-dir" ` +
+    `"${reposDir}": the snapshots are written in the repos-dir layout, so they would overwrite ` +
+    "the central settings files or be read back as central files. Write them to a directory " +
+    "outside the repos-dir and copy them over deliberately"
+  );
+}
+
 describe("runSnapshot refuses a destination that would overwrite an authored file", () => {
   test.each([
     [
@@ -212,22 +222,22 @@ describe("runSnapshot refuses a destination that would overwrite an authored fil
     [
       "snapshot-dir equal to the repos-dir",
       () => dirCfg({ snapshotDir: "./repos", reposDir: "repos" }),
-      'the "snapshot-dir" input "./repos" is, contains, or sits inside the "repos-dir" "repos": the snapshots are written in the repos-dir layout, so they would overwrite the central settings files or be read back as central files. Write them to a directory outside the repos-dir and copy them over deliberately',
+      disjointRefusal("./repos", "repos"),
     ],
     [
       "snapshot-dir above the repos-dir, where a bare <name>.yml would be overwritten",
       () => dirCfg({ snapshotDir: "central", reposDir: "central/acme" }),
-      'the "snapshot-dir" input "central" is, contains, or sits inside the "repos-dir" "central/acme": the snapshots are written in the repos-dir layout, so they would overwrite the central settings files or be read back as central files. Write them to a directory outside the repos-dir and copy them over deliberately',
+      disjointRefusal("central", "central/acme"),
     ],
     [
       "snapshot-dir below the repos-dir under a name starting with two dots, which is still below it",
       () => dirCfg({ snapshotDir: "central/..snapshots", reposDir: "central" }),
-      'the "snapshot-dir" input "central/..snapshots" is, contains, or sits inside the "repos-dir" "central": the snapshots are written in the repos-dir layout, so they would overwrite the central settings files or be read back as central files. Write them to a directory outside the repos-dir and copy them over deliberately',
+      disjointRefusal("central/..snapshots", "central"),
     ],
     [
       "snapshot-dir below the repos-dir, where the next run would read the snapshots as central files",
       () => dirCfg({ snapshotDir: "central/snapshots", reposDir: "central" }),
-      'the "snapshot-dir" input "central/snapshots" is, contains, or sits inside the "repos-dir" "central": the snapshots are written in the repos-dir layout, so they would overwrite the central settings files or be read back as central files. Write them to a directory outside the repos-dir and copy them over deliberately',
+      disjointRefusal("central/snapshots", "central"),
     ],
   ])("%s fails before any API call or write", async (_case, cfg, message) => {
     const api = new MockApi({});
