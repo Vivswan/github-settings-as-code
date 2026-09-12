@@ -3,7 +3,7 @@
  * consumer names points at a packaged commit on the `build` branch (the tags cut before that branch existed point
  * at main commits from when main still committed the bundle).
  *
- *   packaged commit    = source tree - .github/workflows + the built lib/index.js, `Source: <sha>` trailer
+ *   packaged commit    = source tree - .github/workflows - package.json's prepare script + lib/index.js + lib/pkg/, `Source: <sha>` trailer
  *   refs/heads/build   root (no parent) -> chain commit -> chain commit ...   only ever advances
  *   refs/tags/latest   -> the newest source among build's tip, the publishing run's own chain commit, and where latest already points
  *   refs/tags/vX.Y.Z   -> the chain commit whose source is the release's merge commit; never moved
@@ -13,6 +13,9 @@
  * per workflow step:
  *
  *   advance-build                  post-green.yml          GITHUB_SHA, RUN_URL (optional)
+ *   prerelease-version             post-green.yml          GITHUB_SHA, GITHUB_RUN_NUMBER
+ *   npm-verdict next               post-green.yml          GITHUB_SHA, GITHUB_RUN_NUMBER, NPM_REGISTRY_URL (optional)
+ *   npm-verdict stable             update-release.yml      TAG, GITHUB_SHA, NPM_REGISTRY_URL (optional)
  *   package, retag-major           update-release.yml      TAG, GITHUB_SHA, RUN_URL (optional, package only)
  *   verify                         update-release.yml      TAG, GITHUB_SHA
  *   anchor                         update-release-pr.yml   GITHUB_SHA
@@ -22,12 +25,21 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const MANIFEST_FILE = ".release-please-manifest.json";
 const CONFIG_FILE = "release-please-config.json";
-const BUNDLE_FILE = "lib/index.js";
+/** What a chain commit carries beyond its source: the action bundle and the library build (a directory entry
+ * stages every file under it). */
+const PACKAGED_PATHS = ["lib/index.js", "lib/pkg/"] as const;
+/** What every chain commit ever minted carries: the bundle `uses:` consumers run. */
+const ACTION_BUNDLE = "lib/index.js";
+/** What a ref minted or confirmed HERE must carry as non-empty regular files; the chain commits minted before the
+ * library rode along carry the bundle alone and stay valid parents. */
+const REQUIRED_BUILT_FILES = [ACTION_BUNDLE, "lib/pkg/index.js"] as const;
+/** The packaged paths as the messages name them. */
+const PACKAGED = "lib/index.js and lib/pkg/";
 /** No chain commit carries a workflow file: GitHub judges each pushed commit's diff against its parent and refuses a
  * workflow-file change to a token without the workflows grant. Consumers run the action, not the workflows.
  *   a chain commit against its parent          -> no workflow change, so the default GITHUB_TOKEN can push it
@@ -150,29 +162,80 @@ function releaseMajor(tag: string): string {
   return `v${match[1]}`;
 }
 
-/** A consumable ref must carry the bundle as a non-empty REGULAR file: a symlink or a gitlink at that path has a
- * size too, and no bundle. Asserted on every path that mints or blesses a ref. */
-function assertCarriesBundle(cwd: string, treeish: string): { mode: string; blob: string } {
-  // ls-tree answers a missing path with empty output and exit 0; a failing call (a missing object, a transport
-  // error) must propagate, never read as "no bundle".
-  const entry = git(cwd, "ls-tree", "-l", treeish, "--", BUNDLE_FILE);
-  const [mode = "", , blob = "", size] = entry.split(/\s+/);
-  const regularFile = mode === "100644" || mode === "100755";
-  if (!regularFile || Number(size) === 0) {
-    const found = entry === "" ? "no entry" : `entry ${entry.split("\t")[0]}`;
-    throw new Error(
-      `${treeish} does not carry a non-empty regular-file ${BUNDLE_FILE} (${found}); refusing to point a consumable ref at an unpackaged commit.`,
-    );
+/** A consumable ref must carry each of `files` as a non-empty REGULAR file: a symlink or a gitlink at that path has
+ * a size too, and no build. An existing chain commit is held to the action bundle alone (pre-library commits stay
+ * valid parents); what this run mints or confirms, to the whole required set. */
+function assertCarries(cwd: string, treeish: string, files: readonly string[]): void {
+  for (const file of files) {
+    // ls-tree answers a missing path with empty output and exit 0; a failing call (a missing object, a transport
+    // error) must propagate, never read as "no bundle".
+    const entry = git(cwd, "ls-tree", "-l", treeish, "--", file);
+    const [mode = "", , , size] = entry.split(/\s+/);
+    const regularFile = mode === "100644" || mode === "100755";
+    if (!regularFile || Number(size) === 0) {
+      const found = entry === "" ? "no entry" : `entry ${entry.split("\t")[0]}`;
+      throw new Error(
+        `${treeish} does not carry a non-empty regular-file ${file} (${found}); refusing to point a consumable ref at an unpackaged commit.`,
+      );
+    }
   }
-  return { mode, blob };
 }
 
-/** Assembled in a private index read from sourceSha's tree, so nothing beyond that tree but the bundle can enter and
- * the checkout's own index stays untouched. */
+function isPackagedPath(path: string): boolean {
+  return PACKAGED_PATHS.some((packaged) =>
+    packaged.endsWith("/") ? path.startsWith(packaged) : path === packaged,
+  );
+}
+
+/** Every blob under the packaged paths in a tree, in git's own order. */
+function packagedEntries(
+  cwd: string,
+  treeish: string,
+): { mode: string; blob: string; path: string }[] {
+  return git(cwd, "ls-tree", "-r", treeish, "--", ...PACKAGED_PATHS)
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [meta = "", path = ""] = line.split("\t");
+      const [mode = "", , blob = ""] = meta.split(/\s+/);
+      return { mode, blob, path };
+    });
+}
+
+/** The regular files the build left under the packaged paths in the checkout, as tree paths, sorted. */
+function builtPaths(cwd: string): string[] {
+  const paths: string[] = [];
+  const walk = (relative: string): void => {
+    for (const entry of readdirSync(join(cwd, relative), { withFileTypes: true })) {
+      const path = `${relative}${entry.name}`;
+      if (entry.isDirectory()) {
+        walk(`${path}/`);
+      } else if (entry.isFile()) {
+        paths.push(path);
+      }
+    }
+  };
+  for (const packaged of PACKAGED_PATHS) {
+    if (!existsSync(join(cwd, packaged))) {
+      continue;
+    }
+    if (packaged.endsWith("/")) {
+      walk(packaged);
+    } else {
+      paths.push(packaged);
+    }
+  }
+  return paths.sort();
+}
+
+/** Assembled in a private index read from sourceSha's tree, so nothing beyond that tree but the build outputs can
+ * enter and the checkout's own index stays untouched. `manifest: "source"` keeps package.json as the source has it,
+ * the shape of the chain commits minted before the prepare strip, which an existing tip is also held against. */
 function treePlusBundle(
   cwd: string,
   sourceSha: string,
-  addBundle: (env: Record<string, string>) => void,
+  addBuild: (env: Record<string, string>) => void,
+  manifest: "stripped" | "source" = "stripped",
 ): string {
   const indexFile = join(git(cwd, "rev-parse", "--absolute-git-dir"), "release-pipeline.index");
   const env = { GIT_INDEX_FILE: indexFile };
@@ -191,11 +254,39 @@ function treePlusBundle(
       "--",
       WORKFLOWS_DIR,
     );
-    addBundle(env);
+    if (manifest === "stripped") {
+      const blob = strippedManifestBlob(cwd, sourceSha);
+      if (blob !== null) {
+        gitWithEnv(cwd, env, "update-index", "--add", "--cacheinfo", `100644,${blob},${MANIFEST}`);
+      }
+    }
+    addBuild(env);
     return gitWithEnv(cwd, env, "write-tree");
   } finally {
     rmSync(indexFile, { force: true });
   }
+}
+
+const MANIFEST = "package.json";
+
+/** sourceSha's package.json without scripts.prepare, written to the object store; null when the source has no such
+ * script. npm's git fetcher runs prepare (installing devDependencies first) on a `github:` install whenever the
+ * script exists, and the packaged commit ships the build already. */
+function strippedManifestBlob(cwd: string, sourceSha: string): string | null {
+  const text = tryGit(cwd, "show", `${sourceSha}:${MANIFEST}`);
+  if (text === null) {
+    return null;
+  }
+  const pkg = JSON.parse(text) as { scripts?: Record<string, unknown> };
+  if (pkg.scripts === undefined || !("prepare" in pkg.scripts)) {
+    return null;
+  }
+  delete pkg.scripts.prepare;
+  return execFileSync("git", ["hash-object", "-w", "--stdin"], {
+    cwd,
+    input: `${JSON.stringify(pkg, null, 2)}\n`,
+    encoding: "utf8",
+  }).trim();
 }
 
 function workflowPaths(cwd: string, treeish: string): string[] {
@@ -213,17 +304,30 @@ function assertPackages(
   ref: string,
   remedy: string,
 ): void {
-  const { mode, blob } = assertCarriesBundle(cwd, packaged);
-  const expected = treePlusBundle(cwd, source, (env) =>
-    gitWithEnv(cwd, env, "update-index", "--add", "--cacheinfo", `${mode},${blob},${BUNDLE_FILE}`),
-  );
+  assertCarries(cwd, packaged, [ACTION_BUNDLE]);
+  const entries = packagedEntries(cwd, packaged);
+  const stage = (env: Record<string, string>): void => {
+    for (const { mode, blob, path } of entries) {
+      gitWithEnv(cwd, env, "update-index", "--add", "--cacheinfo", `${mode},${blob},${path}`);
+    }
+  };
+  const expected = treePlusBundle(cwd, source, stage);
   const actual = git(cwd, "rev-parse", `${packaged}^{tree}`);
-  if (actual !== expected) {
-    // An unchanged workflow file never shows in the diff against the source, so every workflow path still in the tree is listed as kept.
+  // The chain commits minted before the prepare strip carry the source's package.json as is; they stay valid parents
+  // and latest targets.
+  if (actual !== expected && actual !== treePlusBundle(cwd, source, stage, "source")) {
+    // An unchanged workflow file never shows in the diff against the source, so every workflow path still in the tree
+    // is listed as kept; package.json is listed unless it is exactly the source's minus the prepare script.
+    const stripped = strippedManifestBlob(cwd, source);
+    const manifestBlob = tryGit(cwd, "rev-parse", `${packaged}:${MANIFEST}`);
     const changed = git(cwd, "diff", "--no-renames", "--name-only", source, packaged)
       .split("\n")
       .filter(
-        (path) => path !== "" && path !== BUNDLE_FILE && !path.startsWith(`${WORKFLOWS_DIR}/`),
+        (path) =>
+          path !== "" &&
+          !isPackagedPath(path) &&
+          !path.startsWith(`${WORKFLOWS_DIR}/`) &&
+          !(path === MANIFEST && stripped !== null && manifestBlob === stripped),
       )
       .concat(workflowPaths(cwd, packaged).map((path) => `${path} (kept)`));
     const listed =
@@ -231,32 +335,34 @@ function assertPackages(
         ? "none (an entry a path diff cannot list, such as an empty subtree)"
         : changed.join(", ");
     throw new Error(
-      `${ref} is not ${source} plus ${BUNDLE_FILE} and the removal of ${WORKFLOWS_DIR}/ alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ${source}: ${listed}); ${remedy}`,
+      `${ref} is not ${source} plus ${PACKAGED}, minus ${MANIFEST}'s prepare script, and the removal of ${WORKFLOWS_DIR}/ alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ${source}: ${listed}); ${remedy}`,
     );
   }
 }
 
-/** The checkout must BE sourceSha with a clean worktree: that is what makes the bundle a build of that source rather
- * than of a by-hand edit. The bundle itself is gitignored, so it never shows as pending. */
+/** The checkout must BE sourceSha with a clean worktree: that is what makes the build outputs a build of that source
+ * rather than of a by-hand edit. They are gitignored, so they never show as pending. */
 function packagedTree(cwd: string, sourceSha: string): string {
   const head = git(cwd, "rev-parse", "HEAD");
   if (head !== sourceSha) {
     throw new Error(`the checkout is at ${head}, not the source commit ${sourceSha} to package.`);
   }
-  if (!existsSync(join(cwd, BUNDLE_FILE))) {
-    throw new Error(`${BUNDLE_FILE} is not built; run the build before packaging.`);
+  for (const file of REQUIRED_BUILT_FILES) {
+    if (!existsSync(join(cwd, file))) {
+      throw new Error(`${file} is not built; run the build before packaging.`);
+    }
   }
   const dirty = git(cwd, "status", "--porcelain").split("\n").filter(Boolean);
   if (dirty.length > 0) {
     throw new Error(
-      `the worktree has pending changes beyond ${BUNDLE_FILE} (${dirty.join("; ")}); the bundle must be a build of ${sourceSha} alone - commit, stash, or clean them first.`,
+      `the worktree has pending changes beyond ${PACKAGED} (${dirty.join("; ")}); the build must be a build of ${sourceSha} alone - commit, stash, or clean them first.`,
     );
   }
-  // -f: main gitignores the bundle
+  // -f: main gitignores the build outputs
   const tree = treePlusBundle(cwd, sourceSha, (env) =>
-    gitWithEnv(cwd, env, "add", "-f", BUNDLE_FILE),
+    gitWithEnv(cwd, env, "add", "-f", "--", ...PACKAGED_PATHS),
   );
-  assertCarriesBundle(cwd, tree);
+  assertCarries(cwd, tree, REQUIRED_BUILT_FILES);
   const leaked = workflowPaths(cwd, tree);
   if (leaked.length > 0) {
     throw new Error(
@@ -364,7 +470,7 @@ function assertSameBuild(cwd: string, packaged: string, sourceSha: string, tree:
     throw new Error(
       `${BUILD_REF} holds ${packaged}, which names ${sourceSha} as its source but its tree ` +
         `${packagedTree} is not the tree ${tree} this checkout's build of ${sourceSha} packages, ` +
-        `so the two differ in their ${BUNDLE_FILE} entry (bytes or file mode): either the commit ` +
+        `so the two differ under ${PACKAGED} (bytes, file modes, or the files under lib/pkg/): either the commit ` +
         "was not built from this source or the build is not reproducible, and the Source trailer " +
         "cannot tell those apart. Diff the two trees by hand; a hand-pushed commit is left for the " +
         "next green push to bury (the ruleset on build forbids moving it back), a build that " +
@@ -423,10 +529,10 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
   releaseMajor(tag);
   const tree = packagedTree(cwd, sourceSha);
   // A hand recovery with the wrong TAG, or a draft pointing at the wrong commit, must stop before an immutable tag is minted.
-  const manifest = JSON.parse(git(cwd, "show", `HEAD:${MANIFEST_FILE}`)) as Record<string, unknown>;
-  if (tag !== `v${manifest["."]}`) {
+  const manifest = manifestVersionAt(cwd, "HEAD");
+  if (tag !== `v${manifest}`) {
     throw new Error(
-      `tag ${tag} does not match the manifest version ${JSON.stringify(manifest["."])} at ${sourceSha}; refusing to package a version this source did not release.`,
+      `tag ${tag} does not match the manifest version ${JSON.stringify(manifest)} at ${sourceSha}; refusing to package a version this source did not release.`,
     );
   }
   const mainHead = fetchMainHead(cwd);
@@ -474,8 +580,8 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
   return { created: true, packagedSha, latestSha: latest.sha };
 }
 
-/** An existing tag is trusted only as THIS source's package. A planted commit that keeps the expected bundle but
- * edits action.yml fails the tree check; one whose bundle differs from the fresh build fails the byte check. */
+/** An existing tag is trusted only as THIS source's package. A planted commit that keeps the expected build outputs
+ * but edits action.yml fails the tree check; one whose files or bytes differ from the fresh build fails the byte check. */
 function verifyPackagedTag(cwd: string, tag: string, sourceSha: string): string {
   const frozen =
     "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.";
@@ -487,11 +593,22 @@ function verifyPackagedTag(cwd: string, tag: string, sourceSha: string): string 
     );
   }
   assertPackages(cwd, packagedSha, sourceSha, `refs/tags/${tag} (${packagedSha})`, frozen);
-  const tagged = gitBytes(cwd, "show", `${packagedSha}:${BUNDLE_FILE}`);
-  if (!tagged.equals(readFileSync(join(cwd, BUNDLE_FILE)))) {
+  const tagged = packagedEntries(cwd, packagedSha)
+    .map((entry) => entry.path)
+    .sort();
+  const built = builtPaths(cwd);
+  if (tagged.join("\n") !== built.join("\n")) {
     throw new Error(
-      `refs/tags/${tag} carries a ${BUNDLE_FILE} that is not a build of ${sourceSha}'s source; ${frozen}`,
+      `refs/tags/${tag} carries [${tagged.join(", ")}] under ${PACKAGED}, while this build of ${sourceSha} produced [${built.join(", ")}]; ${frozen}`,
     );
+  }
+  for (const path of built) {
+    const taggedBytes = gitBytes(cwd, "show", `${packagedSha}:${path}`);
+    if (!taggedBytes.equals(readFileSync(join(cwd, path)))) {
+      throw new Error(
+        `refs/tags/${tag} carries a ${path} that is not a build of ${sourceSha}'s source; ${frozen}`,
+      );
+    }
   }
   assertOnChain(cwd, packagedSha, `refs/tags/${tag} (${packagedSha})`, frozen);
   return packagedSha;
@@ -603,6 +720,7 @@ export function verifyPublishedRefs(options: VerifyOptions): {
   const frozen =
     "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.";
   assertPackages(cwd, packagedSha, sourceSha, `origin's refs/tags/${tag} (${packagedSha})`, frozen);
+  assertCarries(cwd, packagedSha, REQUIRED_BUILT_FILES);
   assertOnChain(cwd, packagedSha, `origin's refs/tags/${tag} (${packagedSha})`, frozen);
   const majorSha = git(cwd, "rev-parse", `refs/verify/${major}^{}`);
   if (majorSha !== packagedSha) {
@@ -981,9 +1099,273 @@ function packages(cwd: string, packaged: string, source: string): boolean {
   }
 }
 
-if (import.meta.main) {
+/** The manifest's version at a commit: what release-please last released, or is about to. */
+function manifestVersionAt(cwd: string, treeish: string): string {
+  const manifest = JSON.parse(git(cwd, "show", `${treeish}:${MANIFEST_FILE}`)) as Record<
+    string,
+    unknown
+  >;
+  return String(manifest["."]);
+}
+
+/**
+ * The npm version a green main commit's library build publishes under the
+ * `next` dist-tag: the manifest version's next patch, then a pre-release
+ * suffix of the workflow run number and the source's short sha. That sorts
+ * above the last release, below the next one whatever its bump, forward
+ * across runs (run numbers only grow), and once per run. The sha carries a
+ * `g` prefix, as git describe writes it: npm reads an all-digit identifier
+ * as a number and drops its leading zero, so a bare sha7 such as 0123456
+ * would be rewritten to 123456 and name no commit.
+ */
+export function prereleaseVersion(
+  manifestVersion: string,
+  runNumber: string,
+  sourceSha: string,
+): string {
+  const version = manifestVersion.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (!version) {
+    throw new Error(
+      `the manifest version ${JSON.stringify(manifestVersion)} is not X.Y.Z; refusing to derive a pre-release version from it.`,
+    );
+  }
+  if (!/^(0|[1-9]\d*)$/.test(runNumber)) {
+    throw new Error(
+      `the run number ${JSON.stringify(runNumber)} is not a decimal integer; refusing to mint a pre-release version from it.`,
+    );
+  }
+  if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
+    throw new Error(
+      `the source ${JSON.stringify(sourceSha)} is not a full commit sha; refusing to mint a pre-release version from it.`,
+    );
+  }
+  const [, major, minor, patch] = version;
+  return `${major}.${minor}.${Number(patch) + 1}-main.${runNumber}.g${sourceSha.slice(0, 7)}`;
+}
+
+export interface PrereleaseVersionOptions {
+  cwd: string;
+  /** The green main commit this run judged; the checkout must be at it. */
+  sourceSha: string;
+  /** The workflow run number, the pre-release's forward-moving component. */
+  runNumber: string;
+}
+
+/** prereleaseVersion for the checkout: the manifest is read at sourceSha, which HEAD must be. */
+export function prereleaseVersionOf(options: PrereleaseVersionOptions): string {
+  const { cwd, sourceSha, runNumber } = options;
+  const head = git(cwd, "rev-parse", "HEAD");
+  if (head !== sourceSha) {
+    throw new Error(
+      `the checkout is at ${head}, not the source commit ${sourceSha} whose build is published.`,
+    );
+  }
+  return prereleaseVersion(manifestVersionAt(cwd, sourceSha), runNumber, sourceSha);
+}
+
+/** A version this pipeline mints, parsed for ordering: a release, or a pre-release of one. */
+interface MintedVersion {
+  release: [number, number, number];
+  pre: { run: number; sha: string } | null;
+}
+
+/** The two version shapes this pipeline mints; anything else (a hand-published
+ * 2.0.1-beta.1 the registry now holds) stops the run rather than being guessed at. */
+function parseMinted(version: string): MintedVersion {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-main\.(0|[1-9]\d*)\.g([0-9a-f]{7}))?$/);
+  if (!match) {
+    throw new Error(
+      `${JSON.stringify(version)} is not a version this pipeline mints (X.Y.Z or X.Y.Z-main.<run>.g<sha7>); refusing to order it.`,
+    );
+  }
+  const [, major = "", minor = "", patch = "", run, sha = ""] = match;
+  return {
+    release: [Number(major), Number(minor), Number(patch)],
+    pre: run === undefined ? null : { run: Number(run), sha },
+  };
+}
+
+/**
+ * How npm orders two minted versions: by release first; a pre-release sorts
+ * below its own release; pre-releases of one release sort by run number, then
+ * by the sha as npm compares identifiers (lexically).
+ */
+export function versionOrder(a: string, b: string): "newer" | "same" | "older" {
+  const left = parseMinted(a);
+  const right = parseMinted(b);
+  for (let i = 0; i < 3; i++) {
+    const l = left.release[i] ?? 0;
+    const r = right.release[i] ?? 0;
+    if (l !== r) {
+      return l > r ? "newer" : "older";
+    }
+  }
+  if (left.pre === null || right.pre === null) {
+    if (left.pre === right.pre) {
+      return "same";
+    }
+    return left.pre === null ? "newer" : "older";
+  }
+  if (left.pre.run !== right.pre.run) {
+    return left.pre.run > right.pre.run ? "newer" : "older";
+  }
+  if (left.pre.sha === right.pre.sha) {
+    return "same";
+  }
+  return left.pre.sha > right.pre.sha ? "newer" : "older";
+}
+
+/** What the registry holds for the package: every published version, and where each dist-tag points. */
+export interface Packument {
+  versions: Record<string, unknown>;
+  "dist-tags": Record<string, string>;
+}
+
+export type PublishVerdict =
+  | { publish: true; version: string }
+  | { publish: false; version: string; reason: string };
+
+/**
+ * Both dist-tags are consulted, not only `next`: `npm publish --tag next`
+ * moves next to whatever it publishes, so a stale run's version must be newer
+ * than what next AND latest name, or next would step back behind a release.
+ * Null is a package the registry has never seen: the bootstrap publishes.
+ */
+export function nextPublishVerdict(version: string, packument: Packument | null): PublishVerdict {
+  if (packument === null) {
+    return { publish: true, version };
+  }
+  if (version in packument.versions) {
+    return { publish: false, version, reason: `${version} is already on the registry` };
+  }
+  for (const tag of ["next", "latest"]) {
+    const current = packument["dist-tags"][tag];
+    if (current !== undefined && versionOrder(version, current) !== "newer") {
+      return {
+        publish: false,
+        version,
+        reason: `the registry's ${tag} is ${current}, not older than ${version}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+      };
+    }
+  }
+  return { publish: true, version };
+}
+
+/**
+ * Only `latest` is consulted: a plain `npm publish` moves latest and leaves
+ * next alone, and a release is meant to sort below the pre-releases that
+ * followed its merge (the merge commit's own run publishes the next patch's
+ * pre-release before this job runs).
+ */
+export function stablePublishVerdict(version: string, packument: Packument | null): PublishVerdict {
+  if (packument === null) {
+    return { publish: true, version };
+  }
+  if (version in packument.versions) {
+    return { publish: false, version, reason: `${version} is already on the registry` };
+  }
+  const latest = packument["dist-tags"].latest;
+  // A pre-release latest is what a package's FIRST publish leaves behind
+  // (npm tags a first publish latest whatever tag it asked for): the hand
+  // bootstrap after a release merged before the owner's setup. A release
+  // must take latest over from it, so only a newer RELEASE holds one back.
+  if (
+    latest !== undefined &&
+    parseMinted(latest).pre === null &&
+    versionOrder(version, latest) === "older"
+  ) {
+    return {
+      publish: false,
+      version,
+      reason: `the registry's latest is ${latest}, newer than ${version}, so this rerun of an older release publishes nothing (npm publish would move latest back)`,
+    };
+  }
+  return { publish: true, version };
+}
+
+/** The registry's record of `name`, or null while it has never been published; any other answer than 200 or 404 throws. */
+async function fetchPackument(registry: string, name: string): Promise<Packument | null> {
+  const url = `${registry.replace(/\/$/, "")}/${name.replaceAll("/", "%2F")}`;
+  const response = await fetch(url, { headers: { accept: "application/json" } });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(
+      `the registry answered ${response.status} for ${name} (${url}); refusing to publish without knowing what it holds.`,
+    );
+  }
+  const body: unknown = await response.json();
+  const record = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (!record(body) || !record(body.versions) || !record(body["dist-tags"])) {
+    throw new Error(
+      `the registry's record of ${name} (${url}) is not a packument (an object with versions and dist-tags records); refusing to publish without knowing what it holds.`,
+    );
+  }
+  const tags = body["dist-tags"];
+  for (const [tag, value] of Object.entries(tags)) {
+    if (typeof value !== "string") {
+      throw new Error(
+        `the registry's record of ${name} names dist-tag ${tag} as ${JSON.stringify(value)}, not a version; refusing to publish without knowing what it holds.`,
+      );
+    }
+  }
+  return { versions: body.versions, "dist-tags": tags as Record<string, string> };
+}
+
+function packageFieldAt(cwd: string, treeish: string, field: "name" | "version"): string {
+  const pkg = JSON.parse(git(cwd, "show", `${treeish}:package.json`)) as Record<string, unknown>;
+  return String(pkg[field]);
+}
+
+/** The version npm publishes for a release: package.json's, which must be the
+ * tag's (the hook held the manifest to the tag; package.json is a separate file
+ * release-please rewrites, and it is the one npm reads). */
+function releaseVersionAt(cwd: string, treeish: string, tag: string): string {
+  const version = packageFieldAt(cwd, treeish, "version");
+  if (`v${version}` !== tag) {
+    throw new Error(
+      `package.json at the release source is version ${version}, but the release tag is ${tag}; refusing to publish a version this source did not release.`,
+    );
+  }
+  return version;
+}
+
+export type NpmVerdictOptions = {
+  cwd: string;
+  /** The commit whose build is published; the checkout must be at it. */
+  sourceSha: string;
+  /** The registry's base URL, where the package's record is read. */
+  registry: string;
+} & ({ channel: "next"; runNumber: string } | { channel: "stable"; tag: string });
+
+/** The publish decision for the checkout, against what the registry holds.
+ * The version is settled before the registry is asked, so a checkout that
+ * cannot name one stops without a request. */
+export async function npmVerdict(options: NpmVerdictOptions): Promise<PublishVerdict> {
+  const { cwd, sourceSha, registry } = options;
+  const head = git(cwd, "rev-parse", "HEAD");
+  if (head !== sourceSha) {
+    throw new Error(
+      `the checkout is at ${head}, not the source commit ${sourceSha} whose build is published.`,
+    );
+  }
+  const version =
+    options.channel === "next"
+      ? prereleaseVersion(manifestVersionAt(cwd, "HEAD"), options.runNumber, sourceSha)
+      : releaseVersionAt(cwd, "HEAD", options.tag);
+  const packument = await fetchPackument(registry, packageFieldAt(cwd, "HEAD", "name"));
+  return options.channel === "next"
+    ? nextPublishVerdict(version, packument)
+    : stablePublishVerdict(version, packument);
+}
+
+const DEFAULT_REGISTRY = "https://registry.npmjs.org";
+
+async function main(): Promise<void> {
   const cwd = process.cwd();
-  const [command] = process.argv.slice(2);
+  const [command, argument] = process.argv.slice(2);
   const env = (name: string): string => {
     const value = process.env[name];
     if (value === undefined || value === "") {
@@ -991,67 +1373,97 @@ if (import.meta.main) {
     }
     return value;
   };
-  try {
-    switch (command) {
-      case "package": {
-        const result = packageRelease({
-          cwd,
-          tag: env("TAG"),
-          sourceSha: env("GITHUB_SHA"),
-          runUrl: process.env.RUN_URL,
-        });
-        console.error(
-          result.created
-            ? `created ${env("TAG")} on chain commit ${result.packagedSha}; latest at ${result.latestSha}`
-            : `${env("TAG")} already packages this source at ${result.packagedSha}`,
-        );
-        break;
-      }
-      case "retag-major": {
-        const result = retagMajor({ cwd, tag: env("TAG"), sourceSha: env("GITHUB_SHA") });
-        console.error(`moved ${result.major} to ${result.packagedSha}`);
-        break;
-      }
-      case "verify": {
-        const result = verifyPublishedRefs({ cwd, tag: env("TAG"), sourceSha: env("GITHUB_SHA") });
-        console.error(
-          `origin's ${env("TAG")} and ${result.major} both point at packaged commit ${result.packagedSha}, whose tree carries lib/index.js`,
-        );
-        break;
-      }
-      case "anchor": {
-        const result = anchorReleasePr({ cwd, sourceSha: env("GITHUB_SHA") });
-        console.error(result.reason);
-        break;
-      }
-      case "boundary-check": {
-        const result = boundaryCheck(cwd);
-        console.error(`boundary is fresh: ${result.boundary}`);
-        break;
-      }
-      case "anchor-check": {
-        const result = anchorCheck(cwd);
-        console.error(`the release PR carries this cycle's anchor: ${result.boundary}`);
-        break;
-      }
-      case "advance-build": {
-        const result = advanceBuild({
-          cwd,
-          sourceSha: env("GITHUB_SHA"),
-          runUrl: process.env.RUN_URL,
-        });
-        console.error(result.reason);
-        break;
-      }
-      default:
-        throw new Error(
-          `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | verify | anchor | boundary-check | anchor-check | advance-build`,
-        );
+  switch (command) {
+    case "package": {
+      const result = packageRelease({
+        cwd,
+        tag: env("TAG"),
+        sourceSha: env("GITHUB_SHA"),
+        runUrl: process.env.RUN_URL,
+      });
+      console.error(
+        result.created
+          ? `created ${env("TAG")} on chain commit ${result.packagedSha}; latest at ${result.latestSha}`
+          : `${env("TAG")} already packages this source at ${result.packagedSha}`,
+      );
+      break;
     }
-  } catch (error) {
+    case "retag-major": {
+      const result = retagMajor({ cwd, tag: env("TAG"), sourceSha: env("GITHUB_SHA") });
+      console.error(`moved ${result.major} to ${result.packagedSha}`);
+      break;
+    }
+    case "verify": {
+      const result = verifyPublishedRefs({ cwd, tag: env("TAG"), sourceSha: env("GITHUB_SHA") });
+      console.error(
+        `origin's ${env("TAG")} and ${result.major} both point at packaged commit ${result.packagedSha}, whose tree carries ${PACKAGED}`,
+      );
+      break;
+    }
+    case "anchor": {
+      const result = anchorReleasePr({ cwd, sourceSha: env("GITHUB_SHA") });
+      console.error(result.reason);
+      break;
+    }
+    case "boundary-check": {
+      const result = boundaryCheck(cwd);
+      console.error(`boundary is fresh: ${result.boundary}`);
+      break;
+    }
+    case "anchor-check": {
+      const result = anchorCheck(cwd);
+      console.error(`the release PR carries this cycle's anchor: ${result.boundary}`);
+      break;
+    }
+    case "advance-build": {
+      const result = advanceBuild({
+        cwd,
+        sourceSha: env("GITHUB_SHA"),
+        runUrl: process.env.RUN_URL,
+      });
+      console.error(result.reason);
+      break;
+    }
+    // The two subcommands whose result is their stdout: the workflow captures it.
+    case "prerelease-version": {
+      console.log(
+        prereleaseVersionOf({
+          cwd,
+          sourceSha: env("GITHUB_SHA"),
+          runNumber: env("GITHUB_RUN_NUMBER"),
+        }),
+      );
+      break;
+    }
+    case "npm-verdict": {
+      if (argument !== "next" && argument !== "stable") {
+        throw new Error(
+          `npm-verdict takes the channel, next or stable, not ${JSON.stringify(argument ?? null)}`,
+        );
+      }
+      const verdict = await npmVerdict({
+        cwd,
+        sourceSha: env("GITHUB_SHA"),
+        registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
+        ...(argument === "next"
+          ? { channel: argument, runNumber: env("GITHUB_RUN_NUMBER") }
+          : { channel: argument, tag: env("TAG") }),
+      });
+      console.log(verdict.publish ? `publish ${verdict.version}` : `skip ${verdict.reason}`);
+      break;
+    }
+    default:
+      throw new Error(
+        `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | verify | anchor | boundary-check | anchor-check | advance-build | prerelease-version | npm-verdict`,
+      );
+  }
+}
+
+if (import.meta.main) {
+  main().catch((error: unknown) => {
     console.error(
-      `release-pipeline ${command ?? ""}: ${error instanceof Error ? error.message : String(error)}`,
+      `release-pipeline ${process.argv[2] ?? ""}: ${error instanceof Error ? error.message : String(error)}`,
     );
     process.exit(1);
-  }
+  });
 }

@@ -7,14 +7,15 @@
 #   package      -> find or append the build commit whose source is the merge commit, mint vX.Y.Z there ONCE, reconcile latest
 #   retag-major  -> force-move vX there, then upload bundle and schema to the draft (a published release freezes its assets)
 #   verify       -> confirm origin's refs and the draft's assets; the managed publish stage then attests and flips the release live
+#   publish-npm  -> publish the library build to npm as the stable version through trusted publishing, once the refs check out
 #
 # Only ci.yml reaches this workflow, with the tag release-please just cut from its own merged PR, so a hand-edited
-# manifest never mints a tag. A rerun converges while this release is its line's newest; once a NEWER release
-# shipped, the major move stops by design.
+# manifest never mints a tag. A rerun converges while this release is its line's newest (a version npm already holds
+# is skipped); once a NEWER release shipped, the major move stops by design.
 
-# Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand run has no attestation.json, and a chain
-# commit it appends carries no run trailer). NEVER publish before `package` has minted the tag: a tagless draft makes
-# GitHub create vX.Y.Z lazily at the bundle-less merge commit on main.
+# Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand run has no attestation.json, a chain commit
+# it appends carries no run trailer, and the npm publish has no hand path at all, only the workflow's OIDC identity may
+# publish). NEVER publish before `package` has minted the tag: a tagless draft makes GitHub create vX.Y.Z lazily on main.
 #   git checkout <merge sha>                    (the draft's target commitish)
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts package
@@ -104,7 +105,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      - name: Confirm the published refs carry the bundle
+      - name: Confirm the published refs carry the build outputs
         env:
           TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ needs.package-release.outputs.source-sha }}
@@ -128,3 +129,81 @@ jobs:
             echo "::error::release $TAG carries assets [$assets], expected [$expected]; re-run package-release before anything publishes."
             exit 1
           fi
+
+  # Publishes the release's library build to npm as the stable version through trusted publishing: no registry
+  # token, provenance attached by npm. Behind verify-release, so nothing reaches the registry before origin's refs
+  # check out. Until the owner's one-time npm setup exists this job fails and holds the draft; a rerun converges.
+  # package-release sits in needs for its output alone (a job reads outputs only from its direct dependencies).
+  # The lane is the one post-green.yml's publish-next takes: the registry has no compare-and-set, so the two
+  # publishers never overlap and a verdict still holds when its publish lands; queue: max keeps every queued
+  # publish (a lane drops all but one pending job by default).
+  publish-npm:
+    if: github.repository == 'Vivswan/github-settings-as-code'
+    needs: [package-release, verify-release]
+    concurrency:
+      group: npm-publish
+      queue: max
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.package-release.outputs.source-sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      # registry-url writes the .npmrc npm publishes through; with no
+      # NODE_AUTH_TOKEN the action leaves a placeholder there, which npm's
+      # OIDC exchange replaces.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing (and its provenance) exists from npm 11.5.1 on; an
+      # older bundled npm is upgraded once, then held to the floor.
+      - name: Require an npm that publishes through OIDC
+        run: |
+          floor=11.5.1
+          below_floor() { [ "$(printf '%s\n' "$floor" "$(npm --version)" | sort -V | head -n1)" != "$floor" ]; }
+          if below_floor; then
+            npm install -g npm@latest
+          fi
+          if below_floor; then
+            echo "::error::npm $(npm --version) cannot publish through OIDC; trusted publishing needs npm $floor or newer."
+            exit 1
+          fi
+      - name: Build the library
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build:lib
+      # scripts.prepare is dropped from the published manifest, as in
+      # post-green.yml's publish-next.
+      # The verdict holds the built package.json to the tag and reads the
+      # registry: a version already there (a rerun) or a latest that is a
+      # newer release (an older release's job rerun after a newer release)
+      # publishes nothing, so no release ever displaces a newer one from
+      # latest (a pre-release there, the bootstrap's, is taken over). GITHUB_SHA on the
+      # publish line sets only the SLSA predicate's source digest; the
+      # sigstore certificate still carries this run's own head, so a release
+      # recovered by a newer push's run has provenance naming two commits.
+      - name: Publish the release to npm
+        env:
+          TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ needs.package-release.outputs.source-sha }}
+        run: |
+          verdict="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-verdict stable)"
+          case "$verdict" in
+            publish\ *)
+              npm pkg delete scripts.prepare
+              GITHUB_SHA="$SOURCE_SHA" npm publish ;;
+            skip\ *) echo "::warning::${verdict#skip }" ;;
+            *)
+              echo "unexpected npm-verdict output: $verdict"
+              echo "::error::npm-verdict printed neither publish nor skip; see the line above."
+              exit 1 ;;
+          esac

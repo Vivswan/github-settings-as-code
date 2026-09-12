@@ -8,14 +8,15 @@ The engine behind the action is also an npm package, `@vivswan/github-settings-a
 
 ## Install
 
-The package is built from this repository:
+Three ways in, one package:
 
 ```bash
-bun install
-bun run build:lib
+npm install @vivswan/github-settings-as-code          # the released version (npm dist-tag latest)
+npm install @vivswan/github-settings-as-code@next     # the newest green main commit, a pre-release
+npm install github:Vivswan/github-settings-as-code#<packaged sha>   # one packaged commit of the build branch
 ```
 
-That writes `lib/pkg/index.js` and `lib/pkg/index.d.ts`, the files the manifest's `exports` point at. Installing from npm or from a packaged commit of the `build` branch arrives with the publishing change.
+`bun add` takes the same three forms. A pre-release version looks like `2.0.1-main.412.gb8df084`; the [Versioning](#versioning) section says how the three relate. The `github:` form works for every commit packaged since the library joined the packaged branch: such a commit carries `lib/pkg/` (the library build) beside `lib/index.js` (the action bundle), both built from its source commit by the workflow run named in its message, so nothing is built on your side. Older packaged commits, and the tags cut from them (v2.0.0 and earlier), carry the action bundle alone. To build the package from a checkout instead, `bun install && bun run build:lib` writes `lib/pkg/index.js` and `lib/pkg/index.d.ts`, the files the manifest's `exports` point at.
 
 The package exports three paths: the entry (`.`), the committed settings.yml JSON Schema (`./settings.schema.json`), and its own manifest (`./package.json`).
 
@@ -164,11 +165,34 @@ and `validate` and `permissions` read a settings file alone. The [command line g
 
 The package and the action share one version, the one in `.release-please-manifest.json` (release-please rewrites `package.json` from it), so a settings file that validates on the library validates on the action of the same version.
 
+| npm dist-tag | Publishes on | Version | Install |
+|---|---|---|---|
+| `next` | Every green push to `main` | The manifest's next patch, then `-main.<run number>.g<sha7>`: `2.0.1-main.412.gb8df084` | `npm install @vivswan/github-settings-as-code@next` |
+| `latest` | Every release cut | The released version: `2.1.0`. Until the first release it names the bootstrap pre-release, which npm tags `latest` as a package's first publish | `npm install @vivswan/github-settings-as-code` |
+| none | Every packaged commit on the `build` branch since the library joined it | The commit itself | `npm install github:Vivswan/github-settings-as-code#<packaged sha>` |
+
+The npm dist-tag `latest` is not the git tag `latest`: the git tag names the newest packaged commit on the `build` branch (every green push moves it), the dist-tag names the newest release on the registry.
+
+- A pre-release sorts above the last release and below the next one whatever its bump, and later runs sort later: run numbers only grow, and the sha makes each run's version its own. The one pre-release that sorts above a release is the release merge commit's own: its manifest already carries the new version, so `next` moves to `2.1.1-main.<run>.g<sha7>` in the same run that publishes `2.1.0`, which is the order the two channels are meant to keep (next above latest).
+- The `g` before the short sha marks a git object id, as `git describe` writes it; a bare all-digit sha such as `0123456` would be read by npm as the number 123456.
+- `next` publishes nothing when its version is already on the registry (a rerun of that run) or when the dist-tag `next` or `latest` already names a version that is not older (a retry of an old run after newer ones published, or after a release). `latest` publishes nothing when the version is already there or when the dist-tag `latest` names a newer release (a rerun of an older release's job); it does not look at `next`. Neither dist-tag ever moves backward.
+- Both channels publish through npm trusted publishing (OIDC) from this repository's CI workflow: no registry token exists anywhere, and npm attaches a provenance attestation to every version CI publishes, which `npm audit signatures` checks in a project that installs it. The one hand-published version is the bootstrap pre-release below, recognizable by its run number 0.
+- The `github:` form installs a packaged commit's `lib/pkg/`, built from its source commit by the same workflow run that built its `lib/index.js`, with no registry and no build step on your side.
+
 ## One-time publishing setup
 
-For the owner, once. npm adds a trusted publisher only to a package that already exists, so the first version is published by hand from a maintainer machine with two-factor authentication. The bootstrap version is a pre-release published under the `next` dist-tag, so no `latest` exists before the first stable release; the exact version command lands with the publishing workflow.
+For the owner, once. npm adds a trusted publisher only to a package that already exists, so the first version is published by hand from a maintainer machine with two-factor authentication; it is the only publish a person ever makes.
 
-1. Build the library: `bun run build:lib` (the tarball ships `lib/pkg/`, which is built, not committed).
-2. Publish the pre-release under `next`, never `latest`: `npm publish --access public --tag next`.
-3. On npmjs.com, on the package's settings page, add a trusted publisher: type GitHub Actions, owner `Vivswan`, repository `github-settings-as-code`, workflow filename `ci.yml`, no environment.
-4. Under publishing access, choose "Require two-factor authentication and disallow tokens", so the workflow's OIDC identity is the only thing that can publish.
+1. From a clean checkout of `main`, build the library (the tarball ships `lib/pkg/`, which is built, not committed), stamp the bootstrap pre-release version, and publish it under `next`, never `latest` by request:
+
+```bash
+bun install --frozen-lockfile && bun run build:lib
+version="$(GITHUB_SHA="$(git rev-parse HEAD)" GITHUB_RUN_NUMBER=0 bun .github/scripts/release-pipeline.ts prerelease-version)"
+npm version "$version" --no-git-tag-version && npm publish --access public --tag next
+git checkout package.json
+```
+
+2. On npmjs.com, on the package's settings page, add a trusted publisher: GitHub Actions, owner `Vivswan`, repository `github-settings-as-code`, workflow filename `ci.yml` (the caller of both hooks), no environment.
+3. Under publishing access, choose "Require two-factor authentication and disallow tokens", so the workflow's OIDC identity is the only thing that can publish.
+
+Until step 2 is done, the release hook's `publish-npm` job fails and the GitHub release stays a draft, and `publish-next` fails the same way on the next green push; re-run the failed jobs once the publisher exists.

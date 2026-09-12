@@ -61,7 +61,7 @@ The [getting started guide](docs/start/getting-started.md) walks the same steps 
 
 ## Library
 
-The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node 22.14 or newer): validate, merge, check, and apply from your own code. It is built from this repository with `bun run build:lib`; the [library reference](docs/reference/library.md) has the API by group.
+The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node 22.14 or newer): validate, merge, check, and apply from your own code. Every green push to `main` publishes a pre-release: `npm install @vivswan/github-settings-as-code@next` (or `bun add`). The plain `npm install @vivswan/github-settings-as-code` gives the released version once one exists, and the bootstrap pre-release until then. The [library reference](docs/reference/library.md) has the API by group and the versioning rules.
 
 The package is also a command: `npx @vivswan/github-settings-as-code@next check --repository o/r --settings-file .github/settings.yml` runs the action's check from a terminal; the [command line guide](docs/start/cli.md) has every command.
 
