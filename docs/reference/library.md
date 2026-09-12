@@ -21,7 +21,15 @@ The package exports three paths: the entry (`.`), the committed settings.yml JSO
 
 ## The API by group
 
-Every name below is exported from the entry, [src/index.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/src/index.ts). Each group has one short example; the types beside each name are in the bundled declarations. Every fallible call returns a [neverthrow](https://github.com/supermacro/neverthrow) `Result` (or `ResultAsync`) whose error is a typed `Problem`; `describeProblem` renders one as the message the action would print. The examples continue from one another: `settings` is the Validate group's validated document, `client` the Client group's `GithubApi`, and `config` in the Io example a `SingleConfig` (the action's parsed inputs).
+Every name below is exported from the entry, [src/index.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/src/index.ts). Each group has one short example; the types beside each name are in the bundled declarations.
+
+How a call reports failure depends on its group:
+
+- A call that reads or parses input, or runs a whole flow (`validateSettings`, `readSettingsFile`, `parseRepoSlug`, `mergeLayers`, `discoverRepos`, `parseRecipient`, `runSingle`, `runMulti`, `runMerge`, ...), returns a [neverthrow](https://github.com/supermacro/neverthrow) `Result` (or `ResultAsync`) whose error is a typed `Problem`; `describeProblem` renders one as the message the action would print.
+- The engine calls, `checkRepository` and `applyRepository`, always resolve to a report: its `result` field carries the outcome (`clean`, `drift`, `applied`, `partial`, `skipped`, `failed`) and its `outcomes` say what each section did.
+- Report delivery: `deliverArtifactReport` never throws and returns `{ uploaded: true }` or `{ warning }`. Two calls throw instead: `encryptReport` on a recipient `parseRecipient` would have rejected (validate it first), and `openReportChannel` when asked for the `artifact` channel without an `ArtifactUploader`.
+
+The examples continue from one another and form one program (the docs tests compile them in page order): each name is imported once, in the first example that uses it, and later examples reuse it, as they do `settings` (the Validate group's validated document), `client` (the Client group's `GithubApi`), and `config` in the Io example (a `SingleConfig`, the action's parsed inputs, declared there).
 
 ### Validate and merge
 
@@ -86,7 +94,7 @@ The run flows the action wraps: `runSingle` (one repository from a local file), 
 import { concludeMerge, failRun, runMerge, silentIo } from "@vivswan/github-settings-as-code";
 
 const io = silentIo();
-const exitCode = runMerge(
+const mergeExitCode = runMerge(
   { settingsFiles: ["base.yml", "team.yml"], mergedFile: "merged.yml", layering: "merge" },
   io,
 ).match(
@@ -136,8 +144,9 @@ console.log(labels.key, Object.keys(labels.endpoints), sectionGrant(labels));
 `Io` is the output port every flow writes to. `collectingIo()` captures lines, outputs, and summary blocks; `silentIo()` drops them; `prefixedIo(io, prefix)` attributes lines to a target; `maskRegistry` builds the mask pair an `Io` implementation needs.
 
 ```ts
-import { collectingIo, concludeRun, failRun, runSingle } from "@vivswan/github-settings-as-code";
+import { collectingIo, concludeRun, runSingle, type SingleConfig } from "@vivswan/github-settings-as-code";
 
+declare const config: SingleConfig;
 const collected = collectingIo();
 const exitCode = await runSingle(client, config, collected.io).match(
   (target) => concludeRun(collected.io, { kind: "single", mode: config.mode, target }),
@@ -152,4 +161,9 @@ The package and the action share one version, the one in `.release-please-manife
 
 ## One-time publishing setup
 
-For the owner, once. npm adds a trusted publisher only to a package that already exists, so the first version is published by hand from a maintainer machine with two-factor authentication: `bun run build:lib` first (the tarball ships `lib/pkg/`, which is built, not committed), then `npm publish --access public`. Then, on npmjs.com, on the package's settings page, add a trusted publisher of type GitHub Actions with owner `Vivswan`, repository `github-settings-as-code`, workflow filename `ci.yml`, and no environment. Then, under publishing access, choose "Require two-factor authentication and disallow tokens", so the workflow's OIDC identity is the only thing that can publish.
+For the owner, once. npm adds a trusted publisher only to a package that already exists, so the first version is published by hand from a maintainer machine with two-factor authentication. The bootstrap version is a pre-release published under the `next` dist-tag, so no `latest` exists before the first stable release; the exact version command lands with the publishing workflow.
+
+1. Build the library: `bun run build:lib` (the tarball ships `lib/pkg/`, which is built, not committed).
+2. Publish the pre-release under `next`, never `latest`: `npm publish --access public --tag next`.
+3. On npmjs.com, on the package's settings page, add a trusted publisher: type GitHub Actions, owner `Vivswan`, repository `github-settings-as-code`, workflow filename `ci.yml`, no environment.
+4. Under publishing access, choose "Require two-factor authentication and disallow tokens", so the workflow's OIDC identity is the only thing that can publish.

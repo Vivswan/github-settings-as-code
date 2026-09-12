@@ -7,27 +7,45 @@
  * type the emitter could not name, fails here instead of on a consumer's
  * machine.
  *
- * Usage: `bun .github/scripts/package-smoke.ts` from anywhere; every temp
+ * Usage: `bun .github/scripts/package-smoke.ts` from anywhere; the temp
  * directory is removed on every path, failure included.
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SECTION_KEYS } from "../../src/schema.js";
 
 /** This script lives at .github/scripts/, two levels below the repository root. */
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 
 const PACKAGE = "@vivswan/github-settings-as-code";
 
-/** The consumer's runtime import: the entry names and the schema subpath, each asserted. */
-const NODE_CONSUMER = `import { SECTION_KEYS, validateSettings } from "${PACKAGE}";
+/**
+ * The node that runs the consumer. The build tooling (tsdown) needs a newer
+ * node than the engines floor package.json advertises, so CI builds on the
+ * PATH node and names the floor's binary here for the consumer alone.
+ */
+const CONSUMER_NODE = process.env.SMOKE_CONSUMER_NODE ?? "node";
+
+/** The `$id` the committed schema publishes; the schema subpath must serve that document. */
+const SCHEMA_ID =
+  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/HEAD/lib/settings.schema.json";
+
+/**
+ * The consumer's runtime import. The section list and the schema id are
+ * pinned from this checkout's source, so the tarball's bundle must expose
+ * exactly what src/ declares, not merely something.
+ */
+const NODE_CONSUMER = `import { deepStrictEqual } from "node:assert/strict";
+import { SECTION_KEYS, validateSettings } from "${PACKAGE}";
 import schema from "${PACKAGE}/settings.schema.json" with { type: "json" };
 const result = validateSettings({ labels: [] });
 if (result.isErr()) throw new Error("validateSettings rejected an empty labels list: " + result.error.code);
-if (!SECTION_KEYS.includes("labels")) throw new Error("SECTION_KEYS lacks labels");
-if (typeof schema.$schema !== "string") throw new Error("the schema subpath did not resolve to the JSON Schema");
+deepStrictEqual(result.value, { settings: { labels: [] }, warnings: [] });
+deepStrictEqual([...SECTION_KEYS], ${JSON.stringify(SECTION_KEYS)});
+deepStrictEqual(schema.$id, ${JSON.stringify(SCHEMA_ID)});
 console.log("imported " + SECTION_KEYS.length + " section keys and the schema");
 `;
 
@@ -54,26 +72,23 @@ function capture(command: string, args: string[], cwd: string): string {
   });
 }
 
-/**
- * Give `body` fresh temp directories under `prefix` and remove every one of
- * them when it returns or throws.
- */
-export async function withTempDirs<T>(
+export interface SmokeDirs {
+  readonly pack: string;
+  readonly consumer: string;
+}
+
+export async function withSmokeDirs<T>(
   prefix: string,
-  count: number,
-  body: (dirs: string[]) => Promise<T> | T,
+  body: (dirs: SmokeDirs) => Promise<T> | T,
 ): Promise<T> {
-  // Allocated inside the try, so a failing second mkdtemp still removes the first.
-  const dirs: string[] = [];
+  const root = mkdtempSync(join(tmpdir(), prefix));
   try {
-    for (let i = 0; i < count; i++) {
-      dirs.push(mkdtempSync(join(tmpdir(), prefix)));
-    }
+    const dirs: SmokeDirs = { pack: join(root, "pack"), consumer: join(root, "consumer") };
+    mkdirSync(dirs.pack);
+    mkdirSync(dirs.consumer);
     return await body(dirs);
   } finally {
-    for (const dir of dirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    rmSync(root, { recursive: true, force: true });
   }
 }
 
@@ -96,27 +111,21 @@ export function packedTarball(packJson: string, destination: string): string {
 async function main(): Promise<void> {
   run("bun", ["run", "build:lib"], REPO_ROOT);
   run("bun", ["run", "lint:package"], REPO_ROOT);
-  await withTempDirs("gsac-smoke-", 2, ([packDir, consumerDir]) => {
-    if (packDir === undefined || consumerDir === undefined) {
-      throw new Error("withTempDirs handed out fewer directories than asked");
-    }
+  await withSmokeDirs("gsac-smoke-", ({ pack, consumer }) => {
     // --ignore-scripts keeps the prepare hook's output out of the JSON stdout.
     const tarball = packedTarball(
-      capture(
-        "npm",
-        ["pack", "--json", "--ignore-scripts", "--pack-destination", packDir],
-        REPO_ROOT,
-      ),
-      packDir,
+      capture("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", pack], REPO_ROOT),
+      pack,
     );
     writeFileSync(
-      join(consumerDir, "package.json"),
+      join(consumer, "package.json"),
       `${JSON.stringify({ name: "smoke-consumer", private: true, type: "module" }, null, 2)}\n`,
     );
-    run("npm", ["install", tarball, "--no-audit", "--no-fund"], consumerDir);
-    writeFileSync(join(consumerDir, "main.mjs"), NODE_CONSUMER);
-    run("node", ["main.mjs"], consumerDir);
-    writeFileSync(join(consumerDir, "main.ts"), TS_CONSUMER);
+    run("npm", ["install", tarball, "--no-audit", "--no-fund"], consumer);
+    writeFileSync(join(consumer, "main.mjs"), NODE_CONSUMER);
+    run(CONSUMER_NODE, ["--version"], consumer);
+    run(CONSUMER_NODE, ["main.mjs"], consumer);
+    writeFileSync(join(consumer, "main.ts"), TS_CONSUMER);
     run(
       join(REPO_ROOT, "node_modules", ".bin", "tsc"),
       [
@@ -132,7 +141,7 @@ async function main(): Promise<void> {
         "es2022",
         "main.ts",
       ],
-      consumerDir,
+      consumer,
     );
   });
   console.log("package smoke: ok");

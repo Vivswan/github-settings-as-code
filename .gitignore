@@ -404,6 +404,6 @@ dist
 # Finder metadata, kept ignored even if the managed macOS block above changes.
 .DS_Store
 
-# The library build (bun run build:lib, tsdown) is built, not committed, like
-# lib/index.js above; the packaged branch and npm carry it.
+# The library build (bun run build:lib) is built, never committed, like
+# lib/index.js above; the npm tarball ships it.
 lib/pkg/
