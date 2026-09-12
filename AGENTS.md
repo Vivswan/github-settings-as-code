@@ -44,6 +44,7 @@ Code is the source of truth: this section holds only the rules and the decisions
 - The import layering of `src/` is declared in `architecture.yml`; a new cross-layer import is a deliberate edit to that file.
 - A type a section module exposes is exported from its home module, or the bundled declarations cannot reach it and the package-smoke job fails.
 - New sections and endpoints ship with e2e scenarios, and `bun run test:e2e` runs green before they land.
+- No backward-compatibility shims: a change that breaks an input, key, format, or behavior ships the break behind a major with a loud error naming the fix; a one-shot migration only when many files must move at once.
 
 ### Decisions a reader would otherwise reverse
 
