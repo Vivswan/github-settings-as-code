@@ -197,14 +197,16 @@ describe("snapshotRepository", () => {
       api,
       {
         ...opts(),
-        sections: SectionSelection.of({ only: ["labels", "check_suite_preferences"] })._unsafeUnwrap(),
+        sections: SectionSelection.of({
+          only: ["labels", "check_suite_preferences"],
+        })._unsafeUnwrap(),
       },
       captureIo().io,
     );
     expect(result.result).toBe("snapshot");
     expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([
-      ["check_suite_preferences", "unsupported"],
       ["labels", "snapshot"],
+      ["check_suite_preferences", "unsupported"],
     ]);
     expect(Object.keys(result.settings ?? {})).toEqual(["labels"]);
   });

@@ -130,7 +130,6 @@ A snapshot is written so that applying it changes nothing and checking it reads 
 | `actions.<key>` the token cannot read | A sub-endpoint has its own grant (the OIDC template needs Actions) | Nothing for that key; the header names it, and the other keys read back |
 | `rulesets[]` whose `bypass_actors` the token cannot see | GitHub returns the list only to a write-grade token | No entry (kept under `_undeclared: keep`) and a header line; an entry without the list would clear it on the next update |
 | Organization and enterprise rulesets | Inherited, not the repository's to manage | Nothing; a header line names each |
-| `repository` | With `snapshot-file`: the target, defaulting to the current repository. Rejected with `snapshot-dir` |
 | `collaborators`: the repository owner, email invitations | The owner's access is implicit, and an email invitation has no username to declare | No entry and a note each; apply leaves both alone |
 | `collaborators`: expired invitations | A declared one would be cancelled and re-sent; an undeclared one is cancelled under the delete default the file carries | No entry and a note per invitation; add the entry to re-invite |
 | A custom role named `push` or `pull` | In a settings file those words mean the `write` and `read` roles, so no declaration plans as the live role | `collaborators` fails and the file is written without it; `teams` omits the team with a note |
