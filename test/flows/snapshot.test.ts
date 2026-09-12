@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
@@ -240,6 +240,73 @@ function disjointRefusal(snapshotDir: string, reposDir: string): string {
     "outside the repos-dir and copy them over deliberately"
   );
 }
+
+describe("runSnapshot writes through a staging file", () => {
+  const unwritable = (path: string, input: "snapshot-file" | "snapshot-dir", os: string) => ({
+    level: "error" as const,
+    line: `cannot write the snapshot to ${path}: Error: ${os}. Check that the "${input}" input names a writable path`,
+  });
+
+  test("a staging write that fails leaves the previous snapshot intact and reports the write's error", async () => {
+    const api = new MockApi(labelsRoute("o/r", [BUG]));
+    const cfg = fileCfg();
+    const staging = `${cfg.snapshotFile}.tmp`;
+    mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
+    writeFileSync(cfg.snapshotFile, "labels: []\n");
+    // A directory at the staging path fails the write before the rename; the run must not remove it either.
+    mkdirSync(staging);
+    const collected = collectingIo();
+    expect(await run(api, cfg, collected.io)).toBe(1);
+    expect(collected.outputs.result).toBe("failed");
+    expect(collected.lines[0]).toEqual(
+      unwritable(
+        cfg.snapshotFile,
+        "snapshot-file",
+        `EISDIR: illegal operation on a directory, open '${staging}'`,
+      ),
+    );
+    expect(readFileSync(cfg.snapshotFile, "utf8")).toBe("labels: []\n");
+    rmSync(staging, { recursive: true });
+    expect(await run(api, cfg, collectingIo().io)).toBe(0);
+    expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
+    expect(existsSync(staging)).toBe(false);
+  });
+
+  test("a rename that fails removes the staging file, fails only that target, and leaves the destination as it was", async () => {
+    const api = new MockApi({
+      "GET /repos/o/a": { data: { private: false } },
+      "GET /repos/o/b": { data: { private: false } },
+      ...labelsRoute("o/a", [BUG]),
+      ...labelsRoute("o/b", [DOCS]),
+    });
+    const cfg = dirCfg();
+    const fileA = join(cfg.snapshotDir, "o", "a.yml");
+    const fileB = join(cfg.snapshotDir, "o", "b.yml");
+    // A directory holding a file at o/a's destination lets the staging write succeed and the rename fail.
+    mkdirSync(fileA, { recursive: true });
+    writeFileSync(join(fileA, "keep"), "authored\n");
+    const collected = collectingIo();
+    expect(await run(api, cfg, collected.io)).toBe(1);
+    expect(collected.outputs).toEqual({
+      "skipped-sections": "",
+      result: "failed",
+      "repos-result": JSON.stringify({
+        "o/a": { result: "failed", source: "remote", skippedSections: [] },
+        "o/b": { result: "snapshot", source: "remote", skippedSections: [] },
+      }),
+    });
+    const { level, line } = unwritable(
+      fileA,
+      "snapshot-dir",
+      `EISDIR: illegal operation on a directory, rename '${fileA}.tmp' -> '${fileA}'`,
+    );
+    expect(collected.lines[0]).toEqual({ level, line: `o/a: ${line}` });
+    expect(existsSync(`${fileA}.tmp`)).toBe(false);
+    expect(readFileSync(join(fileA, "keep"), "utf8")).toBe("authored\n");
+    expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
+    expect(existsSync(`${fileB}.tmp`)).toBe(false);
+  });
+});
 
 describe("runSnapshot refuses a destination that would overwrite an authored file", () => {
   test.each([

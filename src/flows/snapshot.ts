@@ -10,7 +10,7 @@
  * on disk while nothing about it is printed.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { RepoRef, Target } from "../discovery/targets.js";
@@ -228,8 +228,7 @@ async function snapshotTarget(ctx: {
     };
   }
   try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(
+    writeReplacing(
       path,
       renderSnapshotYaml(result, { schemaUrl: SNAPSHOT_SCHEMA_URL, timestamp: ctx.timestamp }),
     );
@@ -251,6 +250,28 @@ async function snapshotTarget(ctx: {
     note: `written to ${path}`,
     file: path,
   };
+}
+
+/**
+ * Write `text` to `path` through a sibling staging file renamed into place, so
+ * a write that fails partway (disk full, an interrupted run) leaves the
+ * previous snapshot at `path` intact instead of a truncated one; the rename is
+ * atomic for a regular file on POSIX and Windows alike. The staging file is
+ * removed when the write fails.
+ */
+function writeReplacing(path: string, text: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const staging = `${path}.tmp`;
+  try {
+    writeFileSync(staging, text);
+    renameSync(staging, path);
+  } catch (error) {
+    // The write's error is the one reported: a directory at the staging path fails both the write and this rm.
+    try {
+      rmSync(staging, { force: true });
+    } catch {}
+    throw error;
+  }
 }
 
 /**
