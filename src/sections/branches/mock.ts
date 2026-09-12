@@ -65,12 +65,24 @@ export function wildcardMatches(pattern: string, branch: string): boolean {
       // Ruby negates on "!" or "^"; a leading "]" closes the class at once (an empty class matches nothing).
       const negated = pattern[i + 1] === "!" || pattern[i + 1] === "^";
       const start = i + (negated ? 2 : 1);
-      const close = pattern.indexOf("]", start);
+      // Members walk one at a time: a backslash escapes the next character (so an escaped "]" does
+      // not close the class), an unescaped "-" keeps its range meaning, everything else is literal.
+      let members = "";
+      let close = -1;
+      for (let j = start; j < pattern.length; j++) {
+        const member = pattern[j] as string;
+        if (member === "]") {
+          close = j;
+          break;
+        }
+        const escaped = member === "\\" && j + 1 < pattern.length;
+        const literal = escaped ? (pattern[++j] as string) : member;
+        members += !escaped && literal === "-" ? "-" : literal.replace(/[\]\\^[-]/g, "\\$&");
+      }
       if (close < 0) {
         regex += "\\[";
       } else {
         // No class consumes a slash (fnmatch's FNM_PATHNAME), a positive one listing it included.
-        const members = pattern.slice(start, close);
         regex += negated ? `[^/${members}]` : `(?!/)[${members}]`;
         i = close;
       }
