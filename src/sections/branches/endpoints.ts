@@ -23,7 +23,7 @@ export const ENDPOINTS = {
   },
   putProtection: {
     route: "PUT /repos/{owner}/{repo}/branches/{branch}/protection",
-    statuses: { 200: "protection replaced", 404: "the branch does not exist" },
+    statuses: { 200: "protection replaced" },
     // Reached for a missing branch only when the advisory probe below was denied.
     denialHint: MISSING_BRANCH_HINT,
     hints: {
