@@ -9,6 +9,8 @@ import {
   ADMIN_REPO,
   ADMIN_SLUG,
   E2E_TOKEN,
+  layerFile,
+  RUNNER_ROOT_FILES,
   TOKEN_USER_LOGIN,
   VIOLATION_PREFIX,
 } from "./constants.js";
@@ -225,6 +227,37 @@ describe("scenario schema", () => {
       ),
     ).toThrow(/relative path below the working directory/);
   });
+
+  // The runner writes these at the root before the child runs; a destination starting with one
+  // would overwrite it, or hand it to the dir form's walk. Derived from the runner's own list.
+  test.each<[name: string, inputs: Record<string, string>]>([
+    ...Object.values(RUNNER_ROOT_FILES).flatMap(
+      (name): Array<[string, Record<string, string>]> => [
+        [`snapshot_dir: ${name}`, { snapshot_dir: name }],
+        [`snapshot_file: ${name}`, { snapshot_file: name }],
+      ],
+    ),
+    [
+      `a nested path under ${RUNNER_ROOT_FILES.settings}`,
+      { snapshot_dir: `${RUNNER_ROOT_FILES.settings}/out` },
+    ],
+    [`a merge layer, ${layerFile(0)}`, { snapshot_file: layerFile(0) }],
+  ])(
+    "rejects a snapshot destination starting with a runner-owned root file: %s",
+    (_name, inputs) => {
+      expect(() =>
+        parseScenario(
+          {
+            name: "x",
+            settings: {},
+            inputs: { mode: "snapshot", ...inputs },
+            expect: { exit_code: 0 },
+          },
+          "reserved.yml",
+        ),
+      ).toThrow(/may not start with a file the runner keeps/);
+    },
+  );
 
   test("accepts a nested snapshot destination and the dir form's snapshot_converges", () => {
     const s = parseScenario(

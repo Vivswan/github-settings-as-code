@@ -13,6 +13,7 @@ import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report
 import { SECTION_KEYS } from "../../src/schema.js";
 import type { PatResource } from "../../src/sections/contract/permissions.js";
 import type { MustBeNever } from "../../src/types.js";
+import { LAYER_FILE_PREFIX, RUNNER_ROOT_FILES } from "./constants.js";
 import type { LiveState } from "./mock/state.js";
 import { LIVE_STATE_KEYS } from "./mock/state.js";
 
@@ -60,10 +61,14 @@ const OwnerKindSchema = z.enum(["org", "user"]);
 
 /**
  * A snapshot destination stays a plain path below the child's working directory, spelled exactly as
- * the child resolves it: the runner keeps its own files (settings.yml, the layer and defaults files)
- * at that directory's root, so a destination resolving to the root or above it would hand them to
- * the dir form's walk as snapshots, and the child trims surrounding whitespace the runner would not.
+ * the child resolves it (the child trims surrounding whitespace, the runner reads the spelling), and
+ * off the runner's own root files: a destination resolving to the root or above it would hand them
+ * to the dir form's walk as snapshots, and one starting with a runner file would overwrite it.
  */
+const RESERVED_ROOT_NAMES: readonly string[] = Object.values(RUNNER_ROOT_FILES);
+function reservedRootName(segment: string): boolean {
+  return RESERVED_ROOT_NAMES.includes(segment) || segment.startsWith(LAYER_FILE_PREFIX);
+}
 const SnapshotDestinationSchema = z
   .string()
   .refine(
@@ -74,7 +79,10 @@ const SnapshotDestinationSchema = z
       message:
         'a snapshot destination is a relative path below the working directory: no surrounding whitespace and no empty, ".", or ".." segment',
     },
-  );
+  )
+  .refine((path) => !reservedRootName(path.split("/")[0] ?? ""), {
+    message: `a snapshot destination may not start with a file the runner keeps at the working directory's root (${RESERVED_ROOT_NAMES.join(", ")}, ${LAYER_FILE_PREFIX}*)`,
+  });
 
 /** The action inputs a scenario can set; the list inputs stay comma-separated strings, the action's own wire format. */
 const InputsSchema = z

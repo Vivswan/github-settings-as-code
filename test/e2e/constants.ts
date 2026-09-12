@@ -22,3 +22,20 @@ export const E2E_TOKEN = "e2e-inert-token";
  * from GitHub-shaped error bodies. Lives here so validate.ts reads it without a runtime edge into the mock.
  */
 export const VIOLATION_PREFIX = "E2E MOCK VIOLATION:";
+
+/**
+ * The files the runner itself keeps at the root of the child's working directory. A snapshot
+ * destination may not start with one of them: the run would overwrite a harness file, or the dir
+ * form's walk would collect it as a written snapshot. layerFile(i) names a mode: merge layer.
+ */
+export const RUNNER_ROOT_FILES = {
+  settings: "settings.yml",
+  output: "output.txt",
+  summary: "summary.md",
+  merged: "merged.yml",
+  defaults: "defaults.yml",
+} as const;
+export const LAYER_FILE_PREFIX = "layer-";
+export function layerFile(index: number): string {
+  return `${LAYER_FILE_PREFIX}${index}.yml`;
+}

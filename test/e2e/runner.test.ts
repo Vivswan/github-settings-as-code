@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ok } from "neverthrow";
+import { stringify as stringifyYaml } from "yaml";
 import { parseRecipient } from "../../src/report/artifact-report.js";
 import type { RerunCapture } from "./apply-idempotence-proof.js";
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
@@ -19,6 +20,7 @@ import {
   parseGithubOutput,
   parseSummaryOutcomes,
   requestLogFailures,
+  roundTripFailures,
   type ScenarioReport,
   setReplay,
   snapshotCheckInputs,
@@ -26,6 +28,7 @@ import {
   stripMaskLines,
   writtenSnapshotLeaks,
   writtenSnapshotPaths,
+  yamlStrings,
 } from "./runner.js";
 import type { Scenario } from "./schema.js";
 
@@ -88,6 +91,119 @@ describe("writtenSnapshotLeaks (the secret sweep over the written documents)", (
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // A multi-line value serializes as a block scalar: "|-" then one indented line per source line,
+  // so the raw text never contains the value whole. Written through the same emitter the action uses.
+  test("a planted multi-line value, wrapped as a block scalar, is still a leak", () => {
+    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
+    try {
+      const secret = "line one of the key\nline two of the key";
+      const path = "snapshot.yml";
+      const text = stringifyYaml({ webhooks: { entries: [{ url: "https://x", secret }] } });
+      writeFileSync(join(dir, path), text);
+      expect(text).not.toContain(secret);
+      expect(text).toContain("|-");
+      expect(writtenSnapshotLeaks(dir, [path], [secret])).toEqual([
+        `leak: "${secret}" present in the written snapshot ${path}`,
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a document that does not parse as YAML fails on its own instead of passing the sweep silently", () => {
+    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
+    try {
+      writeFileSync(join(dir, "broken.yml"), "labels: [unclosed\n");
+      const failures = writtenSnapshotLeaks(dir, ["broken.yml"], ["hunter2"]);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatch(/^the written snapshot broken.yml is not parseable YAML: /);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("yamlStrings (every key and string leaf of a document)", () => {
+  test("walks mappings, sequences, and scalars, keeping keys and skipping non-strings", () => {
+    expect(
+      yamlStrings({
+        labels: {
+          entries: [{ name: "bug", color: 1, on: true, note: null }],
+          _undeclared: "delete",
+        },
+      }),
+    ).toEqual(["labels", "entries", "name", "bug", "color", "on", "note", "_undeclared", "delete"]);
+    expect(yamlStrings(null)).toEqual([]);
+    expect(yamlStrings("top")).toEqual(["top"]);
+  });
+});
+
+describe("roundTripFailures (the snapshot round trip's verdict)", () => {
+  const clean = {
+    exitCode: 0,
+    outputs: { result: "clean" },
+    summary: "",
+    stdout: "",
+    stderr: "",
+    killedByHarness: false,
+  };
+  const write: LoggedRequest = {
+    method: "POST",
+    pathname: "/repos/o/r/labels",
+    query: "",
+    status: 201,
+  };
+  const read: LoggedRequest = {
+    method: "GET",
+    pathname: "/repos/o/r/labels",
+    query: "",
+    status: 200,
+  };
+  test.each<
+    [
+      label: string,
+      check: typeof clean,
+      requests: LoggedRequest[],
+      violations: string[],
+      want: string[],
+    ]
+  >([
+    ["a clean check with only reads is no failure", clean, [read], [], []],
+    [
+      "a drifted check fails on its exit code and its result",
+      { ...clean, exitCode: 1, outputs: { result: "drift" } },
+      [read],
+      [],
+      [
+        "snapshot round trip[s.yml]: the check exited 1, expected 0",
+        'snapshot round trip[s.yml]: the check\'s result is "drift", expected "clean"',
+      ],
+    ],
+    [
+      "a write during the check is named, and so is the barrier violation it trips",
+      clean,
+      [read, write],
+      ["request POST /repos/o/r/labels is a write in check mode"],
+      [
+        "snapshot round trip[s.yml]: the check wrote 1 time(s): POST /repos/o/r/labels",
+        "snapshot round trip[s.yml]: mock violations:\n  request POST /repos/o/r/labels is a write in check mode",
+      ],
+    ],
+    [
+      "a harness kill is marked on the exit-code failure",
+      { ...clean, exitCode: 143, killedByHarness: true },
+      [],
+      [],
+      [
+        "snapshot round trip[s.yml]: the check exited 143, expected 0 (the harness killed the child after 300000ms)",
+      ],
+    ],
+  ])("%s", (_label, check, requests, violations, want) => {
+    expect(roundTripFailures("snapshot round trip[s.yml]", check, requests, violations)).toEqual(
+      want,
+    );
   });
 });
 

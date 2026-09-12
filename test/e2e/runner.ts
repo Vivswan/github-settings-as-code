@@ -29,7 +29,7 @@ import {
   type Invocation,
   type RerunCapture,
 } from "./apply-idempotence-proof.js";
-import { E2E_TOKEN, ADMIN_SLUG as REPO_SLUG } from "./constants.js";
+import { E2E_TOKEN, layerFile, ADMIN_SLUG as REPO_SLUG, RUNNER_ROOT_FILES } from "./constants.js";
 import { assertIssueReport, checkReportLeaks } from "./issue-report-assert.js";
 import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { isWriteRequest } from "./mock/dispatch.js";
@@ -230,8 +230,16 @@ function expectedReposResult(scenario: Scenario): Record<string, string> | null 
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
+const {
+  settings: SETTINGS_FILE,
+  output: OUTPUT_FILE,
+  summary: SUMMARY_FILE,
+  merged: MERGED_FILE,
+  defaults: DEFAULTS_FILE,
+} = RUNNER_ROOT_FILES;
+
 function mergedFilePath(dir: string): string {
-  return join(dir, "merged.yml");
+  return join(dir, MERGED_FILE);
 }
 
 function documentFileFailures(
@@ -325,17 +333,41 @@ export function writtenSnapshotPaths(
   return [];
 }
 
+/** Every key and string leaf of a parsed YAML document, so a value is matched whole however the emitter wrapped it. */
+export function yamlStrings(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(yamlStrings);
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value).flatMap(([key, nested]) => [key, ...yamlStrings(nested)]);
+  }
+  return [];
+}
+
 /**
  * The leak sweep over the written snapshots: a document is a private surface like the delivered
  * report (a private slug or a private live value belongs in it), so only the secret needles are
- * forbidden, never the whole leaks_nowhere list.
+ * forbidden, never the whole leaks_nowhere list. Matched against the raw text AND every parsed
+ * string: a multi-line value serializes as a block scalar whose lines are indented, so the raw
+ * text alone would miss it. An unparseable document fails on its own.
  */
 export function writtenSnapshotLeaks(dir: string, paths: string[], secrets: string[]): string[] {
   const failures: string[] = [];
   for (const path of paths) {
     const text = readFileSync(join(dir, path), "utf8");
+    let strings: string[] = [];
+    try {
+      strings = yamlStrings(parseYaml(text));
+    } catch (error) {
+      failures.push(
+        `the written snapshot ${path} is not parseable YAML: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     for (const needle of secrets) {
-      if (text.includes(needle)) {
+      if (text.includes(needle) || strings.some((s) => s.includes(needle))) {
         failures.push(`leak: "${needle}" present in the written snapshot ${path}`);
       }
     }
@@ -344,7 +376,7 @@ export function writtenSnapshotLeaks(dir: string, paths: string[], secrets: stri
 }
 
 /** The round-trip verdict both snapshot forms share: the check reads clean and neither writes nor trips the mock. */
-function roundTripFailures(
+export function roundTripFailures(
   label: string,
   check: Invocation,
   requests: LoggedRequest[],
@@ -390,8 +422,8 @@ function childEnv(
     INPUT_TOKEN: E2E_TOKEN,
     GITHUB_REPOSITORY: REPO_SLUG,
     GITHUB_API_URL: apiUrl,
-    GITHUB_OUTPUT: join(dir, "output.txt"),
-    GITHUB_STEP_SUMMARY: join(dir, "summary.md"),
+    GITHUB_OUTPUT: join(dir, OUTPUT_FILE),
+    GITHUB_STEP_SUMMARY: join(dir, SUMMARY_FILE),
     RUNNER_DEBUG: "1",
     // A test knob: millisecond plugin units and the immediate scheduler, so retry scenarios run in milliseconds instead of seconds.
     RETRY_BASE_MS: "1",
@@ -401,11 +433,11 @@ function childEnv(
   // its destination relative to the child's working directory (this temp dir).
   if (inputs.mode === "merge") {
     const layers = (scenario.settings_layers ?? []).map((layer, i) => {
-      const path = join(dir, `layer-${i}.yml`);
+      const path = join(dir, layerFile(i));
       writeFileSync(path, stringifyYaml(layer));
       return path;
     });
-    env["INPUT_SETTINGS-FILE"] = [...layers, join(dir, "settings.yml")].join("\n");
+    env["INPUT_SETTINGS-FILE"] = [...layers, join(dir, SETTINGS_FILE)].join("\n");
     env["INPUT_MERGED-FILE"] = mergedFilePath(dir);
   } else if (inputs.mode === "snapshot") {
     if (inputs.snapshot_file !== undefined) {
@@ -415,7 +447,7 @@ function childEnv(
       env["INPUT_SNAPSHOT-DIR"] = inputs.snapshot_dir;
     }
   } else if (!multi) {
-    env["INPUT_SETTINGS-FILE"] = join(dir, "settings.yml");
+    env["INPUT_SETTINGS-FILE"] = join(dir, SETTINGS_FILE);
   }
   if (inputs.mode) {
     env.INPUT_MODE = inputs.mode;
@@ -455,7 +487,7 @@ function childEnv(
     env["INPUT_REPOS-DIR"] = reposDir;
   }
   if (scenario.defaults_file) {
-    const defaultsPath = join(dir, "defaults.yml");
+    const defaultsPath = join(dir, DEFAULTS_FILE);
     writeFileSync(defaultsPath, stringifyYaml(scenario.defaults_file));
     env["INPUT_DEFAULTS-FILE"] = defaultsPath;
   }
@@ -468,8 +500,8 @@ async function invoke(
   apiUrl: string,
   reposDir?: string,
 ): Promise<Invocation> {
-  const outputFile = join(dir, "output.txt");
-  const summaryFile = join(dir, "summary.md");
+  const outputFile = join(dir, OUTPUT_FILE);
+  const summaryFile = join(dir, SUMMARY_FILE);
   writeFileSync(outputFile, "");
   writeFileSync(summaryFile, "");
 
@@ -636,7 +668,7 @@ export async function runScenario(
         : {}),
       ...opts?.serverOptions,
     });
-    writeFileSync(join(dir, "settings.yml"), settingsYamlFor(scenario));
+    writeFileSync(join(dir, SETTINGS_FILE), settingsYamlFor(scenario));
     first = await invoke(scenario, dir, handle.url);
     // Snapshot NOW: a fault that fires only during an optional re-run must not read as non-vacuous
     // for the primary outcome exitCode, outputs, and reposResult describe.
@@ -829,7 +861,7 @@ export async function runScenario(
           const { repos: _repos, discovery: _discovery, ...single } = scenario;
           check = await invoke({ ...single, inputs: checkInputs }, dir, handle.url, reposDir);
         } else {
-          copyFileSync(join(dir, path), join(dir, "settings.yml"));
+          copyFileSync(join(dir, path), join(dir, SETTINGS_FILE));
           check = await invoke({ ...scenario, inputs: checkInputs }, dir, handle.url);
         }
         const rerunRequests = handle.requests.slice(requestsBefore);
