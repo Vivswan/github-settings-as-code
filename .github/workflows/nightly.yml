@@ -168,6 +168,7 @@ jobs:
           # module's tracking label, which the fleet settings layer applies.
           label-color: "D93F0B"
           label-description: Automated nightly CI failure
+          stream: generic
 
       # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
       - name: Trigger auto-assign for the filed issue

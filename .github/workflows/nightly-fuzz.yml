@@ -95,6 +95,10 @@ jobs:
           label: "fuzz-nightly"
           artifacts-dir: test/e2e/.artifacts
           artifact-name: fuzz-failures-${{ github.run_attempt }}
+          title: Nightly fuzz failures
+          label-color: "B60205"
+          label-description: Automated nightly fuzz failure
+          stream: fuzz
 
       # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
       - name: Trigger auto-assign for the filed issue
@@ -110,3 +114,4 @@ jobs:
         with:
           mode: resolve
           label: "fuzz-nightly"
+          stream: fuzz
