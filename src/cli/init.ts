@@ -166,7 +166,8 @@ export function runInit(
       }
       const grant = grantTable(report.settings, bold);
       const unsupported = keysWith(report, "unsupported");
-      const skipped = keysWith(report, "skipped", "failed");
+      const skipped = keysWith(report, "skipped");
+      const failed = keysWith(report, "failed");
       // An empty document is no starting point, and under --force it would erase the file:
       // a section failing on its own leaves the run partial, and an unsupported-only
       // selection reads back nothing at all.
@@ -177,8 +178,8 @@ export function runInit(
           settingsFile: cfg.settingsFile,
           reasons: [
             ["cannot be read back", unsupported],
-            ["skipped", keysWith(report, "skipped")],
-            ["failed", keysWith(report, "failed")],
+            ["skipped", skipped],
+            ["failed", failed],
             ["nothing exists on the repository", keysWith(report, "snapshot")],
           ],
         });
@@ -198,6 +199,9 @@ export function runInit(
               : [
                   `skipped: ${skipped.join(", ")} (the file omits them; the warnings above say why)`,
                 ]),
+            ...(failed.length === 0
+              ? []
+              : [`failed: ${failed.join(", ")} (the file omits them; the errors above say why)`]),
             "Token permissions the file needs:",
             ...grant.lines.map((line) => `  ${line}`),
           ],
@@ -206,6 +210,7 @@ export function runInit(
             repository: cfg.repo.slug,
             result: report.result,
             skippedSections: skipped,
+            failedSections: failed,
             grant: grant.json,
           },
         };

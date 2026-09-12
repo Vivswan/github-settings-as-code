@@ -225,9 +225,53 @@ describe("init: the written file and the printed grant", () => {
       repository: "o/r",
       result: "snapshot",
       skippedSections: [],
+      failedSections: [],
       grant: Object.fromEntries(
         declared.map((key) => [key, sectionGrant(sectionModule(key as "labels"))]),
       ),
+    });
+  });
+
+  test("a section failing beside one that read back is reported failed, never skipped", async () => {
+    const file = join(tempDir(), "settings.yml");
+    const api = new MockApi({
+      "GET /repos/o/r/labels?per_page=100&page=1": {
+        error: { status: 500, message: "Server Error", body: "" },
+      },
+      "GET /repos/o/r/milestones?state=all&per_page=100&page=1": {
+        data: [{ number: 1, title: "v1", state: "open", description: null, due_on: null }],
+      },
+    });
+    const args = [
+      "init",
+      "--token",
+      TOKEN,
+      "--repository",
+      "o/r",
+      "--settings-file",
+      file,
+      "--sections",
+      "labels,milestones",
+    ];
+    const plain = await cli(args, api);
+    expect(plain.code).toBe(0);
+    expect(plain.stderr).toMatch(/^error: labels: /);
+    expect(plain.stdout).toBe(
+      [
+        `${file} written from o/r: 1 section(s) declared (milestones)`,
+        "failed: labels (the file omits them; the errors above say why)",
+        "Token permissions the file needs:",
+        `  milestones: ${sectionGrant(sectionModule("milestones"))}`,
+        "",
+      ].join("\n"),
+    );
+    expect(Object.keys(parseYaml(readFileSync(file, "utf8")))).toEqual(["milestones"]);
+    const json = await cli([...args, "--force", "--json"], api);
+    expect(json.code).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      result: "partial",
+      skippedSections: [],
+      failedSections: ["labels"],
     });
   });
 
