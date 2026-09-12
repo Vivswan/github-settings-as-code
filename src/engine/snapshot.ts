@@ -1,7 +1,6 @@
 /**
- * The snapshot pipeline: read every supported section back through its read port, assemble the
- * settings document, and validate it before anyone sees it. The read-only twin of runForRepo in
- * ./orchestrate.ts, sharing its allowlist rule and its denial classification.
+ * The read-only twin of runForRepo in ./orchestrate.ts, honoring the sections allowlist by the
+ * same rule.
  */
 
 import { stringify as stringifyYaml } from "yaml";
@@ -30,7 +29,10 @@ import type { SectionSelection } from "./section-selection.js";
 export interface SnapshotOptions {
   /** The target repository, parsed at the caller's validated boundary. */
   repo: RepoRef;
-  /** The allowlist; its required set is unused here, since a snapshot never writes. */
+  /**
+   * The allowlist. Its required set goes unread: required-sections governs what must apply, and
+   * a snapshot never writes, so a denial classifies on onMissingPermission alone.
+   */
   sections: SectionSelection;
   onMissingPermission: "fail" | "warn";
 }
@@ -133,8 +135,6 @@ export async function snapshotRepository(
       );
     } catch (error) {
       if (error instanceof PermissionDenied) {
-        // A snapshot never writes and takes no required set, so a denial classifies on the
-        // skip/fail policy alone.
         const status = opts.onMissingPermission === "warn" ? "skipped" : "failed";
         if (status === "skipped") {
           io.annotate("warning", `${section.key}: skipped - ${error.detail}`);
