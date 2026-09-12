@@ -1290,10 +1290,9 @@ export function stablePublishVerdict(version: string, packument: Packument | nul
     return { publish: false, version, reason: `${version} is already on the registry` };
   }
   const latest = packument["dist-tags"].latest;
-  // A pre-release latest is what a package's FIRST publish leaves behind
-  // (npm tags a first publish latest whatever tag it asked for): the hand
-  // bootstrap after a release merged before the owner's setup. A release
-  // must take latest over from it, so only a newer RELEASE holds one back.
+  // A pre-release on latest is a state the hand bootstrap can leave behind (npm's docs are silent on what a
+  // package's FIRST publish under --tag does to latest). A release must take latest over from it, so only a newer
+  // RELEASE holds one back; an absent latest publishes too.
   if (
     latest !== undefined &&
     parseMinted(latest).pre === null &&

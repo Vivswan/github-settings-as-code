@@ -168,7 +168,7 @@ The package and the action share one version, the one in `.release-please-manife
 | npm dist-tag | Publishes on | Version | Install |
 |---|---|---|---|
 | `next` | Every green push to `main` | The manifest's next patch, then `-main.<run number>.g<sha7>`: `2.0.1-main.412.gb8df084` | `npm install @vivswan/github-settings-as-code@next` |
-| `latest` | Every release cut | The released version: `2.1.0`. Until the first release it names the bootstrap pre-release, which npm tags `latest` as a package's first publish | `npm install @vivswan/github-settings-as-code` |
+| `latest` | Every release cut | The released version: `2.1.0`. Before the first release, whatever the bootstrap left on `latest`: the pre-release, or nothing (see the setup section) | `npm install @vivswan/github-settings-as-code` |
 | none | Every packaged commit on the `build` branch since the library joined it | The commit itself | `npm install github:Vivswan/github-settings-as-code#<packaged sha>` |
 
 The npm dist-tag `latest` is not the git tag `latest`: the git tag names the newest packaged commit on the `build` branch (every green push moves it), the dist-tag names the newest release on the registry.
@@ -191,6 +191,15 @@ version="$(GITHUB_SHA="$(git rev-parse HEAD)" GITHUB_RUN_NUMBER=0 bun .github/sc
 npm version "$version" --no-git-tag-version && npm publish --access public --tag next
 git checkout package.json
 ```
+
+   Then `npm dist-tag ls @vivswan/github-settings-as-code` shows one of two states; npm's documentation says publishing sets `latest` unless `--tag` is used and is silent on a package's first publish, so neither is promised:
+
+   | Dist-tags after the bootstrap | Plain `npm install @vivswan/github-settings-as-code` until the first release |
+   |---|---|
+   | `next` and `latest`, both on the pre-release | Resolves to the bootstrap pre-release |
+   | `next` alone | Fails; `@next` is the install line |
+
+   The stable publish job handles both: it yields only to a newer release, so the first release takes `latest` from the pre-release or creates it.
 
 2. On npmjs.com, on the package's settings page, add a trusted publisher: GitHub Actions, owner `Vivswan`, repository `github-settings-as-code`, workflow filename `ci.yml` (the caller of both hooks), no environment.
 3. Under publishing access, choose "Require two-factor authentication and disallow tokens", so the workflow's OIDC identity is the only thing that can publish.
