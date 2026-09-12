@@ -2,7 +2,7 @@
  * What each subcommand does once its inputs are parsed: the engine and merge
  * runs end exactly where the action's do (concludeRun, concludeMerge,
  * failRun), so the exit codes and the outputs are the action's; the two
- * file-only commands render a result for the program to print.
+ * file-only commands and init render a result for the program to print.
  */
 
 import {
@@ -107,18 +107,27 @@ export function validateFile(file: string, io: Io): Rendered {
   );
 }
 
+/** The PAT grant each section a document declares needs, from the section declarations, as lines and as an object. */
+export function grantTable(
+  settings: ValidatedSettings,
+  bold: (text: string) => string,
+): { sections: string[]; lines: string[]; json: Record<string, string> } {
+  const grants = declaredSections(settings).map(
+    (section) => [section.key, sectionGrant(section)] as const,
+  );
+  return {
+    sections: grants.map(([key]) => key),
+    lines: grants.map(([key, grant]) => `${bold(key)}: ${grant}`),
+    json: Object.fromEntries(grants),
+  };
+}
+
 /** `permissions <file>`: the PAT grant each declared section needs, from the section declarations. */
 export function permissionsFor(file: string, io: Io, bold: (text: string) => string): Rendered {
   return readValidated(file, io).match(
     (settings): Rendered => {
-      const grants = declaredSections(settings).map(
-        (section) => [section.key, sectionGrant(section)] as const,
-      );
-      return {
-        code: 0,
-        lines: grants.map(([key, grant]) => `${bold(key)}: ${grant}`),
-        json: Object.fromEntries(grants),
-      };
+      const { lines, json } = grantTable(settings, bold);
+      return { code: 0, lines, json };
     },
     (problem): Rendered => {
       const message = describeProblem(problem);
