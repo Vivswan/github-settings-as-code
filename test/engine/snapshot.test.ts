@@ -279,6 +279,66 @@ describe("snapshotRepository", () => {
   });
 });
 
+describe("snapshotRepository shape guard", () => {
+  test("a null 200 body on a whole-section read fails the section as a body outside the shape, never an omitted section", async () => {
+    const fake = registryFake(LIVE);
+    const nulling: GithubClient = {
+      tryRequest: (method, path, payload, options) =>
+        method === "GET" && path === "/repos/o/r/code-scanning/default-setup"
+          ? Promise.resolve({ data: null })
+          : fake.tryRequest(method, path, payload, options),
+      tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
+    };
+    const result = await snapshotRepository(
+      nulling,
+      { ...opts(), onlySections: new Set(["code_scanning_default_setup", "labels"]) },
+      captureIo().io,
+    );
+    expect(result.result).toBe("failed");
+    expect(result.settings).toBeUndefined();
+    expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([
+      ["labels", "snapshot"],
+      ["code_scanning_default_setup", "failed"],
+    ]);
+    expect(result.outcomes[1]?.detail).toEqual([
+      expect.stringMatching(
+        /^BUG: code_scanning_default_setup produced a snapshot its own schema rejects - .*code_scanning_default_setup: Invalid input: expected object, received null/,
+      ),
+    ]);
+  });
+});
+
+describe("pages null body", () => {
+  test("a null 200 on the Pages GET fails the section as a body outside the shape, never `pages: null`", async () => {
+    const fake = registryFake(LIVE);
+    const nulling: GithubClient = {
+      tryRequest: (method, path, payload, options) =>
+        method === "GET" && path === "/repos/o/r/pages"
+          ? Promise.resolve({ data: null })
+          : fake.tryRequest(method, path, payload, options),
+      tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
+    };
+    const result = await snapshotRepository(
+      nulling,
+      { ...opts(), onlySections: new Set(["pages"]) },
+      captureIo().io,
+    );
+    expect(result.result).toBe("partial");
+    expect(Object.keys(result.settings ?? {})).toEqual([]);
+    expect(result.outcomes).toEqual([
+      {
+        key: "pages",
+        status: "failed",
+        detail: [
+          expect.stringMatching(
+            /^pages: GET \/repos\/\{owner\}\/\{repo\}\/pages returned a body outside the documented shape - \(body\): Invalid input: expected object, received null/,
+          ),
+        ],
+      },
+    ]);
+  });
+});
+
 describe("renderSnapshotYaml", () => {
   test("a message spanning several lines is commented line by line, so the file still parses", async () => {
     const stubbed = spyOn(labelsSection, "snapshot").mockRejectedValue(

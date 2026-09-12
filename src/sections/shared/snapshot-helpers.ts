@@ -43,17 +43,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * A live value projected onto a schema slice: an object keeps exactly the keys the slice's shape
- * names (a loose object keeps its passthrough keys too), each child projected in turn; a list
- * projects its items; a union projects through its first option accepting the value.
- * A `null` the slice cannot hold is GitHub's "no value" (a not-configured setup's null
- * runner_type), so the key is omitted rather than emitted as an invalid declaration; every other
- * value the slice rejects is left in place for the document validation to name.
- * A passthrough slice (a catchall other than never) keeps every live key by design, so server
- * fields cannot fall away there: a section on such a slice names the keys it reads back itself.
- * The one cast is the boundary: the engine validates the assembled document before returning it.
+ * A live value projected onto a schema slice, so server-assigned fields fall away without a hand
+ * list per section. A nested `null` the slice cannot hold is GitHub's "no value" (a not-configured
+ * setup's runner_type) and its key is omitted; a value the slice rejects at the root stays, so the
+ * engine's validation names a body outside the shape instead of the section vanishing. A
+ * passthrough slice (a catchall other than never) keeps every live key by design, so a section on
+ * one names the keys it reads back itself. The casts are the boundary the engine validates behind.
  */
 export function projectOntoSchema<T>(schema: z.ZodType<T>, live: unknown): T {
+  if (live === null && !schema.safeParse(null).success) {
+    return live as T;
+  }
   return project(schema, live) as T;
 }
 

@@ -105,6 +105,16 @@ describe("snapshot round trip", () => {
         { id: 2, config: { url: "https://ci.example.com/hook" }, events: ["release"] },
       ],
     });
+    // A service hook on the same url counts too: the planner matches against every live hook.
+    const mixed = registryFake({
+      hooks: [
+        { id: 1, config: { url: "https://ci.example.com/hook" } },
+        { id: 2, name: "slack", config: { url: "https://ci.example.com/hook" } },
+      ],
+    });
+    await expect(
+      webhooksSection.snapshot(planContext(webhooksSection, mixed, REPO)),
+    ).rejects.toThrow(/webhooks: GitHub holds webhooks that resolve to one identity/);
     await expect(
       webhooksSection.snapshot(planContext(webhooksSection, hooks, REPO)),
     ).rejects.toThrow(

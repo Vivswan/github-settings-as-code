@@ -16,6 +16,7 @@ export const row: Row = {
         },
       },
       { id: 602, active: false, config: { url: "https://deploy.example.com/hook" } },
+      { id: 603, name: "slack", config: { url: "https://hooks.slack.example/T0/B0" } },
     ],
   },
   expected: {
@@ -42,6 +43,7 @@ export const row: Row = {
       ],
     },
     notes: [
+      'webhooks["https://hooks.slack.example/T0/B0"]: a "slack" service hook is not a web hook this section manages, so it is left out of the snapshot',
       'webhooks["https://ci.example.com/hook"].config.secret: the webhook secret is not readable; export a value as WEBHOOK_SECRET_601 into the environment before apply',
     ],
   },

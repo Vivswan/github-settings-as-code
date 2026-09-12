@@ -305,12 +305,13 @@ export const webhooksSection = {
     return plan;
   },
   // A live hook reports a set secret as "********": the entry carries a `$WEBHOOK_SECRET_<id>`
-  // reference in its place, and a note asks for the value. A hook without a config.url has no
-  // identity this section can declare, so it is noted and left out.
+  // reference in its place, and a note asks for the value. A legacy service hook (name other
+  // than "web") and a hook without a config.url are outside what this section manages, so each is
+  // noted and left out.
   async snapshot(ctx) {
     const live = parseLive(this, ENDPOINTS.list, z.array(LiveHook), await ctx.read.list.listAll());
     const notes: string[] = [];
-    const addressable = live.filter((hook) => {
+    const withUrl = live.filter((hook) => {
       if (typeof hook.config?.url === "string" && hook.config.url !== "") {
         return true;
       }
@@ -319,13 +320,24 @@ export const webhooksSection = {
       );
       return false;
     });
+    // Over every url-bearing hook, service hooks included: the planner matches a declared url
+    // against ALL live hooks, so a web hook sharing a url with a service hook cannot converge.
     rejectLiveDuplicates(
       this,
       "webhook",
-      addressable,
+      withUrl,
       (hook) => String(hook.config?.url),
       (hook) => `${String(hook.config?.url)} (id ${hook.id})`,
     );
+    const addressable = withUrl.filter((hook) => {
+      if (hook.name === undefined || hook.name === "web") {
+        return true;
+      }
+      notes.push(
+        `webhooks[${describeHook(hook)}]: a "${hook.name}" service hook is not a web hook this section manages, so it is left out of the snapshot`,
+      );
+      return false;
+    });
     if (addressable.length === 0) {
       return { value: undefined, notes };
     }
