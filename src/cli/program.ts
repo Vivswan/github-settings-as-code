@@ -1,8 +1,9 @@
 /**
  * The command tree: check, apply, merge, and snapshot mirror the action's modes with
- * INPUT_DECLS as their flags; validate and permissions read a file alone.
- * `--token`, `--json`, `--summary`, and `--verbose` are global. main() runs
- * argv to its exit code without touching the process.
+ * INPUT_DECLS as their flags; init snapshots one repository into the settings
+ * file; validate and permissions read a file alone. `--token`, `--json`,
+ * `--summary`, and `--verbose` are global. main() runs argv to its exit code
+ * without touching the process.
  */
 
 import { Command, CommanderError, Option } from "commander";
@@ -26,7 +27,16 @@ import {
   runConfig,
   validateFile,
 } from "./commands.js";
-import { argvReader, inputOption, inputsForMode, once, tokenValues } from "./inputs.js";
+import { failInit, type InitConfig, parseInitConfig, runInit } from "./init.js";
+import {
+  argvReader,
+  INIT_DESCRIPTIONS,
+  INIT_INPUTS,
+  inputOption,
+  inputsForMode,
+  once,
+  tokenValues,
+} from "./inputs.js";
 import { type CliStreams, cliIo, type MaskedStreams, maskedStreams } from "./io.js";
 
 /** Every subcommand, in help order; the package smoke asserts the installed help names each. */
@@ -35,6 +45,7 @@ export const CLI_COMMANDS = [
   "apply",
   "merge",
   "snapshot",
+  "init",
   "validate",
   "permissions",
 ] as const;
@@ -47,6 +58,7 @@ const DESCRIPTION: Readonly<Record<CliCommand, string>> = {
   merge: "Fold an ordered list of settings files into one document, with no token and no API call",
   snapshot:
     "Write a repository's live settings as a settings file, or one file per multi-repo target under a directory",
+  init: "Start managing a repository: write its live settings to the settings file (.github/settings.yml unless --settings-file says otherwise) and print the PAT grant that file needs",
   validate: "Validate a settings file against the schema; no token, no API call",
   permissions: "Print the PAT grant each section a settings file declares needs",
 };
@@ -77,6 +89,8 @@ export interface ProgramOptions {
   readonly colors?: boolean;
   /** Run a parsed config; tests capture the config here instead of running it. */
   readonly execute?: (cfg: RunConfig, io: Io) => Promise<number>;
+  /** Run a parsed init config to its rendering; tests capture the config here instead of running it. */
+  readonly executeInit?: (cfg: InitConfig, io: Io) => Promise<Rendered>;
 }
 
 /** The production host: process.env and the real client. */
@@ -100,6 +114,7 @@ export function buildProgram(options: ProgramOptions): {
   const colors = options.colors ?? pc.isColorSupported;
   const paint = pc.createColors(colors);
   const execute = options.execute ?? ((cfg, io) => runConfig(cfg, io, host));
+  const executeInit = options.executeInit ?? ((cfg, io) => runInit(cfg, io, host, paint.bold));
   const envToken = host.env.GITHUB_TOKEN?.trim();
   if (envToken !== undefined && envToken !== "") {
     streams.mask(envToken);
@@ -169,6 +184,29 @@ export function buildProgram(options: ProgramOptions): {
       flush();
     });
   }
+
+  const init = program.command("init").description(DESCRIPTION.init);
+  for (const input of INIT_INPUTS) {
+    init.addOption(inputOption(input, INIT_DESCRIPTIONS[input]));
+  }
+  init
+    .option("--force", "Replace the settings file when it already exists; without it, init refuses")
+    .action(async function (this: Command) {
+      const values = this.optsWithGlobals<
+        Globals & { force?: boolean } & Record<string, unknown>
+      >();
+      const { io } = openIo(values);
+      const rendered = await parseInitConfig(
+        argvReader("snapshot", values),
+        values.force === true,
+        host.env,
+      ).match(
+        (cfg) => executeInit(cfg, io),
+        async (problem) => failInit(io, problem),
+      );
+      present(rendered, values);
+      exitCode = rendered.code;
+    });
 
   program
     .command("validate")

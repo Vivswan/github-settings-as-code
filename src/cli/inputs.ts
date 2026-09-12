@@ -51,6 +51,30 @@ export function inputsForMode(mode: Mode): InputName[] {
   return INPUT_NAMES.filter((name) => !hidden.includes(name) && reads(name));
 }
 
+/**
+ * The init subcommand's flags: the snapshot inputs of one repository, with
+ * settings-file as the destination in place of snapshot-file. Filtered from
+ * the declarations so the help keeps their order.
+ */
+const INIT_FLAGS: ReadonlySet<InputName> = new Set<InputName>([
+  "repository",
+  "settings-file",
+  "on-missing-permission",
+  "sections",
+  "api-version",
+]);
+export const INIT_INPUTS: readonly InputName[] = INPUT_NAMES.filter((name) => INIT_FLAGS.has(name));
+
+/** The init flags whose declaration describes another command's use of the input. */
+export const INIT_DESCRIPTIONS: Partial<Record<InputName, string>> = {
+  repository:
+    "Target repository (owner/name). Required outside GitHub Actions, where GITHUB_REPOSITORY supplies it.",
+  "settings-file":
+    "Where the settings document is written: the file apply and check read. One path; an existing file is kept unless --force is passed.",
+  sections:
+    "Optional comma-separated allowlist of sections to read back; every other section is left out of the file.",
+};
+
 /** Every input some subcommand or the program exposes; the mode is the subcommand itself. */
 export function exposedInputs(): InputName[] {
   const flags = new Set<InputName>(["token", ...MODES.flatMap(inputsForMode)]);
@@ -96,10 +120,14 @@ export function once(flag: string): (value: string, previous?: string) => string
   };
 }
 
-/** The commander option for one input: `--<name> <value>`, repeatable when the declaration is a list. */
-export function inputOption(name: InputName): Option {
+/**
+ * The commander option for one input: `--<name> <value>`, repeatable when the
+ * declaration is a list; `description` replaces the declaration's where a
+ * subcommand reads the input for another purpose.
+ */
+export function inputOption(name: InputName, description = inputDescription(name)): Option {
   const parse = isList(name) ? accumulate : once(name);
-  return new Option(`--${name} <value>`, inputDescription(name)).argParser(parse);
+  return new Option(`--${name} <value>`, description).argParser(parse);
 }
 
 /** Commander's attribute for each flag (camelCase of the name), read from commander itself. */

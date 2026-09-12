@@ -10,10 +10,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { CLI_COMMANDS, main } from "../../src/cli/program.js";
-import { type ConfigEnv, type GithubClient, sectionGrant, sectionModule } from "../../src/index.js";
+import { CLI_COMMANDS } from "../../src/cli/program.js";
+import { type ConfigEnv, sectionGrant, sectionModule } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
-import { memoryStream } from "./streams.js";
+import { runCli } from "./streams.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const SINGLE = join(ROOT, "test", "fixtures", "single.yml");
@@ -33,20 +33,7 @@ function tempDir(): string {
   return dir;
 }
 
-async function cli(
-  args: readonly string[],
-  api: GithubClient = new MockApi({}),
-  env: ConfigEnv = {},
-) {
-  const stdout = memoryStream();
-  const stderr = memoryStream();
-  const code = await main(["node", "gsac", ...args], {
-    host: { env, createClient: () => api },
-    streams: { stdout: stdout.stream, stderr: stderr.stream },
-    colors: false,
-  });
-  return { code, stdout: stdout.text(), stderr: stderr.text() };
-}
+const cli = runCli;
 
 describe("check and apply", () => {
   const target = ["--repository", "o/r", "--settings-file", SINGLE, "--token", TOKEN];
