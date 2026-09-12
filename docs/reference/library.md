@@ -21,7 +21,7 @@ The package exports three paths: the entry (`.`), the committed settings.yml JSO
 
 ## The API by group
 
-Every name below is exported from the entry, [src/index.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/src/index.ts). Each group has one short example; the types beside each name are in the bundled declarations.
+Every name below is exported from the entry, [src/index.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/src/index.ts). Each group has one short example; the types beside each name are in the bundled declarations. The examples continue from one another: `result` is the Validate group's validated document, `client` the Client group's `GithubApi`, and `config` in the Io example a `SingleConfig` (the action's parsed inputs).
 
 ### Validate and merge
 
@@ -51,12 +51,12 @@ console.log(parsed.success, SECTION_KEYS.length, schema.$schema);
 
 ### Client
 
-`GithubApi` is the REST and GraphQL client the action uses (retries, throttling, the pinned `DEFAULT_API_VERSION`, trace redaction); `GithubClient` is the interface a test double implements. `isPermissionError` and `isRateLimitError` classify an `ApiError`.
+`GithubApi` is the REST and GraphQL client the action uses (retries, throttling, the pinned `DEFAULT_API_VERSION`, trace redaction); it takes an options object whose only required field is `token` (`io`, `baseUrl`, and `apiVersion` are optional). `GithubClient` is the interface a test double implements. `isPermissionError` and `isRateLimitError` classify an `ApiError`.
 
 ```ts
-import { GithubApi, silentIo } from "@vivswan/github-settings-as-code";
+import { GithubApi } from "@vivswan/github-settings-as-code";
 
-const client = new GithubApi(process.env.GITHUB_TOKEN ?? "", silentIo());
+const client = new GithubApi({ token: process.env.GITHUB_TOKEN ?? "" });
 ```
 
 ### Check and apply
@@ -83,7 +83,7 @@ console.log(report.result, report.outcomes.map((o) => `${o.key}: ${o.status}`), 
 The run flows the action wraps: `runSingle` (one repository from a local file), `runMulti` (repos-dir, discovery, defaults file), `runMerge` (fold files into one), with `concludeRun` and `failRun` turning a finished run into outputs and an exit code. `SingleConfig`, `MultiConfig`, and `MergeConfig` are the inputs the action parses into.
 
 ```ts
-import { runMerge } from "@vivswan/github-settings-as-code";
+import { runMerge, silentIo } from "@vivswan/github-settings-as-code";
 
 const exitCode = runMerge(
   { settingsFiles: ["base.yml", "team.yml"], mergedFile: "merged.yml", layering: "merge" },
