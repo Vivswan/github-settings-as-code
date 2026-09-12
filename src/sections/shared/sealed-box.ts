@@ -16,7 +16,11 @@ const EPHEMERAL_KEY_BYTES = SEALED_BOX_PUBLIC_KEY_BYTES;
 /** XSalsa20's extended nonce, which crypto_box_seal derives instead of transmitting. */
 const NONCE_BYTES = 24;
 
-/** hsalsa20's "expand 32-byte k" constant as the word view hsalsa reads. */
+/**
+ * hsalsa20's "expand 32-byte k" constant as the host-order word view hsalsa reads.
+ * hsalsa byte-swaps its inputs and its output itself on a big-endian host, so the
+ * views stay raw here: little-endian words would be swapped twice there.
+ */
 const HSALSA_SIGMA = new Uint32Array(new TextEncoder().encode("expand 32-byte k").buffer);
 
 /** crypto_box_beforenm runs hsalsa20 with an all-zero 16-byte input. */
@@ -39,8 +43,9 @@ export function decodeBase64(text: string): Uint8Array {
  * libsodium's crypto_box_beforenm: the X25519 shared point through hsalsa20.
  * getSharedSecret throws on a low-order public key (an all-zero shared point),
  * like crypto_scalarmult's -1 that makes libsodium refuse the seal.
+ * test/sections/sealed-box.test.ts pins the result against crypto_box_beforenm.
  */
-function boxSharedKey(secretKey: Uint8Array, publicKey: Uint8Array): Uint8Array {
+export function boxSharedKey(secretKey: Uint8Array, publicKey: Uint8Array): Uint8Array {
   const shared = x25519.getSharedSecret(secretKey, publicKey);
   const key = new Uint32Array(8);
   hsalsa(HSALSA_SIGMA, new Uint32Array(shared.slice().buffer), ZERO_INPUT, key);
@@ -58,8 +63,8 @@ function sealNonce(ephemeralPublicKey: Uint8Array, recipientPublicKey: Uint8Arra
 
 /**
  * Seal `message` so only the holder of `recipientPublicKey`'s secret half can
- * open it. The ephemeral secret key is a parameter only so the tests can pin
- * fixed vectors; production callers let it default to fresh randomness.
+ * open it. `ephemeralSecretKey` exists only so the tests can pin fixed vectors;
+ * production callers must never pass it.
  */
 export function sealBox(
   message: Uint8Array,
