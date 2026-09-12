@@ -14,17 +14,8 @@ on:
         type: string
 
 jobs:
-  # No lane here: the called workflow holds apply-settings-<repo>. The apply
-  # writes with APPLY_SETTING_TOKEN via inherit; the ceiling is contents: read.
-  apply-settings:
-    uses: ./.github/workflows/apply-settings.yml
-    with:
-      sha: ${{ inputs.sha }}
-    secrets: inherit
-
   # Appends the green commit's packaged commit to the `build` branch and moves
-  # the `latest` tag (release-pipeline.ts advance-build). Beside
-  # apply-settings, not behind it: a settings skip must not hold build back.
+  # the `latest` tag (release-pipeline.ts advance-build).
   # No permissions key: the job inherits the caller's grant and pushes with
   # GITHUB_TOKEN when that is contents: write, which suffices because chain
   # commits carry no .github/workflows/ (the same fact update-release.yml's
