@@ -8,6 +8,7 @@ import { stringify as stringifyYaml } from "yaml";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
+import { describeProblem } from "../problem.js";
 import type { SectionKey } from "../schema.js";
 import {
   type EndpointDecl,
@@ -23,7 +24,7 @@ import {
 } from "../sections/contract/module.js";
 import { planContext } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
-import { deniedSectionStatus, excludedBySections, type ValidatedSettings, type ValidatedSettings, validateSettingsDoc, validateSettingsDoc } from "./orchestrate.js";
+import { type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
 import type { SectionSelection } from "./section-selection.js";
 
 export interface SnapshotOptions {
@@ -181,14 +182,14 @@ export async function snapshotRepository(
       new Set(),
       io,
     );
-    if ("error" in verdict) {
-      const detail = `BUG: ${section.key} produced a snapshot its own schema rejects - ${verdict.error}`;
+    if (verdict.isErr()) {
+      const detail = `BUG: ${section.key} produced a snapshot its own schema rejects - ${describeProblem(verdict.error)}`;
       io.annotate("error", detail);
       outcomes.push({ key: section.key, status: "failed", detail: [...snapshot.notes, detail] });
       failed = true;
       continue;
     }
-    document[section.key] = verdict.settings[section.key];
+    document[section.key] = verdict.value[section.key];
     outcomes.push({ key: section.key, status: "snapshot", detail: [...snapshot.notes] });
   }
 
@@ -198,15 +199,15 @@ export async function snapshotRepository(
   // The brand's one mint, over the already-parsed fragments: every section validated alone
   // above, so the whole cannot fail.
   const verdict = validateSettingsDoc(document, `the snapshot of ${opts.repo.slug}`, new Set(), io);
-  if ("error" in verdict) {
+  if (verdict.isErr()) {
     throw new Error(
-      `BUG: the assembled snapshot of ${opts.repo.slug} failed validation after every section validated on its own: ${verdict.error}`,
+      `BUG: the assembled snapshot of ${opts.repo.slug} failed validation after every section validated on its own: ${describeProblem(verdict.error)}`,
     );
   }
   return {
     repo: opts.repo.slug,
     result: partial ? "partial" : "snapshot",
-    settings: verdict.settings,
+    settings: verdict.value,
     outcomes,
   };
 }

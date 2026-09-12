@@ -4,9 +4,8 @@ import {
   type ValidatedSettings,
   validateSettingsDoc,
 } from "../../src/engine/orchestrate.js";
-import type { SettingsSource } from "../../src/engine/secret-refs.js";
 import { type SettingsSource, validateSecretRef } from "../../src/engine/secret-refs.js";
-import { collectSecretValues, collectSecretValues, snapshotSecretReference } from "../../src/engine/secrets.js";
+import { collectSecretValues, snapshotSecretReference } from "../../src/engine/secrets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";

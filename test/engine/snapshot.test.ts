@@ -149,7 +149,10 @@ describe("snapshotRepository", () => {
     const { io, annotations } = captureIo();
     const result = await snapshotRepository(
       denied,
-      { ...opts(), onlySections: new Set(["pages", "custom_properties"]) },
+      {
+        ...opts(),
+        sections: SectionSelection.of({ only: ["pages", "custom_properties"] })._unsafeUnwrap(),
+      },
       io,
     );
     const note =
@@ -173,7 +176,7 @@ describe("snapshotRepository", () => {
     });
     const present = await snapshotRepository(
       live,
-      { ...opts(), onlySections: new Set(["pages"]) },
+      { ...opts(), sections: SectionSelection.of({ only: ["pages"] })._unsafeUnwrap() },
       captureIo().io,
     );
     expect(present.outcomes).toEqual([{ key: "pages", status: "snapshot", detail: [] }]);
@@ -185,7 +188,7 @@ describe("snapshotRepository", () => {
       const quiet = captureIo();
       const nothing = await snapshotRepository(
         live,
-        { ...opts(), onlySections: new Set(["pages"]) },
+        { ...opts(), sections: SectionSelection.of({ only: ["pages"] })._unsafeUnwrap() },
         quiet.io,
       );
       expect(nothing.outcomes).toEqual([{ key: "pages", status: "snapshot", detail: [NOTHING] }]);
@@ -294,7 +297,12 @@ describe("snapshotRepository shape guard", () => {
     };
     const result = await snapshotRepository(
       nulling,
-      { ...opts(), onlySections: new Set(["code_scanning_default_setup", "labels"]) },
+      {
+        ...opts(),
+        sections: SectionSelection.of({
+          only: ["code_scanning_default_setup", "labels"],
+        })._unsafeUnwrap(),
+      },
       captureIo().io,
     );
     expect(result.result).toBe("failed");
@@ -323,7 +331,7 @@ describe("pages null body", () => {
     };
     const result = await snapshotRepository(
       nulling,
-      { ...opts(), onlySections: new Set(["pages"]) },
+      { ...opts(), sections: SectionSelection.of({ only: ["pages"] })._unsafeUnwrap() },
       captureIo().io,
     );
     expect(result.result).toBe("partial");
