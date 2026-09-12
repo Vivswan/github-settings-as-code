@@ -30,6 +30,8 @@ jobs:
         run: bun run typecheck
       - name: Dead code (knip)
         run: bun run knip
+      - name: Compat markers
+        run: bun run check:compat
       - name: Test
         run: bun run test
 
@@ -66,6 +68,11 @@ jobs:
           bun-version-file: .bun-version
       - name: Require the release PR to carry this cycle's anchor
         run: bun .github/scripts/release-pipeline.ts anchor-check
+      # The release PR's tree already carries the version it cuts, so the manifest names the due line: a major
+      # release still carrying a compat marker for its major is unmergeable here, and the removal lands on main first.
+      - name: Refuse a release that still carries compat paths due at its major
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+        run: bun .github/scripts/check-compat-markers.ts --target-major "$(jq -r '."." | split(".")[0]' .release-please-manifest.json)"
 
   schema-check:
     runs-on: ubuntu-latest

@@ -9,6 +9,12 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built where they are needed and never committed on `main`. Every runtime dependency is compiled into them.
 - [COVERAGE.md](COVERAGE.md) is the inventory of the supported API surface. A change that adds or extends a section keeps it in step.
 
+## Backward compatibility
+
+- A compat path that stays (an alias, a retired input still accepted, an arm for an older artifact) carries a comment `COMPAT(vN): <what stays working and what to delete>`, N the major that removes it. JSON takes no comments, so compat in a JSON file is marked in the code that reads it.
+- `bun run check:compat` (in `bun run check` and in CI) rejects a malformed marker and any marker whose major is at or below `package.json`'s, and prints the remaining markers grouped by major.
+- A release PR runs the same check against the major it cuts, so every marker for that major is deleted on `main` before the release can merge.
+
 ## End-to-end tests
 
 The end-to-end tests build the bundle to a temp path and run it as a subprocess against a mock GitHub API, so they exercise the same single-file bundle a release ships.
