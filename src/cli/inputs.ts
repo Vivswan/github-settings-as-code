@@ -116,6 +116,8 @@ function declared(input: InputName, text: string): string {
 interface Clause {
   readonly input: InputName;
   readonly text: string;
+  /** What stands in for `text` when it is removed; a bare removal by default. */
+  readonly replacement?: string;
   /** Met when the subcommand accepts every one of these flags. */
   readonly flags?: readonly InputName[];
   /** Met when the subcommand runs one of these modes. */
@@ -167,6 +169,12 @@ const CLAUSES: readonly Clause[] = [
     ),
     flags: ["report-public-key"],
   },
+  {
+    input: "private-report",
+    text: declared("private-report", "issue, issue-on-failure, or artifact."),
+    replacement: "issue, or issue-on-failure.",
+    flags: ["report-public-key"],
+  },
 ];
 
 function meets(subcommand: Subcommand, clause: Clause): boolean {
@@ -189,7 +197,7 @@ export function inputDescription(name: InputName, subcommand: Subcommand): strin
   let description: string = INPUT_DECLS[name].description;
   for (const clause of CLAUSES) {
     if (clause.input === name && !meets(subcommand, clause)) {
-      description = description.replace(clause.text, "");
+      description = description.replace(clause.text, clause.replacement ?? "");
     }
   }
   if (name === "repository") {

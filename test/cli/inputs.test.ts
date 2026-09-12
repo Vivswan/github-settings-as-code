@@ -701,4 +701,17 @@ describe("the help text", () => {
       INPUT_DECLS.sections.description,
     );
   });
+
+  test("the private-report flag's help offers only the channels the CLI accepts", () => {
+    // No subcommand exposes report-public-key, so the artifact channel leaves the value list too.
+    const check = inputDescription("private-report", modeSubcommand("check"));
+    expect(check).toStartWith("none (default), issue, or issue-on-failure. ");
+    expect(check).not.toContain("artifact");
+    // With the key flag present the declaration stands whole, so the removal is the clause's alone.
+    const withKey = { ...modeSubcommand("check"), flags: new Set(exposedInputs()) };
+    withKey.flags.add("report-public-key");
+    expect(inputDescription("private-report", withKey)).toBe(
+      INPUT_DECLS["private-report"].description,
+    );
+  });
 });
