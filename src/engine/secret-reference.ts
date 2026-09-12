@@ -1,25 +1,28 @@
 /**
- * The `$NAME` reference a snapshot writes in place of a secret value GitHub never reveals. The
- * grammar and the reserved prefixes are the secret-reference module's; this is the one place a
- * snapshot mints a reference from a live secret's name.
+ * The `$NAME` reference a snapshot writes in place of a secret value GitHub never reveals. One
+ * reference per store and name, so two stores holding the same secret name (an Actions and a
+ * Dependabot DEPLOY_TOKEN) never share an environment variable an apply would write to both.
  */
 
-import { RESERVED_REF_PREFIXES } from "../action/secret-refs.js";
-
-/** The prefix that keeps a reserved-looking secret name out of the runner's own namespace. */
-const RESERVED_ESCAPE = "SECRET_";
+import { validateSecretRef } from "../action/secret-refs.js";
 
 /**
- * The environment variable a snapshot asks the operator to export for a live secret: the secret's
- * own name, or `SECRET_<name>` when the bare name would be refused as a reserved runner variable
- * (a repository secret named GITHUB_TOKEN is legal on GitHub; a reference to it is not).
+ * The environment variable a snapshot asks the operator to export for one live secret, and the
+ * whole-value reference the settings file carries for it: `SECRET_<STORE>_<NAME>`. The store leads
+ * so the variable stays out of the runner's reserved namespaces (`ACTIONS_*` is reserved, so the
+ * store cannot lead as `ACTIONS_SECRET_...`); the reference grammar itself proves the mint.
  */
-export function snapshotSecretVariable(secretName: string): string {
-  const reserved = RESERVED_REF_PREFIXES.some((prefix) => secretName.startsWith(prefix));
-  return reserved ? `${RESERVED_ESCAPE}${secretName}` : secretName;
-}
-
-/** The whole-value reference for a live secret, as the settings file spells it. */
-export function snapshotSecretReference(secretName: string): string {
-  return `$${snapshotSecretVariable(secretName)}`;
+export function snapshotSecretReference(
+  store: string,
+  secretName: string,
+): { variable: string; reference: string } {
+  const variable = `SECRET_${store.toUpperCase()}_${secretName}`;
+  const reference = `$${variable}`;
+  const checked = validateSecretRef(reference, "operator", `the ${store} secret ${secretName}`);
+  if (!checked.ok) {
+    throw new Error(
+      `BUG: the snapshot minted a reference the settings file refuses: ${checked.error}`,
+    );
+  }
+  return { variable, reference };
 }

@@ -129,14 +129,15 @@ export async function snapshotRepository(
       failed = true;
       continue;
     }
-    document[section.key] = snapshot.value;
+    document[section.key] = verdict.settings[section.key];
     outcomes.push({ key: section.key, status: "snapshot", detail: [...snapshot.notes] });
   }
 
   if (failed) {
     return { repo: opts.repo.slug, result: "failed", outcomes };
   }
-  // The brand's one mint: every section validated alone above, so the whole cannot fail.
+  // The brand's one mint, over the already-parsed fragments: every section validated alone
+  // above, so the whole cannot fail.
   const verdict = validateSettingsDoc(document, `the snapshot of ${opts.repo.slug}`, new Set(), io);
   if ("error" in verdict) {
     throw new Error(
@@ -154,7 +155,8 @@ export async function snapshotRepository(
 /**
  * The snapshot as a settings file: the language-server schema pin, a comment header naming the
  * repository, the moment (supplied by the caller, so the text is deterministic), and every
- * outcome line, then the document as the merge flow writes one.
+ * outcome line, then the document as the merge flow writes one. A message spanning several
+ * physical lines (an API error body) is commented line by line, so no line escapes the header.
  */
 export function renderSnapshotYaml(
   result: RenderableSnapshot,
@@ -164,7 +166,9 @@ export function renderSnapshotYaml(
     `# yaml-language-server: $schema=${opts.schemaUrl}`,
     `# Snapshot of ${result.repo} taken ${opts.timestamp}`,
     ...result.outcomes.flatMap((outcome) =>
-      outcome.detail.map((line) => `# ${outcome.key}: ${line}`),
+      outcome.detail.flatMap((message) =>
+        message.split(/\r?\n/).map((line) => `# ${outcome.key}: ${line}`),
+      ),
     ),
   ];
   return `${header.join("\n")}\n${stringifyYaml(result.settings)}`;

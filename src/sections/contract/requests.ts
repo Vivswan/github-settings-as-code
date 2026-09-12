@@ -350,15 +350,14 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
 }
 
 /**
- * Two entries resolving to one natural key would fight each other on every run. Every collision is
- * collected and reported once (each against the first entry under its key), so N duplicates cost one run to discover.
+ * Every pair of items resolving to the same natural key, as `"first" and "second"` prose; the
+ * declared-side and live-side rejections both read it.
  */
-export function rejectDuplicates<T>(
-  section: SectionMeta,
+export function collidingPairs<T>(
   items: readonly T[],
   keyOf: (item: T) => string,
   describe: (item: T) => string,
-): void {
+): string[] {
   const seen = new Map<string, string>();
   const collisions: string[] = [];
   for (const item of items) {
@@ -370,6 +369,20 @@ export function rejectDuplicates<T>(
     }
     seen.set(key, describe(item));
   }
+  return collisions;
+}
+
+/**
+ * Two entries resolving to one natural key would fight each other on every run. Every collision is
+ * collected and reported once (each against the first entry under its key), so N duplicates cost one run to discover.
+ */
+export function rejectDuplicates<T>(
+  section: SectionMeta,
+  items: readonly T[],
+  keyOf: (item: T) => string,
+  describe: (item: T) => string,
+): void {
+  const collisions = collidingPairs(items, keyOf, describe);
   if (collisions.length > 0) {
     throw new Error(
       `${section.key}: the settings file declares entries that name the same ${section.key} entry: ${collisions.join("; ")}. Keep exactly one entry per resource`,

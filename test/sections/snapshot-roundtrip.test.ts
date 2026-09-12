@@ -63,8 +63,12 @@ interface Row {
 
 const STAMPS = { created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 
-/** One secret family's row: the names read back as references, one note each; a reserved-prefixed name is escaped. */
-function secretsRow(section: SnapshotSection, family: keyof LiveState): Row {
+/**
+ * One secret family's row: the names read back as per-store references (so the same name in two
+ * stores never shares a variable), one note each; a reserved-looking name needs no escape.
+ */
+function secretsRow(section: SnapshotSection, store: string, family: keyof LiveState): Row {
+  const STORE = store.toUpperCase();
   return {
     section,
     live: {
@@ -77,13 +81,13 @@ function secretsRow(section: SnapshotSection, family: keyof LiveState): Row {
       value: {
         _undeclared: "keep",
         entries: [
-          { name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" },
-          { name: "GITHUB_PAT", value: "$SECRET_GITHUB_PAT" },
+          { name: "DEPLOY_TOKEN", value: `$SECRET_${STORE}_DEPLOY_TOKEN` },
+          { name: "GITHUB_PAT", value: `$SECRET_${STORE}_GITHUB_PAT` },
         ],
       },
       notes: [
-        `${section.key}[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as DEPLOY_TOKEN before apply`,
-        `${section.key}[GITHUB_PAT]: value of GITHUB_PAT is not readable; export it into the environment as SECRET_GITHUB_PAT before apply`,
+        `${section.key}[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_${STORE}_DEPLOY_TOKEN before apply`,
+        `${section.key}[GITHUB_PAT]: value of GITHUB_PAT is not readable; export it into the environment as SECRET_${STORE}_GITHUB_PAT before apply`,
       ],
     },
   };
@@ -139,10 +143,10 @@ const ROWS: { readonly [K in SnapshotKey]: Row } = {
       notes: [],
     },
   },
-  actions_secrets: secretsRow(actionsSecretsSection, "actions_secrets"),
-  dependabot_secrets: secretsRow(dependabotSecretsSection, "dependabot_secrets"),
-  codespaces_secrets: secretsRow(codespacesSecretsSection, "codespaces_secrets"),
-  agents_secrets: secretsRow(agentsSecretsSection, "agents_secrets"),
+  actions_secrets: secretsRow(actionsSecretsSection, "actions", "actions_secrets"),
+  dependabot_secrets: secretsRow(dependabotSecretsSection, "dependabot", "dependabot_secrets"),
+  codespaces_secrets: secretsRow(codespacesSecretsSection, "codespaces", "codespaces_secrets"),
+  agents_secrets: secretsRow(agentsSecretsSection, "agents", "agents_secrets"),
   workflows: {
     section: workflowsSection,
     live: {
@@ -296,7 +300,7 @@ const ROWS: { readonly [K in SnapshotKey]: Row } = {
               url: "https://ci.example.com/hook",
               content_type: "json",
               insecure_ssl: "0",
-              secret: "$WEBHOOK_SECRET_1",
+              secret: "$WEBHOOK_SECRET_601",
             },
             events: ["push", "pull_request"],
             active: true,
@@ -310,7 +314,7 @@ const ROWS: { readonly [K in SnapshotKey]: Row } = {
         ],
       },
       notes: [
-        'webhooks["https://ci.example.com/hook"].config.secret: the webhook secret is not readable; export a value as WEBHOOK_SECRET_1 into the environment before apply',
+        'webhooks["https://ci.example.com/hook"].config.secret: the webhook secret is not readable; export a value as WEBHOOK_SECRET_601 into the environment before apply',
       ],
     },
   },
@@ -450,8 +454,55 @@ describe("snapshot round trip", () => {
     );
   });
 
+  test("live duplicates under one identity fail the snapshot, naming the pairs", async () => {
+    const keys = registryFake({
+      deploy_keys: [
+        { title: "ci", key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOne" },
+        { title: "ci", key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITwo" },
+      ],
+    });
+    await expect(
+      deployKeysSection.snapshot(planContext(deployKeysSection, keys, REPO)),
+    ).rejects.toThrow(
+      'deploy_keys: GitHub holds deploy keys that resolve to one identity: "ci" and "ci". This section manages one deploy key per identity, so the snapshot cannot declare them; delete all but one of each on GitHub, then snapshot again',
+    );
+    const hooks = registryFake({
+      hooks: [
+        { id: 1, config: { url: "https://ci.example.com/hook" }, events: ["push"] },
+        { id: 2, config: { url: "https://ci.example.com/hook" }, events: ["release"] },
+      ],
+    });
+    await expect(
+      webhooksSection.snapshot(planContext(webhooksSection, hooks, REPO)),
+    ).rejects.toThrow(
+      'webhooks: GitHub holds webhooks that resolve to one identity: "https://ci.example.com/hook (id 1)" and "https://ci.example.com/hook (id 2)". This section manages one webhook per identity, so the snapshot cannot declare them; delete all but one of each on GitHub, then snapshot again',
+    );
+  });
+
+  test("a hook without a config.url is noted and left out; alone, it leaves nothing to declare", async () => {
+    const api = registryFake({ hooks: [{ id: 7, config: {} }] });
+    const snapshot = await webhooksSection.snapshot(planContext(webhooksSection, api, REPO));
+    expect(snapshot).toEqual({
+      value: undefined,
+      notes: [
+        "webhooks[id 7 (no config.url)]: the hook has no config.url, the natural key this section manages by, so it is left out of the snapshot",
+      ],
+    });
+  });
+
+  test("no Pages site reads back as nothing to declare, with the permission ambiguity noted", async () => {
+    const api = registryFake({});
+    const snapshot = await pagesSection.snapshot(planContext(pagesSection, api, REPO));
+    expect(snapshot).toEqual({
+      value: undefined,
+      notes: [
+        "pages: GitHub reports no Pages site. A fine-grained token missing the Pages permission gets the same answer; if this repository does have a Pages site, grant the token Pages read and snapshot again",
+      ],
+    });
+  });
+
   test("sections without live state read back as nothing to declare", async () => {
-    // The mock's defaults: no Pages site, no limit with the cap disabled and nobody bypassing it,
+    // The mock's defaults: no limit with the cap disabled and nobody bypassing it,
     // no custom property values, every list empty.
     const api = registryFake({});
     for (const key of [
@@ -459,7 +510,6 @@ describe("snapshot round trip", () => {
       "autolinks",
       "actions_secrets",
       "workflows",
-      "pages",
       "milestones",
       "interaction_limits",
       "actions_variables",

@@ -29,7 +29,11 @@ import {
 } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
-import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
+import {
+  knobbedSnapshot,
+  projectOntoSchema,
+  rejectLiveDuplicates,
+} from "../shared/snapshot-helpers.js";
 import { WebhookConfig } from "./schema.js";
 
 const LiveHook = z.looseObject({
@@ -138,9 +142,13 @@ function describeHook(hook: LiveHook): string {
 const CANNOT_VERIFY_SECRET =
   'GitHub never reveals a webhook secret (reads echo "********"), so the declared value cannot be verified; apply re-sends it on every run so rotations propagate';
 
-/** The environment variable a snapshot names for the Nth (1-based) live hook's secret. */
-function snapshotSecretVariable(index: number): string {
-  return `WEBHOOK_SECRET_${index}`;
+/**
+ * The environment variable a snapshot names for one live hook's secret, keyed by the hook's id
+ * (the number in its settings URL): a list position would rebind every later hook's variable to
+ * another hook's value once a hook is deleted and the repository is snapshotted again.
+ */
+function snapshotSecretVariable(hookId: number): string {
+  return `WEBHOOK_SECRET_${hookId}`;
 }
 
 export const webhooksSection = {
@@ -292,20 +300,37 @@ export const webhooksSection = {
     }
     return plan;
   },
-  // A live hook reports a set secret as "********": the entry carries a `$WEBHOOK_SECRET_<n>`
-  // reference in its place (numbered by list position), and a note asks for the value.
+  // A live hook reports a set secret as "********": the entry carries a `$WEBHOOK_SECRET_<id>`
+  // reference in its place, and a note asks for the value. A hook without a config.url has no
+  // identity this section can declare, so it is noted and left out.
   async snapshot(ctx) {
     const live = parseLive(this, ENDPOINTS.list, z.array(LiveHook), await ctx.read.list.listAll());
-    if (live.length === 0) {
-      return { value: undefined, notes: [] };
-    }
     const notes: string[] = [];
-    const entries = live.map((hook, index) => {
+    const addressable = live.filter((hook) => {
+      if (typeof hook.config?.url === "string" && hook.config.url !== "") {
+        return true;
+      }
+      notes.push(
+        `webhooks[${describeHook(hook)}]: the hook has no config.url, the natural key this section manages by, so it is left out of the snapshot`,
+      );
+      return false;
+    });
+    rejectLiveDuplicates(
+      this,
+      "webhook",
+      addressable,
+      (hook) => String(hook.config?.url),
+      (hook) => `${String(hook.config?.url)} (id ${hook.id})`,
+    );
+    if (addressable.length === 0) {
+      return { value: undefined, notes };
+    }
+    const entries = addressable.map((hook) => {
       const entry = projectOntoSchema(WebhookConfig, hook);
       if (entry.config.secret === undefined) {
         return entry;
       }
-      const variable = snapshotSecretVariable(index + 1);
+      const variable = snapshotSecretVariable(hook.id);
       notes.push(
         `webhooks[${describeHook(hook)}].config.secret: the webhook secret is not readable; export a value as ${variable} into the environment before apply`,
       );

@@ -33,7 +33,7 @@ import {
 } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
-import { knobbedSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
+import { knobbedSnapshot, projectOntoSchema, rejectLiveDuplicates } from "./snapshot-helpers.js";
 
 /** A list section enumerates its live resources, so it is exactly a section with an undeclared policy. */
 export type ListSectionKey = UndeclaredPolicySection;
@@ -525,9 +525,8 @@ async function planList(
 }
 
 /**
- * The live list read back as entries: each item in its comparable form (the lens normalizes as
- * GitHub stores), projected onto the entry slice so the server-owned fields fall away, under the
- * section's default policy. An empty list is nothing to declare.
+ * Items are normalized as GitHub stores them before the projection onto the entry slice, so the
+ * read-back compares equal to the declaration that produced it.
  */
 async function snapshotList(
   decl: ErasedDecl,
@@ -543,7 +542,17 @@ async function snapshotList(
   if (live.length === 0) {
     return { value: undefined, notes: [] };
   }
-  const entries = live.map((item) => projectOntoSchema(decl.entry, decl.lens.fromLive(item)));
+  const fold = decl.identity.fold ?? ((name: string) => name);
+  const comparable = live.map((item) => decl.lens.fromLive(item));
+  const nameOfItem = (item: Comparable<string>): string => nameOf(item, decl.identity.field);
+  rejectLiveDuplicates(
+    section,
+    decl.noun,
+    comparable,
+    (item) => fold(nameOfItem(item)),
+    nameOfItem,
+  );
+  const entries = comparable.map((item) => projectOntoSchema(decl.entry, item));
   return { value: knobbedSnapshot(section, entries), notes: [] };
 }
 

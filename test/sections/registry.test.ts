@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SECTION_KEYS, type SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import type { checkSuitePreferencesSection } from "../../src/sections/check_suite_preferences/index.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -1003,7 +1004,9 @@ describe("handler contracts", () => {
     // The snapshot twin: a module without snapshot() measures exact (nothing to compare), the
     // shipped labels module measures exact, and labels' snapshot() over workflows' dictionary
     // measures misdeclared.
-    type _NoSnapshot = MustBeNever<MisdeclaredSnapshotModule<"workflows", typeof workflowsSection>>;
+    type _NoSnapshot = MustBeNever<
+      MisdeclaredSnapshotModule<"check_suite_preferences", typeof checkSuitePreferencesSection>
+    >;
     type _ExactSnapshot = MustBeNever<MisdeclaredSnapshotModule<"labels", typeof labelsSection>>;
     const misdeclaredSnapshot = {
       ...labelsSection,

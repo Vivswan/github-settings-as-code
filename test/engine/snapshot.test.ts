@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, spyOn, test } from "bun:test";
+import { parse as parseYaml } from "yaml";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import {
   type RenderableSnapshot,
@@ -97,7 +98,7 @@ describe("snapshotRepository", () => {
     });
     expect(result.settings?.actions_secrets).toEqual({
       _undeclared: "keep",
-      entries: [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }],
+      entries: [{ name: "DEPLOY_TOKEN", value: "$SECRET_ACTIONS_DEPLOY_TOKEN" }],
     });
     // Every registered section has exactly one outcome, unsupported ones with their reason.
     expect(result.outcomes.map((o) => o.key)).toEqual(SECTIONS.map((s) => s.key));
@@ -127,7 +128,7 @@ describe("snapshotRepository", () => {
       key: "actions_secrets",
       status: "snapshot",
       detail: [
-        "actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as DEPLOY_TOKEN before apply",
+        "actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
       ],
     });
     expect(result.outcomes.find((o) => o.key === "milestones")).toEqual({
@@ -136,7 +137,7 @@ describe("snapshotRepository", () => {
       detail: ["nothing exists on the repository, so the section is omitted"],
     });
     expect(annotations).toContain(
-      "notice: actions_secrets: actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as DEPLOY_TOKEN before apply",
+      "notice: actions_secrets: actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
     );
   });
 
@@ -228,6 +229,39 @@ describe("snapshotRepository", () => {
 });
 
 describe("renderSnapshotYaml", () => {
+  test("a message spanning several lines is commented line by line, so the file still parses", async () => {
+    const stubbed = spyOn(labelsSection, "snapshot").mockRejectedValue(
+      new Error("502 Bad Gateway\nupstream unavailable"),
+    );
+    try {
+      const result = await snapshotRepository(
+        registryFake(LIVE),
+        {
+          ...opts(),
+          sections: SectionSelection.of({ only: ["labels", "actions_variables"] })._unsafeUnwrap(),
+        },
+        captureIo().io,
+      );
+      expect(result.result).toBe("partial");
+      const rendered = renderSnapshotYaml(result as RenderableSnapshot, {
+        schemaUrl: "https://example.test/settings.schema.json",
+        timestamp: "2026-09-11T00:00:00Z",
+      });
+      expect(rendered.split("\n").slice(2, 4)).toEqual([
+        "# labels: labels: 502 Bad Gateway",
+        "# labels: upstream unavailable",
+      ]);
+      expect(parseYaml(rendered)).toEqual({
+        actions_variables: {
+          _undeclared: "delete",
+          entries: [{ name: "REGION", value: "eu-west-1" }],
+        },
+      });
+    } finally {
+      stubbed.mockRestore();
+    }
+  });
+
   test("pins the schema, dates the header, comments every outcome line, and writes the document", async () => {
     const result = await snapshotRepository(
       registryFake(LIVE),
@@ -248,7 +282,7 @@ describe("renderSnapshotYaml", () => {
       [
         "# yaml-language-server: $schema=https://example.test/settings.schema.json",
         "# Snapshot of o/r taken 2026-09-11T00:00:00Z",
-        "# actions_secrets: actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as DEPLOY_TOKEN before apply",
+        "# actions_secrets: actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
         "# check_suite_preferences: check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run",
         "labels:",
         "  _undeclared: delete",
@@ -260,7 +294,7 @@ describe("renderSnapshotYaml", () => {
         "  _undeclared: keep",
         "  entries:",
         "    - name: DEPLOY_TOKEN",
-        "      value: $DEPLOY_TOKEN",
+        "      value: $SECRET_ACTIONS_DEPLOY_TOKEN",
         "",
       ].join("\n"),
     );

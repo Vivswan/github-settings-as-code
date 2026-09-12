@@ -8,6 +8,7 @@ import type { z } from "zod";
 import type { UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
+import { collidingPairs } from "../contract/requests.js";
 
 /** The zod internals the projection walks: the def discriminator and its children. */
 interface ProjectionDef {
@@ -111,6 +112,26 @@ function project(schema: z.ZodType, live: unknown): unknown {
         );
       }
       return live;
+  }
+}
+
+/**
+ * Refuse a live list holding two resources under one identity (GitHub allows repeated deploy-key
+ * titles and hook urls): the planner manages one resource per identity and would refuse the
+ * snapshot's own file, so the snapshot fails here, naming the pairs, instead of emitting it.
+ */
+export function rejectLiveDuplicates<T>(
+  section: SectionMeta,
+  noun: string,
+  items: readonly T[],
+  keyOf: (item: T) => string,
+  describe: (item: T) => string,
+): void {
+  const collisions = collidingPairs(items, keyOf, describe);
+  if (collisions.length > 0) {
+    throw new Error(
+      `${section.key}: GitHub holds ${noun}s that resolve to one identity: ${collisions.join("; ")}. This section manages one ${noun} per identity, so the snapshot cannot declare them; delete all but one of each on GitHub, then snapshot again`,
+    );
   }
 }
 

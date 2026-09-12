@@ -8,7 +8,7 @@
  */
 
 import type { z } from "zod";
-import { snapshotSecretReference, snapshotSecretVariable } from "../../engine/secret-reference.js";
+import { snapshotSecretReference } from "../../engine/secret-reference.js";
 import type { SettingsFile } from "../../schema.js";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsSecretConfig } from "../actions_secrets/schema.js";
@@ -250,8 +250,8 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     return planSecrets(section, scope, { entries, policy, defaultPolicy });
   };
 
-  // GitHub lists names only, so each entry carries the `$NAME` reference the operator must export
-  // before an apply, and a note says so per secret.
+  // GitHub lists names only, so each entry carries the per-store reference the operator must
+  // export before an apply, and a note says so per secret.
   const snapshot = async (ctx: PlanContext<WideEndpoints>): Promise<WideSnapshot> => {
     const live = parseLive(
       section,
@@ -262,10 +262,14 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }
-    const entries = live.map(({ name }) => ({ name, value: snapshotSecretReference(name) }));
-    const notes = live.map(
-      ({ name }) =>
-        `${key}[${name}]: value of ${name} is not readable; export it into the environment as ${snapshotSecretVariable(name)} before apply`,
+    const references = live.map(({ name }) => ({
+      name,
+      ...snapshotSecretReference(pathSegment, name),
+    }));
+    const entries = references.map(({ name, reference }) => ({ name, value: reference }));
+    const notes = references.map(
+      ({ name, variable }) =>
+        `${key}[${name}]: value of ${name} is not readable; export it into the environment as ${variable} before apply`,
     );
     return { value: knobbedSnapshot(section, entries), notes };
   };
