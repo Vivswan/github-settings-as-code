@@ -75,3 +75,4 @@ expect:
     - PATCH /
     - PUT /
     - DELETE /
+  snapshot_converges: true

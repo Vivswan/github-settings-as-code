@@ -21,7 +21,8 @@ export interface Invocation {
 
 /**
  * Shape-compatible with checkLeaks' observed argument, so a leak conditional on check mode or converged
- * state is swept exactly like the primary invocation.
+ * state is swept exactly like the primary invocation. `requests` is the slice of the mock's log this
+ * re-run produced, so a failure artifact shows what the re-run asked for.
  */
 export interface RerunCapture {
   label: string;
@@ -29,15 +30,21 @@ export interface RerunCapture {
   stderr: string;
   summary: string;
   outputs: Record<string, string>;
+  requests: LoggedRequest[];
 }
 
-export function captureRerun(label: string, run: Invocation): RerunCapture {
+export function captureRerun(
+  label: string,
+  run: Invocation,
+  requests: LoggedRequest[],
+): RerunCapture {
   return {
     label,
     stdout: run.stdout,
     stderr: run.stderr,
     summary: run.summary,
     outputs: run.outputs,
+    requests,
   };
 }
 
@@ -260,7 +267,9 @@ export async function assertApplyIdempotent(
   const violationsBefore = handle.violations.length;
 
   const second = await child.invoke(rerun);
-  reruns.push(captureRerun("apply-idempotence second apply", second));
+  reruns.push(
+    captureRerun("apply-idempotence second apply", second, handle.requests.slice(requestsBefore)),
+  );
   if (second.exitCode !== 0) {
     failures.push(
       `apply-idempotence: second apply exited ${second.exitCode}, expected 0${child.killNote(second)}`,
@@ -284,7 +293,9 @@ export async function assertApplyIdempotent(
   const checkViolationsBefore = handle.violations.length;
   handle.enterCheckMode();
   const check = await child.invoke({ ...rerun, inputs: { ...rerun.inputs, mode: "check" } });
-  reruns.push(captureRerun("apply-idempotence check", check));
+  reruns.push(
+    captureRerun("apply-idempotence check", check, handle.requests.slice(checkRequestsBefore)),
+  );
   if (check.exitCode !== 0) {
     failures.push(
       `apply-idempotence: the check run after the second apply exited ${check.exitCode}, expected 0${child.killNote(check)}`,
