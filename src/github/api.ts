@@ -12,7 +12,13 @@ import { retry } from "@octokit/plugin-retry";
 import { throttling } from "@octokit/plugin-throttling";
 import type Bottleneck from "bottleneck/light.js";
 import { type Io, maskRegistry } from "../io.js";
-import { IMMEDIATE_SCHEDULER, type Scheduler, TIMERS_SCHEDULER } from "./scheduler.js";
+import {
+  IMMEDIATE_SCHEDULER,
+  type Scheduler,
+  type ThrottleGroups,
+  TIMERS_SCHEDULER,
+  throttleGroups,
+} from "./scheduler.js";
 import { redactSecretPayloadSafe } from "./secret-scan.js";
 
 export interface ApiError {
@@ -406,6 +412,8 @@ export class GithubApi implements GithubClient {
         // The plugin's option types name Bottleneck's whole class; a Scheduler is the slice of it the plugin calls.
         Bottleneck: scheduler as unknown as typeof Bottleneck,
         retryAfterBaseValue: retryBaseMs,
+        // The plugin reads global and auth from its state, not from its declared options, hence the cast.
+        ...(throttleGroups(scheduler) as Record<keyof ThrottleGroups, Bottleneck.Group>),
         write: new scheduler.Group({
           id: "octokit-write",
           maxConcurrent: 1,

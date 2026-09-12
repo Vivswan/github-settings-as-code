@@ -268,7 +268,7 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
     GITHUB_OUTPUT: join(dir, "output.txt"),
     GITHUB_STEP_SUMMARY: join(dir, "summary.md"),
     RUNNER_DEBUG: "1",
-    // A test knob so retry scenarios run in milliseconds instead of seconds.
+    // A test knob: millisecond plugin units and the immediate scheduler, so retry scenarios run in milliseconds instead of seconds.
     RETRY_BASE_MS: "1",
   };
   // settings-file is a single-repo input the action rejects beside the multi-repo inputs. A merge
