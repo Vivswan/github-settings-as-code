@@ -8,7 +8,7 @@
 
 import type { z } from "zod";
 import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
-import type { MustBeNever } from "../types.js";
+import type { DeepReadonly, MustBeNever } from "../types.js";
 import { actionsSection } from "./actions/index.js";
 import { actionsSecretsSection } from "./actions_secrets/index.js";
 import { actionsVariablesSection } from "./actions_variables/index.js";
@@ -163,10 +163,12 @@ export function sectionModule<K extends SectionKey>(key: K): SectionModule<K> {
   return byKeyErased[key];
 }
 
-export type TaggedEndpoint = EndpointDecl & {
-  readonly section: SectionKey;
-  readonly role: string;
-};
+export type TaggedEndpoint = DeepReadonly<
+  EndpointDecl & {
+    readonly section: SectionKey;
+    readonly role: string;
+  }
+>;
 
 /**
  * ":" is RESERVED for a future scope prefix ("<scope>:<section>.<role>"); a colon smuggled in today
@@ -181,11 +183,24 @@ function assertScopeFree(kind: "section key" | "role", value: string): void {
 }
 
 /**
+ * Freezes in place through every nested object and array, so the declarations the tagged views share
+ * cannot mutate under any consumer; functions are left as they are (nothing reads their properties).
+ */
+function deepFreeze<T>(value: T): DeepReadonly<T> {
+  if (typeof value === "object" && value !== null) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) {
+      deepFreeze(child);
+    }
+  }
+  return value as DeepReadonly<T>;
+}
+
+/**
  * The single view the e2e mock's route table and USED_PATHS iterate, keyed by the exact SectionEndpointKey
- * union so an undeclared lookup does not compile.
- *
- *   frozen (record, tagged entries, nested statuses/permission)  -> they reference the declarations, which must never mutate
- *   `sections` injectable                                        -> the scope-free assert is testable; an injected list keeps string keys
+ * union so an undeclared lookup does not compile. Deep-frozen, and the source declaration with it: the
+ * entries reference the declarations, which must never mutate. `sections` is injectable so the scope-free
+ * assert is testable; an injected list keeps string keys.
  */
 export function allEndpoints(): Readonly<Record<SectionEndpointKey, TaggedEndpoint>>;
 export function allEndpoints(
@@ -199,25 +214,26 @@ export function allEndpoints(
     assertScopeFree("section key", section.key);
     for (const [role, endpoint] of Object.entries(section.endpoints)) {
       assertScopeFree("role", role);
-      Object.freeze(endpoint.statuses);
-      if (endpoint.permission && typeof endpoint.permission === "object") {
-        Object.freeze(endpoint.permission);
-        Object.freeze(endpoint.permission.repo);
-      }
-      out[`${section.key}.${role}`] = Object.freeze({ ...endpoint, section: section.key, role });
+      out[`${section.key}.${role}`] = deepFreeze({
+        ...deepFreeze(endpoint),
+        section: section.key,
+        role,
+      });
     }
   }
   return Object.freeze(out);
 }
 
-export type TaggedGraphqlOp = GraphqlOpDecl & {
-  readonly section: SectionKey;
-  readonly role: string;
-};
+export type TaggedGraphqlOp = DeepReadonly<
+  GraphqlOpDecl & {
+    readonly section: SectionKey;
+    readonly role: string;
+  }
+>;
 
 /**
  * The allEndpoints() sibling for the mock's dispatch table, the coverage tripwire, and the fault-key
- * universe; frozen for the same reason. Operation NAMES must be globally unique (the wire dispatch key),
+ * universe; deep-frozen for the same reason. Operation NAMES must be globally unique (the wire dispatch key),
  * and a role never collides with a REST role in the same section (fault directives share one "section.role" key space).
  */
 export function allGraphqlOps(): Readonly<Record<SectionGraphqlKey, TaggedGraphqlOp>>;
@@ -246,12 +262,7 @@ export function allGraphqlOps(
         );
       }
       byName.set(op.name, key);
-      Object.freeze(op.outcomes);
-      if (op.permission && typeof op.permission === "object") {
-        Object.freeze(op.permission);
-        Object.freeze(op.permission.repo);
-      }
-      out[key] = Object.freeze({ ...op, section: section.key, role });
+      out[key] = deepFreeze({ ...deepFreeze(op), section: section.key, role });
     }
   }
   return Object.freeze(out);

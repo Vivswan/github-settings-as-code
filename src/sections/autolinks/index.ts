@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { listSection } from "../shared/list-section.js";
+import { exactName, listSection } from "../shared/list-section.js";
 import { AutolinkConfig } from "./schema.js";
 
 const LiveAutolink = z.looseObject({ id: z.number(), key_prefix: z.string() });
@@ -30,7 +30,7 @@ export const autolinksSection = listSection({
   endpoints: ENDPOINTS,
   // GitHub returns every autolink in one response and ignores page params.
   listing: { unpaginated: true },
-  identity: { field: "key_prefix" },
+  identity: { field: "key_prefix", fold: exactName },
   address: (live) => ({ autolink_id: String(live.id) }),
   lens: {
     // An undeclared is_alphanumeric is GitHub's default (true) on the create and unmanaged after.

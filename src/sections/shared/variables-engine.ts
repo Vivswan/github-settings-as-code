@@ -28,28 +28,19 @@ export interface VariableEntry {
 interface VariablesScopeProse {
   /** The drift-line prefix, e.g. "actions_variables" or "environments[prod].variables". */
   label: string;
-  /** The noun for notes and change lines ("Actions variable"; a nested scope says "variable"). */
+  /** The noun for notes and change lines ("Actions variable"). */
   noun: string;
-  /** Where a missing variable would be created, for drift prose; "the repo" by default. */
-  home?: string;
-  /** Where an undeclared variable exists, for the keep-note; "the repo" by default. */
-  keepHome?: string;
-  /** Appended to create/update change lines (` in environment "prod"`); "" by default. */
-  changeSuffix?: string;
-  /** Appended to DELETE change lines (` from environment "prod"`); "" by default. */
-  removeSuffix?: string;
 }
 
 interface VariableCreate {
-  readonly name: string;
   readonly payload: PlainPayload;
   readonly drift: readonly [string];
   readonly change: string;
 }
 
 interface VariableUpdate {
-  /** The LIVE name addresses the request (the path names what exists); the declared name is prose. */
-  readonly names: { readonly declared: string; readonly live: string };
+  /** The LIVE name addresses the request path: it names what exists, whatever casing the file uses. */
+  readonly liveName: string;
   readonly payload: PlainPayload;
   readonly drift: readonly [string, ...string[]];
   readonly change: string;
@@ -76,8 +67,8 @@ export interface VariablesPlanScope<
   readonly remove: (deletion: VariableDeletion) => Remove;
 }
 
-function missingVariableDrift(scope: VariablesScopeProse, label: string): string {
-  return `${label}: missing - declared in the settings file but not on ${scope.home ?? "the repo"}; apply will create it`;
+function missingVariableDrift(label: string): string {
+  return `${label}: missing - declared in the settings file but not on the repo; apply will create it`;
 }
 
 function valueDriftLine(label: string, declared: string, live: string): string {
@@ -87,7 +78,7 @@ function valueDriftLine(label: string, declared: string, live: string): string {
 function undeclaredVariableNote(scope: VariablesScopeProse, liveName: string): string {
   return undeclaredNote({
     subject: `${scope.noun} "${liveName}"`,
-    state: `exists on ${scope.keepHome ?? "the repo"} but is not declared`,
+    state: "exists on the repo but is not declared",
     action: "DELETE it",
   });
 }
@@ -128,8 +119,6 @@ export async function planVariables<
   },
 ): Promise<SectionPlan<Create | Update | Remove>> {
   const { entries, policy, defaultPolicy } = opts;
-  const changeSuffix = scope.changeSuffix ?? "";
-  const removeSuffix = scope.removeSuffix ?? "";
   const plan: SectionPlan<Create | Update | Remove> = { ops: [], notes: [], drift: [] };
 
   const liveByKey = liveVariablesByKey(await scope.list());
@@ -142,10 +131,9 @@ export async function planVariables<
     if (!existing) {
       plan.ops.push(
         scope.create({
-          name: variable.name,
           payload: { name: variable.name, value: variable.value, ...extraKeys },
-          drift: [missingVariableDrift(scope, label)],
-          change: `created ${scope.noun} "${variable.name}"${changeSuffix}`,
+          drift: [missingVariableDrift(label)],
+          change: `created ${scope.noun} "${variable.name}"`,
         }),
       );
       continue;
@@ -167,10 +155,10 @@ export async function planVariables<
     }
     plan.ops.push(
       scope.update({
-        names: { declared: variable.name, live: existing.name },
+        liveName: existing.name,
         payload: { value: variable.value, ...extraKeys },
         drift: [first, ...rest],
-        change: `updated ${scope.noun} "${variable.name}"${changeSuffix}`,
+        change: `updated ${scope.noun} "${variable.name}"`,
       }),
     );
   }
@@ -186,7 +174,7 @@ export async function planVariables<
         scope.remove({
           name: variable.name,
           drift: [undeclaredVariableDrift(scope, defaultPolicy, variable.name)],
-          change: `DELETED undeclared ${scope.noun} "${variable.name}"${removeSuffix}`,
+          change: `DELETED undeclared ${scope.noun} "${variable.name}"`,
         }),
       );
     }

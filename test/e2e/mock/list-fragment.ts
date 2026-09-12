@@ -36,13 +36,13 @@ export function mockFragmentFor<
   Ends extends ListEndpoints,
   Live extends object,
   F extends string,
+  Key extends string,
 >(
-  section: ListSectionModule<K, Ends, Live, F>,
+  section: ListSectionModule<K, Ends, Live, F, Key>,
   spec: ListMockSpec,
 ): Record<`${K}.${ListRole<Ends>}`, Handler> {
   const { identity, address, endpoints, listing } = section.decl;
-  const fold = identity.fold ?? ((name: string) => name);
-  const keyOf = (item: Json): string => fold(String(item[identity.field]));
+  const keyOf = (item: Json): string => identity.fold(String(item[identity.field]));
   const uniqueOf = spec.unique === "identity" ? keyOf : spec.unique;
   // The collection holds the GET shape the section parses, so the address
   // reads the same fields off a raw item.

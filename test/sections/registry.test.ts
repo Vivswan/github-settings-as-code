@@ -49,7 +49,7 @@ import { denialResponse } from "../e2e/mock/grading.js";
 interface ListDeclView {
   readonly identity: {
     readonly field: string;
-    readonly fold?: (name: string) => string;
+    readonly fold: (name: string) => string;
     readonly aliases?: (entry: object) => readonly string[];
   };
 }
@@ -649,7 +649,7 @@ describe("allEndpoints", () => {
     }
   });
 
-  test("the returned view is frozen so a consumer cannot corrupt declarations", () => {
+  test("the returned view is frozen through every nested field, so a consumer cannot corrupt declarations", () => {
     const all = allEndpoints();
     const entry = all["labels.update"];
     expect(entry).toEqual({
@@ -660,13 +660,37 @@ describe("allEndpoints", () => {
     });
     expect(Object.isFrozen(all)).toBe(true);
     expect(Object.isFrozen(entry)).toBe(true);
-    expect(Object.isFrozen(entry?.statuses)).toBe(true);
     // Assignment on a frozen object throws only in strict mode; ES module test files are strict.
-    expect(() => {
-      (entry as unknown as { role: string }).role = "hacked";
-    }).toThrow();
+    // Every nested facet a declaration can carry, on a real declaration that carries it.
+    const nested: Record<string, () => void> = {
+      role: () => {
+        (entry as unknown as { role: string }).role = "hacked";
+      },
+      statuses: () => {
+        (entry.statuses as Record<number, string>)[200] = "hacked";
+      },
+      primaryRead: () => {
+        (all["labels.list"].primaryRead as { notFound: string }).notFound = "absent";
+      },
+      hints: () => {
+        (all["deploy_keys.create"].hints as Record<number, string>)[422] = "hacked";
+      },
+      permission: () => {
+        (all["branches.listProtected"].permission as unknown as { repo: string[] }).repo.push("x");
+      },
+      rejections: () => {
+        (all["branches.putProtection"].rejections as unknown as { message: string }[])[0] = {
+          message: "x",
+        };
+      },
+    };
+    for (const [facet, mutate] of Object.entries(nested)) {
+      expect(mutate, facet).toThrow(TypeError);
+    }
     const labels = SECTIONS.find((s) => s.key === "labels");
     expect(labels?.endpoints.update?.route).toBe("PATCH /repos/{owner}/{repo}/labels/{name}");
+    // The source declaration is frozen with its view, so neither path can move a route.
+    expect(Object.isFrozen(labels?.endpoints.update)).toBe(true);
   });
 });
 
@@ -690,22 +714,48 @@ describe("allGraphqlOps", () => {
     outcomes: { ok: "x" },
   });
 
-  test("flattens, tags, and freezes like allEndpoints", () => {
-    const ops = allGraphqlOps([graphqlSection("repository", { toggles: op("RepoToggles") })]);
+  test("flattens, tags, and freezes through every nested field like allEndpoints", () => {
+    const toggles = {
+      ...op("RepoToggles"),
+      query: "query RepoToggles($cursor: String) { viewer { login } }",
+      permission: { repo: ["administration"] },
+      connection: { path: ["repository", "rules"] },
+    } satisfies GraphqlPaginatedReadDecl;
+    const ops = allGraphqlOps([graphqlSection("repository", { toggles })]);
     expect(ops).toEqual({
       "repository.toggles": {
         name: "RepoToggles",
         kind: "read",
-        query: "query RepoToggles { viewer { login } }",
+        query: "query RepoToggles($cursor: String) { viewer { login } }",
         outcomes: { ok: "x" },
+        permission: { repo: ["administration"] },
+        connection: { path: ["repository", "rules"] },
         section: "repository",
         role: "toggles",
       },
     });
     const tagged = ops["repository.toggles"];
+    if (tagged === undefined) {
+      throw new Error("the flattened op is missing");
+    }
     expect(Object.isFrozen(ops)).toBe(true);
     expect(Object.isFrozen(tagged)).toBe(true);
-    expect(Object.isFrozen(tagged?.outcomes)).toBe(true);
+    const nested: Record<string, () => void> = {
+      outcomes: () => {
+        (tagged.outcomes as Record<string, string>).ok = "hacked";
+      },
+      permission: () => {
+        (tagged.permission as unknown as { repo: string[] }).repo.push("issues");
+      },
+      connection: () => {
+        (tagged.connection as unknown as { path: string[] }).path.push("nodes");
+      },
+    };
+    for (const [facet, mutate] of Object.entries(nested)) {
+      expect(mutate, facet).toThrow(TypeError);
+    }
+    // The injected declaration is frozen with its view.
+    expect(Object.isFrozen(toggles.connection.path)).toBe(true);
   });
 
   test("a duplicate operation name across sections fails at construction", () => {

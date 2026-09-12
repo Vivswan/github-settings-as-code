@@ -21,3 +21,10 @@ export type MustBeNever<T extends never> = T;
 
 /** `Omit<A | B, K>` collapses to the common keys, losing each member's own fields; this keeps one member per arm. */
 export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** Readonly through every nested object and array; functions pass untouched. The type twin of a deep Object.freeze. */
+export type DeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends object
+    ? { readonly [P in keyof T]: DeepReadonly<T[P]> }
+    : T;

@@ -5,14 +5,14 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { listSection } from "../shared/list-section.js";
+import { exactName, listSection } from "../shared/list-section.js";
 import { DeployKeyConfig } from "./schema.js";
 
 const LiveDeployKey = z.looseObject({
   id: z.number(),
   title: z.string(),
   key: z.string(),
-  read_only: z.boolean().optional(),
+  read_only: z.boolean(),
 });
 type LiveDeployKey = z.infer<typeof LiveDeployKey>;
 
@@ -78,27 +78,27 @@ export const deployKeysSection = listSection({
   live: LiveDeployKey,
   endpoints: ENDPOINTS,
   // Exact titles: GitHub documents no case folding, so two titles differing in case are two keys.
-  identity: { field: "title" },
+  identity: { field: "title", fold: exactName },
   address: (live) => ({ key_id: String(live.id) }),
   lens: {
-    // GitHub defaults read_only to false on create; an undeclared toggle is not compared, since this
-    // file does not manage it.
     toWrite: ({ title, key, read_only, ...passthrough }) => ({
       title,
       key: declaredMaterial(title, key),
       ...(read_only === undefined ? {} : { read_only }),
       ...passthrough,
     }),
-    fromLive: (live) => ({
-      ...live,
-      key: liveMaterial(live),
-      read_only: live.read_only ?? false,
-    }),
+    fromLive: (live) => ({ ...live, key: liveMaterial(live) }),
     matchBy: {},
   },
-  // The recreate seeds the LIVE read_only: without it a rotated read-only key would come back with
-  // GitHub's read/write default, a privilege widening nothing in the file asked for. A declared value wins.
-  recreate: (live, write) => ({ read_only: live.read_only ?? false, ...write }),
+  /**
+   * GitHub creates a key READ/WRITE when the body omits read_only, and this file does not manage an
+   * undeclared flag, so the flag reaches a create body only from a source that holds it:
+   *
+   *   declared              -> the declared value, on a create and a recreate alike (the write is spread last)
+   *   undeclared, create    -> omitted: GitHub's default, never compared afterwards
+   *   undeclared, recreate  -> the LIVE flag re-sent, so rotating a read-only key never widens its access
+   */
+  recreate: (live, write) => ({ read_only: live.read_only, ...write }),
   // GitHub attaches a public key to one repository once, so a second key with the same material is
   // rejected at create time; both collisions are named upfront instead of failing mid-apply.
   conflicts: {

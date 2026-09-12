@@ -111,15 +111,23 @@ type Address<Ends extends ListEndpoints> = Ends extends {
   ? SameParams<U, Ends["remove"]["route"]>
   : Readonly<Record<PathParams<Ends["remove"]["route"]>, string>>;
 
-/** Declared fields only: an omitted optional stays OUT (never undefined), so it is neither written nor compared. */
-type Write<F extends string> = { readonly [P in F]: string } & {
+/**
+ * Declared fields only: an omitted optional stays OUT (never undefined), so it is neither written nor compared.
+ * A section narrows it to pin a folded field's brand on its lens (labels' HexColor).
+ */
+export type ListWrite<F extends string> = { readonly [P in F]: string } & {
   readonly [key: string]: PlainData;
 };
 
 /** A live item in the same terms, each field normalized as GitHub stores it. */
-type Comparable<F extends string> = { readonly [P in F]: string } & Readonly<
+export type ListComparable<F extends string> = { readonly [P in F]: string } & Readonly<
   Record<string, unknown>
 >;
+
+/** The fold of a section GitHub matches exactly: the key IS the name. */
+export function exactName(name: string): string {
+  return name;
+}
 
 type NoteWording = Pick<Parameters<typeof undeclaredNote>[0], "state" | "add" | "manage">;
 
@@ -133,11 +141,16 @@ interface Listing {
   readonly unpaginated?: true;
 }
 
+/**
+ * `Key` is the fold's output: the planner keys every live-versus-declared lookup by it, so an unfolded
+ * name cannot be looked up, and a section's brand (labels' NameKey) survives to `decl`.
+ */
 export interface ListSectionDecl<
   K extends ListSectionKey,
   Ends extends ListEndpoints,
   Live extends object,
   F extends string,
+  Key extends string,
 > {
   readonly key: K;
   readonly permission: SectionPermission;
@@ -153,8 +166,8 @@ export interface ListSectionDecl<
   readonly identity: {
     /** The write field naming the resource, as the live item carries it ("name", "title"). */
     readonly field: F;
-    /** Folds a name to its matching key; omitted when GitHub matches exactly. */
-    readonly fold?: (name: string) => string;
+    /** Folds a name to the key GitHub matches it by; `exactName` when GitHub matches exactly. */
+    readonly fold: (name: string) => Key;
     /**
      * Names an entry also answers to (a label's pre-rename `name`), so a live item under one is this
      * entry's, renamed by the update, not undeclared.
@@ -173,7 +186,7 @@ export interface ListSectionDecl<
   readonly address: [Address<Ends>] extends [never] ? never : (live: Live) => Address<Ends>;
   readonly lens: {
     /** The entry in wire terms: the create body, and what a converged live item reads back as. */
-    readonly toWrite: (entry: Entry<K>) => Write<F>;
+    readonly toWrite: (entry: Entry<K>) => ListWrite<F>;
     /**
      * A live item in the same terms as toWrite, so the two compare field by field.
      *
@@ -181,7 +194,7 @@ export interface ListSectionDecl<
      *   other declared fields   -> normalized as GitHub stores them (a color lowercased without "#", a null description as "")
      *   every other live field  -> kept, so declared passthrough keys compare against what the API echoed
      */
-    readonly fromLive: (live: Live) => Comparable<F>;
+    readonly fromLive: (live: Live) => ListComparable<F>;
     /** Per entry field holding a list, the item key to pair by (see DeltaOptions.matchBy); `{}` when none does. */
     readonly matchBy: Readonly<Partial<Record<keyof Entry<K> & string, string>>>;
   };
@@ -191,7 +204,7 @@ export interface ListSectionDecl<
    */
   readonly recreate?: "update" extends keyof Ends
     ? never
-    : (live: Live, write: Write<F>) => Write<F>;
+    : (live: Live, write: ListWrite<F>) => ListWrite<F>;
   /**
    * Conflicts the identities cannot show, one line each naming the fix; any line fails the section.
    *
@@ -199,10 +212,10 @@ export interface ListSectionDecl<
    *   `live`      -> runs after the read and before any write (a deploy key's material held by another key)
    */
   readonly conflicts?: {
-    readonly declared?: (writes: readonly Write<F>[]) => readonly string[];
+    readonly declared?: (writes: readonly ListWrite<F>[]) => readonly string[];
     readonly live?: (
-      writes: readonly Write<F>[],
-      live: readonly Comparable<F>[],
+      writes: readonly ListWrite<F>[],
+      live: readonly ListComparable<F>[],
     ) => readonly string[];
   };
   readonly prose: {
@@ -226,6 +239,7 @@ export interface ListSectionModule<
   Ends extends ListEndpoints,
   Live extends object,
   F extends string,
+  Key extends string,
 > {
   readonly key: K;
   readonly permission: SectionPermission;
@@ -240,11 +254,14 @@ export interface ListSectionModule<
   ) => Promise<SectionPlan<PlannedOp<Ends>>>;
   readonly snapshot: (ctx: SnapshotContext<Ends>) => Promise<SectionSnapshot<K>>;
   /** The declaration, for the harness derivations (the mock's transformers, the fuzz witness). */
-  readonly decl: ListSectionDecl<K, Ends, Live, F>;
+  readonly decl: ListSectionDecl<K, Ends, Live, F, Key>;
 }
 
-/** Entries and live items erased to objects; the planner only hands them back to the declaration's own functions. */
-interface ErasedDecl {
+/**
+ * Entries and live items erased to objects; the planner only hands them back to the declaration's own
+ * functions. The fold's key type stays: it is what the planner's lookups are keyed by.
+ */
+interface ErasedDecl<Key extends string> {
   readonly key: ListSectionKey;
   readonly noun: string;
   readonly entry: z.ZodType<object>;
@@ -253,25 +270,25 @@ interface ErasedDecl {
   readonly listing?: Listing;
   readonly identity: {
     readonly field: string;
-    readonly fold?: (name: string) => string;
+    readonly fold: (name: string) => Key;
     readonly aliases?: (entry: object) => readonly string[];
     readonly renameKey?: string;
   };
   readonly address: (live: object) => Readonly<Record<string, string>>;
   readonly lens: {
-    readonly toWrite: (entry: object) => Write<string>;
-    readonly fromLive: (live: object) => Comparable<string>;
+    readonly toWrite: (entry: object) => ListWrite<string>;
+    readonly fromLive: (live: object) => ListComparable<string>;
     readonly matchBy: Readonly<Record<string, string>>;
   };
-  readonly recreate?: (live: object, write: Write<string>) => Write<string>;
+  readonly recreate?: (live: object, write: ListWrite<string>) => ListWrite<string>;
   readonly conflicts?: {
-    readonly declared?: (writes: readonly Write<string>[]) => readonly string[];
+    readonly declared?: (writes: readonly ListWrite<string>[]) => readonly string[];
     readonly live?: (
-      writes: readonly Write<string>[],
-      live: readonly Comparable<string>[],
+      writes: readonly ListWrite<string>[],
+      live: readonly ListComparable<string>[],
     ) => readonly string[];
   };
-  readonly prose: ListSectionDecl<ListSectionKey, ListEndpoints, object, string>["prose"];
+  readonly prose: ListSectionDecl<ListSectionKey, ListEndpoints, object, string, Key>["prose"];
   readonly secretValues?: (entry: object) => readonly DeclaredSecretValue[];
 }
 
@@ -301,11 +318,11 @@ const RECREATE_REMEDIES: Remedies = {
  * records because the merge reads layers before validation: null when a claimed name is not a string,
  * which the merge refuses and a validated entry never is.
  */
-function identityClaims(
-  identity: ErasedDecl["identity"],
+function identityClaims<Key extends string>(
+  identity: ErasedDecl<Key>["identity"],
   entry: Readonly<Record<string, unknown>>,
-): readonly string[] | null {
-  const { field, renameKey, fold = (name: string) => name } = identity;
+): readonly Key[] | null {
+  const { field, renameKey, fold } = identity;
   const written = renameKey === undefined ? undefined : entry[renameKey];
   const names = [written ?? entry[field], ...(identity.aliases?.(entry) ?? [])];
   if (!names.every((name): name is string => typeof name === "string")) {
@@ -349,7 +366,7 @@ function renderEntryDelta(
   return renderDelta(label, delta);
 }
 
-function updateBody(decl: ErasedDecl, write: Write<string>): PlainData {
+function updateBody(decl: ErasedDecl<string>, write: ListWrite<string>): PlainData {
   const { renameKey, field } = decl.identity;
   if (renameKey === undefined) {
     return plainData(write);
@@ -358,21 +375,24 @@ function updateBody(decl: ErasedDecl, write: Write<string>): PlainData {
   return plainData({ [renameKey]: nameOf(write, field), ...rest });
 }
 
-async function readList(decl: ErasedDecl, ctx: PlanContext<ListEndpoints>): Promise<unknown> {
+async function readList(
+  decl: ErasedDecl<string>,
+  ctx: PlanContext<ListEndpoints>,
+): Promise<unknown> {
   const query = decl.listing?.query;
   return decl.listing?.unpaginated === true
     ? ctx.read.list.call({ query })
     : ctx.read.list.listAll({ query });
 }
 
-async function planList(
-  decl: ErasedDecl,
+async function planList<Key extends string>(
+  decl: ErasedDecl<Key>,
   section: SectionMeta<ListSectionKey>,
   ctx: PlanContext<ListEndpoints>,
   declared: ErasedDeclared,
 ): Promise<SectionPlan> {
   const { key, noun, identity, lens, prose, endpoints } = decl;
-  const fold = identity.fold ?? ((name: string) => name);
+  const { fold } = identity;
   const update = updateRole(endpoints);
   const remedies = update === undefined ? RECREATE_REMEDIES : UPDATE_REMEDIES;
   const defaultPolicy = defaultUndeclaredPolicy(section);
@@ -421,11 +441,11 @@ async function planList(
     );
   }
   // GitHub may hold two items one fold apart (deploy keys repeat titles), which a single-slot map would hide.
-  const liveByKey = new Map<string, (typeof liveItems)[number][]>();
+  const liveByKey = new Map<Key, (typeof liveItems)[number][]>();
   for (const item of liveItems) {
     liveByKey.set(item.key, [...(liveByKey.get(item.key) ?? []), item]);
   }
-  const claimed = new Set(writes.flatMap((w) => w.claims));
+  const claimed = new Set<Key>(writes.flatMap((w) => w.claims));
 
   const plan: SectionPlan = { ops: [], notes: [], drift: [] };
   for (const { write, name, claims } of writes) {
@@ -530,7 +550,7 @@ async function planList(
  * read-back compares equal to the declaration that produced it.
  */
 async function snapshotList(
-  decl: ErasedDecl,
+  decl: ErasedDecl<string>,
   section: SectionMeta<ListSectionKey>,
   ctx: PlanContext<ListEndpoints>,
 ): Promise<{ value: UndeclaredPolicyList<object> | undefined; notes: string[] }> {
@@ -543,21 +563,20 @@ async function snapshotList(
   if (live.length === 0) {
     return { value: undefined, notes: [] };
   }
-  const fold = decl.identity.fold ?? ((name: string) => name);
   const comparable = live.map((item) => decl.lens.fromLive(item));
-  const nameOfItem = (item: Comparable<string>): string => nameOf(item, decl.identity.field);
+  const nameOfItem = (item: ListComparable<string>): string => nameOf(item, decl.identity.field);
   rejectLiveDuplicates(
     section,
     decl.noun,
     comparable,
-    (item) => fold(nameOfItem(item)),
+    (item) => decl.identity.fold(nameOfItem(item)),
     nameOfItem,
   );
   const entries = comparable.map((item) => projectOntoSchema(decl.entry, item));
   return { value: knobbedSnapshot(section, entries), notes: [] };
 }
 
-function secretValuesOf(decl: ErasedDecl, declared: ErasedDeclared): DeclaredSecretValue[] {
+function secretValuesOf(decl: ErasedDecl<string>, declared: ErasedDeclared): DeclaredSecretValue[] {
   const extract = decl.secretValues;
   if (extract === undefined) {
     return [];
@@ -575,9 +594,10 @@ export function listSection<
   const Ends extends ListEndpoints,
   Live extends object,
   F extends string,
->(decl: ListSectionDecl<K, Ends, Live, F>): ListSectionModule<K, Ends, Live, F> {
-  const erased = decl as unknown as ErasedDecl;
-  const section: ListSectionModule<K, Ends, Live, F> = {
+  Key extends string,
+>(decl: ListSectionDecl<K, Ends, Live, F, Key>): ListSectionModule<K, Ends, Live, F, Key> {
+  const erased = decl as unknown as ErasedDecl<Key>;
+  const section: ListSectionModule<K, Ends, Live, F, Key> = {
     key: decl.key,
     permission: decl.permission,
     undeclaredDefault: decl.undeclaredDefault,
