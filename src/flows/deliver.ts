@@ -214,9 +214,16 @@ export function concludeRun(io: Io, run: FinishedRun): number {
   return conclude(io, views, run.mode === "check");
 }
 
-/** A run that failed before any target ran gets a failed target's conclusion and no summary; the one place a fatal problem becomes text. */
-export function failRun(io: Io, problem: Problem): number {
-  const message = describeProblem(problem);
+/**
+ * A run that failed before any target ran gets a failed target's conclusion and no summary; the one place a fatal problem becomes text.
+ * `describe` is the action's wording unless the caller's face (the command line) words a remedy differently.
+ */
+export function failRun(
+  io: Io,
+  problem: Problem,
+  describe: (problem: Problem) => string = describeProblem,
+): number {
+  const message = describe(problem);
   io.annotate("error", message);
   // The mode may be unknown here (a config error); a failure exits 1 under either.
   return conclude(io, [failedTarget(message)], false);

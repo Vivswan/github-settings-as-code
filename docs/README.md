@@ -19,6 +19,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 | Predict what an apply or a check will do | [reference/semantics.md](reference/semantics.md) |
 | See how the action works, module by module | [reference/architecture.md](reference/architecture.md) |
 | Use the engine from your own code | [reference/library.md](reference/library.md) |
+| Run check, apply, or validate from a terminal | [start/cli.md](start/cli.md) |
 | Detect drift on a schedule | [operate/check-mode.md](operate/check-mode.md) |
 | Fold several settings files into one | [operate/layering.md](operate/layering.md) |
 | Manage a fleet from one repository | [operate/multi-repo.md](operate/multi-repo.md) |
@@ -32,6 +33,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 - [Getting started](start/getting-started.md): create the PAT, add the workflow, run your first check, and read the drift output.
 - [Migrating from the Probot Settings app](start/migrating-from-probot.md): the step-by-step move, including the parts that changed on purpose and an org-scale shadow run.
 - [Examples](start/examples.md): a settings.yml cookbook, from a minimal file to a full-featured one, including what `null` means where it is meaningful.
+- [Command line](start/cli.md): the `github-settings-as-code` and `gsac` commands in the npm package, one per action mode plus `validate` and `permissions`, their flags, outputs, and exit codes.
 
 ## reference: the normative model
 
