@@ -26,6 +26,7 @@ import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { isWriteRequest } from "./mock/dispatch.js";
 import { type ServerOptions, startMockServer } from "./mock/server.js";
 import { sharedValidator } from "./openapi/validate.js";
+import { replayBlockLines } from "./replay-block.js";
 import { type Scenario, settingsYamlFor } from "./schema.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -704,7 +705,7 @@ export async function runScenario(
 export function insertReplay(artifactDir: string, replay: string): void {
   const path = join(artifactDir, "report.md");
   const [title, ...rest] = readFileSync(path, "utf8").split("\n");
-  writeFileSync(path, [title, "", "## Replay", "", "```sh", replay, "```", ...rest].join("\n"));
+  writeFileSync(path, [title, ...replayBlockLines(replay), ...rest].join("\n"));
 }
 
 /**
