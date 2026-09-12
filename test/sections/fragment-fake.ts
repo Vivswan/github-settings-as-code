@@ -1,20 +1,25 @@
 /**
  * A stateful GithubClient over a section's e2e mock fragment, so a unit idempotence proof runs against the mock's own transformers, not a second
- * hand-written inverse. Two views: one section's fragment (a request outside it is refused), or the whole merged registry.
+ * hand-written inverse.
+ *
+ *   fragmentFake(section, ...)  -> that section's handlers; a request outside them is refused
+ *   registryFake(live)          -> every section's handlers, the merged mock tables
+ *   GraphQL                     -> dispatched by operation name onto the mock's GraphQL handlers
  */
 
 import type { ApiError, GithubClient } from "../../src/github/api.js";
 import type { SectionKey } from "../../src/schema.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
-import { matchEndpoint } from "../e2e/mock/dispatch.js";
-import { HANDLERS } from "../e2e/mock/handlers.js";
+import { allGraphqlOps } from "../../src/sections/registry.js";
+import { graphqlOpForBody, matchEndpoint } from "../e2e/mock/dispatch.js";
+import { GRAPHQL_HANDLERS, HANDLERS } from "../e2e/mock/handlers.js";
 import { buildStateForSlug, type LiveState, type MockState } from "../e2e/mock/state.js";
-import type { Handler } from "../e2e/mock/support.js";
+import type { Handler, Json } from "../e2e/mock/support.js";
 import { REPO } from "./section-run.js";
 
 export interface FragmentFake extends GithubClient {
   readonly state: MockState;
-  /** Every non-GET request that reached a handler, as "METHOD /path". */
+  /** Every write that reached a handler: "METHOD /path", or "GRAPHQL <opName>" for a mutation. */
   readonly writes: string[];
 }
 
@@ -79,8 +84,34 @@ function handlerFake(
       }
       return { data: response.body };
     },
-    async tryGraphql() {
-      throw new Error(`${only ?? "the registry fake"} issues no GraphQL`);
+    async tryGraphql(op, variables) {
+      const dispatched = graphqlOpForBody({ operationName: op.name }, allGraphqlOps());
+      const handler = dispatched === null ? undefined : GRAPHQL_HANDLERS[dispatched.key];
+      if (
+        dispatched === null ||
+        (only !== null && dispatched.op.section !== only) ||
+        handler === undefined
+      ) {
+        return { error: { status: 404, message: `unexpected GRAPHQL ${op.name}`, body: "" } };
+      }
+      if (op.kind === "write") {
+        writes.push(`GRAPHQL ${op.name}`);
+      }
+      const result = handler({ state, op: dispatched.op, variables: variables as Json });
+      if (result.errors !== undefined) {
+        // The client's status fold (apiErrorFromGraphqlErrors): FORBIDDEN 403, NOT_FOUND 404, else 422.
+        const types = result.errors.map((entry) => entry.type);
+        const status = types.includes("FORBIDDEN") ? 403 : types.includes("NOT_FOUND") ? 404 : 422;
+        return {
+          error: {
+            status,
+            message: result.errors.map((entry) => entry.message).join("; "),
+            body: JSON.stringify(result.errors),
+            graphqlTypes: [...types].sort(),
+          },
+        };
+      }
+      return { data: result.data };
     },
   };
 }
