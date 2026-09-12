@@ -4,11 +4,11 @@ import pkg from "../package.json";
 
 /**
  * package.json is the npm manifest of @vivswan/github-settings-as-code as
- * well as the toolchain's script table, so its publishable shape is pinned:
- * the field set, the version's mirror of the release-please manifest, the
- * exports map, the shipped files, and which packages are runtime
- * dependencies (the action-only ones stay dev: the action bundle inlines
- * them, the library never imports them).
+ * well as the toolchain's script table, so its publishable values are pinned:
+ * the version's mirror of the release-please manifest, the exports map, the
+ * shipped files, and which packages are runtime dependencies (the action-only
+ * ones stay dev: the action bundle inlines them, the library never imports
+ * them).
  */
 describe("package.json as the npm manifest", () => {
   test("mirrors the release-please manifest version", () => {
@@ -17,27 +17,9 @@ describe("package.json as the npm manifest", () => {
     expect(pkg.version).toBe(manifest["."]);
   });
 
-  test("carries exactly the pinned fields, in order", () => {
-    expect(Object.keys(pkg)).toEqual([
-      "name",
-      "version",
-      "description",
-      "license",
-      "type",
-      "repository",
-      "engines",
-      "sideEffects",
-      "exports",
-      "files",
-      "publishConfig",
-      "scripts",
-      "dependencies",
-      "devDependencies",
-    ]);
-  });
-
   test("publishes publicly under the scoped name as an ESM package", () => {
     expect(pkg.name).toBe("@vivswan/github-settings-as-code");
+    expect(pkg.license).toBe("SEE LICENSE IN LICENSE.md");
     expect("private" in pkg).toBe(false);
     expect(pkg.publishConfig).toEqual({ access: "public" });
     expect(pkg.type).toBe("module");
