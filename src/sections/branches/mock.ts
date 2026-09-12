@@ -35,24 +35,35 @@ import { MISSING_BRANCH } from "./endpoints.js";
 import { classicViewOfRule } from "./graphql-rules.js";
 
 /**
- * GitHub's fnmatch for classic rule patterns: `*` and `?` stop at a slash, `**` crosses one, and a
- * bracket class passes through; every other character is literal.
+ * GitHub's fnmatch (Ruby's, FNM_PATHNAME) for classic rule patterns: `*` and `?` stop at a slash,
+ * only a double star followed by a slash crosses one (a bare double star is `*`), a bracket class
+ * passes through with fnmatch's `!` negation spelled as the regex `^`; every other character is
+ * literal. Exported for its own case table in branches.test.ts.
  */
-function wildcardMatches(pattern: string, branch: string): boolean {
+export function wildcardMatches(pattern: string, branch: string): boolean {
   let regex = "";
   for (let i = 0; i < pattern.length; i++) {
     const ch = pattern[i] as string;
-    if (ch === "*" && pattern[i + 1] === "*") {
-      regex += ".*";
-      i++;
+    if (ch === "*" && pattern[i + 1] === "*" && pattern[i + 2] === "/") {
+      regex += "(?:[^/]*/)*";
+      i += 2;
     } else if (ch === "*") {
       regex += "[^/]*";
+      if (pattern[i + 1] === "*") {
+        i++;
+      }
     } else if (ch === "?") {
       regex += "[^/]";
     } else if (ch === "[") {
-      const close = pattern.indexOf("]", i + 1);
-      regex += close < 0 ? "\\[" : pattern.slice(i, close + 1);
-      i = close < 0 ? i : close;
+      const close = pattern.indexOf("]", i + 2);
+      if (close < 0) {
+        regex += "\\[";
+      } else {
+        const negated = pattern[i + 1] === "!";
+        // A negated class never crosses a slash either (fnmatch's FNM_PATHNAME).
+        regex += `[${negated ? "^/" : ""}${pattern.slice(i + (negated ? 2 : 1), close)}]`;
+        i = close;
+      }
     } else {
       regex += ch.replace(/[.+^${}()|\\]/g, "\\$&");
     }

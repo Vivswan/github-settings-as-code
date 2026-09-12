@@ -1600,13 +1600,14 @@ describe("environments snapshot", () => {
   });
 
   test("the pinned environments lead in rank order with pinned: true, the rest follow without the key, and the file plans clean", async () => {
+    // The listing order (web, api, sandbox) differs from the rank order (api, web), so the
+    // assertion proves rank wins. Hole-y positions, as live GitHub leaves them after an unpin.
     const api = registryFake({
       environments: {
-        api: { name: "api", protection_rules: [] },
         web: { name: "web", protection_rules: [] },
+        api: { name: "api", protection_rules: [] },
         sandbox: { name: "sandbox", protection_rules: [] },
       },
-      // Hole-y positions, as live GitHub leaves them after an unpin: only the rank matters.
       pinned_environments: [
         { name: "web", position: 7 },
         { name: "api", position: 3 },

@@ -25,7 +25,7 @@ import {
 } from "../contract/endpoints.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { branchesSection, flattenProtection, protectionSnapshot } from "./index.js";
-import { branchesMockGraphqlHandlers, branchesMockHandlers } from "./mock.js";
+import { branchesMockGraphqlHandlers, branchesMockHandlers, wildcardMatches } from "./mock.js";
 
 type Desired = Parameters<typeof branchesSection.plan>[1];
 
@@ -1586,6 +1586,40 @@ describe("branches snapshot", () => {
     });
   });
 
+  test("overlapping wildcard rules keep the connection's creation order, so apply recreates them with the same priority", async () => {
+    // z* was created first and wins for "zebra" on GitHub; a sort by pattern would put * first.
+    const api = registryFake({
+      branches: ["zebra"],
+      branch_protection_rules: [
+        { pattern: "z*", isAdminEnforced: true },
+        { pattern: "*", requiresLinearHistory: true },
+      ],
+    });
+    const { snapshot } = await proveSnapshotRoundTrip(branchesSection, api);
+    expect(snapshot.value).toEqual([
+      { name: "z*", protection: { enforce_admins: true } },
+      { name: "*", protection: { required_linear_history: true } },
+    ]);
+  });
+
+  test.each([
+    ["release/*", "release/1.0", true],
+    ["release/*", "release/1.0/rc", false],
+    ["release/**", "release/1.0/rc", false],
+    ["release/**/*", "release/1.0/rc", true],
+    ["release/**/*", "release/1.0", true],
+    ["v?", "v1", true],
+    ["v?", "v10", false],
+    ["release/[0-9]*", "release/1foo", true],
+    ["release/[0-9]*", "release/foo", false],
+    ["release/[!0-9]*", "release/foo", true],
+    ["release/[!0-9]*", "release/1foo", false],
+    ["release[!0-9]*", "release/foo", false],
+    ["a.b", "axb", false],
+  ])("the mock's fnmatch: %s against %s -> %p", (pattern, branch, matches) => {
+    expect(wildcardMatches(pattern, branch)).toBe(matches);
+  });
+
   test("the mock serves a wildcard rule's protection only under an EXISTING matching branch, signatures included", async () => {
     const api = registryFake({
       branches: ["release/1.0"],
@@ -1615,9 +1649,9 @@ describe("branches snapshot", () => {
     expect(snapshot).toEqual({
       value: undefined,
       notes: [
-        'branches[main]: a classic rule with this literal pattern exists, but the protection read of branch "main" ' +
-          "answered 404 (no such branch, or Administration not granted), so it is left out; create the branch or " +
-          "fix the grant, then snapshot again",
+        "branches[main]: rule kept out of the snapshot: REST read no protected branch by this name (the " +
+          "branch is missing, or its protection is unreadable); create the branch or fix the grant, then " +
+          "snapshot again",
       ],
     });
   });

@@ -1111,7 +1111,7 @@ export function ruleFromProtection(
   return ruleWireNode(stored);
 }
 
-/** Sorted by pattern for determinism. REST GETs never see the wildcard family, mirroring GitHub. */
+/** Literal rules first, then the wildcard seeds in order. REST GETs never see the wildcard family, mirroring GitHub. */
 export function allRuleNodes(state: MockState): Json[] {
   const slug = state.slug;
   const nodes: Json[] = [];
@@ -1125,7 +1125,8 @@ export function allRuleNodes(state: MockState): Json[] {
   for (const rule of state.branch_protection_rules) {
     nodes.push(ruleWireNode(rule));
   }
-  nodes.sort((a, b) => String(a.pattern).localeCompare(String(b.pattern)));
+  // Seed order, as GitHub lists rules in creation order: the snapshot writes wildcard rules in
+  // connection order because overlapping patterns apply in that order.
   return nodes;
 }
 

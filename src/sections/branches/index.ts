@@ -126,14 +126,16 @@ const LiveProtection = z.looseObject({
 const LiveBranchSummary = z.looseObject({ name: z.string() });
 
 /**
- * A literal-pattern rule whose branch the REST reads did not surface: no branch of that name exists
- * (a pattern needs none), or the protection probe was denied. A literal entry applies through the
- * REST PUT, which needs the branch, so the rule is noted instead of written. One header line.
+ * A literal-pattern rule the REST reads did not surface as a protected branch: no branch of that
+ * name exists (a pattern needs none), or its protection probe was denied. A literal entry applies
+ * through the REST PUT, which needs the branch, so the rule is noted instead of written. The
+ * pattern appears once and the text stays short, so the rendered header line ("# " prefixed)
+ * stays under 256 chars for patterns up to 54 chars.
  */
 const unreachableLiteralRuleNote = (pattern: string): string =>
-  `branches[${pattern}]: a classic rule with this literal pattern exists, but the protection read ` +
-  `of branch "${pattern}" answered 404 (no such branch, or Administration not granted), so it is ` +
-  "left out; create the branch or fix the grant, then snapshot again";
+  `branches[${pattern}]: rule kept out of the snapshot: REST read no protected branch by this ` +
+  "name (the branch is missing, or its protection is unreadable); create the branch or fix the " +
+  "grant, then snapshot again";
 
 /** Built in the ONE place that decides whether the GraphQL run state exists, so no other site re-spells the predicate. */
 type ClassifiedEntry =
@@ -306,8 +308,9 @@ export const branchesSection = {
       });
     }
     const written = new Set(entries.map((entry) => entry.name));
-    const byPattern = [...rules].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    for (const [pattern, rule] of byPattern) {
+    // Connection order, never sorted: GitHub applies overlapping wildcard rules in creation order,
+    // which the connection lists, and apply creates the entries in file order.
+    for (const [pattern, rule] of rules) {
       if (isWildcardPattern(pattern)) {
         entries.push({ name: pattern, protection: wildcardSnapshot(rule) });
       } else if (!written.has(pattern)) {
