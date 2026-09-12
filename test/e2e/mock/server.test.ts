@@ -992,11 +992,9 @@ describe("core-route faults and server_error", () => {
 });
 
 describe("429 fault production parity", () => {
-  test("the throttling plugin (production topology, no env knob) absorbs the mock's 429", async () => {
-    // RETRY_BASE_MS must be ABSENT: under it the client swaps to a test-only recovery path
-    // (throttling off, 429 retried by the retry plugin) that absorbs ANY 429 shape. The constructor
-    // override scales only the WAITS, so production throttle detection is what absorbs this 429.
-    expect(process.env.RETRY_BASE_MS).toBeUndefined();
+  test("the throttling plugin absorbs the mock's 429 shape", async () => {
+    // The retry plugin never retries a 429 (doNotRetry), so a recovery here proves the throttling plugin
+    // recognized the mock's secondary-rate shape; retryBaseMs scales only the waits.
     const h = await start(scenario({ live_state: { labels: [{ id: 1, name: "bug" }] } }), {
       faults: [{ key: "labels.list", kind: "429_then_200" }],
     });
