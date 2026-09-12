@@ -18,6 +18,7 @@ import {
   defaultUndeclaredPolicy,
   denialPosture,
   endpointPermission,
+  type GraphqlDict,
   planningReads,
   type SectionContext,
   type SectionMeta,
@@ -1024,7 +1025,7 @@ describe("handler contracts", () => {
     const misdeclared = {
       ...workflowsSection,
       async plan(
-        _ctx: PlanContext<typeof workflowsSection.endpoints>,
+        _ctx: PlanContext<typeof workflowsSection.endpoints, GraphqlDict, "workflows">,
         _desired: Exclude<SettingsFile["labels"], undefined>,
       ) {
         return { ops: [], notes: [], drift: [] };
@@ -1032,6 +1033,18 @@ describe("handler contracts", () => {
     };
     // @ts-expect-error a plan() over labels' value is not exact for workflows
     type _Wrong = MustBeNever<MisdeclaredPlanModule<"workflows", typeof misdeclared>>;
+    // The key arm: workflows' own dictionary and value under labels' context brand is misdeclared too.
+    const foreignKey = {
+      ...workflowsSection,
+      async plan(
+        _ctx: PlanContext<typeof workflowsSection.endpoints, GraphqlDict, "labels">,
+        _desired: Exclude<SettingsFile["workflows"], undefined>,
+      ) {
+        return { ops: [], notes: [], drift: [] };
+      },
+    };
+    // @ts-expect-error a plan() branded with labels' key is not exact for workflows
+    type _ForeignKey = MustBeNever<MisdeclaredPlanModule<"workflows", typeof foreignKey>>;
     // The snapshot twin: a module without snapshot() measures exact (nothing to compare), the
     // shipped labels module measures exact, and labels' snapshot() over workflows' dictionary
     // measures misdeclared.
@@ -1041,7 +1054,9 @@ describe("handler contracts", () => {
     type _ExactSnapshot = MustBeNever<MisdeclaredSnapshotModule<"labels", typeof labelsSection>>;
     const misdeclaredSnapshot = {
       ...labelsSection,
-      async snapshot(_ctx: SnapshotContext<typeof workflowsSection.endpoints>) {
+      async snapshot(
+        _ctx: SnapshotContext<typeof workflowsSection.endpoints, GraphqlDict, "labels">,
+      ) {
         return { value: undefined, notes: [] };
       },
     };

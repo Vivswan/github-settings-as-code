@@ -14,6 +14,7 @@ import {
   type DeclaredSecretValue,
   defaultUndeclaredPolicy,
   type EntryOf,
+  type GraphqlDict,
   type KeyedListLayering,
   loosen,
   type SectionMeta,
@@ -235,10 +236,10 @@ export interface ListSectionModule<
   readonly secretValues?: (declared: Declared<K>) => DeclaredSecretValue[];
   readonly layering?: KeyedListLayering;
   readonly plan: (
-    ctx: PlanContext<Ends>,
+    ctx: PlanContext<Ends, GraphqlDict, K>,
     desired: Declared<K>,
   ) => Promise<SectionPlan<PlannedOp<Ends>>>;
-  readonly snapshot: (ctx: SnapshotContext<Ends>) => Promise<SectionSnapshot<K>>;
+  readonly snapshot: (ctx: SnapshotContext<Ends, GraphqlDict, K>) => Promise<SectionSnapshot<K>>;
   /** The declaration, for the harness derivations (the mock's transformers, the fuzz witness). */
   readonly decl: ListSectionDecl<K, Ends, Live, F>;
 }

@@ -144,6 +144,7 @@ A module's `plan()` and `snapshot()` are callable directly, each over a context 
 
 - `planContext(module, client, repo)` for `plan()`.
 - `snapshotContext(module, client, repo, onMissingPermission)` for `snapshot()`; the fourth argument is the permission policy, `"fail"` or `"warn"` (a `MissingPermissionPolicy`). The context carries it as a `DenialPolicy` only this factory mints, so a literal object cannot stand in for one.
+- A context belongs to the module it was built from: `labels.plan(planContext(branches, ...))` does not compile, and a module handed another section's context at runtime rejects with an error naming both sections before it reads anything.
 
 Prefer `checkRepository()` and `snapshotRepository()` for the whole document: one run over every selected section, permission failures classified per section, and one report or rendered file at the end.
 

@@ -15,12 +15,19 @@ import { AgentsVariableConfig } from "../agents_variables/schema.js";
 import { parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
+  type GraphqlDict,
   loosen,
   type SectionSnapshot,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "../contract/plan.js";
+import type {
+  KeyErasedPlan,
+  PlanContext,
+  PlannedOp,
+  SectionPlan,
+  SnapshotContext,
+} from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
@@ -95,7 +102,7 @@ type RepoVariablesDeclared<K extends RepoVariablesKey> = Exclude<SettingsFile[K]
  */
 type RepoVariablesPlan<K extends RepoVariablesKey> = {
   [F in RepoVariablesKey]: (
-    ctx: PlanContext<RepoVariablesEndpoints<VariablesSegment<F>>>,
+    ctx: PlanContext<RepoVariablesEndpoints<VariablesSegment<F>>, GraphqlDict, F>,
     declared: RepoVariablesDeclared<F>,
   ) => Promise<SectionPlan<PlannedOp<RepoVariablesEndpoints<VariablesSegment<F>>>>>;
 }[K];
@@ -120,7 +127,9 @@ type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : fals
 
 type _SharedPlanIsEveryFamilyPlan = MustBeNever<
   {
-    [K in RepoVariablesKey]: Invariant<SharedPlan, RepoVariablesPlan<K>> extends true ? never : K;
+    [K in RepoVariablesKey]: Invariant<SharedPlan, KeyErasedPlan<RepoVariablesPlan<K>>> extends true
+      ? never
+      : K;
   }[RepoVariablesKey]
 >;
 
@@ -133,7 +142,7 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly shape: z.ZodType;
   readonly plan: RepoVariablesPlan<K>;
   readonly snapshot: (
-    ctx: SnapshotContext<RepoVariablesEndpoints<VariablesSegment<K>>>,
+    ctx: SnapshotContext<RepoVariablesEndpoints<VariablesSegment<K>>, GraphqlDict, K>,
   ) => Promise<SectionSnapshot<K>>;
 }
 
@@ -245,7 +254,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
-    snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints>),
+    snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),
   };
   return section;
 }

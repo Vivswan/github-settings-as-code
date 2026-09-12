@@ -17,13 +17,20 @@ import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
 import { parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
+  type GraphqlDict,
   loosen,
   type SectionModule,
   type SectionSnapshot,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "../contract/plan.js";
+import type {
+  KeyErasedPlan,
+  PlanContext,
+  PlannedOp,
+  SectionPlan,
+  SnapshotContext,
+} from "../contract/plan.js";
 import { DependabotSecretConfig } from "../dependabot_secrets/schema.js";
 import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
@@ -107,7 +114,7 @@ type RepoSecretsDeclared<K extends RepoSecretsKey> = Exclude<SettingsFile[K], un
  */
 type RepoSecretsPlan<K extends RepoSecretsKey> = {
   [F in RepoSecretsKey]: (
-    ctx: PlanContext<RepoSecretsEndpoints<SecretsSegment<F>>>,
+    ctx: PlanContext<RepoSecretsEndpoints<SecretsSegment<F>>, GraphqlDict, F>,
     declared: RepoSecretsDeclared<F>,
   ) => Promise<SectionPlan<PlannedOp<RepoSecretsEndpoints<SecretsSegment<F>>>>>;
 }[K];
@@ -133,7 +140,9 @@ type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : fals
 
 type _SharedPlanIsEveryFamilyPlan = MustBeNever<
   {
-    [K in RepoSecretsKey]: Invariant<SharedPlan, RepoSecretsPlan<K>> extends true ? never : K;
+    [K in RepoSecretsKey]: Invariant<SharedPlan, KeyErasedPlan<RepoSecretsPlan<K>>> extends true
+      ? never
+      : K;
   }[RepoSecretsKey]
 >;
 
@@ -165,7 +174,7 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
   readonly closedSurface: typeof CLOSED_SURFACE;
   readonly plan: RepoSecretsPlan<K>;
   readonly snapshot: (
-    ctx: SnapshotContext<RepoSecretsEndpoints<SecretsSegment<K>>>,
+    ctx: SnapshotContext<RepoSecretsEndpoints<SecretsSegment<K>>, GraphqlDict, K>,
   ) => Promise<SectionSnapshot<K>>;
 }
 
@@ -286,7 +295,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     closedSurface: CLOSED_SURFACE,
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
-    snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints>),
+    snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),
   };
   return section;
 }

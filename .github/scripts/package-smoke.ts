@@ -52,9 +52,9 @@ console.log("imported " + SECTION_KEYS.length + " section keys and the schema");
 `;
 
 /**
- * The consumer compiled against index.d.ts, no client behind it. The expect-error line is the control
- * that the bundle keeps DenialPolicy nominal: the literal is its public shape, so only the private
- * member rejects it.
+ * The consumer compiled against index.d.ts, no client behind it. The expect-error lines are the
+ * controls that the bundle keeps DenialPolicy nominal (the literal is its public shape, so only the
+ * private member rejects it) and keeps the context branded with its section's key.
  */
 const TS_CONSUMER = `import {
   type GithubClient,
@@ -73,11 +73,13 @@ export const ok: boolean = result.isOk() && first === "repository";
 declare const client: GithubClient;
 declare const repo: RepoRef;
 const labels = sectionModule("labels");
-const snapshotCtx: SnapshotContext = snapshotContext(labels, client, repo, "warn");
+const snapshotCtx = snapshotContext(labels, client, repo, "warn");
 export const direct = () =>
   Promise.all([labels.plan(planContext(labels, client, repo), []), labels.snapshot?.(snapshotCtx)]);
 // @ts-expect-error only snapshotContext() mints a DenialPolicy
 export const forged: SnapshotContext = { ...snapshotCtx, onMissingPermission: { notesDenials: true } };
+// @ts-expect-error a context built for branches is not labels' context
+export const foreign = () => labels.plan(planContext(sectionModule("branches"), client, repo), []);
 `;
 
 /** The settings file the installed CLI validates: one section, valid as written. */

@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import {
   planContext,
   type RepoRef,
+  type SectionModule,
   type SnapshotContext,
   sectionModule,
   snapshotContext,
@@ -59,5 +60,25 @@ describe("a section module called through the entry", () => {
     // @ts-expect-error only snapshotContext() mints a DenialPolicy
     const forged: SnapshotContext = { ...ctx, onMissingPermission: { notesDenials: true } };
     expect(forged.repo).toEqual(REPO);
+  });
+
+  test("another section's context is refused by the type, and at runtime before any read", async () => {
+    const api = new MockApi({});
+    const labels = sectionModule("labels");
+    const branches = sectionModule("branches");
+    // @ts-expect-error a context built for branches is not labels' context
+    await expect(labels.plan(planContext(branches, api, REPO), [])).rejects.toThrow(
+      'labels.plan() was given the context built for section "branches"; build it from this module: planContext(sectionModule("labels"), api, repo)',
+    );
+    // @ts-expect-error a context built for branches is not labels' context
+    await expect(labels.snapshot?.(snapshotContext(branches, api, REPO, "warn"))).rejects.toThrow(
+      'labels.snapshot() was given the context built for section "branches"; build it from this module: snapshotContext(sectionModule("labels"), api, repo, onMissingPermission)',
+    );
+    // Erased to the roster's type the brand is one SectionKey on both sides, so only the runtime refusal stands.
+    const erased: SectionModule = sectionModule("repository");
+    await expect(erased.plan(planContext(labels, api, REPO), [])).rejects.toThrow(
+      'repository.plan() was given the context built for section "labels"',
+    );
+    expect(api.calls).toEqual([]);
   });
 });

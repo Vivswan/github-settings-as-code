@@ -357,8 +357,8 @@ export interface SectionModule<
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
 > extends SectionModuleBase<K, E, G> {
-  plan(ctx: PlanContext<E, G>, desired: SectionInput<K>): Promise<SectionPlan<PlannedOp<E, G>>>;
-  snapshot?(ctx: SnapshotContext<E, G>): Promise<SectionSnapshot<K>>;
+  plan(ctx: PlanContext<E, G, K>, desired: SectionInput<K>): Promise<SectionPlan<PlannedOp<E, G>>>;
+  snapshot?(ctx: SnapshotContext<E, G, K>): Promise<SectionSnapshot<K>>;
   /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
   run?: never;
 }
