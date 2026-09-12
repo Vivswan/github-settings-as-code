@@ -7,6 +7,7 @@
  * build:bundle) is a separate artifact that inlines everything.
  */
 
+import { rmSync } from "node:fs";
 import { defineConfig } from "tsdown";
 import pkg from "./package.json" with { type: "json" };
 
@@ -15,6 +16,10 @@ export default defineConfig({
   format: "esm",
   platform: "node",
   dts: true,
+  hooks: {
+    // The bin has no importable surface; its declaration file would be an empty `export {}`.
+    "build:done": () => rmSync("lib/pkg/cli.d.ts", { force: true }),
+  },
   outDir: "lib/pkg",
   deps: {
     // tsdown already externalizes package.json dependencies and their subpaths

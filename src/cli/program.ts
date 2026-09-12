@@ -1,7 +1,6 @@
 /**
  * The command tree: check, apply, and merge mirror the action's modes with
- * INPUT_DECLS as their flags; validate and permissions read a file alone;
- * snapshot and init name the snapshot mode this library build may not carry.
+ * INPUT_DECLS as their flags; validate and permissions read a file alone.
  * `--token`, `--json`, `--summary`, and `--verbose` are global. main() runs
  * argv to its exit code without touching the process.
  */
@@ -9,7 +8,6 @@
 import { Command, CommanderError, Option } from "commander";
 import pc from "picocolors";
 import {
-  failRun,
   GithubApi,
   INPUT_DECLS,
   type Io,
@@ -18,26 +16,20 @@ import {
   type RunConfig,
 } from "../index.js";
 import {
+  ARTIFACT_UNSUPPORTED,
   type CliHost,
+  describeCliProblem,
+  failCli,
   permissionsFor,
   type Rendered,
   runConfig,
-  unavailable,
   validateFile,
 } from "./commands.js";
 import { argvReader, inputOption, inputsForMode, once, tokenValues } from "./inputs.js";
 import { type CliStreams, cliIo, type MaskedStreams, maskedStreams } from "./io.js";
 
 /** Every subcommand, in help order; the package smoke asserts the installed help names each. */
-export const CLI_COMMANDS = [
-  "check",
-  "apply",
-  "merge",
-  "snapshot",
-  "init",
-  "validate",
-  "permissions",
-] as const;
+export const CLI_COMMANDS = ["check", "apply", "merge", "validate", "permissions"] as const;
 
 type CliCommand = (typeof CLI_COMMANDS)[number];
 
@@ -45,9 +37,6 @@ const DESCRIPTION: Readonly<Record<CliCommand, string>> = {
   check: "Report drift between a settings file and the live repository; exits 1 on any drift",
   apply: "Apply a settings file to the repository",
   merge: "Fold an ordered list of settings files into one document, with no token and no API call",
-  snapshot:
-    "Write the live repository settings as a settings file (needs a build with mode: snapshot)",
-  init: "Snapshot the repository into .github/settings.yml and print the PAT grant it needs (needs a build with mode: snapshot)",
   validate: "Validate a settings file against the schema; no token, no API call",
   permissions: "Print the PAT grant each section a settings file declares needs",
 };
@@ -152,22 +141,17 @@ export function buildProgram(options: ProgramOptions): {
     command.action(async function (this: Command) {
       const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
       const { io, flush } = openIo(values);
-      exitCode = await parseConfig(argvReader(mode, values), host.env).match(
-        (cfg) => execute(cfg, io),
-        async (problem) => failRun(io, problem),
-      );
+      const read = argvReader(mode, values);
+      // Refused before parseConfig, which would otherwise ask for the channel's age key first.
+      exitCode =
+        read("private-report") === "artifact"
+          ? failCli(io, ARTIFACT_UNSUPPORTED)
+          : await parseConfig(read, host.env).match(
+              (cfg) => execute(cfg, io),
+              async (problem) => failCli(io, describeCliProblem(problem)),
+            );
       flush();
     });
-  }
-
-  for (const name of ["snapshot", "init"] as const) {
-    program
-      .command(name)
-      .description(DESCRIPTION[name])
-      .action(function (this: Command) {
-        const { io } = openIo(this.optsWithGlobals<Globals>());
-        exitCode = unavailable(name, io);
-      });
   }
 
   program
@@ -197,13 +181,7 @@ export function buildProgram(options: ProgramOptions): {
   return { program, exitCode: () => exitCode };
 }
 
-/**
- * Run `argv` (the full process.argv shape) to its exit code over plain
- * streams, which are wrapped in the mask boundary first. Commander's own
- * exits (help shown, a bad flag) become the code it would have exited with;
- * anything else that escapes a command is reported through the boundary
- * (the stack under --verbose) and exits 1, so no path prints unmasked.
- */
+/** Run `argv` (the full process.argv shape) to its exit code; every line, a crash's included, is masked. */
 export async function main(
   argv: readonly string[],
   options: Omit<ProgramOptions, "streams"> & { readonly streams: CliStreams },

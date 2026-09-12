@@ -1,14 +1,15 @@
 /**
  * The command tree end to end: each subcommand through main() against a
  * stub client, holding the exit codes and outputs to the action's, the two
- * file-only commands to their verdicts, the unavailable commands to their one
- * line, and the token to never appearing in what the CLI prints.
+ * file-only commands to their verdicts, and the token to never appearing in
+ * what the CLI prints.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { CLI_COMMANDS, main } from "../../src/cli/program.js";
 import { type ConfigEnv, type GithubClient, sectionGrant, sectionModule } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
@@ -103,8 +104,8 @@ describe("check and apply", () => {
       new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } }),
     );
     expect(result.code).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ "skipped-sections": "", result: "clean" });
     expect(result.stderr).toBe("result: clean\n");
+    expect(JSON.parse(result.stdout)).toEqual({ "skipped-sections": "", result: "clean" });
   });
 
   test("the token comes from GITHUB_TOKEN when no flag names it", async () => {
@@ -122,9 +123,36 @@ describe("check and apply", () => {
     expect(result.code).toBe(1);
     expect(api.calls).toHaveLength(0);
     expect(result.stderr).toBe(
-      'error: cannot target a repository: "not-a-slug" is not an owner/name slug. Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"\n',
+      'error: cannot target a repository: "not-a-slug" is not an owner/name slug. Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)\n',
     );
     expect(result.stdout).toBe("result: failed\nskipped-sections=\nresult=failed\n");
+  });
+
+  test.each<[string, string[], string]>([
+    [
+      "no token",
+      ["check", "--repository", "o/r"],
+      "cannot call the GitHub API: no token was provided. Pass --token, or export GITHUB_TOKEN",
+    ],
+    [
+      "no repository outside Actions",
+      ["check", "--token", TOKEN],
+      'cannot target a repository: "" is not an owner/name slug. Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)',
+    ],
+    [
+      "the artifact channel",
+      ["check", ...target, "--private-report", "artifact"],
+      '"--private-report artifact" uploads through the Actions artifact service, which the command line has no access to. Use "--private-report issue" or "issue-on-failure" (a report on each private target repository), or "none"',
+    ],
+  ])("%s fails with a remedy a terminal can follow", async (_case, args, message) => {
+    const api = new MockApi({});
+    const result = await cli(args, api);
+    expect(api.calls).toHaveLength(0);
+    expect(result).toEqual({
+      code: 1,
+      stdout: "result: failed\nskipped-sections=\nresult=failed\n",
+      stderr: `error: ${message}\n`,
+    });
   });
 
   test("the token never appears in what the CLI prints, even echoed by the API", async () => {
@@ -200,7 +228,15 @@ describe("merge", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toEndWith("result: merged\nskipped-sections=\nresult=merged\n");
-    expect(readFileSync(out, "utf8")).toContain("name: team");
+    // Only the fold produces this shape: team.yml's label joins fleet.yml's two under
+    // the explicit policy wrapper, and its `has_projects: null` removes fleet.yml's key.
+    const merged = parseYaml(readFileSync(out, "utf8")) as {
+      repository: Record<string, unknown>;
+      labels: { _undeclared: string; entries: Array<{ name: string }> };
+    };
+    expect(merged.repository).toEqual({ has_wiki: false });
+    expect(merged.labels._undeclared).toBe("delete");
+    expect(merged.labels.entries.map((label) => label.name)).toEqual(["bug", "docs", "team"]);
   });
 
   test("a merge without merged-file fails with the action's line", async () => {
@@ -220,6 +256,8 @@ describe("validate and permissions", () => {
       stderr: "",
     });
     const json = await cli(["validate", SINGLE, "--json"]);
+    expect(json.code).toBe(0);
+    expect(json.stderr).toBe("");
     expect(JSON.parse(json.stdout)).toEqual({
       file: SINGLE,
       valid: true,
@@ -234,8 +272,12 @@ describe("validate and permissions", () => {
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toStartWith(`error: ${file} has malformed section entries:`);
+    // The same message, once on stderr and once as the object's problem.
+    const problem = result.stderr.slice("error: ".length, -1);
     const json = await cli(["validate", file, "--json"]);
-    expect(JSON.parse(json.stdout)).toMatchObject({ file, valid: false });
+    expect(json.code).toBe(1);
+    expect(json.stderr).toBe(result.stderr);
+    expect(JSON.parse(json.stdout)).toEqual({ file, valid: false, problem });
   });
 
   test("validate: an unreadable file exits 1 naming the path", async () => {
@@ -257,21 +299,12 @@ describe("validate and permissions", () => {
       stderr: "",
     });
     const json = await cli(["permissions", file, "--json"]);
+    expect(json.code).toBe(0);
+    expect(json.stderr).toBe("");
     expect(JSON.parse(json.stdout)).toEqual({
       repository: sectionGrant(sectionModule("repository")),
       labels: sectionGrant(sectionModule("labels")),
     });
-  });
-});
-
-describe("the commands this build cannot run", () => {
-  test.each(["snapshot", "init"])("%s exits 1 naming the missing mode", async (command) => {
-    const result = await cli([command]);
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toBe(
-      `error: ${command} needs mode: snapshot, which this build of github-settings-as-code does not include. Upgrade to a release whose inputs reference lists snapshot among the modes\n`,
-    );
   });
 });
 

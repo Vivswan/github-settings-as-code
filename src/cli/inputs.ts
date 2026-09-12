@@ -10,6 +10,7 @@
 import { InvalidArgumentError, Option } from "commander";
 import {
   INPUT_DECLS,
+  type InputDecl,
   type InputName,
   type InputReader,
   MERGE_INPUTS,
@@ -24,15 +25,22 @@ const INPUT_NAMES = Object.keys(INPUT_DECLS) as InputName[];
 const PROGRAM_INPUTS = ["mode", "token"] as const satisfies readonly InputName[];
 
 /**
+ * Inputs no subcommand exposes: the artifact report channel needs the Actions
+ * artifact service, which a terminal has no upload for, so its key has no use.
+ */
+export const CLI_UNSUPPORTED_INPUTS = ["report-public-key"] as const satisfies readonly InputName[];
+
+/**
  * The flags a mode's subcommand takes: the inputs its mode reads. `settings-file`
  * is the one input both the merge and the engine modes read.
  */
 export function inputsForMode(mode: Mode): InputName[] {
   const mergeReads = (name: InputName): boolean =>
     (MERGE_INPUTS as readonly InputName[]).includes(name);
+  const hidden: readonly InputName[] = [...PROGRAM_INPUTS, ...CLI_UNSUPPORTED_INPUTS];
   return INPUT_NAMES.filter(
     (name) =>
-      !(PROGRAM_INPUTS as readonly InputName[]).includes(name) &&
+      !hidden.includes(name) &&
       (mode === "merge" ? mergeReads(name) : !mergeReads(name) || name === "settings-file"),
   );
 }
@@ -43,20 +51,29 @@ export function exposedInputs(): InputName[] {
   return INPUT_NAMES.filter((name) => flags.has(name));
 }
 
-/**
- * The inputs parseConfig splits on newlines and commas (its splitList calls),
- * so a repeated flag may accumulate into one list. Pinned to parseConfig in
- * test/cli/inputs.test.ts: every name here accepts a newline-joined pair.
- */
-export const LIST_INPUTS = [
-  "settings-file",
-  "required-sections",
-  "sections",
-  "repos",
-  "exclude",
-  "topics",
-  "affiliation",
-] as const satisfies readonly InputName[];
+/** The sentence the action's `repository` description spends on a default a terminal never has. */
+const ACTIONS_DEFAULT_SENTENCE = "Defaults to the current repository.";
+const CLI_REPOSITORY_SENTENCE =
+  "Required unless repos or repos-dir is set (inside GitHub Actions, GITHUB_REPOSITORY supplies it).";
+if (!INPUT_DECLS.repository.description.includes(ACTIONS_DEFAULT_SENTENCE)) {
+  throw new Error(
+    `BUG: the repository input's description no longer says "${ACTIONS_DEFAULT_SENTENCE}"; reword the CLI's replacement with it`,
+  );
+}
+
+/** The flag's help text: the declaration's, reworded where it assumes the Actions runner. */
+export function inputDescription(name: InputName): string {
+  const description = INPUT_DECLS[name].description;
+  return name === "repository"
+    ? description.replace(ACTIONS_DEFAULT_SENTENCE, CLI_REPOSITORY_SENTENCE)
+    : description;
+}
+
+/** Whether the declaration is a list; read through InputDecl since only the list members carry the field. */
+export function isList(name: InputName): boolean {
+  const decl: InputDecl = INPUT_DECLS[name];
+  return decl.list === true;
+}
 
 /** A repeated list flag accumulates as a newline-separated list, the form parseConfig splits. */
 function accumulate(value: string, previous?: string): string {
@@ -73,10 +90,10 @@ export function once(flag: string): (value: string, previous?: string) => string
   };
 }
 
-/** The commander option for one input: `--<name> <value>` with the action's description. */
+/** The commander option for one input: `--<name> <value>`, repeatable when the declaration is a list. */
 export function inputOption(name: InputName): Option {
-  const parse = (LIST_INPUTS as readonly InputName[]).includes(name) ? accumulate : once(name);
-  return new Option(`--${name} <value>`, INPUT_DECLS[name].description).argParser(parse);
+  const parse = isList(name) ? accumulate : once(name);
+  return new Option(`--${name} <value>`, inputDescription(name)).argParser(parse);
 }
 
 /** Commander's attribute for each flag (camelCase of the name), read from commander itself. */

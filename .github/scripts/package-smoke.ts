@@ -12,7 +12,7 @@
  * directory is removed on every path, failure included.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,10 +61,24 @@ export const ok: boolean = result.isOk() && first === "repository";
 /** The settings file the installed CLI validates: one section, valid as written. */
 const SETTINGS_FILE = "labels:\n  - name: bug\n    color: d73a4a\n";
 
+/** The control: a label without its name, which the validator refuses. */
+const INVALID_SETTINGS_FILE = "labels:\n  - color: d73a4a\n";
+
 /** Run a command to completion in `cwd`, streaming its output; a non-zero exit throws. */
 function run(command: string, args: string[], cwd: string): void {
   console.log(`$ ${[command, ...args].join(" ")}`);
   execFileSync(command, args, { cwd, stdio: "inherit" });
+}
+
+/** Run a command expected to fail; any other exit code, zero included, throws. */
+function expectExit(code: number, command: string, args: string[], cwd: string): void {
+  console.log(`$ ${[command, ...args].join(" ")}  # expecting exit ${code}`);
+  const result = spawnSync(command, args, { cwd, stdio: "inherit" });
+  if (result.status !== code) {
+    throw new Error(
+      `${[command, ...args].join(" ")} exited ${result.status ?? "by signal"}, expected ${code}`,
+    );
+  }
 }
 
 /** Run a command and return its stdout. */
@@ -139,6 +153,9 @@ async function main(): Promise<void> {
     }
     writeFileSync(join(consumer, "settings.yml"), SETTINGS_FILE);
     run(CONSUMER_NODE, [bin, "validate", "settings.yml"], consumer);
+    // The failing control: a bin that swallowed its exit code would pass the line above.
+    writeFileSync(join(consumer, "invalid.yml"), INVALID_SETTINGS_FILE);
+    expectExit(1, CONSUMER_NODE, [bin, "validate", "invalid.yml"], consumer);
     writeFileSync(join(consumer, "main.ts"), TS_CONSUMER);
     run(
       join(REPO_ROOT, "node_modules", ".bin", "tsc"),

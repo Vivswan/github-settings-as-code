@@ -10,13 +10,21 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
-import { exposedInputs, inputsForMode, LIST_INPUTS } from "../../src/cli/inputs.js";
+import { ARTIFACT_UNSUPPORTED, describeCliProblem } from "../../src/cli/commands.js";
+import {
+  CLI_UNSUPPORTED_INPUTS,
+  exposedInputs,
+  inputDescription,
+  inputsForMode,
+  isList,
+} from "../../src/cli/inputs.js";
 import { maskedStreams } from "../../src/cli/io.js";
 import { buildProgram, CLI_COMMANDS, main } from "../../src/cli/program.js";
 import {
   type ConfigEnv,
   describeProblem,
   INPUT_DECLS,
+  type InputDecl,
   type InputName,
   MODES,
   type Mode,
@@ -49,6 +57,8 @@ interface Case {
    * parseConfig runs, where the action's path refuses the same input by name.
    */
   readonly unknownFlag?: InputName;
+  /** A value the action accepts and only the CLI refuses, with the line it prints. */
+  readonly cliRefuses?: string;
 }
 
 /** One case per RunConfig arm and per path a flag can take, plus the rejections. */
@@ -128,7 +138,13 @@ function cases(): Case[] {
       env: { GITHUB_REPOSITORY: "o/admin" },
     },
     {
-      name: "check, central repos-dir with the artifact channel and its key",
+      name: "check, central repos-dir with the issue channel",
+      argv: ["check", "--token", "ghp_flag", "--repos-dir", "repos", "--private-report", "issue"],
+      inputs: { mode: "check", token: "ghp_flag", "repos-dir": "repos", "private-report": "issue" },
+      env: { GITHUB_REPOSITORY: "o/admin" },
+    },
+    {
+      name: "refused by the CLI alone: the artifact channel",
       argv: [
         "check",
         "--token",
@@ -137,17 +153,15 @@ function cases(): Case[] {
         "repos",
         "--private-report",
         "artifact",
-        "--report-public-key",
-        recipient,
       ],
       inputs: {
         mode: "check",
         token: "ghp_flag",
         "repos-dir": "repos",
         "private-report": "artifact",
-        "report-public-key": recipient,
       },
       env: { GITHUB_REPOSITORY: "o/admin" },
+      cliRefuses: ARTIFACT_UNSUPPORTED,
     },
     {
       name: "merge, layers as repeated flags",
@@ -237,9 +251,18 @@ async function throughArgv(argv: readonly string[], env: ConfigEnv) {
 
 describe("argv -> config equals env -> config", () => {
   test("for every RunConfig arm and every rejection", async () => {
-    for (const { name, argv, inputs, env = {}, unknownFlag } of cases()) {
+    for (const { name, argv, inputs, env = {}, unknownFlag, cliRefuses } of cases()) {
       const expected = parseConfig(recordReader(inputs), env);
       const actual = await throughArgv(argv, env);
+      if (cliRefuses !== undefined) {
+        // The action would ask for the channel's key next; the CLI refuses the channel itself.
+        expect(actual, name).toEqual({
+          parsed: undefined,
+          code: 1,
+          stderr: `error: ${cliRefuses}\n`,
+        });
+        continue;
+      }
       if (expected.isOk()) {
         expect(actual.parsed, name).toEqual(expected.value);
         expect(actual.code, name).toBe(0);
@@ -248,7 +271,7 @@ describe("argv -> config equals env -> config", () => {
       expect(actual.parsed, name).toBeUndefined();
       expect(actual.code, name).toBe(1);
       if (unknownFlag === undefined) {
-        expect(actual.stderr, name).toBe(`error: ${describeProblem(expected.error)}\n`);
+        expect(actual.stderr, name).toBe(`error: ${describeCliProblem(expected.error)}\n`);
       } else {
         expect(actual.stderr, name).toStartWith(`error: unknown option '--${unknownFlag}'`);
       }
@@ -260,9 +283,9 @@ describe("argv -> config equals env -> config", () => {
     const kinds = new Set<string>();
     let envToken = 0;
     let rejected = 0;
-    for (const { argv, inputs, env = {} } of cases()) {
+    for (const { argv, inputs, env = {}, cliRefuses } of cases()) {
       const result = parseConfig(recordReader(inputs), env);
-      if (result.isErr()) {
+      if (result.isErr() || cliRefuses !== undefined) {
         rejected++;
         continue;
       }
@@ -343,74 +366,133 @@ describe("the per-mode flag split", () => {
               (problem) => problem.code,
             ),
             `${mode} --${name}`,
-          ).toMatch(/^input-(merge-only|rejected-in-merge)$/);
+          ).toMatch(/^input-(merge-only|rejected-in-merge|report-key-unused)$/);
         }
       }
     }
   });
 
-  test("every LIST_INPUTS entry is one parseConfig splits: a newline-joined pair is accepted whole", () => {
-    // Two entries per list input, each valid alone; the pair must come out of the
-    // parse as those two values, which only the library's own splitting can prove
-    // (repos is split downstream by parseReposInput, so that is what reads it).
-    const engine: Inputs = { mode: "check", token: "ghp" };
-    const discovery: Inputs = { ...engine, repos: "*" };
-    const cases: Record<
-      (typeof LIST_INPUTS)[number],
-      [Inputs, [string, string], (cfg: RunConfig) => readonly string[]]
-    > = {
-      "settings-file": [
-        { mode: "merge", "merged-file": "out.yml" },
-        ["a.yml", "b.yml"],
-        (cfg) => (cfg.kind === "merge" ? cfg.settingsFiles : []),
-      ],
-      "required-sections": [
-        engine,
-        ["labels", "milestones"],
-        (cfg) => (cfg.kind === "merge" ? [] : [...cfg.sections.required]),
-      ],
-      sections: [
-        engine,
-        ["labels", "milestones"],
-        (cfg) => (cfg.kind === "merge" ? [] : [...cfg.sections.only]),
-      ],
-      repos: [
-        engine,
-        ["o/a", "o/b"],
-        (cfg) =>
-          cfg.kind === "multi"
-            ? parseReposInput(cfg.reposInput)
-                .map((r) => r.slugs)
-                .unwrapOr([])
-            : [],
-      ],
-      exclude: [
-        discovery,
-        ["x/*", "tmp-*"],
-        (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.exclude : []),
-      ],
-      topics: [
-        discovery,
-        ["a", "b"],
-        (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.topics : []),
-      ],
-      affiliation: [
-        discovery,
-        ["owner", "collaborator"],
-        (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.affiliation : []),
-      ],
-    };
-    const env: ConfigEnv = { GITHUB_REPOSITORY: "o/self" };
-    for (const name of LIST_INPUTS) {
-      const [companions, pair, kept] = cases[name];
-      const result = parseConfig(recordReader({ ...companions, [name]: pair.join("\n") }), env);
-      expect(result.isOk(), `${name}: ${result.match(() => "", describeProblem)}`).toBe(true);
-      expect(result.map(kept).unwrapOr([]), name).toEqual(pair);
+  /**
+   * One repeated-argv case per input, keyed over every InputName so a new
+   * input must say whether it repeats: a list input names the subcommand and
+   * companions, the pair a repeated flag carries, and the library's own
+   * reading of the parsed config (repos is split by parseReposInput); a
+   * single-value input is "single" and its repeat must be refused.
+   */
+  interface Repeated {
+    readonly argv: readonly string[];
+    readonly pair: readonly [string, string];
+    readonly kept: (cfg: RunConfig) => readonly string[];
+    readonly env?: ConfigEnv;
+  }
+  const check = ["check", "--token", "ghp", "--repository", "o/r"];
+  const discovery = ["check", "--token", "ghp", "--repos", "*"];
+  const REPEATED: Record<InputName, Repeated | "single"> = {
+    token: "single",
+    repository: "single",
+    "settings-file": {
+      argv: ["merge", "--merged-file", "out.yml"],
+      pair: ["a.yml", "b.yml"],
+      kept: (cfg) => (cfg.kind === "merge" ? cfg.settingsFiles : []),
+    },
+    mode: "single",
+    "merged-file": "single",
+    "on-missing-permission": "single",
+    "required-sections": {
+      argv: check,
+      pair: ["labels", "milestones"],
+      kept: (cfg) => (cfg.kind === "merge" ? [] : [...cfg.sections.required]),
+    },
+    sections: {
+      argv: check,
+      pair: ["labels", "milestones"],
+      kept: (cfg) => (cfg.kind === "merge" ? [] : [...cfg.sections.only]),
+    },
+    "api-version": "single",
+    repos: {
+      argv: ["check", "--token", "ghp"],
+      pair: ["o/a", "o/b"],
+      kept: (cfg) =>
+        cfg.kind === "multi"
+          ? parseReposInput(cfg.reposInput)
+              .map((r) => r.slugs)
+              .unwrapOr([])
+          : [],
+      env: { GITHUB_REPOSITORY: "o/admin" },
+    },
+    "repos-dir": "single",
+    "defaults-file": "single",
+    layering: "single",
+    "private-repos": "single",
+    "private-report": "single",
+    "report-public-key": "single",
+    visibility: "single",
+    archived: "single",
+    forks: "single",
+    exclude: {
+      argv: discovery,
+      pair: ["x/*", "tmp-*"],
+      kept: (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.exclude : []),
+    },
+    topics: {
+      argv: discovery,
+      pair: ["a", "b"],
+      kept: (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.topics : []),
+    },
+    affiliation: {
+      argv: discovery,
+      pair: ["owner", "collaborator"],
+      kept: (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.affiliation : []),
+    },
+  };
+
+  test("a repeated flag accumulates exactly for the inputs declared list, and is refused for the rest", async () => {
+    const exposed = new Set(exposedInputs());
+    for (const name of Object.keys(REPEATED) as InputName[]) {
+      const repeated = REPEATED[name];
+      const decl: InputDecl = INPUT_DECLS[name];
+      // The record and the declaration agree on which inputs are lists.
+      expect(repeated !== "single", `${name} declares list: ${decl.list}`).toBe(decl.list === true);
+      expect(isList(name), name).toBe(decl.list === true);
+      if (repeated === "single") {
+        if (!exposed.has(name)) {
+          continue; // the mode is the subcommand; an unsupported input has no flag
+        }
+        const flag =
+          name === "token"
+            ? ["check", "--repository", "o/r"]
+            : inputsForMode("check").includes(name)
+              ? check
+              : ["merge"];
+        // Long values: a token value is masked, and a one-letter mask would eat the message.
+        const actual = await throughArgv(
+          [...flag, `--${name}`, "first-value", `--${name}`, "second-value"],
+          {},
+        );
+        expect(actual.code, name).toBe(1);
+        expect(actual.stderr, name).toContain(
+          `--${name} takes one value and was given more than once`,
+        );
+        continue;
+      }
+      const [first, second] = repeated.pair;
+      const actual = await throughArgv(
+        [...repeated.argv, `--${name}`, first, `--${name}`, second],
+        repeated.env ?? {},
+      );
+      expect(actual.stderr, name).toBe("");
+      expect(actual.parsed, name).toBeDefined();
+      expect(actual.parsed === undefined ? [] : repeated.kept(actual.parsed), name).toEqual([
+        first,
+        second,
+      ]);
     }
   });
 
-  test("every declared input is the mode, the global token, or a flag of some subcommand", () => {
-    expect(new Set([...exposedInputs(), "mode"])).toEqual(new Set(Object.keys(INPUT_DECLS)));
+  test("every declared input is the mode, the global token, a flag of some subcommand, or named unsupported", () => {
+    expect(new Set([...exposedInputs(), "mode", ...CLI_UNSUPPORTED_INPUTS])).toEqual(
+      new Set(Object.keys(INPUT_DECLS)),
+    );
   });
 });
 
@@ -431,22 +513,30 @@ describe("the help text", () => {
     expect(help).toContain("--summary <file>");
   });
 
-  test("each mode's subcommand lists exactly its INPUT_DECLS flags, described by the declaration", () => {
+  test("each mode's subcommand carries exactly its INPUT_DECLS flags, each with its full description", () => {
     for (const mode of MODES) {
       const command = program.commands.find((candidate) => candidate.name() === mode);
       if (command === undefined) {
         throw new Error(`no ${mode} subcommand`);
       }
-      const help = command.helpInformation();
-      for (const name of Object.keys(INPUT_DECLS) as InputName[]) {
-        const listed = help.includes(`--${name} <value>`);
-        expect(listed, `${mode} --${name}`).toBe(inputsForMode(mode).includes(name));
-        if (listed) {
-          // The description wraps to the help width; its first words are the declaration's.
-          const opening = INPUT_DECLS[name].description.split(" ").slice(0, 3).join(" ");
-          expect(help, `${mode} --${name} description`).toContain(opening);
-        }
+      const options = command.options.filter((option) => option.long !== "--help");
+      expect(options.map((option) => option.long).sort(), mode).toEqual(
+        inputsForMode(mode)
+          .map((name) => `--${name}`)
+          .sort(),
+      );
+      for (const option of options) {
+        const name = option.long?.slice(2) as InputName;
+        expect(option.flags, `${mode} ${name}`).toBe(`--${name} <value>`);
+        expect(option.description, `${mode} ${name}`).toBe(inputDescription(name));
       }
     }
+  });
+
+  test("the repository flag's help names the terminal's requirement, not the runner's default", () => {
+    const description = inputDescription("repository");
+    expect(description).toContain("Required unless repos or repos-dir is set");
+    expect(description).not.toContain("Defaults to the current repository");
+    expect(description).toStartWith(INPUT_DECLS.repository.description.split(".")[0] ?? "");
   });
 });

@@ -50,6 +50,12 @@ export interface InputDecl {
    * fallback, or the effective value for an empty raw default.
    */
   readonly shownDefault?: string;
+  /**
+   * A comma- or newline-separated list. parseConfig reads such an input only
+   * through its list() port (repos is split by the target resolver instead),
+   * and the CLI lets the flag repeat; a single-value input has no `list`.
+   */
+  readonly list?: true;
 }
 
 /**
@@ -83,6 +89,7 @@ export const INPUT_DECLS = {
     default: DEFAULT_SETTINGS_FILE,
     summary:
       "Settings file path (single-repo mode); in `mode: merge`, the ordered list of layers to fold, low to high",
+    list: true,
   },
   mode: {
     description:
@@ -122,6 +129,7 @@ export const INPUT_DECLS = {
       "front, because the run could never attempt it.",
     default: "",
     summary: "Sections that must fully apply even under `warn`",
+    list: true,
   },
   sections: {
     description:
@@ -130,6 +138,7 @@ export const INPUT_DECLS = {
     summary:
       "Comma-separated allowlist of sections to process (apply and check only; rejected in `mode: merge`)",
     shownDefault: "(all declared)",
+    list: true,
   },
   "api-version": {
     description:
@@ -147,6 +156,7 @@ export const INPUT_DECLS = {
     default: "",
     summary:
       "Multi-repo remote mode: `owner/name` list (comma/newline), or `*` to discover owned repos",
+    list: true,
   },
   "repos-dir": {
     description:
@@ -256,12 +266,14 @@ export const INPUT_DECLS = {
     default: "",
     summary:
       "Discovery-only: `*` wildcard patterns (name, or `owner/name` if the pattern has a `/`) to drop",
+    list: true,
   },
   topics: {
     description:
       'Comma- or newline-separated topics; repos: "*" discovery keeps only repositories carrying at least one of them. Unrelated to the topics settings section. Fails if set without repos: "*".',
     default: "",
     summary: "Discovery-only: keep repositories carrying at least one listed topic",
+    list: true,
   },
   affiliation: {
     description:
@@ -272,10 +284,16 @@ export const INPUT_DECLS = {
     default: "",
     summary: "Discovery-only: `owner`, `collaborator`, `organization_member` (comma list)",
     shownDefault: `\`${DEFAULT_DISCOVERY_FILTERS.affiliation.join(",")}\``,
+    list: true,
   },
 } as const satisfies Record<string, InputDecl>;
 
 export type InputName = keyof typeof INPUT_DECLS;
+
+/** The inputs declared `list: true`, the only names the list() port accepts. */
+type ListInput = {
+  [K in InputName]: (typeof INPUT_DECLS)[K] extends { readonly list: true } ? K : never;
+}[InputName];
 
 /** Empty when unset; parseConfig trims, so a port need not. */
 export type InputReader = (name: InputName) => string;
@@ -291,12 +309,15 @@ export type ConfigEnv = Readonly<Record<string, string | undefined>>;
 interface Inputs {
   readonly value: InputReader;
   readonly orDefault: (name: InputName) => string;
+  /** A declared list input, split; the default when unset. */
+  readonly list: (name: ListInput) => string[];
 }
 
 function inputs(read: InputReader): Inputs {
   // The runner's getInput trims; a CLI's port may not. Trimming here gives every port one rule.
   const value: InputReader = (name) => read(name).trim();
-  return { value, orDefault: (name) => value(name) || INPUT_DECLS[name].default };
+  const orDefault = (name: InputName): string => value(name) || INPUT_DECLS[name].default;
+  return { value, orDefault, list: (name) => splitList(orDefault(name)) };
 }
 
 export const FILTER_INPUTS = [
@@ -354,7 +375,7 @@ function readSectionSelection(input: Inputs): Result<SectionSelection, Problem> 
   const sectionInputs = ["required-sections", "sections"] as const;
   const names = sectionInputs.map((name) => ({
     input: name,
-    names: splitList(input.value(name)),
+    names: input.list(name),
   }));
   const knownSections = new Set<string>(SECTION_KEYS);
   const unknown = names
@@ -436,7 +457,7 @@ function parseMergeConfig(input: Inputs): Result<Extract<RunConfig, { kind: "mer
       return err({ code: "input-merged-file-missing" });
     }
     const layering = yield* readEnum(input, "layering", LAYERINGS, "merge", "layering");
-    const settingsFiles = splitList(input.orDefault("settings-file"));
+    const settingsFiles = input.list("settings-file");
     if (settingsFiles.length === 0) {
       return err({
         code: "input-settings-file-empty",
@@ -512,7 +533,6 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
     };
 
     const discoveryFiltersSet = FILTER_INPUTS.filter((name) => input.value(name) !== "");
-    const list = (name: FilterInput): string[] => splitList(input.value(name));
     const visibility = yield* readEnum(
       input,
       "visibility",
@@ -534,7 +554,7 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
       DEFAULT_DISCOVERY_FILTERS.forks,
       "fork policy",
     );
-    const affiliation = [...new Set(list("affiliation"))];
+    const affiliation = [...new Set(input.list("affiliation"))];
     const unsupported = affiliation.find(
       (entry) => !(AFFILIATIONS as readonly string[]).includes(entry),
     );
@@ -545,7 +565,7 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
         allowed: AFFILIATIONS,
       });
     }
-    const exclude = list("exclude");
+    const exclude = input.list("exclude");
     const unmatchable = exclude.find((pattern) => {
       const parts = pattern.split("/");
       return parts.length > 2 || (parts.length === 2 && (!parts[0] || !parts[1]));
@@ -558,7 +578,7 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
       archived,
       forks,
       affiliation: affiliation.length > 0 ? affiliation : DEFAULT_DISCOVERY_FILTERS.affiliation,
-      topics: list("topics").map((topic) => topic.toLowerCase()),
+      topics: input.list("topics").map((topic) => topic.toLowerCase()),
       exclude,
     };
 

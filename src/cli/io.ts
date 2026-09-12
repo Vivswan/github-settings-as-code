@@ -1,11 +1,6 @@
 /**
- * The CLI's output boundary and its Io. maskedStreams() wraps stdout and
- * stderr so every write, the parser's messages included, passes one mask
- * registry (no runner masks for a terminal); cliIo() is the Io the flows
- * write through over those streams: annotations and the debug trace on
- * stderr as `level: message`, log lines on stdout, the summary appended to a
- * file when one is named, and the outputs collected for flush() to print as
- * `name=value` lines or one JSON object.
+ * The CLI's output boundary and its Io. No runner masks for a terminal, so
+ * every writer, the parser included, goes through maskedStreams().
  */
 
 import { appendFileSync } from "node:fs";
@@ -47,8 +42,12 @@ class RedactingStream extends Writable {
   }
 
   override _write(chunk: unknown, _encoding: BufferEncoding, callback: () => void): void {
-    this.target.write(this.redact(String(chunk)));
-    callback();
+    // A full target holds the next chunk until it drains, so backpressure reaches the writer.
+    if (this.target.write(this.redact(String(chunk)))) {
+      callback();
+    } else {
+      this.target.once("drain", callback);
+    }
   }
 }
 

@@ -12,6 +12,7 @@ import {
   failRun,
   type GithubClient,
   type Io,
+  type Problem,
   type RunConfig,
   readSettingsFile,
   runMerge,
@@ -117,12 +118,31 @@ export function permissionsFor(file: string, io: Io, bold: (text: string) => str
   );
 }
 
-/** A command whose mode this build's library does not carry: one error line, exit 1. */
-export function unavailable(command: string, io: Io): number {
-  io.annotate(
-    "error",
-    `${command} needs mode: snapshot, which this build of github-settings-as-code does not include. ` +
-      "Upgrade to a release whose inputs reference lists snapshot among the modes",
-  );
+/**
+ * The action's wording for a problem, except where the remedy names the
+ * workflow step: from a terminal the fix is a flag or an environment variable.
+ */
+export function describeCliProblem(problem: Problem): string {
+  switch (problem.code) {
+    case "input-token-missing":
+      return "cannot call the GitHub API: no token was provided. Pass --token, or export GITHUB_TOKEN";
+    case "input-repository-not-slug":
+      return `cannot target a repository: "${problem.value}" is not an owner/name slug. Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)`;
+    default:
+      return describeProblem(problem);
+  }
+}
+
+/** The one report channel a terminal cannot serve: the artifact upload needs the Actions runner. */
+export const ARTIFACT_UNSUPPORTED =
+  '"--private-report artifact" uploads through the Actions artifact service, which the command line has no access to. ' +
+  'Use "--private-report issue" or "issue-on-failure" (a report on each private target repository), or "none"';
+
+/** End a run on a problem the library has no code for, exactly as failRun ends one. */
+export function failCli(io: Io, message: string): number {
+  io.annotate("error", message);
+  io.output("skipped-sections", "");
+  io.output("result", "failed");
+  io.log("result: failed");
   return 1;
 }

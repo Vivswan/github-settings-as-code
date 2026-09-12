@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CliIoOptions, cliIo, maskedStreams } from "../../src/cli/io.js";
@@ -106,10 +106,22 @@ describe("the CLI Io", () => {
     named.io.summary("## first");
     named.io.summary("## second");
     expect(readFileSync(summary, "utf8")).toBe("## first\n## second\n");
-    const unnamed = open();
-    unnamed.io.summary("## dropped");
-    expect(unnamed.stdout() + unnamed.stderr()).toBe("");
-    expect(existsSync(join(dir, "other.md"))).toBe(false);
+    // Without a file the block goes nowhere: no stream carries it, and the working
+    // directory (where a defaulted path would land) stays empty.
+    const cwd = mkdtempSync(join(tmpdir(), "gsac-io-cwd-"));
+    scratch.push(cwd);
+    const previous = process.cwd();
+    process.chdir(cwd);
+    try {
+      const unnamed = open();
+      unnamed.io.summary("## dropped");
+      expect(unnamed.stdout() + unnamed.stderr()).toBe("");
+      expect(readdirSync(cwd)).toEqual([]);
+    } finally {
+      process.chdir(previous);
+    }
+    expect(readdirSync(dir)).toEqual(["summary.md"]);
+    expect(readFileSync(summary, "utf8")).toBe("## first\n## second\n");
   });
 
   test("identical consecutive lines are all printed, never folded", () => {

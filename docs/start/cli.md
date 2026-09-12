@@ -5,8 +5,8 @@ order: 40
 # Command line
 
 The engine behind the action is also a command in the npm package `@vivswan/github-settings-as-code`: `github-settings-as-code`, or `gsac` for short.
-It runs the same checks, applies, and merges the action runs, from a terminal or any CI, plus three file-only commands the action has no step for:
-validate a settings file, print the PAT grant it needs, and (in a build that carries the snapshot mode) write a repository's live settings as a file.
+It runs the same checks, applies, and merges the action runs, from a terminal or any CI, plus two file-only commands the action has no step for:
+validate a settings file, and print the PAT grant it needs.
 
 ## Install
 
@@ -35,10 +35,6 @@ The package needs Node 22.14 or newer; `bunx` fetches it the same way and honors
 | `merge` | Fold an ordered list of settings files into one document | no |
 | `validate <file>` | Validate a settings file against the schema | no |
 | `permissions <file>` | Print the PAT grant each section the file declares needs | no |
-| `snapshot` | Write the live repository settings as a settings file | yes |
-| `init` | Snapshot into `.github/settings.yml` and print the PAT grant that file needs | yes |
-
-`snapshot` and `init` need a build of the package whose library carries `mode: snapshot`; a build without it exits 1 naming the missing mode.
 
 ### check
 
@@ -58,7 +54,8 @@ The defaults are the action's, redaction included: a private repository's lines 
 gsac apply --repository octo-org/api --settings-file .github/settings.yml --on-missing-permission warn
 ```
 
-Every flag of the action's `apply` and `check` inputs is a flag here, spelled the same way; `--repos`, `--repos-dir`, and `--defaults-file` switch to [multi-repo mode](../operate/multi-repo.md), and the discovery filters follow.
+Every flag of the action's `apply` and `check` inputs is a flag here, spelled the same way, with two exceptions below. `--repos` or `--repos-dir` switches to [multi-repo mode](../operate/multi-repo.md); `--defaults-file` and the discovery filters apply there, as in the action.
+Outside GitHub Actions there is no `GITHUB_REPOSITORY`, so single-repo runs need `--repository`.
 
 ### merge
 
@@ -90,6 +87,8 @@ The subcommand is the action's `mode` input. Every other input of that mode is a
 the [inputs reference](../reference/inputs.md) lists each one with its default and meaning, and `gsac <command> --help` prints the same descriptions.
 A list input (`--settings-file` under merge, `--repos`, `--exclude`, `--topics`, `--affiliation`, `--sections`, `--required-sections`) takes a comma-separated value or the flag repeated; repeating any other value flag, `--token` and `--summary` included, is an error naming it.
 
+Two inputs have no command-line form: `--private-report artifact` is refused (the artifact upload needs the Actions runner; `issue`, `issue-on-failure`, and `none` work), and `report-public-key`, which only that channel reads, is not a flag.
+
 Four flags are the command line's own:
 
 | Flag | Does |
@@ -117,5 +116,5 @@ With `--json` the outputs are one object instead, and stdout carries nothing els
 
 The exit codes are the action's: `check` exits 1 on drift or failure, `apply` and `merge` exit 1 on failure only, `validate` exits 1 on an invalid file, `permissions` exits 0 for a valid file.
 A flag the mode does not read is unknown to that subcommand and exits 1 with the parser's message, where the action rejects the same input by name;
-a value the mode refuses (a filter without `--repos "*"`, a `--repository` that is not a slug) fails with the action's own message.
+a value the mode refuses (a filter without `--repos "*"`, a `--repository` that is not a slug) fails with the action's own message, reworded where the action's remedy names the workflow step.
 The token passed on the command line is masked as `***` wherever a line would echo it.
