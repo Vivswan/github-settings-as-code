@@ -60,8 +60,9 @@ export function wildcardMatches(pattern: string, branch: string): boolean {
         regex += "\\[";
       } else {
         const negated = pattern[i + 1] === "!";
-        // A negated class never crosses a slash either (fnmatch's FNM_PATHNAME).
-        regex += `[${negated ? "^/" : ""}${pattern.slice(i + (negated ? 2 : 1), close)}]`;
+        // No class consumes a slash (fnmatch's FNM_PATHNAME), a positive one listing it included.
+        const members = pattern.slice(i + (negated ? 2 : 1), close);
+        regex += negated ? `[^/${members}]` : `(?!/)[${members}]`;
         i = close;
       }
     } else {

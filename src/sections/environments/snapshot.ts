@@ -34,7 +34,8 @@ type NestedSnapshot = Pick<EnvironmentConfig, NestedKey>;
  * `pinned: true` (the planner reads declaration order as pin order, so any other order would plan
  * a reorder); the rest follow in listing order without the key, since an unpinned environment has
  * nothing to declare and an absent key leaves a pin untouched. A pin naming no listed environment
- * is a note: environments are matched case-insensitively, as GitHub names them.
+ * (matched case-insensitively, as GitHub names them) cannot be declared, and the declared pins
+ * must lead the live list, so from that rank on no pin is declared; one note names them all.
  */
 export function withPins(
   entries: readonly EnvironmentConfig[],
@@ -43,18 +44,23 @@ export function withPins(
   const byKey = new Map(entries.map((entry) => [entry.name.toLowerCase(), entry]));
   const leading: EnvironmentConfig[] = [];
   const notes: string[] = [];
-  for (const name of pins) {
-    const entry = byKey.get(name.toLowerCase());
-    if (entry === undefined) {
-      notes.push(
-        `environments: the pinned environment "${name}" is not in the environment listing, so its pin is left out of the snapshot`,
-      );
-      continue;
-    }
+  const unlistedAt = pins.findIndex((name) => !byKey.has(name.toLowerCase()));
+  const declared = unlistedAt < 0 ? pins : pins.slice(0, unlistedAt);
+  for (const name of declared) {
+    const entry = byKey.get(name.toLowerCase()) as EnvironmentConfig;
     byKey.delete(name.toLowerCase());
     // The key sits beside the name in the written file, ahead of the nested lists.
     const { name: entryName, ...rest } = entry;
     leading.push({ name: entryName, pinned: true, ...rest });
+  }
+  if (unlistedAt >= 0) {
+    const undeclared = pins.slice(unlistedAt + 1).map((name) => `"${name}"`);
+    notes.push(
+      `environments: the pinned environment "${pins[unlistedAt]}" is not in the environment listing, so its pin cannot be declared` +
+        (undeclared.length === 0
+          ? ""
+          : `; the pins ranked after it (${undeclared.join(", ")}) are left without the pinned key too, since declared pins must lead the live list`),
+    );
   }
   return { entries: [...leading, ...byKey.values()], notes };
 }

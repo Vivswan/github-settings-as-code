@@ -1620,12 +1620,20 @@ describe("environments snapshot", () => {
     });
   });
 
-  test("a pin naming no listed environment is a note; names match case-insensitively", () => {
-    const entries = [{ name: "Prod" }, { name: "qa" }];
-    expect(withPins(entries, ["prod", "ghost"])).toEqual({
-      entries: [{ name: "Prod", pinned: true }, { name: "qa" }],
+  test("a pin naming no listed environment stops the declared block there, so the file's pins stay a prefix of the live order", () => {
+    const entries = [{ name: "Prod" }, { name: "qa" }, { name: "web" }];
+    // Case-insensitive match for the leading pin; ghost is unlisted, so web (ranked after it) is not declared.
+    expect(withPins(entries, ["prod", "ghost", "web"])).toEqual({
+      entries: [{ name: "Prod", pinned: true }, { name: "qa" }, { name: "web" }],
       notes: [
-        'environments: the pinned environment "ghost" is not in the environment listing, so its pin is left out of the snapshot',
+        'environments: the pinned environment "ghost" is not in the environment listing, so its pin cannot be declared; ' +
+          'the pins ranked after it ("web") are left without the pinned key too, since declared pins must lead the live list',
+      ],
+    });
+    expect(withPins(entries, ["ghost"])).toEqual({
+      entries,
+      notes: [
+        'environments: the pinned environment "ghost" is not in the environment listing, so its pin cannot be declared',
       ],
     });
   });
