@@ -1,6 +1,6 @@
 {
   "name": "@vivswan/github-settings-as-code",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more.",
   "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",

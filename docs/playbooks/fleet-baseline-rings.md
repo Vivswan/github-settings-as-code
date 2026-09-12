@@ -131,7 +131,7 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.curated) }}
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           mode: merge
           settings-file: |
@@ -139,7 +139,7 @@ jobs:
             .github/settings/rings/${{ matrix.ring }}.yml
             .github/repos/${{ matrix.ring }}/${{ matrix.repo }}.yml
           merged-file: merged/${{ matrix.repo }}.yml
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_TOKEN }}
           repository: acme/${{ matrix.repo }}
@@ -154,14 +154,14 @@ jobs:
         ring: [settings-ring-0, settings-ring-1]
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           mode: merge
           settings-file: |
             .github/settings/baseline.yml
             .github/settings/rings/${{ matrix.ring }}.yml
           merged-file: merged/${{ matrix.ring }}.yml
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_TOKEN }}
           repos: "*"

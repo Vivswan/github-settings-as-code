@@ -9,7 +9,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 2. Add `.github/settings.yml`. The first line gives editor autocomplete and hover docs:
 
    ```yaml
-   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
+   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v3/lib/settings.schema.json # x-release-please-major
 
    repository:
      description: My project
@@ -42,7 +42,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
        runs-on: ubuntu-latest
        steps:
          - uses: actions/checkout@v7
-         - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+         - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
            with:
              token: ${{ secrets.ADMIN_TOKEN }}
              mode: check
@@ -52,7 +52,7 @@ The [getting started guide](docs/start/getting-started.md) walks the same steps 
 
 ## Versioning
 
-- `@v2` is a moving major tag: <!-- x-release-please-major --> every release in that major line moves it, so fixes arrive without changing your pin. Stable within the line; pin it for production.
+- `@v3` is a moving major tag: <!-- x-release-please-major --> every release in that major line moves it, so fixes arrive without changing your pin. Stable within the line; pin it for production.
 - `@latest` is a moving tag on the `build` branch's packaged commit of the newest `main` source: main's newest green commit with the built action, reconciled at every release and, where the repository's own CI can push, at every green push. Breaking changes arrive there unannounced, ahead of any release. The tag exists from the first release cut on the `build` branch.
 - Pin `@vX.Y.Z` (or a commit SHA) for byte-stable behavior. Version tags cut from the `build` branch onward point at a packaged commit carrying the built action, whose recorded source is the audited release commit on main. A ruleset freezes the tags.
 - Packaged commits live on the `build` branch: each is its source commit's tree without `.github/workflows/`, plus the built action (consumers run the action, not this repository's workflows). The tags cut before that branch existed (v2.0.0 and earlier) point at release commits on `main` from when `main` still committed the bundle. `main` is source-only now and not runnable as an action.

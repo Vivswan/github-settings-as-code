@@ -37,7 +37,7 @@ jobs:
         repo: ${{ fromJSON(needs.plan.outputs.repos) }}
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           mode: merge
           settings-file: |
@@ -61,7 +61,7 @@ jobs:
           path: merged
       - id: plan
         continue-on-error: true
-        uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+        uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_READ_TOKEN }}
           mode: check
