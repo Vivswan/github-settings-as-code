@@ -612,7 +612,9 @@ describe("rulesets snapshot", () => {
       },
       notes: [
         'rulesets[org-wide]: inherited from the organization (source_type "Organization"), so it is not part of the repository\'s snapshot; manage it where it is defined',
-        "rulesets[tags]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); grant Administration write to read it back",
+        "rulesets[tags]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
+          "and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); " +
+          "grant Administration write to read it back",
       ],
     });
     expect(api.writes).toEqual([]);
@@ -634,7 +636,9 @@ describe("rulesets snapshot", () => {
     expect(read).toEqual({
       value: { _undeclared: "keep", entries: [] },
       notes: [
-        "rulesets[tags]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); grant Administration write to read it back",
+        "rulesets[tags]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
+          "and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); " +
+          "grant Administration write to read it back",
       ],
     });
     const planned = await rulesetsSection.plan(

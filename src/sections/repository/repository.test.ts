@@ -914,7 +914,9 @@ describe("repository snapshot", () => {
     expect(await snapshot(allOff)).toEqual({
       value: { enable_sponsorships: false, issue_creation_policy: "all" },
       notes: [
-        `repository.enable_vulnerability_alerts/enable_automated_security_fixes/enable_private_vulnerability_reporting/enable_immutable_releases: every toggle GET answered 404, which reads as off but is also how a fine-grained token missing the grant is answered, so they are left out; if the token does ${sectionGrant(repositorySection)}, they are all off and can be declared false`,
+        "repository.enable_vulnerability_alerts/enable_automated_security_fixes/enable_private_vulnerability_reporting/enable_immutable_releases: " +
+          "every toggle GET answered 404, which reads as off but is also how a fine-grained token missing the grant is answered, so they are left out; " +
+          `if the token does ${sectionGrant(repositorySection)}, they are all off and can be declared false`,
         LFS_NOTE,
       ],
     });
