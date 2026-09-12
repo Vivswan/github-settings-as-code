@@ -14,12 +14,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
@@ -240,6 +241,14 @@ describe("runSnapshot, file form", () => {
   });
 });
 
+function settingsRefusal(snapshotFile: string): string {
+  return (
+    `the "snapshot-file" input "${snapshotFile}" is the settings file apply and check read ` +
+    "(.github/settings.yml): the snapshot would overwrite the document you author. Write it to " +
+    "another path and copy it over deliberately"
+  );
+}
+
 /** The refusal a snapshot-dir gets when it is not disjoint from the repos-dir. */
 function disjointRefusal(snapshotDir: string, reposDir: string): string {
   return (
@@ -356,7 +365,7 @@ describe("runSnapshot refuses a destination that would overwrite an authored fil
     [
       "snapshot-file naming the settings file apply reads",
       () => fileCfg({ snapshotFile: "./.github/settings.yml" }),
-      'the "snapshot-file" input "./.github/settings.yml" is the settings file apply and check read (.github/settings.yml): the snapshot would overwrite the document you author. Write it to another path and copy it over deliberately',
+      settingsRefusal("./.github/settings.yml"),
     ],
     [
       "snapshot-dir equal to the repos-dir",
@@ -388,6 +397,298 @@ describe("runSnapshot refuses a destination that would overwrite an authored fil
       { level: "error", line: message },
       { line: "result: failed" },
     ]);
+  });
+});
+
+function tempFoldsCase(): boolean {
+  const probe = mkdtempSync(join(tmpdir(), "snapshot-case-probe-"));
+  try {
+    writeFileSync(join(probe, "a"), "");
+    return existsSync(join(probe, "A"));
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+}
+
+describe("runSnapshot refuses a destination that is an authored path under another name", () => {
+  const AUTHORED = "labels:\n  - name: $NAME\n";
+  type Alias = {
+    /** The authored file the alias reaches, relative to the working directory. */
+    authored: string;
+    /** Makes the alias reach the authored path; a case alias needs nothing. */
+    link?: (dir: string) => void;
+    cfg: () => SnapshotConfig;
+    message: string;
+  };
+
+  /** Runs in `dir`, since the inputs and the settings-file constant resolve against the working directory. */
+  async function refuses({ authored, link, cfg, message }: Alias): Promise<void> {
+    const authoredPath = join(dir, authored);
+    mkdirSync(dirname(authoredPath), { recursive: true });
+    writeFileSync(authoredPath, AUTHORED);
+    link?.(dir);
+    const api = new MockApi({
+      "GET /repos/o/r": { data: { private: false } },
+      ...labelsRoute("o/r", [BUG]),
+    });
+    const collected = collectingIo();
+    const previous = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(await run(api, cfg(), collected.io)).toBe(1);
+    } finally {
+      process.chdir(previous);
+    }
+    expect(api.calls).toEqual([]);
+    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(collected.lines).toEqual([
+      { level: "error", line: message },
+      { line: "result: failed" },
+    ]);
+    expect(readFileSync(authoredPath, "utf8")).toBe(AUTHORED);
+  }
+
+  const settingsFile = join(".github", "settings.yml");
+  const central = join("central", "o", "r.yml");
+
+  describe.skipIf(!tempFoldsCase())("a case alias, on a filesystem that folds case", () => {
+    test.each<[string, Alias]>([
+      [
+        "snapshot-file spelled .GITHUB/settings.yml",
+        {
+          authored: settingsFile,
+          cfg: () => fileCfg({ snapshotFile: join(".GITHUB", "settings.yml") }),
+          message: settingsRefusal(join(".GITHUB", "settings.yml")),
+        },
+      ],
+      [
+        "snapshot-dir spelled CENTRAL over the repos-dir central",
+        {
+          authored: central,
+          cfg: () => dirCfg({ snapshotDir: "CENTRAL", reposDir: "central" }),
+          message: disjointRefusal("CENTRAL", "central"),
+        },
+      ],
+      [
+        "a snapshot-dir that does not exist yet below the case-aliased repos-dir",
+        {
+          authored: central,
+          cfg: () => dirCfg({ snapshotDir: join("CENTRAL", "snapshots"), reposDir: "central" }),
+          message: disjointRefusal(join("CENTRAL", "snapshots"), "central"),
+        },
+      ],
+    ])("%s", (_case, alias) => refuses(alias));
+  });
+
+  test.each<[string, Alias]>([
+    [
+      "snapshot-file naming a symlink to the settings file",
+      {
+        authored: settingsFile,
+        link: (cwd) => symlinkSync(join(cwd, settingsFile), join(cwd, "snapshot.yml")),
+        cfg: () => fileCfg({ snapshotFile: "snapshot.yml" }),
+        message: settingsRefusal("snapshot.yml"),
+      },
+    ],
+    [
+      "snapshot-dir naming a symlink to the repos-dir",
+      {
+        authored: central,
+        link: (cwd) => symlinkSync(join(cwd, "central"), join(cwd, "mirror")),
+        cfg: () => dirCfg({ snapshotDir: "mirror", reposDir: "central" }),
+        message: disjointRefusal("mirror", "central"),
+      },
+    ],
+    [
+      "snapshot-dir reaching that symlink through a directory that does not exist yet and ..",
+      {
+        authored: central,
+        link: (cwd) => symlinkSync(join(cwd, "central"), join(cwd, "mirror")),
+        cfg: () =>
+          dirCfg({ snapshotDir: ["missing", "..", "mirror"].join(sep), reposDir: "central" }),
+        message: disjointRefusal(["missing", "..", "mirror"].join(sep), "central"),
+      },
+    ],
+    [
+      "repos-dir spelled as a symlink inside the snapshot-dir, so a target owned like the link writes through it",
+      {
+        authored: join("authored", "r.yml"),
+        link: (cwd) => {
+          mkdirSync(join(cwd, "out"));
+          symlinkSync(join("..", "authored"), join(cwd, "out", "central"));
+        },
+        cfg: () =>
+          dirCfg({ snapshotDir: "out", reposDir: join("out", "central"), adminOwner: "central" }),
+        message: disjointRefusal("out", join("out", "central")),
+      },
+    ],
+    [
+      "snapshot-file leaving a symlink's target with .., which the filesystem resolves to the settings file",
+      {
+        authored: settingsFile,
+        link: (cwd) => {
+          mkdirSync(join(cwd, ".github", "inner"));
+          symlinkSync(join(".github", "inner"), join(cwd, "link"));
+        },
+        cfg: () => fileCfg({ snapshotFile: ["link", "..", "settings.yml"].join(sep) }),
+        message: settingsRefusal(["link", "..", "settings.yml"].join(sep)),
+      },
+    ],
+  ])("%s", (_case, alias) => refuses(alias));
+
+  type Carried = {
+    authored: string;
+    link: (cwd: string) => void;
+    cfg: () => DirConfig;
+    /** Every target the run resolves, central first, with the file it would write and why it must not. */
+    targets: Array<{
+      slug: string;
+      source: "central" | "remote";
+      path: string;
+      reason: (cwd: string) => string;
+    }>;
+  };
+  const real = (cwd: string, ...parts: string[]) => realpathSync.native(join(cwd, ...parts));
+  const ontoAuthored = (landing: string) =>
+    `the filesystem carries it to ${landing}, an authored settings file. Write the snapshots to a directory that leads to no authored file`;
+  const intoReposDir = (landing: string, reposDir: string) =>
+    `the filesystem carries it to ${landing}, inside the "repos-dir" input "${reposDir}". Write the snapshots to a directory that leads to no central file`;
+
+  // Neither input names the other under any spelling; only the written path, followed by the filesystem, does.
+  test.each<[string, Carried]>([
+    [
+      "links under the snapshot-dir lead a target's file into the repos-dir",
+      {
+        authored: join("authored", "r.yml"),
+        link: (cwd) => {
+          mkdirSync(join(cwd, "out"));
+          symlinkSync("out", join(cwd, "outlink"));
+          symlinkSync(join("..", "authored"), join(cwd, "out", "central"));
+        },
+        cfg: () =>
+          dirCfg({
+            snapshotDir: "outlink",
+            reposInput: "",
+            reposDir: join("out", "central"),
+            adminOwner: "central",
+            privateRepos: "show",
+          }),
+        targets: [
+          {
+            slug: "central/r",
+            source: "central",
+            path: join("outlink", "central", "r.yml"),
+            reason: (cwd) => ontoAuthored(real(cwd, "authored", "r.yml")),
+          },
+        ],
+      },
+    ],
+    [
+      "an owner spelled .github under a snapshot-dir of . names the settings file",
+      {
+        authored: settingsFile,
+        link: () => {},
+        cfg: () =>
+          dirCfg({ snapshotDir: ".", reposInput: ".github/settings", privateRepos: "show" }),
+        targets: [
+          {
+            slug: ".github/settings",
+            source: "remote",
+            path: settingsFile,
+            reason: (cwd) => ontoAuthored(real(cwd, ".github", "settings.yml")),
+          },
+        ],
+      },
+    ],
+    [
+      "a link under the repos-dir into the snapshot-dir, so discovery read the authored file where the snapshot writes",
+      {
+        authored: join("out", "o", "r.yml"),
+        link: (cwd) => {
+          mkdirSync(join(cwd, "central"));
+          symlinkSync(join("..", "out", "o"), join(cwd, "central", "o"));
+        },
+        cfg: () =>
+          dirCfg({ snapshotDir: "out", reposDir: "central", reposInput: "", privateRepos: "show" }),
+        targets: [
+          {
+            slug: "o/r",
+            source: "central",
+            path: join("out", "o", "r.yml"),
+            reason: (cwd) => ontoAuthored(real(cwd, "out", "o", "r.yml")),
+          },
+        ],
+      },
+    ],
+    [
+      "a link under the snapshot-dir into the repos-dir: the central file is authored, the remote target's new file would be read back as central",
+      {
+        authored: join("central", "o", "r.yml"),
+        link: (cwd) => {
+          mkdirSync(join(cwd, "out"));
+          symlinkSync(join("..", "central", "o"), join(cwd, "out", "o"));
+        },
+        cfg: () =>
+          dirCfg({
+            snapshotDir: "out",
+            reposDir: "central",
+            reposInput: "o/x",
+            privateRepos: "show",
+          }),
+        targets: [
+          {
+            slug: "o/r",
+            source: "central",
+            path: join("out", "o", "r.yml"),
+            reason: (cwd) => ontoAuthored(real(cwd, "central", "o", "r.yml")),
+          },
+          {
+            slug: "o/x",
+            source: "remote",
+            path: join("out", "o", "x.yml"),
+            reason: (cwd) => intoReposDir(join(real(cwd, "central", "o"), "x.yml"), "central"),
+          },
+        ],
+      },
+    ],
+  ])("%s: those targets fail alone, before any read", async (_case, carried) => {
+    const authoredPath = join(dir, carried.authored);
+    mkdirSync(dirname(authoredPath), { recursive: true });
+    writeFileSync(authoredPath, AUTHORED);
+    carried.link(dir);
+    const api = new MockApi({});
+    const collected = collectingIo();
+    const previous = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(await run(api, carried.cfg(), collected.io)).toBe(1);
+    } finally {
+      process.chdir(previous);
+    }
+    expect(api.calls).toEqual([]);
+    expect(collected.outputs).toEqual({
+      "skipped-sections": "",
+      result: "failed",
+      "repos-result": JSON.stringify(
+        Object.fromEntries(
+          carried.targets.map((t) => [
+            t.slug,
+            { result: "failed", source: t.source, skippedSections: [] },
+          ]),
+        ),
+      ),
+    });
+    expect(collected.lines).toEqual([
+      ...carried.targets.map((t) => ({
+        level: "error" as const,
+        line: `${t.slug}: cannot write the snapshot to ${t.path}: ${t.reason(dir)}`,
+      })),
+      { line: "result: failed" },
+    ]);
+    expect(readFileSync(authoredPath, "utf8")).toBe(AUTHORED);
+    for (const t of carried.targets) {
+      expect(existsSync(join(dir, `${t.path}.tmp`))).toBe(false);
+    }
   });
 });
 
