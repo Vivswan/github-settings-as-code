@@ -145,10 +145,14 @@ function tryGit(cwd: string, ...args: string[]): string | null {
   }
 }
 
-function configureIdentity(cwd: string): void {
-  git(cwd, "config", "user.name", "settings-as-code-release");
-  git(cwd, "config", "user.email", "settings-as-code-release@users.noreply.github.com");
-}
+/** The identity the pipeline's own commits carry, passed per invocation: written into a checkout's config it would
+ * outlive the run and stamp every later commit made from that repository, or any worktree sharing it. */
+const BOT_IDENTITY = {
+  GIT_AUTHOR_NAME: "settings-as-code-release",
+  GIT_AUTHOR_EMAIL: "settings-as-code-release@users.noreply.github.com",
+  GIT_COMMITTER_NAME: "settings-as-code-release",
+  GIT_COMMITTER_EMAIL: "settings-as-code-release@users.noreply.github.com",
+};
 
 /** Every ref derivation passes through this parse, so a malformed tag stops the pipeline instead of minting "v2"
  * from "v2.1-rc.0". */
@@ -383,14 +387,23 @@ function commitChain(
   sourceSha: string,
   runUrl: string | undefined,
 ): string {
-  configureIdentity(cwd);
   const trailers = [`Source: ${sourceSha}`];
   if (runUrl !== undefined) {
     trailers.push(`Workflow-run: ${runUrl}`);
   }
   const subject = `build: main at ${git(cwd, "rev-parse", "--short", sourceSha)}`;
   const parents = parent === null ? [] : ["-p", parent];
-  return git(cwd, "commit-tree", ...parents, "-m", subject, "-m", trailers.join("\n"), tree);
+  return gitWithEnv(
+    cwd,
+    BOT_IDENTITY,
+    "commit-tree",
+    ...parents,
+    "-m",
+    subject,
+    "-m",
+    trailers.join("\n"),
+    tree,
+  );
 }
 
 interface BuildTip {
@@ -631,7 +644,6 @@ export function retagMajor(options: RetagMajorOptions): { major: string; package
   // The full verification, not a weaker probe: the major must never bless a commit a fresh package run would refuse.
   const packagedSha = verifyPackagedTag(cwd, tag, sourceSha);
   const major = releaseMajor(tag);
-  configureIdentity(cwd);
   const attempts = 3;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const newest = newestInLine(cwd, major);
@@ -782,10 +794,10 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
     }
     config["last-release-sha"] = sourceSha;
     writeFileSync(join(cwd, CONFIG_FILE), `${JSON.stringify(config, null, 2)}\n`);
-    configureIdentity(cwd);
     git(cwd, "add", CONFIG_FILE);
-    git(
+    gitWithEnv(
       cwd,
+      BOT_IDENTITY,
       "commit",
       "-m",
       "chore: anchor release-please to this release cycle's base",

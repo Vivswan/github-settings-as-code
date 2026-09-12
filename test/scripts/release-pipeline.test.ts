@@ -297,6 +297,16 @@ function shallowChecker(fx: Fixture, name: string): string {
 }
 
 const buildTip = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/heads/build");
+/** Author and committer of a commit, as the pipeline must stamp its own. */
+const identityOf = (cwd: string, sha: string): string =>
+  git(cwd, "log", "-1", "--format=%an <%ae> / %cn <%ce>", sha);
+const BOT = "settings-as-code-release <settings-as-code-release@users.noreply.github.com>";
+const BOT_IDENTITY = `${BOT} / ${BOT}`;
+/** The identity a clone's own config carries after the pipeline ran in it: clone() set it, and it must stay
+ * (a repo config the pipeline wrote would outlive the run and stamp every later commit from that checkout). */
+const localIdentity = (cwd: string): string =>
+  `${git(cwd, "config", "--local", "--get", "user.name")} <${git(cwd, "config", "--local", "--get", "user.email")}>`;
+const FIXTURE_IDENTITY = "fixture <fixture@example.invalid>";
 /** A commit's first parent as its object records it, whatever ref or shallow state the reading clone is in. */
 const parentOf = (cwd: string, sha: string): string =>
   git(cwd, "cat-file", "-p", sha).match(/^parent ([0-9a-f]{40})$/m)?.[1] ?? "";
@@ -987,6 +997,8 @@ describe("retagMajor", () => {
     expect(moved).toEqual({ major: "v2", packagedSha });
     expect(git(fx.origin, "rev-parse", "refs/tags/v2^{}")).toBe(packagedSha);
     expect(buildTip(fx)).toBe(packagedSha);
+    expect(identityOf(fx.origin, packagedSha)).toBe(BOT_IDENTITY);
+    expect(localIdentity(fx.work)).toBe(FIXTURE_IDENTITY);
 
     const next = prepareNextRelease(fx, "2.1.1", 44, "packaged-bundle-bytes-2\n");
     const packaged = packageRelease({ cwd: next.dir, tag: "v2.1.1", sourceSha: next.mergeSha });
@@ -1277,6 +1289,8 @@ describe("anchorReleasePr", () => {
     const worker = clone(fx.root, fx.origin, "anchor-worker");
     const result = anchorReleasePr({ cwd: worker, sourceSha: mainHead });
     expect(result.changed).toBe(true);
+    expect(identityOf(worker, "HEAD")).toBe(BOT_IDENTITY);
+    expect(localIdentity(worker)).toBe(FIXTURE_IDENTITY);
     const check = clone(fx.root, fx.origin, "anchor-check");
     git(check, "checkout", "--quiet", "release-please--branches--main");
     const config = JSON.parse(readFileSync(join(check, "release-please-config.json"), "utf8")) as {
@@ -1635,6 +1649,8 @@ describe("advanceBuild", () => {
     expect(body).toContain(`build: main at ${git(fx.origin, "rev-parse", "--short", fx.mergeSha)}`);
     expect(body).toContain("Workflow-run: https://example.invalid/actions/runs/7");
     expect(sourceTrailer(fx.origin, tip)).toBe(fx.mergeSha);
+    expect(identityOf(fx.origin, tip)).toBe(BOT_IDENTITY);
+    expect(localIdentity(fx.work)).toBe(FIXTURE_IDENTITY);
     expect(git(fx.work, "rev-parse", "HEAD")).toBe(fx.mergeSha);
     expect(git(fx.work, "status", "--porcelain")).toBe("");
 
