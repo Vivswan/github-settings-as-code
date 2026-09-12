@@ -715,8 +715,9 @@ describe("advanceBuild", () => {
 
   test("a build tip minted before the library rode along is built on, and the child carries it", () => {
     const fx = seedFixture();
-    // The chain as the pipeline left it before lib/pkg/ was packaged: the
-    // seed's tree minus workflows plus the bundle alone, latest on it.
+    // COMPAT(v3): a pre-library chain tip is still built on; delete this test with assertPackages' legacy arm.
+    // The chain as the pipeline left it before lib/pkg/ was packaged: the seed's tree minus workflows plus the
+    // bundle alone, latest on it.
     const legacy = plantBuild(
       fx,
       "build-legacy",

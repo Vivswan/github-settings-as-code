@@ -34,7 +34,8 @@
     "access": "public"
   },
   "scripts": {
-    "check": "bun run lint && bun run lint:yaml && bun run lint:arch && bun run typecheck && bun run knip && bun run test && bun run build:check",
+    "check": "bun run lint && bun run lint:yaml && bun run lint:arch && bun run check:compat && bun run typecheck && bun run knip && bun run test && bun run build:check",
+    "check:compat": "bun .github/scripts/check-compat-markers.ts",
     "lint": "bun x biome ci --error-on-warnings .",
     "lint:yaml": "if command -v yamllint >/dev/null 2>&1; then git ls-files -z '*.yml' '*.yaml' | xargs -0 yamllint -s; else echo 'lint:yaml: yamllint not installed, skipping (CI enforces it; install with pip install yamllint or brew install yamllint)'; fi",
     "lint:fix": "bun x biome check --write .",
