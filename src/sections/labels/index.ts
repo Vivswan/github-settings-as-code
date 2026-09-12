@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { listSection } from "../shared/list-section.js";
+import { type ListComparable, type ListWrite, listSection } from "../shared/list-section.js";
 import { LabelConfig } from "./schema.js";
 
 /** Case-insensitive matching is the section's whole contract; the brand marks a name as already folded. */
@@ -13,7 +13,7 @@ export function nameKey(name: string): NameKey {
 
 /**
  * GitHub stores colors without the leading '#', lowercase; a color compared or written unfolded
- * would drift forever against the stored form.
+ * would drift forever against the stored form, so both lens sides may only spell a folded one.
  */
 declare const labelHexColor: unique symbol;
 type HexColor = string & { readonly [labelHexColor]: true };
@@ -21,6 +21,10 @@ type HexColor = string & { readonly [labelHexColor]: true };
 function normalizeColor(color: string): HexColor {
   return color.replace(/^#/, "").toLowerCase() as HexColor;
 }
+
+type LabelWrite = ListWrite<"name"> & { readonly color?: HexColor };
+
+type LabelComparable = ListComparable<"name"> & { readonly color: HexColor };
 
 const LiveLabel = z.looseObject({
   name: z.string(),
@@ -65,14 +69,14 @@ export const labelsSection = listSection({
   },
   address: (live) => ({ name: live.name }),
   lens: {
-    toWrite: ({ name, new_name, color, description, ...passthrough }) => ({
+    toWrite: ({ name, new_name, color, description, ...passthrough }): LabelWrite => ({
       name: new_name ?? name,
       ...(color === undefined ? {} : { color: normalizeColor(color) }),
       ...(description === undefined ? {} : { description }),
       ...passthrough,
     }),
     // GitHub returns null for an empty description, which the file spells "".
-    fromLive: (live) => ({
+    fromLive: (live): LabelComparable => ({
       ...live,
       color: normalizeColor(live.color),
       description: live.description ?? "",

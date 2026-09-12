@@ -241,8 +241,9 @@ export interface LensWitnessSpec<
   Ends extends ListEndpoints,
   Live extends object,
   F extends string,
+  Key extends string,
 > {
-  readonly section: ListSectionModule<K, Ends, Live, F>;
+  readonly section: ListSectionModule<K, Ends, Live, F, Key>;
   /** Per write field, the value a drift-update witness stores instead; each disjoint from every generator pool. */
   readonly sentinels: Readonly<Record<string, unknown>>;
   /** The live item an extra-undeclared witness adds; absent when the section models no such kind. */
@@ -258,16 +259,17 @@ export function lensWitness<
   Ends extends ListEndpoints,
   Live extends object,
   F extends string,
+  Key extends string,
 >(
-  spec: LensWitnessSpec<K, Ends, Live, F>,
+  spec: LensWitnessSpec<K, Ends, Live, F, Key>,
   rng: Rng,
   declared: Json[],
   kind: LiveWitnessKind,
   collection: keyof LiveState,
 ): LiveWitness {
   const { identity, lens } = spec.section.decl;
+  const { fold } = identity;
   type Entry = Parameters<typeof lens.toWrite>[0];
-  const fold = identity.fold ?? ((name: string) => name);
   const writes = declared.map((entry) => lens.toWrite(entry as unknown as Entry));
   const items: Json[] = writes.map((write) => ({ ...write }));
   const state = { [collection]: items } as LiveState;

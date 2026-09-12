@@ -208,7 +208,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
       }),
       update: (write) => ({
         role: "update",
-        params: { name: write.names.live },
+        params: { name: write.liveName },
         payload: write.payload,
         drift: write.drift,
         change: write.change,

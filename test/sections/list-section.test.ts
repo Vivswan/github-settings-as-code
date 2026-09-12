@@ -9,6 +9,7 @@ import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { LABELS_MOCK } from "../../src/sections/labels/mock.js";
 import {
+  exactName,
   type ListEndpoints,
   type ListSectionModule,
   listSection,
@@ -29,8 +30,8 @@ const { update: _update, ...IMMUTABLE_ENDPOINTS } = base.endpoints;
 const immutable = listSection({ ...base, endpoints: IMMUTABLE_ENDPOINTS });
 
 /** The derived mock fake over a variant module, seeded with `live`. */
-function fakeFor<Ends extends ListEndpoints, Live extends object>(
-  section: ListSectionModule<"labels", Ends, Live, "name">,
+function fakeFor<Ends extends ListEndpoints, Live extends object, Key extends string>(
+  section: ListSectionModule<"labels", Ends, Live, "name", Key>,
   live: Record<string, unknown>[],
 ) {
   return fragmentFake(section, mockFragmentFor(section, LABELS_MOCK), { labels: live });
@@ -61,10 +62,10 @@ describe("listSection", () => {
     expect(second.ops).toEqual([]);
   });
 
-  test("without a fold or a rename key, identities match exactly and the update carries the name under its own field", async () => {
+  test("under the exact fold and no rename key, identities match verbatim and the update carries the name under its own field", async () => {
     const exact = listSection({
       ...base,
-      identity: { field: "name" },
+      identity: { field: "name", fold: exactName },
     });
     const api = fakeFor(exact, [
       { name: "Bug", color: "ffffff", description: null },

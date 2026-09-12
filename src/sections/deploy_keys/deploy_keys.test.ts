@@ -115,9 +115,11 @@ describe("deploy_keys conflicts", () => {
 
 describe("deploy_keys loud live extraction", () => {
   test.each<[label: string, entry: Record<string, unknown>]>([
-    ["a non-string title", { id: 1, title: 7, key: BOT_KEY }],
-    ["a non-string key", { id: 1, title: "deploy-bot", key: null }],
-    ["a non-numeric id", { id: "1", title: "deploy-bot", key: BOT_KEY }],
+    ["a non-string title", { id: 1, title: 7, key: BOT_KEY, read_only: false }],
+    ["a non-string key", { id: 1, title: "deploy-bot", key: null, read_only: false }],
+    ["a non-numeric id", { id: "1", title: "deploy-bot", key: BOT_KEY, read_only: false }],
+    // The documented shape requires the flag; a silent default would seed a recreate with a guess.
+    ["no read_only flag", { id: 1, title: "deploy-bot", key: BOT_KEY }],
   ])("a live entry with %s is a contract violation naming the endpoint", async (_label, entry) => {
     const api = new MockApi({ [LIST]: { data: [entry] } });
     await expect(plan(api, [])).rejects.toThrow(
@@ -201,17 +203,42 @@ describe("deploy_keys reconcile", () => {
     [
       label: string,
       declaredReadOnly: boolean | undefined,
-      liveReadOnly: boolean,
-      recreated: boolean,
+      live: ReturnType<typeof liveKey>[],
+      payload: Record<string, string | boolean>,
     ]
   >([
-    ["an omitted read_only keeps the live true (no privilege widening)", undefined, true, true],
-    ["a declared false beats a live true", false, true, false],
-    ["an omitted read_only keeps the live false", undefined, false, false],
-  ])("on a rotated blob, %s", async (_label, declaredReadOnly, liveReadOnly, recreated) => {
-    const api = new MockApi({
-      [LIST]: { data: [liveKey(10, "mirror-pull", STALE_KEY, liveReadOnly)] },
-    });
+    [
+      "a fresh create carries the declared flag",
+      true,
+      [],
+      { title: "mirror-pull", key: MIRROR_KEY, read_only: true },
+    ],
+    [
+      "a fresh create OMITS an undeclared flag, leaving GitHub's read/write default",
+      undefined,
+      [],
+      { title: "mirror-pull", key: MIRROR_KEY },
+    ],
+    [
+      "a recreate re-sends the live true under an undeclared flag (no privilege widening)",
+      undefined,
+      [liveKey(10, "mirror-pull", STALE_KEY, true)],
+      { title: "mirror-pull", key: MIRROR_KEY, read_only: true },
+    ],
+    [
+      "a recreate re-sends the live false under an undeclared flag",
+      undefined,
+      [liveKey(10, "mirror-pull", STALE_KEY, false)],
+      { title: "mirror-pull", key: MIRROR_KEY, read_only: false },
+    ],
+    [
+      "a declared false beats the live true on a recreate",
+      false,
+      [liveKey(10, "mirror-pull", STALE_KEY, true)],
+      { title: "mirror-pull", key: MIRROR_KEY, read_only: false },
+    ],
+  ])("%s", async (_label, declaredReadOnly, live, payload) => {
+    const api = new MockApi({ [LIST]: { data: live } });
     const result = await plan(api, [
       {
         title: "mirror-pull",
@@ -219,8 +246,12 @@ describe("deploy_keys reconcile", () => {
         ...(declaredReadOnly === undefined ? {} : { read_only: declaredReadOnly }),
       },
     ]);
-    const create = result.ops.find((op) => op.role === "create");
-    expect(create?.payload).toMatchObject({ read_only: recreated });
+    expect(result.ops.map((op) => op.role)).toEqual(
+      live.length === 0 ? ["create"] : ["remove", "create"],
+    );
+    expect(result.ops.filter((op) => op.role === "create").map((op) => op.payload)).toEqual([
+      payload,
+    ]);
   });
 
   test("a divergent DECLARED read_only alone forces the replace; an undeclared one is never compared", async () => {
