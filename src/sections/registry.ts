@@ -24,7 +24,7 @@ import { collaboratorsSection } from "./collaborators/index.js";
 import type { EndpointDecl } from "./contract/endpoints.js";
 import type { GraphqlOpDecl } from "./contract/graphql.js";
 import type { EndpointDict, GraphqlDict, SectionModule } from "./contract/module.js";
-import type { PlanContext } from "./contract/plan.js";
+import type { PlanContext, SnapshotContext } from "./contract/plan.js";
 import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
 import { deployKeysSection } from "./deploy_keys/index.js";
@@ -108,7 +108,7 @@ type _PlanModulesAreExact = MustBeNever<MisdeclaredPlanModules>;
 
 /** The dictionaries a module's snapshot() was TYPED over, or "absent" when it declares none. */
 type SnapshotTypedOver<M> = M extends {
-  snapshot: (ctx: PlanContext<infer E, infer G>) => unknown;
+  snapshot: (ctx: SnapshotContext<infer E, infer G>) => unknown;
 }
   ? { endpoints: E; graphql: G }
   : "absent";

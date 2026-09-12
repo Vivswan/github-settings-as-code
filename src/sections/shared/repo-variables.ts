@@ -20,7 +20,7 @@ import {
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
+import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
@@ -133,7 +133,7 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly shape: z.ZodType;
   readonly plan: RepoVariablesPlan<K>;
   readonly snapshot: (
-    ctx: PlanContext<RepoVariablesEndpoints<VariablesSegment<K>>>,
+    ctx: SnapshotContext<RepoVariablesEndpoints<VariablesSegment<K>>>,
   ) => Promise<SectionSnapshot<K>>;
 }
 
@@ -223,7 +223,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     return planVariables(scope, { entries, policy, defaultPolicy });
   };
 
-  const snapshot = async (ctx: PlanContext<WideEndpoints>): Promise<WideSnapshot> => {
+  const snapshot = async (ctx: SnapshotContext<WideEndpoints>): Promise<WideSnapshot> => {
     const live = parseLive(
       section,
       wide.list,
@@ -245,7 +245,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
-    snapshot: (ctx) => snapshot(ctx as PlanContext<WideEndpoints>),
+    snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints>),
   };
   return section;
 }

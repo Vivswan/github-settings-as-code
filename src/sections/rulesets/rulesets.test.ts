@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import type { GithubClient } from "../../../src/github/api.js";
-import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
+import {
+  type PlannedOp,
+  planContext,
+  snapshotContext,
+} from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
@@ -549,7 +553,7 @@ describe("rulesets", () => {
 
 describe("rulesets snapshot", () => {
   const snapshot = (api: GithubClient) =>
-    rulesetsSection.snapshot(planContext(rulesetsSection, api, REPO));
+    rulesetsSection.snapshot(snapshotContext(rulesetsSection, api, REPO, "fail"));
 
   /** A live ruleset as the by-id GET returns it, server fields included. */
   const served = (

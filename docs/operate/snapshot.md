@@ -75,6 +75,7 @@ GitHub never returns a secret's value, so the file cannot hold one. The snapshot
 | A repository Actions secret named `DEPLOY_TOKEN` | `value: $SECRET_ACTIONS_DEPLOY_TOKEN` | `SECRET_ACTIONS_DEPLOY_TOKEN` |
 | The same name in another store (`dependabot_secrets`, `codespaces_secrets`, `agents_secrets`) | `$SECRET_DEPENDABOT_DEPLOY_TOKEN`, `$SECRET_CODESPACES_DEPLOY_TOKEN`, `$SECRET_AGENTS_DEPLOY_TOKEN` | One variable per store, so two stores holding the same name never share a value by accident |
 | A webhook's `config.secret`, one per hook | `secret: $WEBHOOK_SECRET_601` | `WEBHOOK_SECRET_<id>`, the hook's own id, so the reference survives a reordering |
+| An environment secret named `DEPLOY_TOKEN` in the `production` environment | `value: $SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN` | `SECRET_ENVIRONMENT_<ENV>_<NAME>`, the environment name uppercased with every other character folded to `_`, so same-named secrets in two environments get two variables; two names the fold collapses (`prod-eu`, `prod_eu`) share one, and a header line names the entries to edit |
 
 Wire them the way the [secrets guide](../reference/secrets-and-vaults.md) describes: an `env:` block on the apply step, fed from GitHub Secrets or a vault action. A reference that is not exported fails the run that reads the file, naming the variable.
 
@@ -130,14 +131,13 @@ A snapshot is written so that applying it changes nothing and checking it reads 
 | `repository.enable_immutable_releases` under owner enforcement | GitHub answers 409 to both writes | `true`, with a header line saying apply cannot change it from the repository |
 | `repository.enable_git_lfs` | GitHub exposes no read endpoint | Nothing; the header says so, and apply re-asserts the declared value on every run |
 | `repository.enable_*` toggles under a token whose every toggle probe answers 404 | A fine-grained token missing the Administration grant is answered like a disabled toggle | Nothing for the four toggles, under one header line |
-| `actions.<key>` the token cannot read | A sub-endpoint has its own grant (the OIDC template needs Actions) | Nothing for that key; the header names it, and the other keys read back |
+| `actions.<key>` the token cannot read, under `on-missing-permission: warn` | A sub-endpoint has its own grant (the OIDC template needs Actions) | Nothing for that key; the header names it, and the other keys read back. Under `fail` (the default) the denial fails the section and the run instead |
 | `rulesets[]` whose `bypass_actors` the token cannot see | GitHub returns the list only to a write-grade token | No entry (kept under `_undeclared: keep`) and a header line; an entry without the list would clear it on the next update |
 | Organization and enterprise rulesets | Inherited, not the repository's to manage | Nothing; a header line names each |
 | `collaborators`: the repository owner, email invitations | The owner's access is implicit, and an email invitation has no username to declare | No entry and a note each; apply leaves both alone |
 | `collaborators`: expired invitations | A declared one would be cancelled and re-sent; an undeclared one is cancelled under the delete default the file carries | No entry and a note per invitation; add the entry to re-invite |
 | A custom role named `push` or `pull` | In a settings file those words mean the `write` and `read` roles, so no declaration plans as the live role | `collaborators` fails and the file is written without it; `teams` omits the team with a note |
 | `teams`: access granted at the organization or enterprise level | Declaring it would grant direct repository access on top | No entry and a note; apply leaves it alone |
-| Sections the snapshot does not read back yet | Not implemented for that section | Nothing; the header lists each, and the run notices them |
 
 A section that exists but holds nothing live (no milestones, no Pages site) is omitted with a header line, never written as an empty list: an empty list under `_undeclared: delete` would delete on apply.
 
@@ -184,7 +184,7 @@ Private and internal targets are redacted by default, exactly as in a multi-repo
 | `repository` | With `snapshot-file`: the target, defaulting to the current repository. Rejected with `snapshot-dir` |
 | `repos`, `repos-dir`, `visibility`, `archived`, `forks`, `exclude`, `topics`, `affiliation` | With `snapshot-dir`: the targets and the discovery filters, as in multi-repo mode. Rejected with `snapshot-file` |
 | `sections` | The allowlist of sections to read back; every other section is left out of the file |
-| `on-missing-permission` | `fail` (default) fails the run on a section the token cannot read, and no file is written for that target; `warn` skips the section with a warning and writes the rest |
+| `on-missing-permission` | `fail` (default) fails the run on a section the token cannot read, in whole or in part: a denial on any of the section's reads, one behind another grant included (an Actions-gated `actions` key, an environment's branch policies), and no file is written for that target; `warn` skips a denied section with a warning, except that a key the section reads on its own (an `actions` key such as the OIDC template or a cache limit, an environment's branch policies or protection rules) is left out alone under a header line while the rest of its section reads back; the file holds what did read |
 | `private-repos` | `redact` (default) hides private and internal targets from the public surfaces; `show` reveals them |
 | `token`, `api-version` | The API calls, as in every mode that reaches GitHub |
 | `settings-file`, `merged-file`, `layering`, `required-sections`, `defaults-file`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a snapshot applies no document, folds no layers, and delivers no report |
@@ -195,6 +195,6 @@ Private and internal targets are redacted by default, exactly as in a multi-repo
 |---|---|---|
 | `snapshot` | 0 | Every target read fully back and its file was written |
 | `partial` | 0 | A section was skipped under `on-missing-permission: warn`, or failed on its own; the file omits it, the header says why, and `skipped-sections` lists the skipped ones |
-| `failed` | 1 | A target failed: a denial under `fail`, an unwritable path, or a value a section's own schema rejects (a bug, reported as such). No file is written for a failed target |
+| `failed` | 1 | A target failed: a denial on any read under `fail`, an unwritable path, or a value a section's own schema rejects (a bug, reported as such). No file is written for a failed target |
 
 In the `snapshot-dir` form the worst result across targets decides, and `repos-result` maps each target to its own.

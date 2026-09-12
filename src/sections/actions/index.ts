@@ -11,6 +11,7 @@ import {
   type PlannedOp,
   plainData,
   type SectionPlan,
+  type SnapshotContext,
 } from "../contract/plan.js";
 import { projectOntoSchema, readOrNote } from "../shared/snapshot-helpers.js";
 import { ActionsConfig } from "./schema.js";
@@ -135,6 +136,7 @@ const ENDPOINTS = {
 } as const satisfies Record<string, EndpointDecl>;
 
 type ActionsContext = PlanContext<typeof ENDPOINTS>;
+type ActionsSnapshotContext = SnapshotContext<typeof ENDPOINTS>;
 type ActionsOp = PlannedOp<typeof ENDPOINTS>;
 type ActionsPlan = SectionPlan<ActionsOp>;
 
@@ -198,10 +200,11 @@ interface RoutedDestination<K extends keyof ActionsConfig> {
   ) => Promise<void>;
   /**
    * Read the live state back as the settings file would declare it; undefined when none applies.
-   * A destination over several GETs notes a denied one itself, so its siblings survive.
+   * A destination over several GETs reads each through readOrNote itself, so under warn its
+   * siblings survive a denied one.
    */
   snapshot: (
-    ctx: ActionsContext,
+    ctx: ActionsSnapshotContext,
     section: SectionMeta,
     base: BasePermissions,
     notes: string[],
@@ -331,7 +334,7 @@ const KEY_DESTINATION = {
     snapshot: async (ctx, _section, _base, notes) => {
       const limits: Record<string, unknown> = {};
       for (const [key, wiring] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
-        const read = await readOrNote(notes, `actions.cache.${key}`, () =>
+        const read = await readOrNote(ctx, notes, `actions.cache.${key}`, () =>
           ctx.read[wiring.get].call(),
         );
         if (!("denied" in read)) {
@@ -425,12 +428,12 @@ async function planRouted<K extends RoutedKey>(
 /** Read one routed key back; generic so the handler and the value stay correlated to one key. */
 async function snapshotRouted<K extends RoutedKey>(
   key: K,
-  ctx: ActionsContext,
+  ctx: ActionsSnapshotContext,
   section: SectionMeta,
   base: BasePermissions,
   notes: string[],
 ): Promise<ActionsConfig[K]> {
-  const read = await readOrNote(notes, `actions.${key}`, () =>
+  const read = await readOrNote(ctx, notes, `actions.${key}`, () =>
     ROUTED_DESTINATIONS[key].snapshot(ctx, section, base, notes),
   );
   return "denied" in read ? undefined : read.value;
@@ -527,13 +530,13 @@ export const actionsSection = {
     }
     return plan;
   },
-  // The base permissions are the primary read, so their denial classifies the section; every
-  // other key the token cannot read is a note naming it.
+  // The base permissions are the primary read, so their denial classifies the section under both
+  // policies; every other key goes through readOrNote, so its denial is a note under warn only.
   async snapshot(ctx) {
     const notes: string[] = [];
     const base = projectOntoSchema(ActionsConfig, await ctx.read.getPermissions.call());
     const value: Record<string, unknown> = { ...base };
-    const workflow = await readOrNote(notes, `actions.${[...WORKFLOW_KEYS].join("/")}`, () =>
+    const workflow = await readOrNote(ctx, notes, `actions.${[...WORKFLOW_KEYS].join("/")}`, () =>
       ctx.read.getWorkflow.call(),
     );
     if (!("denied" in workflow)) {

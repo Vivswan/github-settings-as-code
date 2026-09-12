@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { planContext } from "../../../src/sections/contract/plan.js";
+import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
@@ -12,7 +12,8 @@ const LIST = "GET /repos/o/r/teams?per_page=100&page=1";
 const probeOf = (slug: string) => `GET /orgs/o/teams/${slug}/repos/o/r`;
 const plan = (api: MockApi, desired: Parameters<typeof teamsSection.plan>[1]) =>
   teamsSection.plan(planContext(teamsSection, api, REPO), desired);
-const snapshot = (api: MockApi) => teamsSection.snapshot(planContext(teamsSection, api, REPO));
+const snapshot = (api: MockApi) =>
+  teamsSection.snapshot(snapshotContext(teamsSection, api, REPO, "fail"));
 
 describe("teams", () => {
   test("a personal account no-ops with a note after the org probe alone", async () => {

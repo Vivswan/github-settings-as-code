@@ -20,6 +20,7 @@ import {
   type PlannedOp,
   plainData,
   type SectionPlan,
+  type SnapshotContext,
 } from "../contract/plan.js";
 import { projectOntoSchema } from "./snapshot-helpers.js";
 
@@ -105,7 +106,7 @@ export interface SetupSectionModule<K extends SetupKey> {
   readonly endpoints: SetupEndpoints<K>;
   readonly shape: z.ZodType;
   readonly plan: SetupPlan<K>;
-  readonly snapshot: (ctx: PlanContext<SetupEndpoints<K>>) => Promise<SectionSnapshot<K>>;
+  readonly snapshot: (ctx: SnapshotContext<SetupEndpoints<K>>) => Promise<SectionSnapshot<K>>;
 }
 
 /** The verbatim-PATCH plan, the named 202 configuration run, and the 409 advice live here once; routes, shape, and read grade derive from the key. */
@@ -174,8 +175,8 @@ export function setupSection<K extends SetupKey>(setup: {
   // the snapshot is that body on the slice's keys; the PATCH takes the same keys back verbatim.
   // SETUPS pairs the slice with its key, so its projection IS the section's declared type; the
   // casts are the wide-port and per-key boundaries.
-  const snapshot = async (ctx: PlanContext<SetupEndpoints<K>>): Promise<SectionSnapshot<K>> => {
-    const live = await (ctx as PlanContext<WideEndpoints>).read.get.call();
+  const snapshot = async (ctx: SnapshotContext<SetupEndpoints<K>>): Promise<SectionSnapshot<K>> => {
+    const live = await (ctx as SnapshotContext<WideEndpoints>).read.get.call();
     return { value: projectOntoSchema(slice as z.ZodType, live) as SetupDeclared<K>, notes: [] };
   };
 

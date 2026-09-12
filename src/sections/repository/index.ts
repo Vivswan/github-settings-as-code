@@ -678,7 +678,7 @@ export const repositorySection = {
       concealable: boolean;
     }> = [];
     for (const toggle of READABLE_TOGGLES) {
-      const read = await readOrNote(notes, `repository.${toggle.key}`, async () => {
+      const read = await readOrNote(ctx, notes, `repository.${toggle.key}`, async () => {
         const answer = await ctx.read[toggle.get].tryCall();
         if ("error" in answer) {
           // The declared 422 ("not applicable") is answered only to a granted token.
@@ -717,6 +717,7 @@ export const repositorySection = {
       );
     }
     const routed = await readOrNote(
+      ctx,
       notes,
       GRAPHQL_ROUTED_KEYS.map((entry) => `repository.${entry.key}`).join(" and "),
       () => ctx.read.featuresQuery.call(repoVariables(ctx)),

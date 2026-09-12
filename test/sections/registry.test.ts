@@ -25,7 +25,11 @@ import {
   sectionGrant,
 } from "../../src/sections/contract/module.js";
 import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
-import type { PlanContext, SectionPlan } from "../../src/sections/contract/plan.js";
+import type {
+  PlanContext,
+  SectionPlan,
+  SnapshotContext,
+} from "../../src/sections/contract/plan.js";
 import { call, probeAbsent } from "../../src/sections/contract/requests.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import {
@@ -1037,7 +1041,7 @@ describe("handler contracts", () => {
     type _ExactSnapshot = MustBeNever<MisdeclaredSnapshotModule<"labels", typeof labelsSection>>;
     const misdeclaredSnapshot = {
       ...labelsSection,
-      async snapshot(_ctx: PlanContext<typeof workflowsSection.endpoints>) {
+      async snapshot(_ctx: SnapshotContext<typeof workflowsSection.endpoints>) {
         return { value: undefined, notes: [] };
       },
     };

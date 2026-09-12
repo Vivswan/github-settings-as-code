@@ -9,6 +9,7 @@ import type { UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
+import type { SnapshotContext } from "../contract/plan.js";
 import { collidingPairs } from "../contract/requests.js";
 
 /** The zod internals the projection walks: the def discriminator and its children. */
@@ -139,11 +140,13 @@ export function rejectLiveDuplicates<T>(
 }
 
 /**
- * One read of a snapshot that a denial may take out without failing the section: a
- * PermissionDenied becomes a note naming the key left out and the grant advice, anything else
- * propagates. For a section whose keys sit behind different grants (repository, actions).
+ * One read of a snapshot whose denial is that read's alone, for a section whose keys sit behind
+ * different grants (repository, actions, environments). Under `warn` a PermissionDenied becomes a
+ * note naming the key left out and the grant advice; under `fail` it propagates, so the engine
+ * fails the section exactly as it does a primary read's denial. Anything else propagates.
  */
 export async function readOrNote<T>(
+  ctx: Pick<SnapshotContext, "onMissingPermission">,
   notes: string[],
   label: string,
   read: () => Promise<T>,
@@ -151,7 +154,7 @@ export async function readOrNote<T>(
   try {
     return { value: await read() };
   } catch (error) {
-    if (error instanceof PermissionDenied) {
+    if (error instanceof PermissionDenied && ctx.onMissingPermission === "warn") {
       notes.push(`${label}: left out of the snapshot - ${error.detail}`);
       return { denied: true };
     }

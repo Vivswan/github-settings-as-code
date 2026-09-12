@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { PermissionDenied } from "../../../src/sections/contract/errors.js";
-import { planContext } from "../../../src/sections/contract/plan.js";
+import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
@@ -14,7 +14,7 @@ const INVITATIONS = "GET /repos/o/r/invitations?per_page=100&page=1";
 const plan = (api: MockApi, desired: Parameters<typeof collaboratorsSection.plan>[1]) =>
   collaboratorsSection.plan(planContext(collaboratorsSection, api, REPO), desired);
 const snapshot = (api: MockApi) =>
-  collaboratorsSection.snapshot(planContext(collaboratorsSection, api, REPO));
+  collaboratorsSection.snapshot(snapshotContext(collaboratorsSection, api, REPO, "fail"));
 const NO_SECRETS = {
   resolveSecret: (): string => {
     throw new Error("no secrets");

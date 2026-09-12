@@ -37,12 +37,14 @@ function captureIo(): { io: Io; annotations: string[] } {
   };
 }
 
-/** A client that answers the fine-grained denial (404) to GETs whose path matches `denied`. */
-function denying(api: GithubClient, denied: RegExp): GithubClient {
+/** A client that answers `status` (the fine-grained denial is 404) to GETs whose path matches `denied`. */
+function denying(api: GithubClient, denied: RegExp, status: 403 | 404 = 404): GithubClient {
   return {
     tryRequest: (method, path, payload, options) =>
       method === "GET" && denied.test(path)
-        ? Promise.resolve({ error: { status: 404, message: "Not Found", body: "" } })
+        ? Promise.resolve({
+            error: { status, message: status === 404 ? "Not Found" : "Forbidden", body: "" },
+          })
         : api.tryRequest(method, path, payload, options),
     tryGraphql: (op, variables, slug) => api.tryGraphql(op, variables, slug),
   };
@@ -236,6 +238,73 @@ describe("snapshotRepository", () => {
       fail.annotations.filter((a) => a.startsWith("error: labels: not snapshotted")),
     ).toHaveLength(1);
   });
+
+  /**
+   * The roster of sub-reads readOrNote guards, one per section that calls it: the path whose
+   * denial is that read's alone (the primary read still answers) and the key the note names.
+   */
+  const SUB_READS = [
+    {
+      key: "repository",
+      denied: /\/repos\/o\/r\/private-vulnerability-reporting$/,
+      status: 403,
+      label: "repository.enable_private_vulnerability_reporting",
+    },
+    {
+      key: "actions",
+      denied: /\/repos\/o\/r\/actions\/oidc\/customization\/sub$/,
+      status: 404,
+      label: "actions.oidc_customization_sub",
+    },
+    {
+      key: "environments",
+      denied: /\/repos\/o\/r\/environments\/production\/deployment_protection_rules$/,
+      status: 404,
+      label: "environments[production].deployment_protection_rules",
+    },
+  ] as const;
+
+  for (const sub of SUB_READS) {
+    test(`${sub.key}: a denied sub-read fails the section under fail and is a note under warn`, async () => {
+      const live: LiveState = {
+        ...LIVE,
+        environments: {
+          production: { name: "production", protection_rules: [], deployment_branch_policy: null },
+        },
+      };
+      const denied = denying(registryFake(live), sub.denied, sub.status);
+      const only = SectionSelection.of({ only: [sub.key] })._unsafeUnwrap();
+      const fail = captureIo();
+      const failed = await snapshotRepository(denied, { ...opts("fail"), sections: only }, fail.io);
+      expect(failed.result).toBe("failed");
+      expect(failed.settings).toBeUndefined();
+      expect(failed.outcomes).toEqual([
+        {
+          key: sub.key,
+          status: "failed",
+          detail: [expect.stringMatching(/^the token was denied .*GET \/repos\/o\/r\//)],
+        },
+      ]);
+      expect(fail.annotations).toEqual([
+        expect.stringMatching(
+          new RegExp(
+            `^error: ${sub.key}: not snapshotted - the token was denied .*GET /repos/o/r/`,
+          ),
+        ),
+      ]);
+
+      const warn = captureIo();
+      const noted = await snapshotRepository(denied, { ...opts("warn"), sections: only }, warn.io);
+      expect(noted.result).toBe("snapshot");
+      expect(noted.settings?.[sub.key]).toBeDefined();
+      expect(noted.outcomes.map((o) => o.status)).toEqual(["snapshot"]);
+      const prefix = `${sub.label}: left out of the snapshot - the token was denied `;
+      const noteAt = (level: string) => (line: string) =>
+        line.startsWith(`${level}${prefix}`) && line.includes("GET /repos/o/r/");
+      expect(noted.outcomes[0]?.detail.some(noteAt(""))).toBe(true);
+      expect(warn.annotations.some(noteAt("notice: "))).toBe(true);
+    });
+  }
 
   test("a section whose snapshot throws fails alone; the document still carries the rest", async () => {
     const stubbed = spyOn(labelsSection, "snapshot").mockRejectedValue(new Error("boom"));

@@ -58,10 +58,7 @@ export async function listProtectionRules(
     z
       .looseObject({ custom_deployment_protection_rules: z.array(LiveProtectionRule).optional() })
       .nullable(),
-    await ctx.read.listProtectionRules.call({
-      params: { environment_name: envName },
-      describe: `listing deployment protection rules of environment "${envName}"`,
-    }),
+    await ctx.read.listProtectionRules.call({ params: { environment_name: envName } }),
     `environment "${envName}"`,
   );
   return data?.custom_deployment_protection_rules ?? [];
