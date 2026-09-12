@@ -212,6 +212,7 @@ describe("runForRepo provenance", () => {
           name: "web",
           config: { url: "https://x.test/h", secret: "fleet-plaintext" },
         },
+        carriesSecret: true,
       },
     ]);
   });

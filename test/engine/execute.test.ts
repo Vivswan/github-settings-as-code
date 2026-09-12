@@ -837,6 +837,61 @@ describe("executePlan", () => {
     const _graphql: Op = graphql;
   });
 
+  test("an operation marks its request by resolving a secret in any hook; its neighbours stay unmarked", async () => {
+    // The field is named `token`, which no field-name scan knows: the mark comes from the resolve alone. Each operation
+    // gets its own recorder, so the second op is unmarked although the first resolved.
+    const api = new MockApi({}).allowMutations("POST /repos/o/r/labels", "GRAPHQL ExecutorWrite");
+    const plan: SectionPlan = {
+      ops: [
+        {
+          role: "create",
+          payload: (exec) => ({ name: "a", token: exec.resolveSecret("$A") }),
+          drift: ["a"],
+          change: "a",
+        },
+        { role: "create", payload: { name: "b" }, drift: ["b"], change: "b" },
+        {
+          role: "create",
+          before: (exec) => {
+            exec.resolveSecret("$C");
+          },
+          payload: { name: "c" },
+          drift: ["c"],
+          change: "c",
+        },
+        {
+          role: "write",
+          variables: (exec) => ({ token: exec.resolveSecret("$D") }),
+          drift: ["d"],
+          change: "d",
+        },
+        { role: "write", variables: {}, drift: ["e"], change: "e" },
+      ],
+      notes: [],
+      drift: [],
+    };
+    const execution = await executePlan(plan, SECTION, api, REPO, TOOLS);
+    expect(execution.status).toBe("applied");
+    expect(api.calls).toEqual([
+      {
+        method: "POST",
+        path: "/repos/o/r/labels",
+        payload: { name: "a", token: "plain($A)" },
+        carriesSecret: true,
+      },
+      { method: "POST", path: "/repos/o/r/labels", payload: { name: "b" } },
+      { method: "POST", path: "/repos/o/r/labels", payload: { name: "c" }, carriesSecret: true },
+      {
+        method: "GRAPHQL",
+        path: "ExecutorWrite",
+        payload: { token: "plain($D)" },
+        carriesSecret: true,
+        graphqlKind: "write",
+      },
+      { method: "GRAPHQL", path: "ExecutorWrite", payload: {}, graphqlKind: "write" },
+    ]);
+  });
+
   test("a thunk receives a frozen projection holding the resolver and nothing else", async () => {
     // A caller may pass a wider object as tools; the thunk must see nothing on it beyond the resolver.
     const api = new MockApi({}).allowMutations("POST /repos/o/r/labels");

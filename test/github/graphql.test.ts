@@ -416,6 +416,33 @@ describe("tryGraphql tracing and redaction", () => {
     expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
   });
 
+  test("the caller's mark withholds an error body whose variables name no scanned field", async () => {
+    const echo = () =>
+      graphql({ data: null, errors: [{ type: "UNPROCESSABLE", message: "echo: hunter2" }] });
+    stubFetch([echo]);
+    const dbg = traceIo();
+    const marked = await api(dbg.io).tryGraphql(WRITE_OP, { id: "X", token: "hunter2" }, "o/r", {
+      carriesSecret: true,
+    });
+    expect(dbg.lines.filter((line) => line.startsWith("GRAPHQL "))).toEqual([
+      expect.stringMatching(
+        /^GRAPHQL UpdateToggles -> 200 \(\d+ms\) variables: <withheld: the request carried a resolved secret>$/,
+      ),
+    ]);
+    expect(dbg.lines.join("\n")).not.toContain("hunter2");
+    expect(marked).toEqual({
+      error: {
+        status: 422,
+        message: SECRET_RESPONSE_WITHHELD,
+        body: SECRET_RESPONSE_WITHHELD,
+        graphqlTypes: ["UNPROCESSABLE"],
+      },
+    });
+    stubFetch([echo]);
+    const unmarked = await api().tryGraphql(WRITE_OP, { id: "X", token: "hunter2" }, "o/r");
+    expect("error" in unmarked && unmarked.error.message).toBe("echo: hunter2");
+  });
+
   test("warnings on a secret-carrying request keep only their count", async () => {
     stubFetch([
       () =>

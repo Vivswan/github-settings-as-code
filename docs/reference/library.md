@@ -61,7 +61,7 @@ console.log(parsed.success, SECTION_KEYS.length, schema.$schema);
 
 ### Client
 
-`GithubApi` is the REST and GraphQL client the action uses (retries, throttling, the pinned `DEFAULT_API_VERSION`, trace redaction); it takes an options object whose only required field is `token` (`io`, `baseUrl`, and `apiVersion` are optional). `GithubClient` is the interface a test double implements. `isPermissionError` and `isRateLimitError` classify an `ApiError`.
+`GithubApi` is the REST and GraphQL client the action uses (retries, throttling, the pinned `DEFAULT_API_VERSION`, trace redaction); it takes an options object whose only required field is `token` (`io`, `baseUrl`, and `apiVersion` are optional). `GithubClient` is the interface a test double implements. A request whose payload holds a resolved secret reaches the client marked `carriesSecret` (the `RequestMark` option), and whatever error that client returns or throws for it is withheld on the engine's side of the port, so an echoed value never reaches an outcome, the log, or a report, whichever client is in use. `isPermissionError` and `isRateLimitError` classify an `ApiError`.
 
 ```ts
 import { GithubApi } from "@vivswan/github-settings-as-code";
