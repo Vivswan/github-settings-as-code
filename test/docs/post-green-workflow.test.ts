@@ -1,4 +1,4 @@
-/** post-green.yml runs only from ci.yml's post-green slot, so the build branch is never written from a commit the all-green gate has not judged. */
+/** post-green.yml runs only from ci.yml's post-green slot, so neither the build branch nor npm is written from a commit the all-green gate has not judged. */
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
@@ -66,7 +66,7 @@ interface CallerContract {
   /** The whole workflow_call interface ci.yml must satisfy. */
   inputs: Record<string, { required: boolean; type: string | undefined; hasDefault: boolean }>;
   secrets: string[];
-  /** Pinned to the exact key set so nothing gates or extends the one job; no permissions ceiling of its own, so it inherits the caller's grant. */
+  /** Pinned to the exact key set so nothing gates or extends the two jobs; no permissions ceiling of their own, so they inherit the caller's grant. */
   jobs: Array<{
     id: string;
     keys: string[];
@@ -108,6 +108,52 @@ const PUSH_PROBE = [
   '  echo "proceed=false" >> "$GITHUB_OUTPUT"',
   "fi",
   "rm -f probe.err",
+  "",
+].join("\n");
+
+/** The publish job's gate: every step after the OIDC probe runs only when the runner minted a token URL. */
+const OIDC_PROCEED = "steps.oidc.outputs.proceed == 'true'";
+/** The OIDC probe: the runner sets ACTIONS_ID_TOKEN_REQUEST_URL only under an
+ * id-token: write grant (the managed caller gives post-green one; a fork or a
+ * ceiling change may not); without it the job warns, naming the caller's
+ * ceiling, and skips. */
+const OIDC_PROBE = [
+  'if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then',
+  '  echo "proceed=true" >> "$GITHUB_OUTPUT"',
+  "else",
+  '  echo "::warning::this run has no OIDC token (the post-green call in the managed ci.yml grants no id-token: write); the library pre-release was not published to npm." \\',
+  '    "Add id-token: write to that call\'s permissions in Vivswan/repo-platform to publish every green push to @next."',
+  '  echo "proceed=false" >> "$GITHUB_OUTPUT"',
+  "fi",
+  "",
+].join("\n");
+/** The npm floor: trusted publishing needs 11.5.1; an older npm is upgraded once, then held to it. */
+const NPM_FLOOR = [
+  "floor=11.5.1",
+  'below_floor() { [ "$(printf \'%s\\n\' "$floor" "$(npm --version)" | sort -V | head -n1)" != "$floor" ]; }',
+  "if below_floor; then",
+  "  npm install -g npm@latest",
+  "fi",
+  "if below_floor; then",
+  '  echo "::error::npm $(npm --version) cannot publish through OIDC; trusted publishing needs npm $floor or newer."',
+  "  exit 1",
+  "fi",
+  "",
+].join("\n");
+/** The publish: the pipeline's verdict names the version or the reason to skip; the source sha reaches npm's provenance; no token is passed. */
+const PUBLISH_NEXT = [
+  `verdict="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-verdict next)"`,
+  'case "$verdict" in',
+  "  publish\\ *)",
+  `    npm version "\${verdict#publish }" --no-git-tag-version`,
+  "    npm pkg delete scripts.prepare",
+  `    GITHUB_SHA="$SOURCE_SHA" npm publish --tag next ;;`,
+  `  skip\\ *) echo "::notice::\${verdict#skip }" ;;`,
+  "  *)",
+  '    echo "unexpected npm-verdict output: $verdict"',
+  '    echo "::error::npm-verdict printed neither publish nor skip; see the line above."',
+  "    exit 1 ;;",
+  "esac",
   "",
 ].join("\n");
 
@@ -157,11 +203,11 @@ const CALLER_EXPECTED: CallerContract = {
           with: { "bun-version-file": ".bun-version" },
         },
         {
-          name: "Build the bundle",
+          name: "Build the bundle and the library",
           id: undefined,
           uses: undefined,
           if: PROCEED,
-          run: "bun install --frozen-lockfile --ignore-scripts\nbun run build:bundle\n",
+          run: "bun install --frozen-lockfile --ignore-scripts\nbun run build:bundle\nbun run build:lib\n",
           env: undefined,
           with: undefined,
         },
@@ -175,6 +221,79 @@ const CALLER_EXPECTED: CallerContract = {
             SOURCE_SHA: `\${{ inputs.sha }}`,
             RUN_URL: `\${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}`,
           },
+          with: undefined,
+        },
+      ],
+    },
+    {
+      id: "publish-next",
+      keys: ["concurrency", "if", "runs-on", "steps", "timeout-minutes"],
+      uses: undefined,
+      with: undefined,
+      secrets: undefined,
+      permissions: undefined,
+      steps: [
+        {
+          name: "Check the caller grants an OIDC token",
+          id: "oidc",
+          uses: undefined,
+          if: undefined,
+          run: OIDC_PROBE,
+          env: undefined,
+          with: undefined,
+        },
+        {
+          name: undefined,
+          id: undefined,
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          if: OIDC_PROCEED,
+          run: undefined,
+          env: undefined,
+          with: { ref: `\${{ inputs.sha }}`, "persist-credentials": false },
+        },
+        {
+          name: undefined,
+          id: undefined,
+          uses: "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+          if: OIDC_PROCEED,
+          run: undefined,
+          env: undefined,
+          with: { "bun-version-file": ".bun-version" },
+        },
+        {
+          name: undefined,
+          id: undefined,
+          uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+          if: OIDC_PROCEED,
+          run: undefined,
+          env: undefined,
+          with: { "node-version": 24, "registry-url": "https://registry.npmjs.org" },
+        },
+        {
+          name: "Require an npm that publishes through OIDC",
+          id: undefined,
+          uses: undefined,
+          if: OIDC_PROCEED,
+          run: NPM_FLOOR,
+          env: undefined,
+          with: undefined,
+        },
+        {
+          name: "Build the library",
+          id: undefined,
+          uses: undefined,
+          if: OIDC_PROCEED,
+          run: "bun install --frozen-lockfile --ignore-scripts\nbun run build:lib\n",
+          env: undefined,
+          with: undefined,
+        },
+        {
+          name: "Publish the pre-release under the next dist-tag",
+          id: undefined,
+          uses: undefined,
+          if: OIDC_PROCEED,
+          run: PUBLISH_NEXT,
+          env: { SOURCE_SHA: `\${{ inputs.sha }}` },
           with: undefined,
         },
       ],
@@ -223,7 +342,7 @@ describe("post-green.yml publishes the build branch", () => {
     readFileSync(join(ROOT, ".github", "workflows", "post-green.yml"), "utf8"),
   ) as Caller;
 
-  test("one self-contained job, gated on the token probe, with the judged sha as its only input", () => {
+  test("two self-contained jobs, each gated on its probe, with the judged sha as the only input", () => {
     expectCallerContract(wf);
   });
 
@@ -264,6 +383,50 @@ describe("post-green.yml publishes the build branch", () => {
     [
       "a build job with a ceiling of its own instead of the caller's grant",
       (w) => (must(w.jobs.build, "build job").permissions = { contents: "read" }),
+      "jobs",
+    ],
+    [
+      "a publish job with a ceiling of its own, which the managed caller's rejects as a whole",
+      (w) =>
+        (must(w.jobs["publish-next"], "publish-next job").permissions = {
+          contents: "read",
+          "id-token": "write",
+        }),
+      "jobs",
+    ],
+    [
+      "a publish step that runs without the OIDC gate",
+      (w) => {
+        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
+        must(step, "publish step").if = undefined;
+      },
+      "jobs",
+    ],
+    [
+      "a publish job that hands npm a registry token",
+      (w) => {
+        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
+        must(step, "publish step").env = {
+          ...must(step, "publish step").env,
+          NODE_AUTH_TOKEN: `\${{ secrets.NPM_TOKEN }}`,
+        };
+      },
+      "jobs",
+    ],
+    [
+      "a publish job that publishes under the default dist-tag",
+      (w) => {
+        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
+        must(step, "publish step").run = PUBLISH_NEXT.replace(
+          "npm publish --tag next",
+          "npm publish",
+        );
+      },
+      "jobs",
+    ],
+    [
+      "a publish job open to forks",
+      (w) => delete must(w.jobs["publish-next"], "publish-next job").if,
       "jobs",
     ],
     [
@@ -353,7 +516,7 @@ describe("post-green.yml publishes the build branch", () => {
       "jobs",
     ],
     [
-      "a workflow-level lane above the one job",
+      "a workflow-level lane above the jobs",
       (w) => (w.concurrency = { group: `post-green-\${{ github.repository }}` }),
       "topLevel",
     ],

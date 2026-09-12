@@ -14,7 +14,7 @@ One page per major version. A major is the only release that can change what an 
 | `@vX.Y.Z` | Never | Byte-stable behavior; upgrade deliberately |
 | A commit SHA | Never | The same, for repositories that pin actions by digest |
 
-Every version tag points at a packaged commit carrying the built action. Its parent is the audited release commit on `main`, and a ruleset freezes the tag. Only the latest release is supported; fixes are not backported.
+Every version tag cut since the `build` branch exists points at a packaged commit on it carrying the built action, and those cut since the library joined it also carry the library build (`lib/pkg/`, what the npm package of the same version ships); the packaged commit records its source, the audited release commit on `main`, in a trailer, and a ruleset freezes the tag. The tags up to v2.0.0 point at release commits on `main` from when main still committed the bundle. Only the latest release is supported; fixes are not backported.
 
 ## The guides
 
