@@ -10,13 +10,13 @@
 
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
-import type { ApiError } from "../../github/api.js";
+import { matchesRejection } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import { loosen, type SectionMeta, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { plainData } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
-import { ENDPOINTS } from "./endpoints.js";
+import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
   type BranchesContext,
   type BranchesPlan,
@@ -111,14 +111,6 @@ function omittedLiveDrift(
 
 function isPlainMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * A denied probe is a 404 too (fine-grained tokens conceal denied reads), with the body "Not Found";
- * reading that as a missing branch skipped protecting an existing branch on every apply.
- */
-function isMissingBranch(error: ApiError): boolean {
-  return error.status === 404 && error.message === "Branch not found";
 }
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -305,15 +297,14 @@ async function planLiteralEntry(
   // fields, so a planned PUT re-applies every declared one.
   let putPlanned = false;
   if ("missing" in probe) {
-    // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart, and a
-    // denied probe (no Contents grant) keeps the plain unprotected reading.
+    // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart. A denied
+    // probe is a 404 as well (fine-grained tokens conceal denied reads) with the body "Not Found",
+    // and reading that as a missing branch once skipped protecting an existing branch on every
+    // apply, so only GitHub's own body counts and a denial keeps the plain unprotected reading.
     const branchProbe = await ctx.read.branchProbe.tryCall({ params });
-    if ("error" in branchProbe && isMissingBranch(branchProbe.error)) {
-      // No operation can create a branch.
-      plan.drift.push(
-        `branches[${branch.name}]: declared in the settings file but the branch does not exist on the repo, so apply cannot protect it; create the branch, or remove it from the settings file`,
-      );
-      return;
+    if ("error" in branchProbe && matchesRejection(MISSING_BRANCH, branchProbe.error)) {
+      // The same failure the PUT raises without the Contents grant, so the outcome does not depend on it.
+      throw new Error(`${section.key}: branches[${branch.name}]: ${MISSING_BRANCH.advice}`);
     }
     plan.ops.push({
       role: "putProtection",

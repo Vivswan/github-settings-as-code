@@ -14,6 +14,7 @@ import {
   matchesTemplate,
   pathSegments,
 } from "../contract/endpoints.js";
+import { PermissionDenied } from "../contract/errors.js";
 import { branchesSection } from "./index.js";
 import { branchesMockGraphqlHandlers, branchesMockHandlers } from "./mock.js";
 
@@ -183,19 +184,38 @@ describe("branches", () => {
     expect(api.mutations()).toHaveLength(0);
   });
 
-  test("a missing branch is op-less drift: nothing can create it, so apply notes it instead of a PUT that 404s", async () => {
-    // The unrouted protection GET 404s; the probe answers GitHub's missing-branch body.
-    const api = new MockApi({
+  test("a missing branch fails the section with one advice wherever GitHub's body surfaces: at the probe, or at the PUT once the probe was denied", async () => {
+    const advice =
+      "the declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file";
+    // The unrouted protection GET 404s; a Contents-granted probe answers GitHub's missing-branch body.
+    const probed = new MockApi({
       [PROBE]: { error: { status: 404, message: "Branch not found", body: "" } },
     });
-    const result = await plan(api, declared);
-    expect(result).toEqual({
-      ops: [],
-      notes: [],
-      drift: [
-        "branches[main]: declared in the settings file but the branch does not exist on the repo, so apply cannot protect it; create the branch, or remove it from the settings file",
-      ],
+    await expect(plan(probed, declared)).rejects.toThrow(
+      new Error(`branches: branches[main]: ${advice}`),
+    );
+    expect(probed.mutations()).toHaveLength(0);
+    // A denied probe is a concealed 404, so the PUT is planned and GitHub answers it with the same body: a
+    // hard failure under every on-missing-permission policy, never a denial carrying grant advice.
+    const put = "PUT /repos/o/r/branches/main/protection";
+    const denied = new MockApi({
+      [PROBE]: { error: { status: 404, message: "Not Found", body: "" } },
+      [put]: { error: { status: 404, message: "Branch not found", body: "" } },
     });
+    const execution = await executePlan(
+      await plan(denied, declared),
+      branchesSection,
+      denied,
+      REPO,
+      NO_SECRETS,
+    );
+    expect(execution.status).toBe("failed");
+    const error = (execution as { error: unknown }).error;
+    expect(error).not.toBeInstanceOf(PermissionDenied);
+    expect((error as Error).message).toBe(
+      `branches: replacing protection for branch "main" failed - ${put}: 404 Branch not found. The declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file`,
+    );
+    expect(denied.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([put]);
   });
 
   test.each([

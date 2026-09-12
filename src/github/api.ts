@@ -685,7 +685,11 @@ export function isRateLimitError(error: ApiError): boolean {
   );
 }
 
-/** True when an error means the token lacks access, as opposed to a bad payload. */
+/**
+ * True when an error means the token lacks access, as opposed to a bad payload: a status fold, blind
+ * to the body. A message an endpoint declares as a definitive rejection (sections/contract/endpoints.ts)
+ * is classified ahead of this in throwFor, where the endpoint is known.
+ */
 export function isPermissionError(error: ApiError): boolean {
   if (isRateLimitError(error)) {
     return false;
