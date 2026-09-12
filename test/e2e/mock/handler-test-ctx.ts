@@ -24,7 +24,10 @@ export function handlerTestContext(
     state,
     endpoint,
     param: (name: string): string => {
-      const value = opts.params?.[name];
+      const value =
+        opts.params !== undefined && Object.hasOwn(opts.params, name)
+          ? opts.params[name]
+          : undefined;
       if (value === undefined) {
         throw new Error(
           `handlerTestContext: no "${name}" param supplied for ${key} (${endpoint.route})`,

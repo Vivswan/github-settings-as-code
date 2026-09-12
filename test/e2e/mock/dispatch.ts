@@ -68,7 +68,8 @@ export function paramAccessor(
   params: Record<string, string>,
 ): (name: string) => string {
   return (name) => {
-    const value = params[name];
+    // hasOwn, not an index read: params is a plain object, so params.toString is a function and no throw.
+    const value = Object.hasOwn(params, name) ? params[name] : undefined;
     if (value === undefined) {
       throw new Error(
         `E2E MOCK BUG: handler "${key}" asked for path param "{${name}}" that its route "${endpoint.route}" does not declare (declared: ${Object.keys(params).join(", ") || "(none)"})`,
