@@ -5,9 +5,9 @@
  *
  *   packaged commit    = source tree - .github/workflows - package.json's preparation scripts + lib/index.js + lib/pkg/, `Source: <sha>` trailer
  *   refs/heads/build   root (no parent) -> chain commit -> chain commit ...   only ever advances
- *   refs/tags/latest   -> the newest source among build's tip, the publishing run's own chain commit, and where latest already points
+ *   refs/tags/latest   -> the chain commit whose source is the newest on main
  *   refs/tags/vX.Y.Z   -> the chain commit whose source is the release's merge commit; never moved
- *   refs/tags/vX       -> the same commit, force-moved on each release; retagMajor refuses a step backward (see its one blind race)
+ *   refs/tags/vX       -> the same commit, force-moved on each release; retagMajor refuses a step backward
  *
  * release-please cuts the DRAFT release without a tag (`draft` on, `force-tag-creation` off); one subcommand runs
  * per workflow step:
@@ -21,7 +21,7 @@
  *   anchor                         update-release-pr.yml   GITHUB_SHA
  *   boundary-check, anchor-check   checks.yml              (the checkout alone)
  *
- * Node builtins only: bun runs this before `bun install`. Fixture-repository tests: test/scripts/release-pipeline.test.ts.
+ * Node builtins only: bun runs this before `bun install`. Tests: test/scripts/release-pipeline*.test.ts over release-pipeline-fixture.ts.
  */
 
 import { execFileSync } from "node:child_process";
@@ -359,7 +359,9 @@ function assertPackages(
         ? "none (an entry a path diff cannot list, such as an empty subtree)"
         : changed.join(", ");
     throw new Error(
-      `${ref} is not ${source} plus ${PACKAGED}, minus ${MANIFEST}'s preparation scripts, and the removal of ${WORKFLOWS_DIR}/ alone: its tree is ${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ${source}: ${listed}); ${remedy}`,
+      `${ref} is not ${source} plus ${PACKAGED}, minus ${MANIFEST}'s preparation scripts, and the removal of ` +
+        `${WORKFLOWS_DIR}/ alone: its tree is ${actual}, the rebuilt one is ${expected} ` +
+        `(paths beyond those changed relative to ${source}: ${listed}); ${remedy}`,
     );
   }
 }
@@ -453,15 +455,18 @@ function fetchMainHead(cwd: string): string {
   return git(cwd, "rev-parse", "FETCH_HEAD");
 }
 
-function findPackaged(cwd: string, sourceSha: string): string | null {
+/** Each source the chain packages, mapped to the newest chain commit packaging it. The pipeline appends a source
+ * only after finding no commit for it, so a second commit for one source can only be a hand push. */
+function chainPackaging(cwd: string): Map<string, string> {
+  const packaging = new Map<string, string>();
   const log = git(cwd, "log", "--format=%H%x09%(trailers:key=Source,valueonly)", BUILD_REMOTE);
   for (const line of log.split("\n")) {
-    const [sha, source] = line.split("\t");
-    if (sha !== undefined && sha !== "" && source === sourceSha) {
-      return sha;
+    const [commit = "", source = ""] = line.split("\t");
+    if (commit !== "" && source !== "" && !packaging.has(source)) {
+      packaging.set(source, commit);
     }
   }
-  return null;
+  return packaging;
 }
 
 const BY_HAND =
@@ -580,7 +585,7 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
   if (existing !== "") {
     git(cwd, "fetch", "--quiet", ...TAG_FETCH, "origin", `+${ref}:${ref}`);
     const verified = verifyPackagedTag(cwd, tag, sourceSha);
-    const latest = publishLatest(cwd, verified, 3);
+    const latest = publishLatest(cwd, 3);
     console.error(latest.reason);
     return { created: false, packagedSha: verified, latestSha: latest.sha };
   }
@@ -588,8 +593,8 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
   let packagedSha: string | null = null;
   for (let attempt = 1; attempt <= attempts && packagedSha === null; attempt++) {
     const build = readBuildTip(cwd);
-    const found = build.tip === null ? null : findPackaged(cwd, sourceSha);
-    if (found !== null) {
+    const found = build.tip === null ? undefined : chainPackaging(cwd).get(sourceSha);
+    if (found !== undefined) {
       assertSameBuild(cwd, found, sourceSha, tree);
       packagedSha = found;
       break;
@@ -608,7 +613,7 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
   }
   git(cwd, "tag", tag, packagedSha);
   git(cwd, "push", "origin", ref);
-  const latest = publishLatest(cwd, packagedSha, attempts);
+  const latest = publishLatest(cwd, attempts);
   console.error(latest.reason);
   return { created: true, packagedSha, latestSha: latest.sha };
 }
@@ -653,10 +658,11 @@ export interface RetagMajorOptions {
   sourceSha: string;
 }
 
-/** The version tag is re-verified against origin from scratch, never trusted from the local ref, and newestInLine
- * refuses a step backward: a rerun of an old release's job must not regress major-pinned consumers.
- *   the major moves after this run observed it                  -> the lease fails; re-read and retry
- *   a newer release lands between newestInLine and that read   -> not caught: the observed value is the newer one and the lease passes */
+/** The version tag is re-verified against origin from scratch, never trusted from the local ref, and the major never
+ * steps backward: a rerun of an old release's job must not regress major-pinned consumers. The line's tags and the
+ * major's value come from ONE advertisement, so the release the compare judged is the release the lease holds
+ * against: a newer release landing after it either moved the major (the lease fails; re-read and retry) or has not
+ * yet (its own move follows, and a lease of its own settles the order). */
 export function retagMajor(options: RetagMajorOptions): { major: string; packagedSha: string } {
   const { cwd, tag, sourceSha } = options;
   const ref = `refs/tags/${tag}`;
@@ -666,17 +672,16 @@ export function retagMajor(options: RetagMajorOptions): { major: string; package
   const major = releaseMajor(tag);
   const attempts = 3;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const newest = newestInLine(cwd, major);
-    if (newest !== null && newest !== tag) {
+    const line = observeMajorLine(cwd, major);
+    if (line.newest !== null && line.newest !== tag) {
       throw new Error(
-        `${newest} already exists in the ${major} line, so ${major} must stay on it; refusing to move ${major} back to ${tag} (a rerun of an old release's job must not regress major-pinned consumers).`,
+        `${line.newest} already exists in the ${major} line, so ${major} must stay on it; refusing to move ${major} back to ${tag} (a rerun of an old release's job must not regress major-pinned consumers).`,
       );
     }
-    const observed = git(cwd, "ls-remote", "origin", `refs/tags/${major}`).split("\t")[0] ?? "";
     git(cwd, "tag", "-f", major, packagedSha);
     const push = pushUnlessOvertaken(
       cwd,
-      `--force-with-lease=refs/tags/${major}:${observed}`,
+      `--force-with-lease=refs/tags/${major}:${line.observed}`,
       "origin",
       `refs/tags/${major}`,
     );
@@ -690,11 +695,17 @@ export function retagMajor(options: RetagMajorOptions): { major: string; package
   );
 }
 
-function newestInLine(cwd: string, major: string): string | null {
-  const listed = git(cwd, "ls-remote", "origin", `refs/tags/${major}.*`);
+/** The major's value and the newest release tag in its line, from one advertisement. */
+function observeMajorLine(cwd: string, major: string): { observed: string; newest: string | null } {
+  const listed = git(cwd, "ls-remote", "origin", `refs/tags/${major}`, `refs/tags/${major}.*`);
+  let observed = "";
   let newest: number[] | null = null;
   for (const line of listed.split("\n")) {
-    const name = line.split("\t")[1];
+    const [sha = "", name] = line.split("\t");
+    if (name === `refs/tags/${major}`) {
+      observed = sha;
+      continue;
+    }
     const match = name?.match(/^refs\/tags\/v(\d+)\.(\d+)\.(\d+)$/);
     if (!match) {
       continue;
@@ -704,7 +715,7 @@ function newestInLine(cwd: string, major: string): string | null {
       newest = parts;
     }
   }
-  return newest === null ? null : `v${newest.join(".")}`;
+  return { observed, newest: newest === null ? null : `v${newest.join(".")}` };
 }
 
 function isNewer(a: number[], b: number[]): boolean {
@@ -947,8 +958,8 @@ export interface AdvanceBuildResult {
 
 /**
  * build only ever advances: the next chain commit is parented on the tip and pushed without force. latest follows
- * the newest source publishLatest can see rather than the tip alone, because a release-hook backfill can append an
- * older source behind newer ones.
+ * the chain's newest main source rather than the tip, because a release-hook backfill can append an older source
+ * behind newer ones.
  *
  *   the chain already packages sourceSha  -> nothing appended (its tree must match this build); latest reconciled
  *   the tip is already past sourceSha     -> left alone: a rerun of an older commit's run
@@ -963,7 +974,7 @@ export function advanceBuild(options: AdvanceBuildOptions): AdvanceBuildResult {
   }
   const tree = packagedTree(cwd, sourceSha);
   const advanced = advanceChain(cwd, sourceSha, tree, runUrl, attempts);
-  const latest = publishLatest(cwd, advanced.buildSha, attempts);
+  const latest = publishLatest(cwd, attempts);
   return {
     ...advanced,
     latestSha: latest.sha,
@@ -981,8 +992,8 @@ function advanceChain(
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const build = readBuildTip(cwd);
     if (build.tip !== null) {
-      const found = findPackaged(cwd, sourceSha);
-      if (found !== null) {
+      const found = chainPackaging(cwd).get(sourceSha);
+      if (found !== undefined) {
         assertSameBuild(cwd, found, sourceSha, tree);
         return {
           changed: false,
@@ -1020,51 +1031,44 @@ function advanceChain(
 }
 
 /**
- * latest names the newest source among build's tip, this run's own chain commit, and where latest already points (a
- * stale rerun must not lease it back). The tip is older than the own commit only when the hook backfilled a release
- * behind commits post-green had appended.
- *   observe latest -> read the tip -> choose the target -> push with a lease on the observed value
- * Observing BEFORE the tip read is what makes the lease sound: build only advances and latest only names values build
- * has held, so the tip read is that value or newer, and a stale lease means another run moved latest.
+ * latest names the chain commit whose source is the newest on main, read off the whole chain: the tip alone is wrong
+ * after the release hook backfills an older source behind newer ones, and the run's own commit alone when the run
+ * that appended the newer source lost its latest push before that backfill.
+ *   observe latest -> read the chain -> pick the target -> push with a lease on the observed value
+ * Observing BEFORE the chain read is what makes the lease sound: build only advances and latest only names values
+ * build has held, so the chain read is that value or newer, and a stale lease means another run moved latest.
  */
-function publishLatest(
-  cwd: string,
-  own: string,
-  attempts: number,
-): { sha: string; reason: string } {
-  const ownSource = sourceTrailer(cwd, own);
+function publishLatest(cwd: string, attempts: number): { sha: string; reason: string } {
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const observed = git(cwd, "ls-remote", "origin", LATEST_REF).split("\t")[0] ?? "";
+    const observed = observeRemote(cwd, LATEST_REF);
     const build = readBuildTip(cwd);
     if (build.tip === null) {
       throw new Error(
         `${BUILD_REF} vanished after this run appended to it; inspect origin by hand.`,
       );
     }
-    const tipSource = validateTip(cwd, build.tip, build.mainHead);
-    const [target, targetSource] = isAncestor(cwd, ownSource, tipSource)
-      ? [build.tip, tipSource]
-      : [own, ownSource];
-    if (observed === target) {
-      return { sha: target, reason: `${LATEST_REF} already at ${target}` };
+    validateTip(cwd, build.tip, build.mainHead);
+    const target = chainCommitOfNewestSource(cwd, build.mainHead);
+    if (target.commit !== build.tip) {
+      assertPackages(
+        cwd,
+        target.commit,
+        target.source,
+        `${BUILD_REF} holds ${target.commit}, which names ${target.source} as its source but`,
+        BY_HAND,
+      );
     }
-    if (observed !== "") {
-      const newer = newerChainCommit(cwd, observed, targetSource, build.mainHead);
-      if (newer !== null) {
-        return {
-          sha: newer.commit,
-          reason: `${LATEST_REF} stays at ${newer.commit} (built from ${newer.source}), newer than ${target} (built from ${targetSource}); the next green push appends past it`,
-        };
-      }
+    if (observed.peeled === target.commit) {
+      return { sha: target.commit, reason: `${LATEST_REF} already at ${target.commit}` };
     }
     const push = pushUnlessOvertaken(
       cwd,
-      `--force-with-lease=${LATEST_REF}:${observed}`,
+      `--force-with-lease=${LATEST_REF}:${observed.id}`,
       "origin",
-      `${target}:${LATEST_REF}`,
+      `${target.commit}:${LATEST_REF}`,
     );
     if (push.landed) {
-      return { sha: target, reason: `${LATEST_REF}: moved to ${target}` };
+      return { sha: target.commit, reason: `${LATEST_REF}: moved to ${target.commit}` };
     }
     console.error(`latest lease push attempt ${attempt}/${attempts} overtaken: ${push.stderr}`);
   }
@@ -1073,33 +1077,40 @@ function publishLatest(
   );
 }
 
-/** A hand push with a newer Source trailer but a tampered tree, or off the chain, yields null and the target takes
- * over. The raw observed id stays the lease's expected value: an annotated tag's id is not its commit's. */
-function newerChainCommit(
+/** A ref as origin advertises it: the id a lease holds against, and the commit it peels to (an annotated tag's id
+ * is not its commit's). Both empty when the ref does not exist. The peeled line is advertised only when its own
+ * pattern asks for it. */
+function observeRemote(cwd: string, ref: string): { id: string; peeled: string } {
+  let id = "";
+  let peeled = "";
+  for (const line of git(cwd, "ls-remote", "origin", ref, `${ref}^{}`).split("\n")) {
+    const [sha = "", name] = line.split("\t");
+    if (name === ref) {
+      id = sha;
+    } else if (name === `${ref}^{}`) {
+      peeled = sha;
+    }
+  }
+  return { id, peeled: peeled === "" ? id : peeled };
+}
+
+/** The chain commit packaging the newest main source, in MAIN's order rather than the chain's: a release-hook
+ * backfill appends an older source behind newer ones. A trailer naming a commit off main, or none, packages nothing
+ * this can name. */
+function chainCommitOfNewestSource(
   cwd: string,
-  observed: string,
-  targetSource: string,
   mainHead: string,
-): { commit: string; source: string } | null {
-  git(cwd, "fetch", "--quiet", ...TAG_FETCH, "origin", LATEST_REF);
-  // The tag can move between the ls-remote and this fetch; then the lease on the observed value settles it.
-  if (git(cwd, "rev-parse", "FETCH_HEAD") !== observed) {
-    return null;
+): { commit: string; source: string } {
+  const packaging = chainPackaging(cwd);
+  for (const source of git(cwd, "rev-list", "--topo-order", mainHead).split("\n")) {
+    const commit = packaging.get(source);
+    if (commit !== undefined) {
+      return { commit, source };
+    }
   }
-  const commit = git(cwd, "rev-parse", `${observed}^{commit}`);
-  const source = sourceTrailer(cwd, commit);
-  if (
-    source === "" ||
-    source === targetSource ||
-    !isAncestor(cwd, source, mainHead) ||
-    !isAncestor(cwd, targetSource, source)
-  ) {
-    return null;
-  }
-  if (!packages(cwd, commit, source)) {
-    return null;
-  }
-  return isAncestor(cwd, commit, BUILD_REMOTE) ? { commit, source } : null;
+  throw new Error(
+    `no commit on ${BUILD_REF} packages a commit on main's history (head ${mainHead}); ${BY_HAND}`,
+  );
 }
 
 /** The ruleset-protected chain is the trust boundary: a detached commit with the right tree, bytes, and Source
@@ -1113,21 +1124,6 @@ function assertOnChain(cwd: string, packaged: string, ref: string, remedy: strin
     throw new Error(
       `${ref} is not on ${BUILD_REF} (not an ancestor of its tip ${build.tip}); ${remedy}`,
     );
-  }
-}
-
-function packages(cwd: string, packaged: string, source: string): boolean {
-  try {
-    assertPackages(cwd, packaged, source, packaged, "");
-    return true;
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      / is not .* plus |does not carry a non-empty/.test(error.message)
-    ) {
-      return false;
-    }
-    throw error;
   }
 }
 

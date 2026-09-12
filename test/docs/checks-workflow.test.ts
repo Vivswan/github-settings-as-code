@@ -898,13 +898,15 @@ describe("step predicates", () => {
   });
 });
 
-/** The guard: one anchor-check step gated on the constant, and no job or step condition spelling it otherwise. */
+/** The guard: one anchor-check step, its job gated on the constant, and no job or step condition spelling it otherwise. */
 function expectReleasePrefixes(wf: Workflow): void {
-  const anchorSteps = Object.values(wf.jobs)
-    .flatMap((job) => job.steps ?? [])
-    .filter((step) => (step.run ?? "").includes("release-pipeline.ts anchor-check"));
-  expect(anchorSteps.length, "checks.yml lost its anchor-check step").toBe(1);
-  expect(headRefPrefixesIn(anchorSteps[0]?.if)).toEqual([RELEASE_PR_BRANCH_PREFIX]);
+  const anchorStepJobs = Object.values(wf.jobs).flatMap((job) =>
+    (job.steps ?? [])
+      .filter((step) => (step.run ?? "").includes("release-pipeline.ts anchor-check"))
+      .map(() => job),
+  );
+  expect(anchorStepJobs.length, "checks.yml must run anchor-check in exactly one step").toBe(1);
+  expect(headRefPrefixesIn(anchorStepJobs[0]?.if)).toEqual([RELEASE_PR_BRANCH_PREFIX]);
   for (const literal of headRefPrefixes(wf)) {
     expect(literal).toBe(RELEASE_PR_BRANCH_PREFIX);
   }
