@@ -9,9 +9,17 @@
  *                process so a run never tests stale code
  */
 
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
 import type { OutputName } from "../../src/io.js";
@@ -21,13 +29,13 @@ import {
   type Invocation,
   type RerunCapture,
 } from "./apply-idempotence-proof.js";
-import { E2E_TOKEN, ADMIN_SLUG as REPO_SLUG } from "./constants.js";
+import { E2E_TOKEN, layerFile, ADMIN_SLUG as REPO_SLUG, RUNNER_ROOT_FILES } from "./constants.js";
 import { assertIssueReport, checkReportLeaks } from "./issue-report-assert.js";
 import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { isWriteRequest } from "./mock/dispatch.js";
 import { type ServerOptions, startMockServer } from "./mock/server.js";
 import { sharedValidator } from "./openapi/validate.js";
-import { type Expect, type Scenario, settingsYamlFor } from "./schema.js";
+import { collectYmlFiles, type Expect, type Scenario, settingsYamlFor } from "./schema.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 /**
@@ -222,8 +230,16 @@ function expectedReposResult(scenario: Scenario): Record<string, string> | null 
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
+const {
+  settings: SETTINGS_FILE,
+  output: OUTPUT_FILE,
+  summary: SUMMARY_FILE,
+  merged: MERGED_FILE,
+  defaults: DEFAULTS_FILE,
+} = RUNNER_ROOT_FILES;
+
 function mergedFilePath(dir: string): string {
-  return join(dir, "merged.yml");
+  return join(dir, MERGED_FILE);
 }
 
 function documentFileFailures(
@@ -297,10 +313,107 @@ export function snapshotCheckInputs(
   return { ...carried, mode: "check" };
 }
 
-/** Built from scratch: only PATH and HOME are taken from process.env. */
-function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.ProcessEnv {
+/**
+ * Every document a mode: snapshot run wrote, relative to the scenario's temp dir: the one file of the
+ * file form, or every .yml under the dir form's directory. Read off the filesystem, not the pins, so a
+ * file the run wrote without a pin is still swept and round-tripped.
+ */
+export function writtenSnapshotPaths(
+  inputs: NonNullable<Scenario["inputs"]>,
+  dir: string,
+): string[] {
+  if (inputs.snapshot_file !== undefined) {
+    return existsSync(join(dir, inputs.snapshot_file)) ? [inputs.snapshot_file] : [];
+  }
+  if (inputs.snapshot_dir !== undefined) {
+    return collectYmlFiles(join(dir, inputs.snapshot_dir))
+      .map((path) => relative(dir, path))
+      .sort();
+  }
+  return [];
+}
+
+/** Every key and string leaf of a parsed YAML document, so a value is matched whole however the emitter wrapped it. */
+export function yamlStrings(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(yamlStrings);
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value).flatMap(([key, nested]) => [key, ...yamlStrings(nested)]);
+  }
+  return [];
+}
+
+/**
+ * The leak sweep over the written snapshots: a document is a private surface like the delivered
+ * report (a private slug or a private live value belongs in it), so only the secret needles are
+ * forbidden, never the whole leaks_nowhere list. Matched against the raw text AND every parsed
+ * string: a multi-line value serializes as a block scalar whose lines are indented, so the raw
+ * text alone would miss it. An unparseable document fails on its own.
+ */
+export function writtenSnapshotLeaks(dir: string, paths: string[], secrets: string[]): string[] {
+  const failures: string[] = [];
+  for (const path of paths) {
+    const text = readFileSync(join(dir, path), "utf8");
+    let strings: string[] = [];
+    try {
+      strings = yamlStrings(parseYaml(text));
+    } catch (error) {
+      failures.push(
+        `the written snapshot ${path} is not parseable YAML: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    for (const needle of secrets) {
+      if (text.includes(needle) || strings.some((s) => s.includes(needle))) {
+        failures.push(`leak: "${needle}" present in the written snapshot ${path}`);
+      }
+    }
+  }
+  return failures;
+}
+
+/** The round-trip verdict both snapshot forms share: the check reads clean and neither writes nor trips the mock. */
+export function roundTripFailures(
+  label: string,
+  check: Invocation,
+  requests: LoggedRequest[],
+  violations: string[],
+): string[] {
+  const failures: string[] = [];
+  if (check.exitCode !== 0) {
+    failures.push(`${label}: the check exited ${check.exitCode}, expected 0${killNote(check)}`);
+  }
+  if (check.outputs.result !== "clean") {
+    failures.push(`${label}: the check's result is "${check.outputs.result}", expected "clean"`);
+  }
+  const writes = requests.filter(isWriteRequest);
+  if (writes.length > 0) {
+    failures.push(
+      `${label}: the check wrote ${writes.length} time(s): ${writes.map((r) => renderRequest(r, false)).join(", ")}`,
+    );
+  }
+  if (violations.length > 0) {
+    failures.push(`${label}: mock violations:\n  ${violations.join("\n  ")}`);
+  }
+  return failures;
+}
+
+/**
+ * Built from scratch: only PATH and HOME are taken from process.env. `reposDir` is the one input the
+ * scenario schema has no key for: the dir-form round trip feeds a written snapshot back as a
+ * central-mode target, so it selects the multi-repo path without a `repos` map.
+ */
+function childEnv(
+  scenario: Scenario,
+  dir: string,
+  apiUrl: string,
+  reposDir?: string,
+): NodeJS.ProcessEnv {
   const inputs = scenario.inputs ?? {};
-  const multi = Boolean(scenario.repos || scenario.discovery);
+  const multi = Boolean(scenario.repos || scenario.discovery || reposDir !== undefined);
   const env: Record<string, string> = {
     ...(scenario.env ?? {}),
     PATH: process.env.PATH ?? "",
@@ -309,8 +422,8 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
     INPUT_TOKEN: E2E_TOKEN,
     GITHUB_REPOSITORY: REPO_SLUG,
     GITHUB_API_URL: apiUrl,
-    GITHUB_OUTPUT: join(dir, "output.txt"),
-    GITHUB_STEP_SUMMARY: join(dir, "summary.md"),
+    GITHUB_OUTPUT: join(dir, OUTPUT_FILE),
+    GITHUB_STEP_SUMMARY: join(dir, SUMMARY_FILE),
     RUNNER_DEBUG: "1",
     // A test knob: millisecond plugin units and the immediate scheduler, so retry scenarios run in milliseconds instead of seconds.
     RETRY_BASE_MS: "1",
@@ -320,11 +433,11 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
   // its destination relative to the child's working directory (this temp dir).
   if (inputs.mode === "merge") {
     const layers = (scenario.settings_layers ?? []).map((layer, i) => {
-      const path = join(dir, `layer-${i}.yml`);
+      const path = join(dir, layerFile(i));
       writeFileSync(path, stringifyYaml(layer));
       return path;
     });
-    env["INPUT_SETTINGS-FILE"] = [...layers, join(dir, "settings.yml")].join("\n");
+    env["INPUT_SETTINGS-FILE"] = [...layers, join(dir, SETTINGS_FILE)].join("\n");
     env["INPUT_MERGED-FILE"] = mergedFilePath(dir);
   } else if (inputs.mode === "snapshot") {
     if (inputs.snapshot_file !== undefined) {
@@ -334,7 +447,7 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
       env["INPUT_SNAPSHOT-DIR"] = inputs.snapshot_dir;
     }
   } else if (!multi) {
-    env["INPUT_SETTINGS-FILE"] = join(dir, "settings.yml");
+    env["INPUT_SETTINGS-FILE"] = join(dir, SETTINGS_FILE);
   }
   if (inputs.mode) {
     env.INPUT_MODE = inputs.mode;
@@ -370,23 +483,31 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
   } else if (scenario.repos) {
     env.INPUT_REPOS = Object.keys(scenario.repos).join(",");
   }
+  if (reposDir !== undefined) {
+    env["INPUT_REPOS-DIR"] = reposDir;
+  }
   if (scenario.defaults_file) {
-    const defaultsPath = join(dir, "defaults.yml");
+    const defaultsPath = join(dir, DEFAULTS_FILE);
     writeFileSync(defaultsPath, stringifyYaml(scenario.defaults_file));
     env["INPUT_DEFAULTS-FILE"] = defaultsPath;
   }
   return env;
 }
 
-async function invoke(scenario: Scenario, dir: string, apiUrl: string): Promise<Invocation> {
-  const outputFile = join(dir, "output.txt");
-  const summaryFile = join(dir, "summary.md");
+async function invoke(
+  scenario: Scenario,
+  dir: string,
+  apiUrl: string,
+  reposDir?: string,
+): Promise<Invocation> {
+  const outputFile = join(dir, OUTPUT_FILE);
+  const summaryFile = join(dir, SUMMARY_FILE);
   writeFileSync(outputFile, "");
   writeFileSync(summaryFile, "");
 
   const proc = Bun.spawn(["node", await builtBundle()], {
     cwd: dir,
-    env: childEnv(scenario, dir, apiUrl),
+    env: childEnv(scenario, dir, apiUrl, reposDir),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -529,6 +650,8 @@ export async function runScenario(
   opts?: { serverOptions?: ServerOptions },
 ): Promise<ScenarioReport> {
   let dir: string | undefined;
+  /** The dir-form round trip's one-file repos-dirs, a sibling of `dir` so they can never fall under the snapshot dir. */
+  let scratch: string | undefined;
   let handle: Awaited<ReturnType<typeof startMockServer>> | undefined;
   const failures: string[] = [];
   const reruns: RerunCapture[] = [];
@@ -545,7 +668,7 @@ export async function runScenario(
         : {}),
       ...opts?.serverOptions,
     });
-    writeFileSync(join(dir, "settings.yml"), settingsYamlFor(scenario));
+    writeFileSync(join(dir, SETTINGS_FILE), settingsYamlFor(scenario));
     first = await invoke(scenario, dir, handle.url);
     // Snapshot NOW: a fault that fires only during an optional re-run must not read as non-vacuous
     // for the primary outcome exitCode, outputs, and reposResult describe.
@@ -687,15 +810,16 @@ export async function runScenario(
     // write would not be a violation.
     if (exp.fixpoint === "converges") {
       const violationsBefore = handle.violations.length;
-      const writesBefore = handle.requests.length;
+      const requestsBefore = handle.requests.length;
       handle.enterCheckMode();
       const converge = await invoke(
         { ...scenario, inputs: { ...scenario.inputs, mode: "check" } },
         dir,
         handle.url,
       );
-      reruns.push(captureRerun("converges check", converge));
-      const newWrites = handle.requests.slice(writesBefore).filter(isWriteRequest);
+      const rerunRequests = handle.requests.slice(requestsBefore);
+      reruns.push(captureRerun("converges check", converge, rerunRequests));
+      const newWrites = rerunRequests.filter(isWriteRequest);
       if (converge.exitCode !== 0) {
         failures.push(
           `convergence: rerun exited ${converge.exitCode}, expected 0${killNote(converge)}`,
@@ -712,38 +836,44 @@ export async function runScenario(
       }
     }
 
-    // 8-snapshot. The written snapshot, fed back as the settings file of a CHECK run against the
-    // SAME seeded state, must read clean without a write.
-    if (exp.snapshot_converges && snapshotFile !== undefined) {
-      const violationsBefore = handle.violations.length;
-      const writesBefore = handle.requests.length;
+    // 8-snapshot. Every written snapshot, fed back as the settings document of a CHECK run against
+    // the SAME seeded state, must read clean without a write. The file form copies it over
+    // settings.yml; the dir form feeds each file back through its own one-file repos-dir, so the
+    // check targets exactly that repository and a non-converging file names itself.
+    const written = writtenSnapshotPaths(scenario.inputs ?? {}, dir);
+    const snapshotDir = scenario.inputs?.snapshot_dir;
+    if (exp.snapshot_converges) {
+      const checkInputs = snapshotCheckInputs(scenario.inputs ?? {});
+      if (written.length === 0) {
+        failures.push("snapshot round trip: the run wrote no snapshot document to feed back");
+      }
       handle.enterCheckMode();
-      copyFileSync(join(dir, snapshotFile), join(dir, "settings.yml"));
-      const check = await invoke(
-        { ...scenario, inputs: snapshotCheckInputs(scenario.inputs ?? {}) },
-        dir,
-        handle.url,
-      );
-      reruns.push(captureRerun("snapshot check", check));
-      const newWrites = handle.requests.slice(writesBefore).filter(isWriteRequest);
-      if (check.exitCode !== 0) {
+      for (const [i, path] of written.entries()) {
+        const violationsBefore = handle.violations.length;
+        const requestsBefore = handle.requests.length;
+        let check: Invocation;
+        if (snapshotDir !== undefined) {
+          scratch ??= mkdtempSync(join(tmpdir(), "e2e-round-trip-"));
+          const reposDir = join(scratch, String(i));
+          const central = join(reposDir, relative(join(dir, snapshotDir), join(dir, path)));
+          mkdirSync(dirname(central), { recursive: true });
+          copyFileSync(join(dir, path), central);
+          const { repos: _repos, discovery: _discovery, ...single } = scenario;
+          check = await invoke({ ...single, inputs: checkInputs }, dir, handle.url, reposDir);
+        } else {
+          copyFileSync(join(dir, path), join(dir, SETTINGS_FILE));
+          check = await invoke({ ...scenario, inputs: checkInputs }, dir, handle.url);
+        }
+        const rerunRequests = handle.requests.slice(requestsBefore);
+        reruns.push(captureRerun(`snapshot check ${path}`, check, rerunRequests));
         failures.push(
-          `snapshot round trip: the check exited ${check.exitCode}, expected 0${killNote(check)}`,
+          ...roundTripFailures(
+            `snapshot round trip[${path}]`,
+            check,
+            rerunRequests,
+            handle.violations.slice(violationsBefore),
+          ),
         );
-      }
-      if (check.outputs.result !== "clean") {
-        failures.push(
-          `snapshot round trip: the check's result is "${check.outputs.result}", expected "clean"`,
-        );
-      }
-      if (newWrites.length > 0) {
-        failures.push(
-          `snapshot round trip: the check wrote ${newWrites.length} time(s): ${newWrites.map((r) => renderRequest(r, false)).join(", ")}`,
-        );
-      }
-      const newViolations = handle.violations.slice(violationsBefore);
-      if (newViolations.length > 0) {
-        failures.push(`snapshot round trip: mock violations:\n  ${newViolations.join("\n  ")}`);
       }
     }
 
@@ -780,6 +910,7 @@ export async function runScenario(
     }
     // The request log spans the primary invocation and every re-run, so one sweep covers each delivered report.
     failures.push(...checkReportLeaks(handle.requests, secretNeedles));
+    failures.push(...writtenSnapshotLeaks(dir, written, secretNeedles));
 
     const report: ScenarioReport = {
       scenario: scenario.name,
@@ -805,6 +936,9 @@ export async function runScenario(
     }
     if (dir) {
       rmSync(dir, { recursive: true, force: true });
+    }
+    if (scratch) {
+      rmSync(scratch, { recursive: true, force: true });
     }
   }
 }
@@ -844,10 +978,29 @@ export function markReportTitle(artifactDir: string, marker: string): void {
   writeFileSync(path, [`${title} (${marker})`, ...rest].join("\n"));
 }
 
+/** Sanitized to [a-z0-9-] so a scenario name or a re-run label cannot escape its artifact directory. */
+function artifactName(raw: string, fallback: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9-]/g, "-") || fallback;
+}
+
+/** The four surfaces every invocation, primary or re-run, leaves behind. */
+function dumpInvocation(
+  dir: string,
+  run: { stdout: string; stderr: string; summary: string },
+  requests: LoggedRequest[],
+): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "stdout.txt"), run.stdout);
+  writeFileSync(join(dir, "stderr.txt"), run.stderr);
+  writeFileSync(join(dir, "summary.md"), run.summary);
+  writeFileSync(join(dir, "requests.json"), JSON.stringify(requests, null, 2));
+}
+
 /**
  * The debugging dump for a failing scenario, keyed by name, pid, and a counter so parallel or repeated
  * runs never collide. `failures` is what report.md lists: the runner's own by default, or a caller's
- * judgment of a run the runner itself passed (the fuzz oracle's).
+ * judgment of a run the runner itself passed (the fuzz oracle's). Each re-run's surfaces land in a
+ * `rerun-<n>-<label>/` subdirectory, in execution order, so a re-run failure is diagnosable from the artifact.
  */
 function dumpArtifacts(
   scenario: Scenario,
@@ -855,21 +1008,22 @@ function dumpArtifacts(
   requests: LoggedRequest[],
   failures: readonly string[] = report.failures,
 ): string {
-  // Sanitized to [a-z0-9-] so a scenario name cannot escape the .artifacts root.
-  const safeName = scenario.name.toLowerCase().replace(/[^a-z0-9-]/g, "-") || "scenario";
   const dir = join(
     ROOT,
     "test",
     "e2e",
     ".artifacts",
-    `${safeName}-${process.pid}-${artifactCounter++}`,
+    `${artifactName(scenario.name, "scenario")}-${process.pid}-${artifactCounter++}`,
   );
-  mkdirSync(dir, { recursive: true });
+  dumpInvocation(dir, report, requests);
   writeFileSync(join(dir, "scenario.yml"), stringifyYaml(scenario));
-  writeFileSync(join(dir, "stdout.txt"), report.stdout);
-  writeFileSync(join(dir, "stderr.txt"), report.stderr);
-  writeFileSync(join(dir, "summary.md"), report.summary);
-  writeFileSync(join(dir, "requests.json"), JSON.stringify(requests, null, 2));
+  for (const [i, rerun] of report.reruns.entries()) {
+    dumpInvocation(
+      join(dir, `rerun-${i}-${artifactName(rerun.label, "rerun")}`),
+      rerun,
+      rerun.requests,
+    );
+  }
   writeReport(dir, scenario, report, failures);
   return dir;
 }

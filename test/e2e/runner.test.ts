@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ok } from "neverthrow";
+import { stringify as stringifyYaml } from "yaml";
 import { parseRecipient } from "../../src/report/artifact-report.js";
+import type { RerunCapture } from "./apply-idempotence-proof.js";
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
 import type { LoggedRequest } from "./mock/contract.js";
 import {
@@ -18,13 +20,192 @@ import {
   parseGithubOutput,
   parseSummaryOutcomes,
   requestLogFailures,
+  roundTripFailures,
   type ScenarioReport,
   setReplay,
   snapshotCheckInputs,
   stripDebugLines,
   stripMaskLines,
+  writtenSnapshotLeaks,
+  writtenSnapshotPaths,
+  yamlStrings,
 } from "./runner.js";
 import type { Scenario } from "./schema.js";
+
+describe("writtenSnapshotPaths (the documents a snapshot run left behind)", () => {
+  test("the dir form lists every .yml under the directory, relative to the temp dir, sorted", () => {
+    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
+    try {
+      mkdirSync(join(dir, "snapshots", "acme"), { recursive: true });
+      writeFileSync(join(dir, "snapshots", "acme", "svc-b.yml"), "labels: {}\n");
+      writeFileSync(join(dir, "snapshots", "acme", "svc-a.yml"), "labels: {}\n");
+      // A file outside the snapshot dir (the scenario's own settings.yml) is not a written snapshot.
+      writeFileSync(join(dir, "settings.yml"), "{}\n");
+      expect(writtenSnapshotPaths({ mode: "snapshot", snapshot_dir: "snapshots" }, dir)).toEqual([
+        join("snapshots", "acme", "svc-a.yml"),
+        join("snapshots", "acme", "svc-b.yml"),
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the file form lists the one file when the run wrote it, nothing when it did not", () => {
+    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
+    try {
+      const inputs = { mode: "snapshot" as const, snapshot_file: "snapshot.yml" };
+      expect(writtenSnapshotPaths(inputs, dir)).toEqual([]);
+      writeFileSync(join(dir, "snapshot.yml"), "labels: {}\n");
+      expect(writtenSnapshotPaths(inputs, dir)).toEqual(["snapshot.yml"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a run without a snapshot destination wrote none", () => {
+    expect(writtenSnapshotPaths({ mode: "apply" }, "/nonexistent")).toEqual([]);
+  });
+});
+
+describe("writtenSnapshotLeaks (the secret sweep over the written documents)", () => {
+  // The negative control for the sweep: a resolved secret value planted into a written document
+  // must fail, naming the document and the value, while the clean sibling stays quiet.
+  test("a planted secret value in a written document is a leak; a clean document is not", () => {
+    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
+    try {
+      mkdirSync(join(dir, "snapshots", "acme"), { recursive: true });
+      const clean = join("snapshots", "acme", "clean.yml");
+      const planted = join("snapshots", "acme", "planted.yml");
+      writeFileSync(
+        join(dir, clean),
+        "actions_variables:\n  entries:\n    - name: A\n      value: $A\n",
+      );
+      writeFileSync(
+        join(dir, planted),
+        "actions_variables:\n  entries:\n    - name: A\n      value: hunter2-resolved\n",
+      );
+      expect(writtenSnapshotLeaks(dir, [clean, planted], ["hunter2-resolved", "ghp_e2e"])).toEqual([
+        `leak: "hunter2-resolved" present in the written snapshot ${planted}`,
+      ]);
+      expect(writtenSnapshotLeaks(dir, [clean], ["hunter2-resolved"])).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // A multi-line value serializes as a block scalar: "|-" then one indented line per source line,
+  // so the raw text never contains the value whole. Written through the same emitter the action uses.
+  test("a planted multi-line value, wrapped as a block scalar, is still a leak", () => {
+    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
+    try {
+      const secret = "line one of the key\nline two of the key";
+      const path = "snapshot.yml";
+      const text = stringifyYaml({ webhooks: { entries: [{ url: "https://x", secret }] } });
+      writeFileSync(join(dir, path), text);
+      expect(text).not.toContain(secret);
+      expect(text).toContain("|-");
+      expect(writtenSnapshotLeaks(dir, [path], [secret])).toEqual([
+        `leak: "${secret}" present in the written snapshot ${path}`,
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a document that does not parse as YAML fails on its own instead of passing the sweep silently", () => {
+    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
+    try {
+      writeFileSync(join(dir, "broken.yml"), "labels: [unclosed\n");
+      const failures = writtenSnapshotLeaks(dir, ["broken.yml"], ["hunter2"]);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatch(/^the written snapshot broken.yml is not parseable YAML: /);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("yamlStrings (every key and string leaf of a document)", () => {
+  test("walks mappings, sequences, and scalars, keeping keys and skipping non-strings", () => {
+    expect(
+      yamlStrings({
+        labels: {
+          entries: [{ name: "bug", color: 1, on: true, note: null }],
+          _undeclared: "delete",
+        },
+      }),
+    ).toEqual(["labels", "entries", "name", "bug", "color", "on", "note", "_undeclared", "delete"]);
+    expect(yamlStrings(null)).toEqual([]);
+    expect(yamlStrings("top")).toEqual(["top"]);
+  });
+});
+
+describe("roundTripFailures (the snapshot round trip's verdict)", () => {
+  const clean = {
+    exitCode: 0,
+    outputs: { result: "clean" },
+    summary: "",
+    stdout: "",
+    stderr: "",
+    killedByHarness: false,
+  };
+  const write: LoggedRequest = {
+    method: "POST",
+    pathname: "/repos/o/r/labels",
+    query: "",
+    status: 201,
+  };
+  const read: LoggedRequest = {
+    method: "GET",
+    pathname: "/repos/o/r/labels",
+    query: "",
+    status: 200,
+  };
+  test.each<
+    [
+      label: string,
+      check: typeof clean,
+      requests: LoggedRequest[],
+      violations: string[],
+      want: string[],
+    ]
+  >([
+    ["a clean check with only reads is no failure", clean, [read], [], []],
+    [
+      "a drifted check fails on its exit code and its result",
+      { ...clean, exitCode: 1, outputs: { result: "drift" } },
+      [read],
+      [],
+      [
+        "snapshot round trip[s.yml]: the check exited 1, expected 0",
+        'snapshot round trip[s.yml]: the check\'s result is "drift", expected "clean"',
+      ],
+    ],
+    [
+      "a write during the check is named, and so is the barrier violation it trips",
+      clean,
+      [read, write],
+      ["request POST /repos/o/r/labels is a write in check mode"],
+      [
+        "snapshot round trip[s.yml]: the check wrote 1 time(s): POST /repos/o/r/labels",
+        "snapshot round trip[s.yml]: mock violations:\n  request POST /repos/o/r/labels is a write in check mode",
+      ],
+    ],
+    [
+      "a harness kill is marked on the exit-code failure",
+      { ...clean, exitCode: 143, killedByHarness: true },
+      [],
+      [],
+      [
+        "snapshot round trip[s.yml]: the check exited 143, expected 0 (the harness killed the child after 300000ms)",
+      ],
+    ],
+  ])("%s", (_label, check, requests, violations, want) => {
+    expect(roundTripFailures("snapshot round trip[s.yml]", check, requests, violations)).toEqual(
+      want,
+    );
+  });
+});
 
 describe("snapshotCheckInputs (the round-trip check's inputs)", () => {
   test("carries every input the snapshot set, drops both destinations, and switches the mode", () => {
@@ -468,6 +649,56 @@ describe("failureArtifacts (a verdict the runner did not reach)", () => {
     expect(failureArtifacts(scenario, passed, [])).toBeUndefined();
     const dumped = { ...passed, ok: false, artifactDir: "/already/dumped" };
     expect(failureArtifacts(scenario, dumped, [])).toBe("/already/dumped");
+  });
+
+  test("each re-run's surfaces land in their own subdirectory, with only that re-run's requests", () => {
+    const primaryRequest: LoggedRequest = {
+      method: "GET",
+      pathname: "/repos/o/r/labels",
+      query: "",
+      status: 200,
+    };
+    const rerunRequest: LoggedRequest = {
+      method: "GET",
+      pathname: "/repos/o/r",
+      query: "",
+      status: 200,
+    };
+    const rerun: RerunCapture = {
+      label: "snapshot check snapshots/o/r.yml",
+      stdout: "rerun stdout",
+      stderr: "rerun stderr",
+      summary: "| labels | :white_check_mark: clean | |",
+      outputs: { result: "drift" },
+      requests: [rerunRequest],
+    };
+    const report: ScenarioReport = {
+      ...passed,
+      ok: false,
+      failures: [
+        'snapshot round trip[snapshots/o/r.yml]: the check\'s result is "drift", expected "clean"',
+      ],
+      requests: [primaryRequest, rerunRequest],
+      reruns: [rerun],
+    };
+    const dir = failureArtifacts(scenario, report, report.failures);
+    expect(dir).toBeDefined();
+    try {
+      // The label is sanitized like the scenario name, so a path-shaped label stays inside the artifact dir.
+      const sub = join(dir as string, "rerun-0-snapshot-check-snapshots-o-r-yml");
+      expect(existsSync(sub)).toBe(true);
+      expect(readFileSync(join(sub, "stdout.txt"), "utf8")).toBe("rerun stdout");
+      expect(readFileSync(join(sub, "stderr.txt"), "utf8")).toBe("rerun stderr");
+      expect(readFileSync(join(sub, "summary.md"), "utf8")).toBe(rerun.summary);
+      expect(JSON.parse(readFileSync(join(sub, "requests.json"), "utf8"))).toEqual([rerunRequest]);
+      // The primary dump is unchanged: the full log at the top, the primary surfaces beside it.
+      expect(JSON.parse(readFileSync(join(dir as string, "requests.json"), "utf8"))).toEqual(
+        report.requests,
+      );
+      expect(readFileSync(join(dir as string, "stdout.txt"), "utf8")).toBe("");
+    } finally {
+      rmSync(dir as string, { recursive: true, force: true });
+    }
   });
 
   test.each<[label: string, runnerFailures: string[], callerFailures: string[], listed: string[]]>([

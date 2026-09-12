@@ -13,6 +13,7 @@ import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report
 import { SECTION_KEYS } from "../../src/schema.js";
 import type { PatResource } from "../../src/sections/contract/permissions.js";
 import type { MustBeNever } from "../../src/types.js";
+import { LAYER_FILE_PREFIX, RUNNER_ROOT_FILES } from "./constants.js";
 import type { LiveState } from "./mock/state.js";
 import { LIVE_STATE_KEYS } from "./mock/state.js";
 
@@ -58,6 +59,31 @@ const DenialStyleSchema = z.union([z.literal("fine_grained"), z.literal(403), z.
 /** Which account kind the mock owner presents as (teams behave differently). */
 const OwnerKindSchema = z.enum(["org", "user"]);
 
+/**
+ * A snapshot destination stays a plain path below the child's working directory, spelled exactly as
+ * the child resolves it (the child trims surrounding whitespace, the runner reads the spelling), and
+ * off the runner's own root files: a destination resolving to the root or above it would hand them
+ * to the dir form's walk as snapshots, and one starting with a runner file would overwrite it.
+ */
+const RESERVED_ROOT_NAMES: readonly string[] = Object.values(RUNNER_ROOT_FILES);
+function reservedRootName(segment: string): boolean {
+  return RESERVED_ROOT_NAMES.includes(segment) || segment.startsWith(LAYER_FILE_PREFIX);
+}
+const SnapshotDestinationSchema = z
+  .string()
+  .refine(
+    (path) =>
+      path === path.trim() &&
+      path.split("/").every((segment) => !["", ".", ".."].includes(segment)),
+    {
+      message:
+        'a snapshot destination is a relative path below the working directory: no surrounding whitespace and no empty, ".", or ".." segment',
+    },
+  )
+  .refine((path) => !reservedRootName(path.split("/")[0] ?? ""), {
+    message: `a snapshot destination may not start with a file the runner keeps at the working directory's root (${RESERVED_ROOT_NAMES.join(", ")}, ${LAYER_FILE_PREFIX}*)`,
+  });
+
 /** The action inputs a scenario can set; the list inputs stay comma-separated strings, the action's own wire format. */
 const InputsSchema = z
   .object({
@@ -69,8 +95,8 @@ const InputsSchema = z
      * relative to the scenario's temp dir (its working directory), forwarded
      * verbatim as INPUT_SNAPSHOT-FILE / INPUT_SNAPSHOT-DIR.
      */
-    snapshot_file: z.string().optional(),
-    snapshot_dir: z.string().optional(),
+    snapshot_file: SnapshotDestinationSchema.optional(),
+    snapshot_dir: SnapshotDestinationSchema.optional(),
     on_missing_permission: z.enum(["fail", "warn"]).optional(),
     required_sections: z.string().optional(),
     sections: z.string().optional(),
@@ -185,10 +211,11 @@ const ExpectSchema = z
      */
     snapshot: SettingsSchema.optional(),
     /**
-     * mode: snapshot, file form only. When true, the runner re-runs the bundle
-     * in CHECK mode with the written snapshot as its settings file against the
-     * SAME seeded state (the allowlist and the denial policy carried over) and
-     * expects exit 0, `result: clean`, and zero writes: the round trip.
+     * mode: snapshot, either form. When true, the runner re-runs the bundle in
+     * CHECK mode against the SAME seeded state (the allowlist and the denial
+     * policy carried over) once per written document: the file form as the
+     * settings file, the dir form's files each as a one-file repos-dir. Every
+     * check must exit 0 with `result: clean` and zero writes: the round trip.
      */
     snapshot_converges: z.boolean().optional(),
   })
@@ -425,14 +452,12 @@ const ScenarioSchema = z
         "a mode: snapshot scenario sets exactly one of inputs.snapshot_file or inputs.snapshot_dir",
     },
   )
-  .refine(
-    (s) =>
-      (s.expect.snapshot === undefined && s.expect.snapshot_converges === undefined) ||
-      s.inputs?.snapshot_file !== undefined,
-    {
-      message: "expect.snapshot and expect.snapshot_converges only apply with inputs.snapshot_file",
-    },
-  )
+  .refine((s) => s.expect.snapshot === undefined || s.inputs?.snapshot_file !== undefined, {
+    message: "expect.snapshot only applies with inputs.snapshot_file",
+  })
+  .refine((s) => s.expect.snapshot_converges === undefined || s.inputs?.mode === "snapshot", {
+    message: "expect.snapshot_converges only applies with inputs.mode: snapshot",
+  })
   .refine(
     (s) =>
       s.inputs?.snapshot_dir !== undefined ||

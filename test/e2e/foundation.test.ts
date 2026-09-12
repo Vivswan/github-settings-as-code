@@ -9,6 +9,8 @@ import {
   ADMIN_REPO,
   ADMIN_SLUG,
   E2E_TOKEN,
+  layerFile,
+  RUNNER_ROOT_FILES,
   TOKEN_USER_LOGIN,
   VIOLATION_PREFIX,
 } from "./constants.js";
@@ -201,6 +203,84 @@ describe("scenario schema", () => {
       "d.yml",
     );
     expect(s.denial_style).toBe(403);
+  });
+
+  // The runner keeps its own files at the root of the child's working directory, so a destination
+  // that resolves to that root (or above it) would let the dir form's walk collect them as snapshots;
+  // the child trims surrounding whitespace, so a padded spelling would name a different path than the runner reads.
+  test.each<[label: string, inputs: Record<string, string>]>([
+    ["the working directory itself", { snapshot_dir: "." }],
+    ["a parent segment", { snapshot_dir: "../snapshots" }],
+    ["an absolute path", { snapshot_file: "/tmp/snapshot.yml" }],
+    ["an empty segment", { snapshot_file: "out//snapshot.yml" }],
+    ["surrounding whitespace", { snapshot_dir: "snapshots " }],
+  ])("rejects a snapshot destination that is not a plain subpath: %s", (_label, inputs) => {
+    expect(() =>
+      parseScenario(
+        {
+          name: "x",
+          settings: {},
+          inputs: { mode: "snapshot", ...inputs },
+          expect: { exit_code: 0 },
+        },
+        "dest.yml",
+      ),
+    ).toThrow(/relative path below the working directory/);
+  });
+
+  // The runner writes these at the root before the child runs; a destination starting with one
+  // would overwrite it, or hand it to the dir form's walk. Derived from the runner's own list.
+  test.each<[name: string, inputs: Record<string, string>]>([
+    ...Object.values(RUNNER_ROOT_FILES).flatMap(
+      (name): Array<[string, Record<string, string>]> => [
+        [`snapshot_dir: ${name}`, { snapshot_dir: name }],
+        [`snapshot_file: ${name}`, { snapshot_file: name }],
+      ],
+    ),
+    [
+      `a nested path under ${RUNNER_ROOT_FILES.settings}`,
+      { snapshot_dir: `${RUNNER_ROOT_FILES.settings}/out` },
+    ],
+    [`a merge layer, ${layerFile(0)}`, { snapshot_file: layerFile(0) }],
+  ])(
+    "rejects a snapshot destination starting with a runner-owned root file: %s",
+    (_name, inputs) => {
+      expect(() =>
+        parseScenario(
+          {
+            name: "x",
+            settings: {},
+            inputs: { mode: "snapshot", ...inputs },
+            expect: { exit_code: 0 },
+          },
+          "reserved.yml",
+        ),
+      ).toThrow(/may not start with a file the runner keeps/);
+    },
+  );
+
+  test("accepts a nested snapshot destination and the dir form's snapshot_converges", () => {
+    const s = parseScenario(
+      {
+        name: "x",
+        settings: {},
+        inputs: { mode: "snapshot", snapshot_dir: "out/snapshots" },
+        repos: { "e2e-owner/svc-a": {} },
+        expect: { exit_code: 0, snapshot_converges: true },
+      },
+      "dir.yml",
+    );
+    expect(s.inputs?.snapshot_dir).toBe("out/snapshots");
+    expect(s.expect.snapshot_converges).toBe(true);
+  });
+
+  test("snapshot_converges outside mode: snapshot is dead configuration, so it is rejected", () => {
+    expect(() =>
+      parseScenario(
+        { name: "x", settings: {}, expect: { exit_code: 0, snapshot_converges: true } },
+        "apply.yml",
+      ),
+    ).toThrow(/snapshot_converges only applies with inputs.mode: snapshot/);
   });
 });
 
