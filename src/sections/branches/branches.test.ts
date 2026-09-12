@@ -1463,7 +1463,11 @@ describe("branches snapshot", () => {
     const snapshot = await branchesSection.snapshot(planContext(branchesSection, api, REPO));
     expect(snapshot.value?.map((entry) => entry.name)).toEqual(["main"]);
     expect(snapshot.notes).toEqual([
-      "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule surface, which snapshot does not read; an omitted key leaves its live value untouched, so declare them to manage them. A branch a wildcard rule protects is written here as a LITERAL entry carrying that rule's protection (the REST reads name no pattern), and applying it would create a literal rule beside the wildcard; replace such entries with one wildcard entry naming the pattern",
+      "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule " +
+        "surface, which snapshot does not read; an omitted key leaves its live value untouched, so declare them to " +
+        "manage them. A branch a wildcard rule protects is written here as a LITERAL entry carrying that rule's " +
+        "protection (the REST reads name no pattern), and applying it would create a literal rule beside the " +
+        "wildcard; replace such entries with one wildcard entry naming the pattern",
     ]);
     expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
       "GET /repos/o/r/branches?protected=true&per_page=100&page=1",

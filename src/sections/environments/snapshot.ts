@@ -27,11 +27,9 @@ import {
 /** The nested keys of one snapshot entry: only the lists with at least one live item appear. */
 type NestedSnapshot = Pick<EnvironmentConfig, NestedKey>;
 
-/** The snapshot note for the pin state, which only the GraphQL pins connection reveals. */
 export const PINNED_NOTE =
   "pinned rides the GraphQL pins connection, which snapshot does not read; an entry without the key leaves its pin untouched, so declare pinned to manage pins";
 
-/** A nested list in the wrapped form, the planner's default policy spelled out. */
 function wrapped<E>(key: NestedKey, entries: E[]): UndeclaredPolicyList<E> {
   return { _undeclared: nestedDefaultPolicy(key), entries };
 }
