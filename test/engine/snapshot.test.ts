@@ -108,8 +108,6 @@ describe("snapshotRepository", () => {
     expect(UNSUPPORTED).toEqual([
       "repository",
       "rulesets",
-      "environments",
-      "branches",
       "actions",
       "check_suite_preferences",
       "collaborators",

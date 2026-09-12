@@ -93,6 +93,26 @@ function createPolicyOp(
   };
 }
 
+/**
+ * One environment's live patterns. Only meaningful while its custom_branch_policies flag is on:
+ * the endpoint 404s otherwise, which the caller reads off the environment body first.
+ */
+export async function listBranchPolicies(
+  ctx: EnvironmentsRestContext,
+  section: SectionMeta,
+  envName: string,
+): Promise<LiveBranchPolicy[]> {
+  return parseLive(
+    section,
+    ENDPOINTS.listPolicies,
+    z.array(LiveBranchPolicy),
+    await ctx.read.listPolicies.listAllEnveloped("branch_policies", {
+      params: { environment_name: envName },
+    }),
+    `environment "${envName}"`,
+  );
+}
+
 /** With custom_branch_policies off the pattern list 404s, so patterns already behind the flag reconcile on the next run. */
 export async function planBranchPolicies(
   ctx: EnvironmentsRestContext,
@@ -117,13 +137,7 @@ export async function planBranchPolicies(
       `environments[${envName}].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and create the declared patterns, and any pattern already behind the flag reconciles on the next run`,
     );
   } else if (liveEnv !== undefined) {
-    live = parseLive(
-      section,
-      ENDPOINTS.listPolicies,
-      z.array(LiveBranchPolicy),
-      await ctx.read.listPolicies.listAllEnveloped("branch_policies", { params }),
-      `environment "${envName}"`,
-    );
+    live = await listBranchPolicies(ctx, section, envName);
   }
   const liveByName = new Map<string, LiveBranchPolicy>();
   for (const pattern of live) {

@@ -33,7 +33,7 @@ import {
   WILDCARD_KEY_SET,
   WILDCARD_KEYS,
 } from "./graphql-rules.js";
-import { type BranchConfig, BranchesConfig } from "./schema.js";
+import { type BranchConfig, BranchesConfig, type BranchProtectionConfig } from "./schema.js";
 
 const REQUIRED_PROTECTION_KEYS = [
   "required_status_checks",
@@ -118,6 +118,17 @@ const permission: SectionPermission = { repo: ["administration"] };
 const LiveProtection = z.looseObject({
   required_signatures: z.looseObject({ enabled: z.boolean() }).optional(),
 });
+
+/** One item of the protected-branch listing; only the name is read (the protection is probed). */
+const LiveBranchSummary = z.looseObject({ name: z.string() });
+
+/** The snapshot note for the surface the REST reads cannot carry. */
+const GRAPHQL_ONLY_NOTE =
+  "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule " +
+  "surface, which snapshot does not read; an omitted key leaves its live value untouched, so declare them to " +
+  "manage them. A branch a wildcard rule protects is written here as a LITERAL entry carrying that rule's " +
+  "protection (the REST reads name no pattern), and applying it would create a literal rule beside the " +
+  "wildcard; replace such entries with one wildcard entry naming the pattern";
 
 /** Built in the ONE place that decides whether the GraphQL run state exists, so no other site re-spells the predicate. */
 type ClassifiedEntry =
@@ -252,7 +263,53 @@ export const branchesSection = {
     }
     return plan;
   },
+  // The listing also names branches only a ruleset protects, whose classic
+  // protection probe answers 404: nothing to declare here. The engine notes
+  // the denial that 404 could also be when every listed branch answers it.
+  async snapshot(ctx) {
+    const listed = parseLive(
+      this,
+      ENDPOINTS.listProtected,
+      z.array(LiveBranchSummary),
+      await ctx.read.listProtected.listAll({ query: { protected: "true" } }),
+    );
+    const entries: BranchConfig[] = [];
+    for (const { name } of listed) {
+      const probe = await ctx.read.getProtection.probeAbsent({ params: { branch: name } });
+      if ("missing" in probe) {
+        continue;
+      }
+      const live = parseLive(
+        this,
+        ENDPOINTS.getProtection,
+        LiveProtection,
+        probe.data,
+        `branch "${name}"`,
+      );
+      entries.push({ name, protection: protectionSnapshot(live) });
+    }
+    if (entries.length === 0) {
+      return { value: undefined, notes: [] };
+    }
+    return { value: entries, notes: [GRAPHQL_ONLY_NOTE] };
+  },
 } satisfies SectionModule<"branches", typeof ENDPOINTS, typeof GRAPHQL>;
+
+/**
+ * The declared protection a live GET body reads back as: flattenProtection's PUT vocabulary with
+ * every top-level control that is off dropped, since the replacing PUT resets an omitted control
+ * to off anyway.
+ */
+export function protectionSnapshot(live: Record<string, unknown>): BranchProtectionConfig {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(flattenProtection(live))) {
+    if (value !== false && value !== null && value !== undefined) {
+      out[key] = value;
+    }
+  }
+  // The engine validates the assembled document, so this cast is the projection boundary.
+  return out as BranchProtectionConfig;
+}
 
 async function planLiteralEntry(
   ctx: BranchesContext,
@@ -291,6 +348,9 @@ async function planLiteralEntry(
     if (!(key in payload)) {
       payload[key] = null;
     }
+  }
+  if (isPlainMapping(payload.required_status_checks)) {
+    payload.required_status_checks = putStatusChecks(payload.required_status_checks);
   }
   let live: Record<string, unknown> | null = null;
   // GitHub does not document whether the PUT preserves the sub-resource and the GraphQL-only
@@ -415,10 +475,33 @@ export function flattenProtection(live: Record<string, unknown>): Record<string,
     out[key] = flattenValue(value);
   }
   const checks = out.required_status_checks;
-  if (typeof checks === "object" && checks !== null && !Array.isArray(checks)) {
-    delete (checks as Record<string, unknown>).enforcement_level;
+  if (isPlainMapping(checks)) {
+    const { enforcement_level: _level, ...status } = checks;
+    out.required_status_checks = putStatusChecks(status);
   }
   return out;
+}
+
+/**
+ * The required status checks in the PUT's spelling, applied to the live body and the declared
+ * payload alike so both sides compare equal: "any App may report this check" reads back as app_id
+ * null but the PUT takes -1 (an omitted app_id lets GitHub pin whichever App reported last), and
+ * the PUT still requires `contexts` beside `checks`, so a body carrying only `checks` (a mock
+ * storing a PUT verbatim) gets the names derived from it.
+ */
+function putStatusChecks(status: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(status.checks)) {
+    return status;
+  }
+  const checks = status.checks.map((check) =>
+    isPlainMapping(check) && check.app_id === null ? { ...check, app_id: -1 } : check,
+  );
+  const contexts = Array.isArray(status.contexts)
+    ? status.contexts
+    : checks.flatMap((check) =>
+        isPlainMapping(check) && typeof check.context === "string" ? [check.context] : [],
+      );
+  return { ...status, checks, contexts };
 }
 
 // GET-only metadata the PUT vocabulary has no word for (url keys drop generically).

@@ -45,7 +45,7 @@ export const NESTED_KEYS = [
   "deployment_branch_policies",
   "deployment_protection_rules",
 ] as const satisfies readonly (keyof EnvironmentConfig)[];
-type NestedKey = (typeof NESTED_KEYS)[number];
+export type NestedKey = (typeof NESTED_KEYS)[number];
 
 type NestedDeclared = { [K in NestedKey]: NonNullable<EnvironmentConfig[K]> };
 
@@ -153,6 +153,11 @@ function unwrapNested<K extends NestedKey>(
   );
 }
 
+/** The undeclared-entry policy one nested key's list carries when the declaration spells none. */
+export function nestedDefaultPolicy(key: NestedKey): UndeclaredPolicy {
+  return NESTED_PLANNERS[key].defaultPolicy;
+}
+
 export function validateNested<K extends NestedKey>(key: K, env: EnvironmentConfig): void {
   const declared = env[key];
   if (declared !== undefined) {
@@ -243,6 +248,23 @@ function rejectDuplicateVariables(
   }
 }
 
+/** One environment's live Actions variables. */
+export async function listEnvironmentVariables(
+  ctx: EnvironmentsRestContext,
+  section: SectionMeta,
+  envName: string,
+): Promise<LiveVariable[]> {
+  return parseLive(
+    section,
+    ENDPOINTS.listVariables,
+    z.array(LiveVariable),
+    await ctx.read.listVariables.listAllEnveloped("variables", {
+      params: { environment_name: envName },
+    }),
+    `environment "${envName}"`,
+  );
+}
+
 async function planVariables(
   ctx: EnvironmentsRestContext,
   section: SectionMeta,
@@ -253,16 +275,7 @@ async function planVariables(
 ): Promise<NestedPlan> {
   const params = { environment_name: envName };
   const label = `environments[${envName}].variables`;
-  const live =
-    liveEnv === undefined
-      ? []
-      : parseLive(
-          section,
-          ENDPOINTS.listVariables,
-          z.array(LiveVariable),
-          await ctx.read.listVariables.listAllEnveloped("variables", { params }),
-          `environment "${envName}"`,
-        );
+  const live = liveEnv === undefined ? [] : await listEnvironmentVariables(ctx, section, envName);
   const liveByKey = new Map(live.map((variable) => [variableKey(variable.name), variable]));
   const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
   const planned: NestedPlan = { ops: [], notes: [] };
@@ -364,6 +377,23 @@ function rejectDuplicateSecrets(
   }
 }
 
+/** One environment's live Actions secret names (GitHub never lists values). */
+export async function listEnvironmentSecrets(
+  ctx: EnvironmentsRestContext,
+  section: SectionMeta,
+  envName: string,
+): Promise<z.infer<typeof LIVE_SECRET_NAMES>> {
+  return parseLive(
+    section,
+    ENDPOINTS.listSecrets,
+    LIVE_SECRET_NAMES,
+    await ctx.read.listSecrets.listAllEnveloped("secrets", {
+      params: { environment_name: envName },
+    }),
+    `environment "${envName}"`,
+  );
+}
+
 /**
  * Existence is the only comparable state (values never read back), so every declared secret is a
  * sealed PUT. The sealing key is read inside the first payload thunk: in apply the environment PUT
@@ -381,16 +411,7 @@ async function planEnvironmentSecrets(
   const label = `environments[${envName}].secrets`;
   const noun = `${envName} environment secret`;
   const suffix = ` in environment "${envName}"`;
-  const live =
-    liveEnv === undefined
-      ? []
-      : parseLive(
-          section,
-          ENDPOINTS.listSecrets,
-          LIVE_SECRET_NAMES,
-          await ctx.read.listSecrets.listAllEnveloped("secrets", { params }),
-          `environment "${envName}"`,
-        );
+  const live = liveEnv === undefined ? [] : await listEnvironmentSecrets(ctx, section, envName);
   // Real GitHub lists names uppercase already; keying by secretKey keeps a differently-cased mock or proxy harmless.
   const liveByKey = new Map(live.map((item) => [secretKey(item.name), item.name]));
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));

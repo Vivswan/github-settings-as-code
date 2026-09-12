@@ -117,6 +117,7 @@ describe("changed-sections derived fan-out", () => {
       // workflows, whose two-field entry is spelled by hand.
       "snapshot-helpers.ts": inKeyOrder(
         "labels",
+        "environments",
         "autolinks",
         "actions_secrets",
         "dependabot_secrets",

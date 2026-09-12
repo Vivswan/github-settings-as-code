@@ -6,8 +6,10 @@ import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
 import { buildState, type LiveState } from "../../../test/e2e/mock/state.js";
 import type { Json } from "../../../test/e2e/mock/support.js";
 import { MockApi } from "../../../test/mock-api.js";
+import { registryFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { proveSnapshotRoundTrip } from "../../../test/sections/snapshot-roundtrip.js";
 import {
   endpointMethod,
   endpointPath,
@@ -15,7 +17,7 @@ import {
   pathSegments,
 } from "../contract/endpoints.js";
 import { PermissionDenied } from "../contract/errors.js";
-import { branchesSection } from "./index.js";
+import { branchesSection, flattenProtection, protectionSnapshot } from "./index.js";
 import { branchesMockGraphqlHandlers, branchesMockHandlers } from "./mock.js";
 
 type Desired = Parameters<typeof branchesSection.plan>[1];
@@ -1245,6 +1247,7 @@ describe("branches plan contract", () => {
     const ctx = planContext(branchesSection, new MockApi({}), REPO);
     expect(Object.keys(ctx.read)).toEqual([
       "getProtection",
+      "listProtected",
       "branchProbe",
       "appLookup",
       "rulesQuery",
@@ -1289,5 +1292,212 @@ describe("branches plan contract", () => {
     const variableless = { role: "updateRule", drift: ["x"], change: "" } as const;
     // @ts-expect-error a mutation carries its declared variables
     const _variableless: Op = variableless;
+  });
+});
+
+describe("branches snapshot", () => {
+  /** A protection GET body as GitHub serves it: url keys, {enabled} wrappers, actor objects. */
+  const LIVE_PROTECTION = {
+    url: "https://api.github.com/repos/o/r/branches/main/protection",
+    required_status_checks: {
+      url: "https://api.github.com/repos/o/r/branches/main/protection/required_status_checks",
+      strict: true,
+      contexts: ["ci", "lint"],
+      contexts_url:
+        "https://api.github.com/repos/o/r/branches/main/protection/required_status_checks/contexts",
+      checks: [
+        { context: "ci", app_id: null },
+        { context: "lint", app_id: null },
+      ],
+      enforcement_level: "non_admins",
+    },
+    enforce_admins: { url: "https://api.github.com/x/enforce_admins", enabled: true },
+    required_pull_request_reviews: {
+      url: "https://api.github.com/x/required_pull_request_reviews",
+      dismiss_stale_reviews: true,
+      require_code_owner_reviews: false,
+      required_approving_review_count: 2,
+      require_last_push_approval: false,
+      dismissal_restrictions: {
+        url: "https://api.github.com/x/dismissal_restrictions",
+        users_url: "https://api.github.com/x/dismissal_restrictions/users",
+        teams_url: "https://api.github.com/x/dismissal_restrictions/teams",
+        users: [{ login: "octocat", id: 1 }],
+        teams: [{ slug: "platform", id: 2 }],
+        apps: [],
+      },
+    },
+    restrictions: {
+      url: "https://api.github.com/x/restrictions",
+      users_url: "https://api.github.com/x/restrictions/users",
+      teams_url: "https://api.github.com/x/restrictions/teams",
+      apps_url: "https://api.github.com/x/restrictions/apps",
+      users: [{ login: "release-bot", id: 3 }],
+      teams: [],
+      apps: [{ slug: "deploy-gate", id: 4 }],
+    },
+    required_linear_history: { enabled: true },
+    allow_force_pushes: { enabled: false },
+    allow_deletions: { enabled: false },
+    block_creations: { enabled: false },
+    required_conversation_resolution: { enabled: false },
+    lock_branch: { enabled: false },
+    allow_fork_syncing: { enabled: false },
+    required_signatures: { url: "https://api.github.com/x/required_signatures", enabled: true },
+  };
+
+  test("the lens turns the GET shape into the PUT vocabulary, controls that are off omitted", () => {
+    expect(protectionSnapshot(LIVE_PROTECTION)).toEqual({
+      required_status_checks: {
+        strict: true,
+        contexts: ["ci", "lint"],
+        checks: [
+          { context: "ci", app_id: -1 },
+          { context: "lint", app_id: -1 },
+        ],
+      },
+      enforce_admins: true,
+      required_pull_request_reviews: {
+        dismiss_stale_reviews: true,
+        require_code_owner_reviews: false,
+        required_approving_review_count: 2,
+        require_last_push_approval: false,
+        dismissal_restrictions: { users: ["octocat"], teams: ["platform"], apps: [] },
+      },
+      restrictions: { users: ["release-bot"], teams: [], apps: ["deploy-gate"] },
+      required_linear_history: true,
+      required_signatures: true,
+    });
+  });
+
+  test.each([
+    {
+      case: "both spellings are kept; a null app_id (any App) becomes the PUT's -1",
+      checks: {
+        strict: false,
+        contexts: ["ci", "lint"],
+        checks: [
+          { context: "ci", app_id: 15368 },
+          { context: "lint", app_id: null },
+        ],
+      },
+      expected: {
+        strict: false,
+        contexts: ["ci", "lint"],
+        checks: [
+          { context: "ci", app_id: 15368 },
+          { context: "lint", app_id: -1 },
+        ],
+      },
+    },
+    {
+      case: "a body with only checks derives the contexts the PUT requires",
+      checks: { strict: true, checks: [{ context: "ci", app_id: null }] },
+      expected: { strict: true, checks: [{ context: "ci", app_id: -1 }], contexts: ["ci"] },
+    },
+    {
+      case: "a body without checks keeps contexts",
+      checks: { strict: true, contexts: ["ci"] },
+      expected: { strict: true, contexts: ["ci"] },
+    },
+  ])("required_status_checks: $case", ({ checks, expected }) => {
+    expect(protectionSnapshot({ required_status_checks: checks })).toEqual({
+      required_status_checks: expected,
+    });
+  });
+
+  test("the live side gets the same PUT spelling: -1 for a null app_id, contexts derived from checks", () => {
+    expect(
+      flattenProtection({ required_status_checks: { checks: [{ context: "ci", app_id: null }] } }),
+    ).toEqual({
+      required_status_checks: { checks: [{ context: "ci", app_id: -1 }], contexts: ["ci"] },
+    });
+  });
+
+  test("a checks-only live body round-trips: the snapshot plans as a no-op against it", async () => {
+    const live: LiveState = {
+      branches: ["main"],
+      branch_protection: {
+        main: {
+          required_status_checks: { strict: true, checks: [{ context: "ci", app_id: null }] },
+        },
+      },
+    };
+    const { snapshot } = await proveSnapshotRoundTrip(branchesSection, registryFake(live));
+    expect(snapshot.value).toEqual([
+      {
+        name: "main",
+        protection: {
+          required_status_checks: {
+            strict: true,
+            checks: [{ context: "ci", app_id: -1 }],
+            contexts: ["ci"],
+          },
+        },
+      },
+    ]);
+  });
+
+  test("a required_signatures the GET omits, and a false one, both read as nothing to declare", () => {
+    expect(protectionSnapshot({ enforce_admins: { enabled: true } })).toEqual({
+      enforce_admins: true,
+    });
+    expect(
+      protectionSnapshot({
+        enforce_admins: { enabled: false },
+        required_signatures: { enabled: false },
+      }),
+    ).toEqual({});
+  });
+
+  test("a listed branch whose protection 404s is left out; the engine's note covers the all-404 case", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/branches?protected=true&per_page=100&page=1": {
+        data: [{ name: "main" }, { name: "rules-only" }],
+      },
+      "GET /repos/o/r/branches/main/protection": { data: LIVE_PROTECTION },
+      "GET /repos/o/r/branches/rules-only/protection": {
+        error: { status: 404, message: "Branch not protected", body: "" },
+      },
+    });
+    const snapshot = await branchesSection.snapshot(planContext(branchesSection, api, REPO));
+    expect(snapshot.value?.map((entry) => entry.name)).toEqual(["main"]);
+    expect(snapshot.notes).toEqual([
+      "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule " +
+        "surface, which snapshot does not read; an omitted key leaves its live value untouched, so declare them to " +
+        "manage them. A branch a wildcard rule protects is written here as a LITERAL entry carrying that rule's " +
+        "protection (the REST reads name no pattern), and applying it would create a literal rule beside the " +
+        "wildcard; replace such entries with one wildcard entry naming the pattern",
+    ]);
+    expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "GET /repos/o/r/branches?protected=true&per_page=100&page=1",
+      "GET /repos/o/r/branches/main/protection",
+      "GET /repos/o/r/branches/rules-only/protection",
+    ]);
+  });
+
+  test("a declared any-App check (app_id null) converges against GitHub's null read-back", async () => {
+    const checks = { strict: true, contexts: ["ci"], checks: [{ context: "ci", app_id: null }] };
+    const api = liveRepo({
+      branches: ["main"],
+      branch_protection: { main: { required_status_checks: checks } },
+    });
+    const result = await plan(api, [
+      {
+        name: "main",
+        protection: {
+          required_status_checks: { strict: true, checks: [{ context: "ci", app_id: null }] },
+        },
+      },
+    ]);
+    expect(result).toEqual({ ops: [], notes: [], drift: [] });
+  });
+
+  test("no protected branch reads back as nothing to declare", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/branches?protected=true&per_page=100&page=1": { data: [] },
+    });
+    const snapshot = await branchesSection.snapshot(planContext(branchesSection, api, REPO));
+    expect(snapshot).toEqual({ value: undefined, notes: [] });
   });
 });

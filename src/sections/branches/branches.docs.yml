@@ -1,6 +1,7 @@
 sections_table:
   endpoints: >-
-    classic branch protection + required-signatures sub-endpoint + app-by-slug actor lookup +
+    protected-branch listing + classic branch protection + required-signatures sub-endpoint +
+    app-by-slug actor lookup +
     GraphQL BranchProtectionRules + BranchProtectionRepository + BranchProtectionActorUser +
     BranchProtectionActorTeam + CreateBranchProtectionRule + UpdateBranchProtectionRule +
     DeleteBranchProtectionRule
@@ -62,6 +63,16 @@ coverage:
       key keeps its live value, unlike the literal PUT's replace). Actor and environment names
       compare case-insensitively (GitHub canonicalizes them), and the routed lists reject duplicate
       names upfront.
+      Snapshot lists the protected branches (GET /repos/{owner}/{repo}/branches?protected=true)
+      and reads each one's classic protection back in the PUT vocabulary, controls that are off
+      omitted and the required checks in both spellings the PUT takes, `contexts` and `checks` (an
+      any-App check as app_id -1, the PUT's spelling of GitHub's null read-back, which the diff
+      normalizes the same way); a listed branch
+      whose protection read answers 404 (a ruleset protects it) is left out, and
+      force_push_bypassers, required_deployments, and wildcard rules are not read back
+      (GraphQL-only, noted once; a branch a wildcard rule protects comes back as a literal entry
+      carrying that rule's protection, since no REST read names the pattern, and the note says to
+      replace such entries with the wildcard entry).
 schema:
   SettingsFile.branches: Classic branch protection per branch.
   BranchConfig: Classic protection for one branch name or wildcard pattern.
