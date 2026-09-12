@@ -10,7 +10,7 @@ One page per major version. A major is the only release that can change what an 
 
 | Pin | Moves when | Use it for |
 |---|---|---|
-| `@v2` (the moving major) <!-- x-release-please-major --> | Every release in that major line | Fixes arrive without touching your pin; the line never breaks a working file |
+| `@v3` (the moving major) <!-- x-release-please-major --> | Every release in that major line | Fixes arrive without touching your pin; the line never breaks a working file |
 | `@vX.Y.Z` | Never | Byte-stable behavior; upgrade deliberately |
 | A commit SHA | Never | The same, for repositories that pin actions by digest |
 

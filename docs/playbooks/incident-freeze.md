@@ -58,7 +58,7 @@ jobs:
     environment: incident-response
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           token: ${{ secrets.INCIDENT_TOKEN }}
           settings-file: .github/profiles/${{ inputs.profile }}.yml

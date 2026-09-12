@@ -21,7 +21,7 @@ Save the token as a repository secret. The examples below call it `ADMIN_TOKEN`.
 Settings live in `.github/settings.yml` by default (the `settings-file` input moves it). A comment at the top wires editor autocomplete and hover documentation to the published JSON Schema. A small first file:
 
 ```yaml settings
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v3/lib/settings.schema.json # x-release-please-major
 
 repository:
   description: Payments service
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
           mode: check
@@ -67,7 +67,7 @@ jobs:
 
 Each trigger earns its place. The push trigger runs the action on every reviewed change to the settings file: a check while `mode: check` is set, an apply once step 5 removes it. `workflow_dispatch` lets you run the action by hand from the Actions tab, which is how the first run happens. The schedule catches drift: in check mode a weekly run turns red when the live settings diverge from the file, and after the switch to apply it re-asserts the declared keys and reverts anything changed through the UI in the meantime (apply is convergent, see [Semantics](../reference/semantics.md)).
 
-The `@v2` pin <!-- x-release-please-major --> is the moving major tag, stable within its line; `@latest` is a moving tag on the packaged commit of the newest `main` source on the `build` branch (`main` itself is source-only), where breaking changes arrive unannounced, so keep production on the major pin; the tag exists from the first release cut on the `build` branch.
+The `@v3` pin <!-- x-release-please-major --> is the moving major tag, stable within its line; `@latest` is a moving tag on the packaged commit of the newest `main` source on the `build` branch (`main` itself is source-only), where breaking changes arrive unannounced, so keep production on the major pin; the tag exists from the first release cut on the `build` branch.
 
 ## 4. Run check mode first
 

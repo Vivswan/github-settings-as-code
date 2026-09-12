@@ -1,5 +1,74 @@
 # Changelog
 
+## [3.0.0](https://github.com/Vivswan/github-settings-as-code/compare/v2.0.0...v3.0.0) (2026-09-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **upgrading:** two more v3 breaks. (1) A settings-file path may no longer contain a comma or a newline in any mode (they are the list separators mode: merge splits on); apply and check reject such a path with an input error naming the rule; rename the file. (2) defaults-file is no longer merged under every multi-repo target: it is applied whole to a target that has no settings file of its own (previously skipped), and a target's own file is applied as written; build layered documents with mode: merge and apply its output; run mode: check first, since with repos: "*" every discovered repository without a settings file now receives the defaults.
+* the knobbed list wrapper's policy key is `_undeclared`; a settings file still writing `undeclared` fails validation with an error naming the new key.
+
+### Features
+
+* add mode: merge with a layered settings-file ([#104](https://github.com/Vivswan/github-settings-as-code/issues/104)) ([d50e70b](https://github.com/Vivswan/github-settings-as-code/commit/d50e70bd51ddf620d023c8c9daf8f94dc269b4b3))
+* add the plan-returning section contract and migrate the workflows section ([8a65765](https://github.com/Vivswan/github-settings-as-code/commit/8a65765e276540e75aae83992b3383ea8e4002ef))
+* **cli:** github-settings-as-code and gsac commands over the library ([#152](https://github.com/Vivswan/github-settings-as-code/issues/152)) ([364a9c6](https://github.com/Vivswan/github-settings-as-code/commit/364a9c62988a60a6e6af0e434c364aed37be41bc))
+* **contract:** extend the plan contract for every migrating section ([9ae375c](https://github.com/Vivswan/github-settings-as-code/commit/9ae375cc6027d9d7eac970eb808d14a588bac80f))
+* derive list sections from a declarative factory, piloted on labels ([71859b5](https://github.com/Vivswan/github-settings-as-code/commit/71859b571bc4c334d4e6796b5424b27f361fb8df))
+* generate action.yml, the inputs table, and the policy and permissions references from declarations ([d062cf1](https://github.com/Vivswan/github-settings-as-code/commit/d062cf1b6bd4f2767986477c383f2bed1a201341))
+* generate COVERAGE.md from section declarations ([51068cd](https://github.com/Vivswan/github-settings-as-code/commit/51068cdd765667b1190cb99625cd7ab6f656df7f))
+* generate the README sections table, outputs, and PAT form from section declarations ([83f3c84](https://github.com/Vivswan/github-settings-as-code/commit/83f3c84ede257c66e2d5ca0cb46f9b3ebfee20e3))
+* **library:** package @vivswan/github-settings-as-code ([#142](https://github.com/Vivswan/github-settings-as-code/issues/142)) ([cbeb56f](https://github.com/Vivswan/github-settings-as-code/commit/cbeb56f7406e201a1363d3b8023f509fe00aa1c9))
+* publish packaged commits on a build branch, with latest and the version tags on it ([#122](https://github.com/Vivswan/github-settings-as-code/issues/122)) ([db45c7d](https://github.com/Vivswan/github-settings-as-code/commit/db45c7d9f297b68a10a39c8f24a4d65a5fffe99b))
+* **snapshot:** section snapshot contract, engine, round-trip harness, and the first sections ([#140](https://github.com/Vivswan/github-settings-as-code/issues/140)) ([f721bb1](https://github.com/Vivswan/github-settings-as-code/commit/f721bb19f35e6dfdda1159eed4c975b4a125425f))
+
+
+### Bug Fixes
+
+* **action:** the YAML parser never prints a settings file's source lines as warnings ([#123](https://github.com/Vivswan/github-settings-as-code/issues/123)) ([54a50a0](https://github.com/Vivswan/github-settings-as-code/commit/54a50a074dfbd6ccee945f1b476e3f9f9fc06699))
+* adopt zod 4.5's native root $ref emission and own-__proto__ rejection ([#67](https://github.com/Vivswan/github-settings-as-code/issues/67)) ([44dab3b](https://github.com/Vivswan/github-settings-as-code/commit/44dab3bccf1e5fca5546d48dda45756c1d7ae084))
+* apply review fixes to the docs and tooling sweep ([73b6b4a](https://github.com/Vivswan/github-settings-as-code/commit/73b6b4a4f2cbc2f0f3263fee3478ea0eb2b6eab8))
+* apply review fixes to the harness audit batch ([ceb9f46](https://github.com/Vivswan/github-settings-as-code/commit/ceb9f463d7e7bd24acf4bcb770eb6bee63a9219a))
+* apply review fixes to the src-side audit batch ([b9de617](https://github.com/Vivswan/github-settings-as-code/commit/b9de617bdd0e9cb2444f2b544f8c5c3ae8c754bb))
+* attest build provenance and attach the sigstore bundle to releases ([b5db672](https://github.com/Vivswan/github-settings-as-code/commit/b5db67242eabf3b2c380ba672bcd022c476ddfdf))
+* **branches:** a denied branch probe no longer reads as a missing branch ([#149](https://github.com/Vivswan/github-settings-as-code/issues/149)) ([c1d6243](https://github.com/Vivswan/github-settings-as-code/commit/c1d62434c124cb8b49bf482884a9966b4498d43e))
+* **branches:** seal GraphQL node-id lookups at execution so check mode never issues them ([#75](https://github.com/Vivswan/github-settings-as-code/issues/75)) ([feaf279](https://github.com/Vivswan/github-settings-as-code/commit/feaf279a69df4c125f33827ed5b300c18b657a4e)), closes [#73](https://github.com/Vivswan/github-settings-as-code/issues/73)
+* centralize the token-leak sweep in the runner ([7dcc225](https://github.com/Vivswan/github-settings-as-code/commit/7dcc2256e80f56248284b77b7ef1c17decd3c5c2))
+* classify rate limits structurally on every path ([65f97a2](https://github.com/Vivswan/github-settings-as-code/commit/65f97a2a86e85d60492889a85f28273996d48fd7))
+* correct mock identity minting and the pages resurrect bug ([9152a91](https://github.com/Vivswan/github-settings-as-code/commit/9152a91b6f1ef2dd8b5ef94223abb9d5dc72a663))
+* cover every faultable section in the fuzz fault battery ([e41aa99](https://github.com/Vivswan/github-settings-as-code/commit/e41aa9916c9673941b40365347c77692352a16e1))
+* derive owner-kind sensitivity from the section declaration ([0181f01](https://github.com/Vivswan/github-settings-as-code/commit/0181f01a752eb9675f48663d21e9ce70ef497b31))
+* discover schema-corpus scenarios across all scenario roots ([d34d031](https://github.com/Vivswan/github-settings-as-code/commit/d34d0316af107fccf5c910352eae608dff39e91c))
+* **e2e:** oracle never predicts a preflight abort for teams on a personal account ([#114](https://github.com/Vivswan/github-settings-as-code/issues/114)) ([152c7d9](https://github.com/Vivswan/github-settings-as-code/commit/152c7d98e9de002a9ffad32e06ed6a1bfaa17733))
+* **e2e:** path param accessors read own keys only ([#158](https://github.com/Vivswan/github-settings-as-code/issues/158)) ([89c8ee8](https://github.com/Vivswan/github-settings-as-code/commit/89c8ee811d661baab9a4610ae7fc1f777276bd18))
+* hand sections the parsed settings document instead of the raw one ([1ddc2f3](https://github.com/Vivswan/github-settings-as-code/commit/1ddc2f3ed9cf567e5bd5bb67d658d6ae28f3902a))
+* harden release boundary checks and decouple the schema id from the release manifest ([f5c4c59](https://github.com/Vivswan/github-settings-as-code/commit/f5c4c59896053ed9ef5eecd44e550887dfe33959))
+* harden the CI tooling ([6fb2603](https://github.com/Vivswan/github-settings-as-code/commit/6fb2603a57cfa6ed2d6fc98041fbb60dd2d18f7a))
+* keep spec-pinned gaps out of automatic graduation ([ae278c9](https://github.com/Vivswan/github-settings-as-code/commit/ae278c9f3770a8580727db917124a0cea32e164b))
+* **library:** gate findings on the packaging PR ([#156](https://github.com/Vivswan/github-settings-as-code/issues/156)) ([e4e8b4c](https://github.com/Vivswan/github-settings-as-code/commit/e4e8b4c1f7717100a5a96348fe0e2174ae6d5e0e))
+* **nightly:** file the curated e2e issue through the fleet action ([#160](https://github.com/Vivswan/github-settings-as-code/issues/160)) ([8ef9747](https://github.com/Vivswan/github-settings-as-code/commit/8ef974791d61264e69dcae81be481a645fb5a420))
+* **nightly:** replay a fuzz artifact with the command its run wrote ([#157](https://github.com/Vivswan/github-settings-as-code/issues/157)) ([339e002](https://github.com/Vivswan/github-settings-as-code/commit/339e002d13cdcf4054d185bf44661695ccf7877e))
+* parse live bodies through parseLive in the seven asserting sections ([56ca3e4](https://github.com/Vivswan/github-settings-as-code/commit/56ca3e41dc90981580c4d45057594ad8f4b74369))
+* pass zod's schema layout through instead of guarding it ([#68](https://github.com/Vivswan/github-settings-as-code/issues/68)) ([64aad27](https://github.com/Vivswan/github-settings-as-code/commit/64aad276b2182d4a39175d15fe5e4e7b530345d0))
+* reject required-sections entries excluded by the sections allowlist ([c1fc169](https://github.com/Vivswan/github-settings-as-code/commit/c1fc1699adc8027919464bea8eceb65b53fc81f2))
+* **release:** follow the attestation bundle rename in the repo-owned asset check and SECURITY.md ([#76](https://github.com/Vivswan/github-settings-as-code/issues/76)) ([3704176](https://github.com/Vivswan/github-settings-as-code/commit/3704176cc0709d1c19a70765c925f033f4266ccd))
+* **report:** paginate the report-issue lookups and scan by title, not creator ([#159](https://github.com/Vivswan/github-settings-as-code/issues/159)) ([631e1da](https://github.com/Vivswan/github-settings-as-code/commit/631e1da622e16f75c8c95caf3a2f7b8614c6d4a0))
+* **rulesets:** bypass_actors hidden from a non-admin token is not drift ([#137](https://github.com/Vivswan/github-settings-as-code/issues/137)) ([b8df084](https://github.com/Vivswan/github-settings-as-code/commit/b8df084cb0af6bc15e6d7cf9afe68a6e3f68226e))
+* single-tag releases - version tags live only on packaged commits ([08d5585](https://github.com/Vivswan/github-settings-as-code/commit/08d5585b974e529898cf2121bfea220317c914c8))
+* size the harness kill cap for the directed fuzz battery ([8543af8](https://github.com/Vivswan/github-settings-as-code/commit/8543af85d8178f736598e6565839df1c57b8334c))
+* strengthen the remaining per-section representations ([3fc0f85](https://github.com/Vivswan/github-settings-as-code/commit/3fc0f853f914d032e0bf5f746aee48357d062a03))
+* **test:** match private-report heading markers without an HTML-comment regex ([#106](https://github.com/Vivswan/github-settings-as-code/issues/106)) ([33ff405](https://github.com/Vivswan/github-settings-as-code/commit/33ff40576b478606dce525da0ee0aa5bd64fd290))
+
+
+### Documentation
+
+* **upgrading:** link the v3 breaks to their guides ([8541b3d](https://github.com/Vivswan/github-settings-as-code/commit/8541b3d1c40c6e31a5f682d5c034495a76adbba2))
+
+
+### Miscellaneous Chores
+
+* drop the release-as pin and the machinery that retired it ([a2cc999](https://github.com/Vivswan/github-settings-as-code/commit/a2cc999d1936b9e72e7762778f3ac2ba58091ecc))
+
 ## [2.0.0](https://github.com/Vivswan/github-settings-as-code/compare/v1.0.1...v2.0.0) (2026-08-11)
 
 
