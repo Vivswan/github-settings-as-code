@@ -14,17 +14,25 @@ function accepted(request: LoggedRequest): boolean {
   return request.status >= 200 && request.status < 300;
 }
 
-export function deliveredIssueBody(requests: LoggedRequest[], slug: string): string | undefined {
+/** Every body GitHub accepted for the slug's report issue, in write order: the create and each body-bearing PATCH. */
+function deliveredIssueBodies(requests: LoggedRequest[], slug: string): string[] {
   const base = `/repos/${slug}/issues`;
-  const create = requests.find((r) => accepted(r) && r.method === "POST" && r.pathname === base);
-  const fromCreate = stringBody(create);
-  if (fromCreate !== undefined) {
-    return fromCreate;
-  }
-  const lastPatch = requests
-    .filter((r) => accepted(r) && r.method === "PATCH" && r.pathname.startsWith(`${base}/`))
-    .at(-1);
-  return stringBody(lastPatch);
+  return requests
+    .filter(
+      (r) =>
+        accepted(r) &&
+        ((r.method === "POST" && r.pathname === base) ||
+          (r.method === "PATCH" && r.pathname.startsWith(`${base}/`))),
+    )
+    .flatMap((r) => {
+      const body = stringBody(r);
+      return body === undefined ? [] : [body];
+    });
+}
+
+/** The issue's final body: the latest accepted write that carried one, so a trailing state-only PATCH hides nothing. */
+export function deliveredIssueBody(requests: LoggedRequest[], slug: string): string | undefined {
+  return deliveredIssueBodies(requests, slug).at(-1);
 }
 
 const ISSUE_WRITE = /^\/repos\/([^/]+\/[^/]+)\/issues(?:\/\d+)?$/;
@@ -145,9 +153,10 @@ export function assertIssueReport(
       failures.push(`issue_report: report body for ${spec.slug} missing "${needle}"`);
     }
   }
-  // An undelivered body lacks everything; body_contains, or created_count, is what pins delivery.
+  // Every accepted body, not only the final one: an earlier write already published what a later one replaced. An
+  // undelivered report lacks everything; body_contains, or created_count, is what pins delivery.
   for (const needle of spec.body_lacks ?? []) {
-    if (deliveredBody?.includes(needle)) {
+    if (deliveredIssueBodies(requests, spec.slug).some((body) => body.includes(needle))) {
       failures.push(`issue_report: report body for ${spec.slug} must not contain "${needle}"`);
     }
   }

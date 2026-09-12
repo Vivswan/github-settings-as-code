@@ -25,6 +25,7 @@ const requests: LoggedRequest[] = [
     labels: [MARKER_LABEL],
   }),
   write("PATCH", "/repos/o/b/issues/7", { body: "report for o/b, clean", state: "closed" }),
+  write("PATCH", "/repos/o/b/issues/7", { body: "report for o/b, reopened", state: "open" }),
   // A state-only PATCH carries no body; a hook write under another path is not a report.
   write("PATCH", "/repos/o/b/issues/7", { state: "open" }),
   write("PATCH", "/repos/o/c/hooks/3/config", { body: "ghp_plain" }),
@@ -38,6 +39,7 @@ describe("transmittedReportBodies", () => {
     expect(transmittedReportBodies(requests)).toEqual([
       { slug: "o/a", body: "report for o/a: token=ghp_plain" },
       { slug: "o/b", body: "report for o/b, clean" },
+      { slug: "o/b", body: "report for o/b, reopened" },
       { slug: "o/r", body: "rejected ghp_plain" },
     ]);
   });
@@ -79,7 +81,14 @@ describe("assertIssueReport body_lacks", () => {
     expect(assertIssueReport(spec, requests)).toEqual([
       'issue_report: report body for o/a must not contain "ghp_plain"',
     ]);
-    expect(assertIssueReport({ slug: "o/b", body_lacks: ["ghp_plain"] }, requests)).toEqual([]);
+    // The final body is the latest body-bearing write, past the trailing state-only PATCH; body_lacks sweeps
+    // every accepted body, so the superseded first PATCH still fails it.
+    expect(
+      assertIssueReport(
+        { slug: "o/b", body_contains: ["reopened"], body_lacks: ["ghp_plain", "clean"] },
+        requests,
+      ),
+    ).toEqual(['issue_report: report body for o/b must not contain "clean"']);
     // Undelivered: body_lacks alone is vacuous by design; body_contains is what reports the missing delivery.
     expect(
       assertIssueReport(
