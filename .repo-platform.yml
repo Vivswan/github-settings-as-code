@@ -1,7 +1,7 @@
 # Generated once by the fleet sync and repo-owned from then on: the sync reads this file and never rewrites it.
 modules:
   - bun
-  - docs-site
+  - site
   - release-please
   - issue-templates
   - pr-title
