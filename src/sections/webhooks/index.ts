@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { deltas, renderDelta } from "../../engine/diff.js";
+import { mintSecretReference } from "../../engine/secrets.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
@@ -143,12 +144,15 @@ const CANNOT_VERIFY_SECRET =
   'GitHub never reveals a webhook secret (reads echo "********"), so the declared value cannot be verified; apply re-sends it on every run so rotations propagate';
 
 /**
- * The environment variable a snapshot names for one live hook's secret, keyed by the hook's id
- * (the number in its settings URL): a list position would rebind every later hook's variable to
- * another hook's value once a hook is deleted and the repository is snapshotted again.
+ * The reference a snapshot writes for one live hook's secret, keyed by the hook's id (the number
+ * in its settings URL): a list position would rebind every later hook's variable to another
+ * hook's value once a hook is deleted and the repository is snapshotted again.
  */
-function snapshotSecretVariable(hookId: number): string {
-  return `WEBHOOK_SECRET_${hookId}`;
+function snapshotSecretReference(hook: LiveHook): { variable: string; reference: string } {
+  return mintSecretReference(
+    `WEBHOOK_SECRET_${hook.id}`,
+    `the webhook ${describeHook(hook)} secret`,
+  );
 }
 
 export const webhooksSection = {
@@ -330,11 +334,11 @@ export const webhooksSection = {
       if (entry.config.secret === undefined) {
         return entry;
       }
-      const variable = snapshotSecretVariable(hook.id);
+      const { variable, reference } = snapshotSecretReference(hook);
       notes.push(
         `webhooks[${describeHook(hook)}].config.secret: the webhook secret is not readable; export a value as ${variable} into the environment before apply`,
       );
-      return { ...entry, config: { ...entry.config, secret: `$${variable}` } };
+      return { ...entry, config: { ...entry.config, secret: reference } };
     });
     return { value: knobbedSnapshot(this, entries), notes };
   },

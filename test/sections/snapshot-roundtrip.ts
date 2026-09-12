@@ -8,12 +8,22 @@
 import { expect } from "bun:test";
 import type { SectionModule, SectionSnapshot } from "../../src/sections/contract/module.js";
 import { planContext, planDrift, type SectionPlan } from "../../src/sections/contract/plan.js";
+import type { LiveState } from "../e2e/mock/state.js";
 import type { FragmentFake } from "./fragment-fake.js";
 import { identityOf, unconvergedOps } from "./plan-idempotence.js";
 import { REPO } from "./section-run.js";
 
 /** A section module that declares snapshot(). */
 export type SnapshotSection = SectionModule & Required<Pick<SectionModule, "snapshot">>;
+
+/** One section's enrolment in the proof: test/sections/snapshot-rows/<key>.ts exports it as `row`. */
+export interface Row {
+  readonly section: SnapshotSection;
+  /** The live state seeded into the mock; must hold at least one resource of the section's. */
+  readonly live: LiveState;
+  /** The whole snapshot the seeded state reads back as. */
+  readonly expected: { value: unknown; notes: string[] };
+}
 
 export async function proveSnapshotRoundTrip(
   section: SnapshotSection,

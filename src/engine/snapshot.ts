@@ -9,15 +9,21 @@ import type { RepoRef } from "../discovery/targets.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { SectionKey } from "../schema.js";
+import {
+  type EndpointDecl,
+  endpointPath,
+  matchesTemplate,
+} from "../sections/contract/endpoints.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
 import {
   concealedAbsenceNote,
+  gatedAbsentRead,
   type SectionSnapshot,
   snapshotUnsupportedNote,
 } from "../sections/contract/module.js";
 import { planContext } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
-import { deniedSectionStatus, type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
+import { deniedSectionStatus, excludedBySections, type ValidatedSettings, type ValidatedSettings, validateSettingsDoc, validateSettingsDoc } from "./orchestrate.js";
 import type { SectionSelection } from "./section-selection.js";
 
 export interface SnapshotOptions {
@@ -58,6 +64,42 @@ export type RenderableSnapshot = Extract<SnapshotResult, { settings: ValidatedSe
 /** What a section without live state says for itself in the outcome and the file header. */
 const NOTHING_TO_DECLARE = "nothing exists on the repository, so the section is omitted";
 
+/** A line under its section's key, prefixed once: a section's own notes already lead with the key. */
+function underKey(key: SectionKey, line: string): string {
+  const own = line.startsWith(key) && /^[:.[]/.test(line.slice(key.length));
+  return own ? line : `${key}: ${line}`;
+}
+
+/**
+ * The client as one section's snapshot sees it, reporting whether a GET on `read`'s route
+ * answered 404 (the observation the concealed-absence note is keyed on). Null passes through.
+ */
+function watchingNotFound(
+  api: GithubClient,
+  read: EndpointDecl | null,
+  seen: { notFound: boolean },
+): GithubClient {
+  if (read === null) {
+    return api;
+  }
+  const template = endpointPath(read.route);
+  return {
+    tryRequest: async (method, path, payload, options) => {
+      const result = await api.tryRequest(method, path, payload, options);
+      if (
+        "error" in result &&
+        result.error.status === 404 &&
+        method === "GET" &&
+        matchesTemplate(template, path)
+      ) {
+        seen.notFound = true;
+      }
+      return result;
+    },
+    tryGraphql: (op, variables, slug) => api.tryGraphql(op, variables, slug),
+  };
+}
+
 /** Read one repository's supported sections back into a validated settings document. */
 export async function snapshotRepository(
   api: GithubClient,
@@ -81,13 +123,18 @@ export async function snapshotRepository(
       });
       continue;
     }
+    const absentRead = gatedAbsentRead(section);
+    const seen = { notFound: false };
     let snapshot: SectionSnapshot;
     try {
-      snapshot = await section.snapshot(planContext(section, api, opts.repo));
+      snapshot = await section.snapshot(
+        planContext(section, watchingNotFound(api, absentRead, seen), opts.repo),
+      );
     } catch (error) {
       if (error instanceof PermissionDenied) {
-        // Nothing is ever written here, so the denial classifies on the policy alone.
-        const status = deniedSectionStatus(opts.onMissingPermission, false);
+        // A snapshot never writes and takes no required set, so a denial classifies on the
+        // skip/fail policy alone.
+        const status = opts.onMissingPermission === "warn" ? "skipped" : "failed";
         if (status === "skipped") {
           io.annotate("warning", `${section.key}: skipped - ${error.detail}`);
           partial = true;
@@ -108,12 +155,14 @@ export async function snapshotRepository(
       continue;
     }
     for (const note of snapshot.notes) {
-      io.annotate("notice", `${section.key}: ${note}`);
+      io.annotate("notice", underKey(section.key, note));
     }
     if (snapshot.value === undefined) {
       // Chosen at the engine level so every absent-posture section behaves alike: the 404 keeps
-      // its "nothing exists" reading, and the note names the denial it could also be.
-      const concealed = concealedAbsenceNote(section);
+      // its "nothing exists" reading, and the note names the denial it could also be. Keyed on an
+      // observed 404, so an empty 200 listing earns no note.
+      const concealed =
+        absentRead !== null && seen.notFound ? concealedAbsenceNote(section, absentRead) : null;
       if (concealed !== null) {
         io.annotate("notice", concealed);
       }
@@ -177,7 +226,7 @@ export function renderSnapshotYaml(
     `# Snapshot of ${result.repo} taken ${opts.timestamp}`,
     ...result.outcomes.flatMap((outcome) =>
       outcome.detail.flatMap((message) =>
-        message.split(/\r?\n/).map((line) => `# ${outcome.key}: ${line}`),
+        message.split(/\r?\n/).map((line) => `# ${underKey(outcome.key, line)}`),
       ),
     ),
   ];

@@ -7,6 +7,7 @@
 import type { z } from "zod";
 import type { UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicyList } from "../../types.js";
+import { PermissionDenied } from "../contract/errors.js";
 import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
 import { collidingPairs } from "../contract/requests.js";
 
@@ -48,6 +49,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * A `null` the slice cannot hold is GitHub's "no value" (a not-configured setup's null
  * runner_type), so the key is omitted rather than emitted as an invalid declaration; every other
  * value the slice rejects is left in place for the document validation to name.
+ * A passthrough slice (a catchall other than never) keeps every live key by design, so server
+ * fields cannot fall away there: a section on such a slice names the keys it reads back itself.
  * The one cast is the boundary: the engine validates the assembled document before returning it.
  */
 export function projectOntoSchema<T>(schema: z.ZodType<T>, live: unknown): T {
@@ -132,6 +135,28 @@ export function rejectLiveDuplicates<T>(
     throw new Error(
       `${section.key}: GitHub holds ${noun}s that resolve to one identity: ${collisions.join("; ")}. This section manages one ${noun} per identity, so the snapshot cannot declare them; delete all but one of each on GitHub, then snapshot again`,
     );
+  }
+}
+
+/**
+ * One read of a snapshot that a denial may take out without failing the section: a
+ * PermissionDenied becomes a note naming the key left out and the grant advice, anything else
+ * propagates. For a section whose keys sit behind different grants (repository, actions).
+ * @public
+ */
+export async function readOrNote<T>(
+  notes: string[],
+  label: string,
+  read: () => Promise<T>,
+): Promise<{ value: T } | { denied: true }> {
+  try {
+    return { value: await read() };
+  } catch (error) {
+    if (error instanceof PermissionDenied) {
+      notes.push(`${label}: left out of the snapshot - ${error.detail}`);
+      return { denied: true };
+    }
+    throw error;
   }
 }
 

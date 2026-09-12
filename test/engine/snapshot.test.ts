@@ -16,6 +16,7 @@ import type { GithubClient } from "../../src/github/api.js";
 import type { Io } from "../../src/io.js";
 import { maskRegistry } from "../../src/io.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
+import { pagesSection } from "../../src/sections/pages/index.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { LiveState } from "../e2e/mock/state.js";
 import { registryFake } from "../sections/fragment-fake.js";
@@ -139,12 +140,12 @@ describe("snapshotRepository", () => {
       detail: [NOTHING],
     });
     expect(annotations).toContain(
-      "notice: actions_secrets: actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
+      "notice: actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
     );
   });
 
-  test("a 404 on a gated absent-posture read keeps its empty reading and notes the denial it could be; a public probe and a present resource get no note", async () => {
-    const denied = denying(registryFake(LIVE), /\/repos\/o\/r\/pages$/);
+  test("a 404 on a gated absent-posture read keeps its empty reading and notes the denial it could be; an empty read without a 404, a public probe, and a present resource get no note", async () => {
+    const denied = denying(registryFake(LIVE), /\/repos\/o\/r\/pages$|\/orgs\/o$/);
     const { io, annotations } = captureIo();
     const result = await snapshotRepository(
       denied,
@@ -154,19 +155,41 @@ describe("snapshotRepository", () => {
     const note =
       'pages: GitHub answered GET /repos/{owner}/{repo}/pages with 404, read here as nothing to snapshot. A fine-grained token missing the grant gets the same answer; if the repository does have this resource, grant "Pages" (read and write) under the PAT\'s Repository permissions, then snapshot again';
     expect(result.result).toBe("snapshot");
+    // The org probe is public and DID answer 404: a 404 there has one reading, so no such note.
+    const personal =
+      'custom_properties: owner "o" is a personal account, and custom properties require an organization-owned repository; nothing to snapshot';
     expect(result.outcomes).toEqual([
       { key: "pages", status: "snapshot", detail: [note, NOTHING] },
-      // The org probe is public: its 404 has one reading, so no such note.
-      { key: "custom_properties", status: "snapshot", detail: [NOTHING] },
+      { key: "custom_properties", status: "snapshot", detail: [personal, NOTHING] },
     ]);
-    expect(annotations).toEqual([`notice: ${note}`]);
-    // The control: a present site reads back and carries no note.
+    expect(annotations).toEqual([`notice: ${note}`, `notice: ${personal}`]);
+    // The controls: a present site reads back and carries no note, and a section that read
+    // nothing WITHOUT a 404 (an empty 200 listing) carries none either.
+    const live = registryFake({
+      pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
+    });
     const present = await snapshotRepository(
-      registryFake({ pages: { build_type: "workflow", source: { branch: "main", path: "/" } } }),
+      live,
       { ...opts(), onlySections: new Set(["pages"]) },
       captureIo().io,
     );
     expect(present.outcomes).toEqual([{ key: "pages", status: "snapshot", detail: [] }]);
+    const empty = spyOn(pagesSection, "snapshot").mockImplementation(async (ctx) => {
+      await ctx.read.get.probeAbsent();
+      return { value: undefined, notes: [] };
+    });
+    try {
+      const quiet = captureIo();
+      const nothing = await snapshotRepository(
+        live,
+        { ...opts(), onlySections: new Set(["pages"]) },
+        quiet.io,
+      );
+      expect(nothing.outcomes).toEqual([{ key: "pages", status: "snapshot", detail: [NOTHING] }]);
+      expect(quiet.annotations).toEqual([]);
+    } finally {
+      empty.mockRestore();
+    }
   });
 
   test("the sections allowlist limits the run to the named sections", async () => {
@@ -276,7 +299,7 @@ describe("renderSnapshotYaml", () => {
         timestamp: "2026-09-11T00:00:00Z",
       });
       expect(rendered.split("\n").slice(2, 4)).toEqual([
-        "# labels: labels: 502 Bad Gateway",
+        "# labels: 502 Bad Gateway",
         "# labels: upstream unavailable",
       ]);
       expect(parseYaml(rendered)).toEqual({
@@ -310,8 +333,8 @@ describe("renderSnapshotYaml", () => {
       [
         "# yaml-language-server: $schema=https://example.test/settings.schema.json",
         "# Snapshot of o/r taken 2026-09-11T00:00:00Z",
-        "# actions_secrets: actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
-        "# check_suite_preferences: check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run",
+        "# actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
+        "# check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run",
         "labels:",
         "  _undeclared: delete",
         "  entries:",
