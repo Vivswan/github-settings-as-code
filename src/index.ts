@@ -183,6 +183,12 @@ export {
   type PatResource,
   type SectionPermission,
 } from "./sections/contract/permissions.js";
+export type {
+  Justification,
+  PlannedOpBase,
+  Tolerance,
+  Unverifiable,
+} from "./sections/contract/plan.js";
 export {
   allEndpoints,
   allGraphqlOps,

@@ -24,7 +24,12 @@
         "docs/playbooks/trust-tiers.md",
         "docs/reference/secrets-and-vaults.md",
         "docs/upgrading/README.md",
-        ".github/ISSUE_TEMPLATE/bug_report.yml"
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+        {
+          "type": "json",
+          "path": "package.json",
+          "jsonpath": "$.version"
+        }
       ]
     }
   }

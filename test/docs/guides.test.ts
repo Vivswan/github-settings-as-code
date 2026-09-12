@@ -46,6 +46,7 @@ const REQUIRED_PAGES = [
   "reference/forward-compatibility.md",
   "reference/secrets-and-vaults.md",
   "reference/architecture.md",
+  "reference/library.md",
   "operate/check-mode.md",
   "operate/multi-repo.md",
   "operate/layering.md",
@@ -76,13 +77,15 @@ function guidePages(): string[] {
  * The closed fence vocabulary: `yaml settings` is a complete settings document,
  * `yaml layer` one layer of a merge (valid once its null markers are stripped,
  * not necessarily standalone), `yaml` a workflow file, `mermaid` a diagram
- * (pinned to real code in diagrams.test.ts), `text` and `bash` never yaml.
+ * (pinned to real code in diagrams.test.ts), `ts` a library consumer's
+ * TypeScript, `text` and `bash` never yaml.
  */
 const ALLOWED_FENCE_INFO = new Set([
   "yaml settings",
   "yaml layer",
   "yaml",
   "mermaid",
+  "ts",
   "text",
   "bash",
 ]);
@@ -551,6 +554,16 @@ describe("docs/ guide pages", () => {
       .concat(templates);
   }
 
+  /** One release-please extra-file: a marker-scanned path, or a json updater entry. */
+  type ExtraFile = string | { type: string; path: string; jsonpath?: string };
+
+  function releaseExtraFiles(): ExtraFile[] {
+    const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
+      packages: Record<string, { "extra-files": ExtraFile[] }>;
+    };
+    return config.packages["."]?.["extra-files"] ?? [];
+  }
+
   test("marker-bearing files equal the release-please extra-files set", () => {
     // release-please's generic updater rewrites version pins only in files
     // listed under extra-files; a page moved without updating
@@ -558,14 +571,19 @@ describe("docs/ guide pages", () => {
     // restructure is exactly when that happens, so pin the sets equal.
     // An extra-files entry outside markerScanFiles() (action.yml, a
     // workflow) fails this equality and means the scan set needs widening.
-    const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
-      packages: Record<string, { "extra-files": string[] }>;
-    };
-    const extraFiles = config.packages["."]?.["extra-files"] ?? [];
+    const extraFiles = releaseExtraFiles().filter((entry) => typeof entry === "string");
     const marked = markerScanFiles()
       .filter((file) => readFileSync(file.path, "utf8").includes("x-release-please-"))
       .map((file) => file.label);
     expect(marked.sort()).toEqual([...extraFiles].sort());
+  });
+
+  test("package.json's version is the one json extra-file", () => {
+    // The npm manifest carries no marker: release-please's json updater
+    // rewrites $.version, and test/package-json.test.ts holds it equal to
+    // the manifest, so a dropped or duplicated entry is seen here.
+    const updaters = releaseExtraFiles().filter((entry) => typeof entry !== "string");
+    expect(updaters).toEqual([{ type: "json", path: "package.json", jsonpath: "$.version" }]);
   });
 
   for (const page of guidePages()) {

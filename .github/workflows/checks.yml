@@ -90,6 +90,26 @@ jobs:
       - name: Regenerate the schema and compare
         run: bun run build:check
 
+  # The npm library gate: build lib/pkg/ (tsdown), judge the package shape
+  # (publint, attw), then install the packed tarball into a fresh consumer
+  # project and import it under Node and under tsc with skipLibCheck off, so
+  # a declaration leaking a devDependency type fails here, not on a
+  # consumer's machine. The consumer runs under node, so node is installed.
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Build, pack, install, import, and typecheck the library
+        run: bun .github/scripts/package-smoke.ts
+
   # Self-test: run the action from this checkout in check mode against this
   # repository. The bundle is not committed, so build it first. Drift or
   # permission skips are fine (the default token cannot read admin

@@ -1,38 +1,65 @@
 {
-  "name": "github-settings-as-code",
-  "private": true,
-  "license": "SEE LICENSE IN LICENSE.md",
+  "name": "@vivswan/github-settings-as-code",
+  "version": "2.0.0",
   "description": "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more.",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vivswan/github-settings-as-code.git"
+  },
+  "engines": {
+    "node": ">=22.14"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./lib/pkg/index.d.ts",
+      "default": "./lib/pkg/index.js"
+    },
+    "./settings.schema.json": "./lib/settings.schema.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/pkg/",
+    "lib/settings.schema.json",
+    "LICENSE.md",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "check": "bun run lint && bun run lint:yaml && bun run lint:arch && bun run typecheck && bun run knip && bun run test && bun run build:check",
     "lint": "bun x biome ci --error-on-warnings .",
     "lint:yaml": "if command -v yamllint >/dev/null 2>&1; then git ls-files -z '*.yml' '*.yaml' | xargs -0 yamllint -s; else echo 'lint:yaml: yamllint not installed, skipping (CI enforces it; install with pip install yamllint or brew install yamllint)'; fi",
     "lint:fix": "bun x biome check --write .",
     "lint:arch": "bun .github/scripts/arch-lint.ts",
+    "lint:package": "bun x publint --strict && bun x attw --pack . --profile esm-only",
     "typecheck": "bun x tsc -p .",
     "knip": "knip",
     "test": "bun test",
     "test:e2e": "bun test/e2e/run.ts",
     "fuzz": "bun test/e2e/fuzz.ts",
-    "build": "bun run build:bundle && bun run build:schema && bun run build:docs && bun run build:action-docs",
+    "build": "bun run build:bundle && bun run build:lib && bun run build:schema && bun run build:docs && bun run build:action-docs",
     "build:bundle": "bun build src/main.ts --target=node --outfile lib/index.js",
+    "build:lib": "bun x tsdown",
     "build:schema": "bun .github/scripts/gen-settings-schema.ts",
     "build:docs": "bun .github/scripts/gen-docs.ts",
     "build:action-docs": "bun .github/scripts/gen-action-docs.ts",
     "build:check": "bun run build:schema && git diff --exit-code lib/settings.schema.json && ! git ls-files --others --exclude-standard lib/settings.schema.json | grep . && bun run build:docs && bun run build:action-docs && git diff --exit-code README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/architecture.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md && ! git ls-files --others --exclude-standard README.md COVERAGE.md action.yml docs/start/getting-started.md docs/reference/sections.md docs/reference/inputs.md docs/reference/architecture.md docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md | grep .",
-    "prepare": "lefthook install"
+    "prepare": "lefthook install || true"
   },
   "dependencies": {
-    "@actions/artifact": "6.2.1",
-    "@actions/core": "3.0.1",
     "@noble/ciphers": "2.4.0",
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
     "@octokit/core": "7.0.8",
+    "@octokit/openapi-types": "29.0.1",
     "@octokit/plugin-request-log": "6.0.0",
     "@octokit/plugin-retry": "8.1.1",
     "@octokit/plugin-throttling": "11.0.5",
+    "@octokit/types": "18.0.0",
     "age-encryption": "0.3.1",
     "bottleneck": "2.19.5",
     "neverthrow": "8.2.0",
@@ -40,9 +67,10 @@
     "zod": "4.5.4"
   },
   "devDependencies": {
+    "@actions/artifact": "6.2.1",
+    "@actions/core": "3.0.1",
+    "@arethetypeswrong/cli": "0.18.5",
     "@biomejs/biome": "2.5.11",
-    "@octokit/openapi-types": "29.0.1",
-    "@octokit/types": "18.0.0",
     "@types/bun": "1.4.0",
     "@types/node": "26.4.1",
     "ajv": "8.20.0",
@@ -53,6 +81,8 @@
     "lefthook": "2.1.12",
     "libsodium-wrappers": "0.8.4",
     "oxc-parser": "0.147.0",
+    "publint": "0.3.24",
+    "tsdown": "0.23.0",
     "typescript": "7.0.2"
   }
 }
