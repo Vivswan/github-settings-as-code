@@ -13,12 +13,9 @@ describe("package smoke helpers", () => {
       return "done";
     });
     expect(value).toBe("done");
-    expect(dirname(seen.pack)).toBe(dirname(seen.consumer));
-    expect([seen.pack.endsWith("/pack"), seen.consumer.endsWith("/consumer")]).toEqual([
-      true,
-      true,
-    ]);
-    expect(existsSync(dirname(seen.pack))).toBe(false);
+    const root = dirname(seen.pack);
+    expect(seen).toEqual({ pack: join(root, "pack"), consumer: join(root, "consumer") });
+    expect(existsSync(root)).toBe(false);
   });
 
   test("withSmokeDirs removes the root when the body throws", async () => {
