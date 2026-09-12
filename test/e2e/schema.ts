@@ -134,7 +134,7 @@ const ExpectSchema = z
      * that slug; the only place the private slug and sentinel may legitimately appear. A created issue must
      * always carry the marker label; that is asserted without a field.
      *   body_contains   -> the delivered body: the create, or the PATCH on a reuse run
-     *   body_lacks      -> the runner already sweeps every report for the run's resolved secrets
+     *   body_lacks      -> absent from EVERY accepted body, not only the last; resolved secrets need no entry, the runner sweeps them
      *   lookup_by_label -> the issues list GET used the labels=<marker> filter
      *   labels          -> the LAST write that set them; a reattached marker must not clobber human labels
      *   created_count   -> report issues POSTed for the slug; 0 on the denied or reuse path
