@@ -8,7 +8,12 @@
 
 import { mintNodeId } from "../../../test/e2e/mock/node-id.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../../../test/e2e/mock/secrets.js";
-import { environmentFromPut, named, PROTECTION_RULE_APPS } from "../../../test/e2e/mock/state.js";
+import {
+  environmentFromPut,
+  type MockState,
+  named,
+  PROTECTION_RULE_APPS,
+} from "../../../test/e2e/mock/state.js";
 import {
   asObject,
   branchPoliciesEnabled,
@@ -28,26 +33,41 @@ import { variableKey } from "../shared/variables-engine.js";
 import { environmentsSection } from "./index.js";
 import { MAX_PINNED_ENVIRONMENTS } from "./schema.js";
 
+/**
+ * The body a GET serves for one stored environment. Like GitHub, enabled custom protection rules
+ * surface as the spec's third protection_rules variant ({id, node_id, type}, the type naming the
+ * gating App). Derived at read time onto a copy, so the stored body stays the PUT transformer's output.
+ */
+function servedEnvironment(state: MockState, name: string, environment: Json): Json {
+  const custom = (state.environment_protection_rules[name] ?? []).map((rule) => ({
+    id: rule.id,
+    node_id: rule.node_id,
+    type: (rule.app as Json | undefined)?.slug ?? "custom",
+  }));
+  if (custom.length === 0) {
+    return environment;
+  }
+  const rules = Array.isArray(environment.protection_rules) ? environment.protection_rules : [];
+  return { ...environment, protection_rules: [...rules, ...custom] };
+}
+
 export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
+  "environments.list": ({ state, query }) => {
+    const environments = Object.entries(state.environments).map(([name, environment]) =>
+      servedEnvironment(state, name, environment),
+    );
+    return ok({
+      total_count: environments.length,
+      environments: slicePage(environments, query),
+    });
+  },
   "environments.probe": ({ state, param }) => {
     const name = param("environment_name");
     const environment = state.environments[name];
     if (!environment) {
       return { status: 404, body: { message: "Not Found" } };
     }
-    // Like GitHub, enabled custom protection rules surface in the GET as the spec's third
-    // protection_rules variant ({id, node_id, type}, the type naming the gating App). Derived at
-    // read time onto a copy, so the stored body stays the PUT transformer's output.
-    const custom = (state.environment_protection_rules[name] ?? []).map((rule) => ({
-      id: rule.id,
-      node_id: rule.node_id,
-      type: (rule.app as Json | undefined)?.slug ?? "custom",
-    }));
-    if (custom.length === 0) {
-      return ok(environment);
-    }
-    const rules = Array.isArray(environment.protection_rules) ? environment.protection_rules : [];
-    return ok({ ...environment, protection_rules: [...rules, ...custom] });
+    return ok(servedEnvironment(state, name, environment));
   },
   "environments.update": ({ state, param, body }) => {
     const name = param("environment_name");

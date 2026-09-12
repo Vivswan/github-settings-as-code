@@ -1,0 +1,157 @@
+name: environments-snapshot-roundtrip
+description: >-
+  mode: snapshot reads the live environments back into snapshot.yml and writes nothing to GitHub.
+  The environment listing names production and staging; each reads back as an entry: the PUT-shape
+  settings off its GET body (protection_rules un-nested into wait_timer, prevent_self_review, and
+  reviewers by type and id; deployment_branch_policy kept, null included), and every nested list
+  with live items in its wrapped form under that list's default policy: variables with their values,
+  secrets as per-store $SECRET_ENVIRONMENT_<NAME>_<SECRET> references with a note each, the branch-
+  policy patterns while custom_branch_policies is on, and the enabled protection rules by App slug.
+  The pin state is GraphQL-only and one note. The written file, fed back to a check run against the
+  same state with the secret values in the environment, reads clean.
+settings: {}
+live_state:
+  environments:
+    production:
+      id: 161088068
+      name: production
+      url: https://api.github.com/repos/e2e-owner/e2e-repo/environments/production
+      html_url: https://github.com/e2e-owner/e2e-repo/deployments/activity_log?environments_filter=production
+      created_at: 2026-01-01T00:00:00Z
+      updated_at: 2026-01-01T00:00:00Z
+      can_admins_bypass: true
+      protection_rules:
+        - id: 3736
+          node_id: MDQ6R2F0ZTM3MzY=
+          type: wait_timer
+          wait_timer: 30
+        - id: 3755
+          node_id: MDQ6R2F0ZTM3NTU=
+          type: required_reviewers
+          prevent_self_review: true
+          reviewers:
+            - type: User
+              reviewer:
+                login: octocat
+                id: 583231
+            - type: Team
+              reviewer:
+                slug: platform
+                id: 42
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: true
+    staging:
+      name: staging
+      protection_rules: []
+      deployment_branch_policy: null
+  environment_variables:
+    production:
+      - name: REGION
+        value: eu-west-1
+        created_at: 2026-01-01T00:00:00Z
+        updated_at: 2026-01-01T00:00:00Z
+  environment_secrets:
+    production:
+      - name: DEPLOY_TOKEN
+        created_at: 2026-01-01T00:00:00Z
+        updated_at: 2026-01-01T00:00:00Z
+      - name: GITHUB_PAT
+        created_at: 2026-01-01T00:00:00Z
+        updated_at: 2026-01-01T00:00:00Z
+    staging:
+      - name: DEPLOY_TOKEN
+        created_at: 2026-01-01T00:00:00Z
+        updated_at: 2026-01-01T00:00:00Z
+  environment_branch_policies:
+    production:
+      - id: 4001
+        name: release/*
+        type: branch
+      - id: 4002
+        name: v*
+        type: tag
+  environment_protection_rules:
+    production:
+      - id: 7100
+        node_id: DPR_7100
+        enabled: true
+        app:
+          id: 3516
+          slug: region-guard
+          integration_url: https://api.github.com/apps/region-guard
+          node_id: MDQ6R2F0ZTM1MTY=
+env:
+  SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN: deploy-token-plaintext-7f3a
+  SECRET_ENVIRONMENT_PRODUCTION_GITHUB_PAT: pat-plaintext-91c2
+  SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN: staging-deploy-token-plaintext-0b5d
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: environments
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    environments: snapshot
+  snapshot:
+    environments:
+      - name: production
+        wait_timer: 30
+        prevent_self_review: true
+        reviewers:
+          - type: User
+            id: 583231
+          - type: Team
+            id: 42
+        deployment_branch_policy:
+          protected_branches: false
+          custom_branch_policies: true
+        variables:
+          _undeclared: delete
+          entries:
+            - name: REGION
+              value: eu-west-1
+        secrets:
+          _undeclared: keep
+          entries:
+            - name: DEPLOY_TOKEN
+              value: $SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN
+            - name: GITHUB_PAT
+              value: $SECRET_ENVIRONMENT_PRODUCTION_GITHUB_PAT
+        deployment_branch_policies:
+          _undeclared: delete
+          entries:
+            - name: release/*
+              type: branch
+            - name: v*
+              type: tag
+        deployment_protection_rules:
+          _undeclared: keep
+          entries:
+            - app: region-guard
+      - name: staging
+        deployment_branch_policy: null
+        secrets:
+          _undeclared: keep
+          entries:
+            - name: DEPLOY_TOKEN
+              value: $SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN
+  requests_contain:
+    - "GET /repos/e2e-owner/e2e-repo/environments"
+    - "GET /repos/e2e-owner/e2e-repo/environments/production/variables"
+    - "GET /repos/e2e-owner/e2e-repo/environments/production/secrets"
+    - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment-branch-policies"
+    - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment_protection_rules"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+    - GRAPHQL
+    - "GET /repos/{repo}/environments/staging/deployment-branch-policies"
+  stdout_contains:
+    - "environments[production].secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN before apply"
+    - "environments[staging].secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN before apply"
+    - "pinned rides the GraphQL pins connection, which snapshot does not read"
+  snapshot_converges: true

@@ -3,6 +3,7 @@
  * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
+import { createHash } from "node:crypto";
 import { decodeNodeId, mintNodeId } from "../../../test/e2e/mock/node-id.js";
 import {
   allRuleNodes,
@@ -27,10 +28,39 @@ import {
   repoNodeId,
   type SectionGraphqlHandlers,
   type SectionRestHandlers,
+  slicePage,
 } from "../../../test/e2e/mock/support.js";
 import { MISSING_BRANCH } from "./endpoints.js";
 
 export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
+  "branches.listProtected": ({ state, param, query }) => {
+    const protectedNames = Object.entries(state.branch_protection)
+      .filter(([, protection]) => protection !== null)
+      .map(([name]) => name);
+    // A protected branch exists even when the branches family does not list it.
+    const all = [...new Set([...state.branches, ...protectedNames])];
+    const names =
+      query.protected === "true"
+        ? all.filter((name) => protectedNames.includes(name))
+        : query.protected === "false"
+          ? all.filter((name) => !protectedNames.includes(name))
+          : all;
+    const slug = `${param("owner")}/${param("repo")}`;
+    return ok(
+      slicePage(
+        names.map((name) => ({
+          name,
+          commit: {
+            sha: createHash("sha1").update(name).digest("hex"),
+            url: `https://api.github.com/repos/${slug}/commits/${name}`,
+          },
+          protected: protectedNames.includes(name),
+          protection_url: `https://api.github.com/repos/${slug}/branches/${name}/protection`,
+        })),
+        query,
+      ),
+    );
+  },
   "branches.getProtection": ({ state, param }) => {
     const branch = param("branch");
     const protection = state.branch_protection[branch];

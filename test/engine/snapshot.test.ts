@@ -105,14 +105,7 @@ describe("snapshotRepository", () => {
     });
     // Every registered section has exactly one outcome, unsupported ones with their reason.
     expect(result.outcomes.map((o) => o.key)).toEqual(SECTIONS.map((s) => s.key));
-    expect(UNSUPPORTED).toEqual([
-      "repository",
-      "rulesets",
-      "environments",
-      "branches",
-      "actions",
-      "check_suite_preferences",
-    ]);
+    expect(UNSUPPORTED).toEqual(["repository", "rulesets", "actions", "check_suite_preferences"]);
     expect(
       result.outcomes.filter((o) => o.status === "unsupported").map((o) => [o.key, o.detail]),
     ).toEqual(

@@ -1,0 +1,122 @@
+name: branches-snapshot-roundtrip
+description: >-
+  mode: snapshot reads the live branch protection back into snapshot.yml and writes nothing to
+  GitHub. The protected-branch listing names main; its classic protection reads back in the PUT
+  vocabulary: {enabled} wrappers as booleans with the off controls omitted, actor objects as login
+  and slug lists, the url keys and enforcement_level dropped, the required checks in both spellings
+  the PUT takes with GitHub's null app_id as the PUT's -1, and a live required_signatures. develop
+  is unprotected, so it is not listed and not written. The GraphQL-only surface
+  (force_push_bypassers, required_deployments, wildcard rules) is one note. The written file, fed
+  back to a check run against the same state, reads clean.
+settings: {}
+live_state:
+  branches: [main, develop]
+  branch_protection:
+    main:
+      url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection
+      required_status_checks:
+        url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/required_status_checks
+        strict: true
+        contexts: [ci]
+        contexts_url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/required_status_checks/contexts
+        checks:
+          - context: ci
+            app_id: null
+        enforcement_level: non_admins
+      enforce_admins:
+        url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/enforce_admins
+        enabled: true
+      required_pull_request_reviews:
+        url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/required_pull_request_reviews
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: false
+        required_approving_review_count: 2
+        require_last_push_approval: false
+        dismissal_restrictions:
+          url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/dismissal_restrictions
+          users_url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/dismissal_restrictions/users
+          teams_url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/dismissal_restrictions/teams
+          users:
+            - login: octocat
+              id: 1
+          teams:
+            - slug: platform
+              id: 2
+          apps: []
+      restrictions:
+        url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/restrictions
+        users_url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/restrictions/users
+        teams_url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/restrictions/teams
+        apps_url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/restrictions/apps
+        users:
+          - login: release-bot
+            id: 3
+        teams: []
+        apps:
+          - slug: deploy-gate
+            id: 4
+      required_linear_history:
+        enabled: true
+      allow_force_pushes:
+        enabled: false
+      allow_deletions:
+        enabled: false
+      block_creations:
+        enabled: false
+      required_conversation_resolution:
+        enabled: false
+      lock_branch:
+        enabled: false
+      allow_fork_syncing:
+        enabled: false
+      required_signatures:
+        url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/required_signatures
+        enabled: true
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: branches
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    branches: snapshot
+  snapshot:
+    branches:
+      - name: main
+        protection:
+          required_status_checks:
+            strict: true
+            contexts: [ci]
+            checks:
+              - context: ci
+                app_id: -1
+          enforce_admins: true
+          required_pull_request_reviews:
+            dismiss_stale_reviews: true
+            require_code_owner_reviews: false
+            required_approving_review_count: 2
+            require_last_push_approval: false
+            dismissal_restrictions:
+              users: [octocat]
+              teams: [platform]
+              apps: []
+          restrictions:
+            users: [release-bot]
+            teams: []
+            apps: [deploy-gate]
+          required_linear_history: true
+          required_signatures: true
+  requests_contain:
+    - "GET /repos/e2e-owner/e2e-repo/branches?protected=true"
+    - "GET /repos/e2e-owner/e2e-repo/branches/main/protection"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+    - GRAPHQL
+    - "GET /repos/{repo}/branches/develop/protection"
+  stdout_contains:
+    - "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule surface, which snapshot does not read"
+  snapshot_converges: true
