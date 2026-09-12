@@ -286,6 +286,17 @@ function pinnedDirSnapshots(
   return pinned;
 }
 
+/**
+ * The check run that proves a snapshot round-trips takes every input the scenario set, minus the two
+ * destinations check mode rejects; derived by exclusion so a target-selecting input added later still rides along.
+ */
+export function snapshotCheckInputs(
+  inputs: NonNullable<Scenario["inputs"]>,
+): NonNullable<Scenario["inputs"]> {
+  const { snapshot_file: _file, snapshot_dir: _dir, ...carried } = inputs;
+  return { ...carried, mode: "check" };
+}
+
 /** Built from scratch: only PATH and HOME are taken from process.env. */
 function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.ProcessEnv {
   const inputs = scenario.inputs ?? {};
@@ -708,19 +719,8 @@ export async function runScenario(
       const writesBefore = handle.requests.length;
       handle.enterCheckMode();
       copyFileSync(join(dir, snapshotFile), join(dir, "settings.yml"));
-      const inputs = scenario.inputs ?? {};
       const check = await invoke(
-        {
-          ...scenario,
-          inputs: {
-            mode: "check",
-            ...(inputs.sections === undefined ? {} : { sections: inputs.sections }),
-            ...(inputs.on_missing_permission === undefined
-              ? {}
-              : { on_missing_permission: inputs.on_missing_permission }),
-            ...(inputs.private_repos === undefined ? {} : { private_repos: inputs.private_repos }),
-          },
-        },
+        { ...scenario, inputs: snapshotCheckInputs(scenario.inputs ?? {}) },
         dir,
         handle.url,
       );
