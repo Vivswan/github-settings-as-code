@@ -52,7 +52,10 @@ describe("checkCompatMarkers", () => {
       ".github/workflows/publish.yml":
         "name: publish\n# COMPAT(v3): tolerate the old asset name; delete this step\n",
       "docs/anchors.md":
-        "The marker is `COMPAT(vN): <what stays working and what to delete>`, a `COMPAT(vN)` comment.\n\nCOMPAT(v5): keep the old anchor ids; delete the redirect table\n<!-- COMPAT(v5): the old heading slugs still resolve; delete the redirect list -->\nUse `COMPAT(vN): reason; for example COMPAT(v5): keep the old path; delete it`.\n",
+        "The marker is `COMPAT(vN): <what stays working and what to delete>`, a `COMPAT(vN)` comment.\n\n" +
+        "COMPAT(v5): keep the old anchor ids; delete the redirect table\n" +
+        "<!-- COMPAT(v5): the old heading slugs still resolve; delete the redirect list -->\n" +
+        "Use `COMPAT(vN): reason; for example COMPAT(v5): keep the old path; delete it`.\n",
     });
     expect(checkCompatMarkers({ cwd })).toEqual({
       code: 0,

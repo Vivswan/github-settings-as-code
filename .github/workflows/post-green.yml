@@ -75,25 +75,14 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts advance-build
 
-  # Publishes this green commit's library build to npm under the `next`
-  # dist-tag (release-pipeline.ts prerelease-version names the version)
-  # through trusted publishing: no registry token anywhere, provenance
-  # attached by npm. No permissions key, like build: a job asking for more
-  # than the caller's ceiling fails the whole call, so the OIDC grant arrives
-  # by inheritance from the id-token: write the managed ci.yml gives the
-  # post-green call. Where a caller grants none (a fork, a ceiling change),
-  # the runner sets no ACTIONS_ID_TOKEN_REQUEST_URL, and the first step
-  # warns and skips every later one instead of failing the hook.
-  # The lane: ci.yml keys main runs by sha, so two green pushes can publish
-  # at once, and the registry has no compare-and-set, so a verdict read here
-  # must still hold when its publish lands. Both npm publish jobs (this one
-  # and update-release.yml's) take the same lane; no caller holds it. A lane
-  # keeps ONE pending job by default and drops the rest, which would lose a
-  # queued publish (a cancelled job here also fails the post-green call);
-  # queue: max keeps every queued publish. The lane serializes, it does not
-  # order: GitHub does not promise which queued run goes first, which is why
-  # the verdict step reads the registry's dist-tags under the lane and skips
-  # a version that is not newer than what next or latest already name.
+  # No permissions key, like build: a job asking above the caller's ceiling fails the whole call, so the OIDC
+  # grant arrives by inheritance from the id-token: write the managed ci.yml gives the post-green call.
+  # The npm-publish lane exists because ci.yml keys main runs by sha (two green pushes can publish at once) and
+  # the registry has no compare-and-set: a verdict read under the lane still holds when its publish lands.
+  #   no ACTIONS_ID_TOKEN_REQUEST_URL -> the caller granted none (a fork, a ceiling change); step one skips the rest
+  #   shared lane                     -> update-release.yml's publish takes the same lane; no caller holds it
+  #   queue: max                      -> a lane keeps ONE pending job by default; a dropped job fails the post-green call
+  #   verdict compares dist-tags      -> the lane serializes but does not order; GitHub promises no queue order
   publish-next:
     if: github.repository == 'Vivswan/github-settings-as-code'
     concurrency:
