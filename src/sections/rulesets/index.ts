@@ -70,11 +70,11 @@ type LiveRulesetSummary = z.infer<typeof LiveRulesetSummary>;
 const permission: SectionPermission = { repo: ["administration"] };
 
 /**
- * A summary this section may manage: anything not explicitly owned by another source (source_type
- * is optional in the API type). Deletion is gated harder in plan(): only an explicit "Repository"
- * is ever deleted, since a missing field is not proof.
+ * A summary this section may manage: one no other source explicitly owns (source_type is optional in
+ * the API type). Deletion is gated harder in plan(): only an explicit "Repository" is ever deleted,
+ * since a missing field is not proof.
  */
-function ownedByRepository(summary: LiveRulesetSummary): boolean {
+function notInherited(summary: LiveRulesetSummary): boolean {
   return (summary.source_type ?? "Repository") === "Repository";
 }
 
@@ -163,7 +163,7 @@ export const rulesetsSection = {
       z.array(LiveRulesetSummary),
       await ctx.read.list.listAll(),
     );
-    const repoRulesets = summaries.filter(ownedByRepository);
+    const repoRulesets = summaries.filter(notInherited);
     const idByName = new Map(repoRulesets.map((r) => [r.name, r.id]));
 
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
@@ -253,22 +253,22 @@ export const rulesetsSection = {
       await ctx.read.list.listAll(),
     );
     const notes = summaries
-      .filter((summary) => !ownedByRepository(summary))
+      .filter((summary) => !notInherited(summary))
       .map(
         (summary) =>
           `rulesets[${summary.name}]: inherited from the ${String(summary.source_type).toLowerCase()} (source_type "${summary.source_type}"), so it is not part of the repository's snapshot; manage it where it is defined`,
       );
-    const owned = summaries.filter(ownedByRepository);
+    const manageable = summaries.filter(notInherited);
     // plan() upserts by name, so two live rulesets under one name have no declarable form.
     rejectLiveDuplicates(
       this,
       "ruleset",
-      owned,
+      manageable,
       (summary) => summary.name,
       (summary) => `${summary.name} (id ${summary.id})`,
     );
     const entries: RulesetConfig[] = [];
-    for (const summary of owned) {
+    for (const summary of manageable) {
       const live = await ctx.read.get.call({ params: { ruleset_id: String(summary.id) } });
       if (!bypassActorsVisible(live)) {
         notes.push(
@@ -278,9 +278,9 @@ export const rulesetsSection = {
       }
       entries.push(projectOntoSchema(RulesetConfig, live));
     }
-    // Owned rulesets that were all left out still exist: an empty keep wrapper says so, where
+    // Manageable rulesets that were all left out still exist: an empty keep wrapper says so, where
     // `undefined` would render as "nothing exists on the repository".
-    if (owned.length === 0) {
+    if (manageable.length === 0) {
       return { value: undefined, notes };
     }
     return { value: knobbedSnapshot(this, entries), notes };
