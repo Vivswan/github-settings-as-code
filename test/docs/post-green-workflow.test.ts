@@ -1,4 +1,5 @@
-/** post-green.yml runs only from ci.yml's post-green slot, so neither the build branch nor npm is written from a commit the all-green gate has not judged. */
+/** post-green.yml runs only from ci.yml's post-green slot, so neither the build branch nor npm is written from a
+ * commit the all-green gate has not judged. */
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
@@ -66,7 +67,8 @@ interface CallerContract {
   /** The whole workflow_call interface ci.yml must satisfy. */
   inputs: Record<string, { required: boolean; type: string | undefined; hasDefault: boolean }>;
   secrets: string[];
-  /** Pinned to the exact key set so nothing gates or extends the two jobs; no permissions ceiling of their own, so they inherit the caller's grant. */
+  /** Pinned to the exact key set so nothing gates or extends the two jobs; no permissions ceiling of their own, so
+   * they inherit the caller's grant. */
   jobs: Array<{
     id: string;
     keys: string[];
@@ -103,8 +105,10 @@ const PUSH_PROBE = [
   "  rm -f probe.err",
   "  exit 1",
   "else",
-  '  echo "::warning::this run\'s token cannot push (the caller grants contents: read); the build branch and the latest tag were not advanced here (the release hook advances them on each release)." \\',
-  '    "Raise the caller\'s ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) on this repository, to publish every green push to @latest."',
+  '  echo "::warning::this run\'s token cannot push (the caller grants contents: read);" \\',
+  '    "the build branch and the latest tag were not advanced here (the release hook advances them on each release)." \\',
+  '    "Raise the caller\'s ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret" \\',
+  '    "with Contents (read and write) on this repository, to publish every green push to @latest."',
   '  echo "proceed=false" >> "$GITHUB_OUTPUT"',
   "fi",
   "rm -f probe.err",
@@ -121,7 +125,8 @@ const OIDC_PROBE = [
   'if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then',
   '  echo "proceed=true" >> "$GITHUB_OUTPUT"',
   "else",
-  '  echo "::warning::this run has no OIDC token (the post-green call in the managed ci.yml grants no id-token: write); the library pre-release was not published to npm." \\',
+  '  echo "::warning::this run has no OIDC token (the post-green call in the managed ci.yml grants no id-token: write);" \\',
+  '    "the library pre-release was not published to npm." \\',
   '    "Add id-token: write to that call\'s permissions in Vivswan/repo-platform to publish every green push to @next."',
   '  echo "proceed=false" >> "$GITHUB_OUTPUT"',
   "fi",

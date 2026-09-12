@@ -51,8 +51,10 @@ jobs:
             rm -f probe.err
             exit 1
           else
-            echo "::warning::this run's token cannot push (the caller grants contents: read); the build branch and the latest tag were not advanced here (the release hook advances them on each release)." \
-              "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) on this repository, to publish every green push to @latest."
+            echo "::warning::this run's token cannot push (the caller grants contents: read);" \
+              "the build branch and the latest tag were not advanced here (the release hook advances them on each release)." \
+              "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret" \
+              "with Contents (read and write) on this repository, to publish every green push to @latest."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
           rm -f probe.err
@@ -107,7 +109,8 @@ jobs:
           if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::this run has no OIDC token (the post-green call in the managed ci.yml grants no id-token: write); the library pre-release was not published to npm." \
+            echo "::warning::this run has no OIDC token (the post-green call in the managed ci.yml grants no id-token: write);" \
+              "the library pre-release was not published to npm." \
               "Add id-token: write to that call's permissions in Vivswan/repo-platform to publish every green push to @next."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi

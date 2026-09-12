@@ -85,7 +85,8 @@ interface Contract {
   /** Both setup-node steps' registry, and whether either carries an env of its own. */
   registries: unknown[];
   setupNodeEnvs: unknown[];
-  /** The npm lines of each publish step: scripts.prepare leaves the manifest, then the one publish, the source sha reaching npm's provenance and the dist-tag the channel's. */
+  /** The npm lines of each publish step: scripts.prepare leaves the manifest, then the one publish, the source sha
+   * reaching npm's provenance and the dist-tag the channel's. */
   publishCommands: [string[], string[]];
 }
 
