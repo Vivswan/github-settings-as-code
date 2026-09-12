@@ -8,6 +8,9 @@ order: 215
 
 Use it to start managing a repository from what it has today, to keep a backup before an apply, or to bring a fleet under `repos-dir` management one file per repository.
 
+From a terminal, `gsac init --repository owner/name` is that first use in one step: it writes the snapshot to `.github/settings.yml` (the destination `snapshot-file` refuses) and prints the PAT grant the file needs.
+See [the command line](../start/cli.md#init).
+
 ## One repository
 
 ```yaml
