@@ -7,8 +7,8 @@
  *   bun .github/scripts/check-compat-markers.ts --target-major 3    due line: the major a release PR cuts
  *
  * The tree is `git ls-files` with untracked files and without ignored ones, minus the skip set below. Markdown may
- * name the convention as `COMPAT(vN)`; in every other file the version is digits, so a marker cannot dodge the gate
- * by leaving its major out. Node builtins only, like release-pipeline.ts: the release PR's checks run this before
+ * name the convention in inline code as `COMPAT(vN)`; everywhere else the version is digits, so a marker cannot
+ * dodge the gate by leaving its major out. Node builtins only, like release-pipeline.ts: the release PR's checks run this before
  * `bun install`. Fixture tests: test/scripts/check-compat-markers.test.ts.
  */
 
@@ -59,7 +59,7 @@ export interface Scan {
   malformed: Malformed[];
 }
 
-/** Every `COMPAT(` occurrence in `text` is a marker, the Markdown placeholder, or malformed. An occurrence runs to
+/** Every `COMPAT(` occurrence in `text` is a marker, the Markdown placeholder in inline code, or malformed. An occurrence runs to
  * the next one on its line, and its description ends where its comment does. */
 export function scanText(path: string, text: string): Scan {
   const scan: Scan = { markers: [], malformed: [] };
@@ -68,7 +68,7 @@ export function scanText(path: string, text: string): Scan {
     const starts = [...content.matchAll(OCCURRENCE)].map((occurrence) => occurrence.index);
     starts.forEach((start, position) => {
       const segment = content.slice(start, starts[position + 1]);
-      if (markdown && PLACEHOLDER.test(segment)) {
+      if (markdown && content[start - 1] === "`" && PLACEHOLDER.test(segment)) {
         return;
       }
       const line = index + 1;

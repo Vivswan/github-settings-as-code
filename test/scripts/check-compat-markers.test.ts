@@ -89,7 +89,8 @@ describe("checkCompatMarkers", () => {
         "// COMPAT(v3): keep the src/**/ glob; delete the legacy matcher */",
         "",
       ].join("\n"),
-      "notes.md": "A `COMPAT(vN)` marker, and one gone wrong: COMPAT(v3)\n<!-- COMPAT(v3): -->\n",
+      "notes.md":
+        "A `COMPAT(vN)` marker, and one gone wrong: COMPAT(v3)\n<!-- COMPAT(v3): -->\n<!-- COMPAT(vN): keep the old anchor; delete the redirect -->\n",
     });
     expect(checkCompatMarkers({ cwd })).toEqual({
       code: 1,
@@ -104,6 +105,7 @@ describe("checkCompatMarkers", () => {
       stderr: [
         malformed("notes.md:1", "COMPAT(v3)"),
         malformed("notes.md:2", "COMPAT(v3): -->"),
+        malformed("notes.md:3", "COMPAT(vN): keep the old anchor; delete the redirect -->"),
         malformed("src/m.ts:1", "COMPAT(v3) accept the old key"),
         malformed("src/m.ts:2", "COMPAT(3): drop the v prefix"),
         malformed("src/m.ts:3", "COMPAT(v3):"),
