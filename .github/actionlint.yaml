@@ -15,3 +15,9 @@ paths:
       # prior step, and the runnable refs are the release build tags, so
       # the static existence check is a false positive here.
       - 'file "lib/index\.js" does not exist'
+      # The npm publish jobs in post-green.yml and update-release.yml share a
+      # lane with `queue: max`, which keeps every queued publish instead of
+      # the one pending job a lane holds by default; actionlint 1.7.12, the
+      # newest release, does not know the key. Drop this once an actionlint
+      # release lists `queue` under concurrency and the fleet step runs it.
+      - 'unexpected key "queue" for "concurrency" section'

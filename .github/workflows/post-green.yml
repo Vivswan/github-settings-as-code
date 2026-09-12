@@ -60,14 +60,115 @@ jobs:
         if: steps.token.outputs.proceed == 'true'
         with:
           bun-version-file: .bun-version
-      - name: Build the bundle
+      - name: Build the bundle and the library
         if: steps.token.outputs.proceed == 'true'
         run: |
           bun install --frozen-lockfile --ignore-scripts
           bun run build:bundle
+          bun run build:lib
       - name: Append this commit's packaged commit to build and point latest at the newest main source
         if: steps.token.outputs.proceed == 'true'
         env:
           SOURCE_SHA: ${{ inputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts advance-build
+
+  # Publishes this green commit's library build to npm under the `next`
+  # dist-tag (release-pipeline.ts prerelease-version names the version)
+  # through trusted publishing: no registry token anywhere, provenance
+  # attached by npm. No permissions key, like build: a job asking for more
+  # than the caller's ceiling fails the whole call, so the OIDC grant arrives
+  # by inheritance from the id-token: write the managed ci.yml gives the
+  # post-green call. Where a caller grants none (a fork, a ceiling change),
+  # the runner sets no ACTIONS_ID_TOKEN_REQUEST_URL, and the first step
+  # warns and skips every later one instead of failing the hook.
+  # The lane: ci.yml keys main runs by sha, so two green pushes can publish
+  # at once, and the registry has no compare-and-set, so a verdict read here
+  # must still hold when its publish lands. Both npm publish jobs (this one
+  # and update-release.yml's) take the same lane; no caller holds it. A lane
+  # keeps ONE pending job by default and drops the rest, which would lose a
+  # queued publish (a cancelled job here also fails the post-green call);
+  # queue: max keeps every queued publish. The lane serializes, it does not
+  # order: GitHub does not promise which queued run goes first, which is why
+  # the verdict step reads the registry's dist-tags under the lane and skips
+  # a version that is not newer than what next or latest already name.
+  publish-next:
+    if: github.repository == 'Vivswan/github-settings-as-code'
+    concurrency:
+      group: npm-publish
+      queue: max
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the caller grants an OIDC token
+        id: oidc
+        run: |
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::this run has no OIDC token (the post-green call in the managed ci.yml grants no id-token: write); the library pre-release was not published to npm." \
+              "Add id-token: write to that call's permissions in Vivswan/repo-platform to publish every green push to @next."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.oidc.outputs.proceed == 'true'
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.oidc.outputs.proceed == 'true'
+        with:
+          bun-version-file: .bun-version
+      # registry-url writes the .npmrc npm publishes through; with no
+      # NODE_AUTH_TOKEN the action leaves a placeholder there, which npm's
+      # OIDC exchange replaces.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.oidc.outputs.proceed == 'true'
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing (and its provenance) exists from npm 11.5.1 on; an
+      # older bundled npm is upgraded once, then held to the floor.
+      - name: Require an npm that publishes through OIDC
+        if: steps.oidc.outputs.proceed == 'true'
+        run: |
+          floor=11.5.1
+          below_floor() { [ "$(printf '%s\n' "$floor" "$(npm --version)" | sort -V | head -n1)" != "$floor" ]; }
+          if below_floor; then
+            npm install -g npm@latest
+          fi
+          if below_floor; then
+            echo "::error::npm $(npm --version) cannot publish through OIDC; trusted publishing needs npm $floor or newer."
+            exit 1
+          fi
+      - name: Build the library
+        if: steps.oidc.outputs.proceed == 'true'
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build:lib
+      # scripts.prepare is dropped from the published manifest: it installs
+      # lefthook, a devDependency the tarball does not carry, and npm blocks
+      # install scripts from a provenance-attested package anyway.
+      # The verdict reads the registry: a version already there (a rerun of
+      # this run) or a next or latest that is not older (a stale retry after
+      # newer runs published) publishes nothing, so next never moves back; a
+      # registry error stops the job instead of publishing blind. npm's
+      # provenance names the commit in GITHUB_SHA, so the source is passed in.
+      - name: Publish the pre-release under the next dist-tag
+        if: steps.oidc.outputs.proceed == 'true'
+        env:
+          SOURCE_SHA: ${{ inputs.sha }}
+        run: |
+          verdict="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-verdict next)"
+          case "$verdict" in
+            publish\ *)
+              npm version "${verdict#publish }" --no-git-tag-version
+              npm pkg delete scripts.prepare
+              GITHUB_SHA="$SOURCE_SHA" npm publish --tag next ;;
+            skip\ *) echo "::notice::${verdict#skip }" ;;
+            *)
+              echo "unexpected npm-verdict output: $verdict"
+              echo "::error::npm-verdict printed neither publish nor skip; see the line above."
+              exit 1 ;;
+          esac
