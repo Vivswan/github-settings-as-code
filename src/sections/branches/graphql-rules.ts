@@ -50,19 +50,10 @@ export const WILDCARD_KEY_SET: ReadonlySet<string> = new Set(WILDCARD_KEYS);
 // --- GraphQL operations -------------------------------------------------------
 
 /**
- * Classic protection IS a BranchProtectionRule upstream, so this lists literal and wildcard rules
- * alike. NOT_FOUND is tolerated so a fine-grained denial reads as "no rules visible" and surfaces
- * at the first write, the section's posture everywhere.
+ * The rule selection both rules reads share, so the snapshot's read cannot lag the planner's
+ * translation tables (test/sections/graphql-queries.test.ts asserts every twin is selected).
  */
-const RULES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
-  name: "BranchProtectionRules",
-  kind: "read",
-  connection: { path: ["repository", "branchProtectionRules"] },
-  outcomes: {
-    ok: "the repository's classic branch protection rules",
-    NOT_FOUND: "the repository is not visible to the token; read as no rules",
-  },
-  query: `query BranchProtectionRules($owner: String!, $repo: String!, $cursor: String) {
+const RULES_SELECTION = `($owner: String!, $repo: String!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     branchProtectionRules(first: 100, after: $cursor) {
       nodes {
@@ -102,7 +93,34 @@ const RULES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
       pageInfo { hasNextPage endCursor }
     }
   }
-}`,
+}`;
+
+/**
+ * Classic protection IS a BranchProtectionRule upstream, so this lists literal and wildcard rules
+ * alike. NOT_FOUND is tolerated so a fine-grained denial reads as "no rules visible" and surfaces
+ * at the first write, the section's posture everywhere.
+ */
+const RULES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
+  name: "BranchProtectionRules",
+  kind: "read",
+  connection: { path: ["repository", "branchProtectionRules"] },
+  outcomes: {
+    ok: "the repository's classic branch protection rules",
+    NOT_FOUND: "the repository is not visible to the token; read as no rules",
+  },
+  query: `query BranchProtectionRules${RULES_SELECTION}`,
+});
+
+/**
+ * The snapshot's read of the same rules. No write follows a snapshot to surface a denial, so
+ * NOT_FOUND is not tolerated here: a concealed denial fails the read with the grant advice.
+ */
+const RULES_SNAPSHOT = graphqlOp<{ owner: string; repo: string }>()({
+  name: "BranchProtectionRulesSnapshot",
+  kind: "read",
+  connection: { path: ["repository", "branchProtectionRules"] },
+  outcomes: { ok: "the repository's classic branch protection rules, for the snapshot" },
+  query: `query BranchProtectionRulesSnapshot${RULES_SELECTION}`,
 });
 
 /**
@@ -201,6 +219,7 @@ const DELETE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
 
 export const GRAPHQL = {
   rulesQuery: RULES_QUERY,
+  rulesSnapshot: RULES_SNAPSHOT,
   repoLookup: REPO_LOOKUP,
   actorUser: ACTOR_USER,
   actorTeam: ACTOR_TEAM,
@@ -245,8 +264,23 @@ export async function fetchRules(ctx: BranchesContext): Promise<LiveRules> {
     // The declared NOT_FOUND: the denial surfaces at the first write instead of here.
     return null;
   }
+  return indexRules(read.items);
+}
+
+/** The snapshot's read: the op tolerates no outcome, so a denial throws with the grant advice. */
+export async function fetchRulesForSnapshot(ctx: BranchesContext): Promise<Map<string, RuleNode>> {
+  const read = await ctx.read.rulesSnapshot.listConnection(repoVariables(ctx));
+  if ("error" in read) {
+    throw new Error(
+      "BUG: branches: the snapshot rules query declares no tolerated outcome, yet its read returned an error instead of throwing",
+    );
+  }
+  return indexRules(read.items);
+}
+
+function indexRules(items: readonly unknown[]): Map<string, RuleNode> {
   const byPattern = new Map<string, RuleNode>();
-  for (const node of read.items) {
+  for (const node of items) {
     if (typeof node === "object" && node !== null) {
       const rule = node as RuleNode;
       // The nested allowance connection is read in one 100-node page; a rule beyond that would
@@ -325,6 +359,48 @@ export function classicViewOfRule(node: RuleNode): Record<string, unknown> {
         }
       : null;
   return out;
+}
+
+/**
+ * The two routed keys of a LITERAL entry as the snapshot declares them: only a non-empty allowance
+ * list and a requirement that is on. An omitted routed key leaves the live value untouched (unlike
+ * the replacing PUT, which resets an omitted control), so the file pins what is set.
+ */
+export function routedKeysSnapshot(
+  node: RuleNode,
+): Pick<BranchProtectionConfig, "force_push_bypassers" | "required_deployments"> {
+  const view = classicViewOfRule(node);
+  const out: Pick<BranchProtectionConfig, "force_push_bypassers" | "required_deployments"> = {};
+  const actors = view.force_push_bypassers as string[];
+  if (actors.length > 0) {
+    out.force_push_bypassers = actors;
+  }
+  if (view.required_deployments !== null) {
+    out.required_deployments = view.required_deployments as { environments: string[] };
+  }
+  return out;
+}
+
+/**
+ * A WILDCARD rule as the snapshot declares it: the classic view with every control that is off
+ * dropped and a nested null (an unset review count) omitted, so the entry carries only keys the
+ * wildcard shape accepts and the check reads clean against the same rule.
+ */
+export function wildcardSnapshot(node: RuleNode): BranchProtectionConfig {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(classicViewOfRule(node))) {
+    if (value === false || value === null || (Array.isArray(value) && value.length === 0)) {
+      continue;
+    }
+    out[key] =
+      typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(
+            Object.entries(value as Record<string, unknown>).filter(([, inner]) => inner !== null),
+          )
+        : value;
+  }
+  // The engine validates the assembled document, so this cast is the projection boundary.
+  return out as BranchProtectionConfig;
 }
 
 /** Shape validation already restricted a wildcard entry's keys, so an unknown key here is a bug. */

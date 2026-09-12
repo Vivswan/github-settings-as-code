@@ -1,11 +1,14 @@
 import { branchesSection } from "../../../src/sections/branches/index.js";
 import type { Row } from "../snapshot-roundtrip.js";
 
-// The GET shape: url keys, {enabled} wrappers, actor objects, the checks list spelled twice.
+// The GET shape: url keys, {enabled} wrappers, actor objects, the checks list spelled twice. The
+// rule surface beside it: main's GraphQL-only fields, and a wildcard rule that alone protects
+// release/1.0, which the snapshot must therefore not write as a literal entry.
 export const row: Row = {
   section: branchesSection,
   live: {
-    branches: ["main", "develop"],
+    branches: ["main", "develop", "release/1.0"],
+    environments: { production: { name: "production", protection_rules: [] } },
     branch_protection: {
       main: {
         url: "https://api.github.com/repos/o/r/branches/main/protection",
@@ -56,6 +59,25 @@ export const row: Row = {
       },
       develop: null,
     },
+    branch_protection_graphql: {
+      main: {
+        bypassForcePushActors: ["octocat", "o/platform", "app/deploy-gate"],
+        requiresDeployments: true,
+        requiredDeploymentEnvironments: ["production"],
+      },
+    },
+    branch_protection_rules: [
+      {
+        pattern: "release/*",
+        isAdminEnforced: true,
+        requiresStatusChecks: true,
+        requiresStrictStatusChecks: true,
+        requiredStatusCheckContexts: ["ci"],
+        requiresApprovingReviews: true,
+        requiredApprovingReviewCount: 1,
+        bypassForcePushActors: ["release-bot"],
+      },
+    ],
   },
   expected: {
     value: [
@@ -78,15 +100,25 @@ export const row: Row = {
           restrictions: { users: ["release-bot"], teams: [], apps: ["deploy-gate"] },
           required_linear_history: true,
           required_signatures: true,
+          force_push_bypassers: ["app/deploy-gate", "o/platform", "octocat"],
+          required_deployments: { environments: ["production"] },
+        },
+      },
+      {
+        name: "release/*",
+        protection: {
+          enforce_admins: true,
+          required_status_checks: { strict: true, contexts: ["ci"] },
+          required_pull_request_reviews: {
+            required_approving_review_count: 1,
+            require_code_owner_reviews: false,
+            dismiss_stale_reviews: false,
+            require_last_push_approval: false,
+          },
+          force_push_bypassers: ["release-bot"],
         },
       },
     ],
-    notes: [
-      "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule " +
-        "surface, which snapshot does not read; an omitted key leaves its live value untouched, so declare them to " +
-        "manage them. A branch a wildcard rule protects is written here as a LITERAL entry carrying that rule's " +
-        "protection (the REST reads name no pattern), and applying it would create a literal rule beside the " +
-        "wildcard; replace such entries with one wildcard entry naming the pattern",
-    ],
+    notes: [],
   },
 };

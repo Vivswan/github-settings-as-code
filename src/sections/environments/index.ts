@@ -16,9 +16,10 @@ import {
   nodeIdField,
   type PinDeclaration,
   planPinned,
+  snapshotPins,
 } from "./pins.js";
 import { EnvironmentConfig, EnvironmentsConfig } from "./schema.js";
-import { PINNED_NOTE, sharedSecretNotes, snapshotNested } from "./snapshot.js";
+import { sharedSecretNotes, snapshotNested, withPins } from "./snapshot.js";
 
 /** One item of the environment listing: the GET body plan() probes by name, so the name is pinned. */
 const LiveEnvironment = z.looseObject({ name: z.string() });
@@ -156,8 +157,9 @@ export const environmentsSection = {
       entries.push({ ...settings, ...nested });
       notes.push(...nestedNotes);
     }
-    notes.push(...sharedSecretNotes(entries), PINNED_NOTE);
-    return { value: entries, notes };
+    const pinned = withPins(entries, await snapshotPins(ctx));
+    notes.push(...pinned.notes, ...sharedSecretNotes(pinned.entries));
+    return { value: pinned.entries, notes };
   },
 } satisfies SectionModule<"environments", typeof ENDPOINTS, typeof GRAPHQL_OPS>;
 

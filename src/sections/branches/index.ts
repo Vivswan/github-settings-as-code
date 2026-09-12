@@ -21,6 +21,7 @@ import {
   type BranchesContext,
   type BranchesPlan,
   fetchRules,
+  fetchRulesForSnapshot,
   GRAPHQL,
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
@@ -30,8 +31,10 @@ import {
   planRoutedUpdate,
   planWildcardEntry,
   resolveActorIds,
+  routedKeysSnapshot,
   WILDCARD_KEY_SET,
   WILDCARD_KEYS,
+  wildcardSnapshot,
 } from "./graphql-rules.js";
 import { type BranchConfig, BranchesConfig, type BranchProtectionConfig } from "./schema.js";
 
@@ -122,13 +125,15 @@ const LiveProtection = z.looseObject({
 /** One item of the protected-branch listing; only the name is read (the protection is probed). */
 const LiveBranchSummary = z.looseObject({ name: z.string() });
 
-/** The snapshot note for the surface the REST reads cannot carry. */
-const GRAPHQL_ONLY_NOTE =
-  "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule " +
-  "surface, which snapshot does not read; an omitted key leaves its live value untouched, so declare them to " +
-  "manage them. A branch a wildcard rule protects is written here as a LITERAL entry carrying that rule's " +
-  "protection (the REST reads name no pattern), and applying it would create a literal rule beside the " +
-  "wildcard; replace such entries with one wildcard entry naming the pattern";
+/**
+ * A literal-pattern rule whose branch the REST reads did not surface: no branch of that name exists
+ * (a pattern needs none), or the protection probe was denied. A literal entry applies through the
+ * REST PUT, which needs the branch, so the rule is noted instead of written. One header line.
+ */
+const unreachableLiteralRuleNote = (pattern: string): string =>
+  `branches[${pattern}]: a classic rule with this literal pattern exists, but the protection read ` +
+  `of branch "${pattern}" answered 404 (no such branch, or Administration not granted), so it is ` +
+  "left out; create the branch or fix the grant, then snapshot again";
 
 /** Built in the ONE place that decides whether the GraphQL run state exists, so no other site re-spells the predicate. */
 type ClassifiedEntry =
@@ -263,9 +268,10 @@ export const branchesSection = {
     }
     return plan;
   },
-  // The listing also names branches only a ruleset protects, whose classic
-  // protection probe answers 404: nothing to declare here. The engine notes
-  // the denial that 404 could also be when every listed branch answers it.
+  // The listing also names branches only a ruleset protects, whose classic protection probe answers
+  // 404: nothing to declare here. The engine notes the denial that 404 could also be when every
+  // listed branch answers it. The rules read is unconditional, unlike plan()'s: it is the only view
+  // of the wildcard rules and of the two routed keys, and it names which rule protects a branch.
   async snapshot(ctx) {
     const listed = parseLive(
       this,
@@ -273,10 +279,18 @@ export const branchesSection = {
       z.array(LiveBranchSummary),
       await ctx.read.listProtected.listAll({ query: { protected: "true" } }),
     );
+    const rules = await fetchRulesForSnapshot(ctx);
     const entries: BranchConfig[] = [];
+    const notes: string[] = [];
     for (const { name } of listed) {
       const probe = await ctx.read.getProtection.probeAbsent({ params: { branch: name } });
       if ("missing" in probe) {
+        continue;
+      }
+      const rule = rules.get(name);
+      if (rule === undefined) {
+        // The effective protection of a branch only a wildcard rule matches: that rule is written
+        // below as the wildcard entry, and a literal entry here would create a second rule on apply.
         continue;
       }
       const live = parseLive(
@@ -286,12 +300,24 @@ export const branchesSection = {
         probe.data,
         `branch "${name}"`,
       );
-      entries.push({ name, protection: protectionSnapshot(live) });
+      entries.push({
+        name,
+        protection: { ...protectionSnapshot(live), ...routedKeysSnapshot(rule) },
+      });
+    }
+    const written = new Set(entries.map((entry) => entry.name));
+    const byPattern = [...rules].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const [pattern, rule] of byPattern) {
+      if (isWildcardPattern(pattern)) {
+        entries.push({ name: pattern, protection: wildcardSnapshot(rule) });
+      } else if (!written.has(pattern)) {
+        notes.push(unreachableLiteralRuleNote(pattern));
+      }
     }
     if (entries.length === 0) {
-      return { value: undefined, notes: [] };
+      return { value: undefined, notes };
     }
-    return { value: entries, notes: [GRAPHQL_ONLY_NOTE] };
+    return { value: entries, notes };
   },
 } satisfies SectionModule<"branches", typeof ENDPOINTS, typeof GRAPHQL>;
 

@@ -1,7 +1,7 @@
 /**
  * The snapshot half of the nested seam: one environment's sub-resource lists read back in their
  * declared wrapped form, each under its planner's own default policy (nestedDefaultPolicy), and
- * the environment-level GraphQL surface the REST reads cannot carry, as a note.
+ * the pin state read off the GraphQL pins connection folded onto the entries.
  */
 
 import { snapshotSecretReference } from "../../engine/secrets.js";
@@ -18,6 +18,7 @@ import {
   type NestedKey,
   nestedDefaultPolicy,
 } from "./nested.js";
+import type { PinnedNames } from "./pins.js";
 import { listProtectionRules, liveRuleSlug } from "./protection-rules.js";
 import {
   DeploymentBranchPolicyConfig,
@@ -28,8 +29,35 @@ import {
 /** The nested keys of one snapshot entry: only the lists with at least one live item appear. */
 type NestedSnapshot = Pick<EnvironmentConfig, NestedKey>;
 
-export const PINNED_NOTE =
-  "pinned rides the GraphQL pins connection, which snapshot does not read; an entry without the key leaves its pin untouched, so declare pinned to manage pins";
+/**
+ * The pin state folded onto the entries: the pinned environments lead, in rank order, each with
+ * `pinned: true` (the planner reads declaration order as pin order, so any other order would plan
+ * a reorder); the rest follow in listing order without the key, since an unpinned environment has
+ * nothing to declare and an absent key leaves a pin untouched. A pin naming no listed environment
+ * is a note: environments are matched case-insensitively, as GitHub names them.
+ */
+export function withPins(
+  entries: readonly EnvironmentConfig[],
+  pins: PinnedNames,
+): { entries: EnvironmentConfig[]; notes: string[] } {
+  const byKey = new Map(entries.map((entry) => [entry.name.toLowerCase(), entry]));
+  const leading: EnvironmentConfig[] = [];
+  const notes: string[] = [];
+  for (const name of pins) {
+    const entry = byKey.get(name.toLowerCase());
+    if (entry === undefined) {
+      notes.push(
+        `environments: the pinned environment "${name}" is not in the environment listing, so its pin is left out of the snapshot`,
+      );
+      continue;
+    }
+    byKey.delete(name.toLowerCase());
+    // The key sits beside the name in the written file, ahead of the nested lists.
+    const { name: entryName, ...rest } = entry;
+    leading.push({ name: entryName, pinned: true, ...rest });
+  }
+  return { entries: [...leading, ...byKey.values()], notes };
+}
 
 function wrapped<E>(key: NestedKey, entries: E[]): UndeclaredPolicyList<E> {
   return { _undeclared: nestedDefaultPolicy(key), entries };

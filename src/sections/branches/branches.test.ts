@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
+import { SectionSelection } from "../../../src/engine/section-selection.js";
+import { snapshotRepository } from "../../../src/engine/snapshot.js";
 import type { GithubClient } from "../../../src/github/api.js";
+import { type Io, maskRegistry } from "../../../src/io.js";
 import {
   type PlannedOp,
   planContext,
@@ -1255,6 +1258,7 @@ describe("branches plan contract", () => {
       "branchProbe",
       "appLookup",
       "rulesQuery",
+      "rulesSnapshot",
       "repoLookup",
       "actorUser",
       "actorTeam",
@@ -1459,6 +1463,7 @@ describe("branches snapshot", () => {
       "GET /repos/o/r/branches?protected=true&per_page=100&page=1": {
         data: [{ name: "main" }, { name: "rules-only" }],
       },
+      "GRAPHQL BranchProtectionRulesSnapshot": rulesData([ruleNode("main")]),
       "GET /repos/o/r/branches/main/protection": { data: LIVE_PROTECTION },
       "GET /repos/o/r/branches/rules-only/protection": {
         error: { status: 404, message: "Branch not protected", body: "" },
@@ -1468,15 +1473,10 @@ describe("branches snapshot", () => {
       snapshotContext(branchesSection, api, REPO, "fail"),
     );
     expect(snapshot.value?.map((entry) => entry.name)).toEqual(["main"]);
-    expect(snapshot.notes).toEqual([
-      "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule " +
-        "surface, which snapshot does not read; an omitted key leaves its live value untouched, so declare them to " +
-        "manage them. A branch a wildcard rule protects is written here as a LITERAL entry carrying that rule's " +
-        "protection (the REST reads name no pattern), and applying it would create a literal rule beside the " +
-        "wildcard; replace such entries with one wildcard entry naming the pattern",
-    ]);
+    expect(snapshot.notes).toEqual([]);
     expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
       "GET /repos/o/r/branches?protected=true&per_page=100&page=1",
+      "GRAPHQL BranchProtectionRulesSnapshot",
       "GET /repos/o/r/branches/main/protection",
       "GET /repos/o/r/branches/rules-only/protection",
     ]);
@@ -1499,13 +1499,175 @@ describe("branches snapshot", () => {
     expect(result).toEqual({ ops: [], notes: [], drift: [] });
   });
 
-  test("no protected branch reads back as nothing to declare", async () => {
+  test("no protected branch and no rule reads back as nothing to declare", async () => {
     const api = new MockApi({
       "GET /repos/o/r/branches?protected=true&per_page=100&page=1": { data: [] },
+      "GRAPHQL BranchProtectionRulesSnapshot": rulesData([]),
     });
     const snapshot = await branchesSection.snapshot(
       snapshotContext(branchesSection, api, REPO, "fail"),
     );
     expect(snapshot).toEqual({ value: undefined, notes: [] });
+  });
+
+  test("the routed keys read back off the rule in the file's actor spelling, and the file plans clean", async () => {
+    const api = registryFake({
+      branches: ["main"],
+      environments: { production: { name: "production", protection_rules: [] } },
+      branch_protection: { main: { enforce_admins: { enabled: true } } },
+      branch_protection_graphql: {
+        main: {
+          bypassForcePushActors: ["octocat", "o/platform", "app/deploy-gate"],
+          requiresDeployments: true,
+          requiredDeploymentEnvironments: ["production"],
+        },
+      },
+    });
+    const { snapshot } = await proveSnapshotRoundTrip(branchesSection, api);
+    expect(snapshot.value).toEqual([
+      {
+        name: "main",
+        protection: {
+          enforce_admins: true,
+          force_push_bypassers: ["app/deploy-gate", "o/platform", "octocat"],
+          required_deployments: { environments: ["production"] },
+        },
+      },
+    ]);
+  });
+
+  test("an empty allowance list and an off requirement are omitted: an absent routed key leaves the live value untouched", async () => {
+    const api = registryFake({
+      branches: ["main"],
+      branch_protection: { main: { enforce_admins: { enabled: true } } },
+    });
+    const { snapshot } = await proveSnapshotRoundTrip(branchesSection, api);
+    expect(snapshot.value).toEqual([{ name: "main", protection: { enforce_admins: true } }]);
+  });
+
+  test("a wildcard rule is written as its pattern with the off controls dropped, and the branch it protects is not written as a literal", async () => {
+    const api = registryFake({
+      branches: ["release/1.0"],
+      branch_protection_rules: [
+        {
+          pattern: "release/*",
+          isAdminEnforced: true,
+          requiresStatusChecks: true,
+          requiresStrictStatusChecks: true,
+          requiredStatusCheckContexts: ["ci"],
+          requiresApprovingReviews: true,
+          requiredApprovingReviewCount: null,
+          bypassForcePushActors: ["release-bot"],
+        },
+      ],
+    });
+    // The mock serves the wildcard's protection under release/1.0, as GitHub does.
+    const probe = await api.tryRequest("GET", "/repos/o/r/branches/release%2F1.0/protection");
+    expect("data" in probe).toBe(true);
+    const { snapshot } = await proveSnapshotRoundTrip(branchesSection, api);
+    expect(snapshot).toEqual({
+      value: [
+        {
+          name: "release/*",
+          protection: {
+            enforce_admins: true,
+            required_status_checks: { strict: true, contexts: ["ci"] },
+            // The unset review count (null) is omitted; the other review flags read as declared false.
+            required_pull_request_reviews: {
+              require_code_owner_reviews: false,
+              dismiss_stale_reviews: false,
+              require_last_push_approval: false,
+            },
+            force_push_bypassers: ["release-bot"],
+          },
+        },
+      ],
+      notes: [],
+    });
+  });
+
+  test("the mock serves a wildcard rule's protection only under an EXISTING matching branch, signatures included", async () => {
+    const api = registryFake({
+      branches: ["release/1.0"],
+      branch_protection_rules: [
+        { pattern: "release/*", isAdminEnforced: true, requiresCommitSignatures: true },
+      ],
+    });
+    const served = await api.tryRequest("GET", "/repos/o/r/branches/release%2F1.0/protection");
+    expect(
+      "data" in served ? flattenProtection(served.data as Record<string, unknown>) : served,
+    ).toEqual({ enforce_admins: true, required_signatures: true });
+    // A pattern protects no branch that is not there: GitHub answers 404 for a missing branch.
+    const missing = await api.tryRequest("GET", "/repos/o/r/branches/release%2Fmissing/protection");
+    expect("error" in missing && missing.error.status).toBe(404);
+  });
+
+  test("a literal-pattern rule whose branch the REST read did not surface is a note, not an entry", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/branches?protected=true&per_page=100&page=1": { data: [] },
+      "GRAPHQL BranchProtectionRulesSnapshot": rulesData([
+        ruleNode("main", { isAdminEnforced: true }),
+      ]),
+    });
+    const snapshot = await branchesSection.snapshot(
+      snapshotContext(branchesSection, api, REPO, "fail"),
+    );
+    expect(snapshot).toEqual({
+      value: undefined,
+      notes: [
+        'branches[main]: a classic rule with this literal pattern exists, but the protection read of branch "main" ' +
+          "answered 404 (no such branch, or Administration not granted), so it is left out; create the branch or " +
+          "fix the grant, then snapshot again",
+      ],
+    });
+  });
+
+  test("a denied rules read fails the snapshot with the grant advice, and the engine skips the section under warn", async () => {
+    const denied = {
+      status: 404,
+      message: "Could not resolve to a Repository with the given name",
+      body: "",
+      graphqlTypes: ["NOT_FOUND"],
+    };
+    const api = new MockApi({
+      "GET /repos/o/r/branches?protected=true&per_page=100&page=1": { data: [{ name: "main" }] },
+      "GRAPHQL BranchProtectionRulesSnapshot": { error: denied },
+    });
+    const failure = branchesSection.snapshot(snapshotContext(branchesSection, api, REPO, "fail"));
+    await expect(failure).rejects.toBeInstanceOf(PermissionDenied);
+    await expect(failure).rejects.toThrow(
+      "branches: the token was denied GRAPHQL BranchProtectionRulesSnapshot: 404 Could not resolve to a " +
+        'Repository with the given name (a 404 here can also mean the resource does not exist). To fix, grant "Administration" ' +
+        "(read and write) under the PAT's Repository permissions",
+    );
+    const annotations: string[] = [];
+    const io: Io = {
+      annotate: (level, message) => annotations.push(`${level}: ${message}`),
+      log: () => {},
+      debug: () => {},
+      summary: () => {},
+      output: () => {},
+      ...maskRegistry(() => {}),
+    };
+    const result = await snapshotRepository(
+      api,
+      {
+        repo: REPO,
+        sections: SectionSelection.of({ only: ["branches"] })._unsafeUnwrap(),
+        onMissingPermission: "warn",
+      },
+      io,
+    );
+    expect(result.result).toBe("partial");
+    expect(result.outcomes).toEqual([
+      {
+        key: "branches",
+        status: "skipped",
+        detail: [expect.stringContaining('To fix, grant "Administration"')],
+      },
+    ]);
+    expect(
+      annotations.filter((line) => line.startsWith("warning: branches: skipped")),
+    ).toHaveLength(1);
   });
 });

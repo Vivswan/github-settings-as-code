@@ -2,6 +2,8 @@ import { environmentsSection } from "../../../src/sections/environments/index.js
 import type { Row } from "../snapshot-roundtrip.js";
 import { STAMPS } from "./families.js";
 
+// staging is the one pinned environment, so it LEADS the snapshot with pinned: true (the planner
+// reads declaration order as pin order) and production follows without the key.
 export const row: Row = {
   section: environmentsSection,
   live: {
@@ -30,6 +32,7 @@ export const row: Row = {
       },
       staging: { name: "staging", protection_rules: [], deployment_branch_policy: null },
     },
+    pinned_environments: ["staging"],
     environment_variables: {
       production: [{ name: "REGION", value: "eu-west-1", ...STAMPS }],
     },
@@ -65,6 +68,15 @@ export const row: Row = {
   expected: {
     value: [
       {
+        name: "staging",
+        pinned: true,
+        deployment_branch_policy: null,
+        secrets: {
+          _undeclared: "keep",
+          entries: [{ name: "DEPLOY_TOKEN", value: "$SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN" }],
+        },
+      },
+      {
         name: "production",
         wait_timer: 30,
         prevent_self_review: true,
@@ -90,20 +102,11 @@ export const row: Row = {
         },
         deployment_protection_rules: { _undeclared: "keep", entries: [{ app: "region-guard" }] },
       },
-      {
-        name: "staging",
-        deployment_branch_policy: null,
-        secrets: {
-          _undeclared: "keep",
-          entries: [{ name: "DEPLOY_TOKEN", value: "$SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN" }],
-        },
-      },
     ],
     notes: [
       "environments[production].secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN before apply",
       "environments[production].secrets[GITHUB_PAT]: value of GITHUB_PAT is not readable; export it into the environment as SECRET_ENVIRONMENT_PRODUCTION_GITHUB_PAT before apply",
       "environments[staging].secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN before apply",
-      "pinned rides the GraphQL pins connection, which snapshot does not read; an entry without the key leaves its pin untouched, so declare pinned to manage pins",
     ],
   },
 };

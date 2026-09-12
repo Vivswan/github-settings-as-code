@@ -12,6 +12,7 @@ import {
   BYPASS_ACTOR_TEAMS,
   BYPASS_ACTOR_USERS,
   completeRule,
+  type MockState,
   PROTECTION_RULE_APPS,
   protectionFromPut,
   ruleFromProtection,
@@ -31,12 +32,84 @@ import {
   slicePage,
 } from "../../../test/e2e/mock/support.js";
 import { MISSING_BRANCH } from "./endpoints.js";
+import { classicViewOfRule } from "./graphql-rules.js";
+
+/**
+ * GitHub's fnmatch for classic rule patterns: `*` and `?` stop at a slash, `**` crosses one, and a
+ * bracket class passes through; every other character is literal.
+ */
+function wildcardMatches(pattern: string, branch: string): boolean {
+  let regex = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i] as string;
+    if (ch === "*" && pattern[i + 1] === "*") {
+      regex += ".*";
+      i++;
+    } else if (ch === "*") {
+      regex += "[^/]*";
+    } else if (ch === "?") {
+      regex += "[^/]";
+    } else if (ch === "[") {
+      const close = pattern.indexOf("]", i + 1);
+      regex += close < 0 ? "\\[" : pattern.slice(i, close + 1);
+      i = close < 0 ? i : close;
+    } else {
+      regex += ch.replace(/[.+^${}()|\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${regex}$`).test(branch);
+}
+
+/**
+ * The REST GET shape of a wildcard rule, as GitHub serves it under a matching branch's name: the
+ * classic view (routed keys and off controls dropped) through the PUT-to-GET projection every
+ * stored protection takes, plus the signature sub-resource that projection leaves to its own
+ * endpoint, so the flattener reads it like any other body.
+ */
+function restViewOfRule(rule: Json): Json {
+  const view = classicViewOfRule(ruleWireNode(rule));
+  const payload: Json = {};
+  for (const [key, value] of Object.entries(view)) {
+    if (key === "force_push_bypassers" || key === "required_deployments") {
+      continue;
+    }
+    if (value !== null && value !== false) {
+      payload[key] = value as Json[string];
+    }
+  }
+  const out = protectionFromPut(payload);
+  if (view.required_signatures === true) {
+    out.required_signatures = { enabled: true };
+  }
+  return out;
+}
+
+/**
+ * What GET .../protection serves for a branch: its literal protection, else the FIRST wildcard rule
+ * matching an EXISTING branch (GitHub applies rules in creation order, and a pattern protects no
+ * branch that is not there), else nothing (404).
+ */
+function effectiveProtection(state: MockState, branch: string): Json | null {
+  const literal = state.branch_protection[branch];
+  if (literal) {
+    return literal;
+  }
+  if (!state.branches.includes(branch)) {
+    return null;
+  }
+  const rule = state.branch_protection_rules.find((candidate) =>
+    wildcardMatches(String(candidate.pattern), branch),
+  );
+  return rule === undefined ? null : restViewOfRule(rule);
+}
 
 export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   "branches.listProtected": ({ state, param, query }) => {
-    const protectedNames = Object.entries(state.branch_protection)
-      .filter(([, protection]) => protection !== null)
-      .map(([name]) => name);
+    // A branch a wildcard rule matches is protected too, as on GitHub, where the REST view serves
+    // the matching rule's protection under the branch's own name.
+    const protectedNames = [
+      ...new Set([...state.branches, ...Object.keys(state.branch_protection)]),
+    ].filter((name) => effectiveProtection(state, name) !== null);
     // A protected branch exists even when the branches family does not list it.
     const all = [...new Set([...state.branches, ...protectedNames])];
     const names =
@@ -62,9 +135,8 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
     );
   },
   "branches.getProtection": ({ state, param }) => {
-    const branch = param("branch");
-    const protection = state.branch_protection[branch];
-    if (!protection) {
+    const protection = effectiveProtection(state, param("branch"));
+    if (protection === null) {
       return { status: 404, body: { message: "Branch not protected" } };
     }
     return ok(protection);
@@ -140,8 +212,8 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   },
 };
 
-export const branchesMockGraphqlHandlers: SectionGraphqlHandlers<"branches"> = {
-  "branches.rulesQuery": ({ state }) => ({
+function rulesConnection(state: MockState): GraphqlHandlerResult {
+  return {
     data: {
       repository: {
         branchProtectionRules: {
@@ -150,7 +222,13 @@ export const branchesMockGraphqlHandlers: SectionGraphqlHandlers<"branches"> = {
         },
       },
     },
-  }),
+  };
+}
+
+export const branchesMockGraphqlHandlers: SectionGraphqlHandlers<"branches"> = {
+  "branches.rulesQuery": ({ state }) => rulesConnection(state),
+  // The snapshot's read serves the same union of literal and wildcard rules.
+  "branches.rulesSnapshot": ({ state }) => rulesConnection(state),
   "branches.repoLookup": ({ state }) => ({
     data: { repository: { id: repoNodeId(state) } },
   }),
