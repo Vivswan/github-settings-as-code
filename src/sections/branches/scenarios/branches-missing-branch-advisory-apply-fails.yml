@@ -1,21 +1,20 @@
-# Check mode, a declared branch that does not exist live: protection probes 404
-# (unprotected), then the advisory branch-existence probe (Contents-gated)
-# answers GitHub's definitive "Branch not found", so the section fails with the
-# one missing-branch advice, the same failure apply meets at the PUT without the
-# Contents grant. No write is attempted.
-name: branches-missing-branch-advisory
+# Apply mode with the Contents grant: the advisory probe answers "Branch not
+# found" and the section fails before any write, with the same advice and exit
+# code the no-Contents apply gets from the PUT's rejection. The outcome does not
+# depend on which grant exposed the missing branch.
+name: branches-missing-branch-advisory-apply-fails
 settings:
   branches:
     - name: release
       protection:
         enforce_admins: true
 inputs:
-  mode: check
+  mode: apply
 live_state:
   branches: ["main"]
   branch_protection: {}
 token_permissions:
-  administration: read
+  administration: write
   contents: read
 expect:
   exit_code: 1

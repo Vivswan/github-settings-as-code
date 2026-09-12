@@ -94,6 +94,46 @@ describe("runForRepo", () => {
     expect(annotations.some((a) => a.startsWith("warning: repository: skipped"))).toBe(true);
   });
 
+  const put = "PUT /repos/o/r/branches/main/protection";
+  const missingBranch =
+    'branches: replacing protection for branch "main" failed - PUT /repos/o/r/branches/main/protection: 404 Branch not found. The declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file';
+  const deniedPut =
+    'the token was denied replacing protection for branch "main" failed - PUT /repos/o/r/branches/main/protection: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions';
+  test.each([
+    ["warn", "Branch not found", "failed", ["branches", "failed"], `error: ${missingBranch}`],
+    ["fail", "Branch not found", "failed", ["branches", "failed"], `error: ${missingBranch}`],
+    [
+      "warn",
+      "Not Found",
+      "partial",
+      ["branches", "skipped"],
+      `warning: branches: skipped - ${deniedPut}`,
+    ],
+  ] as const)(
+    "under on-missing-permission %s a 404 answering %p on a write is classified by the endpoint's declaration, not the status",
+    async (policy, message, result, outcome, annotation) => {
+      // The unrouted protection GET and branch probe answer 404 "Not Found", a concealed denial, so the PUT is planned.
+      const api = new MockApi({ [put]: { error: { status: 404, message, body: "" } } });
+      const { io, annotations } = captureIo();
+      const run = await runForRepo(
+        api,
+        opts({
+          onMissingPermission: policy,
+          settings: validated({
+            branches: [{ name: "main", protection: { enforce_admins: true } }],
+          }),
+        }),
+        io,
+      );
+      expect([run.result, run.outcomes.map((o) => [o.key, o.status]), annotations]).toEqual([
+        result,
+        [[...outcome]],
+        [annotation],
+      ]);
+      expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([put]);
+    },
+  );
+
   test("check mode reports drift, prefixed through prefixedIo", async () => {
     const api = new MockApi({
       "GET /repos/o/r": { data: { has_wiki: true } },

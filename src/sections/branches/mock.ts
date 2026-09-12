@@ -23,10 +23,12 @@ import {
   type Json,
   noContent,
   ok,
+  rejected,
   repoNodeId,
   type SectionGraphqlHandlers,
   type SectionRestHandlers,
 } from "../../../test/e2e/mock/support.js";
+import { MISSING_BRANCH } from "./endpoints.js";
 
 export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   "branches.getProtection": ({ state, param }) => {
@@ -39,9 +41,8 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   },
   "branches.putProtection": ({ state, param, body }) => {
     const branch = param("branch");
-    // GitHub rejects protection for a branch that does not exist with this exact body.
     if (!state.branches.includes(branch)) {
-      return { status: 404, body: { message: "Branch not found" } };
+      return rejected(MISSING_BRANCH);
     }
     const stored = protectionFromPut(asObject(body));
     // required_signatures is its own sub-resource and absent from the PUT's request schema. Whether
@@ -90,7 +91,7 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   "branches.branchProbe": ({ state, param }) => {
     const branch = param("branch");
     if (!state.branches.includes(branch)) {
-      return { status: 404, body: { message: "Branch not found" } };
+      return rejected(MISSING_BRANCH);
     }
     return ok({ name: branch });
   },

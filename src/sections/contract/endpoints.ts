@@ -7,10 +7,29 @@ import type { SectionPermission } from "./permissions.js";
 export type Route = keyof Endpoints | SupplementalRoute;
 
 /**
- * 403 and 404 are excluded: throwFor's permission branch swallows them for a granted operation (where
- * `denialHint` carries any ambiguity), and a public ("none") operation's 403/404 is never a payload rejection.
+ * The statuses throwFor's permission branch swallows for a granted operation. A `hints` key on one is
+ * dead advice (HintableStatus excludes them); `denialHint` carries an ambiguity, and `rejections` claims
+ * back the one message GitHub reserves for a definite meaning.
  */
+type DenialStatus = 403 | 404;
+
+/** A public ("none") operation's 403/404 is never a payload rejection either, so the exclusion holds for it too. */
 export type HintableStatus = 400 | 412 | 422;
+
+/**
+ * A response whose status a denial shares but whose exact message GitHub reserves for one definite
+ * meaning: the protection PUT's 404 "Branch not found". throwFor classifies a match ahead of its
+ * permission branch as a hard section error, so no on-missing-permission policy can skip it and the
+ * grant advice never renders for it. The message must be one no denial body spells; the registry
+ * test pins every declaration against the e2e mock's denial responses.
+ */
+export interface DefinitiveRejection {
+  readonly status: DenialStatus;
+  /** Compared whole, never as a substring: "Not Found" is a fine-grained denial. */
+  readonly message: string;
+  /** What to fix, as a lowercase clause without a trailing period; throwFor starts a sentence with it. */
+  readonly advice: string;
+}
 
 type GetRoute = Extract<Route, `GET ${string}`>;
 
@@ -83,9 +102,12 @@ interface EndpointDeclFields {
   readonly hints?: Readonly<Partial<Record<HintableStatus, string>>>;
   /**
    * Appended to the PermissionDenied message (which never reads `hints`) when a 403/404 can mean
-   * something other than a missing grant (Git LFS disabled account-wide). One sentence, no trailing period.
+   * something other than a missing grant (Git LFS disabled account-wide) and the body does not tell
+   * the readings apart; a body that does is a `rejections` entry. One sentence, no trailing period.
    */
   readonly denialHint?: string;
+  /** The endpoint's definitive rejections (see DefinitiveRejection); the e2e mock serves the same declarations. */
+  readonly rejections?: readonly DefinitiveRejection[];
   /**
    * When GitHub caps per_page below the standard 100 (the Actions variables list: 30). The page loop
    * requests exactly this many and treats a shorter page as the last, so a request GitHub would silently
@@ -99,6 +121,21 @@ interface EndpointDeclFields {
    * (ReadPort in ./plan.ts) and denialPosture() read it.
    */
   readonly primaryRead?: { readonly notFound: "denied" | "absent" };
+}
+
+export function matchesRejection(
+  rejection: DefinitiveRejection,
+  error: { status: number; message: string },
+): boolean {
+  return error.status === rejection.status && error.message === rejection.message;
+}
+
+/** The declaration an error matches, if the endpoint declares one; a withheld message matches nothing. */
+export function definitiveRejection(
+  endpoint: EndpointDecl,
+  error: { status: number; message: string },
+): DefinitiveRejection | undefined {
+  return endpoint.rejections?.find((rejection) => matchesRejection(rejection, error));
 }
 
 export function endpointMethod(route: Route): string {

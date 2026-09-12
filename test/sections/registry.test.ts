@@ -39,6 +39,7 @@ import {
 } from "../../src/sections/registry.js";
 import { workflowsSection } from "../../src/sections/workflows/index.js";
 import type { MustBeNever } from "../../src/types.js";
+import { denialResponse } from "../e2e/mock/grading.js";
 
 /** The identity facet of a list section's declaration, as the erased registry view exposes it. */
 interface ListDeclView {
@@ -249,6 +250,28 @@ describe("section permissions", () => {
           `${key} keys a hint on ${status}, which the permission branch swallows; use denialHint`,
         ).toBe(false);
       }
+    }
+  });
+
+  test("the definitive rejections are the pinned set, and none spells a body the mock's denial gate answers", () => {
+    // A rejection whose body a denial can carry would read a missing grant as the definite meaning, under every policy.
+    const declared = Object.entries(allEndpoints()).flatMap(([key, endpoint]) =>
+      (endpoint.rejections ?? []).map(
+        (rejection) => [key, rejection.status, rejection.message] as const,
+      ),
+    );
+    expect(declared).toEqual([["branches.putProtection", 404, "Branch not found"]]);
+    const denials = (["fine_grained", 403, 404] as const).flatMap((style) =>
+      (["read", "write"] as const).map((kind) => {
+        const denial = denialResponse(style, kind);
+        return [denial.status, (denial.body as { message: string }).message] as const;
+      }),
+    );
+    for (const [key, status, message] of declared) {
+      expect(
+        denials,
+        `${key} declares a body the mock's denial gate answers, so a denied request would read as definitive`,
+      ).not.toContainEqual([status, message]);
     }
   });
 
