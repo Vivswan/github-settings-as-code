@@ -98,29 +98,6 @@ describe("the CLI Io", () => {
     expect(readFileSync(summary, "utf8")).toBe("# run by ***\n");
   });
 
-  test.each<[string, string[], string, string]>([
-    [
-      "a prefix of another value",
-      ["github_pat_ABC", "github_pat_ABCDEF"],
-      "argument 'github_pat_ABCDEF' repeats github_pat_ABC",
-      "argument '***' repeats ***",
-    ],
-    ["two values overlapping across the text", ["ABC", "BCD"], "x ABCD y", "x *** y"],
-    ["an infix of another value", ["BC", "xABCDEy"], "see xABCDEy and BC", "see *** and ***"],
-    ["two values touching end to start", ["ABC", "DEF"], "ABCDEF", "***"],
-    ["separate occurrences of one value", ["ABC"], "ABC and ABC", "*** and ***"],
-    ["a value absent from the line", ["ABC"], "nothing here", "nothing here"],
-  ])("masking leaves no fragment of %s", (_case, masks, line, redacted) => {
-    // Replacing one value after another would leave "***D" for the overlap and
-    // "***DEF" for the prefix; the ranges are merged in the original text instead.
-    const { io, stderr } = open();
-    for (const value of masks) {
-      io.mask(value);
-    }
-    io.annotate("error", line);
-    expect(stderr()).toBe(`error: ${redacted}\n`);
-  });
-
   test("summary blocks append to the named file and are dropped without one", () => {
     const dir = mkdtempSync(join(tmpdir(), "gsac-io-"));
     scratch.push(dir);

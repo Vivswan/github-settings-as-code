@@ -141,7 +141,7 @@ console.log(labels.key, Object.keys(labels.endpoints), sectionGrant(labels));
 
 ### Io
 
-`Io` is the output port every flow writes to. `collectingIo()` captures lines, outputs, and summary blocks; `silentIo()` drops them; `prefixedIo(io, prefix)` attributes lines to a target; `maskRegistry` builds the mask pair an `Io` implementation needs.
+`Io` is the output port every flow writes to. `collectingIo()` captures lines, outputs, and summary blocks; `silentIo()` drops them; `prefixedIo(io, prefix)` attributes lines to a target; `maskRegistry` builds the mask pair an `Io` implementation needs. What `collectingIo()` captures is masked the way the action's log is: `redactRanges(text, masked)`, the one redactor, replaces every registered value with `***`, overlapping occurrences as one.
 
 ```ts
 import { collectingIo, concludeRun, runSingle, type SingleConfig } from "@vivswan/github-settings-as-code";

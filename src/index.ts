@@ -115,6 +115,7 @@ export {
   maskRegistry,
   type OutputName,
   prefixedIo,
+  redactRanges,
   silentIo,
 } from "./io.js";
 // Problems

@@ -54,6 +54,46 @@ export function maskRegistry(sink: (value: string) => void): MaskPair {
 }
 
 /**
+ * `text` with every occurrence of every masked value replaced by `***`: the
+ * one redactor for the Ios that mask text themselves (collectingIo, the CLI's
+ * streams) where the action leaves it to the runner. Occurrences are located
+ * in the original text and overlapping or touching ones are merged, so two
+ * values that overlap (a prefix of another, or "ABC" and "BCD" across "ABCD")
+ * leave no fragment, as replacing one value after another would.
+ */
+export function redactRanges(text: string, masked: ReadonlySet<string>): string {
+  const ranges: Array<[number, number]> = [];
+  for (const value of masked) {
+    if (value === "") {
+      continue;
+    }
+    for (let at = text.indexOf(value); at !== -1; at = text.indexOf(value, at + 1)) {
+      ranges.push([at, at + value.length]);
+    }
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  let out = "";
+  let cursor = 0;
+  let open: [number, number] | undefined;
+  for (const [start, end] of ranges) {
+    if (open !== undefined && start <= open[1]) {
+      open[1] = Math.max(open[1], end);
+      continue;
+    }
+    if (open !== undefined) {
+      out += `${text.slice(cursor, open[0])}***`;
+      cursor = open[1];
+    }
+    open = [start, end];
+  }
+  if (open !== undefined) {
+    out += `${text.slice(cursor, open[0])}***`;
+    cursor = open[1];
+  }
+  return out + text.slice(cursor);
+}
+
+/**
  * Only annotate and log take the prefix: the debug trace, summary, and outputs are rendered by their writers, and the
  * mask pair registers raw values, not rendered lines.
  */
@@ -77,7 +117,11 @@ export interface CollectedLine {
   line: string;
 }
 
-/** An Io that records instead of printing. The debug trace is dropped, as a runner without step debugging drops it. */
+/**
+ * An Io that records instead of printing. Every captured line, output, and summary block is redacted against the
+ * values registered so far, as a runner masks its log, so a library caller that prints the capture cannot leak
+ * a secret. The debug trace is dropped, as a runner without step debugging drops it.
+ */
 export function collectingIo(): {
   io: Io;
   lines: CollectedLine[];
@@ -87,16 +131,18 @@ export function collectingIo(): {
   const lines: CollectedLine[] = [];
   const outputs: Partial<Record<OutputName, string>> = {};
   const summary: string[] = [];
+  const registry = maskRegistry(() => {});
+  const redact = (text: string): string => redactRanges(text, registry.masked());
   return {
     io: {
-      annotate: (level, message) => lines.push({ level, line: message }),
-      log: (line) => lines.push({ line }),
+      annotate: (level, message) => lines.push({ level, line: redact(message) }),
+      log: (line) => lines.push({ line: redact(line) }),
       debug: () => {},
-      summary: (markdown) => summary.push(markdown),
+      summary: (markdown) => summary.push(redact(markdown)),
       output: (name, value) => {
-        outputs[name] = value;
+        outputs[name] = redact(value);
       },
-      ...maskRegistry(() => {}),
+      ...registry,
     },
     lines,
     outputs,
