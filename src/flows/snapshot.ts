@@ -1,17 +1,16 @@
 /**
  * The mode: snapshot run flow: read each target's live settings back through
  * the section snapshot ports and write them as a settings document, one file
- * for one repository or one file per multi-repo target under a directory.
- * The document reaches ONLY the file. Every public surface (annotations, the
- * step summary, the outputs) carries section keys, statuses, and the notes
- * check mode prints for the same repository (a secret's name, a webhook's
- * URL, never a secret's value), routed through the target's redaction channel
- * exactly as check mode routes its lines, so a redacted target's file lands
- * on disk while nothing about it is printed.
+ * per repository. The document reaches ONLY the file. Every public surface
+ * (annotations, the step summary, the outputs) carries section keys, statuses,
+ * and the notes check mode prints for the same repository (a secret's name, a
+ * webhook's URL, never its value), routed through the target's redaction
+ * channel exactly as check mode routes its lines, so a redacted target's file
+ * lands on disk while nothing about it is printed.
  */
 
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { RepoRef, Target } from "../discovery/targets.js";
 import type { SectionSelection } from "../engine/section-selection.js";
@@ -118,28 +117,72 @@ export type FinishedSnapshot =
   | { form: "file"; view: SnapshotTargetView }
   | { form: "dir"; snapshotDir: string; views: SnapshotTargetView[] };
 
-/** Whether `path` is `dir` itself or lies under it, compared as resolved paths. */
+/**
+ * `path` as the filesystem names it: the real path of what exists, the rest
+ * as spelled. Built one segment at a time, so ".." steps out of a symlink's
+ * TARGET as the write will: handed "link/../x" whole, bun's realpath collapses
+ * the ".." lexically before following the link and names a different file
+ * than the one the write reaches. Every step retries realpath, since
+ * "missing/../link" is back on existing ground after the "..".
+ */
+function canonicalPath(path: string): string {
+  // The platform reads the root (a drive-relative "C:x" resolves on that drive); the walk reads the rest.
+  const { root } = parse(path);
+  let real = realOrSpelled(root === "" ? process.cwd() : resolve(root));
+  for (const part of path.slice(root.length).split(sep === "\\" ? /[\\/]/ : sep)) {
+    if (part === "" || part === ".") {
+      continue;
+    }
+    real = part === ".." ? dirname(real) : realOrSpelled(join(real, part));
+  }
+  return real;
+}
+
+/** `path`'s real path when it exists, else `path` itself. */
+function realOrSpelled(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Whether `path` is `dir` itself or lies under it; both already named the same way. */
 function isWithin(path: string, dir: string): boolean {
-  const rel = relative(resolve(dir), resolve(path));
+  const rel = relative(dir, path);
   // Only a whole ".." segment leaves `dir`: a child named "..snapshots" is inside.
   const leaves = rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
   return !leaves;
 }
 
 /**
- * Refuse a destination that would overwrite an authored file. Guarded here,
- * beside the write, so a library caller gets the refusal too. A snapshot is a
- * starting point beside the file apply and check read, never a replacement
- * written over it: that file carries the $NAME references and directives the
- * operator authored. The dir form writes the repos-dir layout, so the two
- * directories must be disjoint: the same directory overwrites every central
- * file, a snapshot-dir above the repos-dir overwrites a bare <name>.yml whose
- * owner segment is the repos-dir's name, and one below it is read back as
- * central files on the next run. Paths are compared resolved, so "./x" and "x" collide.
+ * Whether one directory is or contains the other under either naming. As
+ * spelled catches a symlink INSIDE one that leads into the other (repos-dir
+ * "out/central" -> "../authored" under snapshot-dir "out"); as the filesystem
+ * names them catches a case alias or a symlink TO the other. The dir form
+ * writes join(snapshotDir, owner, name), and join collapses "link/.." before
+ * the OS sees it, so the filesystem naming starts from the collapsed spelling
+ * too: "link/../snapshots" lands beside link, never inside its target. The
+ * file form writes its spelling raw and stays on OS semantics.
+ */
+function overlap(a: string, b: string): boolean {
+  return [resolve, (p: string) => canonicalPath(resolve(p))].some(
+    (name) => isWithin(name(a), name(b)) || isWithin(name(b), name(a)),
+  );
+}
+
+/**
+ * Refuse a destination that would overwrite an authored file: the settings file
+ * carries the $NAME references and directives the operator wrote, which no
+ * snapshot reproduces. The dir form writes the repos-dir layout, so the two
+ * directories must be disjoint:
+ *   snapshot-dir is the repos-dir -> overwrites every central file
+ *   snapshot-dir above it         -> a target whose owner is the repos-dir's name overwrites its bare <name>.yml
+ *   snapshot-dir below it         -> read back as central files on the next run
  */
 function destinationCollision(cfg: SnapshotConfig): Result<void, Problem> {
   if (cfg.form === "file") {
-    return resolve(cfg.snapshotFile) === resolve(DEFAULT_SETTINGS_FILE)
+    return canonicalPath(cfg.snapshotFile) === canonicalPath(DEFAULT_SETTINGS_FILE)
       ? err({
           code: "snapshot-file-is-settings-file",
           snapshotFile: cfg.snapshotFile,
@@ -147,10 +190,7 @@ function destinationCollision(cfg: SnapshotConfig): Result<void, Problem> {
         })
       : ok();
   }
-  if (
-    cfg.reposDir &&
-    (isWithin(cfg.snapshotDir, cfg.reposDir) || isWithin(cfg.reposDir, cfg.snapshotDir))
-  ) {
+  if (cfg.reposDir && overlap(cfg.snapshotDir, cfg.reposDir)) {
     return err({
       code: "snapshot-dir-overlaps-repos-dir",
       snapshotDir: cfg.snapshotDir,
@@ -277,16 +317,35 @@ function writeReplacing(path: string, text: string): void {
 
 /**
  * A target's file under the snapshot directory, in the repos-dir layout so the
- * directory can later serve as one. SLUG_RE admits "." and "..", which GitHub
- * never issues but a repos entry can spell; either would leave the directory.
+ * directory can later serve as one, or why the target has none. SLUG_RE admits
+ * "." and "..", which GitHub never issues but a repos entry can spell; either
+ * would leave the directory. And the filesystem may carry the file onto
+ * authored ground in a way the two inputs cannot show: a link under either
+ * directory that leads into the other, or an owner spelled ".github".
  */
-function snapshotFilePath(dir: string, repo: RepoRef): { path: string } | { error: string } {
+function snapshotFilePath(
+  cfg: Extract<SnapshotConfig, { form: "dir" }>,
+  repo: RepoRef,
+  authored: ReadonlySet<string>,
+): { path: string } | { error: string } {
   if ([repo.owner, repo.name].some((part) => part === "." || part === "..")) {
     return {
-      error: `the repository name "${repo.slug}" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${dir}`,
+      error: `the repository name "${repo.slug}" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${cfg.snapshotDir}`,
     };
   }
-  return { path: join(dir, repo.owner, `${repo.name}.yml`) };
+  const path = join(cfg.snapshotDir, repo.owner, `${repo.name}.yml`);
+  const landing = canonicalPath(path);
+  if (authored.has(landing)) {
+    return {
+      error: `cannot write the snapshot to ${path}: the filesystem carries it to ${landing}, an authored settings file. Write the snapshots to a directory that leads to no authored file`,
+    };
+  }
+  if (cfg.reposDir && isWithin(landing, canonicalPath(cfg.reposDir))) {
+    return {
+      error: `cannot write the snapshot to ${path}: the filesystem carries it to ${landing}, inside the "repos-dir" input "${cfg.reposDir}". Write the snapshots to a directory that leads to no central file`,
+    };
+  }
+  return { path };
 }
 
 /**
@@ -340,6 +399,11 @@ async function snapshotDir(
 ): Promise<FinishedSnapshot> {
   // One timestamp for the whole run, so every file's header shares it.
   const timestamp = new Date().toISOString();
+  // Every file the run reads as authored, as the filesystem names it.
+  const authored: ReadonlySet<string> = new Set([
+    canonicalPath(DEFAULT_SETTINGS_FILE),
+    ...resolved.targets.flatMap((t) => (t.source === "central" ? [canonicalPath(t.filePath)] : [])),
+  ]);
   const views: SnapshotTargetView[] = [];
   for (const target of resolved.targets) {
     // The channel is opened BEFORE any processing so a failure lands in a
@@ -356,7 +420,7 @@ async function snapshotDir(
         `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be snapshotted`,
       );
     } else {
-      const located = snapshotFilePath(cfg.snapshotDir, repo);
+      const located = snapshotFilePath(cfg, repo, authored);
       outcome =
         "error" in located
           ? fail(located.error)
