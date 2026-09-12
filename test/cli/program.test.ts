@@ -188,20 +188,37 @@ describe("check and apply", () => {
     expect(result.stdout + result.stderr).toContain("***");
   });
 
-  test("a failure after the parse is reported through the mask boundary, exit 1", async () => {
-    // The summary file's directory does not exist, so the write throws inside
-    // the run; the path carries the token, and the report must not.
-    const summary = join(tempDir(), "missing", `${TOKEN}.md`);
-    const result = await cli(
-      ["check", ...target, "--summary", summary],
-      new MockApi({ "GET /repos/o/r": { data: { has_wiki: false, private: false } } }),
-    );
-    expect(result.code).toBe(1);
-    expect(result.stderr).toStartWith("error: github-settings-as-code stopped unexpectedly: ");
-    expect(result.stderr).toContain("ENOENT");
-    expect(result.stdout + result.stderr).not.toContain(TOKEN);
-    expect(result.stderr).toContain("***");
-  });
+  test.each([false, true])(
+    "a failure after the parse is reported through the mask boundary, exit 1 (verbose: %p)",
+    async (verbose) => {
+      // The summary file's directory does not exist, so the write throws inside
+      // the run; the path carries the token, and the report must not. Without
+      // --verbose the remedy asks for it; with it the stack is the report.
+      const summary = join(tempDir(), "missing", `${TOKEN}.md`);
+      const masked = summary.replaceAll(TOKEN, "***");
+      const result = await cli(
+        ["check", ...target, "--summary", summary, ...(verbose ? ["--verbose"] : [])],
+        new MockApi({ "GET /repos/o/r": { data: { has_wiki: false, private: false } } }),
+      );
+      expect(result.code).toBe(1);
+      expect(result.stdout + result.stderr).not.toContain(TOKEN);
+      const message = `Error: ENOENT: no such file or directory, open '${masked}'`;
+      if (!verbose) {
+        expect(result.stderr).toBe(
+          `error: github-settings-as-code stopped unexpectedly: ${message}. Re-run with --verbose for the stack; if it recurs, file a bug with that output attached\n`,
+        );
+        return;
+      }
+      // The stack's frames carry this machine's paths, so the line is pinned around them.
+      expect(result.stderr).toStartWith(
+        `error: github-settings-as-code stopped unexpectedly: ${message}\n    at `,
+      );
+      expect(result.stderr).toEndWith(
+        ". The stack above is the report: if it recurs, file a bug with it attached\n",
+      );
+      expect(result.stderr).not.toContain("Re-run with --verbose");
+    },
+  );
 
   test("--summary appends the run's markdown to the named file", async () => {
     const summary = join(tempDir(), "summary.md");

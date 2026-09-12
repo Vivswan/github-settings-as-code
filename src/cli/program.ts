@@ -199,8 +199,12 @@ export async function main(
     }
     const verbose = program.opts<Globals>().verbose === true;
     const detail = verbose && error instanceof Error && error.stack ? error.stack : String(error);
+    // Under --verbose the stack is already printed, so asking for it again would loop.
+    const remedy = verbose
+      ? "The stack above is the report: if it recurs, file a bug with it attached"
+      : "Re-run with --verbose for the stack; if it recurs, file a bug with that output attached";
     streams.stderr.write(
-      `error: github-settings-as-code stopped unexpectedly: ${detail}. Re-run with --verbose; if it recurs, report a bug with this output attached\n`,
+      `error: github-settings-as-code stopped unexpectedly: ${detail}. ${remedy}\n`,
     );
     return 1;
   }
