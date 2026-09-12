@@ -49,11 +49,22 @@ const labelsRoute = (slug: string, labels: Array<typeof BUG>) => ({
   [`GET /repos/${slug}/labels?per_page=100&page=1`]: { data: labels },
 });
 
-/** The header a written snapshot starts with: the schema pin, then the dated repository line. */
-const HEADER = (slug: string) =>
-  new RegExp(
-    `^# yaml-language-server: \\$schema=${SNAPSHOT_SCHEMA_URL.replaceAll(".", "\\.")}\\n# Snapshot of ${slug} taken \\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z\\n`,
-  );
+/** An ISO-8601 UTC instant, the form the header dates the snapshot in. */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+
+/**
+ * Whether `written` opens with the snapshot header for `slug`: the schema pin
+ * compared as a whole string (never as a pattern, so a look-alike host cannot
+ * pass), then the dated repository line.
+ */
+export function hasSnapshotHeader(written: string, slug: string): boolean {
+  const [pin, dated] = written.split("\n");
+  if (pin !== `# yaml-language-server: $schema=${SNAPSHOT_SCHEMA_URL}`) {
+    return false;
+  }
+  const prefix = `# Snapshot of ${slug} taken `;
+  return dated?.startsWith(prefix) === true && ISO_INSTANT.test(dated.slice(prefix.length));
+}
 
 let dir: string;
 beforeEach(() => {
@@ -101,6 +112,24 @@ const dirCfg = (overrides: Partial<DirConfig> = {}): DirConfig =>
     ...overrides,
   }) as DirConfig;
 
+describe("hasSnapshotHeader", () => {
+  const header = (url: string, slug = "o/r", instant = "2026-09-12T01:00:06.503Z") =>
+    `# yaml-language-server: $schema=${url}\n# Snapshot of ${slug} taken ${instant}\nlabels: []\n`;
+
+  test("accepts the exact pin and a dated line; rejects a look-alike host, another slug, and a non-instant", () => {
+    expect(hasSnapshotHeader(header(SNAPSHOT_SCHEMA_URL), "o/r")).toBe(true);
+    // The URL's dots are literal: a host with one dot swapped for another character is not the pin.
+    expect(
+      hasSnapshotHeader(
+        header(SNAPSHOT_SCHEMA_URL.replace("githubusercontent.com", "githubusercontentXcom")),
+        "o/r",
+      ),
+    ).toBe(false);
+    expect(hasSnapshotHeader(header(SNAPSHOT_SCHEMA_URL, "o/other"), "o/r")).toBe(false);
+    expect(hasSnapshotHeader(header(SNAPSHOT_SCHEMA_URL, "o/r", "yesterday"), "o/r")).toBe(false);
+  });
+});
+
 describe("runSnapshot, file form", () => {
   test("writes the document under its header and reports through the outputs, the log, and the summary", async () => {
     const api = new MockApi(labelsRoute("o/r", [BUG, DOCS]));
@@ -108,7 +137,7 @@ describe("runSnapshot, file form", () => {
     const collected = collectingIo();
     expect(await run(api, cfg, collected.io)).toBe(0);
     const written = readFileSync(cfg.snapshotFile, "utf8");
-    expect(written).toMatch(HEADER("o/r"));
+    expect(hasSnapshotHeader(written, "o/r")).toBe(true);
     expect(parseYaml(written)).toEqual(doc(BUG, DOCS));
     expect(api.mutations()).toEqual([]);
     expect(collected.outputs).toEqual({ "skipped-sections": "", result: "snapshot" });
@@ -191,14 +220,14 @@ describe("runSnapshot, file form", () => {
     const collected = collectingIo();
     expect(await run(api, cfg, collected.io)).toBe(1);
     expect(collected.outputs.result).toBe("failed");
-    expect(collected.lines[0]).toEqual({
-      level: "error",
-      line: expect.stringMatching(
-        new RegExp(
-          `^cannot write the snapshot to ${cfg.snapshotFile.replaceAll(".", "\\.")}: .*(EEXIST|ENOTDIR).*\\. Check that the "snapshot-file" input names a writable path$`,
-        ),
-      ),
-    });
+    const [first] = collected.lines;
+    expect(first?.level).toBe("error");
+    // The path is compared as text, never as a pattern; the OS error code sits between.
+    expect(first?.line.startsWith(`cannot write the snapshot to ${cfg.snapshotFile}: `)).toBe(true);
+    expect(first?.line).toMatch(/E(EXIST|NOTDIR)/);
+    expect(
+      first?.line.endsWith('. Check that the "snapshot-file" input names a writable path'),
+    ).toBe(true);
   });
 });
 
@@ -265,7 +294,7 @@ describe("runSnapshot, dir form", () => {
     expect(await run(api, cfg, collected.io)).toBe(0);
     const fileA = join(cfg.snapshotDir, "o", "a.yml");
     const fileB = join(cfg.snapshotDir, "o", "b.yml");
-    expect(readFileSync(fileA, "utf8")).toMatch(HEADER("o/a"));
+    expect(hasSnapshotHeader(readFileSync(fileA, "utf8"), "o/a")).toBe(true);
     expect(parseYaml(readFileSync(fileA, "utf8"))).toEqual(doc(BUG));
     expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
     expect(api.mutations()).toEqual([]);

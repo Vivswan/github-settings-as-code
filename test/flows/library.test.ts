@@ -172,16 +172,19 @@ describe("snapshotRepository and snapshotRepositories", () => {
         { key: "labels", status: "snapshot", detail: [] },
         { key: "actions_secrets", status: "snapshot", detail: [SECRET_NOTE] },
       ],
-      yaml: expect.stringMatching(
-        new RegExp(
-          `^# yaml-language-server: \\$schema=${SNAPSHOT_SCHEMA_URL.replaceAll(".", "\\.")}\n# Snapshot of o/r taken \\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z\n# actions_secrets: ${SECRET_NOTE.replaceAll("[", "\\[").replaceAll("]", "\\]")}\nlabels:\n`,
-        ),
-      ),
-      log: [{ level: "notice", line: `actions_secrets: ${SECRET_NOTE}` }],
+      yaml: expect.any(String),
+      log: [{ level: "notice", line: SECRET_NOTE }],
     });
     if (report.yaml === undefined) {
       throw new Error("a snapshot result carries its file");
     }
+    // The header, line by line and by equality: the pin is a URL, never a pattern.
+    const [pin, dated, note, first] = report.yaml.split("\n");
+    expect(pin).toBe(`# yaml-language-server: $schema=${SNAPSHOT_SCHEMA_URL}`);
+    expect(dated).toMatch(
+      /^# Snapshot of o\/r taken \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/,
+    );
+    expect([note, first]).toEqual([`# ${SECRET_NOTE}`, "labels:"]);
     expect(stringifyYaml(parseYamlDoc(report.yaml))).toBe(stringifyYaml(report.settings));
   });
 
