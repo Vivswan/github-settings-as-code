@@ -35,7 +35,10 @@ coverage:
       Actions are on), and selected_actions with no allowed_actions infers allowed_actions:
       selected. RISK: a key GitHub adds that belongs on a NEW sub-endpoint gets routed to the base
       PUT where GitHub ignores it; audit the routing whenever GitHub adds a permissions
-      sub-endpoint.
+      sub-endpoint. Snapshot reads every endpoint back onto its key (the allowlist only under the
+      selected policy; the read-only fields each GET adds, like maximum_allowed_days, fall away); a
+      sub-endpoint the token cannot read, such as the OIDC template under a token without the
+      Actions permission, is noted and left out rather than failing the section.
 schema:
   SettingsFile.actions: GitHub Actions permissions for the repository.
   ActionsConfig: GitHub Actions settings, routed to the right endpoint by key.

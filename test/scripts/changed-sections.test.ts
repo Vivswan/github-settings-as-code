@@ -116,9 +116,12 @@ describe("changed-sections derived fan-out", () => {
       // The snapshot projection and knobbed wrapper: every section with a snapshot() except
       // workflows and teams, whose two-field entries are spelled by hand.
       "snapshot-helpers.ts": inKeyOrder(
+        "repository",
         "labels",
+        "rulesets",
         "environments",
         "autolinks",
+        "actions",
         "actions_secrets",
         "dependabot_secrets",
         "codespaces_secrets",
