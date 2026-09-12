@@ -1,7 +1,6 @@
 /**
- * `workflows:` section - enable/disable existing workflows by path. A
- * declared workflow whose file does not exist is skipped loudly, never
- * created (workflow files are code, not settings).
+ * `workflows:` section: enable/disable existing workflows by path. A declared workflow whose file
+ * does not exist is skipped loudly, never created: workflow files are code, not settings.
  */
 
 import { z } from "zod";
@@ -13,7 +12,6 @@ import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { WorkflowsConfig } from "./schema.js";
 
-/** The fields of a live workflow this section reads; extras ride along. */
 const LiveWorkflow = z.looseObject({
   id: z.number(),
   path: z.string(),
@@ -44,16 +42,14 @@ export const workflowsSection = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(WorkflowsConfig),
-  // Closed surface: the enable/disable PUTs carry no body at all, so an
-  // extra key here can only be a typo that would silently do nothing.
+  // The enable/disable PUTs carry no body at all, so an extra key can only be a typo that would silently do nothing.
   closedSurface: {
     known: { path: true, state: true },
     describe: (w) => w.path,
     consequence: "the enable/disable calls send no payload, so the key would silently do nothing",
   },
   async plan(ctx, desired) {
-    // Two entries naming the same file (e.g. "ci.yml" and
-    // ".github/workflows/ci.yml") would fight each other on every run.
+    // Two entries naming the same file ("ci.yml" and ".github/workflows/ci.yml") would fight each other on every run.
     rejectDuplicates(
       this,
       desired,
@@ -75,14 +71,12 @@ export const workflowsSection = {
         (w) => w.path === workflow.path || w.path === `.github/workflows/${workflow.path}`,
       );
       if (!match) {
-        // Nothing to plan: workflow files are code, so no operation can
-        // create one. Check reports the drift; apply surfaces it as a note.
+        // No operation can create a workflow file.
         plan.drift.push(
           `workflows[${workflow.path}]: declared in the settings file but no workflow with that path exists on the repo, so apply skips it - create the workflow file, or remove it from the workflows section`,
         );
         continue;
       }
-      // Every disabled_* live state counts as "disabled".
       const liveState = match.state === "active" ? "active" : "disabled";
       if (liveState === workflow.state) {
         continue;

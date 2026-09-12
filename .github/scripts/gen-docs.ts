@@ -1,8 +1,3 @@
-// Emits the generated regions of COVERAGE.md, the sections, inputs, and architecture reference
-// pages, and the two pages carrying the token-form link (README.md and the getting-started
-// guide), each between `<!-- BEGIN/END GENERATED: <name> -->` markers (build:docs): the Sections
-// table, the `result` list, the token-form link definition, COVERAGE's whole body, and the module
-// map rendered from architecture.yml. Authored prose from the docs registry + coverage-data.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_RESULTS, type RepoResult } from "../../src/engine/orchestrate.js";
@@ -33,14 +28,12 @@ const COVERAGE_PATH = "COVERAGE.md";
 /** The repository these pages document; the token form's name and description derive from it. */
 const REPO_SLUG = "Vivswan/github-settings-as-code";
 
-/** The Undeclared default column's display form of each undeclaredDefault. */
 const UNDECLARED_DEFAULT_DISPLAY: Record<UndeclaredPolicy | "untouched", string> = {
   delete: "deleted (settable)",
   keep: "kept (settable)",
   untouched: "untouched",
 };
 
-/** The section declarations the Sections table reads. */
 export type SectionsTableRow = Pick<
   SectionMeta,
   "key" | "permission" | "grantCaveat" | "undeclaredDefault"
@@ -53,14 +46,12 @@ const GRANT_CLAUSE =
 /** A grant token inside a caveat: `"Label" (read and write)` or `"Label" (read)`. */
 const CAVEAT_GRANT_TOKEN = /"([^"]+)" \((read and write|read)\)/g;
 
-/** The table's short access level: "write" for read-and-write, else "read". */
 function shortLevel(level: string): "read" | "write" {
   return level === "read and write" ? "write" : "read";
 }
 
-// The PAT cell paraphrased from sectionGrant(): `Label: level` per clause (org clauses gain
-// "(org permission)"), then a caveat only if it names extra grants. Every quoted token must be
-// consumed, so a reworded grant or caveat throws instead of dropping out of the cell.
+// The PAT cell paraphrases sectionGrant(). Every quoted token must be consumed, so a reworded grant or caveat throws
+// instead of dropping out of the cell.
 export function renderPatCell(grant: string): string {
   const semicolon = grant.indexOf("; ");
   const advice = semicolon === -1 ? grant : grant.slice(0, semicolon);
@@ -109,11 +100,9 @@ function cell(text: string, where: string): string {
   return text;
 }
 
-/** The Sections table's header and rule lines, as rendered and as the region shape expects them. */
 const TABLE_HEADER =
   "| Section | Endpoints | PAT permission | Undeclared default | Notes |\n|---|---|---|---|---|";
 
-/** The Sections table, one row per section in the given order; a section without docs throws. */
 export function renderSectionsTable(
   sections: readonly SectionsTableRow[],
   docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
@@ -160,19 +149,14 @@ function bullet(text: string, where: string): string {
   return `- ${text}`;
 }
 
-/** The COVERAGE page's section headings, as rendered and as the region shape expects them. */
 const SUPPORTED_HEADING = "## Supported";
 const GAPS_HEADING = "## Repo-scoped gaps (not built yet)";
 const NO_API_HEADING = "## No public API (cannot be built)";
 const OUT_OF_SCOPE_HEADING = "## Out of scope (user or org account surface)";
 
-/** The COVERAGE tables' header and rule lines. */
 const SUPPORTED_HEADER = "| Area | Section | Notes |\n|---|---|---|";
 const GAPS_HEADER = "| Area | Endpoints | Why it matters |\n|---|---|---|";
 
-// The body of COVERAGE.md below its title: the Supported table (each section's rows, sections in
-// the data's display order; the Section cell is the key plus the row's `keys` in parentheses),
-// then the authored gaps table or its empty-state note, no-public-API list, and out-of-scope list.
 export function renderCoverage(
   sections: ReadonlyArray<Pick<SectionMeta, "key">>,
   docs: Readonly<Record<string, Pick<SectionDocs, "coverage">>>,
@@ -244,7 +228,6 @@ export function renderCoverage(
   ].join("\n");
 }
 
-/** Where each `result` value can appear, in display order; total over RepoResult. */
 const RESULT_DISPLAY: Record<RepoResult, "any mode" | "multi-repo only"> = {
   applied: "any mode",
   partial: "any mode",
@@ -254,13 +237,11 @@ const RESULT_DISPLAY: Record<RepoResult, "any mode" | "multi-repo only"> = {
   skipped: "multi-repo only",
 };
 
-/** The outputs enumeration's fixed phrases, as rendered and as the region shape expects them. */
 const WORST_OF = "; worst-of across targets in multi-repo mode";
 const CAN_ALSO_APPEAR = " can also appear";
 /** The merge-mode result, a value outside RepoResult, closes the enumeration. */
 const MERGE_ONLY = `; \`${MERGE_RESULT}\` in mode: merge`;
 
-/** The `result` output's value enumeration: the any-mode values, the multi-repo-only ones, then the merge result. */
 export function renderOutputsList(results: readonly RepoResult[]): string {
   const ordered = (Object.keys(RESULT_DISPLAY) as RepoResult[]).filter((value) =>
     results.includes(value),
@@ -276,14 +257,10 @@ export function renderOutputsList(results: readonly RepoResult[]): string {
   return `${withMulti}${MERGE_ONLY}`;
 }
 
-/** A section operation tagged with its section, as patFormParameters reads it. */
 export type TaggedOperation = Pick<SectionOperation, "role" | "grade" | "permission"> & {
   readonly section: string;
 };
 
-// The token form's permission parameters in `slugs` order: write if any operation naming the
-// resource is write-gated, else read. A null slug is skipped only while every operation naming it
-// also names a resource the form grants; otherwise this throws.
 export function patFormParameters(
   operations: readonly TaggedOperation[],
   slugs: Readonly<Record<string, string | null>>,
@@ -314,7 +291,6 @@ export function patFormParameters(
   return parameters;
 }
 
-/** The pre-filled fine-grained-token form link for the given name, description, and permission parameters. */
 export function renderPatFormUrl(
   form: { readonly name: string; readonly description: string },
   parameters: ReadonlyArray<readonly [slug: string, level: "read" | "write"]>,
@@ -330,7 +306,6 @@ export function renderPatFormUrl(
 /** The reference label a page's token-form link resolves through; the generated definition carries it. */
 const PAT_FORM_LABEL = "pat-form";
 
-/** The pre-filled token-form link for this repository over every section operation's permission. */
 function patFormUrl(): string {
   const operations = SECTIONS.flatMap((section) =>
     sectionOperations(section).map((operation) => ({ ...operation, section: section.key })),
@@ -342,9 +317,8 @@ function patFormUrl(): string {
   );
 }
 
-// The Sections table as region `name` under `heading`, and the shape of this generator's own
-// output for it (or an empty body), built from the renderer constants, so a marker moved over
-// authored prose or another table fails instead of erasing it.
+// The body shape is this generator's own output (or an empty body), built from the renderer constants, so a marker
+// moved over authored prose or another table fails instead of erasing it.
 function sectionsTableRegion(name: string, heading: string): GeneratedRegion {
   return {
     name,
@@ -356,7 +330,6 @@ function sectionsTableRegion(name: string, heading: string): GeneratedRegion {
   };
 }
 
-/** The `result` value enumeration as inline region `name` under `heading`. */
 function outputsListRegion(name: string, heading: string): GeneratedRegion {
   return {
     name,
@@ -370,7 +343,7 @@ function outputsListRegion(name: string, heading: string): GeneratedRegion {
   };
 }
 
-/** The token-form link definition as tail region `name`: the page's `[...][pat-form]` reference resolves through it. */
+/** The page's `[...][pat-form]` reference resolves through this tail definition. */
 function patUrlRegion(name: string): GeneratedRegion {
   return {
     name,
@@ -380,8 +353,7 @@ function patUrlRegion(name: string): GeneratedRegion {
   };
 }
 
-// The module map: a mermaid fence rendered from architecture.yml's layers and edges (the lint
-// keeps that declaration equal to the tree), as region `name` under `heading`.
+// Rendered from architecture.yml, which the lint keeps equal to the tree.
 function architectureMapRegion(name: string, heading: string): GeneratedRegion {
   return {
     name,
@@ -392,8 +364,6 @@ function architectureMapRegion(name: string, heading: string): GeneratedRegion {
   };
 }
 
-// Every page this generator writes besides COVERAGE.md, keyed by path: the reference tables in
-// their homes, and the token-form link definition closing the README and the getting-started guide.
 export const PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
   "README.md": [patUrlRegion("readme-pat-url")],
   "docs/start/getting-started.md": [patUrlRegion("pat-url")],
@@ -404,19 +374,17 @@ export const PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> 
   ],
 };
 
-// The page at `path` with its regions checked for placement, then regenerated. The result must
-// reference the token-form label exactly as often as it defines it (full, collapsed, or shortcut
-// form), and at most once: a renamed reference, a second one, or a stale definition ahead of the
-// generated one (it wins) would leave the page wrong while regeneration stays a no-op.
+// The result must reference the token-form label exactly as often as it defines it, at most once: a renamed
+// reference, a second one, or a stale definition ahead of the generated one (it wins) would leave the page wrong
+// while regeneration stays a no-op.
 export function renderPage(path: string, text: string): string {
   const regions = PAGE_REGIONS[path];
   if (regions === undefined) {
     throw new Error(`gen-docs: no generated regions are registered for ${path}`);
   }
   const out = regenerateRegions(text, regions, path);
-  // CommonMark trims and case-folds labels and lets the first definition win, so every spelling
-  // counts: a mention opening a line and ending in ":" is a definition, any other bracketed
-  // mention is a reference.
+  // CommonMark trims and case-folds labels and lets the first definition win, so every spelling counts: a mention
+  // opening a line and ending in ":" is a definition, any other bracketed mention is a reference.
   const mentions = [...out.matchAll(/^ {0,3}\[([^\]]+)\]:|\[([^\]]+)\]/gm)].filter(
     (match) => (match[1] ?? match[2] ?? "").trim().toLowerCase() === PAT_FORM_LABEL,
   );
@@ -430,9 +398,7 @@ export function renderPage(path: string, text: string): string {
   return out;
 }
 
-// The region shape's pieces, each exactly what its validator lets through: paragraph()/bullet() text
-// (non-blank, one line), cell() text (also no pipe), codeSpan() text (also no backtick). nonBlank is
-// unambiguous on purpose: overlapping parts would backtrack exponentially over a 38-row table.
+// nonBlank is unambiguous on purpose: overlapping parts would backtrack exponentially over a 38-row table.
 const nonBlank = (excluded: string): string =>
   String.raw`[ \t]*[^${excluded}\s][^${excluded}\r\n]*`;
 const PROSE_LINE = `${nonBlank("")}\n`;
@@ -442,9 +408,8 @@ const GAP_ROWS = String.raw`(?:\| ${CELL} \| ${CELL} \| ${CELL} \|\n)+`;
 const GAPS_BODY = String.raw`(?:${PROSE_LINE}\n${escapeRe(GAPS_HEADER)}\n|${escapeRe(GAPS_HEADER)}\n${GAP_ROWS})`;
 const BULLETS = `(?:- ${PROSE_LINE})+`;
 
-// The COVERAGE page's one region closes the file and holds everything below the title: the intro,
-// then the four sections in order (or an empty body between fresh markers), so a marker moved over
-// authored prose fails instead of erasing it.
+// The one region closes the file and holds everything below the title (or an empty body between fresh markers), so
+// a marker moved over authored prose fails instead of erasing it.
 const COVERAGE_REGIONS: readonly GeneratedRegion[] = [
   {
     name: "coverage",
@@ -458,11 +423,10 @@ const COVERAGE_REGIONS: readonly GeneratedRegion[] = [
   },
 ];
 
-/** The title line the COVERAGE region must directly follow. */
 const COVERAGE_TITLE = "# Coverage\n\n";
 
-// COVERAGE.md with its region regenerated. Beyond the shared placement checks, the page is exactly
-// the title, the region, and one final newline, or prose left outside could drift from the generator's.
+// Beyond the shared placement checks, the page must be exactly the title, the region, and one final newline, or
+// prose left outside could drift from the generator's.
 export function renderCoverageFile(coverage: string): string {
   const { begin, end } = regionBounds(coverage, "coverage", "html");
   if (coverage.slice(0, begin[0]) !== COVERAGE_TITLE || coverage.slice(end[1]) !== "\n") {

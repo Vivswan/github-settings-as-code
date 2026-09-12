@@ -1,9 +1,3 @@
-/**
- * actions_secrets tests: existence planning, the one cannot-verify note, the
- * keep/delete knob, the sealed PUT per declared secret, and no plaintext
- * anywhere but inside the sealed payload the executor sends.
- */
-
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { runForRepo, validateSettingsDoc } from "../../../src/engine/orchestrate.js";
@@ -147,7 +141,6 @@ describe("actions_secrets planning", () => {
       notes: [CANNOT_VERIFY],
       drift: [],
     });
-    // Planning reads the list and the sealing key, and writes nothing.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       "GET /repos/o/r/actions/secrets?per_page=100&page=1",
       "GET /repos/o/r/actions/secrets/public-key",
@@ -161,8 +154,7 @@ describe("actions_secrets planning", () => {
       { name: "A", value: "$A" },
       { name: "B", value: "$B" },
     ]);
-    // The references live inside the thunks, and nothing at plan time could
-    // have resolved one: the resolver is first consulted when a thunk runs.
+    // Nothing at plan time could have resolved a reference: the resolver is first consulted when a thunk runs.
     const exec = tools({ $A: "value-a", $B: "value-b" });
     const payloads = result.ops.map((op) =>
       typeof op.payload === "function" ? sealedPayload({ payload: op.payload(exec) }) : null,
@@ -229,8 +221,7 @@ describe("actions_secrets planning", () => {
     expect(api.calls).toEqual([]);
   });
 
-  // orchestrate.ts validates references through engine/secret-refs.ts (tested in
-  // test/engine/secret-refs.test.ts); the section only extracts and looks up values.
+  // Reference validation lives in engine/secret-refs.ts (test/engine/secret-refs.test.ts); the section only extracts and looks up values.
 });
 
 describe("actions_secrets execution", () => {
@@ -255,8 +246,6 @@ describe("actions_secrets execution", () => {
       "/repos/o/r/actions/secrets/EXISTING",
       "/repos/o/r/actions/secrets/BRAND_NEW",
     ]);
-    // The body is exactly {encrypted_value, key_id}, and the sealed value
-    // unseals back to the resolved plaintext (the client-side crypto proof).
     for (const [index, expected] of [
       [0, "value-a"],
       [1, "value-b"],
@@ -269,9 +258,7 @@ describe("actions_secrets execution", () => {
   });
 
   test("the sealed PUT recurs on every plan by declaration; deletions and creates converge", async () => {
-    // No compare is possible (values cannot be read back), and the rewrite is
-    // what propagates a rotated source value: the proof requires the PUT to
-    // fire on every pass and everything else to settle.
+    // No compare is possible (values cannot be read back), and the rewrite is what propagates a rotated source value, so the PUT fires on every pass.
     const api = liveRepo(["ROTATED", "STALE"]);
     const { first, second, changes } = await provePlanIdempotent(
       actionsSecretsSection,
@@ -282,8 +269,7 @@ describe("actions_secrets execution", () => {
     expect(changes).toEqual(['updated secret "ROTATED"', 'DELETED undeclared secret "STALE"']);
     expect(first.ops.map((op) => op.role)).toEqual(["put", "remove"]);
     expect(second.ops.map((op) => op.role)).toEqual(["put"]);
-    // Two executions: the first pass writes and purges, the converged pass
-    // re-seals the declared secret and nothing else.
+    // provePlanIdempotent executes the converged plan too, hence the second PUT.
     expect(api.writes).toEqual([
       "PUT /repos/o/r/actions/secrets/ROTATED",
       "DELETE /repos/o/r/actions/secrets/STALE",
@@ -307,9 +293,8 @@ describe("actions_secrets execution", () => {
     expect(kept.plan.notes.join("\n")).toContain("unrecoverable");
     expect(api.mutations()).toEqual([]);
 
-    // The purge form: nothing declared means no references, so the engine
-    // provisions a resolver that refuses every lookup - deletion must never
-    // touch it, and there is nothing to seal, so no public key is read.
+    // Nothing declared means no references, so the engine provisions a resolver that refuses every lookup; deletion must never touch it, and nothing
+    // needs sealing.
     const api2 = new MockApi({ [LIST]: listOf("STALE") }).allowMutations(
       "DELETE /repos/o/r/actions/secrets/STALE",
     );
@@ -342,8 +327,6 @@ describe("actions_secrets execution", () => {
     expect(rendered).not.toContain(fragment);
     const put = api.mutations().find((call) => call.method === "PUT");
     expect(put?.path).toBe("/repos/o/r/actions/secrets/EDGY");
-    // Only the SEALED form travels; it carries no fragment of the plaintext
-    // and unseals back to it exactly (round-trip fidelity, hostile chars kept).
     const payload = sealedPayload(put);
     expect(payload.encrypted_value).not.toContain(fragment);
     expect(unsealSecretValue(payload.encrypted_value)).toBe(hostile);
@@ -385,9 +368,7 @@ describe("actions_secrets execution", () => {
   });
 
   test("the engine masks every plaintext before the first sealed PUT leaves the client", async () => {
-    // The plan path's twin of the orchestrator's masking-order proof: the
-    // apply context (and its masks) exists before any section is planned,
-    // let alone executed.
+    // The masks are registered after the read-only preflight and before the first mutation; test/engine holds the orchestrator's twin of this proof.
     const api = new MockApi({ [LIST]: listOf(), [PUBLIC_KEY]: KEY_ROUTE }).allowMutations(
       "PUT /repos/o/r/actions/secrets/DEPLOY_TOKEN",
     );
@@ -444,8 +425,7 @@ describe("actions_secrets sealing key", () => {
       /no usable \{key_id, key\} pair \(key_id is missing\)/,
     );
 
-    // An empty key_id is as unusable as a missing one: GitHub requires it in
-    // the PUT body to route the ciphertext to the right key.
+    // GitHub requires key_id in the PUT body to route the ciphertext, so an empty one is as unusable as a missing one.
     const emptyId = new MockApi({
       [LIST]: listOf(),
       [PUBLIC_KEY]: { data: { key_id: "", key: MOCK_SECRETS_PUBLIC_KEY } },
@@ -473,9 +453,8 @@ describe("actions_secrets contract", () => {
   });
 
   test("a planned operation names a declared write role; only the sealed PUT may go without drift", () => {
-    // Compile-time only: the plans are never executed. Each rejected shape
-    // is built first and assigned on one line, so the directive anchors to
-    // the assignment whichever property the compiler blames.
+    // Compile-time only. Each rejected shape is built first and assigned on one line, so the @ts-expect-error anchors to the assignment whichever
+    // property the compiler blames.
     type Op = PlannedOp<typeof actionsSecretsSection.endpoints>;
     const sealed: Op = {
       role: "put",

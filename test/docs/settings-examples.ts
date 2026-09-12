@@ -1,7 +1,5 @@
 /**
- * The one validation body every documented settings example runs through:
- * full document validation plus the repository special-key sweep. Shared by
- * the README and guides example tests, which keep their own block discovery.
+ * The one validation body every documented settings example runs through, so the README and guides tests cannot drift on what "valid" means.
  */
 
 import { expect } from "bun:test";

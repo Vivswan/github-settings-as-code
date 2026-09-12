@@ -1,11 +1,6 @@
 /**
- * The architecture lint's contract: the tree's cross-layer imports are exactly
- * the edges architecture.yml declares (the verdict `bun run lint:arch` prints,
- * so CI's test job carries the gate), and each way the declaration can be
- * wrong is seen failing: a forbidden edge names both files, a stale allowance
- * names the edge, a file outside every layer is reported. Every import form
- * the scanner must read has a control, since a missed form would let a
- * forbidden import pass.
+ * The verdict `bun run lint:arch` prints, so CI's test job carries the gate; every import form the scanner must read has a control, since a missed
+ * form would let a forbidden import pass.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -84,8 +79,7 @@ describe("importSpecifiers", () => {
   });
 
   test("a computed dynamic import throws rather than dropping the edge", () => {
-    // The whole message: the scanner is shared with changed-sections, so under
-    // lint:arch it must not blame that tool.
+    // The whole message: the scanner is shared with changed-sections, so under lint:arch it must not blame that tool.
     expect(() => importSpecifiers('const m = "./a.js"; await import(m);', "x.ts")).toThrow(
       new Error(
         "x.ts:1 loads a module through a computed specifier, which the import graph cannot follow - use a string literal",

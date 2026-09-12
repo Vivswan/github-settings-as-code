@@ -57,7 +57,6 @@ function captureIo(): {
 const redacted = (target: TargetOutcome | undefined): boolean =>
   target !== undefined && isPrivate(target.detail);
 
-/** The run's targets; a fatal problem fails the test with its rendered line. */
 async function runTargets(...args: Parameters<typeof runMulti>): Promise<TargetOutcome[]> {
   return (await runMulti(...args)).match(
     (targets) => targets,
@@ -67,7 +66,6 @@ async function runTargets(...args: Parameters<typeof runMulti>): Promise<TargetO
   );
 }
 
-/** The fatal problem a run ends in before any target executes. */
 async function runFatal(...args: Parameters<typeof runMulti>): Promise<Problem> {
   return (await runMulti(...args)).match(
     (targets) => {
@@ -88,8 +86,7 @@ function cfg(overrides: Partial<Parameters<typeof runMulti>[1]> = {}) {
     sections: SectionSelection.ALL,
     discoveryFilters: DEFAULT_DISCOVERY_FILTERS,
     discoveryFiltersSet: [],
-    // Existing scenarios predate redaction and assert on raw slugs; default
-    // to "show" so they stay byte-identical. Redaction tests override this.
+    // Default "show": the non-redaction scenarios assert on raw slugs.
     privateRepos: "show" as const,
     privateReport: "none" as const,
     reportPublicKey: "",
@@ -100,15 +97,9 @@ function cfg(overrides: Partial<Parameters<typeof runMulti>[1]> = {}) {
 }
 
 describe("runMulti", () => {
-  // Secret provenance is one source per DOCUMENT, decided where the document
-  // is chosen. The same $NAME webhook reference lands in each of the three
-  // document kinds a target can run; check mode reads no environment, so the
-  // outcome is purely the provenance verdict: a target-authored document is
-  // refused (failed, nothing called), an operator-authored one is admitted
-  // and diffed (drift against an empty live hook list).
+  // Secret provenance is decided where the document is chosen; check mode reads no environment, so the outcome is purely the provenance verdict.
   const HOOK_WITH_REF =
     "webhooks:\n  - config:\n      url: https://x.test/h\n      secret: $OPERATOR_SECRET\n";
-  /** Run one target with `layout` on disk in a scratch dir, removed on every path. */
   async function withScratch<T>(
     layout: Record<string, string>,
     body: (dir: string) => Promise<T>,
@@ -185,9 +176,7 @@ describe("runMulti", () => {
         data: "repository:\n  has_wiki: false\n",
       },
       "PATCH /repos/o/b": { error: { status: 500, message: "boom", body: "" } },
-      // o/c: repo visible with readable contents, but has no settings file
-      // (contents GET unrouted -> 404; the default branch ref read proves
-      // Contents access)
+      // o/c: no settings file (contents GET unrouted -> 404); the default branch ref read proves Contents access
       "GET /repos/o/c": { data: { default_branch: "main" } },
       "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
     }).allowMutations("PATCH /repos/o/a");
@@ -228,10 +217,7 @@ describe("runMulti", () => {
   });
 
   test("defaults-file applies whole to a remote target without a settings file", async () => {
-    // o/c has no settings.yml (the contents GET is unrouted -> 404; the
-    // default branch ref read proves Contents access), so the defaults
-    // document runs as its settings: the live repo drifts on has_projects,
-    // the defaults' one key.
+    // o/c has no settings.yml (contents GET unrouted -> 404; the ref read proves Contents access), so the defaults document runs as its settings.
     const api = new MockApi({
       "GET /repos/o/c": { data: { default_branch: "main", has_projects: true } },
       "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
@@ -252,8 +238,7 @@ describe("runMulti", () => {
   });
 
   test("a target with its own file ignores the defaults", async () => {
-    // The live repo drifts on BOTH keys; only the target's own has_wiki is
-    // PATCHed, so the defaults' has_projects never reached this target.
+    // The live repo drifts on BOTH keys, so a PATCH carrying only has_wiki proves the defaults' has_projects never reached this target.
     const api = new MockApi({
       "GET /repos/o/a": { data: { has_wiki: true, has_projects: true } },
       "GET /repos/o/a/contents/.github/settings.yml": {
@@ -288,10 +273,7 @@ describe("runMulti", () => {
   });
 
   test("central per-repo files are applied as written; the defaults never reach them", async () => {
-    // Both live repos drift on has_wiki and has_projects. viv/api declares
-    // has_wiki only and octo/web has_projects only, so each PATCH carries
-    // exactly its own file's key - the defaults' has_projects is never merged
-    // into viv/api.
+    // Both live repos drift on both keys, so each PATCH carrying exactly its own file's key proves the defaults never merged in.
     const api = new MockApi({
       "GET /repos/viv/api": { data: { has_wiki: true, has_projects: true } },
       "GET /repos/octo/web": { data: { has_wiki: true, has_projects: true } },
@@ -331,8 +313,7 @@ describe("runMulti", () => {
   });
 
   test("a token-invisible repo fails loudly instead of skipping", async () => {
-    // No routes at all: the contents GET 404s, and so does the repo probe,
-    // which is how a fine-grained token reports lost access.
+    // No routes at all: the contents GET and the repo probe both 404, which is how a fine-grained token reports lost access.
     const api = new MockApi({});
     const { io, annotations } = captureIo();
     const targets = await runTargets(api, cfg({ reposInput: "o/x" }), io);
@@ -341,10 +322,8 @@ describe("runMulti", () => {
   });
 
   test("a Contents-denied repo fails naming the grant; it neither skips nor receives the defaults", async () => {
-    // The contents GET and the default branch ref read are both unrouted
-    // (404, the fine-grained denial), while the repo probe succeeds: the file
-    // cannot be proven absent, so the target fails - even with a defaults
-    // file in hand, nothing is applied to it.
+    // The contents GET and the ref read 404 (the fine-grained denial) while the repo probe succeeds: the file cannot be proven absent, so nothing is
+    // applied even with a defaults file in hand.
     const api = new MockApi({
       "GET /repos/o/x": { data: { default_branch: "main", has_projects: true } },
     });
@@ -377,9 +356,8 @@ describe("runMulti", () => {
       filters: ["forks"],
       targets: "repos-dir",
     });
-    // Finding D: central-resolution warnings buffered before this fatal return
-    // must still be emitted, not silently swallowed. The fixture's README.md
-    // (non-yaml) and octo/deep/ (too deep) each produce an "ignoring" warning.
+    // Central-resolution warnings buffered before this fatal return must still be emitted; the fixture's README.md (non-yaml) and octo/deep/ (too
+    // deep) each produce one.
     expect(annotations.some((a) => a.startsWith("warning: ignoring "))).toBe(true);
   });
 
@@ -488,22 +466,17 @@ describe("runMulti redaction (private-repos: redact)", () => {
       cfg({ reposInput: "o/pub, o/priv", mode: "check", privateRepos: "redact" }),
       io,
     );
-    // the private slug is masked, and the mask is recorded before any emission
     expect(masks).toContain("o/priv");
     const firstMask = events.indexOf("mask: o/priv");
     const firstEmit = events.findIndex((e) => e.startsWith("annotate") || e.startsWith("log"));
     expect(firstMask).toBeGreaterThanOrEqual(0);
     expect(firstMask).toBeLessThan(firstEmit);
-    // no annotation or log carries the private slug or its live values
     const all = [...annotations, ...logs].join("\n");
     expect(all).not.toContain("o/priv");
     expect(all).not.toContain("SECRET-live-desc");
     expect(all).not.toContain("SECRET-want-desc");
-    // the placeholder is what surfaces instead
     expect(annotations.some((a) => a.includes("private repository #1"))).toBe(true);
-    // the public target is untouched
     expect(all).toContain("o/pub");
-    // internally the full outcome is kept, sealed behind the placeholder
     const priv = targets.find((t) => t.display === "private repository #1");
     expect(redacted(priv)).toBe(true);
     expect(priv?.result).toBe("drift");
@@ -525,11 +498,10 @@ describe("runMulti redaction (private-repos: redact)", () => {
       cfg({ reposInput: "o/pub, o/priv", mode: "check", privateRepos: "show" }),
       showRun.io,
     );
-    // under show, nothing is masked and the private slug appears verbatim
     expect(showRun.masks).toEqual([]);
     const all = [...showRun.annotations, ...showRun.logs].join("\n");
     expect(all).toContain("o/priv");
-    // and no visibility probe was issued (the o/priv GET happens once, in the engine)
+    // No visibility probe under show: the one o/priv GET is the engine's.
     const privGets = showApi.calls.filter((c) => c.method === "GET" && c.path === "/repos/o/priv");
     expect(privGets).toHaveLength(1);
   });
@@ -579,8 +551,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
       cfg({ reposInput: "*", mode: "check", privateRepos: "redact" }),
       io,
     );
-    // o/priv is redacted from the discovery-supplied visibility, with no extra
-    // probe: its only GET is the engine's repository read.
+    // No extra probe: o/priv's only GET is the engine's repository read.
     const privGets = api.calls.filter((c) => c.method === "GET" && c.path === "/repos/o/priv");
     expect(privGets).toHaveLength(1);
     expect(targets.map((t) => [t.display, redacted(t)])).toEqual([
@@ -591,9 +562,7 @@ describe("runMulti redaction (private-repos: redact)", () => {
   });
 
   test("a probe error fails closed: an unknown-visibility target is redacted", async () => {
-    // The repo probe 404s (no route), so visibility is unknown -> redacted.
-    // The contents read then also 404s, so the target fails; the failure line
-    // must be generic, never naming the slug.
+    // The repo probe 404s, so visibility is unknown and redacted; the contents read then 404s too, so the failure line must stay generic.
     const api = new MockApi({});
     const { io, annotations } = captureIo();
     const targets = await runTargets(
@@ -640,10 +609,8 @@ describe("runMulti private-report: issue wiring", () => {
     `GET /repos/${slug}/issues?state=all&labels=${MARKER}&per_page=100`;
 
   /**
-   * A private drifting target whose report issue already exists (found by the
-   * marker-label list), so delivery is a single PATCH we can inspect. The
-   * settings.yml drift carries a CANARY the report body must contain and the
-   * public surfaces must not.
+   * A private drifting target whose report issue already exists, so delivery is a single PATCH; the drift carries a CANARY the report body must
+   * contain and the public surfaces must not.
    */
   function reportApi(
     overrides: Record<
@@ -681,19 +648,16 @@ describe("runMulti private-report: issue wiring", () => {
       io,
     );
     expect(targets[0]?.result).toBe("drift");
-    // the report issue was PATCHed (found by marker label -> one request)
     const patch = api.calls.find(
       (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
     );
     const payload = (patch?.payload ?? {}) as { body?: unknown; state?: unknown };
     const body = String(payload.body ?? "");
-    // the report body carries the full unredacted detail and the transcript
     expect(body).toContain("CANARY-live");
     expect(body).toContain("o/priv");
     expect(body).toContain("## Transcript");
-    // a check-mode drift needs attention -> the issue is opened
+    // A check-mode drift needs attention, so the issue is opened.
     expect(payload.state).toBe("open");
-    // and NONE of that leaks to the public surfaces
     const publicText = [...annotations, ...logs].join("\n");
     expect(publicText).not.toContain("CANARY-live");
     expect(publicText).not.toContain("o/priv");
@@ -722,7 +686,6 @@ describe("runMulti private-report: issue wiring", () => {
       (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
     );
     const body = String(((patch?.payload ?? {}) as { body?: unknown }).body ?? "");
-    // the injection notice is in the report transcript, not the public log
     expect(body).toContain(`added the "${MARKER}" marker label`);
     expect(annotations.some((a) => a.includes(MARKER))).toBe(false);
   });
@@ -745,9 +708,7 @@ describe("runMulti private-report: issue wiring", () => {
       }),
       io,
     );
-    // the target result is unchanged by the delivery failure
     expect(targets[0]?.result).toBe("drift");
-    // one safe warning: placeholder + HTTP status only, no slug, no message
     const warning = annotations.find((a) => a.includes("could not deliver the private report"));
     expect(warning).toBeDefined();
     expect(warning).toContain("private repository #1");
@@ -757,7 +718,6 @@ describe("runMulti private-report: issue wiring", () => {
   });
 
   test("no report is delivered under channel none, policy show, or for a non-redacted target", async () => {
-    // channel none: even a redacted target gets no issue traffic
     const none = reportApi();
     await runMulti(
       none,
@@ -767,8 +727,7 @@ describe("runMulti private-report: issue wiring", () => {
     expect(none.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(none.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
 
-    // policy show: nothing is redacted, so the report never runs (config would
-    // reject this combo at parse; runMulti itself must also stay inert)
+    // Config rejects show + issue at parse; runMulti itself must also stay inert.
     const shown = reportApi();
     await runMulti(
       shown,
@@ -779,11 +738,8 @@ describe("runMulti private-report: issue wiring", () => {
   });
 
   test("an unparseable discovered slug on the issue channel warns instead of losing the report", async () => {
-    // Discovery hands back API data, so a garbage full_name can reach the
-    // loop. The issue channel posts INTO the target repository - impossible
-    // without an owner/name pair - and that loss must be a loud, safe
-    // warning, never silence (the withheld-visibility notice does not fire
-    // here: the target IS proven private).
+    // Discovery hands back API data, so a garbage full_name can reach the loop; the issue channel posts INTO the target, impossible without an
+    // owner/name pair, so the loss must be a loud, safe warning.
     const api = new MockApi({
       "GET /user/repos?affiliation=owner&per_page=100&page=1": {
         data: [
@@ -806,9 +762,7 @@ describe("runMulti private-report: issue wiring", () => {
     );
     expect(targets[0]?.result).toBe("failed");
     expect(redacted(targets[0])).toBe(true);
-    // No issue/label traffic was even attempted.
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
-    // One safe warning names the loss through the placeholder, never the slug.
     const warning = annotations.find((a) => a.includes("could not deliver the private report"));
     expect(warning).toBeDefined();
     expect(warning).toContain("private repository #1");
@@ -817,10 +771,8 @@ describe("runMulti private-report: issue wiring", () => {
   });
 
   test("unknown visibility redacts publicly but does NOT deliver the report (fail closed)", async () => {
-    // The repo probe answers a body with neither `private` nor `visibility`, so
-    // visibility resolves "unknown". Redaction still hides the target (fail
-    // closed for the public view), but delivery must NOT post the private report
-    // to a repo that could actually be public.
+    // A probe body with neither `private` nor `visibility` resolves unknown: redaction still hides the target, but delivery must not post to a repo
+    // that could be public.
     const api = new MockApi({
       "GET /repos/o/maybe": { data: { description: "SECRET" } },
       "GET /repos/o/maybe/contents/.github/settings.yml": {
@@ -834,12 +786,9 @@ describe("runMulti private-report: issue wiring", () => {
       cfg({ reposInput: "o/maybe", mode: "check", privateRepos: "redact", privateReport: "issue" }),
       io,
     );
-    // redacted in the public view
     expect(redacted(targets[0])).toBe(true);
-    // but NO issue/label traffic - the report was withheld
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
-    // one safe notice explains the withholding; no slug leaks
     const withheld = annotations.find((a) => a.includes("visibility could not be verified"));
     expect(withheld).toBeDefined();
     expect(withheld).toContain("private repository #1");
@@ -856,16 +805,14 @@ describe("runMulti private-report: issue wiring", () => {
       cfg({ reposInput: "o/priv", mode: "check", privateRepos: "redact", privateReport: "issue" }),
       io,
     );
-    // internal is deliverable: the issue was upserted
     expect(api.calls.some((c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7")).toBe(
       true,
     );
   });
 
   test("a settings-read failure still delivers a report (whole lifecycle covered)", async () => {
-    // The remote settings.yml is unparseable YAML - a pre-engine failure. The
-    // target fails, but the private report must STILL be delivered (and opened),
-    // so a previously-created issue never keeps a stale body. Finding R3.
+    // An unparseable settings.yml is a pre-engine failure; the report must still be delivered and opened, or a previously-created issue keeps a stale
+    // body.
     const api = reportApi({
       "GET /repos/o/priv/contents/.github/settings.yml": { data: "repository: [oops\n" },
     });
@@ -876,14 +823,12 @@ describe("runMulti private-report: issue wiring", () => {
       io,
     );
     expect(targets[0]?.result).toBe("failed");
-    // the report issue was still PATCHed and OPENED (a failure needs attention)
     const patch = api.calls.find(
       (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
     );
     const payload = (patch?.payload ?? {}) as { body?: unknown; state?: unknown };
     expect(patch).toBeDefined();
     expect(payload.state).toBe("open");
-    // the parse-failure detail is in the private report body, not the public log
     expect(String(payload.body ?? "")).toContain("failed");
     expect(annotations.join("\n")).not.toContain("oops");
   });
@@ -899,7 +844,6 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
   const issue7 = { number: 7, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/7" };
 
   test("a needs-attention target delivers exactly like the issue channel (opened)", async () => {
-    // check-mode drift needs attention, so on-failure takes the full upsert path
     const api = new MockApi({
       "GET /repos/o/priv": { data: { description: "CANARY-live", private: true } },
       "GET /repos/o/priv/contents/.github/settings.yml": {
@@ -954,9 +898,7 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
       io,
     );
     expect(targets[0]?.result).toBe("clean");
-    // the silent skip: no annotation about delivery
     expect(annotations.some((a) => a.includes("report"))).toBe(false);
-    // no mutation of any kind, and the only issue traffic is the open lookup
     expect(api.mutations()).toEqual([]);
     const issueCalls = api.calls.filter((c) => c.path.includes("/issues"));
     expect(issueCalls.map((c) => `${c.method} ${c.path}`)).toEqual([
@@ -990,13 +932,10 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
     );
     const payload = (patch?.payload ?? {}) as { body?: unknown; state?: unknown };
     expect(payload.state).toBe("closed");
-    // the closing PATCH carries the full unredacted healthy report
     expect(String(payload.body ?? "")).toContain("o/priv");
   });
 
   test("marker injection still fires; its notice lands in the closing report only", async () => {
-    // a healthy apply that manages labels: injection must add the marker to the
-    // managed set, and the quiet path's closing PATCH must carry the notice
     const api = new MockApi({
       "GET /repos/o/priv": { data: { private: true } },
       "GET /repos/o/priv/contents/.github/settings.yml": {
@@ -1018,7 +957,6 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
       }),
       io,
     );
-    // the labels section created the injected marker like any declared label
     const created = api
       .mutations()
       .filter((c) => c.method === "POST" && c.path === "/repos/o/priv/labels")
@@ -1054,7 +992,6 @@ describe("runMulti private-report: artifact wiring", () => {
 
   test("accumulates every deliverable target into ONE encrypted upload", async () => {
     const { recipient, uploader, uploads, decrypt } = await artifactHarness();
-    // Two proven-private drifting targets, each carrying its own canary.
     const api = new MockApi({
       "GET /repos/o/a": { data: { description: "CANARY-A", private: true } },
       "GET /repos/o/a/contents/.github/settings.yml": {
@@ -1080,19 +1017,15 @@ describe("runMulti private-report: artifact wiring", () => {
       uploader,
     );
     expect(targets.map((t) => t.result)).toEqual(["drift", "drift"]);
-    // exactly one artifact upload for the whole run, under the fixed names
     expect(uploads).toHaveLength(1);
     expect(uploads[0]?.name).toBe(ARTIFACT_NAME);
     expect(uploads[0]?.file.name).toBe(ARTIFACT_FILE);
-    // no issue traffic under the artifact channel
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
-    // the ONE document decrypts to both targets' full unredacted reports
     const document = await decrypt(uploads[0]?.file.data as Uint8Array);
     expect(document).toContain("CANARY-A");
     expect(document).toContain("CANARY-B");
     expect(document).toContain("o/a");
     expect(document).toContain("o/b");
-    // and none of that reached the public surfaces
     const publicText = [...annotations, ...logs].join("\n");
     expect(publicText).not.toContain("CANARY-A");
     expect(publicText).not.toContain("CANARY-B");
@@ -1127,14 +1060,11 @@ describe("runMulti private-report: artifact wiring", () => {
       io,
       uploader,
     );
-    // both are redacted in the public view
     expect(targets.every((t) => redacted(t))).toBe(true);
-    // one upload, and it contains only the proven-private target
     expect(uploads).toHaveLength(1);
     const document = await decrypt(uploads[0]?.file.data as Uint8Array);
     expect(document).toContain("CANARY-KNOWN");
     expect(document).not.toContain("CANARY-MAYBE");
-    // the excluded target's withholding is announced safely, no slug
     const withheld = annotations.find((a) => a.includes("visibility could not be verified"));
     expect(withheld).toBeDefined();
     expect(annotations.join("\n")).not.toContain("o/maybe");
@@ -1192,9 +1122,7 @@ describe("runMulti private-report: artifact wiring", () => {
       io,
       uploader,
     );
-    // the delivery failure does not change the target's result
     expect(targets[0]?.result).toBe("drift");
-    // one safe warning names the artifact service, never a slug or report content
     const warning = annotations.find((a) => a.includes("could not upload the private report"));
     expect(warning).toBeDefined();
     expect(warning).toContain("ACTIONS_RUNTIME_TOKEN");

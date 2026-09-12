@@ -1,10 +1,6 @@
 /**
- * The leaf seam shared by the per-section fuzz generator fragments
- * (src/sections/<key>/generators.ts) and their aggregator
- * (test/e2e/generators.ts): the entry-form plumbing, the shared name and
- * secret pools, and the live-witness vocabulary. Like mock/support.ts for the
- * mock fragments, this module imports no fragment and no aggregator, so the
- * fragments can depend on it without an import cycle.
+ * The leaf seam shared by the per-section generator fragments (src/sections/<key>/generators.ts) and their aggregator
+ * (test/e2e/generators.ts). Like mock/support.ts, it imports no fragment and no aggregator, so the fragments depend on it without a cycle.
  */
 
 import type { z } from "zod";
@@ -19,52 +15,29 @@ import type { Rng } from "./prng.js";
 
 export type Json = Record<string, unknown>;
 
-/**
- * The policy knob's key on a knobbed section's wrapper, named once so the
- * merge-mode generators and oracle follow a rename with one edit.
- */
 export const UNDECLARED_KEY = "_undeclared";
 
 /** The layering directive's key, on a knobbed wrapper or at a layer's top level. */
 export const LAYERING_KEY = "_layering";
 
-/** How a knobbed section combines with the layers below it in a layered merge. */
 export type LayeringDirective = "merge" | "replace";
 
-/** Both directive values, for draws and for the oracle's boundary check. */
 export const LAYERING_DIRECTIVES: readonly LayeringDirective[] = ["merge", "replace"];
 
-/** Either form a knobbed list section's generated value can take. */
 export type EntriesForm = Json[] | { [UNDECLARED_KEY]?: "keep" | "delete"; entries: Json[] };
 
 /**
- * Unwrap a generated section value into its entry list through the SAME
- * helper the engine uses, so harness code reads both the plain and the
- * wrapped form without hand-rolled casts. Entries come back by reference:
- * mutating them (or pushing into them) edits the generated document in
- * place, whichever form was drawn. The default policy is irrelevant here -
- * only the entries are read.
+ * The SAME unwrap the engine uses. Entries come back by reference, so mutating them edits the generated document in
+ * place, whichever form was drawn.
  */
 export function entriesOf(value: unknown): Json[] {
   return undeclaredPolicy(value as EntriesForm, "keep").entries as Json[];
 }
 
 /**
- * Sometimes rewrap a generated entry list in the `{_undeclared, entries}`
- * form, so the fuzz corpus exercises the knob's parsing, merging, and
- * schema surface alongside the plain form. The policy draw is skewed toward
- * OMITTING `_undeclared` (the wrapper alone), because with the mock's empty
- * live baselines an explicit policy changes no outcome - the delete/keep
- * behavior itself is pinned by curated scenarios (labels-undeclared-keep,
- * rulesets-undeclared-delete, milestones-undeclared-delete).
- *
- * The WITNESS sections (WITNESS_SECTIONS in generators.ts) must never call
- * this: the oracle refines their predictions from the seeded witness alone,
- * so a generated `_undeclared: keep` over an extra-undeclared labels witness
- * would flip the engine's outcome (a kept note instead of drift/deletion)
- * and fail the iteration, and the keep-default sections' delete path has no
- * witness modeling it. New draws live on a forked stream so the pre-existing
- * main-stream sequence (and every recorded seed) stays stable.
+ * Most draws stay plain: on the mock's empty live baselines an explicit policy changes no outcome, and the curated
+ * *-undeclared-* scenarios pin delete/keep. WITNESS_SECTIONS (generators.ts) never call this: a `keep` over an
+ * extra-undeclared witness would flip the outcome the oracle predicts from the witness alone.
  */
 export function maybeWrapUndeclared(rng: Rng, entries: Json[]): EntriesForm {
   const knobRng = rng.fork("undeclared-knob");
@@ -77,11 +50,8 @@ export function maybeWrapUndeclared(rng: Rng, entries: Json[]): EntriesForm {
 }
 
 /**
- * Hostile string pool for names that flow into URLs, step-summary cells, and
- * request paths: pipes and backslashes (summary-table escaping), quotes,
- * spaces, percent signs and slashes (URL encoding), unicode, and a near-limit
- * length. A generator that mixes these in exercises the escaping and encoding
- * paths that a tidy ASCII name would never reach.
+ * Names that reach URLs, step-summary cells, and request paths: pipes and backslashes hit summary-table escaping,
+ * quotes, spaces, percent signs, and slashes hit URL encoding, plus unicode and a near-limit length.
  */
 const HOSTILE_NAMES = [
   "plain",
@@ -104,11 +74,7 @@ export function genName(rng: Rng): string {
     : rng.pick(HOSTILE_NAMES);
 }
 
-/**
- * Keep every identity an entry claims unique across a generated list: a value already claimed
- * (under `fold`) gets the entry's index appended, as a section's own duplicate check would
- * otherwise reject the document. Fields shared by an entry (a label's name and new_name) pool.
- */
+/** A section's own duplicate check would reject two entries claiming one identity (under `fold`), so a claimed value gets the index appended. */
 export function uniqueBy(
   entries: readonly Json[],
   fields: readonly string[],
@@ -134,12 +100,8 @@ export function uniqueBy(
 }
 
 /**
- * The ONE fixed pool secret references draw from, name -> plaintext: webhook
- * config.secret and actions_secrets values alike. Single-sourced: the
- * generators draw `$NAME` references from these keys and scenarioSecretEnv()
- * (test/e2e/generators.ts) builds the scenario `env` from the same map, so a
- * generated reference can never name a variable the child env lacks. The
- * values are distinctive strings so leak checks can hunt them.
+ * The ONE pool secret references draw from; scenarioSecretEnv() (test/e2e/generators.ts) builds the child env from the
+ * same map, so a reference never names a variable the env lacks. Distinctive values, so leak checks can hunt them.
  */
 export const E2E_SECRET_ENV = {
   E2E_SECRET_A: "e2e-hook-secret-alpha",
@@ -148,26 +110,17 @@ export const E2E_SECRET_ENV = {
 } as const;
 
 /**
- * How a section's seeded live state relates to its declared settings, as a
- * SEMANTIC WITNESS the oracle can predict from exactly:
+ * How seeded live state relates to the declared settings, so the oracle predicts exactly. A keep-default section would
+ * only note an extra item; its delete path is pinned by a curated scenario, not a witness kind.
  *
- * - "matching": the live state mirrors EVERY field the handler diffs, so a
- *   correct engine reports exactly clean (check) or a no-op applied (apply).
- * - "drift-update": one DECLARED field diverges (never an omitted optional -
- *   a divergent value in a field the settings do not declare is not drift),
- *   so check must report drift and apply must issue an update.
- * - "extra-undeclared" (delete-default sections only): a live item the settings do not declare,
- *   so check reports undeclared drift and apply DELETEs it. A keep-default section keeps it as a
- *   note; its wrapped `_undeclared: delete` path is pinned by a curated scenario, not a witness kind.
+ * "matching"          -> mirrors EVERY field the handler diffs: check reports clean, apply is a no-op
+ * "drift-update"      -> one DECLARED field diverges (never an omitted optional): check reports drift, apply updates
+ * "extra-undeclared"  -> a live item the settings do not declare, delete-default sections only: check reports drift, apply DELETEs it
  */
 export type LiveWitnessKind = "matching" | "drift-update" | "extra-undeclared";
 
-/** A generated live-state witness: the kind that actually holds, plus state. */
 export interface LiveWitness {
-  /**
-   * The kind the state actually witnesses. May fall back to "matching" when
-   * "drift-update" was requested but no entry declares a perturbable field.
-   */
+  /** The kind the state actually witnesses: "matching" when "drift-update" was requested but no entry declares a perturbable field. */
   kind: LiveWitnessKind;
   state: LiveState;
 }
@@ -175,12 +128,7 @@ export interface LiveWitness {
 /** Perturbation description: absent from every description pool. */
 export const DRIFT_DESCRIPTION = "witness-drift";
 
-/**
- * Loud disjointness guard: a perturbation sentinel that collides with a
- * generated value would silently turn a drift witness into a matching one
- * (or an "undeclared" label into a declared one), so the collision throws
- * instead of degrading the witness.
- */
+/** A sentinel colliding with a generated value would silently turn a drift witness into a matching one, so the collision throws. */
 export function assertSentinelDisjoint(condition: boolean, detail: string): void {
   if (!condition) {
     throw new Error(`witness sentinel collision: ${detail}`);
@@ -189,7 +137,7 @@ export function assertSentinelDisjoint(condition: boolean, detail: string): void
 
 // --- Generators from slices --------------------------------------------------
 
-/** The zod internals the def walk reads: the type discriminator and its children. */
+/** Read off zod's internal `_zod.def`, not a public API, so a zod upgrade can rename these. */
 interface SliceDef {
   type: string;
   shape?: Record<string, z.ZodType>;
@@ -212,9 +160,8 @@ export interface SliceSeed {
 }
 
 /**
- * An entry generator walked off the slice, so a new schema field is fuzzed without a generator edit:
- * required fields always, optional ones by seeded presence, values from the pool or the field's type.
- * Every entry is parsed back through the slice, so a draw a refinement rejects throws naming the field.
+ * Walked off the slice, so a new schema field is fuzzed without a generator edit. Every entry is parsed back through the
+ * slice, so a draw a refinement rejects throws naming the field.
  */
 export function generatorFromSlice(slice: z.ZodType, seed: SliceSeed = {}): (rng: Rng) => Json {
   if (defOf(slice).shape === undefined) {
@@ -237,7 +184,7 @@ export function generatorFromSlice(slice: z.ZodType, seed: SliceSeed = {}): (rng
   };
 }
 
-/** One object drawn field by field; validation belongs to the caller holding the root slice. */
+/** Validation belongs to the caller holding the root slice, so a nested issue names its full path. */
 function drawObject(schema: z.ZodType, seed: SliceSeed, rng: Rng): Json {
   const entry: Json = {};
   for (const [field, child] of Object.entries(defOf(schema).shape ?? {})) {
@@ -251,7 +198,6 @@ function drawObject(schema: z.ZodType, seed: SliceSeed, rng: Rng): Json {
   return entry;
 }
 
-/** A value of one schema, drawn from its type alone. */
 function drawFrom(schema: z.ZodType, rng: Rng, path: string): unknown {
   const def = defOf(schema);
   switch (def.type) {
@@ -304,9 +250,8 @@ export interface LensWitnessSpec<
 }
 
 /**
- * A live-state witness derived from the section's lens, as sparse seeds buildState completes from the
- * mock's defaults and server-owned fields: matching = the declared writes, drift-update = ONE declared
- * field set to its sentinel (or a case-flipped name, read as a rename), extra-undeclared = the sentinel item appended.
+ * A sparse seed buildState completes from the mock's defaults and server-owned fields. A drift-update on the identity
+ * field is a case flip the fold still matches, which the handler reads as a rename.
  */
 export function lensWitness<
   K extends ListSectionKey,

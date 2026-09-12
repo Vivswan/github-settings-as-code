@@ -1,13 +1,9 @@
 /**
- * The environments section's e2e mock fragment, registered in
- * test/e2e/mock/sections.ts. Imports the test-tree seams (mock/support.ts,
- * mock/state.ts, and mock/secrets.ts) on purpose - the bundle entry is
- * src/main.ts, so this fragment never reaches lib/index.js - and never
- * routes.ts or sections.ts.
- *
- * The pin family models VERIFIED live GitHub position semantics: a new pin
- * appends at a monotonic counter, unpinning leaves a hole (no renumbering),
- * and only the reorder mutation renormalizes the list to contiguous 1..N.
+ * This fragment imports test-tree seams on purpose: the bundle entry is src/main.ts, so it never
+ * reaches lib/index.js. The pin handlers follow verified live GitHub position semantics:
+ *   new pin  -> appends at a monotonic counter
+ *   unpin    -> leaves a hole, nothing renumbers
+ *   reorder  -> the one mutation that renumbers, to contiguous 1..N
  */
 
 import { mintNodeId } from "../../../test/e2e/mock/node-id.js";
@@ -39,11 +35,9 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     if (!environment) {
       return { status: 404, body: { message: "Not Found" } };
     }
-    // Enabled custom deployment protection rules surface in the environment
-    // GET as the spec's third protection_rules variant ({id, node_id, type};
-    // the type names the gating App), like GitHub. Derived at read time so
-    // the stored body stays the PUT transformer's output, and appended to a
-    // copy so the handler never mutates the state it serves.
+    // Like GitHub, enabled custom protection rules surface in the GET as the spec's third
+    // protection_rules variant ({id, node_id, type}, the type naming the gating App). Derived at
+    // read time onto a copy, so the stored body stays the PUT transformer's output.
     const custom = (state.environment_protection_rules[name] ?? []).map((rule) => ({
       id: rule.id,
       node_id: rule.node_id,
@@ -57,10 +51,8 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
   },
   "environments.update": ({ state, param, body }) => {
     const name = param("environment_name");
-    // GitHub's PUT environment returns 200 on BOTH create and update (never
-    // 201), matching the section's declared status and the OpenAPI spec. The
-    // node id is minted last so a smuggled node_id in the PUT body can never
-    // displace the canonical self-describing one.
+    // GitHub's PUT returns 200 on BOTH create and update, never 201. The node id is minted last so
+    // a smuggled node_id in the PUT body can never displace the canonical one.
     state.environments[name] = {
       name,
       ...environmentFromPut(asObject(body)),
@@ -68,17 +60,15 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     };
     return ok(state.environments[name]);
   },
-  // Every variables handler 404s for an environment that does not exist: the
-  // variables live under the environment, and the section only calls them
-  // after its probe (check) or PUT (apply) proved the environment is there.
+  // Every variables handler 404s for a missing environment; the section touches them only for an
+  // environment its probe found or its PUT created.
   "environments.listVariables": ({ state, param, query }) => {
     const env = param("environment_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
     const variables = state.environment_variables[env] ?? [];
-    // Clamp from the endpoint declaration, exactly like the repository
-    // variables list: one source for the client loop, the sweep, and here.
+    // The clamp comes from the endpoint declaration: one source for the client loop, the sweep, and here.
     return ok({
       total_count: variables.length,
       variables: slicePage(variables, query, environmentsSection.endpoints.listVariables.pageSize),
@@ -95,13 +85,11 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
       list = [];
       state.environment_variables[env] = list;
     }
-    // A duplicate (case-insensitive) name conflicts, matching GitHub; the
-    // section never POSTs a duplicate (it PATCHes an existing variable).
+    // A duplicate (case-insensitive) name conflicts like GitHub; the section PATCHes an existing variable instead.
     if (list.some((v) => variableName(v) === variableName(payload))) {
       return { status: 409, body: { message: "Variable already exists" } };
     }
-    // Fixed timestamps keep repeat applies byte-stable for the idempotence
-    // proof; the section never reads them.
+    // Fixed timestamps keep repeat applies byte-stable for the idempotence proof.
     list.push({
       name: payload.name,
       value: payload.value,
@@ -139,11 +127,6 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     list.splice(index, 1);
     return noContent();
   },
-  // Every environment-secrets handler 404s for an environment that does not
-  // exist, like the variables handlers: the secrets live under the
-  // environment, and the section only calls them after its probe (check) or
-  // PUT (apply) proved the environment is there. The seal/unseal and
-  // timestamp semantics are the shared secret-family helpers'.
   "environments.listSecrets": ({ state, param, query }) => {
     const env = param("environment_name");
     if (!state.environments[env]) {
@@ -188,10 +171,9 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
       name,
     );
   },
-  // The branch-policy pattern handlers 404 when the environment is missing OR
-  // its stored deployment_branch_policy does not enable
-  // custom_branch_policies, matching GitHub's documented "Not Found or
-  // custom_branch_policies is false" behavior on this endpoint family.
+  // The pattern handlers 404 when the environment is missing OR its stored deployment_branch_policy
+  // does not enable custom_branch_policies: GitHub documents "Not Found or custom_branch_policies
+  // is false" for this family.
   "environments.listPolicies": ({ state, param, query }) => {
     const env = param("environment_name");
     if (!branchPoliciesEnabled(state, env)) {
@@ -209,12 +191,9 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
       return { status: 404, body: { message: "Not Found" } };
     }
     const payload = asObject(body);
-    // GitHub enforces the type enum server-side; settings pass through
-    // verbatim, so a user typo reaches this POST and must be answered with
-    // the real 422, not silently accepted. requestOffSpec exempts only the
-    // request-body SCHEMA check (the spec forbids this body by design; the
-    // rejection is the behavior under test), like the rulesets rule-type
-    // handler.
+    // Settings pass through verbatim, so a user typo in `type` reaches this POST and must get the
+    // real 422 GitHub answers. requestOffSpec exempts only the request-body SCHEMA check: the spec
+    // forbids this body by design, and the rejection is the behavior under test.
     if (payload.type !== undefined && payload.type !== "branch" && payload.type !== "tag") {
       return {
         status: 422,
@@ -227,9 +206,8 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
       list = [];
       state.environment_branch_policies[env] = list;
     }
-    // A duplicate name pattern answers GitHub's documented 303 with NO body
-    // (the spec declares no content for it) and no Location header, so the
-    // client surfaces the response itself instead of chasing a redirect.
+    // GitHub's documented 303 for a duplicate pattern carries NO body and no Location header, so
+    // the client surfaces the response itself instead of chasing a redirect.
     if (list.some((policy) => policy.name === payload.name)) {
       return { status: 303, body: null };
     }
@@ -252,16 +230,13 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     list.splice(index, 1);
     return noContent();
   },
-  // The protection-rule handlers 404 for an environment that does not exist,
-  // like the variables family; there is no flag precondition here.
   "environments.listProtectionRules": ({ state, param }) => {
     const env = param("environment_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
     const rules = state.environment_protection_rules[env] ?? [];
-    // The whole list in one body: this endpoint documents no page/per_page
-    // parameters, so there is nothing to slice.
+    // This endpoint documents no page/per_page parameters, so the whole list goes in one body.
     return ok({ total_count: rules.length, custom_deployment_protection_rules: rules });
   },
   "environments.listProtectionRuleApps": ({ state, param, query }) => {
@@ -282,9 +257,8 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
-    // An integration_id outside the available-Apps fixture answers a 422
-    // (the engine resolves ids from that same listing, so only a harness bug
-    // or a raced uninstall would reach this).
+    // An integration_id outside the available-Apps fixture answers 422; the engine resolves ids
+    // from that same listing, so only a harness bug or a raced uninstall reaches this.
     const payload = asObject(body);
     const app = PROTECTION_RULE_APPS.find((candidate) => candidate.id === payload.integration_id);
     if (!app) {
@@ -325,8 +299,7 @@ export const environmentsMockGraphqlHandlers: SectionGraphqlHandlers<"environmen
             position: pin.position,
             environment: { name: pin.name },
           })),
-          // Whole list in one page: GitHub caps pins at
-          // MAX_PINNED_ENVIRONMENTS, far under the query's page size.
+          // One page: GitHub caps pins at MAX_PINNED_ENVIRONMENTS, far under the query's page size.
           pageInfo: { hasNextPage: false, endCursor: null },
         },
       },
@@ -342,8 +315,7 @@ export const environmentsMockGraphqlHandlers: SectionGraphqlHandlers<"environmen
     if (variables.pinned === true) {
       if (index < 0) {
         if (list.length >= MAX_PINNED_ENVIRONMENTS) {
-          // The DECLARED outcome type, mirroring GitHub's cap rejection, so
-          // the section's full-list error path is reachable on contract.
+          // The DECLARED outcome type of GitHub's cap rejection, so the section's full-list error path is reachable on contract.
           return {
             errors: [
               {
@@ -353,16 +325,12 @@ export const environmentsMockGraphqlHandlers: SectionGraphqlHandlers<"environmen
             ],
           };
         }
-        // Append at the tail via the monotonic counter (verified live
-        // behavior); an earlier unpin's hole is never refilled.
         state._pinned_position_counter += 1;
         list.push({ name: target.name, position: state._pinned_position_counter });
       }
       return { data: { pinEnvironment: { environment: { name: target.name, isPinned: true } } } };
     }
     if (index >= 0) {
-      // Remove WITHOUT renumbering: the positions of the remaining pins keep
-      // their values, leaving a hole (verified live behavior).
       list.splice(index, 1);
     }
     return { data: { pinEnvironment: { environment: { name: target.name, isPinned: false } } } };
@@ -382,9 +350,8 @@ export const environmentsMockGraphqlHandlers: SectionGraphqlHandlers<"environmen
       position < 1 ||
       position > list.length
     ) {
-      // The section only reorders names it just proved pinned, to ranks
-      // inside the list, so reaching this is a section bug - UNPROCESSABLE
-      // is not declared on this operation, and the response guard flags it.
+      // The section only reorders names it just proved pinned, to ranks inside the list, so reaching
+      // this is a section bug: UNPROCESSABLE is not declared on this operation, and the response guard flags it.
       return {
         errors: [
           {
@@ -394,9 +361,6 @@ export const environmentsMockGraphqlHandlers: SectionGraphqlHandlers<"environmen
         ],
       };
     }
-    // Move to the 1-based RANK, then renormalize the WHOLE list to
-    // contiguous 1..N - the reorder mutation is the one operation that
-    // renumbers (verified live behavior), so the counter rejoins it.
     const [moved] = list.splice(index, 1);
     list.splice(position - 1, 0, moved as { name: string; position: number });
     list.forEach((pin, rank) => {

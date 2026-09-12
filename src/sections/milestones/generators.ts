@@ -1,7 +1,6 @@
 /**
- * The milestones fuzz fragment: the entry generator walks the MilestoneConfig slice, so only the
- * corpus invariants live here (one entry per title, a passthrough due_on, the witness pools).
- * Imports only the test-tree seams; the bundle entry is src/main.ts, so this never reaches lib/index.js.
+ * The milestones fuzz generator fragment and witness. It imports test-tree seams on purpose: the
+ * bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {
@@ -17,7 +16,7 @@ import {
 import type { Rng } from "../../../test/e2e/prng.js";
 import { MilestoneConfig } from "./schema.js";
 
-/** Fixed ISO due dates: a pool, never Date.now, so generation stays deterministic. */
+/** A fixed pool, never Date.now, so generation stays deterministic. */
 const DUE_DATES = ["2026-01-15T00:00:00Z", "2026-06-30T00:00:00Z", "2026-12-31T00:00:00Z"] as const;
 
 const genMilestone = generatorFromSlice(MilestoneConfig, {
@@ -36,15 +35,10 @@ export function genMilestones(rng: Rng): Json[] {
     }
     return milestone;
   });
-  // One entry per title (the section's own rule). milestones is a WITNESS
-  // section: always the plain array form, never maybeWrapUndeclared.
   return uniqueBy(milestones, ["title"]);
 }
 
-/**
- * A live milestone body the section reads as EXACTLY matching: every declared field, passthrough
- * included, is compared verbatim, so the whole declaration is spread over the server defaults.
- */
+/** Passthrough fields (due_on) are compared too, so the whole declaration is spread over the server defaults. */
 function matchingLiveMilestone(milestone: Json, index: number): Json {
   return {
     id: 910_000 + index,
@@ -55,7 +49,6 @@ function matchingLiveMilestone(milestone: Json, index: number): Json {
   };
 }
 
-/** The fields of one declared milestone a drift-update witness may perturb. */
 function milestoneDriftFields(milestone: Json): Array<"description" | "state" | "due_on"> {
   const fields: Array<"description" | "state" | "due_on"> = [];
   if (milestone.description !== undefined) {
@@ -79,8 +72,7 @@ export function milestonesWitness(rng: Rng, declared: Json[], kind: LiveWitnessK
     .map((milestone, index) => ({ index, fields: milestoneDriftFields(milestone) }))
     .filter((entry) => entry.fields.length > 0);
   if (eligible.length === 0) {
-    // Every milestone declares only its title: no field can legitimately
-    // diverge, so the witness degrades to matching (and says so).
+    // Every milestone declares only its title, so no field can legitimately diverge.
     return { kind: "matching", state: { milestones } };
   }
   // Every eligible sentinel stays disjoint per build, not only the one picked (state and due_on

@@ -1,28 +1,16 @@
 /**
- * Declared-keys-only comparison of a desired value against a live one (extra live keys are
- * ignored): deltas() computes structured divergences and renderDelta() is the ONE edge rendering
- * them as drift prose, so field-reading consumers take deltas and reporting consumers render.
+ * Declared-keys-only comparison: extra live keys are ignored, and renderDelta() is the ONE rendering of a delta as drift
+ * prose. GitHub returns null, or omits the field, for empty values, so two tolerances are deliberate:
  *
- * Two tolerances are DELIBERATE: desired null vs live absent, and desired "" vs live null/absent,
- * produce no delta, because GitHub returns null (or omits the field) for empty values. A NON-empty
- * declared key the live object lacks is the "phantom" kind (a typo or write-only field).
+ * desired null, live absent         -> no delta
+ * desired "", live null or absent   -> no delta
  */
 
-/**
- * One step of a delta's path below the compared root: an object key, the
- * index of a list item paired by shape, or the key of a list item paired by
- * a declared key ("rules[deletion]").
- */
 type PathStep = string | number | { readonly key: string };
 
-/** How a list's items were paired: by a declared item key, by whole shape, or by value. */
 type ListMatch = "key" | "shape" | "value";
 
-/**
- * One divergence between a desired value and its live counterpart: mismatch (both present,
- * unequal), phantom (a non-empty declared field the live object has no key for), missing (a
- * declared list item no live item pairs with), undeclared (a live list item nothing pairs with).
- */
+/** A phantom is a non-empty declared field the live object has no key for: a typo, or a write-only field. */
 export type Delta =
   | {
       readonly kind: "mismatch";
@@ -46,14 +34,15 @@ export type Delta =
 
 export interface DeltaOptions {
   /**
-   * Per nested list (by dotted object path below the root), the item key to pair by; a missing or
-   * repeated key is a declaration bug, and an unnamed list pairs object items by shape, others by
-   * value. Omitted entirely, lists fall back to the legacy `type` sniffing subsetDiff callers rely on.
+   * Per nested list (by dotted object path below the root), the item key to pair by; a missing or repeated key is a
+   * declaration bug.
+   *
+   * a list not named here  -> object items pair by shape, others by value
+   * matchBy omitted        -> lists fall back to the legacy `type` sniffing subsetDiff callers rely on
    */
   readonly matchBy?: Readonly<Record<string, string>>;
 }
 
-/** A value with no JSON structure beneath it. */
 function isScalar(value: unknown): boolean {
   return typeof value !== "object" || value === null;
 }
@@ -107,8 +96,7 @@ function walk(
     }
     const liveRecord = liveValue as Record<string, unknown>;
     for (const [key, value] of Object.entries(desired as Record<string, unknown>)) {
-      // hasOwn, not indexing: a key named like a prototype member (toString)
-      // must read as absent, not as the inherited function.
+      // hasOwn, not indexing: a key named like a prototype member (toString) must read as absent, not as the inherited function.
       const child = Object.hasOwn(liveRecord, key) ? liveRecord[key] : ABSENT;
       walk(value, child, [...path, key], keyPath === "" ? key : `${keyPath}.${key}`, opts, out);
     }
@@ -126,14 +114,12 @@ function walk(
   }
 }
 
-/** The `type` key of an object list item, or null when the item has none (legacy sniffing). */
 function typeOf(item: unknown): string | null {
   return typeof item === "object" && item !== null && "type" in (item as object)
     ? String((item as { type: unknown }).type)
     : null;
 }
 
-/** The declared pairing key of an item in a matchBy list; a missing one is a declaration bug. */
 function itemKey(item: unknown, key: string, keyPath: string, side: "desired" | "live"): string {
   if (typeof item !== "object" || item === null || !Object.hasOwn(item, key)) {
     throw new Error(
@@ -167,9 +153,8 @@ function walkList(
     return;
   }
   if (opts.matchBy === undefined) {
-    // Legacy sniffing: pair by `type` only when types are unique on both
-    // sides (ruleset rules); environment reviewers repeat types and fall
-    // through to shape pairing below.
+    // Legacy sniffing pairs by `type` only when types are unique on both sides (ruleset rules); environment reviewers
+    // repeat types and fall through to shape pairing below.
     const desiredTypes = desired.map(typeOf);
     const liveTypes = live.map(typeOf);
     const typed =
@@ -191,9 +176,7 @@ function walkList(
     desired.length > 0 &&
     desired.every((item) => typeof item === "object" && item !== null && !Array.isArray(item));
   if (objectList) {
-    // Order-insensitive: each desired item must match SOME live item, and
-    // live items matched by nothing are undeclared (a full-payload write
-    // would remove them).
+    // Order-insensitive; a live item nothing pairs with is undeclared because a full-payload write would remove it.
     const liveItems = [...live];
     for (const [index, item] of desired.entries()) {
       const matchIndex = liveItems.findIndex(
@@ -210,7 +193,6 @@ function walkList(
     }
     return;
   }
-  // Scalar lists (ref includes, topics) compare as sets.
   const desiredSet = new Set(desired.map((v) => JSON.stringify(v)));
   const liveSet = new Set(live.map((v) => JSON.stringify(v)));
   for (const [index, value] of desired.entries()) {
@@ -227,7 +209,6 @@ function walkList(
   }
 }
 
-/** Pair a list by an item key: declared-keys-only per item, and a live key absent from desired is undeclared. */
 function walkKeyed(
   desired: unknown[],
   liveByKey: ReadonlyMap<string, unknown>,
@@ -261,7 +242,6 @@ function walkKeyed(
   }
 }
 
-/** A delta's location as drift prose spells it: `root.field[0].nested[type]`. */
 function renderPath(root: string, path: readonly PathStep[]): string {
   const steps = path.map((step) =>
     typeof step === "string"
@@ -273,7 +253,6 @@ function renderPath(root: string, path: readonly PathStep[]): string {
   return `${root}${steps.join("")}`;
 }
 
-/** The prose for a value that is present on both sides but not the same, or declared and absent live. */
 function mismatchLine(at: string, desired: unknown, live: unknown): string {
   if (desired === null || desired === undefined) {
     return `${at}: expected empty, live has ${JSON.stringify(live)}`;
@@ -290,7 +269,6 @@ function mismatchLine(at: string, desired: unknown, live: unknown): string {
   return `${at}: ${JSON.stringify(desired)} != ${JSON.stringify(live)}`;
 }
 
-/** The one rendering of a delta as a drift line, under the caller's root label. */
 export function renderDelta(root: string, delta: Delta): string {
   const at = renderPath(root, delta.path);
   switch (delta.kind) {
@@ -313,20 +291,11 @@ export function renderDelta(root: string, delta: Delta): string {
   }
 }
 
-/**
- * The rendered drift lines of a declared-keys-only comparison under `path`,
- * pairing lists by the legacy sniffing (see DeltaOptions.matchBy). The
- * string edge the sections not yet reading deltas() consume.
- */
 export function subsetDiff(desired: unknown, live: unknown, path: string): string[] {
   return deltas(desired, live).map((delta) => renderDelta(path, delta));
 }
 
-/**
- * The declared top-level keys the live object has no key for (the top-level phantom deltas by
- * name; declared null/"" read as equal to absent). Sections whose write is gated by a
- * comparison note these so the gating keys do not silently rewrite on every run.
- */
+/** Sections whose write is gated by a comparison note these, so the gating keys do not silently rewrite on every run. */
 export function phantomKeys(desired: Record<string, unknown>, live: unknown): string[] {
   return deltas(desired, live).flatMap((delta) =>
     delta.kind === "phantom" && delta.path.length === 1 && typeof delta.path[0] === "string"
@@ -335,11 +304,6 @@ export function phantomKeys(desired: Record<string, unknown>, live: unknown): st
   );
 }
 
-/**
- * The note for phantom keys, rendered in both modes beside the update they
- * gate. `noun` names the live resource ("label"); `rewrite` says what apply
- * will keep doing ("this update will re-run").
- */
 export function phantomNote(prefix: string, keys: string[], noun: string, rewrite: string): string {
   const list = keys.map((k) => `"${k}"`).join(", ");
   return `${prefix}: declared key(s) ${list} do not exist on the live ${noun}, so if GitHub ignores them ${rewrite} on every apply without converging. Fix the key name, or remove it from the settings file`;

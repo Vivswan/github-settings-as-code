@@ -1,11 +1,5 @@
-/**
- * agents_variables section tests: this section is one repoVariablesSection()
- * factory call, and the factory/engine behavior (reconciliation verbs,
- * case-insensitive matching, the undeclared knob, pagination, phantom keys)
- * is pinned by the actions_variables suite. These tests pin what is THIS
- * section's own: its routes, its "Copilot agents variable" noun, and its
- * delete-by-default posture.
- */
+// The factory and engine behavior is pinned by the actions_variables suite over the same repoVariablesSection() factory; this file pins only this
+// section's routes, noun, and delete-by-default posture.
 
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";

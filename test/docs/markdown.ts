@@ -1,15 +1,9 @@
-// Small markdown helpers shared by the docs contract tests: the lines of a named "## heading"
-// section, and the fenced code blocks carrying a given info string.
-
 /** The contents of every fenced code block whose info string is exactly `info`. */
 export function fencedBlocks(markdown: string, info: string): string[] {
   const blocks: string[] = [];
   const escaped = info.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // Leading whitespace is tolerated and stripped (the README nests fences
-  // inside list items, indenting fence and body alike), and longer fences
-  // close per CommonMark (the closer carries at least the opener's length).
-  // The guides additionally pin their fences to column zero, three backticks
-  // exactly, so this extractor cannot miss a docs/ block.
+  // Leading whitespace is stripped (the README nests fences inside list items) and longer fences close per CommonMark; the guides additionally pin
+  // column-zero triple backticks, so this extractor cannot miss a docs/ block.
   const re = new RegExp(
     `^([ \\t]*)(\`{3,})${escaped}[ \\t]*\\n([\\s\\S]*?)^[ \\t]*\\2\`*[ \\t]*$`,
     "gm",

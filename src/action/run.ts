@@ -1,25 +1,3 @@
-/**
- * github-settings-as-code: apply a declarative .github/settings.yml to the repo.
- *
- * Policy model:
- * - mode: apply (default) mutates; check reports drift and exits 1 on any.
- * - on-missing-permission: fail (default) | warn. Under warn, a section the
- *   token cannot touch is skipped with a warning and the run stays green
- *   (partial success) - unless the section is listed in required-sections.
- * - Non-permission errors always fail, loudly, with the API message.
- *
- * Multi-repo mode (repos / repos-dir / defaults-file inputs): one run in an
- * admin repo applies settings to many repositories - from per-repo files
- * checked into the admin repo (central), or from each target's own
- * .github/settings.yml (remote), or the defaults-file document for a
- * remote target that has no file. Targets run independently; the run fails
- * at the end if any target failed.
- *
- * mode: merge folds an ordered list of settings files into one document
- * written to merged-file, for a later apply or check step to run; it never
- * touches GitHub (src/flows/merge.ts).
- */
-
 import {
   type ArtifactUploader,
   concludeMerge,
@@ -36,10 +14,7 @@ import { actionsArtifactUploader } from "./artifact.js";
 import { parseActionConfig } from "./inputs.js";
 import { actionsIo } from "./io.js";
 
-/**
- * Execute the action; returns the process exit code. `overrides` exists for
- * tests (a stub client, a capturing Io, a capturing uploader); production uses the defaults.
- */
+/** `overrides` exists for tests (a stub client, a capturing Io, a capturing uploader). */
 export async function run(overrides?: {
   api?: GithubClient;
   io?: Io;
@@ -53,7 +28,7 @@ export async function run(overrides?: {
     return failRun(io, parsed.error);
   }
   const cfg = parsed.value;
-  // A merge folds local files only: no client is built, so no token is read.
+
   if (cfg.kind === "merge") {
     return runMerge(cfg, io).match(
       (merged) => concludeMerge(io, merged),

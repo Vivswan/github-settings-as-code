@@ -43,7 +43,6 @@ describe("three-way drift detection", () => {
       for (let i = 0; i < 200; i++) {
         const value = genSettings(new Rng(i * 7 + key.length), key);
         const doc = { [key]: value };
-        // 1. Published JSON schema (ajv).
         try {
           validateAgainstPublishedSchema(doc);
         } catch (error) {
@@ -51,22 +50,19 @@ describe("three-way drift detection", () => {
             `${key} seed ${i}: published schema rejected the doc: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
-        // 2. The action's own doc validator (unknown-key check + more).
         const verdict = validateSettingsDoc(doc, "fuzz", new Set(), silentIo());
         if ("error" in verdict) {
           offenders.push(
             `${key} seed ${i}: validateSettingsDoc rejected the doc: ${verdict.error}`,
           );
         }
-        // 3. The section's zod shape parses the raw value.
         const parsed = shape.safeParse(value);
         if (!parsed.success) {
           offenders.push(
             `${key} seed ${i}: zod shape rejected the generated value ${JSON.stringify(value)}: ${JSON.stringify(parsed.error.issues)}`,
           );
         }
-        // 4. A witness section is drawn as the bare list its live witness
-        //    mirrors entry by entry, never the wrapped {_undeclared, entries} form.
+        // A witness section draws the bare list its live witness mirrors entry by entry, never the wrapped form.
         if ((WITNESS_SECTIONS as readonly string[]).includes(key) && !Array.isArray(value)) {
           offenders.push(
             `${key} seed ${i}: witness section drew the wrapped form ${JSON.stringify(value)}`,
@@ -81,8 +77,7 @@ describe("three-way drift detection", () => {
   });
 
   test("validateAgainstPublishedSchema rejects a section with the wrong type", () => {
-    // The published schema is permissive about unknown top-level keys (the
-    // action rejects those at runtime), but it enforces each section's type.
+    // The published schema is permissive about unknown top-level keys (the action rejects those at runtime), but it enforces each section's type.
     expect(() => validateAgainstPublishedSchema({ labels: "not-an-array" })).toThrow();
   });
 });
@@ -108,9 +103,7 @@ describe("generator couplings and pools", () => {
       "force_push_bypassers",
       "required_deployments",
     ]);
-    // Wildcard entries reconcile through GraphQL, whose translation table has
-    // no `restrictions` (the shape rejects it there); the generator must
-    // never draw it onto one.
+    // Wildcard entries reconcile through GraphQL, whose translation table has no `restrictions`, so the generator must never draw it onto one.
     const wildcardForbidden = new Set(["restrictions", "required_signatures"]);
     let signatureDraws = 0;
     let wildcardDraws = 0;
@@ -152,8 +145,7 @@ describe("generator couplings and pools", () => {
         }
       }
     }
-    // Each minority draw must actually fire across seeds, or its path would
-    // go unfuzzed without anything failing.
+    // Each minority draw must fire across seeds, or its path would go unfuzzed without anything failing.
     expect(signatureDraws).toBeGreaterThan(0);
     expect(wildcardDraws).toBeGreaterThan(0);
     expect(bypasserDraws).toBeGreaterThan(0);
@@ -195,9 +187,7 @@ describe("generator couplings and pools", () => {
   });
 
   test("the knobbed non-witness sections emit both forms, every policy included", () => {
-    // The witness sections stay plain (the oracle refines their predictions
-    // from the witness alone); the other knobbed sections must draw the plain
-    // array, the bare wrapper, and both explicit policies across seeds.
+    // The witness sections stay plain (the oracle refines from the witness alone); the others must draw every form across seeds.
     for (const key of ["collaborators", "rulesets", "webhooks"] as const) {
       let plain = 0;
       const wrapped = new Map<string, number>();
@@ -232,9 +222,7 @@ describe("genLiveWitness", () => {
       const live = witness.state.labels as Label[];
       expect(live.length).toBe(declared.length);
       declared.forEach((label, j) => {
-        // The name is compared verbatim (a case change would be rename drift);
-        // color and description are diffed only when declared, so declared
-        // values must be mirrored verbatim.
+        // The name is compared verbatim (a case change is rename drift); color and description are diffed only when declared.
         expect(live[j]?.name).toBe(label.new_name ?? label.name);
         if (label.color !== undefined) {
           expect(live[j]?.color).toBe(label.color);
@@ -247,10 +235,8 @@ describe("genLiveWitness", () => {
   });
 
   test("witnesses seed the FINAL post-rename state for new_name labels", () => {
-    // The handler resolves new_name to a final name and treats any other live
-    // name as rename drift, so a matching witness must seed the label AT the
-    // final name - seeding the source name would make the oracle predict clean
-    // while the engine PATCHes a rename.
+    // The handler resolves new_name to a final name and reads any other live name as rename drift, so a matching
+    // witness seeded at the source name would have the oracle predict clean while the engine PATCHes a rename.
     const declared: Label[] = [
       { name: "bug", new_name: "defect", color: "d73a4a", description: "broken" },
       { name: "keep", description: "kept" },
@@ -261,8 +247,7 @@ describe("genLiveWitness", () => {
     expect(matchingLive[0]?.color).toBe("d73a4a");
     expect(matchingLive[0]?.description).toBe("broken");
     expect(matchingLive[1]?.name).toBe("keep");
-    // drift-update diverges in exactly one field measured against the
-    // POST-rename state; the name candidate flips the final name's case.
+    // drift-update diverges in exactly one field measured against the POST-rename state; the name candidate flips the final name's case.
     for (let i = 0; i < 50; i++) {
       const drift = genLiveWitness(new Rng(i), "labels", declared, "drift-update");
       expect(drift.kind).toBe("drift-update");
@@ -284,15 +269,13 @@ describe("genLiveWitness", () => {
       }
       expect(diverged).toBe(1);
     }
-    // extra-undeclared keeps the matching (post-rename) base under the extra.
     const extra = genLiveWitness(new Rng(2), "labels", declared, "extra-undeclared");
     expect((extra.state.labels as Label[])[0]?.name).toBe("defect");
   });
 
   test("matching witnesses mirror passthrough fields verbatim", () => {
-    // Both handlers diff passthrough fields (labels via the extra-keys
-    // subsetDiff, milestones via the whole-declaration subsetDiff), so a
-    // witness built from a hardcoded field list would silently read as drift.
+    // Both handlers diff passthrough fields (the list engine compares the complete write, milestones every declared
+    // field), so a witness built from a hardcoded field list would silently read as drift.
     const labels = [{ name: "a", tone: "warm" }];
     const labelWitness = genLiveWitness(new Rng(1), "labels", labels, "matching");
     expect((labelWitness.state.labels as Array<{ tone?: string }>)[0]?.tone).toBe("warm");
@@ -316,8 +299,7 @@ describe("genLiveWitness", () => {
         const finalName = label.new_name ?? label.name;
         const renamed = entry.name !== finalName;
         if (renamed) {
-          // The flipped name must keep its case-insensitive key, so the handler
-          // still matches the label and reads the divergence as rename drift.
+          // The flipped name must keep its case-insensitive key, so the handler still matches the label and reads rename drift.
           expect(entry.name.toLowerCase()).toBe(finalName.toLowerCase());
         }
         const colorDrift = label.color !== undefined && entry.color !== label.color;
@@ -339,9 +321,7 @@ describe("genLiveWitness", () => {
       const live = witness.state.labels as Label[];
       expect(live.length).toBe(declared.length + 1);
       const extra = live[live.length - 1] as Label;
-      // The extra label matches no declared identity (case-insensitively), so
-      // the handler must classify it as _undeclared: delete in apply, drift in
-      // check.
+      // The extra label matches no declared identity (case-insensitively), so the handler classifies it undeclared.
       expect(declared.some((l) => l.name.toLowerCase() === extra.name.toLowerCase())).toBe(false);
     }
   });
@@ -356,8 +336,7 @@ describe("genLiveWitness", () => {
       declared.forEach((milestone, j) => {
         const entry = live[j] as Milestone;
         expect(entry.title).toBe(milestone.title);
-        // subsetDiff compares every DECLARED field verbatim; due_on omitted
-        // from a "matching" witness would read as drift.
+        // The handler diffs every DECLARED field verbatim; due_on omitted from a "matching" witness would read as drift.
         if (milestone.state !== undefined) {
           expect(entry.state).toBe(milestone.state);
         }
@@ -392,8 +371,7 @@ describe("genLiveWitness", () => {
         expect(diverged).toBe(1);
         drifts++;
       } else {
-        // The fallback: no milestone declares a perturbable field, so nothing
-        // can legitimately diverge and the witness says "matching".
+        // The fallback: no milestone declares a perturbable field, so nothing can legitimately diverge.
         expect(witness.kind).toBe("matching");
         expect(diverged).toBe(0);
       }
@@ -408,9 +386,8 @@ describe("genLiveWitness", () => {
   });
 
   test("witness sentinels stay disjoint from every generator pool, for every witness section and kind", () => {
-    // The witness builders throw (assertSentinelDisjoint) when a sentinel collides with a generated
-    // value, so building every supported kind over many seeds is the assertion; the collision
-    // test below is its negative control.
+    // The builders throw (assertSentinelDisjoint) on a collision, so building every kind over many seeds is the
+    // assertion; the collision test below is its negative control.
     for (const key of WITNESS_SECTIONS) {
       for (const kind of WITNESS_KINDS[key]) {
         for (let i = 0; i < 300; i++) {
@@ -422,8 +399,7 @@ describe("genLiveWitness", () => {
   });
 
   test("a sentinel collision fails loudly instead of degrading the witness", () => {
-    // "77" has no letters, so it is not case-flippable and the perturbation
-    // picker has exactly one candidate - the collision is guaranteed to fire.
+    // "77" has no letters, so it is not case-flippable and the perturbation picker has exactly one candidate: the collision must fire.
     expect(() =>
       genLiveWitness(new Rng(1), "labels", [{ name: "77", color: "123456" }], "drift-update"),
     ).toThrow(/sentinel/);
@@ -451,9 +427,8 @@ describe("genLiveWitness", () => {
 
 describe("SECTION_PRIMARY_READ", () => {
   test("every entry names a real GET endpoint of its own section", () => {
-    // The fault fuzz aims at these keys and asserts the fault FIRED, so a key
-    // that drifts from the endpoint registry would fail every fault iteration
-    // - this test catches it at unit speed instead.
+    // The fault fuzz asserts the fault FIRED, so a key drifting from the endpoint registry would fail every fault
+    // iteration; this catches it at unit speed.
     const known = allEndpoints();
     for (const [section, key] of Object.entries(SECTION_PRIMARY_READ)) {
       const endpoint = known[key];
@@ -461,8 +436,7 @@ describe("SECTION_PRIMARY_READ", () => {
         throw new Error(`SECTION_PRIMARY_READ[${section}] names unknown endpoint "${key}"`);
       }
       expect(key.startsWith(`${section}.`)).toBe(true);
-      // A fault target must be the section's READ: faulting a write would
-      // depend on live state ever driving a write, which is not guaranteed.
+      // Faulting a write would depend on live state ever driving one, which is not guaranteed.
       expect(endpoint.route.startsWith("GET ")).toBe(true);
     }
   });
@@ -493,8 +467,6 @@ describe("genInvalidSettings", () => {
       drawn.add(genInvalidSettings(new Rng(i)).name);
     }
     const catalog = INVALID_SETTINGS_CASES.map((c) => c.name);
-    // Two-way: no duplicate case names, and the drawn set equals the catalog
-    // exactly (an unexpected or never-drawn name both fail).
     expect(new Set(catalog).size).toBe(catalog.length);
     expect([...drawn].sort()).toEqual([...catalog].sort());
   });
@@ -553,9 +525,7 @@ describe("genScenario", () => {
       expect([...meta.sections].sort()).toEqual([...declared].sort());
       expect(meta.sections.length).toBeGreaterThan(0);
       expect([403, 404, "fine_grained"]).toContain(meta.denialStyle);
-      // An allowlist, when rolled, is a STRICT nonempty subset of the
-      // declared sections (so the excluded outcome is always reachable) and
-      // rides the inputs verbatim.
+      // An allowlist is a STRICT nonempty subset of the declared sections, so the excluded outcome is always reachable.
       if (meta.onlySections !== undefined) {
         expect(meta.onlySections.length).toBeGreaterThan(0);
         expect(meta.onlySections.length).toBeLessThan(meta.sections.length);
@@ -563,8 +533,7 @@ describe("genScenario", () => {
           expect(declared.has(key)).toBe(true);
         }
         expect(scenario.inputs?.sections).toBe(meta.onlySections.join(","));
-        // Input validation rejects a required section the allowlist excludes,
-        // so the generator must never pair the two.
+        // Input validation rejects a required section the allowlist excludes, so the generator must never pair the two.
         for (const key of meta.requiredSections) {
           expect(
             meta.onlySections.includes(key),
@@ -599,8 +568,6 @@ describe("genScenario", () => {
           continue;
         }
         seen[kind]++;
-        // A recorded witness implies the section is declared and its live
-        // state family is seeded.
         expect(meta.sections).toContain(key);
         expect(Array.isArray(scenario.live_state?.[key])).toBe(true);
       }
@@ -611,13 +578,8 @@ describe("genScenario", () => {
   });
 
   test("declared branches and workflows are present in live_state so they converge", () => {
-    // branches (protection PUT) and workflows (enable/disable) can configure but
-    // not create their resource; a declared name absent from live_state would
-    // permanently drift with a skip note. Every declared LITERAL branch name /
-    // workflow path must appear in the seeded live_state; a wildcard entry is
-    // a RULE (creatable through GraphQL), so it must never be seeded as a git
-    // branch. Declared required-deployment environments must exist live, or
-    // the mock's silent-drop mimicry would fail a fully-granted apply.
+    // A wildcard entry is a RULE (creatable through GraphQL), never a git branch; a required-deployment environment
+    // must exist live, or the mock's silent-drop mimicry fails a fully-granted apply.
     for (let i = 0; i < 200; i++) {
       const { scenario } = genScenario(new Rng(i));
       const branches = scenario.settings?.branches as
@@ -675,8 +637,6 @@ describe("genMultiScenario", () => {
       expect(() => parseScenario(scenario, `m-${i}`)).not.toThrow();
       expect(meta.repos.length).toBeGreaterThanOrEqual(2);
       expect(meta.repos.length).toBeLessThanOrEqual(5);
-      // Exactly one fileless target per scenario (a raw-invalid one is a
-      // separate kind and may or may not exist).
       const fileless = meta.repos.filter((r) => r.target.kind === "missing");
       expect(fileless.length).toBe(1);
     }
@@ -708,8 +668,6 @@ describe("genMultiScenario", () => {
           spec.settings,
           `seed ${i}: raw-invalid target ${repo.slug} also carries a settings object`,
         ).toBeUndefined();
-        // The raw pool entry matches its kind: unparseable bodies throw in
-        // the yaml parser, non-mapping ones parse to a non-mapping.
         if (repo.target.raw === "unparseable") {
           expect(() => parseYaml(spec.settings_raw as string)).toThrow();
         } else {
@@ -718,7 +676,6 @@ describe("genMultiScenario", () => {
             false,
           );
         }
-        // Never the guaranteed leak-canary target.
         expect(canariesOf(repo)).toEqual([]);
       }
     }
@@ -727,10 +684,8 @@ describe("genMultiScenario", () => {
   });
 
   test("the fileless target runs exactly the defaults' sections; every other target exactly its own", () => {
-    // The defaults document is applied whole to the target without a settings
-    // file and never merged into one that has a file: the recorded defaults
-    // meta names the defaults_file keys under an empty mask, and no normal
-    // target's meta gains (or nulls) a section it did not declare itself.
+    // The defaults document is applied whole to the fileless target and never merged into one that has a file, so no
+    // normal target's meta gains (or nulls) a section it did not declare itself.
     for (let i = 0; i < 100; i++) {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       expect(meta.defaults).toEqual({
@@ -761,9 +716,6 @@ describe("genMultiScenario", () => {
   });
 
   test("the redaction flag follows the mechanical rule per target", () => {
-    // redacted iff policy=redact AND slug != selfSlug AND (private/internal OR
-    // probe-denied). Re-derive it independently from the recorded facts and
-    // require it matches what the generator stamped on each target.
     let sawRedacted = false;
     let sawShown = false;
     for (let i = 0; i < 200; i++) {
@@ -784,19 +736,15 @@ describe("genMultiScenario", () => {
           `seed ${i}: target ${repo.slug} (visibility ${repo.visibility}, probeDenied ${repo.probeDenied}, policy ${meta.privateRepos}) stamped redaction "${repo.redaction.kind}" but the mechanical rule says ${expected ? "redacted" : "shown"}`,
         ).toBe(expected);
       }
-      // The action input echoes the policy the meta records.
       expect(scenario.inputs?.private_repos).toBe(meta.privateRepos);
     }
-    // Both policies are exercised across the seed range.
     expect(sawRedacted).toBe(true);
     expect(sawShown).toBe(true);
   });
 
   test("private_report is only a delivering channel under redact, and the input echoes the meta", () => {
-    // The config rejects a delivering channel (issue or artifact) + private-repos:
-    // show, so the generator picks them only under redact. The artifact channel
-    // also forwards a valid report-public-key; the other channels forward none.
-    // Every channel is exercised across the seed range.
+    // The config rejects a delivering channel (issue or artifact) + private-repos: show, so the generator picks them
+    // only under redact. The artifact channel alone forwards a report-public-key.
     let sawIssue = false;
     let sawArtifact = false;
     let sawNone = false;
@@ -806,18 +754,16 @@ describe("genMultiScenario", () => {
         sawIssue = true;
         expect(meta.privateRepos).toBe("redact");
         expect(scenario.inputs?.private_report).toBe("issue");
-        // The issue channel needs no age recipient.
         expect(scenario.inputs?.report_public_key).toBeUndefined();
       } else if (meta.privateReport === "artifact") {
         sawArtifact = true;
         expect(meta.privateRepos).toBe("redact");
         expect(scenario.inputs?.private_report).toBe("artifact");
-        // The artifact channel MUST carry a valid recipient, or the config rejects
-        // the run before it starts (a vacuous fuzz iteration).
+        // Without a valid recipient the config rejects the run before it starts: a vacuous fuzz iteration.
         expect(scenario.inputs?.report_public_key).toBe(ARTIFACT_TEST_RECIPIENT);
       } else {
         sawNone = true;
-        // `none` is the default, so the input is left unset - and no key either.
+        // `none` is the default, so the input is left unset.
         expect(scenario.inputs?.private_report).toBeUndefined();
         expect(scenario.inputs?.report_public_key).toBeUndefined();
       }
@@ -828,8 +774,7 @@ describe("genMultiScenario", () => {
   });
 
   test("a redact run always has at least one redacted target (non-vacuous leak check)", () => {
-    // The generator forces one non-missing target private under redact, so the
-    // forbidden set is never empty and the leak invariant is never vacuous.
+    // One non-missing target is forced private under redact, so the forbidden set is never empty.
     for (let i = 0; i < 300; i++) {
       const { meta } = genMultiScenario(new Rng(i));
       if (meta.privateRepos !== "redact") {
@@ -840,12 +785,9 @@ describe("genMultiScenario", () => {
   });
 
   test("the forced-private target is fully granted so its canary provably flows", () => {
-    // Under apply + fail a single denied section read preflight-aborts the whole
-    // target and renders nothing, so the forced-private leak target clears its
-    // mask (every resource back to the write default). This guarantees the canary
-    // label's name reaches the detail output the counterfactual relies on. Other
-    // private targets keep random masks, so at LEAST one redacted target must be
-    // fully granted (the forced one).
+    // Under apply + fail a single denied section read preflight-aborts the whole target and renders nothing, so the
+    // forced-private leak target clears its mask. Other private targets keep random masks, so at LEAST one redacted
+    // target must be fully granted (the forced one).
     for (let i = 0; i < 300; i++) {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       if (meta.privateRepos !== "redact") {
@@ -868,13 +810,11 @@ describe("genMultiScenario", () => {
       const { scenario, meta } = genMultiScenario(new Rng(i));
       for (const repo of meta.repos) {
         if (repo.redaction.kind !== "redacted") {
-          // A shown target carries no redaction facts - and so no canaries.
           continue;
         }
         const canaries = repo.redaction.canaries;
         if (canaries.length === 0) {
-          // Only a normal target has surfaces to plant into: a redacted
-          // missing-settings or raw-invalid target legitimately has none.
+          // Only a normal target has surfaces to plant into: a redacted missing or raw-invalid target legitimately has none.
           expect(repo.target.kind).not.toBe("normal");
           continue;
         }
@@ -890,9 +830,8 @@ describe("genMultiScenario", () => {
         const declaredDescCanary = canaries.find((c) => c.endsWith("-declared"));
         const liveDescCanary = canaries.find((c) => c.endsWith("-live"));
         const repoCanary = canaries.find((c) => c.endsWith("-repo"));
-        // The canary label is declared and mirrored in live by NAME, but with a
-        // DIFFERENT description, so it drifts (check) / updates (apply) - the name
-        // and description flow into the detail a suppression regression would leak.
+        // The canary label is declared and mirrored live by NAME with a DIFFERENT description, so it drifts (check) or
+        // updates (apply): the name reaches the apply change detail and the descriptions the check drift detail.
         const declared = spec.settings?.labels as
           | Array<{ name?: string; description?: string }>
           | undefined;
@@ -915,10 +854,7 @@ describe("genMultiScenario", () => {
 
 describe("genDiscoveryScenario", () => {
   test("every pool carries at least one non-public repo (non-vacuous leak check)", () => {
-    // Discovery always runs under redact; an all-public pool would hand the
-    // leak invariant an empty forbidden set, so the generator forces one
-    // non-public repo - the same guard genMultiScenario's forced-private
-    // target provides.
+    // Discovery always runs under redact; an all-public pool would hand the leak invariant an empty forbidden set.
     for (let i = 0; i < 300; i++) {
       const { meta } = genDiscoveryScenario(new Rng(i));
       expect(meta.privateRepos).toBe("redact");
@@ -928,9 +864,8 @@ describe("genDiscoveryScenario", () => {
 });
 
 describe("seed determinism (byte-equal JSON)", () => {
-  // Two draws from one seed must serialize byte-identically, or a --seed
-  // replay diverges from the failing run. The multi and discovery cases
-  // project .scenario - the part a seeded replay re-executes.
+  // Two draws from one seed must serialize byte-identically, or a --seed replay diverges from the failing run.
+  // The multi and discovery cases project .scenario, the part a seeded replay re-executes.
   const cases: Array<{ name: string; draw: () => unknown }> = [
     { name: "genInvalidSettings", draw: () => genInvalidSettings(new Rng(5)) },
     { name: "genScenario", draw: () => genScenario(new Rng(42)) },
@@ -956,8 +891,7 @@ describe("battery forces (constructed eligibility, never rejection-sampled)", ()
       const { scenario, meta } = genMultiScenario(new Rng(i), "idempotence-eligible");
       expect(meta.mode).toBe("apply");
       expect(meta.privateReport).toBe("none");
-      // The global mask is cleared too: a globally denied teams section under
-      // fail policy would preflight-abort and block the fixpoint proof.
+      // The global mask is cleared too: a globally denied teams section under fail policy would preflight-abort the fixpoint proof.
       expect(scenario.token_permissions).toBeUndefined();
       expect(meta.repos.some((r) => r.target.kind === "raw-invalid")).toBe(false);
       for (const repo of meta.repos) {
@@ -985,7 +919,6 @@ describe("battery forces (constructed eligibility, never rejection-sampled)", ()
     for (let i = 0; i < 200; i++) {
       const { scenario, meta } = genDiscoveryScenario(new Rng(i), "converges");
       expect(predictDiscovery(meta.pool, meta.filters).length).toBeGreaterThan(0);
-      // No filter inputs ride along under the force.
       expect(scenario.discovery?.inputs).toEqual({});
     }
   });
@@ -1043,8 +976,7 @@ describe("dead-corner knobs", () => {
       if (global !== undefined) {
         sawGlobal++;
         expect(Object.keys(global)).toEqual(["org_members"]);
-        // Every normal target's oracle meta carries the SAME global mask as
-        // orgMask, so mock and oracle grade one effective mask.
+        // Every normal target's oracle meta carries the SAME global mask as orgMask, so mock and oracle grade one effective mask.
         for (const repo of meta.repos) {
           if (repo.target.kind === "normal") {
             expect(repo.target.meta.orgMask).toEqual(global);
@@ -1056,14 +988,10 @@ describe("dead-corner knobs", () => {
   });
 
   test("a globally denied org gate strips org-gated sections from the forced-private canary target", () => {
-    // The canary target's design guarantees (never preflight-aborts, report
-    // always delivers) assume its sections are fully granted; an org-gated
-    // section (teams) under org_members: none is denied whatever the per-slug
-    // mask says, so it is dropped there (regression: fuzz seed 795 -
-    // preflight abort ate the canary and the counterfactual read as vacuous).
-    // Only the FORCED target carries the guarantee: an unforced roll can
-    // produce another redacted empty-mask target that legitimately keeps
-    // teams, so the pin addresses the recorded forcedPrivateSlug exactly.
+    // teams under org_members: none is denied whatever the per-slug mask says, so the canary target drops it; otherwise
+    // a preflight abort eats the canary and the counterfactual reads vacuous.
+    //   forced target  -> carries the guarantee, so the pin addresses forcedPrivateSlug
+    //   unforced roll  -> can also produce a redacted empty-mask target, and that one may keep teams
     expect(ORG_GATED_SECTIONS.has("teams")).toBe(true);
     let sawShape = 0;
     for (let i = 0; i < 600; i++) {
@@ -1109,8 +1037,7 @@ describe("genMergeScenario", () => {
       expect(scenario.inputs?.mode).toBe("merge");
       expect(meta.layers.length).toBeGreaterThanOrEqual(2);
       expect(meta.layers.length).toBeLessThanOrEqual(5);
-      // The runner writes settings_layers[i] as layer-i.yml and settings as
-      // settings.yml, the names the action's refusals and notices carry.
+      // The runner writes settings_layers[i] as layer-i.yml and settings as settings.yml, the names the action's refusals and notices carry.
       const below = scenario.settings_layers ?? [];
       expect(below.length).toBe(meta.layers.length - 1);
       below.forEach((doc, i) => {
@@ -1177,7 +1104,6 @@ describe("genMergeScenario", () => {
       }
       if (meta.refusal !== undefined) {
         refusals.add(meta.refusal.kind);
-        // A refused stack asserts no document, so no other shape counts for it.
         expect(meta.features).toEqual(["refused"]);
       }
     }
@@ -1229,10 +1155,8 @@ describe("genMergeScenario", () => {
 });
 
 describe("mergeFeaturesOf (the axes read off a finished stack)", () => {
-  // The feature read pairs a layer's labels with the held ones the way the
-  // fold does: through every claim, the rename target included, and only
-  // against what the fold still holds. Each row pins the label features of
-  // one stack; the controls are stacks the pairing must NOT see.
+  // The feature read pairs a layer's labels with the held ones the way the fold does: through every claim, the rename
+  // target included, and only against what the fold still holds. The controls are stacks the pairing must NOT see.
   const cases: Array<[string, Record<string, unknown>[], string[]]> = [
     [
       "a higher label naming a held rename target pairs through the alias",
@@ -1292,7 +1216,6 @@ describe("mergeFeaturesOf (the axes read off a finished stack)", () => {
       name: i === docs.length - 1 ? "settings.yml" : `layer-${i}.yml`,
       doc,
     }));
-    // Every row redeclares labels the fold holds under the run's merge default.
     const always: string[] = ["override", "run-layering-merge"];
     expect(mergeFeaturesOf(layers, "merge", false)).toEqual(
       MERGE_FEATURES.filter((feature) => always.includes(feature) || expected.includes(feature)),
@@ -1301,9 +1224,8 @@ describe("mergeFeaturesOf (the axes read off a finished stack)", () => {
 });
 
 describe("merge oracle against the curated merge scenarios", () => {
-  // The hand-written scenarios pin what the dialect means; the oracle's own
-  // fold must reproduce every pinned document exactly, or the fuzz would be
-  // checking the engine against a mirror of itself.
+  // The hand-written scenarios pin what the dialect means; the oracle's own fold must reproduce every pinned document
+  // exactly, or the fuzz would be checking the engine against a mirror of itself.
   const files = collectYmlFiles(join(import.meta.dir, "scenarios")).filter((file) =>
     basename(file).startsWith("merge-"),
   );
@@ -1316,8 +1238,7 @@ describe("merge oracle against the curated merge scenarios", () => {
     "%s: the oracle's fold reproduces expect.merged",
     (_name, file) => {
       const scenario = parseScenario(parseYaml(readFileSync(file, "utf8")), file);
-      // A curated merge scenario without a pinned document would leave this
-      // comparison vacuous; the corpus count above cannot tell.
+      // Without a pinned document this comparison is vacuous; the corpus count above cannot tell.
       if (scenario.expect.merged === undefined) {
         throw new Error(`${file}: a curated merge scenario must pin expect.merged`);
       }
@@ -1333,9 +1254,8 @@ describe("merge oracle against the curated merge scenarios", () => {
       expect(prediction.kind).toBe("merged");
       if (prediction.kind === "merged") {
         expect(prediction.merged).toEqual(scenario.expect.merged);
-        // Every notice the fold predicts is one the scenario pins on stdout,
-        // in the action's words (the e2e run itself catches the converse, a
-        // pinned line the engine never prints).
+        // Every notice the fold predicts is one the scenario pins on stdout, in the action's words (the e2e run itself
+        // catches the converse, a pinned line the engine never prints).
         for (const notice of prediction.notices) {
           expect(scenario.expect.stdout_contains ?? []).toContain(describeOptOut(notice));
         }

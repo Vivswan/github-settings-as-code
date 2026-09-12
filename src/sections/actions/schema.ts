@@ -11,9 +11,8 @@ export const ActionsConfig = z
     can_approve_pull_request_reviews: z.boolean().optional(),
     access_level: z.enum(["none", "user", "organization"]).optional(),
     artifact_and_log_retention: z.object({ days: z.number() }).optional(),
-    // STRICT, unlike its siblings: each cache limit is the entire body of
-    // its own endpoint, so an unrecognized cache key has no passthrough
-    // destination and can only be a typo.
+    // STRICT, unlike its siblings: each cache limit is the entire body of its own endpoint, so an
+    // unrecognized cache key has no passthrough destination and can only be a typo.
     cache: z
       .strictObject({
         max_cache_retention_days: z.number().optional(),
@@ -38,9 +37,8 @@ export const ActionsConfig = z
       .optional(),
   })
   .superRefine((declared, refineCtx) => {
-    // The policy-allowlist contradiction lives HERE, in the shape, not in plan(): upfront
-    // document validation rejects the document in BOTH modes before ANY section writes, where a
-    // plan-time throw would fire after earlier sections already wrote (the environments precedent).
+    // Checked in the shape, not in plan(), so both modes reject the document before ANY section
+    // writes; a plan-time throw would fire after earlier sections already wrote.
     if (declared.selected_actions === undefined || declared.allowed_actions === undefined) {
       return;
     }

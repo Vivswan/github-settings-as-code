@@ -1,8 +1,7 @@
 /**
- * The code_quality_setup section's fuzz generator fragment, aggregated by
- * test/e2e/generators.ts. Imports only the test-tree leaf seams
- * (gen-support.ts, prng.ts) - the src -> test inversion is deliberate; the
- * bundle entry is src/main.ts, so this file never reaches lib/index.js.
+ * The code_quality_setup fuzz generator fragment, aggregated by test/e2e/generators.ts. It imports
+ * only the test-tree leaf seams on purpose: the bundle entry is src/main.ts, so this file never
+ * reaches lib/index.js.
  */
 
 import type { Json } from "../../../test/e2e/gen-support.js";
@@ -23,7 +22,6 @@ export function genCodeQuality(rng: Rng): Json {
   if (rng.bool(0.3)) {
     cfg.runner_type = rng.pick(["standard", "labeled"] as const);
     if (cfg.runner_type === "labeled") {
-      // runner_label pairs with the labeled runner type (schema.ts).
       cfg.runner_label = "e2e-runner";
     }
   }

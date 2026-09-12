@@ -28,7 +28,6 @@ const COUNT_WORDS = [
   "twenty",
 ] as const;
 
-/** The written-out form of `n`; throws past the listed range. */
 export function countWord(n: number): string {
   const word = COUNT_WORDS[n];
   if (word === undefined) {

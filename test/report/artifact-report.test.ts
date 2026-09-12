@@ -34,8 +34,7 @@ describe("encryptReport", () => {
   test("round-trips through the age library's own decrypter", async () => {
     const { identity, recipient } = await testKeypair();
     const ciphertext = await encryptReport(recipient, "the private report body");
-    // Buffer.includes is a subsequence search; Uint8Array toContain would
-    // compare elements and pass even with the plaintext bytes present.
+    // Buffer.includes is a subsequence search; Uint8Array toContain compares elements and would pass with the plaintext bytes present.
     expect(Buffer.from(ciphertext).includes(Buffer.from("private"))).toBe(false);
     const decrypter = new Decrypter();
     decrypter.addIdentity(identity);
@@ -95,8 +94,7 @@ describe("deliverArtifactReport", () => {
   test("a malformed recipient is a warning and the uploader is never called", async () => {
     const { uploader, uploads } = captureUploader();
     const result = await deliverArtifactReport(uploader, "doc", "not-a-key");
-    // The middle of the warning is the age library's own wording for a bad recipient, so only
-    // our prefix and advice are pinned around it.
+    // The middle of the warning is the age library's own wording, so only our prefix and advice are pinned.
     expect(result).toEqual({
       warning: expect.stringMatching(
         /^could not upload the private report artifact: .+\. Re-run the workflow, or set private-report: none if it persists$/,

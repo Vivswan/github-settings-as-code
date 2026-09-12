@@ -1,7 +1,5 @@
-# Repo-owned: generated once by the fleet sync, never overwritten by a
-# later sync. ci.yml calls it after the all-green gate, before the release, with
-# the judged sha. Pending runs coalesce (ci.yml's concurrency group), so
-# jobs here reconcile current state and stay idempotent.
+# Repo-owned, never overwritten by sync; ci.yml calls it after the all-green gate, before the release, with the
+# judged sha. Pending runs coalesce (ci.yml's concurrency group), so jobs here reconcile current state and stay idempotent.
 
 name: Post Green
 
@@ -14,13 +12,9 @@ on:
         type: string
 
 jobs:
-  # Appends the green commit's packaged commit to the `build` branch and moves
-  # the `latest` tag (release-pipeline.ts advance-build).
-  # No permissions key: the job inherits the caller's grant and pushes with
-  # GITHUB_TOKEN when that is contents: write, which suffices because chain
-  # commits carry no .github/workflows/ (the same fact update-release.yml's
-  # append relies on); with a read ceiling and no PAT it warns and skips, and
-  # the release hook publishes the release's chain commit and latest itself.
+  # No permissions key: the job inherits the caller's grant, which is enough because chain commits carry no .github/workflows/.
+  #   GITHUB_TOKEN at contents: write, or a PAT  -> pushes build and latest
+  #   a read ceiling and no PAT                  -> warns and skips; the release hook publishes the release's chain commit and latest itself
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -28,23 +22,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
-          # The script judges whether build's recorded sources lie on this
-          # commit's history; a shallow checkout cannot answer that.
+          # The script judges whether build's recorded sources lie on this commit's history; a shallow checkout cannot.
           fetch-depth: 0
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
-      # A dry-run push asks origin for its receive-pack advertisement over
-      # the very channel the real push uses, which a token without write
-      # access is refused; nothing is created. The target is a ref that never
-      # exists, not build itself: HEAD is no descendant of build's tip, so a
-      # dry run against build would be rejected locally as a non-fast-forward
-      # whatever the token. git's refusal is printed as plain log lines inside
-      # a stop-commands fence keyed by a token minted for this run, never
-      # inside a workflow command: the runner decodes % and line breaks in a
-      # command's message and acts on any line whose first non-blank text is
-      # "::", and only the fence's own token resumes command processing, so
-      # remote-supplied text can neither forge a command nor swallow the
-      # static error that follows (awk, not sed: it terminates the last line
-      # even when git did not, so the closing fence is a line of its own).
+      # A dry-run push asks origin for its receive-pack advertisement over the channel the real push uses, which a
+      # token without write access is refused; nothing is created. The target is a ref that never exists: HEAD is no
+      # descendant of build's tip, so a dry run against build itself would be rejected locally whatever the token.
+      #
+      # git's refusal is remote-supplied text, so it is printed inside a stop-commands fence keyed by a per-run token
+      # and never inside a workflow command.
+      #   the runner acts on any line whose first non-blank text is "::"  -> the fence disarms every such line
+      #   only the fence's own token resumes command processing           -> the text can neither forge a command nor swallow the error after it
+      #   awk, not sed                                                     -> ends the last line even when git did not, so the fence stays alone
       - name: Check the token can push to build
         id: token
         env:

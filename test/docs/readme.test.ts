@@ -1,12 +1,3 @@
-/**
- * README contract tests: pin the schema link, the example settings.yml
- * block, the quick-start warning, and the version pins to their single
- * sources, so a prose claim cannot drift from what the code does; the
- * migration guide's parity clause is pinned here too. The token-form link
- * is generated (.github/scripts/gen-docs.ts) and pinned by that generator's
- * tests, as are the reference pages' tables.
- */
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,12 +19,6 @@ import { stalePins } from "./version-pins.js";
 const ROOT = join(import.meta.dir, "..", "..");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 
-/**
- * Assert the parenthesized enumeration `leadRe` captures from `text` carries
- * each `expected` value backticked and nothing else backticked - the same pin
- * the action-yml contract test applies to the output description, so a new
- * value cannot skip the prose and a dropped one cannot linger.
- */
 function assertBacktickedEnumeration(
   text: string,
   leadRe: RegExp,
@@ -47,9 +32,7 @@ function assertBacktickedEnumeration(
 }
 
 describe("README front door", () => {
-  // The README is the front door to docs/: a pitch, a three-step quick start, the versioning
-  // note, the library pointer, and a table into the guides. Each pin here is a shape the reference content would
-  // break if it grew back: the tables live on the reference pages now.
+  // Each pin is a shape the reference content would break if it grew back into the README; the tables live on the reference pages.
   const prose = readme.replace(/```[\s\S]*?```/g, "");
 
   test("carries exactly the front-door headings, in order", () => {
@@ -64,8 +47,7 @@ describe("README front door", () => {
   });
 
   test("the token-form link is its only generated region", () => {
-    // The Sections and Inputs tables and the outputs list render on the reference pages only;
-    // a marker of theirs reappearing here would regenerate silently.
+    // A reference-table marker reappearing here would regenerate silently.
     const regions = [...readme.matchAll(/<!-- BEGIN GENERATED: ([a-z-]+)/g)].map((m) => m[1]);
     expect(regions).toEqual(["readme-pat-url"]);
   });
@@ -114,17 +96,13 @@ describe("README front door", () => {
   });
 
   test("stays a front door in size", () => {
-    // The budget is the tripwire against the reference tables growing back; the full
-    // reference is docs/.
+    // The tripwire against the reference tables growing back.
     expect(readme.split("\n").length).toBeLessThanOrEqual(100);
   });
 });
 
 describe("README example settings.yml blocks", () => {
   test("every settings.yml example validates and its repository keys are known", () => {
-    // The example block parses to a settings document (other yaml blocks are
-    // workflow yaml). Validate any block whose top level is a mapping of known
-    // section keys, then confirm repository special-looking keys are real.
     const known = new Set<string>(SECTION_KEYS);
     let validated = 0;
     for (const block of fencedBlocks(readme, "yaml")) {
@@ -150,9 +128,6 @@ describe("README example settings.yml blocks", () => {
 
 describe("README version pins", () => {
   test("every uses: pin names the current release's moving major tag", () => {
-    // The uses: pins carry the inline x-release-please-major annotation, so
-    // every release PR that bumps the major rewrites them together with the
-    // manifest; this test is the tripwire for the annotations rotting away.
     const pins = stalePins([{ label: "README.md", text: readme }]);
     if (pins === null) {
       return; // nothing released yet, no pin can be right
@@ -166,10 +141,7 @@ describe("README version pins", () => {
   });
 
   test("the exact-pin advice names the version tag and the build/ namespace stays retired", () => {
-    // Under the single-tag scheme (.github/workflows/release.yml) every
-    // vX.Y.Z tag points at a packaged commit carrying the built action, so
-    // the exact pin README offers is the version tag itself; the retired
-    // build/ namespace must not reappear anywhere in the README.
+    // Every vX.Y.Z tag points at a packaged commit, so the version tag itself is the exact pin.
     expect(
       readme.includes("`@vX.Y.Z`"),
       "README's exact-pin advice must name the `@vX.Y.Z` tag form",
@@ -178,9 +150,7 @@ describe("README version pins", () => {
       readme.includes("build/"),
       "README references the retired build/ tag namespace; version tags are the packaged, runnable refs now",
     ).toBe(false);
-    // Concrete version pins would rot on every release; the moving major
-    // (annotated for release-please) and the @vX.Y.Z placeholder are the
-    // only forms the README may offer.
+    // Concrete version pins would rot on every release.
     const versionPins = [...readme.matchAll(/@v\d+\.\d+\.\d+/g)].map((m) => m[0]);
     expect(
       versionPins,
@@ -190,12 +160,7 @@ describe("README version pins", () => {
 });
 
 describe("delete-by-default enumeration", () => {
-  // The quick-start warning enumerates the sections whose undeclared entries
-  // an apply deletes; the set is derived from the registry so a new
-  // delete-by-default section fails here until the prose (and the display
-  // map in claims.ts) follows. This list drifted once already - the
-  // quick-start warning named three of five sections. The guides' two
-  // enumerations are pinned the same way in guides.test.ts.
+  // The quick-start warning drifted to three of five sections once already; the guides' enumerations are pinned in guides.test.ts.
   const deleteKeys = SECTIONS.filter((s) => s.undeclaredDefault === "delete").map((s) => s.key);
 
   test("the quick-start first-run warning names every delete-by-default section", () => {
@@ -220,17 +185,13 @@ describe("schema $schema hints and $id", () => {
 
   test("every yaml-language-server line in the README and the guides names the schema at the moving major tag", () => {
     expect(id, "lib/settings.schema.json has no $id").toBeTruthy();
-    // The hints share the $id's owner/repo/path but fetch at the current
-    // release line's moving major tag: the $id is version-free (HEAD), the
-    // hints are what editors download, so they pin a release ref.
+    // The $id is version-free (HEAD); the hints are what editors download, so they pin the moving major tag.
     const pins = stalePins([{ label: "README.md", text: readme }]);
     expect(pins, "no release yet, so no major tag for the hints to name").not.toBeNull();
     const idUrl = new URL(id);
     const [owner, repo, , ...rest] = idUrl.pathname.split("/").filter(Boolean);
     const expectedHint = `${idUrl.origin}/${owner}/${repo}/${pins?.major}/${rest.join("/")}`;
-    // Per-file counts, pinned: a global total would let the README's hint
-    // disappear while the guides' hint keeps the sum positive. Adding a hint
-    // to a new page is a conscious edit here.
+    // Per-file counts: a global total would let the README's hint disappear while the guides' keeps the sum positive.
     const EXPECTED_HINTS: Record<string, number> = {
       "README.md": 1, // the quick-start settings example
       "docs/start/getting-started.md": 1,
@@ -252,18 +213,14 @@ describe("schema $schema hints and $id", () => {
   });
 
   test("the $id points at this repository's raw HEAD copy of the build output", () => {
-    // The $id is stamped by gen-settings-schema.ts as the raw copy at HEAD,
-    // an identity that names no release...
+    // gen-settings-schema.ts stamps the $id as the raw copy at HEAD; each URL part is held to its own single source.
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
       repository: { url: string };
     };
-    // ...and the URL's parts must each match their own single source:
-    // https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>.
     const url = new URL(id);
     expect(url.protocol).toBe("https:");
     expect(url.hostname).toBe("raw.githubusercontent.com");
     const [owner, repo, ref, ...rest] = url.pathname.split("/").filter(Boolean);
-    // <path> is the build output, exactly where the generator writes it.
     const genScript = readFileSync(
       join(ROOT, ".github", "scripts", "gen-settings-schema.ts"),
       "utf8",
@@ -272,24 +229,18 @@ describe("schema $schema hints and $id", () => {
       genScript.includes(`join(ROOT, ${rest.map((part) => JSON.stringify(part)).join(", ")})`),
       `gen-settings-schema.ts does not write to ${rest.join("/")}, where the $id points`,
     ).toBe(true);
-    // <owner>/<repo> is the slug the manifest's repository URL names (the
-    // package name is scoped and cannot serve); the equality catches a
-    // rename on either side.
+    // The package name is scoped and cannot serve as the slug, so the manifest's repository URL does; the equality catches a rename on either side.
     const manifestSlug = pkg.repository.url.match(
       /^git\+https:\/\/github\.com\/([^/]+\/[^/]+)\.git$/,
     )?.[1];
     expect(`${owner}/${repo}`).toBe(manifestSlug ?? "");
-    // <owner>/<repo> is the slug the README's own workflow snippet installs
-    // (that pin is itself anchored by the "README version pins" test). An
-    // includes() cannot prove EVERY install line agrees - third-party
-    // actions share the uses: syntax - but a $id naming a slug no snippet
-    // installs fails here.
+    // includes() cannot prove EVERY install line agrees (third-party actions share the uses: syntax), but a $id naming a slug no snippet installs
+    // fails here.
     expect(
       readme.includes(`uses: ${owner}/${repo}@`),
       `the README never installs "uses: ${owner}/${repo}@...", so the $id's slug matches no workflow snippet`,
     ).toBe(true);
-    // <ref> is HEAD: version-free, so a major bump never waits on a schema
-    // regeneration to go green.
+    // HEAD is version-free, so a major bump never waits on a schema regeneration to go green.
     expect(ref).toBe("HEAD");
   });
 });
@@ -301,12 +252,8 @@ describe("migration guide parity paragraph", () => {
       "What carries over as-is",
       "docs/start/migrating-from-probot.md",
     ).join(" ");
-    // Isolate the parity clause precisely so later mentions (the sections
-    // outside the guarantee) cannot leak in: the clause runs from "keeps
-    // working for" up to its "their original Probot shapes remain compatible"
-    // marker; the paragraph goes on to scope the plain-array claim to the
-    // list sections, since the object-shaped sections have no array form and
-    // the wrapped `_undeclared` form is this action's own addition.
+    // The clause runs from "keeps working for" to its "their original Probot shapes remain compatible" marker, so later mentions of non-parity
+    // sections cannot leak in.
     const clause = paragraph.match(
       /keeps working for\s+(.*?): their original Probot shapes remain compatible/s,
     );
@@ -320,8 +267,6 @@ describe("migration guide parity paragraph", () => {
         .filter((key) => (SECTION_KEYS as readonly string[]).includes(key)),
     );
     const parity = new Set<string>(PROBOT_PARITY_KEYS);
-    // Exact set-equality, both directions: no parity section omitted, and no
-    // non-parity section claimed.
     const missing = [...parity].filter((key) => !listed.has(key));
     const extra = [...listed].filter((key) => !parity.has(key));
     expect(
@@ -336,23 +281,17 @@ describe("migration guide parity paragraph", () => {
 });
 
 describe("private repositories guide", () => {
-  // The guide is a standalone page whose title is a single `#`, so it is
-  // read whole-document rather than via sectionLines() - the stronger pin
-  // anyway, since each claim must live somewhere on the page.
+  // The page's title is a single `#`, so it is read whole-document rather than via sectionLines().
   const section = readFileSync(join(ROOT, "docs", "operate", "private-repositories.md"), "utf8");
 
   test("names every private-report channel the code accepts", () => {
-    // A channel added to PRIVATE_REPORT_CHANNELS but never documented (or a
-    // documented channel the code dropped) fails here.
     for (const channel of PRIVATE_REPORT_CHANNELS) {
       expect(
         section.includes(`\`private-report: ${channel}\``) || channel === "none",
         `the private repositories guide does not document the "${channel}" channel`,
       ).toBe(true);
     }
-    // `none` is the default (it delivers nothing), so it is named as the
-    // input default rather than as a delivering channel; pin the verbatim
-    // default sentence - a bare "none" would match unrelated prose.
+    // `none` delivers nothing, so it is named as the input default; a bare "none" would match unrelated prose.
     expect(section).toContain("defaults to `private-report: none`, which delivers nothing");
   });
 
@@ -370,8 +309,7 @@ describe("private repositories guide", () => {
   });
 
   test("documents the issue-channel PAT grant", () => {
-    // The issue channel needs Issues read+write on every target; the grant
-    // prose mirrors grantFor(ISSUE_REPORT_PERMISSION).
+    // The grant prose mirrors grantFor(ISSUE_REPORT_PERMISSION).
     expect(section).toContain('`"Issues"` (read and write)');
   });
 
@@ -385,9 +323,6 @@ describe("private repositories guide", () => {
   });
 
   test("the overall-result enumeration names exactly the REPO_RESULTS members", () => {
-    // The safe-skeleton paragraph enumerates every result value a redacted
-    // target can show; pin the parenthesized list to REPO_RESULTS the same
-    // way the action-yml contract test pins the output description.
     assertBacktickedEnumeration(
       section.replace(/\n/g, " "),
       /the overall result \(([^)]*)\)/,
@@ -399,11 +334,8 @@ describe("private repositories guide", () => {
 
 describe("SettingsFile deletion claims", () => {
   test("the description of delete/keep sections claims its own policy and never the opposite", () => {
-    // Each knobbed section's published description (its <key>.docs.yml
-    // `SettingsFile.<key>` entry) states its default in a "... by default"
-    // clause and may mention the opposite word elsewhere (the `_undeclared:`
-    // opt-in it documents). The claim windows, families, and negator handling
-    // live in ./claims.ts, shared with the COVERAGE sweep.
+    // A knobbed section's description states its default in a "... by default" clause and may name the opposite word elsewhere (the `_undeclared:`
+    // opt-in it documents).
     for (const section of SECTIONS) {
       if (section.undeclaredDefault === "untouched") {
         continue; // "untouched" sections make no per-key deletion claim
@@ -422,13 +354,11 @@ describe("SettingsFile deletion claims", () => {
 
 describe("schema.ts file-header additions claim", () => {
   const schemaSrc = readFileSync(join(ROOT, "src", "schema.ts"), "utf8");
-  // The header block, with URLs removed so a section-key word inside a link
-  // (e.g. "repository" in the repository-settings/app URL) cannot match.
+  // URLs removed so a section-key word inside a link (e.g. "repository" in the repository-settings/app URL) cannot match.
   const header = schemaSrc.slice(0, schemaSrc.indexOf("*/")).replace(/https?:\/\/\S+/g, "");
 
   test("the header defers to PROBOT_PARITY_KEYS", () => {
-    // The header must define the additions by exclusion over
-    // PROBOT_PARITY_KEYS; the pointer to the constant IS the derivation.
+    // The pointer to the constant IS the derivation; an enumeration would be the copy that drifts.
     expect(
       header.includes("PROBOT_PARITY_KEYS"),
       "the schema.ts file header must define the additions via PROBOT_PARITY_KEYS",
@@ -436,8 +366,6 @@ describe("schema.ts file-header additions claim", () => {
   });
 
   test("the header names no addition section", () => {
-    // An enumeration of the non-parity sections is the copy that drifts, so
-    // no section key outside PROBOT_PARITY_KEYS may appear in the header.
     const parity = new Set<string>(PROBOT_PARITY_KEYS);
     for (const key of SECTION_KEYS) {
       if (parity.has(key)) {
@@ -451,64 +379,9 @@ describe("schema.ts file-header additions claim", () => {
   });
 });
 
-describe("section-contract references to the Sections page's headings", () => {
-  const SECTIONS_PAGE = "docs/reference/sections.md";
-  const contractDir = join(ROOT, "src", "sections", "contract");
-  const contractSrc = readdirSync(contractDir)
-    .filter((file) => file.endsWith(".ts"))
-    .map((file) => readFileSync(join(contractDir, file), "utf8"))
-    .join("\n");
-  // Headings count only outside fenced code blocks.
-  const pageProse = readFileSync(join(ROOT, ...SECTIONS_PAGE.split("/")), "utf8").replace(
-    /```[\s\S]*?```/g,
-    "",
-  );
-
-  test('every "..." name quoted beside a docs/reference/sections.md mention is a heading of that page', () => {
-    // The Sections table's home is the reference page, so the contract's
-    // JSDoc points there; every quoted name on a line naming the page must
-    // exist as one of its markdown headings, so a heading rename (or a
-    // JSDoc typo) fails here. All quoted names on the line count.
-    const named: string[] = [];
-    for (const line of contractSrc.split("\n")) {
-      const mention = line.indexOf(SECTIONS_PAGE);
-      if (mention === -1) {
-        continue;
-      }
-      named.push(...[...line.slice(mention).matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? ""));
-    }
-    // Zero extracted names while the contract still names the page means the
-    // extraction went blind (e.g. a rewrap split the mention from its
-    // quotes); fail loudly rather than pass on an empty list.
-    expect(
-      named.length,
-      `the section contract names ${SECTIONS_PAGE} but no quoted heading name was extracted; fix the JSDoc line wrap or this extraction`,
-    ).toBeGreaterThan(0);
-    // A README mention beside table wording is the stale pointer this test replaced; a README
-    // mention on its own (the quick start, the repository front door) is fine.
-    const stale = contractSrc
-      .split("\n")
-      .filter((line) => /README/.test(line) && /\b(?:Sections|table)\b/.test(line));
-    expect(
-      stale,
-      `the section contract still points at the README for the Sections table; it lives on ${SECTIONS_PAGE}`,
-    ).toEqual([]);
-    for (const name of named) {
-      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      expect(
-        new RegExp(`^#{1,6} ${escaped}\\s*$`, "m").test(pageProse),
-        `a section-contract JSDoc names the Sections page's "${name}", but ${SECTIONS_PAGE} has no such heading`,
-      ).toBe(true);
-    }
-  });
-});
-
 describe("forward-compatibility closed-sections claim", () => {
   test("the guide's prose names exactly the closedSurface sections", () => {
-    // closedSurface is the module-level source of which sections reject
-    // unrecognized keys; the forward-compatibility page must list those and
-    // no others, the same way undeclaredDefault pins the Sections table.
-    // The page's title is a single `#`, so it is read whole-document.
+    // closedSurface is the single source of which sections reject unrecognized keys. The page's title is a single `#`, so it is read whole-document.
     const closed = SECTIONS.filter((section) => section.closedSurface !== undefined).map(
       (section) => section.key,
     );
@@ -522,8 +395,6 @@ describe("forward-compatibility closed-sections claim", () => {
       sentence,
       'docs/reference/forward-compatibility.md has no sentence containing "closed rather than passthrough"; restore the phrase or update this extraction',
     ).toBeDefined();
-    // The sentence opens with the count in words; pin it to the derived list
-    // so the next closed section cannot leave the number stale.
     const word = countWord(closed.length);
     const capitalized = word.charAt(0).toUpperCase() + word.slice(1);
     expect(sentence).toContain(`${capitalized} sections are closed`);

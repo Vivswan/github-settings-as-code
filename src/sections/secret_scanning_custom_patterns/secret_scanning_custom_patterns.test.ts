@@ -171,8 +171,7 @@ describe("secret_scanning_custom_patterns", () => {
   });
 
   test("a rename is create plus bulk delete under _undeclared:delete, never a PATCH (no rename inference)", async () => {
-    // The declared pattern carries the SAME fields as the live one, only the
-    // name differs: the name is the identity.
+    // The declared pattern carries the same fields as the live one, only the name differs: the name is the identity.
     const api = new MockApi(
       listRoute([livePattern({ id: 9, name: "old-name", custom_pattern_version: "v7" })]),
     );
@@ -205,7 +204,6 @@ describe("secret_scanning_custom_patterns", () => {
         ],
       },
     ]);
-    // The default keep leaves the renamed-away pattern live, as a note.
     const kept = await plan(api, [{ name: "new-name", pattern: "int_[a-z0-9]{8}" }]);
     expect(kept.ops.map((op) => op.role)).toEqual(["create"]);
     expect(kept.notes).toHaveLength(1);
@@ -213,8 +211,7 @@ describe("secret_scanning_custom_patterns", () => {
   });
 
   test("the bulk DELETE always sends resolve_alerts and each pattern's version, omitting a version-less one", async () => {
-    // resolve_alerts is policy, not configuration: upstream's delete_alerts
-    // default is never sent and no knob exists.
+    // resolve_alerts is policy, not configuration: upstream's delete_alerts default is never sent and no knob exists.
     const api = new MockApi(
       listRoute([
         livePattern({ id: 3, name: "stale-a", custom_pattern_version: "v3" }),
@@ -253,8 +250,7 @@ describe("secret_scanning_custom_patterns", () => {
   test.each<[form: string, live: Record<string, unknown>, at: RegExp]>([
     ["no id", { name: "no-id" }, /\[0\]\.id/],
     ["a non-string name", { id: 1, name: 5 }, /\[0\]\.name/],
-    // string = concurrency token; null/absent = none offered; anything else
-    // must not quietly disable the 412 protection.
+    // string = concurrency token, null/absent = none offered; anything else must not quietly disable the 412 protection.
     [
       "a numeric version",
       livePattern({ custom_pattern_version: 7 }),
@@ -269,8 +265,7 @@ describe("secret_scanning_custom_patterns", () => {
   });
 
   test("an empty delimiter is rejected at document validation (clearing is not expressible)", () => {
-    // "" cannot mean "clear it": the PATCH updates provided fields only, so
-    // the zod shape rejects the spelling before any repository is touched.
+    // "" cannot mean "clear it": the PATCH updates provided fields only.
     for (const key of ["start_delimiter", "end_delimiter"] as const) {
       const doc = { secret_scanning_custom_patterns: [{ ...INTERNAL, [key]: "" }] };
       const invalid = validateSettingsDoc(doc, "test doc", new Set(), silentIo());
@@ -338,9 +333,8 @@ describe("secret_scanning_custom_patterns", () => {
 
 describe("secret_scanning_custom_patterns closed surface", () => {
   test("rejects the read-only state and push_protection_enabled keys BY NAME, before any call", () => {
-    // True by construction (closedSurface lists the six declared fields),
-    // but no other test names the two read-only fields a user would most
-    // plausibly try to declare.
+    // True by construction (closedSurface lists the six declared fields), but no other test names the two read-only fields a user would most
+    // plausibly declare.
     for (const key of ["state", "push_protection_enabled"]) {
       const error = validateSettingsDoc(
         { secret_scanning_custom_patterns: [{ ...INTERNAL, [key]: true }] },

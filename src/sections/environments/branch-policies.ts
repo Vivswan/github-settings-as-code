@@ -1,7 +1,6 @@
 /**
- * The nested `deployment_branch_policies` key: plan one environment's
- * custom branch-policy patterns (a pattern's type is immutable upstream, so
- * a type change is delete plus recreate).
+ * The nested `deployment_branch_policies` key. A pattern's type is immutable upstream, so a type
+ * change is a delete plus a recreate.
  */
 
 import { z } from "zod";
@@ -14,17 +13,16 @@ import { ENDPOINTS, type EnvironmentRestOp, type EnvironmentsRestContext } from 
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentBranchPolicyConfig, EnvironmentConfig } from "./schema.js";
 
-// "delete" like the nested variables list: patterns are readable,
-// recreatable configuration.
+// "delete" like the nested variables list: patterns are readable, recreatable configuration.
 export const BRANCH_POLICIES_DEFAULT_POLICY: UndeclaredPolicy = "delete";
 
 /**
- * The fields of a live branch policy this section reads. GitHub's spec marks
- * every one of them optional, so each is read defensively: a missing type
- * reads as the server-side default "branch", while a missing name or id is a
- * contract break that fails loudly - a policy without a name has no identity
- * to reconcile by, and silently skipping it would let check report falsely
- * clean while the default delete policy neither removed nor noted it.
+ * GitHub's spec marks every field optional. A policy without a name has no identity to reconcile by,
+ * and skipping it would let check report falsely clean while the delete policy neither removed nor noted it.
+ *
+ * missing type  -> the server default "branch"
+ * missing name  -> loud failure
+ * missing id    -> loud failure when a delete addresses it
  */
 const LiveBranchPolicy = z.looseObject({
   id: z.number().optional(),
@@ -33,12 +31,11 @@ const LiveBranchPolicy = z.looseObject({
 });
 type LiveBranchPolicy = z.infer<typeof LiveBranchPolicy>;
 
-/** A live policy's type; "branch" is GitHub's server-side default when absent. */
+/** "branch" is GitHub's server-side default when the type is absent. */
 function livePolicyType(policy: LiveBranchPolicy): string {
   return typeof policy.type === "string" ? policy.type : "branch";
 }
 
-/** The id a delete addresses, or a loud error when the response omitted it. */
 function livePolicyId(policy: LiveBranchPolicy, envName: string): string {
   if (policy.id === undefined) {
     throw new Error(
@@ -48,7 +45,6 @@ function livePolicyId(policy: LiveBranchPolicy, envName: string): string {
   return String(policy.id);
 }
 
-/** The name a policy reconciles by, or a loud error when the response omitted it. */
 function livePolicyName(policy: LiveBranchPolicy, envName: string): string {
   if (typeof policy.name !== "string") {
     throw new Error(
@@ -59,13 +55,8 @@ function livePolicyName(policy: LiveBranchPolicy, envName: string): string {
 }
 
 /**
- * Upfront rejection of duplicate declared patterns: exact-name matching
- * would fight itself on every run. The flag pairing (a declared
- * `deployment_branch_policies` needs `custom_branch_policies: true` on the
- * sibling) is NOT checked here: it lives in the section's zod shape, so an
- * invalid document fails upfront validation in both modes before ANY
- * section writes - a hook-level check would fire only when this section
- * runs, after earlier sections already wrote.
+ * Two entries for one pattern could fight over its type on every run. The flag pairing is checked in
+ * the zod shape (schema.ts), not here, so it fails before any section writes.
  */
 export function validateBranchPolicies(
   env: EnvironmentConfig,
@@ -87,11 +78,6 @@ export function validateBranchPolicies(
   }
 }
 
-/**
- * The create of one pattern, minus the drift and change the caller supplies
- * (a plain create, or the second half of a replace). GitHub's 303 for an
- * existing name arrives as a plain non-error response; extra keys pass through.
- */
 function createPolicyOp(
   envName: string,
   pattern: DeploymentBranchPolicyConfig,
@@ -107,11 +93,7 @@ function createPolicyOp(
   };
 }
 
-/**
- * Plan one environment's patterns: create missing ones, delete-and-recreate a
- * name whose type diverged (immutable upstream), purge or note the rest. With
- * the flag off the list is unreadable, so hidden patterns reconcile next run.
- */
+/** With custom_branch_policies off the pattern list 404s, so patterns already behind the flag reconcile on the next run. */
 export async function planBranchPolicies(
   ctx: EnvironmentsRestContext,
   section: SectionMeta,
@@ -129,9 +111,8 @@ export async function planBranchPolicies(
   const hidden = liveEnv !== undefined && flags?.custom_branch_policies !== true;
   let live: LiveBranchPolicy[] = [];
   if (hidden) {
-    // No list read here means preflight never probes listPolicies for this
-    // environment, so an Actions-read denial surfaces mid-apply - the same
-    // accepted shape as the missing-environment case.
+    // With no list read, preflight never probes listPolicies for this environment, so an
+    // Actions-read denial shows up on the next run's read instead of this one's preflight.
     planned.notes.push(
       `environments[${envName}].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and create the declared patterns, and any pattern already behind the flag reconciles on the next run`,
     );
@@ -170,8 +151,6 @@ export async function planBranchPolicies(
     if (liveType === desiredType) {
       continue;
     }
-    // The differing values are named on the recreate; the generic line alone
-    // left the reader guessing which side says what.
     const typeDrift = subsetDiff({ type: desiredType }, { type: liveType }, label);
     if (!hasDrift(typeDrift)) {
       throw new Error(

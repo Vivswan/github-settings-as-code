@@ -1,9 +1,7 @@
 /**
- * The custom_properties section's fuzz generator fragment, aggregated by
- * test/e2e/generators.ts. Imports only the test-tree leaf seams
- * (gen-support.ts, mock/state.ts, prng.ts) - the src -> test inversion is
- * deliberate; the bundle entry is src/main.ts, so this file never reaches
- * lib/index.js.
+ * The custom_properties fuzz generator fragment, aggregated by test/e2e/generators.ts. It imports
+ * only the test-tree leaf seams on purpose: the bundle entry is src/main.ts, so this file never
+ * reaches lib/index.js.
  */
 
 import { type EntriesForm, type Json, maybeWrapUndeclared } from "../../../test/e2e/gen-support.js";
@@ -11,12 +9,9 @@ import { CUSTOM_PROPERTY_DEFINITIONS } from "../../../test/e2e/mock/state.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 
 /**
- * Custom property values, drawn ONLY from CUSTOM_PROPERTY_DEFINITIONS (the
- * mock's org-level definition fixture, shared with the values PATCH handler)
- * with type-appropriate values, so a generated declaration never trips the
- * undefined-property 422 the oracle does not model. A small null draw
- * exercises the unset path (a declared null over an empty live baseline is
- * simply already-converged).
+ * Values are drawn ONLY from CUSTOM_PROPERTY_DEFINITIONS (the fixture the mock's PATCH handler
+ * validates against), so a generated declaration never trips the undefined-property 422 the oracle
+ * does not model.
  */
 export function genCustomProperties(rng: Rng): EntriesForm {
   const entries: Json[] = [];
@@ -30,8 +25,7 @@ export function genCustomProperties(rng: Rng): EntriesForm {
     } else if (definition.value_type === "string") {
       value = rng.pick(["platform", "payments", "infra"]);
     } else if (definition.value_type === "true_false") {
-      // Both spellings on purpose: a declared boolean must normalize to the
-      // "true"/"false" string GitHub stores.
+      // Both spellings on purpose: a declared boolean must normalize to the "true"/"false" string GitHub stores.
       value = rng.pick([true, false, "true", "false"] as const);
     } else {
       const allowed = [...(definition.allowed_values ?? [])];

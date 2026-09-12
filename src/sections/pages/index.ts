@@ -1,8 +1,3 @@
-/**
- * `pages:` section - create/update the GitHub Pages site; `pages: null`
- * declares Pages OFF (mirroring branches' `protection: null`).
- */
-
 import { subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { loosen, type SectionModule } from "../contract/module.js";
@@ -26,35 +21,25 @@ const ENDPOINTS = {
   remove: { route: "DELETE /repos/{owner}/{repo}/pages", statuses: { 204: "Pages disabled" } },
 } as const satisfies Record<string, EndpointDecl>;
 
-/** The declared site object: the section config with its null (Pages OFF) arm stripped. */
 type PagesSite = NonNullable<PagesConfig>;
 
 /**
- * A Pages source as the API takes it: `path` is REQUIRED on the wire (the
- * update PUT rejects a source without it), where the config leaves it
- * optional. wireSource() is the only mint, so a payload can never carry a
- * pathless source.
+ * `path` is REQUIRED on the wire (the update PUT rejects a source without it) where the config
+ * leaves it optional; wireSource() is the only mint, so no payload can carry a pathless source.
  */
 type PagesSourceWire = Omit<NonNullable<PagesSite["source"]>, "path"> & { path: string };
 
-/**
- * Normalize a declared source to the wire form. The update PUT requires
- * path alongside branch when source is sent; the create POST defaults it,
- * so default it everywhere.
- */
+/** The update PUT requires path alongside branch and the create POST defaults it, so it is defaulted everywhere. */
 function wireSource(source: NonNullable<PagesSite["source"]>): PagesSourceWire {
   return { ...source, path: source.path ?? "/" };
 }
 
-/** The declared config with its source already in the wire form. */
 type PagesWirePayload = Omit<PagesSite, "source"> & { source?: PagesSourceWire };
 
 /**
- * The subset of the payload the create POST accepts; GitHub documents every
- * other field (cname, https_enforced, public) as update-only, so enabling a
- * site is create-then-update. A Pick over the wire payload, so a renamed
- * config field breaks this split at compile time instead of silently
- * rerouting through the wrong endpoint.
+ * GitHub documents every field but build_type and source as update-only, so enabling a site is
+ * create-then-update. A Pick over the wire payload, so a renamed config field breaks this split at
+ * compile time instead of silently rerouting through the wrong endpoint.
  */
 type PagesCreateBody = Pick<PagesWirePayload, "build_type" | "source">;
 
@@ -63,23 +48,17 @@ export const pagesSection = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
-  // The handler dereferences source.path before the API sees it, so the
-  // shape must catch source: null or a source without a branch.
+  // The handler dereferences source.path before the API sees it, so the shape must catch
+  // source: null or a source without a branch.
   shape: loosen(PagesConfig),
   async plan(ctx, desired) {
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    // The probe stays the discriminated union probeAbsent returns; narrowing
-    // happens at each use, so "site exists but no body" (or the reverse) is
-    // not representable, unlike an exists-boolean beside an optional body.
     const probe = await ctx.read.get.probeAbsent();
 
-    // pages: null declares Pages OFF, mirroring branches' protection: null.
     if (desired === null) {
       if ("missing" in probe) {
-        // A 404 here is ambiguous: no Pages site, or a fine-grained token
-        // without the Pages permission (which also answers 404). The
-        // non-null path stays loud either way (the POST would fail); this
-        // no-op path must say so instead of silently succeeding.
+        // A 404 is ambiguous: no Pages site, or a fine-grained token without the Pages permission.
+        // The non-null path stays loud either way (the POST would fail); this no-op path must say so.
         plan.notes.push(
           "pages: declared null and GitHub reports no Pages site, so there is nothing to disable. A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write",
         );
@@ -100,8 +79,8 @@ export const pagesSection = {
       );
       return plan;
     }
-    // Split the source off so the no-source form never carries a source key
-    // at all (an own `source: undefined` would count as a remainder below).
+    // The source is split off so the no-source form never carries a source key at all: an own
+    // `source: undefined` would count as a remainder below.
     const { source, ...restConfig } = desired;
     const payload: PagesWirePayload =
       source === undefined ? restConfig : { ...restConfig, source: wireSource(source) };

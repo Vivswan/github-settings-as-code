@@ -1,13 +1,5 @@
-/**
- * Deterministic PRNG for the e2e fuzz harness. mulberry32 is a small, fast,
- * seedable generator; the Rng class wraps it with the sampling helpers the
- * generators need and a fork(label) that derives an independent child stream
- * from a label, so a scenario's sub-decisions stay replayable no matter how
- * many draws happen elsewhere in the parent stream. Nothing here touches
- * Date.now or Math.random - a run is a pure function of its seed.
- */
+/** The e2e fuzz PRNG: a run is a pure function of its seed, so nothing here touches Date.now or Math.random. */
 
-/** A 32-bit seeded generator returning a float in [0, 1). */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -19,7 +11,6 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/** Mix a string label into a seed so fork(label) is stable and label-specific. */
 function hashLabel(seed: number, label: string): number {
   let h = seed >>> 0;
   for (let i = 0; i < label.length; i++) {
@@ -35,12 +26,10 @@ export class Rng {
     this.next = mulberry32(seed);
   }
 
-  /** A float in [0, 1). */
   float(): number {
     return this.next();
   }
 
-  /** An integer in [0, maxExclusive). */
   int(maxExclusive: number): number {
     if (maxExclusive <= 0) {
       throw new Error(`Rng.int: maxExclusive (${maxExclusive}) must be positive`);
@@ -48,7 +37,6 @@ export class Rng {
     return Math.floor(this.next() * maxExclusive);
   }
 
-  /** A uniformly chosen element of a non-empty array. */
   pick<T>(items: readonly T[]): T {
     if (items.length === 0) {
       throw new Error("Rng.pick: empty array");
@@ -56,16 +44,11 @@ export class Rng {
     return items[this.int(items.length)] as T;
   }
 
-  /** True with the given probability (default 0.5). */
   bool(probability = 0.5): boolean {
     return this.next() < probability;
   }
 
-  /**
-   * An independent child stream keyed by a label. The same (seed, label) pair
-   * always yields the same child, regardless of how many draws the parent has
-   * taken, so a scenario's per-section decisions replay identically.
-   */
+  /** The child depends on (seed, label) alone, however many draws the parent has taken, so a sub-decision replays on its own. */
   fork(label: string): Rng {
     return new Rng(hashLabel(this.seed, label));
   }

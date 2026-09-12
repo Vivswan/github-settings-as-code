@@ -1,11 +1,10 @@
 /**
- * The core-path handlers: the non-section routes the action calls, served by
- * the pipeline (routes.ts) before section matching - the multi-repo discovery
- * listing (GET /user/repos), the settings-file contents fetch and the git ref
- * read that proves a settings file absent, and the private-report issue
- * channel - plus the redaction visibility probe model
- * that both the report delivery rule and the pipeline's denial-barrier
- * exemption read.
+ * The core-path handlers: the non-section routes the action calls, served by routes.ts before section matching.
+ *   GET /user/repos                             -> multi-repo discovery
+ *   GET .../contents/{path}, .../git/ref/{ref}  -> the settings-file fetch and the proof that a missing file is missing
+ *   /user, .../issues, .../labels (marker POST)  -> the private-report issue channel
+ *
+ * Also the redaction visibility probe model, read by the report delivery rule and by the pipeline's denial-barrier exemption.
  */
 
 import { MAX_RETRIES } from "../../../src/github/api.js";
@@ -33,23 +32,14 @@ import {
   slicePage,
 } from "./support.js";
 
-/**
- * The log-less violation pair the core-path handlers return (the pipeline
- * attaches the log entry): one mint, so no handler hand-rolls a drifting
- * copy - the core-path sibling of contract.ts's violationFor.
- */
+/** The log-less sibling of contract.ts's violationFor; the pipeline attaches the log entry. */
 function coreViolation(message: string): { response: MockResponse; violation: string } {
   return { response: violationResponse(message), violation: message };
 }
 
 /**
- * Handle GET /user/repos - multi-repo discovery. In single-repo mode this path
- * is never called, so it answers a loud violation; in multi-repo mode it
- * enumerates the discovery pool, applying the SERVER-SIDE query params the
- * action sends (affiliation always, visibility only for public/private) and
- * paginating, but NOT the client-side filters (archived/fork/topics/exclude),
- * which the action settles itself. The repository probe GET /repos/{o}/{r} is a
- * section endpoint (repository.get), matched before this is consulted.
+ * Applies only the visibility narrowing GitHub does SERVER-SIDE and paginates; affiliation is a pass-through, and the
+ * client-side filters (archived/fork/topics/exclude) are the action's to settle, so pre-filtering them would hide that path.
  */
 export function handleUserRepos(
   method: string,
@@ -73,20 +63,12 @@ export function handleUserRepos(
 }
 
 /**
- * The discovery params GitHub filters SERVER-SIDE, mirrored from
- * src/discovery/discover.ts and its test. `visibility` is the only one the
- * fixtures model: the server-side query narrows only coarsely, and the action
- * settles the rest client-side, so the mock must match that split exactly:
- *   - visibility=public  -> the API returns only public repos.
- *   - visibility=private -> the API returns private AND internal repos (there
- *     is no server-side "internal" value); the action drops the internal ones
- *     client-side (discover.test.ts "visibility: private drops internal repos
- *     client-side"). So the mock must NOT drop internal on the private query.
- *   - visibility=internal / all / absent -> no server-side narrowing; the
- *     action filters, so the mock passes the pool through.
- * `affiliation` has no per-repo fixture attribute (every pool repo is treated
- * as owned), so it is a pass-through here. archived/fork/topics/exclude are
- * client-side and must NEVER be pre-filtered.
+ * Mirrors the server-side split in src/discovery/discover.ts: GitHub has no server-side "internal" value, so the private
+ * query returns internal repos too and the action drops them client-side. Dropping them here would hide that path.
+ *   visibility=public           -> public only
+ *   visibility=private          -> private AND internal
+ *   internal / all / absent     -> the pool, unfiltered
+ * affiliation is a pass-through: no pool repo carries a fixture attribute for it, so every one counts as owned.
  */
 function applyServerSideDiscovery(pool: Json[], query: Record<string, string>): Json[] {
   const visibility = query.visibility;
@@ -94,26 +76,17 @@ function applyServerSideDiscovery(pool: Json[], query: Record<string, string>): 
     return pool.filter((repo) => (repo.visibility ?? "public") === "public");
   }
   if (visibility === "private") {
-    // Private AND internal survive the server-side query; the action narrows.
     return pool.filter((repo) => (repo.visibility ?? "public") !== "public");
   }
   return pool;
 }
 
-/**
- * The Accept header value the settings-file fetch sends: getRepoFile requests
- * the raw media type so the body comes back as the file text, not a JSON
- * content object. The mock requires this exact value on the contents route.
- */
+/** getRepoFile asks for the raw media type so the body is the file text, not a JSON content object; the mock requires exactly this value. */
 export const RAW_CONTENTS_ACCEPT = "application/vnd.github.raw+json";
 
 /**
- * Serve a target slug's settings.yml over the contents endpoint, AFTER the
- * caller has graded the `contents` read permission. A configured slug returns
- * its raw YAML body (the client sent the raw accept header, so the body is the
- * file text verbatim); a slug whose settings are null - or one the multi-state
- * does not know - returns 404, which the action must then prove is a missing
- * FILE by reading the default branch's git ref (gitRefResponse).
+ * Serve a slug's settings.yml raw, after the caller graded the contents read. A null-settings or unknown slug is 404,
+ * which the action must then prove is a missing FILE through gitRefResponse.
  */
 export function contentsResponse(multi: MultiMockState, slug: string): MockResponse {
   const yaml = multi.settings.get(slug);
@@ -123,17 +96,14 @@ export function contentsResponse(multi: MultiMockState, slug: string): MockRespo
   return { status: 200, body: yaml };
 }
 
-/** The target slug of a contents request, or null when the path is not one. */
 export function contentsSlug(pathname: string): string | null {
   const match = pathname.match(/^\/repos\/([^/]+\/[^/]+)\/contents\//);
   return match ? decodeURIComponent(match[1] ?? "") : null;
 }
 
 /**
- * The Contents-readability proof the settings-file fetch issues after a
- * contents 404: GET /repos/{owner}/{repo}/git/ref/{ref}, a Contents-gated read
- * whose success does not depend on the file. Parsed as the target slug plus
- * the fully qualified ref ("heads/main"), or null when the path is not one.
+ * The Contents-readability proof after a contents 404: a Contents-gated read whose success does not depend on the file.
+ * Parsed as the slug plus the qualified ref ("heads/main").
  */
 export function gitRefRequest(pathname: string): { slug: string; ref: string } | null {
   const match = pathname.match(/^\/repos\/([^/]+\/[^/]+)\/git\/ref\/(.+)$/);
@@ -143,15 +113,11 @@ export function gitRefRequest(pathname: string): { slug: string; ref: string } |
   return { slug: decodeURIComponent(match[1] ?? ""), ref: decodeURIComponent(match[2] ?? "") };
 }
 
-/** The commit sha every mock default-branch head points at. */
 const MOCK_HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 /**
- * Serve a git ref read for a target slug, AFTER the caller has graded the
- * `contents` read permission. The default branch's head ref exists for every
- * known slug whether or not it has a settings file - a fileless slug answers
- * 200 here and 404 on the contents route, the pair that proves the file
- * absent - while any other ref, or an unknown slug, is 404.
+ * The default branch's head ref exists for every known slug, file or not: 200 here plus 404 on contents is the pair that
+ * proves the file absent. Any other ref, or an unknown slug, is 404.
  */
 export function gitRefResponse(multi: MultiMockState, slug: string, ref: string): MockResponse {
   const defaultBranch = multi.repos.get(slug)?.repo.default_branch;
@@ -172,15 +138,8 @@ export function gitRefResponse(multi: MultiMockState, slug: string, ref: string)
 
 // --- Private-report issue channel (core paths, not a section) --------------
 //
-// The issue channel delivers the full unredacted report as an issue on the
-// target repo. Its routes are NOT section endpoints (report delivery is
-// infrastructure that writes even in check mode); they are served inline before
-// section matching, exactly like the contents fetch, and gated on the Issues
-// permission per ISSUE_REPORT_PERMISSION. GET /user is the fallback creator
-// scan and is a user-level call, so it is ungated (it reports TOKEN_USER_LOGIN
-// from ../constants.js; the report module reads only `login`). The
-// marker-label POST goes through the existing labels.create section route
-// (Issues-gated, 422 on duplicate), so it is not modeled here.
+// Report delivery writes even in check mode, so these routes are served before section matching, gated on
+// ISSUE_REPORT_PERMISSION. GET /user is a user-level call and ungated; the report module reads only `login`.
 
 /** A repo's proven visibility from its mock state (defaults public via the fixture). */
 function visibilityOfState(state: MockState | undefined): string {
@@ -192,14 +151,9 @@ function visibilityOfState(state: MockState | undefined): string {
 }
 
 /**
- * Whether the action could PROVE this slug's visibility - the precondition for
- * report delivery. Discovery-supplied slugs need no probe (their visibility came
- * from /user/repos), so they are always provable. An explicit target is probed
- * with one administration-gated repository.get; the probe fails to "unknown"
- * (and delivery is skipped) when administration is denied, or when a fault on
- * repository.get exhausts the probe's retry budget. Modeling this - rather than
- * reading the fixture visibility alone - is what lets the mock reject a delivery
- * the action could never have made.
+ * The delivery precondition: the action delivers only when it could PROVE the visibility, so a probe the scenario denies
+ * or faults past its retry budget resolves "unknown" and the mock rejects a delivery the action could never have made.
+ * A discovered slug's visibility came from /user/repos and needs no probe.
  */
 function probeCanProveVisibility(
   slug: string,
@@ -228,11 +182,8 @@ function probeCanProveVisibility(
 }
 
 /**
- * Whether the scenario's report channel delivers through the target repo's
- * report issue: `issue` or `issue-on-failure` (isIssueChannel, single-sourced
- * from the action). The two differ only in WHEN they write - `issue-on-failure`
- * reads (and at most closes) on a healthy run - so the mock serves the same
- * issue routes for both and lets the recorded traffic prove the difference.
+ * `issue` and `issue-on-failure` differ only in WHEN they write (issue-on-failure reads, and at most closes, on a healthy
+ * run), so both get the same routes and the recorded traffic proves the difference.
  */
 function usesIssueChannel(scenario: Scenario): boolean {
   const channel = scenario.inputs?.private_report;
@@ -240,17 +191,9 @@ function usesIssueChannel(scenario: Scenario): boolean {
 }
 
 /**
- * Whether a slug is a report-DELIVERY target this run: the report channel is
- * an issue channel (see usesIssueChannel), redaction is on, the slug is not
- * the admin repo, its FIXTURE
- * visibility is private or internal, AND the action could actually PROVE that
- * visibility (see probeCanProveVisibility). This mirrors the action's delivery
- * rule exactly - deliver only when PROVEN private/internal, so a probe the
- * scenario denies or faults resolves "unknown" and delivery is skipped. The mock
- * serves the issue-channel routes for a slug only when this holds; report
- * traffic to any other slug (public, non-redacted, OR unknown-because-unprovable)
- * falls through to the normal barrier and section matching, so an accidental or
- * regressed delivery is caught loudly.
+ * Mirrors the action's delivery rule: deliver only when PROVEN private or internal. Report traffic to any slug this
+ * rejects (public, non-redacted, the admin repo, or unprovable) falls through to section matching, where the issue
+ * routes hit a loud no-route violation and a marker POST hits the labels.create barrier and gating.
  */
 function isReportDeliveryTarget(
   slug: string,
@@ -279,7 +222,6 @@ function issueUrl(slug: string, number: number): string {
   return `https://github.com/${slug}/issues/${number}`;
 }
 
-/** True when this issue object matches the list query's labels/creator/state filters. */
 function issueMatchesQuery(issue: Json, query: Record<string, string>): boolean {
   if (query.state && query.state !== "all" && String(issue.state) !== query.state) {
     return false;
@@ -302,12 +244,7 @@ function issueMatchesQuery(issue: Json, query: Record<string, string>): boolean 
   return true;
 }
 
-/**
- * Expand a label name into the object shape the issues list returns. Only
- * the marker label carries its configured color (the report path is the one
- * that materializes label objects on issues); any other name gets neutral
- * filler.
- */
+/** Only the marker label carries its configured color: the report path is the one that materializes label objects on issues. */
 function labelObject(name: string): Json {
   return {
     name,
@@ -316,12 +253,7 @@ function labelObject(name: string): Json {
   };
 }
 
-/**
- * Resolve the repo state an issue-channel request addresses. An unknown slug is
- * a loud violation the caller returns early - and, matching the section
- * pipeline's unknown-target rule, it is checked BEFORE the fault hook so a
- * fault can never mask it.
- */
+/** Checked before the fault hook, matching the section pipeline: a fault must never mask an unknown target. */
 function resolveIssueTarget(
   method: string,
   pathname: string,
@@ -336,12 +268,6 @@ function resolveIssueTarget(
   return { state: repoState };
 }
 
-/**
- * Grade an issue-channel request against the report module's DECLARED
- * permission (single-sourced, so a change to ISSUE_REPORT_PERMISSION flows
- * here), not a hard-coded "issues". Returns the ready-to-send denial, or null
- * when the token is allowed.
- */
 function gradeIssueAccess(
   slug: string,
   level: "read" | "write",
@@ -356,7 +282,6 @@ function gradeIssueAccess(
   return null;
 }
 
-/** The core fault key an issue route maps to, or null for an unexpected method. */
 function issueRouteKey(method: string, issueNumber: number | undefined): CoreFaultKey | null {
   if (method === "GET" && issueNumber === undefined) {
     return "core.issuesList";
@@ -371,19 +296,13 @@ function issueRouteKey(method: string, issueNumber: number | undefined): CoreFau
 }
 
 /**
- * The issue channel's decision for one request, one branch per marker: a
- * transport fault passed through verbatim (`faulted`); a HANDLER response
- * tagged with the core route it came from (`coreKey`), so the caller can apply
- * the chaos corruption hook to it; a permission denial (`deniedBy`); or a
- * contract violation (`violation`). Denials and violations carry no coreKey
- * and are never corrupted, matching the section pipeline. Each branch declares
- * the OTHER markers `?: never` (a structural XOR, like RejectionSpec in
- * fuzz.ts): without the exclusions, the union's excess-property check would
- * accept a literal carrying two markers (any property declared on ANY member
- * is legal excess) and the consumer's first check would silently win; with
- * them, a two-marker literal fails to compile. The consumer narrows by marker
- * TRUTHINESS, which the `?: never` optionals make total - `in` checks cannot
- * narrow this shape, since an optional property never rules a member out.
+ * One branch per marker. The `?: never` exclusions make a two-marker literal fail to compile, where the excess-property
+ * check would otherwise accept it and the consumer's first truthiness check silently win; consumers test truthiness
+ * because `in` cannot narrow an optional property away.
+ *   faulted   -> a transport fault, passed through verbatim
+ *   coreKey   -> a handler response, tagged so the chaos hook can corrupt it
+ *   deniedBy  -> a permission denial, never corrupted
+ *   violation -> a contract violation, never corrupted
  */
 export type IssueReportOutcome =
   | {
@@ -416,17 +335,13 @@ export type IssueReportOutcome =
     };
 
 /**
- * Serve the private-report issue routes against a repo's `issues` state:
- *   - GET /user                                      -> the token user (ungated)
- *   - GET  /repos/{o}/{r}/issues                      -> list (Issues: read)
- *   - POST /repos/{o}/{r}/issues                      -> create (Issues: write)
- *   - PATCH /repos/{o}/{r}/issues/{issue_number}      -> update (Issues: write)
- * Returns null when the path is not an issue-channel route, so the caller falls
- * through to section matching. Permission denials set `deniedBy` (so the
- * OpenAPI validator skips them and the runner sees the denial). `takeCoreFault`
- * is the pipeline's core-route fault hook, consulted per route after target
- * resolution and before the permission gate (the same order as the section
- * fault barrier) and before any state mutation.
+ * Null when the path is not an issue-channel route, so the caller falls through to section matching. `takeCoreFault` is
+ * consulted per route after target resolution and before the permission gate and any state mutation, the section order.
+ *   GET   /user                            -> the token user (ungated)
+ *   POST  /repos/{o}/{r}/labels (marker)   -> ensure-create (Issues: write)
+ *   GET   /repos/{o}/{r}/issues            -> list (Issues: read)
+ *   POST  /repos/{o}/{r}/issues            -> create (Issues: write)
+ *   PATCH /repos/{o}/{r}/issues/{number}   -> update (Issues: write)
  */
 export function handleIssueReport(
   method: string,
@@ -439,9 +354,8 @@ export function handleIssueReport(
   faults: FaultOption[] | undefined,
   takeCoreFault: (key: CoreFaultKey) => PipelineResult | null,
 ): IssueReportOutcome | null {
-  // GET /user is the fallback creator scan - served only when the run enables
-  // an issue channel at all (otherwise it is not report traffic and falls
-  // through to a loud no-route violation).
+  // GET /user is report traffic only when the run enables an issue channel; otherwise it falls through to a loud
+  // no-route violation.
   if (matchesTemplate("/user", pathname)) {
     if (method !== "GET" || !usesIssueChannel(scenario)) {
       return null;
@@ -455,13 +369,9 @@ export function handleIssueReport(
       coreKey: "core.userGet",
     };
   }
-  // The marker-label ensure-create is report infrastructure (it writes even in
-  // check mode), so it is served here - BEFORE the check-mode barrier - rather
-  // than through the labels.create section route. The bypass is SCOPED: it fires
-  // only for the marker label name AND only for a slug that is a report-delivery
-  // target this run. A marker POST to any other slug (e.g. a buggy labels-section
-  // write of the injected marker in check mode) falls through to the section
-  // route and hits the normal check-mode barrier / gating.
+  // The marker-label ensure-create writes even in check mode, so it is served here, before the check-mode barrier, but
+  // only for the marker name on a delivery target; any other marker POST falls through to the labels.create section
+  // route and its barrier.
   const labelsMatch = pathname.match(/^\/repos\/([^/]+\/[^/]+)\/labels$/);
   if (labelsMatch && method === "POST" && asObject(body).name === MARKER_LABEL) {
     const slug = decodeURIComponent(labelsMatch[1] ?? "");
@@ -500,9 +410,7 @@ export function handleIssueReport(
     return null;
   }
   const slug = decodeURIComponent(issuesMatch[1] ?? "");
-  // Scope the issue-route bypass to a report-delivery target: issue traffic to a
-  // public/non-redacted slug (accidental delivery) is not served here and falls
-  // through to a loud no-route violation at section matching.
+  // Issue traffic to a non-delivery slug (an accidental delivery) falls through to a loud no-route violation.
   if (!isReportDeliveryTarget(slug, scenario, multi, faults)) {
     return null;
   }
@@ -561,8 +469,7 @@ export function handleIssueReport(
     if (payload.state !== undefined) {
       issue.state = payload.state;
     }
-    // The marker-reattach path PATCHes a labels array (names); apply it the
-    // way the create route does, so the repaired label set is observable.
+    // The marker-reattach PATCH sends label names; expanded as on create, so the repaired label set is observable.
     if (Array.isArray(payload.labels)) {
       issue.labels = payload.labels.map((l) => labelObject(String(l)));
     }
@@ -571,33 +478,19 @@ export function handleIssueReport(
   return coreViolation(`unexpected ${method} on ${pathname}`);
 }
 
-// The admin repo the e2e runner runs as (ADMIN_SLUG, its GITHUB_REPOSITORY)
-// is imported from ../constants.js; the redaction self carve-out never probes
-// that slug, so a repository.get for it is always a section read, never the
-// probe.
-
 /**
- * How many wire attempts the visibility probe can make: one plus the client's
- * retry budget, derived from the client's own MAX_RETRIES (src/github/api.ts).
- * Once a slug's repository.get has faulted this many times the probe has
- * exhausted its retries and given up, so the next repository.get is a section
- * read - not a probe retry - and the exemption expires.
+ * Wire attempts the probe can make, from the client's own MAX_RETRIES. Once a slug's repository.get has faulted this many
+ * times the probe has given up, so the next repository.get is not a probe retry and the exemption expires.
  */
 export const PROBE_RETRY_BUDGET = 1 + MAX_RETRIES;
 
 /**
- * Whether the redaction visibility probe is EXPECTED to issue a
- * `GET /repos/{slug}` for this target, so its denial may be exempted from the
- * denial barrier. The action probes a slug's visibility (one repository.get,
- * outside the section loop) only when ALL hold:
- *   - the run is multi-repo (the single-repo harness path always targets the
- *     admin repo itself, which the self carve-out never probes);
- *   - the effective policy is redact (the default; `show` never probes);
- *   - the slug is not the admin repo (the self carve-out skips the probe);
- *   - the slug's visibility did not already come from a `/user/repos` discovery
- *     response this run (a discovered slug's visibility is known, so no probe).
- * When a probe is NOT expected, the first (and only) repository.get is the
- * repository section's own check-mode read and MUST arm the barrier.
+ * When no probe is expected, the first repository.get is not the probe and MUST arm the barrier when denied. The action
+ * probes a slug's visibility (one repository.get, outside the section loop) only when all hold:
+ *   multi-repo run                            (the single-repo harness targets the admin repo, never probed)
+ *   policy is redact                          (`show` never probes)
+ *   not the admin repo                        (the self carve-out)
+ *   not discovered via /user/repos this run   (a discovered slug's visibility is already known)
  */
 export function probeExpected(
   slug: string,

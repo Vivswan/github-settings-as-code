@@ -1,25 +1,15 @@
 /**
- * $NAME secret references: how secret values stay out of committed settings
- * files. settings.yml is plaintext in git and GitHub does not interpolate
- * ${{ secrets }} inside repository files, so a designated secret field
- * carries a whole-value `$NAME` reference resolved from the action step's
- * environment at run time. Every edge fails closed: a literal is rejected
- * (committed plaintext is exactly what the mechanism prevents), a
- * near-reference like "prefix-$TOKEN" is rejected (shipping it as a literal
- * secret is worse than failing), reserved runner variables are refused, and
- * a reference in a target-fetched settings file is refused (a target
- * repository must not route the operator's environment into itself).
+ * settings.yml is committed plaintext and GitHub does not interpolate ${{ secrets }} inside repository files, so a
+ * designated secret field carries a whole-value `$NAME` reference resolved from the step's environment at run time.
+ * Every edge fails closed; nothing here logs a value, and the module knows no field names.
  *
- * The module knows no field names; future consumer sections call these
- * functions per designated secret field. Nothing here logs a value.
+ * a literal value                 -> rejected: committed plaintext is what the mechanism prevents
+ * "prefix-$TOKEN"                 -> rejected: shipping it as a literal secret is worse than failing
+ * $INPUT_*, $GITHUB_*, ...        -> refused: reserved runner variables
+ * a reference in a target's file  -> refused: a target must not route the operator's environment into itself
  */
 
-/**
- * Who authored the settings source a value came from. References are honored
- * only in operator-owned sources; in a `target` source (a settings file
- * fetched from the target repository itself) a reference is a hard error.
- * Integration decides which files are which.
- */
+/** Who authored the source: a `target` document (fetched from the target repository) has its references refused; flows/multi.ts decides. */
 export type SettingsSource = "operator" | "target";
 
 /** A syntactically valid reference: the env var name, without the `$`. */
@@ -29,29 +19,20 @@ interface SecretRef {
 
 export type SecretRefCheck = { ok: true; ref: SecretRef } | { ok: false; error: string };
 
-/** Whole-value reference shape: `$NAME` and nothing else. */
 const REFERENCE_RE = /^\$[A-Z_][A-Z0-9_]*$/;
 
-/** A reference-looking fragment anywhere in a value that is NOT a whole-value reference. */
 const EMBEDDED_REFERENCE_RE = /\$[A-Z_][A-Z0-9_]*/;
 
 /**
- * Variable prefixes a reference may never name. INPUT_* are the action's own
- * inputs (INPUT_TOKEN is the admin token); GITHUB_*, ACTIONS_*, RUNNER_* and
- * NODE_* are runner and workflow context. Routing any of them into a settings
- * value would turn a settings file into an exfiltration channel.
+ * INPUT_* holds the action's own inputs (INPUT_TOKEN is the admin token); the rest are runner and workflow context.
+ * Routing any of them into a settings value would make the settings file an exfiltration channel.
  */
 export const RESERVED_REF_PREFIXES = ["INPUT_", "GITHUB_", "ACTIONS_", "RUNNER_", "NODE_"] as const;
 
 /**
- * Phase (a): syntax and policy validation for one designated secret field's
- * value. Takes no environment and reads no values, so check mode and
- * preflight can run it without touching secrets. `label` names the OWNING
- * ENTRY (a secret name, a webhook url - configuration, never a secret), so
- * the error points at the offending entry among many. Error strings name
- * the rule, the label, and the reference, and never echo a non-reference
- * value: a rejected literal or the text around an embedded `$NAME` may
- * already be a secret.
+ * Reads no environment, so check mode and preflight run it without touching secrets; `label` names the owning entry
+ * (a secret name, a webhook url), never a value. Errors never echo a non-reference value either: a rejected literal,
+ * or the text around an embedded `$NAME`, may already be a secret.
  */
 export function validateSecretRef(
   value: string,
@@ -99,33 +80,22 @@ export type SecretRefsResolution =
   | { ok: false; errors: string[] };
 
 /**
- * One designated secret field's value, tagged with the provenance of the
- * DOCUMENT that declared it. Provenance is decided once, where the document
- * is chosen (flows/multi.ts readTargetSettings): a target-fetched document
- * is "target", so its references are refused, and every other document is
- * "operator", so its references resolve.
+ * One secret field's value with the provenance of the DOCUMENT that declared it, decided once where the document is
+ * chosen (flows/multi.ts readTargetSettings).
  */
 export interface SourcedSecretValue {
   readonly value: string;
-  /**
-   * Names the declared entry the value belongs to, for error messages: a
-   * secret name, an environment-plus-secret pair, a webhook url - always
-   * configuration the settings file already spells, never a value.
-   */
+  /** The owning entry as the settings file spells it, never a value. */
   readonly label: string;
   readonly source: SettingsSource;
 }
 
 /**
- * Phase (b): resolve every reference up front from the given environment,
- * before any of them is used. Each value re-runs the full phase (a)
- * validation with ITS OWN source, so a mixed batch cannot launder a
- * target-declared reference behind operator-declared ones. All problems are
- * collected, not just the
- * first: a run with three broken references should say so once. An UNSET
- * variable and a SET-BUT-EMPTY variable both fail - an empty vault lookup
- * must not write an empty secret. Callers pass `process.env` at the edge and
- * an injected record in tests.
+ * Every value re-runs validateSecretRef with ITS OWN source, so a mixed batch cannot launder a target-declared reference
+ * behind operator-declared ones. All problems are collected: a run with three broken references says so once.
+ *
+ * unset variable          -> fails
+ * set but empty variable  -> fails too: an empty vault lookup must not write an empty secret
  */
 export function resolveSecretRefs(
   values: readonly SourcedSecretValue[],

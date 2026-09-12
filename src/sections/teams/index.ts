@@ -1,7 +1,4 @@
-/**
- * `teams:` section - team repository access, organization repos only; on a personal account the
- * section no-ops with a note. Each declared team is probed and granted only when its access diverges.
- */
+/** `teams:` section: team repository access. Organization repos only, so a personal account no-ops with a note. */
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
@@ -16,7 +13,7 @@ import { TeamsConfig } from "./schema.js";
 const permission: SectionPermission = { repo: ["administration"], org: "members" };
 
 const ENDPOINTS = {
-  // GET /orgs/{org} is public, so it needs no token permission; its 404 is the personal-account no-op.
+  // GET /orgs/{org} is public, so no token permission; its 404 is the personal-account no-op.
   org: {
     route: "GET /orgs/{org}",
     statuses: { 200: "the organization", 404: "not an organization (a personal account)" },
@@ -33,24 +30,19 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/**
- * The probe body under the repository media type: the repo object, of which this section reads
- * role_name (optional, so a body without one reads as no role). Nullish, because a server
- * ignoring the media type answers a bare 204, which still means "the team has access".
- */
+// The repo object under the repository media type, of which only role_name is read. Nullish,
+// because a server ignoring the media type answers a bare 204, which still means "the team has access".
 const LiveTeamRepo = z.looseObject({ role_name: z.string().optional() }).nullish();
 
 export const teamsSection = {
   key: "teams",
   undeclaredDefault: "untouched",
   permission,
-  // Teams exist only under an organization owner; the org probe below
-  // implements the personal-account no-op this declares.
+  // Teams exist only under an organization owner; the org probe below implements the no-op this declares.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
   shape: loosen(TeamsConfig),
-  // Closed surface: the grant PUT accepts exactly one setting ("permission"), so an extra key is
-  // always a typo - and a misspelled "permission" would silently grant the default role and report clean.
+  // The grant PUT accepts exactly one setting ("permission"), so an extra key is always a typo.
   closedSurface: {
     known: { name: true, permission: true },
     describe: (t) => t.name,
@@ -64,8 +56,7 @@ export const teamsSection = {
       (t) => t.name,
     );
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    // Teams only exist on organization repos; on a personal account the org endpoints 404, so probe
-    // once and no-op with a note instead of failing (403/5xx still classify through probeAbsent).
+    // On a personal account the org endpoints 404; 403/5xx still classify through probeAbsent.
     const orgProbe = await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } });
     if ("missing" in orgProbe) {
       plan.notes.push(

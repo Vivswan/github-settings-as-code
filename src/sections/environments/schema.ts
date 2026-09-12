@@ -1,8 +1,6 @@
 /**
- * The `environments:` section's schema slice; root src/schema.ts composes
- * the SettingsFile property from it. Imports only zod and the leaf shared
- * helpers - never root schema.ts (a cycle whose top-level const evaluation
- * TDZ-crashes at import time).
+ * The `environments:` schema slice. Imports only zod and the leaf shared helpers, never root
+ * schema.ts: that cycle TDZ-crashes at import time on a top-level const.
  */
 
 import { z } from "zod";
@@ -11,9 +9,8 @@ import { nestedKnobbed } from "../shared/schema-helpers.js";
 export const DeploymentBranchPolicyConfig = z
   .object({
     name: z.string(),
-    // Checked as a plain string at runtime (the handler compares it against
-    // the live pattern): GitHub stays the authority on its values, and the
-    // published schema documents the upstream enum through the meta.
+    // A plain string, not z.enum: GitHub stays the authority on the accepted values, and the
+    // meta only documents them in the published schema.
     type: z
       .string()
       .optional()
@@ -45,17 +42,13 @@ export const EnvironmentSecretConfig = z
   .meta({ id: "EnvironmentSecretConfig" });
 export type EnvironmentSecretConfig = z.infer<typeof EnvironmentSecretConfig>;
 
-/**
- * GitHub's hard cap on pinned environments per repository, shared by the
- * shape's upfront cap check and the environments handler's pin planning.
- */
+/** GitHub's cap on pinned environments per repository. */
 export const MAX_PINNED_ENVIRONMENTS = 10;
 
 export const EnvironmentConfig = z
   .object({
     name: z.string(),
-    // A ROUTED SCALAR (see EnvironmentRoutedScalars), never part of the PUT
-    // body: the environments handler strips it and applies it through the
+    // Routed (see EnvironmentRoutedScalars): stripped from the PUT body and applied through the
     // GraphQL pin mutations after every PUT.
     pinned: z.boolean().optional(),
     wait_timer: z.number().optional(),
@@ -74,12 +67,8 @@ export const EnvironmentConfig = z
     secrets: nestedKnobbed(EnvironmentSecretConfig).optional(),
   })
   .superRefine((entry, refineCtx) => {
-    // Secrets live under the plural `secrets` list; a singular entry-level
-    // `secret` would pass the loose runtime shape into the environment PUT
-    // body verbatim and configure nothing, so the misplacement is rejected
-    // by name (the webhooks entry-level `secret` pin precedent). Only the
-    // loosen()ed runtime shape can see the undeclared key - which is the
-    // only shape that ever parses documents.
+    // A singular `secret` would ride the passthrough PUT verbatim and configure nothing. The strict
+    // type hides the key; only the loosen()ed shape that parses documents lets it reach here.
     if ((entry as Record<string, unknown>).secret !== undefined) {
       refineCtx.addIssue({
         code: "custom",
@@ -88,14 +77,9 @@ export const EnvironmentConfig = z
           "environment secrets belong under the entry's `secrets` list, not a singular `secret` key; here it would pass through to the environment PUT verbatim and configure nothing",
       });
     }
-    // The flag-pairing invariant lives HERE, in the shape, not in the
-    // section's validate hook: upfront document validation rejects the
-    // document in BOTH modes before ANY section writes. A hook-level check
-    // would fire only when this section runs (the apply-mode preflight
-    // ignores non-permission errors), after earlier sections already
-    // wrote - and the pattern POST itself would 404 only after the
-    // environment PUT landed, half-applying the run. The published schema
-    // mirrors it as the if/then stamped through this schema's meta.
+    // Checked in the shape, not the section's validate hook, so both modes reject the document
+    // before ANY section writes. A hook would fire mid-run, after earlier sections wrote, and the
+    // pattern POST would 404 only once the environment PUT had landed, half-applying the run.
     if (entry.deployment_branch_policies === undefined) {
       return;
     }
@@ -124,12 +108,7 @@ export const EnvironmentConfig = z
   });
 export type EnvironmentConfig = z.infer<typeof EnvironmentConfig>;
 
-/**
- * The `environments:` document slice: the entry list plus the pinned-cap
- * invariant. The cap lives in the slice like the flag pairing above: upfront
- * document validation rejects the document in BOTH modes before ANY section
- * writes, where a hook-level check would fire only mid-run.
- */
+// The cap is checked in the slice for the same reason as the flag pairing above: rejection before any section writes.
 export const EnvironmentsConfig = z.array(EnvironmentConfig).superRefine((entries, refineCtx) => {
   const pinnedIndexes = entries.flatMap((entry, index) => (entry.pinned === true ? [index] : []));
   if (pinnedIndexes.length > MAX_PINNED_ENVIRONMENTS) {
@@ -142,14 +121,9 @@ export const EnvironmentsConfig = z.array(EnvironmentConfig).superRefine((entrie
 });
 
 /**
- * The per-environment keys ROUTED to their own API operations instead of the
- * environment PUT body - each is a scalar the PUT does not accept, applied
- * through a dedicated call after the PUT. This type is where routed-ness
- * is DECLARED: environments' index.ts pins its ROUTED_SCALAR_KEYS strip list
- * to these keys in both directions (the NESTED_KEYS lockstep pattern), so a
- * key added here without strip handling - or stripped without being declared
- * here - fails to compile. A routed scalar belongs here, never among the
- * plain EnvironmentConfig fields, or it would ride the passthrough PUT
- * verbatim and configure nothing.
+ * Where routed-ness is DECLARED: a key here is a scalar the environment PUT does not accept,
+ * applied through its own call after the PUT. nested.ts pins its ROUTED_SCALAR_KEYS strip list to
+ * these keys in both directions; a routed scalar left among the plain EnvironmentConfig fields
+ * would ride the passthrough PUT verbatim and configure nothing.
  */
 export type EnvironmentRoutedScalars = Pick<EnvironmentConfig, "pinned">;

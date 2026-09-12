@@ -1,15 +1,3 @@
-/**
- * Unit tests for the mock server and its pipeline, run under the normal
- * `bun test` suite (no subprocess): each test starts a real server, drives it
- * with in-process fetch(), and asserts on the response plus the handle's
- * request/violation logs. The server's own logic (permission gate, denial
- * barriers, pagination, chaos) is exercised end to end through the wire.
- *
- * Two invariants are checked without the wire: assertHandlerCompleteness fires
- * when the table drifts, and every handler's observed status is a subset of its
- * endpoint's declaration (the status-subset guard from routes.ts).
- */
-
 import { describe, expect, test } from "bun:test";
 import { GithubApi } from "../../../src/github/api.js";
 import { maskRegistry } from "../../../src/io.js";
@@ -35,7 +23,6 @@ import { slicePage } from "./support.js";
 
 const start = mockServerLifecycle();
 
-/** A client trace facet that drops debug lines and masks nothing. */
 const silentTrace = { debug: () => {}, ...maskRegistry(() => {}) };
 
 describe("handler-completeness startup assertion", () => {
@@ -78,13 +65,10 @@ describe("pagination slicing", () => {
   });
 
   test("an endpoint cap clamps an oversized request, exactly as GitHub does", () => {
-    // The variables list is capped at 30: a client asking for 100 gets 30
-    // per page, which is precisely the behavior EndpointDecl.pageSize
-    // exists to survive - the mock must not be more generous than GitHub.
+    // The variables list is capped at 30 and GitHub clamps, so the mock must not be more generous.
     const items = Array.from({ length: 40 }, (_, i) => i);
     expect(slicePage(items, { per_page: "100", page: "1" }, 30)).toHaveLength(30);
     expect(slicePage(items, { per_page: "100", page: "2" }, 30)).toHaveLength(10);
-    // A request under the cap is honored as asked.
     expect(slicePage(items, { per_page: "10", page: "1" }, 30)).toHaveLength(10);
   });
 
@@ -102,7 +86,6 @@ describe("pagination slicing", () => {
     const second = await jsonArray(await call(h, "GET", `${labelsPath}?per_page=100&page=2`));
     expect(first).toHaveLength(100);
     expect(second).toHaveLength(0);
-    // The log holds exactly the two page reads, query strings intact.
     expect(h.requests.map((r) => r.query)).toEqual(["per_page=100&page=1", "per_page=100&page=2"]);
   });
 });
@@ -128,9 +111,8 @@ describe("permission gate grades", () => {
   });
 
   test("org: members gates the teams probe on org_members read", async () => {
-    // teams needs administration (repo) AND org_members (org). Grant repo,
-    // deny org_members: the org probe (repo? no - it's permission none) still
-    // passes, but the team probe requires org_members.
+    // teams needs administration (repo) AND org_members (org), so denying org_members alone denies
+    // the team probe.
     const h = await start(
       scenario({
         owner_kind: "org",
@@ -189,8 +171,6 @@ describe("permission mask semantics", () => {
   );
 
   test("unlisted resources default to write grade", async () => {
-    // token_permissions omits "issues" entirely; labels (issues) writes must
-    // still be allowed because the default grade is write.
     const h = await start(scenario({ token_permissions: { administration: "read" } }));
     const created = await call(h, "POST", labelsPath, { body: { name: "x" } });
     expect(created.status).toBe(201);
@@ -198,10 +178,6 @@ describe("permission mask semantics", () => {
   });
 
   test("every section endpoint's requirement resolves from the registry, not a hand list", () => {
-    // Spot-check that the gate's requirement source is the section declaration:
-    // for each endpoint, endpointPermission(section, endpoint) must be "none"
-    // or name at least one repo resource. Driven from allEndpoints() so a new
-    // section is covered automatically.
     const sectionByKey = new Map(SECTIONS.map((s) => [s.key, s]));
     const offenders: string[] = [];
     for (const [key, endpoint] of Object.entries(allEndpoints())) {
@@ -233,18 +209,12 @@ describe("denial style bodies", () => {
   });
 
   test("fine_grained: a denied write answers 403 not accessible", async () => {
-    // environments has "absent" denial semantics, so the probe-then-write path
-    // reaches the server and the write body is asserted cleanly (no violation).
     const h = await start(scenario({ token_permissions: { environments: "none" } }));
     const put = await call(h, "PUT", `/repos/${OWNER}/${REPO}/environments/prod`, { body: {} });
     expect(put.status).toBe(403);
     expect((await json(put)).message).toBe("Resource not accessible by personal access token");
   });
 
-  // The full 2x2 matrix: each numeric denial style answers ITS status for both
-  // reads and writes. The write leg uses environments ("absent" denial
-  // semantics), so the probe-then-write path reaches the server and the write
-  // status is asserted cleanly (no violation).
   test.each([
     { style: 403, op: "read" },
     { style: 403, op: "write" },
@@ -278,31 +248,25 @@ describe("denial style bodies", () => {
 
 describe("denial barrier", () => {
   test("a read-grade mask + fail policy + denied write is NOT a violation (preflight only proves reads)", async () => {
-    // labels is "denied", but issues:read passes the list READ, so preflight
-    // (fail policy) succeeds - it can only prove reads work; the engine then
-    // legitimately sends the create, which is write-denied. No preceding denied
-    // read, so NO violation. Fuzz seed 1723060241 found the old rule flagging
-    // exactly this (repo mask issues:read false-flagged POST labels).
+    // issues:read passes the list READ, so preflight (fail policy) succeeds: it proves only reads.
+    // The engine then legitimately sends the create, which the barrier must not read as broken sequencing.
     const h = await start(scenario({ token_permissions: { issues: "read" } }));
     const read = await call(h, "GET", labelsPath);
-    expect(read.status).toBe(200); // the read is allowed
+    expect(read.status).toBe(200);
     const write = await call(h, "POST", labelsPath, { body: { name: "x" } });
-    expect(write.status).toBe(403); // the write is denied
+    expect(write.status).toBe(403);
     expect(h.violations).toHaveLength(0);
   });
 
   test("a denied write to an 'absent'-semantics section under fine_grained is NOT a violation", async () => {
-    // environments is "absent": the probe-then-write path is expected, so a
-    // denied write is answered without a violation.
     const h = await start(scenario({ token_permissions: { environments: "none" } }));
     await call(h, "PUT", `/repos/${OWNER}/${REPO}/environments/prod`, { body: {} });
     expect(h.violations).toHaveLength(0);
   });
 
   test("a denied write to a 'denied'-semantics section under the WARN policy is NOT a violation", async () => {
-    // Under warn there is no preflight (orchestrate gates it on fail), so a
-    // "denied"-semantics section whose first apply op is a write legitimately
-    // sends it and takes the 403. repository is "denied"; deny it, no violation.
+    // Under warn there is no preflight (orchestrate gates it on fail), so a "denied"-semantics
+    // section whose first apply op is a write legitimately sends it and takes the 403.
     const h = await start(
       scenario({
         inputs: { on_missing_permission: "warn" },
@@ -317,11 +281,7 @@ describe("denial barrier", () => {
   });
 
   test("a denied write AFTER a denied read in the same section IS a violation (fail policy)", async () => {
-    // Under fail, preflight issues the section's read first. When the read grade
-    // is none the read is denied (fatal) and recorded; the apply-pass write then
-    // proves broken sequencing. Simulate preflight's read explicitly. labels is
-    // used (not repository) so this stays independent of the probe exemption:
-    // only the FIRST repository.get is exempt, but labels.list always arms.
+    // Under fail, preflight reads first; a none grade denies it (fatal), so an apply write afterwards proves broken sequencing.
     const h = await start(
       scenario({
         inputs: { on_missing_permission: "fail" },
@@ -334,11 +294,9 @@ describe("denial barrier", () => {
   });
 
   test("a denied ADVISORY read (branches.branchProbe) does NOT arm the barrier", async () => {
-    // The branch-existence probe is advisory: branches.ts ignores any status but
-    // a definitive 404 and proceeds to the protection PUT regardless. A denied
-    // branchProbe (contents: none -> 403) must therefore NOT arm - the PUT that
-    // follows is the engine's legitimate write, not a post-abort write. Fuzz seed
-    // 610725843 found the old rule false-flagging exactly this.
+    // branches.ts treats the branch probe as advisory (only a definitive 404 matters) and PUTs
+    // regardless, so a denied probe must NOT arm: the PUT is the engine's legitimate write. Fuzz
+    // seed 610725843 false-flagged this.
     const branch = "main-0";
     const h = await start(
       scenario({
@@ -346,8 +304,6 @@ describe("denial barrier", () => {
         token_permissions: { contents: "none", administration: "read" },
       }),
     );
-    // getProtection 404s (unprotected, tolerated); the advisory branchProbe is
-    // contents-denied; the protection PUT is then administration-write-denied.
     await call(h, "GET", `/repos/${OWNER}/${REPO}/branches/${branch}/protection`);
     await call(h, "GET", `/repos/${OWNER}/${REPO}/branches/${branch}`); // advisory, denied
     await call(h, "PUT", `/repos/${OWNER}/${REPO}/branches/${branch}/protection`, { body: {} });
@@ -355,10 +311,8 @@ describe("denial barrier", () => {
   });
 
   test("the visibility probe (expected, first repository.get) does NOT arm the barrier", async () => {
-    // In a redact multi-repo run, an EXPLICIT target's first repository.get is
-    // the visibility probe (issued before the target loop). A denied probe must
-    // NOT arm: a repository PATCH after it is the section's own legitimate
-    // write-then-403, not a sequencing bug.
+    // In a redact multi-repo run an EXPLICIT target's first repository.get is the visibility probe,
+    // issued before the target loop, so a denied probe is not a section read.
     const target = "e2e-owner/svc-probe";
     const h = await start(
       scenario({
@@ -377,10 +331,8 @@ describe("denial barrier", () => {
   });
 
   test("a LATER denied repository.get (the section's own read) DOES arm the barrier", async () => {
-    // The exemption is probe-only: once the probe has been served, a subsequent
-    // denied repository.get IS the repository section's check-mode read, so a
-    // write after it proves broken sequencing. First call is the probe (exempt),
-    // second is the section read (arms), and the PATCH trips it.
+    // The exemption is probe-only: once the probe is served, the next denied repository.get IS the
+    // repository section's check-mode read.
     const target = "e2e-owner/svc-probe";
     const h = await start(
       scenario({
@@ -400,9 +352,7 @@ describe("denial barrier", () => {
   });
 
   test("NO probe under private-repos: show - the first repository.get arms the barrier", async () => {
-    // show never probes, so the first repository.get IS the section's check-mode
-    // read and must arm. A blanket first-repository.get exemption would wrongly
-    // hide this denied-read-then-write regression.
+    // show never probes, so a blanket first-repository.get exemption would hide this regression.
     const target = "e2e-owner/svc-show";
     const h = await start(
       scenario({
@@ -421,9 +371,7 @@ describe("denial barrier", () => {
   });
 
   test("NO probe for the admin repo (self carve-out) - the first repository.get arms", async () => {
-    // The self carve-out never probes GITHUB_REPOSITORY (e2e-owner/e2e-repo), so
-    // targeting it in a redact multi-run makes its first repository.get a section
-    // read that must arm.
+    // The self carve-out never probes GITHUB_REPOSITORY, even in a redact multi-run.
     const h = await start(
       scenario({
         inputs: { on_missing_permission: "fail", private_repos: "redact" },
@@ -441,9 +389,7 @@ describe("denial barrier", () => {
   });
 
   test("NO probe for a discovery-supplied slug - the first repository.get arms", async () => {
-    // A slug whose visibility came from /user/repos discovery is never probed, so
-    // its first repository.get is the section read and must arm - even in a redact
-    // run.
+    // A slug whose visibility came from /user/repos discovery is never probed, even in a redact run.
     const target = "e2e-owner/disc-x";
     const h = await start(
       scenario({
@@ -463,10 +409,8 @@ describe("denial barrier", () => {
   });
 
   test("a faulted probe retry is still the probe (exempt), not a section read", async () => {
-    // A rate-limited probe returns 403-throttle before delivering, so the slug is
-    // NOT marked seen; the retry is still the probe and stays exempt. Without the
-    // "mark seen only after the fault barrier" rule, the retry would be misread as
-    // the section read and the following PATCH would false-flag.
+    // A faulted probe is not delivered, so the slug is not marked seen and the retry is still the
+    // probe; marking seen before the fault barrier would misread the retry as the section read.
     const target = "e2e-owner/svc-fault";
     const h = await start(
       scenario({
@@ -487,11 +431,8 @@ describe("denial barrier", () => {
   });
 
   test("an ALL-faulting probe exhausts its budget; the section read then arms", async () => {
-    // If EVERY probe attempt faults, the probe never delivers and gives up after
-    // its retry budget (3 wire attempts). The exemption must expire there: the
-    // next repository.get is the section's own denied read, and a write after it
-    // MUST arm the barrier. Faulting the first 3 repository.get (the probe's whole
-    // budget) leaves the 4th - the section read - delivered and denied.
+    // The probe gives up after its retry budget (3 wire attempts), and the exemption must expire
+    // with it: the 4th repository.get is the section's own denied read.
     const target = "e2e-owner/svc-allfault";
     const h = await start(
       scenario({
@@ -514,9 +455,7 @@ describe("denial barrier", () => {
   });
 
   test("a first-op denied write under WARN + uniform 403 style is NOT a violation", async () => {
-    // Under warn there is no preflight in EITHER denial style; a section whose
-    // first apply operation is a write legitimately sends it. Fuzz seed
-    // 2151064002 found the old rule flagging this.
+    // Under warn there is no preflight in EITHER denial style. Fuzz seed 2151064002 flagged this.
     const h = await start(
       scenario({
         denial_style: 403,
@@ -614,9 +553,8 @@ describe("check-mode barrier", () => {
   });
 
   test("enterCheckMode() arms the barrier on an apply-mode server (convergence re-run)", async () => {
-    // The server was built with an apply-mode scenario, so a write is allowed
-    // at first. After enterCheckMode(), a subsequent write is a violation -
-    // this is what the runner calls before the convergence re-run.
+    // Built apply-mode, so the first write passes; enterCheckMode() is what the runner calls before
+    // the convergence re-run.
     const h = await start(scenario());
     const before = await call(h, "POST", labelsPath, { body: { name: "first" } });
     expect(before.status).toBe(201);
@@ -626,7 +564,6 @@ describe("check-mode barrier", () => {
     const after = await call(h, "POST", labelsPath, { body: { name: "second" } });
     expect(after.status).toBe(400);
     expect(h.violations.some((v) => v.startsWith("write in check mode"))).toBe(true);
-    // A GET still works after entering check mode.
     expect((await call(h, "GET", labelsPath)).status).toBe(200);
   });
 });
@@ -664,8 +601,6 @@ describe("route matching and wire contract", () => {
   });
 
   test("the repo probe is served by the repository.get section endpoint", async () => {
-    // GET /repos/{owner}/{repo} matches a section endpoint, so it never reaches
-    // handleCorePath (which no longer carries a dead repo-probe branch).
     const h = await start(scenario());
     const res = await call(h, "GET", `/repos/${OWNER}/${REPO}`);
     expect(res.status).toBe(200);
@@ -675,8 +610,7 @@ describe("route matching and wire contract", () => {
 
   test("the contents core path answers a not-implemented violation", async () => {
     const h = await start(scenario());
-    // The real settings fetch hits a nested path (.github/settings.yml); the
-    // contents match is prefix-based so a multi-segment {path} still routes.
+    // The contents match is prefix-based, so the real nested {path} (.github/settings.yml) routes.
     const res = await call(h, "GET", `/repos/${OWNER}/${REPO}/contents/.github/settings.yml`);
     expect(res.status).toBe(400);
     expect(h.violations.some((v) => v.includes("not implemented"))).toBe(true);
@@ -691,13 +625,11 @@ describe("GHES base prefix", () => {
     const res = await call(h, "GET", `/repos/${OWNER}/${REPO}/labels`);
     expect(res.status).toBe(200);
     expect(h.violations).toHaveLength(0);
-    // The logged pathname has the prefix stripped.
     expect(h.requests[0]?.pathname).toBe(labelsPath);
   });
 
   test("a request missing the required prefix is a violation", async () => {
     const h = await start(scenario(), { basePrefix: "/api/v3" });
-    // Hit the raw base (prefix removed) so the request arrives without it.
     const rawBase = h.url.replace("/api/v3", "");
     const res = await fetch(`${rawBase}${labelsPath}`, { method: "GET", headers: AUTH });
     expect(res.status).toBe(400);
@@ -760,8 +692,6 @@ describe("writes mutate state", () => {
     expect(patched.status).toBe(200);
     list = await jsonArray(await call(h, "GET", labelsPath));
     expect(list[0]?.tone).toBe("cool");
-    // The server-owned fields survive a PATCH payload that tries to set them,
-    // and only new_name (not a bare name) can move the identity.
     expect(list[0]?.name).toBe("feature");
     expect(list[0]?.id).not.toBe(999);
     expect(list[0]?.node_id).not.toBe("FAKE");
@@ -792,7 +722,6 @@ describe("writes mutate state", () => {
     await call(h, "PATCH", `${labelsPath}/old`, { body: { new_name: "new" } });
     const list = await jsonArray(await call(h, "GET", labelsPath));
     expect(list[0]?.name).toBe("new");
-    // The server-owned url is re-minted from the renamed identity.
     expect(list[0]?.url).toBe(`https://api.github.com/repos/${OWNER}/${REPO}/labels/new`);
   });
 });
@@ -844,24 +773,21 @@ describe("code-scanning 200-vs-202 rule", () => {
 
     const same = await call(h, "PATCH", path, { body: { state: "configured" } });
     expect(same.status).toBe(200);
-    // The spec's 200 body is an empty object (additionalProperties: false), NOT
-    // the stored config - so the handler returns {}.
+    // The spec's 200 body is an empty object (additionalProperties: false), NOT the stored config.
     expect(await json(same)).toEqual({});
   });
 });
 
 describe("logged response bodies are snapshots, not live-state aliases", () => {
   test("a later mutation does not retroactively rewrite an earlier logged body", async () => {
-    // repository.get returns the live state.repo; a subsequent repository.update
-    // Object.assigns into that same object. If the log kept a reference, the GET
-    // entry's body would reflect the later PATCH. structuredClone prevents that.
+    // server.ts structuredClones every logged body, so a handler that returned live state could not
+    // have its logged body rewritten by a later mutation.
     const h = await start(scenario());
     await call(h, "GET", `/repos/${OWNER}/${REPO}`);
     await call(h, "PATCH", `/repos/${OWNER}/${REPO}`, { body: { description: "changed-after" } });
     const getLog = h.requests.find(
       (r) => r.method === "GET" && r.pathname === `/repos/${OWNER}/${REPO}`,
     );
-    // The GET's logged body must show the ORIGINAL description, not the PATCH's.
     expect((getLog?.responseBody as Record<string, unknown>)?.description).not.toBe(
       "changed-after",
     );
@@ -915,9 +841,8 @@ describe("core-route faults and server_error", () => {
   const RAW_ACCEPT = "application/vnd.github.raw+json";
   const contentsPath = (slug: string) => `/repos/${slug}/contents/.github/settings.yml`;
 
-  // Key validation, driven directly through both channels (faults and
-  // corrupt) over section and core keys. Duplicate-fault rejection is covered
-  // through startMockServer in the fault-injection suite below.
+  // Key validation through both channels over section and core keys; duplicate-fault rejection is
+  // covered through startMockServer in the fault-injection suite below.
   const faultKeyCases: Array<{
     name: string;
     channel: "faults" | "corrupt";
@@ -964,7 +889,6 @@ describe("core-route faults and server_error", () => {
     for (let i = 0; i < 5; i++) {
       statuses.push((await call(h, "GET", labelsPath)).status);
     }
-    // Deterministic rotation, wrapping after 503; the 5th request is real.
     expect(statuses).toEqual([500, 502, 503, 500, 200]);
     expect(h.faultCounts.get("labels.list")).toBe(4);
   });
@@ -994,14 +918,12 @@ describe("core-route faults and server_error", () => {
     const res = await call(h, "GET", contentsPath(target));
     expect(res.status).toBe(400);
     expect(h.violations.some((v) => v.includes("Accept"))).toBe(true);
-    // The violation answered; the fault did not fire (and so never masked it).
     expect(h.faultCounts.get("core.contentsGet")).toBeUndefined();
   });
 
   test("an UNKNOWN-target contents request cannot steal a core.contentsGet fault", async () => {
-    // Target resolution comes before the fault hook: a request for a slug the
-    // multi state does not know keeps its plain 404 and must not consume the
-    // fault budget, which stays armed for the legitimate target.
+    // Target resolution comes before the fault hook, so an unknown slug keeps its plain 404 and the
+    // fault budget stays armed for the legitimate target.
     const target = "e2e-owner/svc-a";
     const h = await start(
       scenario({ repos: { [target]: { settings: { labels: [{ name: "x" }] } } } }),
@@ -1071,15 +993,9 @@ describe("core-route faults and server_error", () => {
 
 describe("429 fault production parity", () => {
   test("the throttling plugin (production topology, no env knob) absorbs the mock's 429", async () => {
-    // The env knob must be ABSENT here: under RETRY_BASE_MS the client swaps
-    // to a test-only recovery path (throttling off, 429 retried by the retry
-    // plugin), which would absorb ANY 429 shape and prove nothing about
-    // production. This constructs the client with the production topology -
-    // throttling plugin ON, 429 in the retry plugin's doNotRetry - and only
-    // scales the WAITS via the constructor override, so the test proves the
-    // throttle detection recognizes the mock's exact secondary-limit shape
-    // (the "secondary rate" message and the positive Retry-After are both
-    // load-bearing) and retries it into the 200.
+    // RETRY_BASE_MS must be ABSENT: under it the client swaps to a test-only recovery path
+    // (throttling off, 429 retried by the retry plugin) that absorbs ANY 429 shape. The constructor
+    // override scales only the WAITS, so production throttle detection is what absorbs this 429.
     expect(process.env.RETRY_BASE_MS).toBeUndefined();
     const h = await start(scenario({ live_state: { labels: [{ id: 1, name: "bug" }] } }), {
       faults: [{ key: "labels.list", kind: "429_then_200" }],
@@ -1092,8 +1008,6 @@ describe("429 fault production parity", () => {
     });
     const result = await api.tryRequest("GET", `/repos/${OWNER}/${REPO}/labels`);
     expect("error" in result).toBe(false);
-    // The fault FIRED (the absorption was not vacuous) and the retried
-    // request then served the real list.
     expect(h.faultCounts.get("labels.list")).toBe(1);
     const statuses = h.requests.map((r) => r.status);
     expect(statuses).toEqual([429, 200]);
@@ -1101,12 +1015,6 @@ describe("429 fault production parity", () => {
 });
 
 describe("handler statuses obey the realism rule", () => {
-  // The rule (statusAllowed): a handler may answer any DECLARED status plus any
-  // UNdeclared error status (>= 400); an undeclared 2xx/3xx is forbidden. This
-  // drives EVERY handler branch - success AND the error branches (missing
-  // resource 404s, the pages-already-enabled 422, the selected-actions 409),
-  // and every repository security toggle (get/put/remove, enabled and absent) -
-  // not just happy paths, so a handler inventing an undeclared success fails.
   test("every handler branch returns an allowed status", async () => {
     const h = await start(
       scenario({
@@ -1161,8 +1069,7 @@ describe("handler statuses obey the realism rule", () => {
         },
       }),
     );
-    // (key, method, path, body?) tuples. Ordering matters where one call sets
-    // up another (e.g. a create before the list, a remove last).
+    // Ordering matters where one call sets up another (a create before the list, a remove last).
     const cases: Array<[string, string, string, unknown?]> = [
       // repository core + all four readable toggles (enabled GET, put, remove)
       ["repository.get", "GET", `/repos/${OWNER}/${REPO}`],
@@ -1281,13 +1188,8 @@ describe("handler statuses obey the realism rule", () => {
         "DELETE",
         `/repos/${OWNER}/${REPO}/environments/prod/variables/SEEDED`,
       ], // 404 already gone
-      // deployment branch policies: list (200, flag-off 404, missing-env 404),
-      // create (200, duplicate 303, invalid-type 422, flag-off 404), remove
-      // (204 + 404). NOTE: this tuple list is hand-maintained and deliberately
-      // PARTIAL (whole endpoint families - secrets, webhooks, variables at the
-      // repo level - are exercised by their own suites), so a completeness
-      // sweep against allEndpoints() cannot live here; a new handler's
-      // branches must be added by hand.
+      // This list is hand-maintained and PARTIAL (secrets, webhooks, and repo-level variables have
+      // their own suites), so a completeness sweep against allEndpoints() cannot live here.
       [
         "environments.listPolicies",
         "GET",
@@ -1552,16 +1454,12 @@ describe("handler statuses obey the realism rule", () => {
         );
       }
     }
-    // None of these are permission-denied or check-mode writes, so no request
-    // should have raised a mock violation.
     expect(h.violations).toHaveLength(0);
   });
 
   test("security-toggle GET returns an allowed status when the feature is absent", async () => {
-    // A second server with the toggles unset exercises the "not enabled"
-    // branches: vulnerability-alerts 404, automated-security-fixes 404,
-    // private-vulnerability-reporting 200 (enabled: false),
-    // immutable-releases 404.
+    // A second server with the toggles unset exercises the "not enabled" branches; PVR answers 200
+    // (enabled: false) where the other three answer 404.
     const h = await start(scenario());
     const branches: Array<[string, string]> = [
       ["repository.vulnerabilityAlertsGet", `/repos/${OWNER}/${REPO}/vulnerability-alerts`],
@@ -1582,9 +1480,6 @@ describe("handler statuses obey the realism rule", () => {
   });
 
   test("owner-enforced immutable releases answer 409 on both writes", async () => {
-    // The declared-409 branches: under the enforcement flag the mock must
-    // refuse both write directions with the documented status, never an
-    // undeclared 2xx.
     const h = await start(
       scenario({
         live_state: {
@@ -1605,8 +1500,7 @@ describe("handler statuses obey the realism rule", () => {
   });
 
   test("pages create answers an allowed status when a site already exists", async () => {
-    // The pages.create 422 conflict branch: create declares only 201, so the
-    // 422 must pass by the >= 400 error allowance, never as an undeclared 2xx.
+    // pages.create declares only 201, so the 422 conflict passes by the >= 400 error allowance.
     const h = await start(scenario({ live_state: { pages: { url: "u" } } }));
     const res = await call(h, "POST", `/repos/${OWNER}/${REPO}/pages`, {
       body: { source: { branch: "main", path: "/" } },
@@ -1616,9 +1510,6 @@ describe("handler statuses obey the realism rule", () => {
   });
 
   test("org-overridden interaction limits and an unavailable cap answer their declared statuses", async () => {
-    // The flag-gated branches: the base-limit writes answer the declared 409
-    // under an org override, and both creation-cap endpoints answer the
-    // declared 405 where the cap is unavailable.
     const h = await start(
       scenario({
         live_state: {
@@ -1653,8 +1544,7 @@ describe("handler statuses obey the realism rule", () => {
     for (const [key, method, path, status, body] of flagged) {
       const res = await call(h, method, path, body === undefined ? {} : { body });
       expect(res.status).toBe(status);
-      // Stronger than statusAllowed (any >= 400 passes there): these statuses
-      // must stay DECLARED on the section's endpoints.
+      // Stronger than statusAllowed (any >= 400 passes there): these must stay DECLARED.
       expect(
         declaredStatuses(key).has(res.status),
         `handler ${key} must answer a status its endpoint declares`,
@@ -1686,10 +1576,9 @@ describe("fault injection", () => {
     });
     const faulted = await call(h, "GET", labelsPath);
     expect(faulted.status).toBe(403);
-    // The body says "rate limit" (this is the ONLY place a 403 may) so the
-    // client classifies it as throttling, not a permission denial.
+    // The ONLY 403 whose body may say "rate limit": the client classifies it as throttling, not a
+    // permission denial.
     expect((await faulted.text()).toLowerCase()).toContain("rate limit");
-    // The fault fired once (default times: 1); the next request is served.
     const normal = await call(h, "GET", labelsPath);
     expect(normal.status).toBe(200);
   });
@@ -1709,9 +1598,8 @@ describe("fault injection", () => {
     });
     const faulted = await call(h, "GET", labelsPath);
     expect(faulted.status).toBe(429);
-    // Both details are load-bearing for the throttling plugin's detection: the
-    // message must contain "secondary rate", and Retry-After must be a
-    // POSITIVE number (a "0" is falsy and falls back to the plugin's 60s
+    // Both details are load-bearing for the throttling plugin: the message must contain "secondary
+    // rate", and Retry-After must be POSITIVE (a "0" is falsy and falls back to the plugin's 60s
     // default, which the app's callback would honor as a real 60s wait).
     expect(String((await json(faulted)).message)).toContain("secondary rate limit");
     expect(Number(faulted.headers.get("retry-after"))).toBeGreaterThan(0);
@@ -1723,14 +1611,10 @@ describe("fault injection", () => {
     const h = await start(scenario({ live_state: { labels: [{ id: 1, name: "real" }] } }), {
       faults: [{ key: "labels.list", kind: "connection_drop" }],
     });
-    // The server destroys the socket before any response bytes leave, so even
-    // the in-process client sees a genuine network failure: the fetch itself
-    // rejects (no status line ever arrives). The attempt is still logged with
-    // status 0.
+    // The socket is destroyed before any response bytes leave, so the fetch itself rejects; the
+    // attempt is still logged with status 0.
     await expect(call(h, "GET", labelsPath)).rejects.toThrow();
     expect(h.requests.some((r) => r.status === 0)).toBe(true);
-    // The fault fires once, so the next request serves the real list - and the
-    // drop killed one connection, never the server.
     const normal = await jsonArray(await call(h, "GET", labelsPath));
     expect(normal.map((l) => l.name)).toEqual(["real"]);
   });
@@ -1739,7 +1623,6 @@ describe("fault injection", () => {
     const h = await start(scenario(), {
       faults: [{ key: "labels.list", kind: "rate_limit_403" }],
     });
-    // A different endpoint is unaffected.
     expect((await call(h, "GET", `/repos/${OWNER}/${REPO}/milestones`)).status).toBe(200);
   });
 

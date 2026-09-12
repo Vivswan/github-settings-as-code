@@ -1,20 +1,12 @@
 /**
- * The secret_scanning_custom_patterns mock fragment the e2e route pipeline
- * aggregates (test/e2e/mock/sections.ts). Deliberately imports the test-tree
- * seams (support.ts and state.ts, never routes.ts); the bundle entry is
- * src/main.ts, so this file never reaches lib/index.js.
+ * This fragment imports test-tree seams on purpose: the bundle entry is src/main.ts, so it never
+ * reaches lib/index.js. custom_pattern_version is real optimistic concurrency here, so a section that
+ * reuses a version across writes fails a single-threaded e2e run instead of only failing against real GitHub.
  *
- * custom_pattern_version is real optimistic concurrency here: the mock
- * mints a fresh version on EVERY mutation (deterministic, from a per-state
- * counter) and both write handlers answer 412 on a stale one, so a section
- * that reuses a version across writes - instead of re-reading - fails a
- * single-threaded e2e run instead of only failing against real GitHub.
- * Two escapes, both spec-faithful: a PATCH may send version: null (the
- * body requires the key but marks it nullable - the no-concurrency form
- * the section uses for a version-less live pattern), and the bulk
- * DELETE's per-pattern version is OPTIONAL upstream (only pattern_id is
- * required) - the section sending versions whenever it HAS them is pinned
- * by its unit tests' payload assertions, not by this gate.
+ * create or update               -> mints a fresh version
+ * stale version on a write       -> 412
+ * PATCH version: null            -> accepted (the key is required but nullable upstream)
+ * DELETE entry without a version -> accepted (optional upstream)
  */
 
 import {
@@ -36,10 +28,9 @@ export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secr
       ok(slicePage(state.secret_scanning_patterns, query)),
     "secret_scanning_custom_patterns.create": ({ state, body }) => {
       const patterns = asObject(body).patterns;
-      // An empty (or missing) patterns array is GitHub's documented 422; a
-      // MISSING one is also how a request whose body never made it onto the
-      // wire would look, so the bulk-DELETE/POST body transmission is proven
-      // by this rejection arm staying cold in the curated scenarios.
+      // An empty or missing patterns array is GitHub's documented 422. A MISSING one is also how a
+      // body that never made it onto the wire looks, so this arm staying cold in the curated
+      // scenarios proves the bulk POST body transmits.
       if (!Array.isArray(patterns) || patterns.length === 0) {
         return {
           status: 422,
@@ -54,8 +45,7 @@ export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secr
           state.secret_scanning_patterns.some((p) => p.name === name) ||
           created.some((p) => p.name === name);
         if (duplicate) {
-          // A duplicate name answers GitHub's per-index validation_errors map;
-          // nothing is created (the section never POSTs a duplicate).
+          // A duplicate name answers GitHub's per-index validation_errors map; nothing is created.
           return {
             status: 422,
             body: {
@@ -77,22 +67,20 @@ export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secr
       const id = param("pattern_id");
       const pattern = state.secret_scanning_patterns.find((p) => String(p.id) === id);
       if (!pattern) {
-        // Existence first, like GitHub: an unknown id 404s before the version
-        // is even compared.
+        // Existence first, like GitHub: an unknown id 404s before the version is even compared.
         return { status: 404, body: { message: "Not Found" } };
       }
       const payload = asObject(body);
-      // A null version skips the concurrency check (the body marks the key
-      // required but nullable); a present string must match the stored one.
+      // A null version skips the concurrency check (the key is required but nullable); a present
+      // string must match the stored one.
       if (
         payload.custom_pattern_version !== null &&
         payload.custom_pattern_version !== pattern.custom_pattern_version
       ) {
         return SECRET_SCANNING_STALE_VERSION;
       }
-      // The endpoint requires at least one updatable field alongside the
-      // version (the request schema's anyOf); a version-only body is GitHub's
-      // 422, so a regression that stops sending fields fails e2e loudly.
+      // The request schema's anyOf requires at least one updatable field alongside the version, so
+      // a regression that stops sending fields fails e2e loudly with GitHub's 422.
       if (!SECRET_SCANNING_UPDATABLE_KEYS.some((key) => payload[key] !== undefined)) {
         return {
           status: 422,
@@ -112,9 +100,8 @@ export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secr
       const payload = asObject(body);
       const entries = payload.patterns;
       if (!Array.isArray(entries) || entries.length === 0) {
-        // The spec marks the body (and its patterns list) required; a missing
-        // list is also what a DELETE whose body never transmitted would look
-        // like, so this arm is the loud tripwire for that transport property.
+        // The spec marks the body and its patterns list required; a missing list is also what a
+        // DELETE whose body never transmitted looks like, so this arm is the loud tripwire for that.
         return { status: 400, body: { message: "Bad Request: no patterns provided" } };
       }
       const action = payload.post_delete_action;
@@ -124,9 +111,8 @@ export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secr
           body: { message: `Bad Request: unknown post_delete_action "${String(action)}"` },
         };
       }
-      // Resolve and version-check EVERY entry before deleting ANY, so a stale
-      // version can never half-delete the batch - GitHub documents the 412 for
-      // the operation, not per pattern.
+      // Every entry is resolved and version-checked before ANY is deleted, so a stale version can
+      // never half-delete the batch: GitHub documents the 412 for the operation, not per pattern.
       const targets: Json[] = [];
       for (const entry of entries) {
         const request = asObject(entry);

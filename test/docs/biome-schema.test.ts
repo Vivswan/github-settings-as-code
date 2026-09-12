@@ -1,7 +1,6 @@
 /**
- * biome.json's $schema URL names a biome version by hand, and `biome ci` only
- * emits an info notice when it lags the installed CLI, so a dependency bump
- * leaves it drifting silently. Pin the two together here.
+ * biome.json's $schema URL names a biome version by hand, and `biome ci` only emits an info notice when it lags the installed CLI, so a dependency
+ * bump leaves it drifting silently.
  */
 
 import { describe, expect, test } from "bun:test";

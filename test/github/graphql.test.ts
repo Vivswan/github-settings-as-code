@@ -1,8 +1,5 @@
 /**
- * The GraphQL transport: tryGraphql's errors[]-inside-200 mapping (the
- * load-bearing difference from REST), its trace redaction (the slug rides in
- * the BODY, invisible to URL-based redaction), and its reuse of the shared
- * HTTP-level error classification.
+ * tryGraphql's load-bearing differences from REST: errors[] inside a 200, and the slug riding in the BODY, invisible to URL-based redaction.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
@@ -128,9 +125,7 @@ describe("tryGraphql errors[] mapping", () => {
     expect(result.error.body).toBe(
       '[{"type":"UNPROCESSABLE","message":"first problem"},{"message":"second problem"}]',
     );
-    // A partially-typed response carries NO graphqlTypes: the untyped entry
-    // must make the whole response untolerable, not hide behind its typed
-    // sibling.
+    // A partially-typed response carries NO graphqlTypes: the untyped entry must make the whole response untolerable.
     expect(result.error.graphqlTypes).toBeUndefined();
   });
 
@@ -155,12 +150,8 @@ describe("tryGraphql errors[] mapping", () => {
   });
 
   test("a malformed errors value fails closed even beside valid-looking data", async () => {
-    // {data, errors: {...}} must never read as "no errors": treating the
-    // malformed errors as absent would turn a partial response into success.
-    // With the throttling plugin enabled, ITS graphql inspection trips over
-    // the non-array first and the transport catch fails closed; under the
-    // RETRY_BASE_MS knob (the e2e configuration) the plugin is off and OUR
-    // guard must carry the invariant alone - both paths are pinned.
+    // {data, errors: {...}} must never read as "no errors". With the throttling plugin on, ITS graphql inspection trips first; under the
+    // RETRY_BASE_MS knob (the e2e configuration) OUR guard carries the invariant alone, so both paths are pinned.
     stubFetch([
       () => graphql({ data: { repository: { id: "R_1" } }, errors: { type: "NOT_FOUND" } }),
     ]);
@@ -193,9 +184,8 @@ describe("tryGraphql errors[] mapping", () => {
     );
   });
 
-  // Rate limit wins over BOTH lower priorities: beside FORBIDDEN it must not
-  // read as a permission failure (the user would be told to fix their PAT),
-  // and beside UNPROCESSABLE it must not read as a bad payload.
+  // Beside FORBIDDEN a rate limit must not read as a permission failure (the user would be told to fix their PAT); beside UNPROCESSABLE not as a bad
+  // payload.
   test.each([
     ["a permission error (FORBIDDEN)", { type: "FORBIDDEN", message: "denied" }],
     ["a payload error (UNPROCESSABLE)", { type: "UNPROCESSABLE", message: "also broken" }],
@@ -218,8 +208,7 @@ describe("tryGraphql errors[] mapping", () => {
   });
 
   test("partial data beside errors still fails closed", async () => {
-    // GraphQL can answer half the query; a section acting on the half would
-    // mis-diff, so ANY non-empty errors[] is an error result.
+    // GraphQL can answer half the query; a section acting on the half would mis-diff, so ANY non-empty errors[] is an error result.
     stubFetch([
       () =>
         graphql({
@@ -264,9 +253,7 @@ describe("tryGraphql tracing and redaction", () => {
       { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
       "o/secretrepo",
     );
-    // The client's line is the constant alone (an exact element, not a fragment):
-    // no operation name, slug, or variable survives anywhere in the trace. The
-    // other lines are octokit's own timed chatter, so they are not pinned.
+    // The client's line is the constant alone; the other lines are octokit's own timed chatter, so they are not pinned.
     expect(dbg.lines).toContain("<redacted>");
     const trace = dbg.lines.join("\n");
     expect(trace).not.toContain("RepoToggles");
@@ -275,9 +262,6 @@ describe("tryGraphql tracing and redaction", () => {
   });
 
   test("a masked slug inside the rendered line fails closed even when the slug param differs", async () => {
-    // The whole-message backstop: the op addresses one repo but a DIFFERENT
-    // masked slug appears in the variables (a cross-repo value). The
-    // whole-line scan must still collapse it.
     const dbg = traceIo();
     dbg.io.mask("acme/private");
     stubFetch([() => graphql({ data: {} })]);
@@ -302,9 +286,8 @@ describe("tryGraphql tracing and redaction", () => {
   });
 
   test("a masked slug's error content is withheld, keeping the structural fields", async () => {
-    // GraphQL error messages quote the slug verbatim ("Could not resolve to a
-    // Repository with the name 'o/secretrepo'"), so a redacted repository's
-    // error body is replaced wholesale; the classification fields survive.
+    // GraphQL error messages quote the slug verbatim ("Could not resolve to a Repository with the name 'o/secretrepo'"), so the error body is
+    // replaced wholesale.
     const dbg = traceIo();
     dbg.io.mask("o/secretrepo");
     stubFetch([
@@ -334,10 +317,7 @@ describe("tryGraphql tracing and redaction", () => {
   });
 
   test("a redacted HTTP-level rate limit keeps its structural classification, nothing else", async () => {
-    // The withholding must not destroy rate-limit classification: with the
-    // message gone, only the structurally computed flag can distinguish a
-    // 403 rate limit from a permission denial. The docs URL is rebuilt away
-    // with everything else outside the allowlist.
+    // With the message gone, only the structurally computed flag can distinguish a 403 rate limit from a permission denial.
     const dbg = traceIo();
     dbg.io.mask("o/secretrepo");
     stubFetch([
@@ -395,8 +375,7 @@ describe("tryGraphql tracing and redaction", () => {
   ])(
     "a mask registered while the request is in flight redacts the %s",
     async (_case, respond, withheldMessage) => {
-      // Redaction is read at emission, never snapshotted at request start: the
-      // fetch stub masks the slug after the request went out, before any trace.
+      // Redaction is read at emission, never snapshotted at request start: the stub masks the slug after the request went out.
       const t = traceIo();
       stubFetch([
         () => {
@@ -434,8 +413,6 @@ describe("tryGraphql tracing and redaction", () => {
         },
         (error: unknown) => String(error),
       );
-    // The withholding marker replaces the reason wholesale: neither the raw
-    // transport text nor the slug survives into the thrown message.
     expect(thrown).toBe(
       "Error: GRAPHQL RepoToggles failed: the transport failed before an HTTP response arrived (details withheld: the repository is redacted). Check network connectivity from the runner to https://api.test, then re-run the workflow",
     );

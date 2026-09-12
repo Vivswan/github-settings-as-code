@@ -1,8 +1,4 @@
-/**
- * The `check_suite_preferences:` section's schema slice and its
- * AutoTriggerCheckConfig helper; root src/schema.ts composes the
- * SettingsFile property from it.
- */
+/** The `check_suite_preferences:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
 

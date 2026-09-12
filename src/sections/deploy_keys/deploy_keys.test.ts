@@ -25,8 +25,6 @@ describe("normalizeKeyMaterial", () => {
     expect(normalizeKeyMaterial("ssh-ed25519 AAAAC3blob deploy@host")).toBe(
       "ssh-ed25519 AAAAC3blob",
     );
-    // A multi-word comment is stripped whole, and surrounding whitespace is
-    // irrelevant to the compared material.
     expect(normalizeKeyMaterial("  ssh-rsa AAAAB3blob a b c  ")).toBe("ssh-rsa AAAAB3blob");
   });
 
@@ -231,7 +229,6 @@ describe("deploy_keys reconcile", () => {
       { title: "deploy-bot", key: BOT_KEY, read_only: false },
     ]);
     expect(forced.ops.map((op) => op.role)).toEqual(["remove", "create"]);
-    // The control: the same live toggle, undeclared, is not drift.
     const ignored = await plan(new MockApi({ [LIST]: { data: live } }), [
       { title: "deploy-bot", key: BOT_KEY },
     ]);
@@ -239,9 +236,8 @@ describe("deploy_keys reconcile", () => {
   });
 
   test('a declared passthrough field named "material" earns the phantom-key note, diffed against the RAW api body', async () => {
-    // The normalized material replaces the live `key` in place and never
-    // lands under another name, so a user field called "material" reads as
-    // absent live (phantom), not as a synthetic field it would match.
+    // The normalized material replaces the live `key` in place and never lands under another name, so a user field called "material" reads as absent
+    // live rather than matching a synthetic field.
     const api = new MockApi({ [LIST]: { data: [liveKey(10, "deploy-bot", BOT_KEY)] } });
     const result = await plan(api, [
       { title: "deploy-bot", key: BOT_KEY, material: "whatever" } as never,
@@ -340,8 +336,7 @@ describe("deploy_keys convergence", () => {
       "DELETE /repos/o/r/keys/20",
     ]);
     expect(second).toEqual({ ops: [], notes: [], drift: [] });
-    // The mock stores comment-free material the way GitHub does; the rotated
-    // key kept its live read_only through the recreate.
+    // The mock stores comment-free material the way GitHub does; the rotated key kept its live read_only through the recreate.
     expect(api.state.deploy_keys.map((k) => [k.title, k.key, k.read_only])).toEqual([
       ["deploy-bot", BOT_KEY, true],
       ["mirror-pull", MIRROR_KEY, false],

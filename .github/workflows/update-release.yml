@@ -1,50 +1,27 @@
-# The update stage of the release pipeline: repo-owned, called by the
-# managed release.yml between release-please cutting the DRAFT release and
-# the attested publish. This repository's stage is the single-tag scheme:
-# main is source-only (lib/index.js is never committed there), yet every
-# ref a consumer can name from now on - the vX.Y.Z tags, the moving major
-# vX, and the latest tag - must point at a packaged commit (the source tree
-# without its workflows, plus the built bundle), all of them on the `build`
-# branch post-green.yml appends to (the tags cut before that branch existed
-# stay on main commits from when main committed the bundle). So this hook, not release-please, mints the
-# tag (release-please-config.json sets `draft` and pins the fleet's
-# `force-tag-creation` OFF):
-#   1. resolve the merge commit from the draft's target commitish - NOT
-#      this run's GITHUB_SHA: the managed pipeline lets a newer push's run
-#      recover an older merge's pending release - and rebuild the bundle
-#      from it, verifying the committed schema byte-for-byte;
-#   2. find the build commit whose recorded source is the merge commit
-#      (post-green appended it earlier in this run), appending it when
-#      none exists (post-green skipped for want of its token), create
-#      vX.Y.Z once, on that commit - born runnable, never moved (the
-#      release-tags ruleset freezes it, as SECURITY.md states) - and
-#      reconcile the latest tag to the chain commit of the newest main
-#      source;
-#   3. force-move the major tag there and upload bundle and schema to the
-#      draft (published releases freeze their assets);
-#   4. confirm origin's refs and the draft's assets; the managed publish
-#      stage then attests every asset and flips the release live, binding
-#      it to the existing vX.Y.Z tag.
-# Only release.yml reaches this workflow, with the tag release-please just
-# cut from its own merged PR, so a hand-edited manifest never mints a tag.
-# A rerun converges while this release is its line's newest (package
-# byte-verifies an existing tag; assets re-upload with --clobber); once a
-# NEWER release shipped, the major move stops by design.
+# The update stage of the release pipeline: repo-owned, called by the managed ci.yml between release-please
+# cutting the DRAFT release and the attested publish. This hook, not release-please, mints the tag: main is
+# source-only, so every consumable ref must point at a packaged commit on the `build` branch (the topology is in
+# .github/scripts/release-pipeline.ts; release-please-config.json sets `draft` and pins `force-tag-creation` off).
+#
+#   resolve the merge commit from the draft's target commitish -> rebuild the bundle, verify the committed schema byte-for-byte
+#   package      -> find or append the build commit whose source is the merge commit, mint vX.Y.Z there ONCE, reconcile latest
+#   retag-major  -> force-move vX there, then upload bundle and schema to the draft (a published release freezes its assets)
+#   verify       -> confirm origin's refs and the draft's assets; the managed publish stage then attests and flips the release live
+#
+# Only ci.yml reaches this workflow, with the tag release-please just cut from its own merged PR, so a hand-edited
+# manifest never mints a tag. A rerun converges while this release is its line's newest; once a NEWER release
+# shipped, the major move stops by design.
 
-# Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand
-# run has no attestation.json, and a chain commit it appends no run trailer). <merge sha> is the
-# draft's target commitish. NEVER publish before `package` has minted the
-# tag: a tagless draft makes GitHub create vX.Y.Z lazily at the merge
-# commit on main, which has no bundle (the managed release.yml's generic
-# recovery notes assume force-tag-creation and do not apply here).
-#   git checkout <merge sha>
+# Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand run has no attestation.json, and a chain
+# commit it appends carries no run trailer). NEVER publish before `package` has minted the tag: a tagless draft makes
+# GitHub create vX.Y.Z lazily at the bundle-less merge commit on main.
+#   git checkout <merge sha>                    (the draft's target commitish)
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts package
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts retag-major
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts verify
 #   gh release upload vX.Y.Z lib/settings.schema.json lib/index.js --clobber
 #   gh release edit vX.Y.Z --draft=false
-# comment-cap: ignore a hand-recovery runbook whose seven commands mirror the steps below and must stay beside them
 
 name: Update Release
 
@@ -61,19 +38,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      # Tag pushes and the append to build when post-green did not run it;
-      # chain commits carry no .github/workflows/, so the default token
-      # needs no workflows grant (post-green.yml relies on the same fact).
-      # Also what makes the draft visible to gh.
+      # Tag pushes, and the append to build when post-green did not run it: chain commits carry no
+      # .github/workflows/, so the default token needs no workflows grant. Also what makes the draft visible to gh.
       contents: write
     outputs:
       source-sha: ${{ steps.source.outputs.sha }}
     steps:
-      # The release's identity is the draft's target commitish (release-please
-      # records the release PR's merge commit there), never this run's
-      # GITHUB_SHA: the managed head-check skips a run main outran and lets
-      # the newer push's run recover the pending release, so the run
-      # packaging a release need not be the run of its merge push.
+      # The release's identity is the draft's target commitish, never this run's GITHUB_SHA: the managed head-check
+      # lets a newer push's run recover an older merge's pending release.
       - name: Resolve the release's merge commit from the draft
         id: source
         env:
@@ -90,9 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.source.outputs.sha }}
-          # The script rebuilds build's tip from its recorded source and
-          # judges whether that source lies on main; a shallow checkout
-          # cannot answer either.
+          # The script judges whether the build tip's source lies on main; a shallow checkout cannot answer that.
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -101,28 +71,17 @@ jobs:
         run: |
           bun install --frozen-lockfile --ignore-scripts
           bun run build
-          # The uploaded schema asset and the raw URLs at the version and
-          # major tags must serve the bytes committed at the merge commit;
-          # a divergent regeneration (generator drift, or a compromised
-          # generator - SECURITY.md leans on this) stops the release here.
+          # The schema asset and the raw URLs at the tags must serve the bytes committed at the merge commit; a
+          # divergent regeneration (generator drift, or a compromised generator) stops the release here.
           git diff --exit-code lib/settings.schema.json
-      # Create the version tag on the merge commit's build commit exactly
-      # once, appending that commit when build lacks it, and reconcile
-      # latest to the chain commit of the newest main source; a rerun
-      # byte-verifies the existing tag instead (recorded source, whole tree,
-      # bundle bytes) and never moves it. Both paths end with the worktree
-      # bundle equal to the tagged bundle.
+      # Both paths (mint, or byte-verify on a rerun) leave the worktree bundle equal to the tagged one, which the
+      # upload below relies on.
       - name: Create or verify the version tag on the build commit
         env:
           TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts package
-      # Move the moving major tag (v2 for a v2.x.y release) to the packaged
-      # commit, re-verified against origin from scratch: major-pinned
-      # consumers must never receive an unpackaged commit, a package of the
-      # wrong source, or (on a rerun of an old release's job) a step
-      # backward to an older release.
       - name: Move the major tag to the packaged commit
         env:
           TAG: ${{ inputs.tag }}
@@ -134,11 +93,6 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: gh release upload "$TAG" lib/settings.schema.json lib/index.js --clobber
 
-  # The gate between packaging and publishing, against origin's ACTUAL
-  # state rather than anything the packaging job held locally: the version
-  # tag and the major must both point at a packaged commit recording this
-  # merge commit as its source, and that commit's tree must carry a
-  # non-empty lib/index.js.
   verify-release:
     needs: [package-release]
     runs-on: ubuntu-latest
@@ -155,13 +109,10 @@ jobs:
           TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ needs.package-release.outputs.source-sha }}
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts verify
-      # Publishing freezes the asset list, so an incomplete one must stop
-      # the pipeline here, while the release is still a draft (v2.0.0
-      # shipped assetless exactly this way). attestation.json is the managed
-      # publish stage's asset, attached after this job and replaced on its
-      # reruns, so the check ignores it. A legacy attestation.jsonl (the
-      # name before the template renamed it) is stale provenance that stage
-      # no longer cleans up, so it is deleted here before the check.
+      # Publishing freezes the asset list, so an incomplete one must stop here while the release is still a draft
+      # (v2.0.0 shipped assetless exactly this way).
+      #   attestation.json   -> the managed publish stage's asset, attached after this job; ignored by the check
+      #   attestation.jsonl  -> stale provenance under the old name, which that stage no longer cleans up; deleted first
       - name: Confirm the release carries both packaged assets
         env:
           GH_TOKEN: ${{ github.token }}

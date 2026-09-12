@@ -1,10 +1,7 @@
-/** Parsing for the "repos" input: explicit slugs or "*" discovery. */
-
 import { err, ok, type Result } from "neverthrow";
 import type { ProblemOf } from "../problem.js";
 import { SLUG_RE } from "./targets.js";
 
-/** Parse the repos input: comma/newline-separated slugs, or exactly "*". */
 export function parseReposInput(
   raw: string,
 ): Result<
@@ -21,9 +18,8 @@ export function parseReposInput(
     }
     return ok({ slugs: [], discover: true });
   }
-  // Malformed and repeated entries are collected across the whole list and
-  // reported once, so N bad entries cost one run to discover, not N. Both
-  // pools are Sets: a bad entry pasted twice is one offender, not two.
+  // Malformed and repeated entries are collected across the whole list, so N bad entries cost one run to discover, not
+  // N; the pools are Sets, so a bad entry pasted twice is one offender.
   const seen = new Set<string>();
   const invalid = new Set<string>();
   const duplicated = new Set<string>();

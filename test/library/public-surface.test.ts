@@ -1,7 +1,5 @@
 /**
- * The public entry's contract: src/index.ts exports exactly the pinned names
- * (a new or dropped export is a deliberate edit here), and the action reaches
- * the rest of src/ only through it - a direct import is seen failing.
+ * A new or dropped export of src/index.ts is a deliberate edit here; the action reaches the rest of src/ only through it.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -187,8 +185,7 @@ describe("the public entry", () => {
   });
 
   test("a src/action file importing src/engine directly fails the architecture lint (negative control)", () => {
-    // A copy of src/ plus the offending file: the real tree draws every declared
-    // edge, so the forbidden import is the whole verdict.
+    // A copy of src/ plus the offending file: the real tree draws every declared edge, so the forbidden import is the whole verdict.
     const root = mkdtempSync(join(tmpdir(), "public-surface-"));
     try {
       cpSync(join(ROOT, "src"), join(root, "src"), { recursive: true });

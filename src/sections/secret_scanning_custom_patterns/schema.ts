@@ -9,9 +9,8 @@ export const SecretScanningPatternConfig = z
   .object({
     name: z.string(),
     pattern: z.string(),
-    // min(1): "" cannot mean "clear the delimiter" - the PATCH updates
-    // provided fields only - so the spelling fails at document validation,
-    // before any repository is touched.
+    // "" cannot mean "clear the delimiter" (the PATCH updates provided fields only), so the spelling
+    // fails at document validation, before any repository is touched.
     start_delimiter: z.string().min(1, DELIMITER_CLEAR_ERROR).optional(),
     end_delimiter: z.string().min(1, DELIMITER_CLEAR_ERROR).optional(),
     must_match: z.array(z.string()).optional(),

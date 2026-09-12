@@ -1,11 +1,6 @@
 /**
- * The custom_properties section's e2e mock fragment: one handler per
- * "custom_properties.<role>" key in the section's ENDPOINTS, registered in
- * test/e2e/mock/sections.ts. "custom_properties.org" binds the shared
- * orgProbeHandler, the same handler the teams fragment registers under
- * "teams.org", so the two probes cannot drift. Imports only the leaf seams
- * (mock/support.ts, mock/state.ts) - never routes.ts or sections.ts; the
- * bundle entry is src/main.ts, so this fragment never reaches lib/index.js.
+ * The custom_properties e2e mock fragment (registered in test/e2e/mock/sections.ts). It imports the
+ * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import { CUSTOM_PROPERTY_DEFINITIONS } from "../../../test/e2e/mock/state.js";
@@ -30,9 +25,8 @@ export const customPropertiesMockHandlers: SectionRestHandlers<"custom_propertie
         body: { message: 'Invalid request.\n\n"properties" wasn\'t supplied.' },
       };
     }
-    // GitHub rejects the whole PATCH when any named property is not DEFINED
-    // at the organization level; the fixture is the single source of defined
-    // names (the fuzz generator draws from the same list).
+    // GitHub rejects the whole PATCH when any named property is not DEFINED at the organization
+    // level; the fixture is the single source of defined names (the fuzz generator draws from it too).
     for (const entry of properties) {
       const name = asObject(entry).property_name;
       const defined = CUSTOM_PROPERTY_DEFINITIONS.some((d) => d.property_name === name);

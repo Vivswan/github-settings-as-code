@@ -1,39 +1,21 @@
-# Repo-owned auto-fix: the commit-back fixes a PR can need. Main carries no
-# bundle (lib/index.js is built where it runs), so no bundle rebuilds happen
-# here; three fixes remain. lib/settings.schema.json is a committed build
-# artifact, and CI fails when it drifts from src/ or the generator toolchain
-# (a Dependabot generator bump changes the schema bytes on a branch nobody
-# builds). README.md, COVERAGE.md, action.yml, and the docs pages under docs/
-# carry generated regions that build:docs and build:action-docs render from the
-# declarations and coverage-data.ts, and CI fails when they drift. src/upstream-gaps/ holds tripwire files that turn the typecheck
-# red with TS2344 the moment @octokit/types ships a route a gap file declares
-# as missing; graduate-upstream-gaps.ts retires the shipped files (deleting
-# spec-documented ones, rewriting spec-lagging ones to spec-only gaps) and
-# regenerates the gaps index. This workflow runs the graduation and the schema
-# and docs regeneration on every same-repo PR that touches a fix input and pushes the
-# result back to the PR branch; an already-clean tree gets no commit. A PR
-# with unrelated type errors fails the build job here by design (the
-# graduation script refuses to half-fix a red build), just as it fails CI's
-# typecheck.
+# The commit-back fixes a same-repo PR can need, pushed to its branch; an already-clean tree gets no commit. A PR
+# with unrelated type errors fails the build job by design: the graduation script refuses to half-fix a red build.
+#   lib/settings.schema.json                     -> build:schema (a Dependabot generator bump changes its bytes on a branch nobody builds)
+#   README, COVERAGE, action.yml, docs/ regions  -> build:docs, build:action-docs
+#   src/upstream-gaps/                           -> graduate-upstream-gaps.ts retires the gap files @octokit/types caught up with
+#   lib/index.js                                 -> never: main carries no bundle
 #
-# Unlike dependabot-bun-lockfile.yml, regenerating the schema necessarily
-# executes PR-controlled code, so the fix is computed in an unprivileged job
-# and handed to the push job as a git patch staged from
-# lib/settings.schema.json, the generated docs, and src/upstream-gaps/ only: no code from the PR
-# runs on the runner that holds the write token, applying a patch executes
-# nothing, and the push job re-checks the applied paths before committing.
-# --ignore-scripts keeps lefthook (the prepare script) and dependency lifecycle
-# scripts out of the build job, and the push job never installs anything, so
-# no git hooks exist on either runner.
+# Regenerating the schema executes PR-controlled code, so the fix is computed in an unprivileged job and crosses to
+# the push job as a git patch over the fix-owned paths only; applying a patch executes nothing, and the push job
+# re-checks the applied paths before committing.
+#   --ignore-scripts on the build job's install  -> lefthook and dependency lifecycle scripts never run
+#   no install at all on the push job            -> no git hooks exist where the write token is
 #
-# Dependabot-triggered runs read the Dependabot secrets store, not the
-# Actions one. Register REPO_PLATFORM_TOKEN in both stores: a push made
-# with github.token starts no workflows, so without the token the fix
-# commit does not re-run CI (the job then posts a PR comment and a
-# warning annotation; close/reopen the PR to re-run), and on Dependabot
-# bun PRs the token is a hard prerequisite - the stale lockfile fails
-# the frozen install here until dependabot-bun-lockfile.yml's dedupe
-# push retriggers this workflow, which only a real token does.
+# Dependabot-triggered runs read the Dependabot secrets store, not the Actions one, so REPO_PLATFORM_TOKEN goes in
+# both. A push made with github.token starts no workflows.
+#   no token, install succeeds   -> the fix lands but CI does not re-run; the job posts a PR comment and a warning (close/reopen the PR)
+#   no token, Dependabot bun PR  -> the stale lockfile fails the frozen install here until dependabot-bun-lockfile.yml's
+#                                   dedupe push retriggers this workflow, which only a real token does
 
 name: Auto Fix
 
@@ -66,16 +48,15 @@ on:
 permissions:
   contents: read
 
-# Only the newest run per PR proceeds; a superseded run's push would race
-# the new head (its push job skips on the head-moved guard anyway).
+# Only the newest run per PR proceeds; a superseded run's push would race the new head (its push job skips on the
+# head-moved guard anyway).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   build:
-    # Same-repo PRs only: the push job's token cannot push to a fork's
-    # branch.
+    # The push job's token cannot push to a fork's branch.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -90,16 +71,11 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      # On a Dependabot PR whose lockfile still has the stale nested
-      # entries dependabot-bun-lockfile.yml exists to fix, the frozen
-      # install fails here; that workflow's dedupe push retriggers this
-      # one on the fixed head.
       - name: Install dependencies
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Graduate upstream gaps octokit now ships
         shell: bash
-        # Old branches cut before the graduate script landed lack it; the
-        # schema regeneration below still runs for them.
+        # Old branches cut before the graduate script landed lack it; the schema regeneration below still runs for them.
         run: |
           if [ -f .github/scripts/graduate-upstream-gaps.ts ]; then
             bun .github/scripts/graduate-upstream-gaps.ts
@@ -111,23 +87,20 @@ jobs:
         shell: bash
         run: |
           bun run build:schema
-          # Old branches cut before the docs generator landed lack the
-          # script; the schema regeneration above still runs for them.
+          # Old branches cut before the docs generators landed lack them.
           if [ -f .github/scripts/gen-docs.ts ]; then
             bun run build:docs
           fi
           if [ -f .github/scripts/gen-action-docs.ts ]; then
             bun run build:action-docs
           fi
-          # Anything the earlier steps left staged is not this workflow's
-          # fix: start from an empty index so the patch holds exactly the
-          # allowed paths.
+          # Anything the earlier steps left staged is not this workflow's fix: start from an empty index so the
+          # patch holds exactly the allowed paths.
           git reset -q
           git add -A -- lib/settings.schema.json README.md COVERAGE.md action.yml \
             docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md \
             docs/reference/sections.md docs/reference/inputs.md docs/start/getting-started.md
-          # Old branches cut before the gaps directory landed lack it, and
-          # an unmatched pathspec would fail the add.
+          # Old branches lack the gaps directory, and an unmatched pathspec would fail the add.
           if [ -d src/upstream-gaps ]; then
             git add -A -- src/upstream-gaps/
           fi
@@ -139,10 +112,8 @@ jobs:
           else
             git diff --cached --stat
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            # A patch touching src/ means gap files graduated (a schema-only
-            # patch is plain generator drift); the push job picks the commit
-            # subject from this. --quiet exits 1 on a staged src/ change,
-            # and unlike piping --name-only into grep -q it cannot trip
+            # A patch touching src/ means gap files graduated; the push job picks the commit subject from this.
+            # --quiet exits 1 on a staged src/ change and, unlike piping --name-only into grep -q, cannot trip
             # pipefail on an early-exiting reader.
             if git diff --cached --quiet -- src/; then
               echo "pruned=false" >> "$GITHUB_OUTPUT"
@@ -170,8 +141,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: false
-      # The patch lands OUTSIDE the checkout so nothing in the work tree
-      # can shadow or stage it.
+      # The patch lands OUTSIDE the checkout so nothing in the work tree can shadow or stage it.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: autofix-patch
@@ -186,11 +156,9 @@ jobs:
           PRUNED: ${{ needs.build.outputs.pruned }}
         shell: bash
         run: |
-          # The branch can move between the build and this push (a
-          # Dependabot rebase, or dependabot-bun-lockfile.yml's dedupe
-          # commit, which also invalidates the fix we built): the patch
-          # belongs to HEAD_SHA only, and the newer head's own run owns
-          # the rebuild.
+          # The branch can move between the build and this push (a Dependabot rebase, or dependabot-bun-lockfile.yml's
+          # dedupe commit, which also invalidates the fix): the patch belongs to HEAD_SHA only, and the newer head's
+          # own run owns the rebuild.
           superseded() {
             git fetch --quiet origin "$HEAD_REF"
             [ "$(git rev-parse "origin/$HEAD_REF")" != "$HEAD_SHA" ]
@@ -200,11 +168,9 @@ jobs:
             exit 0
           fi
           git apply --index --binary "$RUNNER_TEMP/autofix/autofix.patch"
-          # The patch was cut on a runner PR code had run on, so treat it
-          # as untrusted: refuse to commit anything it staged outside the
-          # fix-owned paths. --no-renames keeps a staged rename listed
-          # as its delete and add halves, so a rename OUT of a protected
-          # path cannot hide behind an allowed destination.
+          # The patch was cut on a runner PR code ran on, so it is untrusted: nothing staged outside the fix-owned
+          # paths may be committed. --no-renames lists a staged rename as its delete and add halves, so a rename OUT
+          # of a protected path cannot hide behind an allowed destination.
           while IFS= read -r -d '' path; do
             case "$path" in
               lib/settings.schema.json | README.md | COVERAGE.md | action.yml | \
@@ -227,20 +193,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           subject="build: regenerate settings schema"
-          # A patch that stages only generated docs is docs drift alone.
           if git diff --cached --quiet -- lib/settings.schema.json src/upstream-gaps/; then
             subject="docs: regenerate generated docs"
           fi
           if [ "$PRUNED" = "true" ]; then
             subject="fix: graduate upstream gaps octokit now ships"
           fi
-          # The body's [dependabot skip] keeps Dependabot rebasing and
-          # updating the PR over this commit; without it Dependabot stops
-          # touching a PR once someone else pushes to it.
+          # [dependabot skip] keeps Dependabot rebasing and updating the PR over this commit; without it Dependabot
+          # stops touching a PR once someone else pushes to it.
           git commit --no-verify -m "$subject" -m "[dependabot skip]"
-          # The lease pins the remote to the exact commit the fix was
-          # built from, so a concurrent push (even a force-reset to an
-          # ancestor) rejects this one instead of racing it.
+          # The lease pins the remote to the exact commit the fix was built from, so a concurrent push (even a
+          # force-reset to an ancestor) rejects this one instead of racing it.
           if ! git push --force-with-lease="refs/heads/${HEAD_REF}:${HEAD_SHA}" \
               "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
               HEAD:"refs/heads/${HEAD_REF}"; then
@@ -253,15 +216,13 @@ jobs:
           if [ "$CAN_RETRIGGER" = "true" ]; then
             exit 0
           fi
-          # The fix landed via github.token, which starts no workflows:
-          # this PR's checks will not re-run on the new head. Surface that
-          # as a run annotation and, in the step below, on the PR; the push
-          # itself succeeded.
+          # The fix landed via github.token, which starts no workflows, so the PR's checks will not re-run on the new
+          # head: surface that here and, in the step below, on the PR.
           echo "notify=true" >> "$GITHUB_OUTPUT"
           echo "::warning::auto-fix pushed without REPO_PLATFORM_TOKEN - checks will not re-run on the new head;" \
             "close/reopen the PR or register the token"
-      # One sticky comment per PR (the header is its identity), updated in
-      # place on later pushes; a failed post fails this step, not the push.
+      # One sticky comment per PR (the header is its identity), updated in place on later pushes; a failed post fails
+      # this step, not the push.
       - name: Tell the PR its checks will not re-run
         if: steps.push.outputs.notify == 'true'
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5

@@ -17,9 +17,8 @@ describe("the action's uploader without a runtime token", () => {
 
   test("missing token yields exactly ONE warning and never invokes the artifact client", async () => {
     delete process.env.ACTIONS_RUNTIME_TOKEN;
-    // Reaching the client would double-warn (it warns on its own before it
-    // throws). Its @actions/core import is a named binding a namespace spy
-    // cannot observe, so the client's entry point is what gets watched.
+    // Reaching the client would double-warn (it warns before it throws); its @actions/core import is a named binding a namespace spy cannot observe,
+    // so the client's entry point is watched.
     const uploadSpy = spyOn(DefaultArtifactClient.prototype, "uploadArtifact");
     try {
       const recipient = await identityToRecipient(await generateX25519Identity());
@@ -29,8 +28,6 @@ describe("the action's uploader without a runtime token", () => {
         recipient,
       );
 
-      // exactly one warning, and it is ours (the client's own text never
-      // appears, and neither does any report content)
       expect(result).toEqual({
         warning:
           "could not upload the private report artifact: the artifact service is unavailable: no " +

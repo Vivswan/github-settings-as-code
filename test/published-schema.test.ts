@@ -1,11 +1,5 @@
 /**
- * Published-schema contract tests: lib/settings.schema.json is what editors
- * and CI linters validate settings.yml against, so where the runtime is
- * strict the schema must be too. The wrapper keys are this action's own
- * vocabulary and the runtime rejects unknown keys in them upfront; these
- * tests pin the strictObject wrapper declarations in src/schema.ts that
- * close the emitted definitions, and prove the closure with a real AJV
- * round-trip.
+ * lib/settings.schema.json is what editors and CI linters validate settings.yml against, so where the runtime is strict the schema must be too.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -25,9 +19,7 @@ const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json")
 
 describe("published schema identity", () => {
   test("$id is the version-free raw copy at HEAD", () => {
-    // The identity gen-settings-schema stamps, pinned as a literal: a $id
-    // that names a release ref again ties every major bump to a schema
-    // regeneration on its release PR.
+    // A $id naming a release ref again would tie every major bump to a schema regeneration on its release PR.
     expect(schema.$id).toBe(
       "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/HEAD/lib/settings.schema.json",
     );
@@ -39,13 +31,7 @@ describe("published schema wrapper strictness", () => {
     name.startsWith("UndeclaredPolicyList<"),
   );
 
-  /**
-   * The nested {_undeclared, entries} knobs inside a section entry
-   * (environments[].variables, environments[].secrets,
-   * environments[].deployment_branch_policies, and
-   * environments[].deployment_protection_rules): each adds one wrapper
-   * definition beyond the knobbed sections.
-   */
+  /** The nested {_undeclared, entries} knobs inside an environment entry, each adding one wrapper definition beyond the knobbed sections. */
   const NESTED_WRAPPERS = [
     "UndeclaredPolicyList<EnvironmentVariableConfig>",
     "UndeclaredPolicyList<EnvironmentSecretConfig>",
@@ -85,8 +71,7 @@ describe("published schema wrapper strictness", () => {
   });
 
   describe("AJV round-trip", () => {
-    // strict: false because the generated schema carries draft-07 idioms
-    // AJV's strict mode complains about; validation semantics are unchanged.
+    // strict: false because the generated schema carries draft-07 idioms AJV's strict mode complains about; validation semantics are unchanged.
     const ajv = new Ajv({ strict: false, allErrors: true });
     const validate: ValidateFunction = ajv.compile(schema);
 
@@ -163,9 +148,7 @@ describe("published schema wrapper strictness", () => {
           ],
         }),
       ).toBe(true);
-      // The declared type is the documented upstream enum in the published
-      // schema (the runtime shape stays a loose string; GitHub is the
-      // authority there).
+      // The published schema pins the documented upstream enum; the runtime shape stays a loose string, GitHub being the authority there.
       expect(
         validate({
           environments: [
@@ -198,10 +181,8 @@ describe("published schema wrapper strictness", () => {
           ],
         }),
       ).toBe(true);
-      // The wrapper is closed (this action's own vocabulary), and so is
-      // the entry itself: the enable call sends only the App's resolved
-      // integration id, so the runtime shape is strict and the published
-      // schema says the same (additionalProperties: false).
+      // The entry is closed too: the enable call sends only the App's resolved integration id, so the runtime shape is strict and the schema says the
+      // same.
       expect(
         validate({
           environments: [
@@ -219,10 +200,8 @@ describe("published schema wrapper strictness", () => {
     });
 
     test("strict runtime shapes are closed in the schema too", () => {
-      // These four surfaces reject unknown keys at runtime (strictObject in
-      // src/schema.ts: no passthrough destination exists for an extra key),
-      // and the published schema must say the same - the old generator left
-      // them open, validating typos the run then failed on.
+      // These surfaces reject unknown keys at runtime (strictObject: no passthrough destination for an extra key); the old generator left them open,
+      // validating typos the run then failed on.
       expect(
         validate({
           environments: [{ name: "prod", secrets: [{ name: "A", value: "$A", extra: 1 }] }],
@@ -242,10 +221,8 @@ describe("published schema wrapper strictness", () => {
     });
 
     test("branch protection required_signatures is a real boolean: true and absent accepted, a quoted string rejected", () => {
-      // BranchProtectionConfig is a passthrough record EXCEPT its one routed
-      // key: required_signatures is typed boolean so a YAML-quoted "yes"
-      // fails upfront instead of silently riding the protection PUT (which
-      // drops the key) and never reaching the signatures sub-endpoint.
+      // required_signatures is typed boolean so a YAML-quoted "yes" fails upfront instead of riding the protection PUT (which drops the key) and
+      // never reaching the signatures sub-endpoint.
       expect(
         validate({ branches: [{ name: "main", protection: { required_signatures: true } }] }),
       ).toBe(true);
@@ -258,13 +235,8 @@ describe("published schema wrapper strictness", () => {
     });
 
     test("the branch-policies flag pairing is enforced, agreeing with the runtime per fixture", () => {
-      // The if/then the EnvironmentConfig schema's meta stamps, run
-      // against the ONE shared fixture set the zod superRefine is also
-      // tested with - and, per fixture, the AJV verdict must agree with
-      // validateSectionShapes (no error = valid), so the schema copy of the
-      // invariant cannot drift from the runtime copy. The [name, valid]
-      // pairs pin the SET: a deleted or flipped fixture would silently
-      // weaken both consumers.
+      // The AJV verdict must agree with validateSectionShapes per fixture, so the schema copy of the invariant cannot drift from the runtime copy;
+      // the [name, valid] pairs pin the SET.
       expect(FLAG_PAIRING_FIXTURES.map((f) => [f.name, f.valid])).toEqual([
         ["patterns without the sibling flag object", false],
         ["patterns with the flag present but false", false],
@@ -285,8 +257,7 @@ describe("published schema wrapper strictness", () => {
     });
 
     test("an extra field on a variable entry validates - entries stay open", () => {
-      // Loose like the runtime shape: entry fields pass through to the API
-      // verbatim, so a field GitHub ships tomorrow must validate today.
+      // Entry fields pass through to the API verbatim, so a field GitHub ships tomorrow must validate today.
       expect(
         validate({
           environments: [

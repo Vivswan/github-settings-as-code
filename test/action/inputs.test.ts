@@ -3,10 +3,7 @@ import { ok } from "neverthrow";
 import { parseActionConfig } from "../../src/action/inputs.js";
 import { INPUT_DECLS, SectionSelection } from "../../src/index.js";
 
-/**
- * The adapter reads INPUT_* through @actions/core and the GITHUB_* context
- * from the environment, so the test sets exactly that env and restores it.
- */
+// @actions/core keeps the dashes in INPUT_* names.
 const ENV_KEYS = [
   ...Object.keys(INPUT_DECLS).map((name) => `INPUT_${name.toUpperCase()}`),
   "GITHUB_TOKEN",

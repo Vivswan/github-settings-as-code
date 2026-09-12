@@ -67,8 +67,7 @@ describe("composeReport", () => {
   });
 
   test("backslashes are escaped BEFORE pipes, so backslash-pipe cannot split a row", () => {
-    // Without the backslash escape, "a\|b" renders as an escaped backslash
-    // followed by a LIVE pipe and the cell splits into two columns.
+    // Without the backslash escape, "a\|b" renders as an escaped backslash followed by a LIVE pipe and the cell splits.
     const report = composeReport(
       input({
         outcomes: [{ key: "labels", status: "failed", detail: ["a\\|b", "line1\nline2"] }],
@@ -78,8 +77,7 @@ describe("composeReport", () => {
   });
 
   test("a bare carriage return is a line ending too and is flattened", () => {
-    // CommonMark treats a standalone CR as a line ending, so an unflattened
-    // "\r" would still split the table row.
+    // CommonMark treats a standalone CR as a line ending, so an unflattened "\r" would still split the table row.
     const report = composeReport(
       input({ outcomes: [{ key: "labels", status: "failed", detail: ["cr\ronly"] }] }),
     );

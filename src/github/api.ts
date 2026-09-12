@@ -1,15 +1,9 @@
 /**
- * GitHub REST client on @octokit/core with the retry and throttling
- * plugins: rate limits (429 and secondary 403s) and transient 5xx/network
- * failures are retried with backoff automatically, honoring Retry-After.
- * Only `octokit.request` is used; the endpoint-method and paginate plugins
- * @octokit/rest adds on top of core have no call site here. Its request-log
- * plugin stays: it is the source of the per-attempt trace line carrying
- * GitHub's request id, which support asks for.
- * Paths are built by the sections, and payloads pass through with every
- * field intact: the JSON body is the payload's own serialization (a
- * byte-identical round-trip for plain data - see redactSecretPayloadSafe),
+ * GitHub REST client on @octokit/core with the retry and throttling plugins; only `octokit.request` is used. Payloads
+ * pass through with every field intact: the JSON body is the payload's own serialization (redactSecretPayloadSafe),
  * never an endpoint typing that could drop an unknown field.
+ *
+ * request-log plugin  -> kept: its per-attempt trace line carries GitHub's request id, which support asks for
  */
 
 import { Octokit } from "@octokit/core";
@@ -27,41 +21,31 @@ export interface ApiError {
   /** GitHub's documentation_url for the failing endpoint, when the body carries one. */
   documentationUrl?: string;
   /**
-   * Content-free rate-limit classification, from structural signals alone
-   * (429, retry-after, errors[].type RATE_LIMITED, the secondary-rate
-   * phrase - and, only when the body was withheld for a secret-carrying
-   * request, the ambiguous zero-quota header). isRateLimitError reads it
-   * alongside its message fallback, so a secondary limit arriving as a 403
-   * is never misread as a permission failure even when the message says
-   * nothing - or no longer exists.
+   * Content-free rate-limit classification from structural signals alone (429, retry-after, errors[].type RATE_LIMITED,
+   * the secondary-rate phrase; the ambiguous zero-quota header only when the body was withheld). isRateLimitError reads
+   * it beside its message fallback, so a secondary limit arriving as a 403 is never misread as a permission failure.
    */
   rateLimited?: true;
   /**
-   * The GraphQL error `type` values behind this error, verbatim, deduped and
-   * sorted - present only when the error was mapped from a GraphQL errors[]
-   * response in which EVERY entry carried a string type. The HTTP status is
-   * a lossy fold (FORBIDDEN and a mixed [FORBIDDEN, UNPROCESSABLE] both land
-   * on 403/422 classes), so tolerance decisions read this instead: an
-   * untyped or partially-typed response omits the field and is never
-   * tolerable. The values are structural enums, never echoes, so the field
-   * survives even a withheld (secret-carrying or redacted) response.
+   * Tolerance decisions read this instead of the status, which is a lossy fold (FORBIDDEN and a mixed
+   * [FORBIDDEN, UNPROCESSABLE] both land on 403/422). The values are structural enums, never echoes, so the field
+   * survives a withheld response.
+   *
+   * every errors[] entry carries a string type  -> the types, deduped and sorted
+   * any entry untyped                           -> omitted, and the response is never tolerable
    */
   graphqlTypes?: readonly string[];
 }
 
 /**
- * Pinned X-GitHub-Api-Version. The single source for the header default
- * here, the action.yml `api-version` default, and the inputs fallback; the
+ * The single source for the header default here, the action.yml `api-version` default, and the inputs fallback; the
  * action-yml contract test asserts the three stay equal.
  */
 export const DEFAULT_API_VERSION = "2022-11-28";
 
 /**
- * A GraphQL operation as the transport sees it: the wire dispatch name, the
- * read/write kind (declared explicitly, NEVER derived from the POST method
- * every GraphQL call shares), and the query document. The transport-level
- * slice of the sections' richer GraphqlOpDecl - this module must not import
- * from sections/, so the declaration type extends this shape structurally.
+ * `kind` is declared explicitly, NEVER derived from the POST method every GraphQL call shares. This module must not
+ * import from sections/, so GraphqlOpDecl extends this shape structurally.
  */
 export interface GraphqlOp {
   readonly name: string;
@@ -69,17 +53,10 @@ export interface GraphqlOp {
   readonly query: string;
 }
 
-/**
- * The one capability everything downstream depends on: a verbatim request
- * that surfaces errors as values. The engine, the sections, discovery,
- * pagination, and the test mock all program against this interface, not
- * the concrete client.
- */
 export interface GithubClient {
   /**
-   * `redactTrace` holds the request's `/repos/<owner>/<repo>` slug redacted
-   * for the request's duration, for a caller that must not leak the slug
-   * before it knows whether the repository is private (the visibility probe).
+   * `redactTrace` holds the request's `/repos/<owner>/<repo>` slug redacted for the request's duration, for the
+   * visibility probe, which must not leak the slug before it knows whether the repository is private.
    */
   tryRequest(
     method: string,
@@ -88,12 +65,9 @@ export interface GithubClient {
     options?: { accept?: string; raw?: boolean; redactTrace?: boolean },
   ): Promise<{ data: unknown } | { error: ApiError }>;
   /**
-   * The GraphQL sibling of tryRequest: one POST /graphql whose failures -
-   * including the errors[] GitHub delivers inside an HTTP 200 - come back as
-   * the same ApiError value the REST classifiers already read. `slug` names
-   * the owner/repo the operation addresses: GraphQL carries the target in the
-   * request BODY, invisible to the URL-based trace redaction, so the client
-   * needs it to keep a redacted repository's traces closed.
+   * Failures, including the errors[] GitHub delivers inside an HTTP 200, come back as the same ApiError the REST
+   * classifiers read. `slug` names the owner/repo: GraphQL carries the target in the request BODY, invisible to the
+   * URL-based trace redaction.
    */
   tryGraphql(
     op: GraphqlOp,
@@ -102,15 +76,10 @@ export interface GithubClient {
   ): Promise<{ data: Record<string, unknown> } | { error: ApiError }>;
 }
 
-/**
- * The output-port facet the client traces through: the debug channel and
- * the mask registry its redaction reads.
- */
 export type TraceIo = Pick<Io, "debug" | "masked">;
 
-// The slug charset ([\w.-]) stops the match at the segment boundary so an
-// octokit line's trailing " - 204 with id ..." is never folded into the name;
-// the `i` flag keeps a mixed-case path from slipping the redaction.
+// The slug charset ([\w.-]) stops at the segment boundary so an octokit line's trailing " - 204 with id ..." is never
+// folded into the name; the `i` flag keeps a mixed-case path from slipping the redaction.
 const REPO_SLUG = /\/repos\/([\w.-]+\/[\w.-]+)/i;
 
 function repoSlugOf(path: string): string | undefined {
@@ -118,13 +87,11 @@ function repoSlugOf(path: string): string | undefined {
 }
 
 /**
- * The client's debug trace with slug redaction: a slug is redacted while it is
- * masked through the Io port or held by an in-flight request (the visibility
- * probe). A traced payload is private content no mask covers, so it is dropped.
+ * A slug is redacted while it is masked through the Io port or held by an in-flight request (the visibility probe). A
+ * traced payload is private content no mask covers, so it is dropped.
  */
 export class TraceRedaction {
-  // One token per hold, so concurrent holds on the same slug release
-  // independently and releasing a token twice is inert.
+  // One token per hold, so concurrent holds on the same slug release independently and a double release is inert.
   private readonly holds = new Set<{ readonly slug: string }>();
 
   constructor(private readonly io: TraceIo) {}
@@ -133,7 +100,6 @@ export class TraceRedaction {
     this.io.debug(line);
   }
 
-  /** Hold `slug` redacted until the returned release runs. */
   hold(slug: string): () => void {
     const token = { slug: slug.toLowerCase() };
     this.holds.add(token);
@@ -153,9 +119,8 @@ export class TraceRedaction {
   }
 
   /**
-   * Collapse the ENTIRE path of a redacted slug to `<redacted>`: the prefix can
-   * carry a team slug and the tail carries live state (branches, labels), so
-   * anything but a constant leaks what redaction hides. Full URLs match too.
+   * The ENTIRE path collapses: the prefix can carry a team slug and the tail live state (branches, labels), so
+   * anything but a constant leaks what redaction hides.
    */
   path(path: string): { path: string; redacted: boolean } {
     const slug = repoSlugOf(path);
@@ -166,9 +131,8 @@ export class TraceRedaction {
   }
 
   /**
-   * Whole-line redactor for octokit's free-text log lines, where a slug can sit
-   * anywhere ("retrying request to o/private after 429"): any held slug or masked
-   * value as a case-insensitive substring collapses the line to `<redacted>`.
+   * For octokit's free-text log lines, where a slug can sit anywhere ("retrying request to o/private after 429"): any
+   * needle as a case-insensitive substring collapses the whole line.
    */
   message(message: string): string {
     const lower = message.toLowerCase();
@@ -180,7 +144,6 @@ export class TraceRedaction {
     return message;
   }
 
-  /** Every redacted needle, lowercased: held slugs plus every masked value. */
   private *needles(): Iterable<string> {
     for (const token of this.holds) {
       yield token.slug;
@@ -195,24 +158,16 @@ export class TraceRedaction {
 }
 
 /**
- * The wholesale replacement for an error response to a secret-carrying
- * request. A 4xx body can ECHO the rejected value inside its free-text
- * message/errors, where no field name finds it, and JSON escaping (quotes,
- * backslashes, newlines) defeats exact-literal masking - so nothing of the
- * body survives; only the HTTP status and the content-free rate-limit
- * classification flag do.
+ * A 4xx body can ECHO the rejected value inside its free-text message/errors, where no field name finds it and JSON
+ * escaping defeats exact-literal masking, so nothing of the body survives.
  */
 export const SECRET_RESPONSE_WITHHELD =
   "response body withheld: the request carried a secret field and an error body may echo its value";
 
 /**
- * The wholesale replacement for a GraphQL error response addressing a
- * REDACTED repository. GraphQL error messages quote the slug and live state
- * verbatim ("Could not resolve to a Repository with the name 'o/private'"),
- * where a REST denial says only "Not Found" - and the output mask is
- * exact-literal, so a re-cased or name-only mention would slip it. Only the
- * status and the structural classification fields (rateLimited,
- * graphqlTypes) survive.
+ * GraphQL error messages quote the slug and live state verbatim ("Could not resolve to a Repository with the name
+ * 'o/private'") where a REST denial says only "Not Found", and the output mask is exact-literal, so a re-cased mention
+ * would slip it.
  */
 export const REDACTED_RESPONSE_WITHHELD =
   "response body withheld: the repository is redacted and a GraphQL error message may carry its name or live state";
@@ -220,11 +175,7 @@ export const REDACTED_RESPONSE_WITHHELD =
 /** The shape of a GitHub GraphQL error `type`: a closed enum token, never free text. */
 const GRAPHQL_TYPE_TOKEN = /^[A-Z][A-Z0-9_]*$/;
 
-/**
- * Rebuild an error from the allowlist (status, the structural classification
- * fields) with `reason` as message and body: constructed, never filtered, so
- * nothing else survives. The one rebuild behind every withholding site.
- */
+/** Constructed from the allowlist, never filtered, so nothing else survives; the one rebuild behind every withholding site. */
 export function withheld(error: ApiError, reason: string): ApiError {
   const types =
     Array.isArray(error.graphqlTypes) &&
@@ -240,12 +191,7 @@ export function withheld(error: ApiError, reason: string): ApiError {
   };
 }
 
-/**
- * Build a throttling-plugin rate-limit callback. The primary and secondary
- * limits are handled identically - trace the (redacted) request, then retry
- * while the wait is within the cap and attempts remain - differing only in the
- * log `label`, so one factory keeps them from drifting.
- */
+/** The primary and secondary limits are handled identically but for the log `label`, so one factory keeps them from drifting. */
 function throttleCallback(
   label: string,
   trace: TraceRedaction,
@@ -264,14 +210,11 @@ function throttleCallback(
 }
 
 /**
- * The `log` implementation passed to Octokit. The request-log, retry, and
- * throttling plugins log every request line - method, URL, status - through
- * this sink; the default sink is `console`, which writes those lines (carrying
- * private slugs and live-state segments like branch names and collaborator
- * logins) with no redaction. Each line is free-text prose, so it goes through
- * the whole-message scan, NOT the path redactor (which only finds a
- * `/repos/<slug>` segment). Every level is demoted to the debug channel so
- * octokit's chatter stays off normal runs. Exported for unit tests.
+ * The request-log, retry, and throttling plugins log every request line through this sink; the default sink is
+ * `console`, which writes them (private slugs, branch names, collaborator logins) with no redaction.
+ *
+ * each line is free-text prose  -> the whole-message scan, NOT the path redactor
+ * every level                   -> demoted to debug
  */
 type Log = (message: string, ...rest: unknown[]) => void;
 
@@ -282,22 +225,18 @@ export function redactingOctokitLog(trace: TraceRedaction): {
   error: Log;
 } {
   const redact: Log = (message) => {
-    // Octokit passes a string message; any extra args are ignored rather than
-    // risk logging an object that embeds an unredacted URL.
+    // Extra args are ignored rather than risk logging an object that embeds an unredacted URL.
     trace.debug(trace.message(String(message)));
   };
   return { debug: redact, info: redact, warn: redact, error: redact };
 }
 
-// Never wait out a rate-limit reset longer than this: failing loudly with
-// the API message beats stalling a workflow for an hour. Exported so the
-// docs contradiction test pins the semantics guide's number to this value.
+// Failing loudly with the API message beats stalling a workflow for an hour. Exported so the docs contradiction test
+// pins the semantics guide's number to this value.
 export const MAX_RETRY_WAIT_S = 60;
-// Exported so consumers derive from the one real value instead of
-// hand-mirroring it: the test harness builds its retry budgets
-// (1 + MAX_RETRIES) from it, and the docs contradiction test pins the
-// semantics guide's retry count to it.
-export const MAX_RETRIES = 2; // total attempts = 1 + MAX_RETRIES
+// Exported so the test harness builds its retry budgets (1 + MAX_RETRIES) from the one real value, and the docs
+// contradiction test pins the guide's retry count to it.
+export const MAX_RETRIES = 2;
 
 const ActionOctokit = Octokit.plugin(requestLog, retry, throttling);
 
@@ -316,21 +255,14 @@ function isHttpError(error: unknown): error is OctokitHttpError {
   );
 }
 
-/** RETRY_BASE_MS parsed defensively: only a finite, positive number counts. */
 function testRetryBaseMs(): number | undefined {
   const value = Number(process.env.RETRY_BASE_MS ?? "");
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 /**
- * Map a caught octokit HTTP error to the ApiError value contract. Shared by
- * tryRequest and tryGraphql, whose HTTP-level failures are identical; only
- * the GraphQL errors[] mapping lives elsewhere.
- * When the failing request carried a secret field, the response is replaced
- * wholesale: a 4xx body can ECHO the rejected value inside its free-text
- * message/errors, where no field name finds it and JSON escaping defeats
- * exact-literal masking. Only the HTTP status and the content-free
- * rate-limit flag survive, so the classification is computed FIRST.
+ * Shared by tryRequest and tryGraphql. For a secret-carrying request the response is replaced wholesale (a 4xx body may
+ * echo the rejected value), so only the status and the content-free rate-limit flag survive; the classification runs FIRST.
  */
 function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiError {
   const body = error.response?.data;
@@ -341,16 +273,11 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
       : typeof body === "string" && body
         ? body
         : error.message;
-  // Rate limits are classified structurally, on every path: GitHub's primary
-  // and secondary limits can arrive as a 403 whose message never says "rate
-  // limit", and misreading one as a missing grant turns a transient limit into
-  // permission advice (under on-missing-permission: warn, a silently skipped
-  // section). The DEFINITIVE signals are the ones the throttling plugin
-  // recognizes and no permission 403 carries: its secondary-limit predicate
-  // (\bsecondary rate\b), errors[].type === "RATE_LIMITED", and retry-after.
-  // Accepting retry-after ALONE is broader than the plugin (which reads it
-  // only after the phrase matches): no documented 403 carries it without
-  // being a rate limit, and a header cannot be spoofed by an echoed value.
+  // Rate limits are classified structurally: GitHub's primary and secondary limits can arrive as a 403 whose message
+  // never says "rate limit", and a limit misread as a missing grant becomes permission advice (under
+  // on-missing-permission: warn, a silently skipped section).
+  //   errors[].type RATE_LIMITED, the secondary-rate phrase  -> the throttling plugin's own signals; no permission 403 carries them
+  //   retry-after ALONE                                      -> accepted too: no documented 403 carries it without being a rate limit
   const errorsRateLimited =
     typeof body === "object" &&
     body !== null &&
@@ -361,10 +288,8 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
         entry !== null &&
         (entry as { type?: unknown }).type === "RATE_LIMITED",
     );
-  // The phrase predicate has one theoretical false positive: an operator's own
-  // secret containing "secondary rate" echoed into a 403. Bounded, because
-  // permission 403s do not echo payloads and a secret-carrying request has its
-  // body withheld above.
+  // The phrase predicate's one theoretical false positive, an operator's own secret containing "secondary rate" echoed
+  // into a 403, is bounded: permission 403s do not echo payloads and a secret-carrying request has its body withheld.
   const definitiveRateLimit =
     error.status === 429 ||
     (error.status === 403 &&
@@ -373,14 +298,9 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
         /\bsecondary rate\b/i.test(classificationText)));
   const rateLimited =
     definitiveRateLimit ||
-    // x-ratelimit-remaining: 0 is AMBIGUOUS alone: a genuine permission 403
-    // issued on the token's last quota unit carries it too, and calling that
-    // a rate limit would hide the missing grant behind retry advice. On the
-    // readable path it contributes nothing (real primary exhaustion says "API
-    // rate limit exceeded", which isRateLimitError's message fallback already
-    // classifies); only a WITHHELD response, with no message left to
-    // disambiguate, accepts it - the lesser evil against telling a
-    // rate-limited user to fix their token.
+    // x-ratelimit-remaining: 0 is AMBIGUOUS alone: a permission 403 issued on the token's last quota unit carries it
+    // too. Only a WITHHELD response, with no message left to disambiguate, accepts it; on the readable path real primary
+    // exhaustion says "API rate limit exceeded", which isRateLimitError's message fallback already classifies.
     (carriesSecret && error.status === 403 && String(headers["x-ratelimit-remaining"]) === "0");
   let message: string;
   let documentationUrl: string | undefined;
@@ -410,12 +330,8 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
 }
 
 /**
- * The hard error for a request that got no HTTP response at all: a
- * network-level failure after the plugins exhausted their retries. `label`
- * names the failing call ("PUT /repos/o/r/topics", "GRAPHQL RepoToggles").
- * `withholdReason`, when given, REPLACES the transport error's own message -
- * some transport failures quote request details in free text, where neither
- * a field name nor the output mask finds a secret or a redacted slug.
+ * `withholdReason`, when given, REPLACES the transport error's own message: some transport failures quote request
+ * details in free text, where neither a field name nor the output mask finds a secret or a redacted slug.
  */
 function transportFailure(
   label: string,
@@ -429,11 +345,9 @@ function transportFailure(
   );
 }
 
-/** The withheld transport-failure reason for a secret-carrying request. */
 const SECRET_TRANSPORT_WITHHELD =
   "the transport failed before an HTTP response arrived (details withheld: the request carried a secret field)";
 
-/** The withheld transport-failure reason for a redacted repository's request. */
 const REDACTED_TRANSPORT_WITHHELD =
   "the transport failed before an HTTP response arrived (details withheld: the repository is redacted)";
 
@@ -441,27 +355,20 @@ export interface GithubApiOptions {
   token: string;
   /** Trace sink for redacted request lines; defaults to a silent trace with nothing masked. */
   io?: TraceIo;
-  /** Defaults to GITHUB_API_URL, then the public API. */
   baseUrl?: string;
   apiVersion?: string;
   /**
-   * Test knob override: an explicit value forces the RETRY_BASE_MS scale
-   * (used by unit tests that construct the client directly); left undefined,
-   * the knob is read once from the environment.
+   * An explicit value forces the RETRY_BASE_MS scale (unit tests constructing the client directly); undefined reads
+   * the knob from the environment once.
    */
   retryBaseMs?: number;
   /** Passed to octokit verbatim; octokit-core's own agent string when omitted. */
   userAgent?: string;
 }
 
-/** The default trace: nothing is written and nothing is masked. */
 const SILENT_TRACE: TraceIo = { debug() {}, masked: maskRegistry(() => {}).masked };
 
-/**
- * The production GithubClient. The Octokit instance is built here and never
- * injected: a consumer that needs full control over transport or plugins
- * implements GithubClient directly instead.
- */
+/** The Octokit instance is built here and never injected: a consumer needing control over transport or plugins implements GithubClient directly. */
 export class GithubApi implements GithubClient {
   private readonly octokit: InstanceType<typeof ActionOctokit>;
   private readonly trace: TraceRedaction;
@@ -471,31 +378,16 @@ export class GithubApi implements GithubClient {
     this.baseUrl = options.baseUrl ?? process.env.GITHUB_API_URL ?? "https://api.github.com";
     this.apiVersion = options.apiVersion ?? DEFAULT_API_VERSION;
     this.trace = new TraceRedaction(options.io ?? SILENT_TRACE);
-    // Read the test knob ONCE. `retryBaseMs` scales the plugin waits (1000 =
-    // real seconds in production, small under RETRY_BASE_MS). `underTestKnob`
-    // is true when the environment sets the knob - the two derive from the one
-    // read so it is never consulted twice.
+    // `retryBaseMs` scales the plugins' Retry-After units, the retry backoff, and the write limiter's gap (1000 = real
+    // seconds); RETRY_BASE_MS is the test knob, read once.
     const envKnob = testRetryBaseMs();
     const retryBaseMs = options.retryBaseMs ?? envKnob ?? 1000;
     const underTestKnob = envKnob !== undefined;
-    // The throttling plugin routes every request through Bottleneck's job
-    // scheduler, which paces mutations (its "write" limiter) at 1000ms and adds
-    // real per-request latency even at minTime 0 - correct for a real fleet run,
-    // but it makes a many-request TEST run wait out tens of seconds. So the
-    // plugin is disabled under the knob. Its ONE job the retry plugin does not
-    // otherwise cover - 429/secondary-limit RETRY - is restored below so a
-    // transient 429 still RECOVERS under the knob (only the recovery outcome
-    // matters to tests). The retry TIMING differs from production and that is
-    // acceptable: see the doNotRetry note.
+    // Bottleneck paces every request and adds real per-request latency even at minTime 0, which a many-request test run
+    // cannot afford, so throttling is off under the knob and the retry plugin takes over 429 recovery below.
     const throttleEnabled = !underTestKnob;
-    // Client errors are never retried (permission 403/404s, payload 422s), so
-    // the retry plugin's doNotRetry excludes only 408 among the 4xx. Under the
-    // test knob it ALSO excludes 429: with the throttling plugin off, the retry
-    // plugin becomes the 429 recovery path. Note the retry plugin IGNORES the
-    // Retry-After header and backs off quadratically - attempt n waits
-    // (n^2 * retryBaseMs) - so under the knob a 429 recovers on a quadratic
-    // delay, not the header's value. Production is unchanged: 429 stays in
-    // doNotRetry and the throttling plugin paces it, honoring Retry-After.
+    // Among the 4xx only 408 is retried, plus 429 under the knob. The retry plugin IGNORES Retry-After and backs off
+    // quadratically (attempt n waits n^2 * retryBaseMs); production keeps 429 with the throttling plugin, which honors it.
     const doNotRetry = Array.from({ length: 100 }, (_, i) => 400 + i).filter(
       (s) => s !== 408 && !(underTestKnob && s === 429),
     );
@@ -503,15 +395,9 @@ export class GithubApi implements GithubClient {
       auth: options.token,
       baseUrl: this.baseUrl,
       userAgent: options.userAgent,
-      // Octokit's default logger is `console`, which writes request lines
-      // (method + URL + status, carrying private slugs and live-state segments
-      // like branch names) to stdout/stderr with no redaction, bypassing our
-      // trace hardening. Route them through the same collapse-to-<redacted>
-      // sink; see redactingOctokitLog.
+      // Octokit's default logger is `console`, which writes request lines with no redaction; see redactingOctokitLog.
       log: redactingOctokitLog(this.trace),
-      // Scales plugin waits (Retry-After units, backoff steps) so tests
-      // can run in milliseconds; 1000 = real seconds in production. Each
-      // plugin reads the value from its own options section.
+      // Each plugin reads retryAfterBaseValue from its own options section.
       request: { retryAfterBaseValue: retryBaseMs },
       retry: {
         doNotRetry,
@@ -519,29 +405,19 @@ export class GithubApi implements GithubClient {
         retryAfterBaseValue: retryBaseMs,
       },
       throttle: {
-        // Disabled under the test knob (see throttleEnabled above) so a
-        // many-request test run does not wait out Bottleneck's per-request
-        // scheduling; always enabled in production.
         enabled: throttleEnabled,
         retryAfterBaseValue: retryBaseMs,
-        // The plugin paces mutating requests through a "write" limiter with a
-        // 1000ms production gap (real seconds between writes). Only used when the
-        // plugin is enabled, i.e. in production, where retryBaseMs is 1000.
         write: new Bottleneck.Group({
           id: "octokit-write",
           maxConcurrent: 1,
           minTime: retryBaseMs,
         }),
-        // Both rate-limit callbacks are identical but for the log label; one
-        // factory keeps them in lockstep. The traced URL is redacted so a
-        // rate-limited private-repo request cannot leak its slug.
         onRateLimit: throttleCallback("rate limit", this.trace),
         onSecondaryRateLimit: throttleCallback("secondary rate limit", this.trace),
       },
     });
   }
 
-  /** Verbatim request; surfaces errors as values for callers to classify. */
   async tryRequest(
     method: string,
     path: string,
@@ -570,11 +446,9 @@ export class GithubApi implements GithubClient {
     options: { accept?: string; raw?: boolean } | undefined,
   ): Promise<{ data: unknown } | { error: ApiError }> {
     const started = Date.now();
-    // One serialization, one truth: the scan normalizes the payload and the
-    // request sends that SAME normalized tree (identical bytes for plain
-    // data). A payload that cannot be normalized is never sent at all -
-    // sending what the scan could not inspect would let a stateful object
-    // show the scan one thing and the wire another.
+    // One serialization, one truth: the scan normalizes the payload and the request sends that SAME tree. A payload that
+    // cannot be normalized is never sent; sending what the scan could not inspect would let a stateful object show the
+    // scan one thing and the wire another.
     const secretScan = redactSecretPayloadSafe(payload);
     if (!secretScan.ok) {
       const reason =
@@ -601,10 +475,7 @@ export class GithubApi implements GithubClient {
           accept: options?.accept ?? "application/vnd.github+json",
           "x-github-api-version": this.apiVersion,
         },
-        // `data` is the request body as the scan normalized it (JSON
-        // round-trip of the input - identical bytes for plain data), which
-        // keeps the passthrough tenet: octokit never reshapes the payload,
-        // and the wire carries exactly the tree the scan inspected.
+        // The body is the tree the scan inspected, so octokit never reshapes the payload and the wire carries exactly what was scanned.
         ...(payload === undefined ? {} : { data: secretScan.payload }),
       } as unknown as Parameters<InstanceType<typeof ActionOctokit>["request"]>[0]);
       trace(response.status);
@@ -618,9 +489,7 @@ export class GithubApi implements GithubClient {
     } catch (error) {
       if (isHttpError(error)) {
         trace(error.status);
-        // Fail closed for a secret-carrying request: apiErrorFromHttp replaces
-        // the response wholesale (an error body may echo the rejected value),
-        // keeping only the status and the content-free rate-limit flag.
+        // Fail closed for a secret-carrying request: an error body may echo the rejected value.
         return { error: apiErrorFromHttp(error, secretScan.carriesSecret) };
       }
       throw transportFailure(
@@ -633,14 +502,10 @@ export class GithubApi implements GithubClient {
   }
 
   /**
-   * One GraphQL operation over POST /graphql, through the same octokit
-   * instance as tryRequest, so retry, throttling, auth, and the pinned API
-   * version all apply. The load-bearing difference from REST: GraphQL
-   * failures arrive as an HTTP 200 carrying a non-empty errors[]. ANY such
-   * response maps to { error } - even beside partial data - so a section can
-   * never act on a half-answered query (fail closed). HTTP-level failures ride
-   * the shared catch unchanged. Non-error `extensions.warnings` (e.g. legacy
-   * node-ID deprecation notices) surface through the debug trace only.
+   * The load-bearing difference from REST: GraphQL failures arrive as an HTTP 200 carrying a non-empty errors[].
+   *
+   * any errors[] entry, even beside partial data   -> { error }, so a section never acts on a half-answered query
+   * `extensions.warnings` (legacy node-ID notices)  -> the debug trace only
    */
   async tryGraphql(
     op: GraphqlOp,
@@ -648,10 +513,7 @@ export class GithubApi implements GithubClient {
     slug: string,
   ): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
     const started = Date.now();
-    // The same one-serialization contract as tryRequest: the secret scan
-    // normalizes the variables and the request sends that SAME tree, so a
-    // future secret-bearing variable is masked in the trace and withheld
-    // from error bodies exactly like a REST payload field.
+    // The same one-serialization contract as tryRequest, so a future secret-bearing variable is masked and withheld like a REST payload field.
     const scan = redactSecretPayloadSafe(variables);
     if (!scan.ok) {
       const reason =
@@ -661,14 +523,10 @@ export class GithubApi implements GithubClient {
         `GRAPHQL ${op.name} was not sent: ${reason}, so they could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
       );
     }
-    // Read live at every emission, never snapshotted at request start: a mask
-    // registered while the request is in flight must redact what follows it.
+    // Read live at every emission, never snapshotted at request start: a mask registered mid-flight must redact what follows.
     const redacted = (): boolean => this.trace.isRedacted(slug);
-    // The operation addresses its repository in the BODY, which the URL-based
-    // path redactor never sees - that is what `slug` is for. A redacted slug
-    // collapses the ENTIRE line to `<redacted>` (the variables carry the
-    // private repository's live state); otherwise the rendered line still
-    // passes the whole-message scan, failing closed like every octokit log line.
+    // The operation addresses its repository in the BODY, which the path redactor never sees: a redacted slug collapses
+    // the ENTIRE line, since the variables carry the repository's live state.
     const trace = (status: number, suffix = ""): void => {
       this.trace.debug(
         redacted()
@@ -678,9 +536,8 @@ export class GithubApi implements GithubClient {
             ),
       );
     };
-    // A redacted repository's GraphQL error is rebuilt from the allowlist: its
-    // messages quote the slug and live state verbatim, which the exact-literal
-    // output mask cannot catch.
+    // A redacted repository's GraphQL error is rebuilt from the allowlist: its messages quote the slug and live state
+    // verbatim, which the exact-literal output mask cannot catch.
     const withholdContent = (): boolean => scan.carriesSecret || redacted();
     const forRedacted = (error: ApiError): ApiError =>
       redacted() ? withheld(error, REDACTED_RESPONSE_WITHHELD) : error;
@@ -693,8 +550,7 @@ export class GithubApi implements GithubClient {
           accept: "application/vnd.github+json",
           "x-github-api-version": this.apiVersion,
         },
-        // operationName makes the request self-describing on the wire (the
-        // mock dispatches on it), and the scanned tree is what is sent.
+        // operationName makes the request self-describing on the wire (the mock dispatches on it).
         data: { query: op.query, operationName: op.name, variables: scan.payload },
       } as unknown as Parameters<InstanceType<typeof ActionOctokit>["request"]>[0])) as {
         status: number;
@@ -705,11 +561,8 @@ export class GithubApi implements GithubClient {
         trace(error.status);
         return { error: forRedacted(apiErrorFromHttp(error, withholdContent())) };
       }
-      // The throttling plugin inspects GraphQL bodies itself: it retries a
-      // RATE_LIMITED errors[] response like any rate limit and, once the
-      // retries are spent, rethrows a plain Error carrying the response (no
-      // HTTP status on the error - the wire status was 200). Classify that
-      // delivered body through the same errors[] mapper as an unretried one.
+      // The throttling plugin inspects GraphQL bodies itself: it retries a RATE_LIMITED errors[] response and, once the
+      // retries are spent, rethrows a plain Error carrying the response with no HTTP status (the wire status was 200).
       const rethrownErrors = (error as { response?: { data?: { errors?: unknown } } } | null)
         ?.response?.data?.errors;
       if (Array.isArray(rethrownErrors) && rethrownErrors.length > 0) {
@@ -738,18 +591,15 @@ export class GithubApi implements GithubClient {
     trace(
       response.status,
       Array.isArray(warnings) && warnings.length > 0
-        ? // Warning entries are free text that can echo input values exactly
-          // like error messages, so a secret-carrying request keeps only the
-          // count.
+        ? // Warning entries are free text that can echo input values like error messages, so a secret-carrying request keeps only the count.
           scan.carriesSecret
           ? ` warnings: ${warnings.length} (details withheld: the request carried a secret field)`
           : ` warnings: ${JSON.stringify(warnings)}`
         : "",
     );
     if (body.errors !== undefined && (!Array.isArray(body.errors) || body.errors.length === 0)) {
-      // The GraphQL contract makes errors, when present, a NON-EMPTY list. A
-      // malformed errors value must not read as "no errors" - that would turn
-      // a partial response into a success (fail closed, body never quoted).
+      // The GraphQL contract makes errors, when present, a NON-EMPTY list; a malformed value must not read as "no errors"
+      // and turn a partial response into a success. The body is never quoted.
       throw new Error(
         `GRAPHQL ${op.name} returned a malformed errors value (not a non-empty list); the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run the workflow, and retry later if it persists`,
       );
@@ -760,9 +610,7 @@ export class GithubApi implements GithubClient {
     }
     const data = body.data;
     if (typeof data !== "object" || data === null || Array.isArray(data)) {
-      // A 200 with neither errors nor a data map is outside the GraphQL
-      // response contract; nothing downstream can classify it, so fail hard
-      // (the body is not quoted - it could carry private live state).
+      // A 200 with neither errors nor a data map is outside the GraphQL contract; the body is not quoted, since it could carry private live state.
       throw new Error(
         `GRAPHQL ${op.name} returned a response carrying neither errors nor a data object; the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run the workflow, and retry later if it persists`,
       );
@@ -772,13 +620,11 @@ export class GithubApi implements GithubClient {
 }
 
 /**
- * Map a GraphQL errors[] array (delivered inside an HTTP 200) to the ApiError
- * value the REST classifiers already understand, keyed on GitHub's structured
- * error `type` (the status ladder is below). With mixed types the earlier wins:
- * a rate limit must never read as a permission failure, nor a permission
- * failure as a bad payload. NOT_FOUND is how fine-grained tokens conceal denied
- * resources, like REST. A secret-carrying request withholds message and body
- * (a message can echo the value; a `type` enum cannot).
+ * Keyed on GitHub's structured error `type`. A secret-carrying request withholds message and body (a `type` enum
+ * cannot echo).
+ *
+ * mixed types  -> the earlier in the ladder wins: a rate limit never reads as a permission failure, nor that as a bad payload
+ * NOT_FOUND    -> 404, how fine-grained tokens conceal denied resources, like REST
  */
 function apiErrorFromGraphqlErrors(errors: unknown[], carriesSecret: boolean): ApiError {
   const types = new Set<string>();
@@ -807,17 +653,14 @@ function apiErrorFromGraphqlErrors(errors: unknown[], carriesSecret: boolean): A
       : types.has("NOT_FOUND")
         ? 404
         : 422;
-  // graphqlTypes only when EVERY entry carried a string type: the field is
-  // what tolerance decisions read, and an untyped entry must make the whole
-  // response untolerable rather than hide behind its typed siblings.
+  // graphqlTypes only when EVERY entry carried a string type: an untyped entry must make the whole response untolerable
+  // rather than hide behind its typed siblings.
   const graphqlTypes =
     everyEntryTyped && types.size > 0 ? { graphqlTypes: Object.freeze([...types].sort()) } : {};
   const readable: ApiError = {
     status,
-    // GitHub's GraphQL contract makes `message` required on every errors[]
-    // entry, so the fallback fires only on off-contract responses - name the
-    // structural types (safe enums, never echoes) so the reader is not left
-    // with a bare status.
+    // `message` is required on every errors[] entry by GitHub's contract, so the fallback fires only off-contract; it
+    // names the structural types (safe enums, never echoes) so the reader is not left with a bare status.
     message:
       messages.join("; ") ||
       (types.size > 0
@@ -831,12 +674,9 @@ function apiErrorFromGraphqlErrors(errors: unknown[], carriesSecret: boolean): A
 }
 
 /**
- * True when a response is rate limiting in a 403 costume: primary REST
- * rate-limit exhaustion and secondary (abuse) limits arrive as 403, not
- * 429, once the throttling plugin gives up retrying. A withheld response
- * (secret-carrying request) has no message to read, so its content-free
- * `rateLimited` flag stands in - as does a GraphQL RATE_LIMITED error,
- * whose HTTP status is a 200 the mapper rewrites to 403.
+ * Rate limiting in a 403 costume: primary exhaustion and secondary limits arrive as 403 once the throttling plugin gives
+ * up. A withheld response has no message to read, so its `rateLimited` flag stands in, as does a GraphQL RATE_LIMITED
+ * error, whose 200 the mapper rewrites to 403.
  */
 export function isRateLimitError(error: ApiError): boolean {
   return (
@@ -850,7 +690,6 @@ export function isPermissionError(error: ApiError): boolean {
   if (isRateLimitError(error)) {
     return false;
   }
-  // 403 = classic missing scope; fine-grained tokens surface missing
-  // permissions as 404 on admin endpoints ("Not Found" hides the resource).
+  // 403 is the classic missing scope; fine-grained tokens surface missing permissions as 404 on admin endpoints.
   return error.status === 403 || error.status === 404;
 }

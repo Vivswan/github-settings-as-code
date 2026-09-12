@@ -1,7 +1,3 @@
-// The schema-description attacher: keys resolve to sites the way the docs files spell them,
-// generic and brace keys fan out, and every failure mode (a dangling key, a doubly described site,
-// an undescribed site) fails naming the culprit - proven on the bug each guard exists for.
-
 import { describe, expect, test } from "bun:test";
 import {
   attachDescriptions,

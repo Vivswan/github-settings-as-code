@@ -1,10 +1,4 @@
-/**
- * post-green.yml is ci.yml's post-green slot: it publishes a green main
- * commit's packaged commit to the build branch. The pins below hold the one
- * job to its exact steps and gates so nothing writes from a commit the
- * all-green gate has not judged, and the probe block runs the token check
- * under bash for real.
- */
+/** post-green.yml runs only from ci.yml's post-green slot, so the build branch is never written from a commit the all-green gate has not judged. */
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
@@ -47,8 +41,6 @@ interface CallerJob {
   [key: string]: unknown;
 }
 
-/** The step contract of a self-contained job: what each step is (the action
- * it uses or the command it runs), its gate, and its name. */
 interface PinnedStep {
   name: string | undefined;
   id: string | undefined;
@@ -68,15 +60,13 @@ interface Caller {
 }
 
 interface CallerContract {
-  /** The workflow's top-level keys: no lane, permissions, or env above the one job. */
+  /** The workflow's top-level keys: no lane, permissions, or env above the jobs. */
   topLevel: string[];
   triggers: string[];
   /** The whole workflow_call interface ci.yml must satisfy. */
   inputs: Record<string, { required: boolean; type: string | undefined; hasDefault: boolean }>;
   secrets: string[];
-  /** Every job, with its exact key set: the build-branch publisher alone
-   * (self-contained steps pinned by name, gate, and command; no ceiling of its
-   * own, so it inherits the caller's grant; no call of its own). */
+  /** Pinned to the exact key set so nothing gates or extends the one job; no permissions ceiling of its own, so it inherits the caller's grant. */
   jobs: Array<{
     id: string;
     keys: string[];
@@ -90,13 +80,13 @@ interface CallerContract {
 
 /** The build job's gate: every step after the push probe runs only when the token can push. */
 const PROCEED = "steps.token.outputs.proceed == 'true'";
-/** The lines that print git's stderr inside a stop-commands fence keyed by a
- * token minted for the run: remote-supplied text can neither forge a workflow
- * command nor swallow the static error that follows (the runner decodes % and
- * line breaks inside a command's message, acts on any line whose first
- * non-blank text is "::", and resumes only on the fence's own token). awk
- * terminates the last line even when git did not, so the closing fence is a
- * line of its own; the behavioral test below runs the block under bash. */
+/**
+ * git's stderr prints inside a stop-commands fence keyed by a token minted for the run, so remote-supplied text can neither forge a workflow command
+ * nor swallow the static error that follows.
+ *   % and encoded line breaks in a message  -> the runner decodes them, so one line can carry a second command
+ *   a line whose first non-blank text is "::" -> the runner acts on it, wherever it came from
+ *   the fence's own token                     -> the only resume; awk terminates probe.err's last line, so the closing fence is a line of its own
+ */
 const FENCED_STDERR = [
   "  fence=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \\n')",
   '  echo "::stop-commands::$fence"',
@@ -104,9 +94,6 @@ const FENCED_STDERR = [
   "  awk '{ print \"  \" $0 }' probe.err",
   '  echo "::$fence::"',
 ].join("\n");
-/** The push probe: a dry-run push over the real channel; a PAT that cannot push
- * fails the job, a default token that cannot warns naming BOTH remedies. The
- * workflow-command messages are static; git's stderr is fenced (FENCED_STDERR). */
 const PUSH_PROBE = [
   "if git push --dry-run --quiet origin HEAD:refs/dry-run/token-probe 2>probe.err; then",
   '  echo "proceed=true" >> "$GITHUB_OUTPUT"',
@@ -431,11 +418,8 @@ interface ProbeRun {
 }
 
 /**
- * Run the pinned probe under `bash -e` (what a `run:` step gets on a Linux
- * runner) with git replaced by a stub that writes `stderr` and exits
- * `gitStatus`, so the branches the pin only spells out are exercised for
- * real: what reaches the log, in which order, and whether probe.err is
- * gone. The scratch directory is removed on every path.
+ * Run the pinned probe under `bash -e` (what a `run:` step gets on a Linux runner) with git stubbed to write `stderr` and exit `gitStatus`; the
+ * scratch directory is removed on every path.
  */
 function runProbe(run: string, stderr: string, gitStatus: number, patSet: boolean): ProbeRun {
   const dir = mkdtempSync(join(tmpdir(), "post-green-probe-"));
@@ -490,18 +474,14 @@ describe("the push probe under bash", () => {
   ) as Caller;
   const run = must(must(must(wf.jobs.build, "build job").steps?.[1], "probe step").run, "run");
 
-  /** The fence token a run opened with; asserts the open and close lines bracket exactly `inner`. */
   function expectFenced(lines: string[], inner: string[]): void {
     const [open, header, ...rest] = lines;
     const token = open?.match(FENCE_OPEN)?.[1];
     expect(token).toBeDefined();
     expect(header).toBe("probe stderr:");
     expect(rest).toEqual([...inner, `::${token}::`, STATIC_ERROR, ""]);
-    // The fence is what keeps the runner from acting on the stderr lines
-    // (the runner trims, so an indented "::error::forged" still reads as a
-    // command outside one); the indent only marks them as quoted text in
-    // the log. Outside the fence only its two lines and the static error
-    // start a command.
+    // The runner trims, so an indented "::error::forged" still reads as a command outside a fence; the indent only marks the lines as quoted text in
+    // the log.
     for (const line of inner) {
       expect(line.startsWith("  ")).toBe(true);
     }

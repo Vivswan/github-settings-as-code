@@ -1,7 +1,6 @@
 /**
- * The autolinks fuzz fragment: the entry generator walks the AutolinkConfig slice and the witness
- * derives from the lens, so only the corpus invariants live here (plausible templates, one entry
- * per prefix, sentinels). Imports only the test-tree seams; the bundle entry is src/main.ts.
+ * The autolinks fuzz generator fragment. It imports test-tree seams on purpose: the bundle entry is
+ * src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {
@@ -25,7 +24,6 @@ const genAutolink = generatorFromSlice(AutolinkConfig, {
 
 export function genAutolinks(rng: Rng): Json[] {
   const autolinks = Array.from({ length: rng.int(2) + 1 }, () => genAutolink(rng));
-  // autolinks is a WITNESS section: always the plain array form, never maybeWrapUndeclared.
   return uniqueBy(autolinks, ["key_prefix"]);
 }
 

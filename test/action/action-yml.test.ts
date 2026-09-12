@@ -1,8 +1,4 @@
-/**
- * action.yml's hand-written half (name, runtime) and the input/output
- * declarations its generated half renders from; the generated regions
- * themselves are covered by test/scripts/gen-action-docs.test.ts.
- */
+/** The generated regions of action.yml are covered by test/scripts/gen-action-docs.test.ts. */
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -33,11 +29,8 @@ describe("action.yml <-> README", () => {
 
 describe("action.yml runtime", () => {
   test("runs.using is node24 and AGENTS.md documents the same runtime", () => {
-    // The runtime is a conscious pin: bumping it changes what Node the
-    // built bundle must run on, so the change has to land here too.
+    // Bumping the runtime changes what Node the built bundle must run on, so the change has to land here too.
     expect(actionYml.runs.using).toBe("node24");
-    // AGENTS.md tells agents which runtime the bundle targets; it must name
-    // the one action.yml declares.
     const agents = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
     expect(
       agents.includes(`(${actionYml.runs.using})`),
@@ -48,9 +41,7 @@ describe("action.yml runtime", () => {
 
 describe("input declarations <-> discovery defaults", () => {
   test("each discovery filter declares an empty default and shows its effective one", () => {
-    // A filter is "explicitly set" when its raw input is not "", so a
-    // non-empty declared default would defeat that detection; the Inputs
-    // table shows the effective default instead and the description names it.
+    // A filter is "explicitly set" when its raw input is not "", so a non-empty declared default would defeat that detection.
     const effective: Partial<Record<(typeof FILTER_INPUTS)[number], string>> = {
       visibility: DEFAULT_DISCOVERY_FILTERS.visibility,
       archived: DEFAULT_DISCOVERY_FILTERS.archived,
@@ -78,10 +69,7 @@ describe("input declarations <-> discovery defaults", () => {
 
 describe("output declarations", () => {
   test("the result description mentions every RepoResult value and the merge result", () => {
-    // REPO_RESULTS is the canonical value list exported next to worstOf() in
-    // src/engine/orchestrate.ts; a new RepoResult value added there but left
-    // out of the output docs fails here. MERGE_RESULT is the one value outside
-    // that list (a merge has no target), documented the same way.
+    // MERGE_RESULT is the one value outside REPO_RESULTS (a merge has no target).
     const missing = [...REPO_RESULTS, MERGE_RESULT].filter(
       (value) => !OUTPUT_DECLS.result.description.includes(value),
     );

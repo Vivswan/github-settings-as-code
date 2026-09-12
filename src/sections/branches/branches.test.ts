@@ -300,8 +300,7 @@ describe("branches", () => {
   ] as const)(
     "%s enabled live but omitted is the replacing PUT's only justification; declared, it plans nothing",
     async (_what, liveProtection, omitting, keyPath, declaring) => {
-      // The old unconditional PUT reset the setting silently; the plan resets
-      // it too, and says so. Empty nested lists are nothing to preserve.
+      // Empty nested lists (dismissal_restrictions) are nothing to preserve, so they earn no line.
       const api = new MockApi({ [PROTECTION]: { data: liveProtection } });
       const result = await plan(api, [{ name: "main", protection: omitting }]);
       expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
@@ -336,8 +335,7 @@ describe("branches", () => {
     });
 
   test("a live control whose fields are all defaults is still a setting the replacing PUT would remove", async () => {
-    // Presence is the setting: reviews are required even with a zero count
-    // and every flag off.
+    // Presence is the setting: reviews are required even with a zero count and every flag off.
     expect(
       (await plan(liveDefaultReviews(), declared)).ops.map((op) => [op.role, op.drift]),
     ).toEqual([
@@ -368,9 +366,7 @@ describe("branches", () => {
   );
 
   test("the GET's own metadata and its second spelling of the status-check list never read as omitted settings", async () => {
-    // name, enabled, and enforcement_level exist only in the GET shape; the
-    // checks list mirrors contexts. None of them is a setting the PUT would
-    // reset, so a converged repository plans nothing.
+    // name, enabled, and enforcement_level exist only in the GET shape, and checks mirrors contexts; none is a setting the PUT would reset.
     const api = new MockApi({
       [PROTECTION]: {
         data: {
@@ -479,8 +475,7 @@ describe("branches", () => {
       { name: "main", protection: { enforce_admins: true, required_signatures: declaredValue } },
     ]);
     expect(result).toEqual({ ops: [...ops], notes: [], drift: [] });
-    // The sub-endpoint is the toggle's ONLY carrier: the PUT body never
-    // smuggles the key GitHub would silently drop.
+    // The sub-endpoint is the toggle's only carrier: the PUT body never smuggles the key GitHub would silently drop.
     expect(result.ops.some((op) => op.role === "putProtection")).toBe(false);
   });
 
@@ -520,17 +515,13 @@ describe("branches", () => {
   });
 
   test('a quoted "true" fails the shape upfront, with the YAML gotcha named', () => {
-    // The toggle is typed in the zod shape so document validation rejects it
-    // before ANY section writes - not a plan-time throw after earlier
-    // sections already applied.
+    // Typed in the zod shape so document validation rejects it before any section writes, not as a plan-time throw after earlier sections applied.
     const parsed = branchesSection.shape.safeParse([
       { name: "main", protection: { enforce_admins: true, required_signatures: "true" } },
     ]);
     expect(parsed.success).toBe(false);
     const messages = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
     expect(messages.some((m) => m.includes("unquoted true or false"))).toBe(true);
-    // The passthrough survives the typed key: unknown protection fields and
-    // a proper boolean both validate.
     expect(
       branchesSection.shape.safeParse([
         {
@@ -576,8 +567,7 @@ describe("branches GraphQL-routed keys", () => {
         ],
       ],
     ]);
-    // The id is late (no rule exists at plan time) and the change line renders
-    // from the response (the deployment read-back), so both seal at execution.
+    // The id is late (no rule exists at plan time) and the change line renders from the deployment read-back, so both seal at execution.
     expect(typeof result.ops[1]?.variables).toBe("function");
     expect(typeof result.ops[1]?.change).toBe("function");
     expect(api.writes).toEqual([]);
@@ -609,7 +599,6 @@ describe("branches GraphQL-routed keys", () => {
     expect(input.bypassForcePushActorIds).toHaveLength(3);
     expect(input.requiresDeployments).toBe(true);
     expect(input.requiredDeploymentEnvironments).toEqual(["prod"]);
-    // Converged: the re-plan reads the rule the update wrote and finds nothing to do.
     expect(await plan(api, routedDesired)).toEqual({ ops: [], notes: [], drift: [] });
   });
 
@@ -652,8 +641,6 @@ describe("branches GraphQL-routed keys", () => {
       const result = await plan(api, [entry]);
       const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
       expect(execution.status).toBe("failed");
-      // Every request landed (the failing one included), but only the ones
-      // before the failed read-back rendered a line.
       expect([execution.changes, execution.notes, execution.landed]).toEqual([
         changesBefore,
         [],
@@ -696,8 +683,7 @@ describe("branches GraphQL-routed keys", () => {
         "branches[main].protection.required_deployments: the settings file requires deployments to [prod] but the live rule requires [qa]; apply will set the declared list",
       ],
     });
-    // The actor's node id is an execution-time input: the plan issues no
-    // lookup (check mode never does), the sealed variables carry the id.
+    // The actor's node id is an execution-time input: the plan issues no lookup (check mode never does), the sealed variables carry the id.
     expect(api.calls.filter((c) => c.path.startsWith("BranchProtectionActor"))).toHaveLength(0);
     const variables = result.ops[0]?.variables;
     expect(typeof variables).toBe("function");
@@ -768,8 +754,7 @@ describe("branches GraphQL-routed keys", () => {
           ],
         ],
       ]);
-      // The PUT carries the actor resolution, so a bad actor fails before the
-      // live protection is replaced; the update's variables seal the ids.
+      // The PUT carries the actor resolution, so a bad actor fails before the live protection is replaced; the update's variables seal the ids.
       expect(typeof result.ops[0]?.before).toBe("function");
       expect(typeof result.ops[1]?.variables).toBe("function");
 
@@ -837,8 +822,7 @@ describe("branches GraphQL-routed keys", () => {
         ],
       ],
     ]);
-    // With no rule id in hand the update looks it up at execution, where the
-    // still-unreadable view fails the operation by name instead of silently.
+    // With no rule id in hand the update looks it up at execution, where the still-unreadable view fails the operation by name instead of silently.
     const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
     expect(execution.status).toBe("failed");
     expect(String((execution as { error: Error }).error.message)).toMatch(
@@ -896,9 +880,8 @@ describe("branches GraphQL-routed keys", () => {
   });
 
   test("a misspelled actor on a LATER entry fails before an EARLIER entry's write lands", async () => {
-    // main drifts on the REST half and carries no actors; dev declares the
-    // bad actor. The section's first operation (main's PUT) resolves every
-    // planned actor first, so nothing is written for either branch.
+    // main drifts on the REST half with no actors and dev declares the bad actor; the section's first operation (main's PUT) resolves every planned
+    // actor first.
     const api = new MockApi(
       {
         [PROTECTION]: { data: { enforce_admins: { enabled: false } } },
@@ -1011,8 +994,7 @@ describe("branches wildcard entries", () => {
     ]);
     expect(result.notes).toEqual([]);
     expect(result.drift).toEqual([]);
-    // The create needs the repository's node id, an execution-time input: the
-    // plan issues no lookup for it, the sealed variables carry it.
+    // The create needs the repository's node id, an execution-time input: the plan issues no lookup for it, the sealed variables carry it.
     expect(create).toMatchObject({
       role: "createRule",
       describe: 'creating the protection rule "release/*"',
@@ -1125,9 +1107,7 @@ describe("branches wildcard entries", () => {
   });
 
   test("a scalar structured key on a wildcard entry fails the shape, not apply", () => {
-    // Without this rejection the value passes the looseObject and crashes
-    // translateWildcardProtection mid-plan with a raw TypeError - a config
-    // that survives check mode must never blow up on apply.
+    // Without this rejection the value passes the looseObject and crashes translateWildcardProtection mid-plan with a raw TypeError.
     for (const bad of [
       { required_status_checks: true },
       { required_pull_request_reviews: 5 },
@@ -1138,8 +1118,7 @@ describe("branches wildcard entries", () => {
       const messages = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
       expect(messages.some((m) => m.includes("must be a mapping of its sub-keys"))).toBe(true);
     }
-    // The same scalar on a LITERAL entry stays a passthrough (GitHub is the
-    // authority on the REST payload).
+    // The same scalar on a LITERAL entry stays a passthrough (GitHub is the authority on the REST payload).
     expect(
       branchesSection.shape.safeParse([
         { name: "main", protection: { required_status_checks: true } },
@@ -1236,7 +1215,6 @@ describe("branches plan contract", () => {
       "GRAPHQL UpdateBranchProtectionRule",
       "GRAPHQL DeleteBranchProtectionRule",
     ]);
-    // The undeclared rule's note survives both plans; nothing else does.
     const note =
       'undeclared classic protection rule "legacy/*" exists on the repo - declare it to manage it (this action never deletes undeclared rules)';
     expect(first.notes).toEqual([note]);
@@ -1270,9 +1248,8 @@ describe("branches plan contract", () => {
   });
 
   test("a planned operation can only name a declared write role, with the facets its route demands", () => {
-    // Compile-time only: the plans are never executed. Each rejected shape
-    // is built first and assigned on one line, so the directive anchors to
-    // the assignment whichever property the compiler blames.
+    // Compile-time only. Each rejected shape is built first and assigned on one line, so the @ts-expect-error anchors to the assignment whichever
+    // property the compiler blames.
     type Op = PlannedOp<typeof branchesSection.endpoints, typeof branchesSection.graphql>;
     const rest: Op = { role: "sigPost", params: MAIN, drift: ["x"], change: "" };
     const mutation: Op = { role: "deleteRule", variables: { input: {} }, drift: ["x"], change: "" };

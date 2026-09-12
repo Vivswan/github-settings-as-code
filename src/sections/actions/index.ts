@@ -1,11 +1,3 @@
-/**
- * `actions:` section - a key router across the Actions settings endpoints
- * (base permissions, selected-actions allowlist, workflow token defaults,
- * access level, artifact/log retention, cache limits, OIDC subject claim,
- * fork pull request workflow policies), with unknown keys passed through
- * verbatim to the base permissions PUT.
- */
-
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
@@ -24,14 +16,12 @@ import { ActionsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
-// The contract documents both 400 and 422 for a rejected template, so the
-// same advice keys both statuses.
+// The contract documents both 400 and 422 for a rejected template, so the same advice keys both.
 const OIDC_TEMPLATE_HINT =
   "include_claim_keys entries must be unique claim keys of the OIDC token (alphanumeric and underscores only); see the OIDC subject claim customization endpoint documentation";
 
-// The fork-pr-workflows-private-repos pair is documented for private
-// repositories, and the contract documents a bare 403 on the GET with no
-// prose about why; a denial here is therefore ambiguous.
+// GitHub documents this pair for private repositories and a bare 403 on the GET with no prose
+// about why, so a denial here is ambiguous.
 const FORK_PR_PRIVATE_DENIAL =
   "the fork PR workflow settings are documented for private repositories, so a denial here can also mean the repository is public";
 
@@ -143,19 +133,16 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/** This section's plan context, operations, and plan, over its literal endpoints. */
 type ActionsContext = PlanContext<typeof ENDPOINTS>;
 type ActionsOp = PlannedOp<typeof ENDPOINTS>;
 type ActionsPlan = SectionPlan<ActionsOp>;
 
-/** The GET roles the read port binds, and the PUT roles an operation may name. */
 type ReadRole = keyof ActionsContext["read"];
 type WriteRole = ActionsOp["role"];
 
 /**
- * One cache limit's endpoint pair, named once so the GET and the PUT cannot
- * be paired across limits: `getCache${N}` and `putCache${N}` are both
- * derived from `N`, and both must be declared roles.
+ * Named once so a limit's GET and PUT cannot be paired across limits: both roles derive from N,
+ * and both must be declared roles.
  */
 function cacheLimit<N extends string>(
   name: `getCache${N}` extends ReadRole ? (`putCache${N}` extends WriteRole ? N : never) : never,
@@ -168,50 +155,37 @@ function cacheLimit<N extends string>(
   };
 }
 
-/**
- * The cache object's keys: each is the whole body of its own single-field
- * PUT, and `label` names it in change lines and describe prose (kept here
- * so a future third key cannot be silently mislabeled by a stale ternary).
- */
+/** Each cache key is the whole body of its own single-field PUT. */
 const CACHE_ENDPOINT_BY_KEY = {
   max_cache_retention_days: cacheLimit("Retention", "retention"),
   max_cache_size_gb: cacheLimit("Storage", "storage"),
 } as const;
 
 /**
- * Compile-time lockstep between the cache config's fields and the endpoint
- * table: the handler below iterates the TABLE, so a new schema field with no
- * entry would compile and then be silently ignored - fail it here instead.
- * Both directions: an unlisted field and a phantom entry are each a compile error.
+ * The handler iterates the TABLE, so a schema field with no entry would compile and be silently
+ * ignored; both an unlisted field and a phantom entry fail here instead.
  */
 type CacheKey = keyof NonNullable<ActionsConfig["cache"]>;
 type _CacheEndpointsComplete = MustBeNever<Exclude<CacheKey, keyof typeof CACHE_ENDPOINT_BY_KEY>>;
 type _CacheEndpointsSound = MustBeNever<Exclude<keyof typeof CACHE_ENDPOINT_BY_KEY, CacheKey>>;
 
 /**
- * Claim-key ORDER defines the OIDC subject format ("repo:...:context:..."),
- * so unlike subsetDiff's scalar-list set comparison, this list must match
- * element by element - a reordered live value is drift.
+ * Claim-key ORDER defines the OIDC subject format ("repo:...:context:..."), so unlike subsetDiff's
+ * set comparison of scalar lists this one matches element by element: a reordered live value is drift.
  */
 function sameClaimKeyOrder(declared: readonly string[], live: readonly string[]): boolean {
   return declared.length === live.length && declared.every((key, index) => live[index] === key);
 }
 
-/**
- * The OIDC subject-claim GET fields this section reads BY NAME: the claim-key
- * list (order-sensitive, compared above; nullish absorbs a null or omitted
- * list exactly as the pre-parse code did); the rest of the body rides into
- * subsetDiff as passthrough.
- */
+// GitHub may return include_claim_keys as null or omit it; the rest of the body rides into
+// subsetDiff as passthrough.
 const LiveOidcSub = z.looseObject({ include_claim_keys: z.array(z.string()).nullish() });
 
 /**
- * A key served by its own endpoint pair. The routing table holds the handler
- * itself, so a routed key without a handler cannot exist; a function-valued
- * property, not method shorthand, so the per-key value types check strictly.
+ * The routing table holds the handler itself, so a routed key without a handler cannot exist.
+ * A function-valued property, not method shorthand, so the per-key value types check strictly.
  */
 interface RoutedDestination<K extends keyof ActionsConfig> {
-  /** Read the live state and plan the write the declared value is due. */
   plan: (
     ctx: ActionsContext,
     section: SectionMeta,
@@ -220,22 +194,15 @@ interface RoutedDestination<K extends keyof ActionsConfig> {
   ) => Promise<void>;
 }
 
-/**
- * The standard routed key: GET, diff under `label`, PUT the body on drift.
- * `N` is inferred from the GET alone so a PUT of another name does not
- * compile; a non-object value (access_level) must say how it becomes a body.
- */
+/** `N` is inferred from the GET alone, so a PUT of another name does not compile. */
 export function endpointRouted<K extends keyof ActionsConfig, N extends string>(
   wiring: {
-    /** The GET role in ENDPOINTS the live state is read from. */
     get: `get${N}` & ReadRole;
-    /** The PUT role in ENDPOINTS the operation names. */
     put: NoInfer<`put${N}`> & WriteRole;
     /** The drift-line prefix ("actions.access"). */
     label: string;
     /** The change line apply reports after the PUT lands. */
     applied: string;
-    /** describe prose for the PUT, where the section spells one. */
     describe?: string;
   } & (NonNullable<ActionsConfig[K]> extends Record<string, unknown>
     ? { body?: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown> }
@@ -262,22 +229,16 @@ export function endpointRouted<K extends keyof ActionsConfig, N extends string>(
   };
 }
 
-// Forward-compatible key routing: every DECLARED ActionsConfig key names its
-// destination here - "base" and "workflow" keys merge into those two PUT
-// bodies, and a key with its own endpoint pair carries the HANDLER that
-// serves it. The mapped `satisfies` makes a new schema field with no routing
-// entry a compile error (the "documented but unrouted" state cannot exist),
-// and because the routed entry is the handler itself, "routed but unhandled"
-// cannot exist either. Undeclared (future) keys fall through to the base
-// permissions PUT verbatim - never silently dropped.
+// Every DECLARED key names its destination, so the mapped `satisfies` makes a schema field with no
+// entry a compile error; a routed entry IS its handler, so routed-but-unhandled cannot exist either.
+// Undeclared (future) keys fall through to the base permissions PUT verbatim, never silently dropped.
 const KEY_DESTINATION = {
   enabled: "base",
   allowed_actions: "base",
   selected_actions: {
     plan: async (ctx, _section, declared, plan) => {
-      // A 409 (policy not "selected") or 404 (no allowlist) is drift, not a
-      // failure; both are declared statuses. The line promises only the
-      // allowlist - the policy is the base permissions operation's own drift.
+      // A 409 (policy not "selected") or 404 (no allowlist) is drift, not a failure; both are
+      // declared statuses. The line promises only the allowlist: the policy is the base operation's own drift.
       const probe = await ctx.read.getSelected.probeAbsent();
       const drift =
         "missing" in probe
@@ -341,17 +302,11 @@ const KEY_DESTINATION = {
         LiveOidcSub,
         await ctx.read.getOidcSub.call(),
       );
-      // The claim-key list is special-cased below; everything ELSE in the
-      // declared object (use_default today, future fields tomorrow) rides
-      // the PUT verbatim, so it must be diffed verbatim too - the expiry
-      // precedent: exclude the special field, compare the remainder.
       const { include_claim_keys, ...comparable } = declared;
       const drift = subsetDiff(comparable, live, "actions.oidc_customization_sub");
-      // GitHub ignores include_claim_keys when use_default is true, and
-      // an OMITTED list on a custom template is itself meaningful
-      // upstream (it opts the repository into the organization template,
-      // whose keys then show up live). So the list is compared only when
-      // the file declares it - declared-keys-only, like everything else.
+      // GitHub ignores include_claim_keys when use_default is true, and an OMITTED list on a custom
+      // template is itself meaningful upstream (it opts the repository into the organization
+      // template, whose keys then show up live), so the list is compared only when the file declares it.
       if (declared.use_default === false && include_claim_keys !== undefined) {
         const liveKeys = live.include_claim_keys ?? [];
         if (!sameClaimKeyOrder(include_claim_keys, liveKeys)) {
@@ -387,31 +342,19 @@ const KEY_DESTINATION = {
   }),
 } satisfies { [K in keyof ActionsConfig]-?: "base" | "workflow" | RoutedDestination<K> };
 
-/** The keys served by their own endpoint pair, as the table declares them. */
 type RoutedKey = {
   [K in keyof ActionsConfig]-?: (typeof KEY_DESTINATION)[K] extends string ? never : K;
 }[keyof ActionsConfig];
 
-/**
- * The routing table's endpoint-routed slice under per-key handler types, so
- * the generic dispatch in planRouted() stays correlated to one literal key
- * (the environments NESTED_RECONCILERS pattern).
- */
+// Per-key handler types, so planRouted's generic dispatch stays correlated to one literal key.
 const ROUTED_DESTINATIONS: { [K in RoutedKey]: RoutedDestination<K> } = KEY_DESTINATION;
 
-/** Routed keys in table order - the order the plan visits them. */
 const ROUTED_KEYS = (Object.keys(KEY_DESTINATION) as (keyof ActionsConfig)[]).filter(
   (key): key is RoutedKey => typeof KEY_DESTINATION[key] !== "string",
 );
 
-/** Routed keys as plain strings, for the base/workflow body split. */
 const ROUTED_KEY_SET: ReadonlySet<string> = new Set(ROUTED_KEYS);
 
-/**
- * Plan one routed key; generic so the handler and the declared value stay
- * correlated to the same literal key. A key the file does not declare is
- * skipped.
- */
 async function planRouted<K extends RoutedKey>(
   key: K,
   ctx: ActionsContext,
@@ -460,22 +403,20 @@ export const actionsSection = {
       }
     }
     if (desired.selected_actions !== undefined && permissions.allowed_actions === undefined) {
-      // The allowlist endpoint answers 409 unless the policy is "selected";
-      // infer the policy when it is undeclared (a contradicting declared
-      // policy is rejected upfront by the shape's superRefine).
+      // The allowlist endpoint answers 409 unless the policy is "selected", so an undeclared policy
+      // is inferred; a contradicting declared one is rejected upfront by the shape's superRefine.
       permissions.allowed_actions = "selected";
     }
     if (Object.keys(permissions).length > 0) {
-      // The PUT body requires `enabled`; declaring any base-permissions key
-      // implies actions are on unless said otherwise.
+      // The PUT body requires `enabled`; declaring any base-permissions key implies actions are on
+      // unless the file says otherwise.
       permissions.enabled = permissions.enabled ?? true;
     }
     const routed = Object.keys(permissions).filter((k) => !KNOWN_PERMISSION_KEYS.has(k));
     if (routed.length > 0) {
-      // The base PUT body always carries an enabled value (defaulted above),
-      // so a mis-routed key can flip Actions on as a side effect; say so.
-      // JSON.stringify keeps a malformed quoted "false" distinguishable from
-      // the boolean in the message.
+      // The base PUT body always carries an enabled value (defaulted above), so a mis-routed key can
+      // flip Actions on as a side effect; the note says so. JSON.stringify keeps a malformed quoted
+      // "false" distinguishable from the boolean.
       const enabledValue = JSON.stringify(permissions.enabled);
       plan.notes.push(
         `key(s) [${routed.join(", ")}] are not recognized by this action; they ride verbatim ` +
@@ -512,9 +453,8 @@ export const actionsSection = {
         });
       }
     }
-    // Every key with its own endpoint pair plans through its table handler,
-    // in table order - the base permissions PUT stays ahead of the
-    // selected-actions PUT, which 409s until the policy is "selected".
+    // The routed keys plan after the base permissions PUT above: the selected-actions PUT 409s
+    // until the policy is "selected".
     for (const key of ROUTED_KEYS) {
       await planRouted(key, ctx, this, desired, plan);
     }

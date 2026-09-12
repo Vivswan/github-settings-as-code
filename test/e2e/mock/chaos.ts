@@ -1,10 +1,4 @@
-/**
- * Fault and chaos-corruption injection: the transport-level fault barrier and
- * the response-corruption hook the pipeline (and the core-route hooks) consult
- * per request, the wire behavior each directive turns into, and the
- * construction-time validation that every injected key names a real section
- * endpoint or core route.
- */
+/** Fault and chaos-corruption injection; a scenario addresses a section endpoint or an inline core route by the same key. */
 
 import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";
 import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
@@ -18,14 +12,9 @@ import type {
 import type { Json, MockResponse } from "./support.js";
 
 /**
- * The CORE-ROUTE fault/corruption keys: stable names for the non-section paths
- * the pipeline serves inline, so a scenario (or the fuzzer) can fault the
- * discovery listing, the settings-file fetch, or the private-report issue
- * channel exactly like a section endpoint. Each fires at the same pipeline
- * point a section fault does: after route and target resolution (a fault never
- * masks an unknown-target violation) and before the permission gate. The
- * values document the route each key names; the issue-report ones are built
- * from ISSUE_REPORT_ENDPOINTS so they cannot drift from the declared routes.
+ * Stable keys so a scenario or the fuzzer faults an inline route like a section endpoint, at the same pipeline point
+ * (after target resolution, before the permission gate). The issue-report values derive from ISSUE_REPORT_ENDPOINTS so
+ * they cannot drift from the declared routes.
  */
 const CORE_FAULT_KEYS = {
   "core.discoveryList": "GET /user/repos (multi-repo discovery listing)",
@@ -40,14 +29,8 @@ const CORE_FAULT_KEYS = {
 export type CoreFaultKey = keyof typeof CORE_FAULT_KEYS;
 
 /**
- * Reject fault/corrupt directives that name an unknown endpoint or duplicate a
- * fault. Keys are free-form strings, so a typo would silently never fire and a
- * duplicate fault would silently take first-match; validating at server
- * construction (the same loud-at-startup pattern as assertHandlerCompleteness)
- * turns both into an immediate throw. A key may name a section endpoint
- * ("section.role", REST or GraphQL - the two share the key space, which
- * allGraphqlOps() keeps collision-free) or a registered core route
- * (CORE_FAULT_KEYS). Exported for direct testing.
+ * Keys are free-form strings: a typo would silently never fire and a duplicate fault would silently take first-match, so
+ * both throw at server construction. REST and GraphQL share the key space, which allGraphqlOps() keeps collision-free.
  */
 export function assertFaultKeys(
   faults: FaultOption[] | undefined,
@@ -79,12 +62,7 @@ export function assertFaultKeys(
   }
 }
 
-/**
- * Consume one firing from a per-key `times` budget (default 1; "always" =
- * every match), counted in `counts` and mutated in place: returns the
- * pre-increment fire index, or null when the budget is spent. The ONE
- * counting rule faults and corruptions share.
- */
+/** The ONE counting rule faults and corruptions share; the returned index is the pre-increment fire count. */
 function takeBudgeted(
   counts: Map<string, number>,
   key: string,
@@ -99,14 +77,7 @@ function takeBudgeted(
   return fired;
 }
 
-/**
- * Consume one firing of the fault registered for `key`, when one remains: each
- * fault fires on the first `times` (default 1; "always" = every match)
- * matching requests, counted in `faultCounts` (which doubles as the
- * fault-fired signal the server exposes). Returns the fault kind plus the
- * pre-increment fire index, which server_error uses to rotate its status
- * deterministically.
- */
+/** faultCounts doubles as the fault-fired signal the server exposes; the fire index lets server_error rotate its status deterministically. */
 export function takeFault(
   key: string,
   options: Pick<PipelineOptions, "faults" | "faultCounts">,
@@ -119,11 +90,7 @@ export function takeFault(
   return fired === null ? null : { kind: fault.kind, fired };
 }
 
-/**
- * Consume one chaos corruption of `key`'s response, when the directive names it
- * and its `times` budget ("always" = every match) is not spent. Shared by the
- * section pipeline and the core-route hooks so both honor the same counting.
- */
+/** Shared by the section pipeline and the core-route hooks so both honor the same `times` counting. */
 export function takeCorruption(
   key: string,
   options: Pick<PipelineOptions, "corrupt" | "corruptCounts">,
@@ -140,19 +107,12 @@ export function takeCorruption(
   return applyCorruption(corrupt.mode, response, { ...log, status: response.status });
 }
 
-/**
- * The 5xx statuses a server_error fault rotates through, indexed by the fault's
- * fire count - deterministic, so a replayed seed sees the same statuses in the
- * same order.
- */
+/** Indexed by fire count, so a replayed seed sees the same statuses in the same order. */
 const SERVER_ERROR_ROTATION = [500, 502, 503] as const;
 
 /**
- * Turn a fault kind into its wire behavior. The log records the attempt with
- * the fault status (403/429/5xx) or 0 for a drop; every kind is deliberately
- * off the OpenAPI contract (offSpecBody). The client's retry plugin retries
- * 5xx and drops, so a single firing is retried away and `times` >= 3
- * exhausts the retries.
+ * Every kind is deliberately off the OpenAPI contract (offSpecBody). The client's retry plugin retries 5xx and drops, so
+ * one firing is retried away and `times` >= 3 exhausts the retries.
  */
 export function applyFault(
   kind: FaultOption["kind"],
@@ -160,9 +120,8 @@ export function applyFault(
   fired: number,
 ): PipelineResult {
   if (kind === "rate_limit_403") {
-    // "rate limit" in the body makes the client's classifier read the 403 as
-    // throttling (isRateLimitError), NOT a permission denial - the one place a
-    // 403 body is allowed to say it.
+    // "rate limit" in the body is what makes the client's classifier (isRateLimitError) read this 403 as throttling,
+    // not a permission denial: the one place a 403 body may say it.
     const response: MockResponse = {
       status: 403,
       body: { message: "API rate limit exceeded for this token" },
@@ -170,12 +129,9 @@ export function applyFault(
     return { response, log: { ...log, status: 403 }, offSpecBody: true };
   }
   if (kind === "429_then_200") {
-    // Production's ONLY 429 recovery path is octokit's throttling plugin (the
-    // retry plugin's doNotRetry includes 429). It retries only when the message
-    // contains "secondary rate" and honors Retry-After only when POSITIVE (0 is
-    // falsy and falls back to its 60s default). A bare 429 + Retry-After: 0
-    // would fail immediately in production while e2e's RETRY_BASE_MS path
-    // absorbed it, so both details are load-bearing for parity.
+    // Production's ONLY 429 recovery is octokit's throttling plugin (the retry plugin's doNotRetry includes 429): a 429
+    // without the "secondary rate" phrase or a zero-quota header is not retried, and Retry-After counts only when
+    // POSITIVE (0 is falsy and falls back to its 60s default). Both details are load-bearing for parity with production.
     const response: MockResponse = {
       status: 429,
       body: {
@@ -193,8 +149,7 @@ export function applyFault(
     const response: MockResponse = { status, body: { message: "Server Error" } };
     return { response, log: { ...log, status }, offSpecBody: true };
   }
-  // connection_drop: the server destroys the socket before any response bytes
-  // leave (see server.ts), a true network failure the client's fetch rejects on.
+  // connection_drop: server.ts destroys the socket before any bytes leave, a true network failure the client's fetch rejects on.
   return {
     response: { status: 0, body: null },
     log: { ...log, status: 0 },
@@ -204,14 +159,8 @@ export function applyFault(
 }
 
 /**
- * Corrupt a response per the chaos mode: invalid_json emits an unparseable
- * body (the "raw" wire kind), wrong_shape replaces a list/object body with a
- * scalar, and missing_envelope strips the wrapper key from an enveloped list.
- * All three are DELIBERATE off-contract bodies, so each marks offSpecBody
- * (invalid_json via the raw wire kind, the others explicitly) - the validator
- * must skip them, else it re-reports the corruption the chaos test already
- * asserts. The mock's own status-subset invariant still guards real handler
- * statuses.
+ * All three are deliberate off-contract bodies the validator must skip (invalid_json through the raw wire kind, the
+ * others through offSpecBody), else it re-reports the corruption the chaos test already asserts.
  */
 function applyCorruption(
   mode: CorruptOption["mode"],
@@ -228,8 +177,6 @@ function applyCorruption(
   if (mode === "wrong_shape") {
     return { response: { status: response.status, body: 42 }, log, offSpecBody: true };
   }
-  // missing_envelope: unwrap a {total_count, <key>: []} body to a bare object
-  // (drops the list the client expects behind the envelope key).
   const body = response.body;
   if (body && typeof body === "object" && !Array.isArray(body)) {
     const stripped: Json = {};

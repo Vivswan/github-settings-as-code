@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import { validateSectionShapes } from "../../src/engine/validate.js";
 
-/** The verdict's issue list, or null when the document validated. */
 function issuesOf(doc: Record<string, unknown>, sourceLabel = "f.yml"): readonly string[] | null {
   return validateSectionShapes(doc, sourceLabel).match(
     () => null,
@@ -74,8 +73,7 @@ describe("section shape validation", () => {
 });
 
 describe("YAML-tagged values are rejected anywhere in a section", () => {
-  // zod object schemas accept a Date or Set as an empty mapping, so without
-  // the plain-data gate these would validate and silently configure nothing.
+  // zod object schemas accept a Date or Set as an empty mapping, so without the plain-data gate these would validate and silently configure nothing.
   test.each<[site: string, doc: Record<string, unknown>]>([
     ["actions", { actions: new Date(0) }],
     ["pages", { pages: new Date(0) }],
@@ -163,9 +161,7 @@ describe("the wrapped undeclared-policy form", () => {
   });
 
   test("wrapper typos fail upfront: an unknown wrapper key and a bad policy value", () => {
-    // The wrapper is this action's own strict vocabulary; unlike entry
-    // passthrough fields, its extra keys have nowhere to go. A misspelled
-    // "entries" reads as both a missing list and an unrecognized key.
+    // The wrapper is this action's own strict vocabulary, so a misspelled "entries" reads as both a missing list and an unrecognized key.
     expect(issuesOf({ labels: { entires: [{ name: "bug" }] } })).toEqual([
       "labels.entries: Invalid input: expected array, received undefined",
       'labels: Unrecognized key: "entires"',

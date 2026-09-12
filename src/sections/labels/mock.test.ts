@@ -1,7 +1,5 @@
 /**
- * Handler-level tests for the labels mock fragment: identity minting rules
- * the e2e assertions do not read directly (no scenario asserts on a served
- * node_id or url), pinned here against the handler.
+ * No scenario asserts on a served node_id or url, so the labels fragment's identity minting is pinned here against the handler.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -21,10 +19,8 @@ function create(state: MockState, body: Record<string, unknown>): Record<string,
 
 describe("labels.create identity minting", () => {
   test("node_id encodes the label's OWN id, matching the generateLabels pattern", () => {
-    // Seed the state through the generate sugar so the created label's ids
-    // come from the same monotonic pool as the seeded ones: the old
-    // post-increment bug (id used, node_id encoding id+1) collided a created
-    // label's node_id with the NEXT id in that shared pool.
+    // Seeding through the generate sugar puts the created labels in the same monotonic id pool as the seeded ones; the old post-increment bug (id
+    // used, node_id encoding id+1) collided a created label's node_id with the next id in that pool.
     const state = buildStateForSlug(
       "acme/private",
       {
@@ -35,8 +31,6 @@ describe("labels.create identity minting", () => {
     );
     create(state, { name: "bug", color: "d73a4a" });
     create(state, { name: "docs", color: "0075ca" });
-    // The pool starts at 90_000_000 and each label, seeded or created, takes
-    // the next id; its node_id encodes that same id.
     const identity = (label: unknown) => {
       const body = label as Record<string, unknown>;
       return [body.name, body.id, body.node_id];

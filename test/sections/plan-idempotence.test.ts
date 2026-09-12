@@ -1,10 +1,6 @@
 /**
- * The idempotence helper's own controls, over synthetic plan sections
- * workflows cannot exercise: a write that is alwaysRewrite by declaration
- * and carries a payload THUNK (the shape the sealed secret sections migrate
- * into), and a section whose write is conditional but whose live read never
- * reflects it, so it re-plans forever. The helper must accept the first -
- * fresh closure per pass included - and reject the second.
+ * The idempotence helper's own controls over synthetic plan sections workflows cannot exercise: it must accept an alwaysRewrite write with a payload
+ * THUNK (a fresh closure per pass) and reject a conditional write whose live read never reflects it.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -47,11 +43,8 @@ function entriesOf(declared: unknown): ReadonlyArray<{ name: string; value: stri
 }
 
 /**
- * The sealed posture: the PUT recurs by declaration, so it plans on every
- * pass with no drift to report - GitHub cannot echo a secret back to
- * compare against - and its value is sealed at execution time. The change
- * line names the live state ("created" for a secret the list lacks,
- * "updated" after), so it differs between passes while the write recurs.
+ * The sealed posture: the PUT recurs by declaration with no drift to report (GitHub cannot echo a secret back), and its change line names the live
+ * state (created, then updated), so it may differ between passes while the write recurs.
  */
 const sealed = {
   ...META,
@@ -62,8 +55,7 @@ const sealed = {
       ops: entriesOf(desired).map((entry) => ({
         role: "put" as const,
         params: { secret_name: entry.name },
-        // A fresh closure on every planning pass: the helper must compare
-        // operation identity, not function references.
+        // A fresh closure on every pass: the helper must compare operation identity, not function references.
         payload: (exec: ExecTools) => ({ encrypted_value: exec.resolveSecret(entry.value) }),
         drift: [],
         change: `${live.some((s) => s.name === entry.name) ? "updated" : "created"} secret "${entry.name}"`,
@@ -75,10 +67,8 @@ const sealed = {
 } satisfies SectionModule<"actions_secrets", typeof SEALED_ENDPOINTS>;
 
 /**
- * The non-converging posture: a conditional write whose live read never
- * shows the result (the fake's list stays empty), so every pass re-plans a
- * drift-bearing write. This is what a section comparing the wrong live
- * field looks like, and the proof must reject it.
+ * The non-converging posture: a conditional write whose live read never shows the result, so every pass re-plans a drift-bearing write; this is what
+ * a section comparing the wrong live field looks like.
  */
 const stuck = {
   ...META,
@@ -146,8 +136,6 @@ describe("provePlanIdempotent", () => {
       DESIRED,
       TOOLS,
     );
-    // The same write on both passes: the list already holds the secret, so the
-    // change line reads "updated" each time.
     const facets = (ops: typeof first.ops) =>
       ops.map((op) => [op.role, op.params, op.drift, op.change]);
     const recurring = [
@@ -155,8 +143,6 @@ describe("provePlanIdempotent", () => {
     ];
     expect(facets(first.ops)).toEqual(recurring);
     expect(facets(second.ops)).toEqual(recurring);
-    // Each pass built its own thunk; the proof passes because it compares
-    // operation identity, not function references.
     expect(typeof first.ops[0]?.payload).toBe("function");
     expect(first.ops[0]?.payload).not.toBe(second.ops[0]?.payload);
   });
@@ -174,9 +160,8 @@ describe("provePlanIdempotent", () => {
   });
 
   test("an alwaysRewrite operation whose request changes between passes fails the proof", async () => {
-    // The write recurs, but not the SAME write: a payload that differs on
-    // the second pass is a section deriving request data from state it
-    // should not see, so the role-and-params match alone must not pass it.
+    // The write recurs but not the SAME write: a payload differing on the second pass is a section deriving request data from state it should not
+    // see.
     let pass = 0;
     const drifting = {
       ...sealed,
@@ -201,8 +186,6 @@ describe("provePlanIdempotent", () => {
   });
 
   test("an unverifiable operation may recur, even one the first pass did not plan; a plain one that recurs still fails", async () => {
-    // A secret-bearing write over an unverifiable endpoint: the first pass creates (drift-bearing);
-    // each pass after it re-sends under the facet.
     const recurring = {
       ...META,
       endpoints: UNVERIFIABLE_ENDPOINTS,
@@ -237,8 +220,7 @@ describe("provePlanIdempotent", () => {
     expect(second.ops.map((op) => op.drift)).toEqual([
       { unverifiable: "DEPLOY_TOKEN cannot be read back", lines: [] },
     ]);
-    // The controls: the same recurrence without the facet, and the facet
-    // still carrying a drift line, are both sections that do not converge.
+    // The controls: the same recurrence without the facet, and the facet still carrying a drift line, are both sections that do not converge.
     const redrifted = (
       drift: (name: string) => PlannedOp<typeof UNVERIFIABLE_ENDPOINTS>["drift"],
     ) =>
@@ -301,8 +283,7 @@ describe("identityOf", () => {
     };
     expect(identityOf(rebuilt)).toEqual(identityOf(again));
     expect(identityOf(rebuilt)).not.toEqual(identityOf(base));
-    // No literal can spell the marker: a change line reading like one is
-    // still a string, not a thunk.
+    // No literal can spell the marker: a change line reading like one is still a string, not a thunk.
     const spelled: Op = { ...base, change: "<sealed>" };
     const thunk: Op = { ...base, change: () => "<sealed>" };
     expect(identityOf(spelled)).not.toEqual(identityOf(thunk));

@@ -11,8 +11,7 @@ const LABEL = 'the secret entry "TEST_ENTRY"';
 
 describe("validateSecretRef (syntax phase, never reads the environment)", () => {
   test("a whole-value $NAME reference from an operator source is accepted", () => {
-    // No environment is in scope at all: the function takes none, so accepting
-    // here proves syntax validation cannot depend on a variable being set.
+    // The function takes no environment, so accepting here proves syntax validation cannot depend on a variable being set.
     const result = validateSecretRef("$WEBHOOK_SECRET", "operator", LABEL);
     expect(result.ok).toBe(true);
     expect(result.ok && result.ref.name).toBe("WEBHOOK_SECRET");
@@ -70,8 +69,7 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
   });
 
   test("the target boundary precedes the reserved check", () => {
-    // A target-sourced reserved name must be refused for the routing reason,
-    // so the error explains the boundary rather than the lesser rule.
+    // A target-sourced reserved name is refused for the routing reason, so the error explains the boundary rather than the lesser rule.
     const result = validateSecretRef("$GITHUB_TOKEN", "target", LABEL);
     expect(result.ok).toBe(false);
     if (result.ok) {
@@ -201,9 +199,7 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
   });
 
   test("a mixed batch cannot launder a target reference behind operator ones", () => {
-    // Every value carries its own provenance, so one resolution can span
-    // documents: the operator's reference resolves while the target's is
-    // refused, and the whole batch fails.
+    // Every value carries its own provenance, so one resolution can span documents and the whole batch fails on the target's.
     const result = resolveSecretRefs(
       [operator("$FLEET_SECRET"), { value: "$FLEET_SECRET", label: LABEL, source: "target" }],
       { FLEET_SECRET: "fleet-value" },

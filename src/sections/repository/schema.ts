@@ -3,10 +3,9 @@
 import { z } from "zod";
 
 /**
- * Cycle-safe description of a rejected toggle value for shape errors:
- * scalars verbatim (strings quoted, so a YAML "no" stays visibly a string),
- * containers by kind only - JSON.stringify on an arbitrary YAML value would
- * throw on a cyclic alias and kill the run before the normal failure path.
+ * JSON.stringify on an arbitrary YAML value would throw on a cyclic alias and kill the run before
+ * the normal failure path, so containers describe by kind only; strings stay quoted so a YAML "no"
+ * is visibly a string.
  */
 function describeToggleValue(value: unknown): string {
   if (value === null) {
@@ -24,7 +23,6 @@ function describeToggleValue(value: unknown): string {
   return String(value);
 }
 
-/** A boolean whose error names the YAML string-vs-boolean gotcha. */
 function repositoryToggle() {
   return z
     .boolean({

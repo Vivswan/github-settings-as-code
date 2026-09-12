@@ -1,11 +1,6 @@
 /**
- * The shared pin for one sealed-secret family minted by repoSecretsSection():
- * its routes under the family's path segment, its noun in output lines, and
- * the keep-by-default posture. Engine behavior (existence planning, sealing,
- * the resolver contract) is pinned by secrets-engine.test.ts and the
- * actions_secrets section tests. Each section directory keeps a thin test
- * file invoking this, so the diff-aware CI selector still maps the section's
- * tests to its key.
+ * The shared pin for one sealed-secret family minted by repoSecretsSection(); each section directory keeps a thin test invoking this, so the
+ * diff-aware CI selector still maps the section's tests to its key.
  */
 
 import { describe, expect, test } from "bun:test";

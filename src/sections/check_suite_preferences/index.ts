@@ -27,13 +27,13 @@ export const checkSuitePreferencesSection = {
   grantCaveat:
     "the token owner must be a repository administrator, and with no read endpoint there is nothing to preflight - a denied write surfaces only after other sections' writes landed",
   endpoints: ENDPOINTS,
-  // Loose on purpose: the PATCH forwards the object verbatim, so future
-  // fields ride along at both levels; only the natural pair is checked.
+  // Loose on purpose: the PATCH forwards the object verbatim, so future fields ride along at both
+  // levels; only the natural pair is checked.
   shape: loosen(CheckSuitePreferencesConfig),
   async plan(_ctx, desired) {
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    // Derived, not restated: writeOnlyCheckNote proves against ENDPOINTS
-    // that no read exists, so this claim cannot outlive the declarations.
+    // Derived, not restated: writeOnlyCheckNote proves against ENDPOINTS that no read exists, so
+    // this claim cannot outlive the declarations.
     plan.notes.push(
       writeOnlyCheckNote(this, {
         resource: "check suite preferences",
@@ -46,8 +46,6 @@ export const checkSuitePreferencesSection = {
       describe: "setting check suite preferences",
       drift: [],
       change: (response) => {
-        // Counts the ECHOED preferences (what GitHub now holds); the declared
-        // list is the fallback only when the echo loses its shape.
         const echoed = (response as { preferences?: { auto_trigger_checks?: unknown } } | null)
           ?.preferences?.auto_trigger_checks;
         const count = Array.isArray(echoed) ? echoed.length : desired.auto_trigger_checks.length;

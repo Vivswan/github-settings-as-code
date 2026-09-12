@@ -39,9 +39,8 @@ describe("sectionOperations", () => {
   };
 
   test("flattens BOTH dictionaries, so a GraphQL-read-only section is not read-free", () => {
-    // The shape the oracle's NO_READ_SECTIONS derivation must never misread:
-    // zero REST endpoints, one GraphQL read. A derivation walking
-    // section.endpoints alone would call this section read-free.
+    // The shape the oracle's NO_READ_SECTIONS derivation must never misread: a derivation walking section.endpoints alone would call this section
+    // read-free.
     const graphqlOnly: SectionMeta = {
       key: "repository",
       permission: { repo: ["administration"] },
@@ -61,14 +60,8 @@ describe("sectionOperations", () => {
   });
 
   test("every REST endpoint and GraphQL operation of a real section appears exactly once", () => {
-    // repositorySection carries BOTH dictionaries, so the GraphQL half of
-    // the flattening binds (a section without `graphql` would prove only the
-    // REST half). The rows are spelled out: `role` carries each operation's
-    // identity, so a duplicated entry canceling an omitted one with the SAME
-    // {wire, grade, permission} tuple still fails on content. No repository
-    // endpoint overrides accessGrade, so wire and grade coincide here; the
-    // override split is pinned by the overrides test below. Declaration order
-    // is not part of the contract, so both sides are compared sorted by role.
+    // repositorySection carries BOTH dictionaries, so the GraphQL half of the flattening binds. Rows are spelled out by role so a duplicate canceling
+    // an omission still fails; declaration order is not part of the contract.
     expect(Object.keys(repositorySection.graphql ?? {}).length).toBeGreaterThan(0);
     const admin = { repo: ["administration"] } as const;
     const row = (role: string, kind: "read" | "write") =>
@@ -126,10 +119,8 @@ describe("sectionOperations", () => {
   });
 
   test("an execution-phase read is not a planning read: a section with only that read plans read-free", () => {
-    // The shape a write-only section gains when a mutation input needs a node
-    // id: check mode and preflight never meet the lookup, so the gating,
-    // the posture (no primaryRead to declare), and the oracle's no-read set
-    // all read the section as one that issues no read while planning.
+    // The shape a write-only section gains when a mutation input needs a node id: check mode and preflight never meet the lookup, so gating, posture,
+    // and the oracle's no-read set all read it as read-free.
     const writeWithLookup = {
       key: "repository",
       permission: { repo: ["administration"] },
@@ -205,8 +196,7 @@ describe("readGating", () => {
   });
 
   test("accessGrade is representable on a GET only", () => {
-    // A mutating route is write-graded by its method, so the override there
-    // is a redundant state: the EndpointDecl arms make it fail to compile.
+    // A mutating route is write-graded by its method, so the override there is a redundant state the EndpointDecl arms refuse.
     const mutating: EndpointDecl = {
       route: "PUT /repos/{owner}/{repo}/interaction-limits",
       statuses: { 200: "x" },
@@ -222,8 +212,7 @@ describe("readGating", () => {
   });
 
   test("the recurrence flags are representable on a write only, one at a time", () => {
-    // A read has no second-apply behaviour to declare, and one write cannot both recur by contract
-    // and merely be allowed to; the EndpointDecl arms make each combination fail to compile.
+    // A read has no second-apply behaviour to declare, and one write cannot both recur by contract and merely be allowed to.
     const rewritten: EndpointDecl = { ...put, alwaysRewrite: true };
     const unverifiable: EndpointDecl = { ...put, unverifiable: true };
     expect([rewritten.alwaysRewrite, unverifiable.unverifiable]).toEqual([true, true]);
@@ -272,9 +261,8 @@ describe("readGating", () => {
   });
 
   test("the registered sections agree on which reads GitHub gates at write", () => {
-    // The fuzz oracle and the permissions docs both read this classification;
-    // interaction_limits mixes its plain base-limit GET with the gated cap
-    // and bypass-list GETs (GitHub's fine-grained permission table).
+    // The fuzz oracle and the permissions docs both read this classification; interaction_limits mixes its plain base-limit GET with the gated cap
+    // and bypass-list GETs.
     const gated = SECTIONS.filter((s) => readGating(s) !== "plain").map((s) => [
       s.key,
       readGating(s),
@@ -325,8 +313,7 @@ describe("throwFor context enrichment", () => {
   });
 
   test("a GraphQL rejection appends the declared outcome prose of each observed error type; undeclared types add nothing", () => {
-    // The GraphQL twin of the status-keyed REST hint (a GraphQL op cannot
-    // declare one; its type forbids it).
+    // The GraphQL twin of the status-keyed REST hint, which a GraphQL op's type forbids.
     const op = {
       name: "PinEnvironment",
       kind: "write",
@@ -465,8 +452,7 @@ describe("throwFor context enrichment", () => {
   });
 
   test("the rate-limit and 5xx branches render their own advice without the hint", () => {
-    // A 5xx-keyed hint is unrepresentable (HintableStatus), so the fixture
-    // carries a 422 one; each branch throws its own advice without it.
+    // A 5xx-keyed hint is unrepresentable (HintableStatus), so the fixture carries a 422 one.
     const hinted = { op: endpoint({ hints: { 422: "never rendered here" } }) };
     expect(() =>
       throwFor(
@@ -510,20 +496,16 @@ describe("throwFor context enrichment", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
-    // The synthetic override has no sibling in the rulesets section carrying
-    // the same permission, so the sibling scan finds no write and the advice
-    // asks for read - what matters here is the RESOURCE: the endpoint's own
-    // grant renders, never the section's.
+    // No rulesets sibling carries the synthetic permission, so the sibling scan finds no write and advises read; what matters is the RESOURCE: the
+    // endpoint's own grant renders, never the section's.
     expect((thrown as PermissionDenied).detail).toBe(
       'the token was denied POST /repos/o/r/actions/oidc/customization/sub: 403 Resource not accessible. To fix, grant "Actions" (read) under the PAT\'s Repository permissions',
     );
   });
 
   test("override advice grades by the section's need: a write sibling on the same permission advises write", () => {
-    // The real OIDC pair: the failing call is the GET, but putOidcSub writes
-    // with the same Actions permission, so read-only advice would cost a
-    // second round trip (grant read, pass the read-only preflight, fail on
-    // the write). The sibling scan restores the write-level advice.
+    // The failing call is the GET, but putOidcSub writes with the same Actions permission; read-only advice would cost a second round trip (grant
+    // read, pass preflight, fail on the write).
     let thrown: unknown;
     try {
       throwFor(
@@ -543,9 +525,8 @@ describe("throwFor context enrichment", () => {
   });
 
   test("override advice grades by the section's need: a read-only permission advises read", () => {
-    // The real branch-policy list: its write siblings (create/remove) carry
-    // Administration, a DIFFERENT permission, so the Actions grant is only
-    // ever read for this section and the advice matches the Sections table's PAT cell.
+    // The write siblings (create/remove) carry Administration, a DIFFERENT permission, so Actions is only ever read here and the advice matches the
+    // Sections table's PAT cell.
     let thrown: unknown;
     try {
       throwFor(
@@ -569,9 +550,7 @@ describe("throwFor context enrichment", () => {
   });
 
   test('a public endpoint ("none") cannot be a missing-grant failure', () => {
-    // A denied PUBLIC endpoint is by definition not about the token's
-    // grants, so the 403 takes the generic branch instead of rendering
-    // grant advice that cannot help.
+    // A denied PUBLIC endpoint is not about the token's grants, so grant advice cannot help.
     let thrown: unknown;
     try {
       throwFor(
@@ -591,12 +570,8 @@ describe("throwFor context enrichment", () => {
   });
 
   test("a no-override denial keeps the section grant's caveat", () => {
-    // sectionGrant(section) and grantFor(effective) coincide for a caveat-free
-    // section, so only a caveat-bearing one can pin the difference: the
-    // no-override path must render the section grant (caveat included), and a
-    // refactor that re-derives the grant from the resolved permission
-    // would silently drop every caveat while caveat-free fixtures stay
-    // green.
+    // sectionGrant(section) and grantFor(effective) coincide for a caveat-free section, so only a caveat-bearing one catches a refactor that
+    // re-derives the grant from the resolved permission and drops every caveat.
     let thrown: unknown;
     const noOverride: EndpointDecl = {
       route: "GET /repos/{owner}/{repo}/actions/permissions",
@@ -713,25 +688,20 @@ describe("planContext read port", () => {
         probe: { call(variables: Record<string, unknown>): Promise<unknown> };
       };
     };
-    // The bound port is built; now rewrite both declarations into writes.
     (endpoints.list as { route: string }).route = "DELETE /repos/{owner}/{repo}/labels";
     (graphql.probe as { kind: string }).kind = "write";
     await ctx.read.list.call();
     await ctx.read.probe.call({ owner: "o", repo: "r" });
-    // Both requests went out as the ORIGINAL reads; the mutations never left.
     expect(api.calls.map((c) => `${c.method} ${c.path} ${c.graphqlKind ?? ""}`.trim())).toEqual([
       "GET /repos/o/r/labels",
       "GRAPHQL PortProbe read",
     ]);
     expect(api.mutations()).toEqual([]);
-    // The port itself is sealed too: no role can be swapped in after binding.
     expect(Object.isFrozen(ctx.read)).toBe(true);
   });
 
   test("an advisory read exposes only tryCall, which tolerates every error status", async () => {
-    // No failure on an advisory read may abort the section: the port offers
-    // neither a must-succeed call nor an absence probe (a 500 is not
-    // "absent"), and tryCall hands every status back to interpret.
+    // No failure on an advisory read may abort the section, and a 500 is not "absent", so the port offers only tryCall.
     const advisory = {
       key: "branches",
       permission: { repo: ["administration"] },
@@ -778,8 +748,7 @@ describe("planContext read port", () => {
   });
 
   test("advisory wins over a primaryRead posture on the same declaration", () => {
-    // Compile-time only: the advisory arm is tested first, so a "denied"
-    // posture cannot hand a must-succeed call back to an advisory read.
+    // Compile-time only: the advisory arm is tested first, so a "denied" posture cannot hand a must-succeed call to an advisory read.
     const both = {
       key: "branches",
       permission: { repo: ["administration"] },
@@ -837,8 +806,7 @@ describe("planContext read port", () => {
         throw new Error("no secrets here");
       },
     };
-    // The first parameter is the token; a plan() body, holding none, cannot
-    // spell the call. The ungated read beside them is the control.
+    // A plan() body holds no token, so it cannot spell the call; the ungated read beside them is the control.
     // @ts-expect-error a request options object is not the token
     const forgedRest: Parameters<typeof ctx.read.app.call>[0] = { params: { app_slug: "x" } };
     // @ts-expect-error the variables are not the token either
@@ -861,9 +829,6 @@ describe("planContext read port", () => {
 
 describe("plainData", () => {
   test("accepts a parsed-YAML shape and returns it as is", () => {
-    // Nested mappings and lists, null, and an omitted optional field
-    // (undefined under a key, which JSON drops) are all what a settings file
-    // parses to.
     const shape = {
       name: "x",
       enabled: true,
@@ -894,8 +859,7 @@ describe("plainData", () => {
       `${BUG}list[0]: an undefined list item, which JSON would turn into null${PLAIN}`,
     ],
     ["undefined at the root", undefined, `${BUG}(root): undefined, which has no JSON form${PLAIN}`],
-    // Keys that are not bare identifiers render bracketed, so a dotted key
-    // and a nested key cannot read the same.
+    // Keys that are not bare identifiers render bracketed, so a dotted key and a nested key cannot read the same.
     ["a value under a dotted key", { "a.b": { c: 1n } }, `${BUG}["a.b"].c: a bigint${PLAIN}`],
     ["a value under an empty key", { "": 1n }, `${BUG}[""]: a bigint${PLAIN}`],
     [
@@ -956,7 +920,6 @@ describe("hasDrift", () => {
     expect(hasDrift([])).toBe(false);
     expect(hasDrift(lines)).toBe(true);
     if (hasDrift(lines)) {
-      // Under the guard the head is a string, not string | undefined.
       const [head] = lines;
       expect(head).toBe("labels[bug]: color d73a4a != live ffffff");
     }
@@ -975,8 +938,7 @@ describe("declaredTolerance", () => {
   });
 
   test("an explicit list may only name declared tolerable statuses", () => {
-    // Only an erased caller can spell these; each is refused before any
-    // request could leave, naming the offending status.
+    // Only an erased caller can spell these; each is refused before any request could leave.
     for (const status of [422, 200, 401, 500]) {
       expect(() => declaredTolerance(endpoint, [status])).toThrow(
         new Error(
@@ -1018,9 +980,6 @@ describe("declaredTolerance", () => {
 });
 
 describe("tryCallDeclared", () => {
-  // The erased tolerant core takes its tolerance as a resolved predicate
-  // (declaredTolerance); the plan executor reaches it with a planned
-  // operation's own.
   const ctx = { repo: { owner: "o", name: "r", slug: "o/r" }, check: false as const };
   const endpoint: EndpointDecl = {
     route: "PATCH /repos/{owner}/{repo}/code-quality/setup",
@@ -1058,9 +1017,7 @@ describe("tryCallDeclared", () => {
   });
 
   test("a rate limit is never a tolerated outcome, even under a tolerated 403", async () => {
-    // A rate limit is a transport failure whatever status carries it, so it
-    // classifies through throwFor's rate-limit branch; the control shows an
-    // ordinary 403 under the same tolerance is handed back.
+    // A rate limit is a transport failure whatever status carries it; the control shows an ordinary 403 under the same tolerance is handed back.
     const declares403 = {
       route: "GET /repos/{owner}/{repo}/pages",
       statuses: { 200: "the site", 403: "forbidden", 404: "no site" },
@@ -1154,8 +1111,7 @@ describe("samePermission", () => {
   });
 
   test("an override restating the section's permission as a separate literal keeps the caveat", () => {
-    // Equal by structure, distinct by identity: an identity comparison would
-    // take the override path and render a caveat-free grant.
+    // Equal by structure, distinct by identity: an identity comparison would take the override path and render a caveat-free grant.
     const restated: EndpointDecl = {
       route: "GET /repos/{owner}/{repo}/actions/permissions",
       statuses: { 200: "x" },

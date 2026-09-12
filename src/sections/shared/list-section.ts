@@ -36,31 +36,25 @@ import { knobbed } from "./schema-helpers.js";
 /** A list section enumerates its live resources, so it is exactly a section with an undeclared policy. */
 export type ListSectionKey = UndeclaredPolicySection;
 
-/** The declared value of a list section, exactly as the settings document types it. */
 type Declared<K extends ListSectionKey> = Exclude<SettingsFile[K], undefined>;
 
-/** One declared entry of a list section, whichever form the value takes. */
 type Entry<K extends ListSectionKey> = EntryOf<NonNullable<SettingsFile[K]>>;
 
-/** The routes of a method whose only path params are owner and repo: the collection routes. */
 type Paramless<R extends Route> = R extends Route
   ? [PathParams<R>] extends [never]
     ? R
     : never
   : never;
 
-/** The role editing one live item in place. */
 type UpdateDecl = EndpointDecl & {
   readonly route: Extract<Route, `PATCH ${string}` | `PUT ${string}`>;
 };
 
-/** The role deleting one live item. */
 type RemoveDecl = EndpointDecl & { readonly route: Extract<Route, `DELETE ${string}`> };
 
 /**
- * The roles: list and create address the collection, remove one item, and update - one item in place -
- * only when GitHub can edit the resource; without it a drifted item is deleted and recreated. The list is
- * the primary read in the "denied" posture. A type alias, so it keeps EndpointDict's index signature.
+ * `update` exists only when GitHub can edit the resource; without it a drifted item is deleted and
+ * recreated. A type alias, so it keeps EndpointDict's index signature.
  */
 export type ListEndpoints = {
   readonly list: EndpointDecl & {
@@ -73,7 +67,6 @@ export type ListEndpoints = {
   | { readonly update: UpdateDecl; readonly remove: RemoveDecl }
 );
 
-/** The role names the factory serves and derives handlers for. */
 export type ListRoleName = "list" | "create" | "update" | "remove";
 
 type UnionToIntersection<U> = (U extends unknown ? (member: U) => void : never) extends (
@@ -82,24 +75,23 @@ type UnionToIntersection<U> = (U extends unknown ? (member: U) => void : never) 
   ? I
   : never;
 
-/** True for a union: only a single type is assignable to the intersection of its own members. */
 type IsUnion<T> = [T] extends [UnionToIntersection<T>] ? false : true;
 
 /**
- * Pins a dictionary to the factory's roles at the declaration: ONE literal dictionary (a union hides
- * its members' roles from keyof, so it is refused), no fifth role, and any `update` is a PATCH or PUT
- * (a DELETE would pass the immutable arm's structural match). An intersection: the index signature stays.
+ * Pins a dictionary to the factory's roles at the declaration. An intersection, so the index signature stays.
+ *
+ *   a union of dictionaries    -> refused (a union hides its members' roles from keyof)
+ *   a fifth role               -> never
+ *   `update` not PATCH or PUT  -> refused (a DELETE would pass the immutable arm's structural match)
  */
 type OnlyListRoles<Ends> = (IsUnion<Ends> extends true ? never : unknown) & {
   readonly [R in Exclude<keyof Ends, ListRoleName>]: never;
 } & { readonly [R in keyof Ends & "update"]: UpdateDecl };
 
-/** The update declaration of a dictionary, or undefined for a resource GitHub cannot edit. */
 export function updateRole(endpoints: ListEndpoints): UpdateDecl | undefined {
   return "update" in endpoints ? endpoints.update : undefined;
 }
 
-/** The address params two item routes agree on; never when they spell different params. */
 type SameParams<A extends string, B extends string> = [PathParams<A>] extends [PathParams<B>]
   ? [PathParams<B>] extends [PathParams<A>]
     ? Readonly<Record<PathParams<A>, string>>
@@ -107,8 +99,8 @@ type SameParams<A extends string, B extends string> = [PathParams<A>] extends [P
   : never;
 
 /**
- * The path params addressing one live item. One address serves update and remove, so when both
- * exist they must spell the SAME params; a dictionary whose item routes disagree collapses to never.
+ * One address serves update and remove, so when both exist they must spell the SAME params; a dictionary
+ * whose item routes disagree collapses to never.
  */
 type Address<Ends extends ListEndpoints> = Ends extends {
   readonly update: { readonly route: infer U extends string };
@@ -116,11 +108,7 @@ type Address<Ends extends ListEndpoints> = Ends extends {
   ? SameParams<U, Ends["remove"]["route"]>
   : Readonly<Record<PathParams<Ends["remove"]["route"]>, string>>;
 
-/**
- * An entry in wire terms: the JSON-plain body a create sends, carrying the
- * identity field as a string. Declared fields only - an omitted optional
- * stays OUT (never undefined), so it is neither written nor compared.
- */
+/** Declared fields only: an omitted optional stays OUT (never undefined), so it is neither written nor compared. */
 type Write<F extends string> = { readonly [P in F]: string } & {
   readonly [key: string]: PlainData;
 };
@@ -130,13 +118,11 @@ type Comparable<F extends string> = { readonly [P in F]: string } & Readonly<
   Record<string, unknown>
 >;
 
-/** The wording knobs of the keep-note beyond its derived subject and action. */
 type NoteWording = Pick<Parameters<typeof undeclaredNote>[0], "state" | "add" | "manage">;
 
-/** The wording knobs of the delete drift beyond its derived label and action. */
 type DriftWording = Pick<Parameters<typeof undeclaredDrift>[1], "state" | "add" | "keep">;
 
-/** How the list read is issued; both facets also drive the derived mock's list handler. */
+/** `unpaginated` also drives the derived mock's list handler (test/e2e/mock/list-fragment.ts). */
 interface Listing {
   /** The query the list carries (milestones' state=all: the default listing omits closed items). */
   readonly query?: Readonly<Record<string, string>>;
@@ -167,15 +153,16 @@ export interface ListSectionDecl<
     /** Folds a name to its matching key; omitted when GitHub matches exactly. */
     readonly fold?: (name: string) => string;
     /**
-     * Names an entry also answers to (a label's pre-rename `name`), so a live
-     * item under one is this entry's - renamed by the update - not undeclared.
+     * Names an entry also answers to (a label's pre-rename `name`), so a live item under one is this
+     * entry's, renamed by the update, not undeclared.
      */
     readonly aliases?: (entry: Entry<K>) => readonly string[];
     /**
-     * The update body's key for the name when GitHub renames through another
-     * one (labels' `new_name`); omitted, the name travels under `field`. An
-     * entry declaring a value under it is renaming: that value is the name it
-     * writes (the lens carries it under `field`), and `field` its current one.
+     * The update body's key for the name when GitHub renames through another one (labels' `new_name`);
+     * omitted, the name travels under `field`.
+     *
+     *   entry declares a value under it  -> it is renaming: that value is the name it writes (the lens puts it under `field`)
+     *   the entry's `field`              -> its current name
      */
     readonly renameKey?: string;
   };
@@ -185,9 +172,11 @@ export interface ListSectionDecl<
     /** The entry in wire terms: the create body, and what a converged live item reads back as. */
     readonly toWrite: (entry: Entry<K>) => Write<F>;
     /**
-     * A live item in the same terms, each field normalized as GitHub stores it (a color lowercased
-     * without "#", a null description as ""), the identity field verbatim, and every other live
-     * field kept so declared passthrough keys compare against what the API echoed.
+     * A live item in the same terms as toWrite, so the two compare field by field.
+     *
+     *   identity field          -> verbatim
+     *   other declared fields   -> normalized as GitHub stores them (a color lowercased without "#", a null description as "")
+     *   every other live field  -> kept, so declared passthrough keys compare against what the API echoed
      */
     readonly fromLive: (live: Live) => Comparable<F>;
     /** Per entry field holding a list, the item key to pair by (see DeltaOptions.matchBy); `{}` when none does. */
@@ -202,8 +191,9 @@ export interface ListSectionDecl<
     : (live: Live, write: Write<F>) => Write<F>;
   /**
    * Conflicts the identities cannot show, one line each naming the fix; any line fails the section.
-   * `declared` sees only the entries and runs BEFORE the read (a settings-file mistake costs no
-   * request); `live` runs after it and before any write (a deploy key's material held by another key).
+   *
+   *   `declared`  -> sees only the entries and runs BEFORE the read (a settings-file mistake costs no request)
+   *   `live`      -> runs after the read and before any write (a deploy key's material held by another key)
    */
   readonly conflicts?: {
     readonly declared?: (writes: readonly Write<F>[]) => readonly string[];
@@ -221,10 +211,8 @@ export interface ListSectionDecl<
   /** The designated secret-field values of one entry, for the engine's up-front resolution. */
   readonly secretValues?: (entry: Entry<K>) => readonly DeclaredSecretValue[];
   /**
-   * How two entries the layered merge pairs combine; omitted, the list always
-   * replaces. The pairing itself is not declared here: the factory derives it
-   * from `identity`, the very claims the planner's duplicate check reads, so
-   * the merge and the planner cannot disagree about which entries are one.
+   * Omitted, the list always replaces. The pairing itself is derived from `identity`, the very claims the
+   * planner's duplicate check reads, so the merge and the planner cannot disagree about which entries are one.
    */
   readonly layering?: Pick<KeyedListLayering, "combine">;
 }
@@ -251,10 +239,7 @@ export interface ListSectionModule<
   readonly decl: ListSectionDecl<K, Ends, Live, F>;
 }
 
-/**
- * The declaration as the planner reads it, entries and live items erased to
- * objects; the planner only hands them back to the declaration's own functions.
- */
+/** Entries and live items erased to objects; the planner only hands them back to the declaration's own functions. */
 interface ErasedDecl {
   readonly key: ListSectionKey;
   readonly noun: string;
@@ -285,13 +270,9 @@ interface ErasedDecl {
   readonly secretValues?: (entry: object) => readonly DeclaredSecretValue[];
 }
 
-/** A declared value in the erased view: the entry list, plain or wrapped. */
 type ErasedDeclared = readonly object[] | UndeclaredPolicyList<object>;
 
-/**
- * What apply does about a drifted item, as the drift lines spell it: an update sets values in
- * place, a recreate names its remedy once on the generic line, so the field lines carry none.
- */
+/** A recreate names its remedy once on the generic line, so its field lines carry none. */
 interface Remedies {
   readonly value: string;
   readonly rename: string;
@@ -311,12 +292,9 @@ const RECREATE_REMEDIES: Remedies = {
 };
 
 /**
- * Every identity one entry claims, folded: the name it writes (its rename
- * key's value when it declares one, else its identity field) and each alias.
- * The ONE derivation behind both the planner's duplicate check and the
- * layered merge's pairing. Total over raw records because the merge reads
- * layers before validation: null when a claimed name is not a string, which
- * the merge refuses at its boundary and a validated entry never is.
+ * The ONE derivation behind the planner's duplicate check and the layered merge's pairing. Total over raw
+ * records because the merge reads layers before validation: null when a claimed name is not a string,
+ * which the merge refuses and a validated entry never is.
  */
 function identityClaims(
   identity: ErasedDecl["identity"],
@@ -331,7 +309,7 @@ function identityClaims(
   return [...new Set(names.map(fold))];
 }
 
-/** The identity field of a write or comparable: typed string by the declaration, checked once in the erased view. */
+/** The erased view lost the declaration's string typing, so the check happens once here. */
 function nameOf(record: Readonly<Record<string, unknown>>, field: string): string {
   const value = record[field];
   if (typeof value !== "string") {
@@ -342,16 +320,10 @@ function nameOf(record: Readonly<Record<string, unknown>>, field: string): strin
   return value;
 }
 
-/** The check-mode line for a declared entry the listing does not carry. */
 function missingLine(label: string): string {
   return `${label}: missing - declared in the settings file but not on the repo; apply will create it`;
 }
 
-/**
- * One entry-level delta as drift prose: the identity field diverging under an
- * equal key is a rename, another top-level scalar names both values, and
- * everything else is the shared delta rendering under the entry's label.
- */
 function renderEntryDelta(
   sectionKey: string,
   field: string,
@@ -372,7 +344,6 @@ function renderEntryDelta(
   return renderDelta(label, delta);
 }
 
-/** The update body: the write with its identity under the rename key when GitHub renames through one. */
 function updateBody(decl: ErasedDecl, write: Write<string>): PlainData {
   const { renameKey, field } = decl.identity;
   if (renameKey === undefined) {
@@ -382,7 +353,6 @@ function updateBody(decl: ErasedDecl, write: Write<string>): PlainData {
   return plainData({ [renameKey]: nameOf(write, field), ...rest });
 }
 
-/** The list read as the declaration issues it: the whole list at once, or every page. */
 async function readList(decl: ErasedDecl, ctx: PlanContext<ListEndpoints>): Promise<unknown> {
   const query = decl.listing?.query;
   return decl.listing?.unpaginated === true
@@ -414,8 +384,7 @@ async function planList(
     }
     return { write, name, claims };
   });
-  // Every identity an entry claims must be its alone: two entries resolving
-  // to one resource would fight each other on every run.
+  // Every identity an entry claims must be its alone: two entries resolving to one resource would fight on every run.
   rejectDuplicates(
     section,
     writes.flatMap((w) => w.claims.map((claim) => ({ claim, name: w.name }))),
@@ -446,8 +415,7 @@ async function planList(
       `${key}: the settings file conflicts with the live ${noun}s: ${liveConflicts.join("; ")}. Resolve each conflict on GitHub, then re-run`,
     );
   }
-  // Every live item under a folded key: GitHub may hold two items one fold
-  // apart (deploy keys repeat titles), which a single-slot map would hide.
+  // GitHub may hold two items one fold apart (deploy keys repeat titles), which a single-slot map would hide.
   const liveByKey = new Map<string, (typeof liveItems)[number][]>();
   for (const item of liveItems) {
     liveByKey.set(item.key, [...(liveByKey.get(item.key) ?? []), item]);
@@ -490,8 +458,7 @@ async function planList(
       plan.notes.push(phantomNote(label, phantom, noun, remedies.phantom));
     }
     if (update === undefined) {
-      // The differing fields are named on the recreate; the generic line alone
-      // would leave the reader guessing which field (or typo) forces the replace.
+      // The differing fields ride on the recreate; the generic line alone would leave the reader guessing which field forces the replace.
       plan.ops.push(
         {
           role: "remove",
@@ -553,20 +520,18 @@ async function planList(
   return plan;
 }
 
-/** Every entry's designated secret values, labelled by the extractor the declaration supplied. */
 function secretValuesOf(decl: ErasedDecl, declared: ErasedDeclared): DeclaredSecretValue[] {
   const extract = decl.secretValues;
   if (extract === undefined) {
     return [];
   }
-  // The policy is irrelevant here; only the entries are read.
+  // "keep" is a placeholder: only the entries are read.
   return undeclaredPolicy(declared, "keep").entries.flatMap((entry) => [...extract(entry)]);
 }
 
 /**
- * Mint a list section from its declaration. The planner runs over the erased
- * view while the module surface stays typed over the literal dictionary and
- * declared value the registry pins; the casts are that one boundary.
+ * The planner runs over the erased view while the module surface stays typed over the literal dictionary
+ * and declared value the registry pins; the casts are that one boundary.
  */
 export function listSection<
   K extends ListSectionKey,

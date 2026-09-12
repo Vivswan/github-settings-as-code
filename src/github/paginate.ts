@@ -1,22 +1,13 @@
 /**
- * The single page loop behind every list endpoint: the sections'
- * listAll/listAllEnveloped helpers and multi-repo discovery all share it, so
- * pagination behavior can never drift between callers. `extract` adapts the
- * response shape (bare array by default, or an envelope key's list).
- * `perPage` defaults to the standard 100; an endpoint with a smaller
- * documented cap (EndpointDecl.pageSize) passes it so the short-page
- * termination check matches what GitHub actually serves per page.
+ * The single page loop the sections' listAll helpers and discovery share, so pagination cannot drift between them. An
+ * endpoint with a documented cap below 100 (EndpointDecl.pageSize) passes its `perPage` so the short-page termination
+ * check matches what GitHub serves.
  */
 
 import type { ApiError, GithubClient } from "./api.js";
 
 export type PageResult = { items: unknown[] } | { error: ApiError } | { malformed: true };
 
-/**
- * `stop`, when given, is consulted after every page with everything collected
- * so far; returning true ends the walk early with those items. Lookups that
- * only need the first match use it to avoid fetching pages past the answer.
- */
 export async function paginate(
   api: GithubClient,
   path: string,

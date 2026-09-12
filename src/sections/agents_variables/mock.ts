@@ -1,11 +1,7 @@
 /**
- * agents_variables mock fragment: the section's e2e handlers, minted by the
- * shared variables-family factory (support.ts) and registered in
- * test/e2e/mock/sections.ts. Imports only the test-tree leaf seams - the
- * src -> test inversion is deliberate; the bundle entry is src/main.ts, so
- * this file never reaches lib/index.js. The Copilot agents variable store
- * mirrors actions_variables exactly: same GET shape, same uppercase-stored
- * names, same page cap read from the endpoint declaration.
+ * The agents_variables e2e mock fragment, minted by the shared variables-family factory in
+ * test/e2e/mock/support.ts. It imports the test-tree seams on purpose: the bundle entry is
+ * src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {

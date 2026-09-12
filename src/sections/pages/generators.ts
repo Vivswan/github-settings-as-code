@@ -1,8 +1,6 @@
 /**
- * The pages section's fuzz generator fragment, aggregated by
- * test/e2e/generators.ts. Imports only the test-tree leaf seams
- * (gen-support.ts, prng.ts) - the src -> test inversion is deliberate; the
- * bundle entry is src/main.ts, so this file never reaches lib/index.js.
+ * The pages fuzz generator fragment, aggregated by test/e2e/generators.ts. It imports only the
+ * test-tree leaf seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import type { Json } from "../../../test/e2e/gen-support.js";
@@ -12,9 +10,8 @@ export function genPages(rng: Rng): Json | null {
   if (rng.bool(0.25)) {
     return null;
   }
-  // source is required to CREATE Pages (the POST body must carry it), and the
-  // generator never seeds Pages into live state, so every Pages scenario is a
-  // create - always emit source. Other fields are optional extras.
+  // The generator never seeds Pages into live state, so every Pages scenario is a create, and the
+  // create POST must carry source.
   const pages: Json = {
     source: { branch: rng.pick(["main", "gh-pages"]), path: rng.pick(["/", "/docs"]) },
   };

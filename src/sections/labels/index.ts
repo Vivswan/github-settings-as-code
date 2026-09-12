@@ -1,44 +1,27 @@
-/**
- * `labels:` section - Probot parity: upsert declared labels by
- * case-insensitive name (with `new_name` rename support) and DELETE
- * undeclared labels, loudly. The wrapped `_undeclared: keep` form softens
- * the deletion to notes. A list section: everything but the lens and the
- * identity fold derives from the declaration (see ../shared/list-section.ts).
- */
-
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { listSection } from "../shared/list-section.js";
 import { LabelConfig } from "./schema.js";
 
-/**
- * The case-insensitive matching key of a label name, branded so only
- * nameKey() can mint one: matching case-insensitively is this section's
- * whole contract, and the brand makes a map or set keyed by a raw (unfolded)
- * name a compile error instead of a silent case-sensitive lookup.
- */
+/** Case-insensitive matching is the section's whole contract; the brand marks a name as already folded. */
 declare const labelNameKey: unique symbol;
 export type NameKey = string & { readonly [labelNameKey]: true };
 
-/** Case-insensitive key for name-matched resources (labels). */
 export function nameKey(name: string): NameKey {
   return name.toLowerCase() as NameKey;
 }
 
 /**
- * A label color in GitHub's stored form (no leading '#', lowercase),
- * branded so only normalizeColor() can mint one - a color compared or
- * written unfolded would drift forever against the stored form.
+ * GitHub stores colors without the leading '#', lowercase; a color compared or written unfolded
+ * would drift forever against the stored form.
  */
 declare const labelHexColor: unique symbol;
 type HexColor = string & { readonly [labelHexColor]: true };
 
-/** Label colors: GitHub stores them without the leading '#', lowercase. */
 function normalizeColor(color: string): HexColor {
   return color.replace(/^#/, "").toLowerCase() as HexColor;
 }
 
-/** The fields of a live label this section reads; extra fields ride along. */
 const LiveLabel = z.looseObject({
   name: z.string(),
   color: z.string(),
@@ -97,6 +80,5 @@ export const labelsSection = listSection({
     matchBy: {},
   },
   prose: { undeclaredAction: "DELETE it" },
-  // Entries layer by the identity above; a higher same-label entry wins wholesale.
   layering: { combine: "replace" },
 });
