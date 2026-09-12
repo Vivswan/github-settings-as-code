@@ -1,9 +1,6 @@
 /**
- * Structural contract for the nightly e2e workflow's issue path: on failure it
- * files an issue and then dispatches auto-assign with that issue's number, so
- * assignment policy stays in auto-assign rather than the filer. Pins the filer
- * step id, the targeted dispatch, the `actions: write` permission, the graceful
- * dispatch failure, and the auto-assign caller's matching `issue` input.
+ * On failure the nightly files an issue and then dispatches auto-assign with that issue's number, so assignment policy stays in auto-assign rather
+ * than the filer.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -49,24 +46,18 @@ describe("e2e-nightly.yml issue + auto-assign path", () => {
     expect(fileIdx, "no file-fuzz-issue step").toBeGreaterThanOrEqual(0);
     expect(dispatchIdx, "no auto-assign dispatch step").toBeGreaterThan(fileIdx);
     const dispatch = steps[dispatchIdx];
-    // Guard: run only when the filer emitted a non-empty issue-number, so the
-    // dispatch never expands to a bare `-f issue=`.
+    // Gated on a non-empty issue-number, so the dispatch never expands to a bare `-f issue=`.
     expect(dispatch?.if).toContain("failure()");
     expect(dispatch?.if).toContain("steps.file-issue.outputs.issue-number != ''");
-    // The number is passed through a quoted env var, not interpolated into run:.
     expect(dispatch?.env?.ISSUE_NUMBER).toContain("steps.file-issue.outputs.issue-number");
     expect(dispatch?.run).toContain('-f "issue=$ISSUE_NUMBER"');
-    // An interpolation would embed the step-output path in run:; the env-var
-    // approach keeps it out, so run: must not name the step output directly.
     expect(dispatch?.run).not.toContain("steps.file-issue.outputs");
   });
 
   test("tolerates a dispatch failure as a warning, not a job failure", () => {
     const dispatch = steps.find((s) => (s.run ?? "").includes("gh workflow run auto-assign.yml"));
-    // The joined `|| echo "::warning::` shape ties the warning to the failed
-    // dispatch: the echo runs exactly when the dispatch fails, and its zero
-    // exit keeps the step green. Asserting the pieces separately would pass
-    // with the warning detached from the fallback branch.
+    // The joined `|| echo "::warning::` shape ties the warning to the failed dispatch; asserting the pieces separately would pass with the warning
+    // detached from the fallback branch.
     expect(dispatch?.run).toContain('|| echo "::warning::');
   });
 });
@@ -80,8 +71,7 @@ describe("auto-assign.yml caller forwards the dispatched issue", () => {
     const dispatch = wf.on?.workflow_dispatch as
       | { inputs?: Record<string, { required?: boolean; default?: unknown }> }
       | undefined;
-    // Optional with an empty default: the nightly filer always passes a
-    // number, and a bare dispatch must still run the full sweep.
+    // The nightly filer always passes a number, and a bare dispatch must still run the full sweep.
     expect(dispatch?.inputs?.issue).toMatchObject({ required: false, default: "" });
     expect(String(wf.jobs["auto-assign"]?.with?.issue)).toContain("inputs.issue");
   });

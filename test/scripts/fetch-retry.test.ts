@@ -1,9 +1,5 @@
 /**
- * Unit contract for lib/fetch-retry.ts: which failures retry (network
- * errors, timeouts - including mid-body - 5xx, 408, 429), which return
- * immediately (success, plain 4xx), and how exhaustion reports. The fetch
- * and sleep seams are injected, so no test touches the network or waits
- * out a real backoff.
+ * The fetch and sleep seams are injected, so no test touches the network or waits out a real backoff.
  */
 
 import { describe, expect, test } from "bun:test";

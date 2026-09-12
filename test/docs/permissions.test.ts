@@ -1,5 +1,4 @@
-// Hand-written permission prose in permissions.md, pinned to the section declarations; the
-// generated regions (permissions.md, check-mode.md) are covered by gen-action-docs.test.ts.
+// The generated regions (permissions.md, check-mode.md) are covered by gen-action-docs.test.ts.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -23,11 +22,7 @@ function repoLabels(permission: SectionPermission): string[] {
 
 describe("branches Contents advice", () => {
   test("the branches Notes cell and permissions.md advise the branch probe's override grant", () => {
-    // The advisory branch-existence probe carries a Contents permission
-    // override (src/sections/branches/endpoints.ts), advised at the level the section
-    // needs on that permission - the source both prose mentions restate. The
-    // Sections table row renders from the section's authored docs, pinned
-    // here at their source.
+    // The advisory branch-existence probe carries a Contents override (src/sections/branches/endpoints.ts); both prose mentions restate that source.
     const probe = allEndpoints()["branches.branchProbe"];
     const override = probe?.permission;
     expect(override !== undefined && override !== "none").toBe(true);
@@ -40,8 +35,6 @@ describe("branches Contents advice", () => {
       `the branches Notes cell (src/sections/branches/branches.docs.yml) must advise "add ${advice}" for the probe`,
     ).toBe(true);
     expect(notes).toContain("missing branch");
-    // permissions.md restates the same advice as the Contents grant's second
-    // job; the grant name, the section, and what the probe buys must match.
     expect(permissions).toContain(`The ${label} grant earns its keep twice`);
     expect(permissions).toContain(
       "it also lets `branches` tell a missing branch from an unprotected one in check mode",

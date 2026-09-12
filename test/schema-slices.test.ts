@@ -1,12 +1,6 @@
 /**
- * Identity pins for the slice-first schema composition. The type-level
- * SliceDerivation pin in src/schema.ts is structural, so a property rebuilt
- * from a type-identical LOOKALIKE schema (dropping a slice's refinements,
- * say) would still typecheck; this test closes that hole by asserting OBJECT
- * IDENTITY: every SettingsFile property is `.optional()` over the section's
- * own slice export - or, for a knobbed section, over the undeclared knob
- * whose both branches carry the slice as their entry element. Each offender
- * fails by key name.
+ * The type-level SliceDerivation pin in src/schema.ts is structural, so a type-identical LOOKALIKE schema (a slice minus its refinements) would still
+ * typecheck; this asserts OBJECT IDENTITY instead.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -52,11 +46,7 @@ function defOf(schema: z.ZodType): ZodDefView {
   return (schema as unknown as { _zod: { def: ZodDefView } })._zod.def;
 }
 
-/**
- * What each property must be composed from: the slice instance itself, or
- * the knob over the entry slice. Keyed over SectionKey, so a new section
- * fails to compile here until its expectation is declared.
- */
+/** Keyed over SectionKey, so a new section fails to compile here until its expectation is declared. */
 const EXPECTED: Record<
   SectionKey,
   { kind: "slice"; slice: z.ZodType } | { kind: "knob"; entry: z.ZodType }
@@ -104,8 +94,7 @@ describe("SettingsFile slice composition identity", () => {
         ).toBe(true);
         return;
       }
-      // A knobbed section: the inner union is built by knobbed() in root, so
-      // identity holds one level down - both branches carry the entry slice.
+      // knobbed() builds the inner union in root, so identity holds one level down, on both branches' entry element.
       const innerDef = defOf(inner);
       expect(innerDef.type, `${key}: the knobbed property must wrap a union`).toBe("union");
       const options = innerDef.options ?? [];

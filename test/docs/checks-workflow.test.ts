@@ -1,9 +1,3 @@
-/**
- * Workflow contract for the fetched, gitignored test artifacts: one composite owns both caches
- * and miss-gated fetches, no workflow caches one inline, every loading job runs the composite
- * first, and the drift-tripwire nightlies fetch the spec fresh instead.
- */
-
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -50,10 +44,7 @@ const FETCHED_ARTIFACTS: readonly FetchedArtifact[] = [
 ];
 const [OPENAPI, GRAPHQL] = FETCHED_ARTIFACTS as [FetchedArtifact, FetchedArtifact];
 
-/**
- * Jobs whose spec fetch IS the upstream-drift tripwire: they call the script
- * directly and never restore a cache; every other loading job uses the composite.
- */
+/** Jobs whose spec fetch IS the upstream-drift tripwire: they call the script directly and never restore a cache. */
 const UNCACHED_FETCH_JOBS: ReadonlySet<string> = new Set([
   "e2e-nightly.yml#nightly",
   "nightly-fuzz.yml#fuzz",
@@ -76,10 +67,6 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/**
- * The scripts that spawn the bundle against the spec-validating mock: every
- * non-test file that imports the e2e runner, directly or through another.
- */
 function harnessEntrypoints(): string[] {
   const files = ["test/e2e", ".github/scripts"].flatMap((dir) => sourceFilesUnder(join(ROOT, dir)));
   return [...transitiveDependents(reverseImportGraph(files), join(ROOT, "test/e2e/runner.ts"))]
@@ -208,9 +195,8 @@ function hashFilesPatterns(key: string): string[] {
 }
 
 /**
- * The repo-relative .ts files paths.ts imports route data from (compiled .js specifiers mapped
- * back to source). Only single-line static imports are recognized; any other import-ish line
- * fails the assertion below, so an unsupported form extends this parser instead of being skipped.
+ * The .ts files paths.ts imports route data from. Only single-line static imports are recognized; any other import-ish line fails, so an unsupported
+ * form extends this parser instead of being skipped.
  */
 function routeDataImports(): string[] {
   const source = readFileSync(join(ROOT, PATHS_TS), "utf8");
@@ -351,10 +337,6 @@ function installs(run: string | undefined): boolean {
   );
 }
 
-/**
- * A run scalar executing `bun <script>` anywhere the shell would run it: as a command token on
- * an executed line, however wrapped, but not quoted or commented.
- */
 function runsFetch(run: string | undefined, fetchScript: string): boolean {
   const token = new RegExp(`(?:^|[\\s!(;&|])bun ${escapeRegExp(fetchScript)}(?=[\\s;)&|]|$)`);
   return executedLines(run ?? "").some((line) => !line.trim().startsWith("#") && token.test(line));
@@ -651,13 +633,11 @@ describe("the fetch-test-artifacts composite", () => {
   });
 
   test("every hashFiles pattern of every key matches at least one file on disk", () => {
-    // hashFiles() silently skips a pattern that matches nothing (a moved or
-    // renamed input), so the key would stop changing with that input while
-    // the coverage test above still sees the stale pattern string.
+    // hashFiles() silently skips a pattern that matches nothing (a moved input), so the key would stop changing with it while the coverage test still
+    // sees the stale pattern string.
     for (const artifact of FETCHED_ARTIFACTS) {
       for (const pattern of hashFilesPatterns(keyOf(artifact))) {
-        // dot: true because the scripts live under .github/, which the glob
-        // scanner skips by default (hashFiles itself does not).
+        // dot: true because the scripts live under .github/, which the glob scanner skips by default (hashFiles itself does not).
         const matches = [...new Bun.Glob(pattern).scanSync({ cwd: ROOT, dot: true })];
         expect(
           matches.length,
@@ -941,9 +921,8 @@ function expectReleasePrefixes(wf: Workflow): void {
 describe("checks.yml release PR branch spelling", () => {
   const text = readFileSync(join(WORKFLOWS_DIR, "checks.yml"), "utf8");
 
-  // Workflows cannot import the constant, so the head_ref conditions spell
-  // it by hand; a drifted spelling skips the anchor-check on every release
-  // PR instead of failing there.
+  // Workflows cannot import the constant, so the head_ref conditions spell it by hand; a drifted spelling skips the anchor-check on every release PR
+  // instead of failing there.
   test("the anchor-check step is gated on RELEASE_PR_BRANCH_PREFIX and nothing spells it otherwise", () => {
     expectReleasePrefixes(parseYaml(text) as Workflow);
   });

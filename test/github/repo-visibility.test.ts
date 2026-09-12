@@ -30,8 +30,6 @@ describe("createVisibilityResolver", () => {
   });
 
   test("private === true wins over a stale/forged visibility: public", async () => {
-    // Fail closed: a body claiming visibility "public" but private true must
-    // resolve private, never public.
     const api = new MockApi({
       "GET /repos/o/liar": { data: { visibility: "public", private: true } },
     });
@@ -45,8 +43,6 @@ describe("createVisibilityResolver", () => {
     expect(await createVisibilityResolver(api)("o/int")).toBe("internal");
   });
 
-  // The fail-closed negative space of "only an explicit private === false (or
-  // a real visibility) yields public": every near-miss resolves unknown.
   test.each([
     ["a string 'false' private flag", { private: "false" }],
     ["a numeric 0 private flag", { private: 0 }],

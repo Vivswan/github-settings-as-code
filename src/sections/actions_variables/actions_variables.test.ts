@@ -94,7 +94,6 @@ describe("actions_variables", () => {
         {
           role: "update",
           params: { name: "DEPLOY_REGION" },
-          // The update sends the value only.
           payload: { value: "eu-west-1" },
           drift: [
             'actions_variables[DEPLOY_REGION].value: declared "eu-west-1" != live "us-east-1"; apply will set the declared value',
@@ -103,7 +102,6 @@ describe("actions_variables", () => {
         },
         {
           role: "create",
-          // The create sends name + value.
           payload: { name: "BUILD_MODE", value: "release" },
           drift: [
             "actions_variables[BUILD_MODE]: missing - declared in the settings file but not on the repo; apply will create it",
@@ -122,7 +120,6 @@ describe("actions_variables", () => {
       notes: [],
       drift: [],
     });
-    // Planning reads and never writes.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       "GET /repos/o/r/actions/variables?per_page=30&page=1",
     ]);
@@ -209,9 +206,8 @@ describe("actions_variables", () => {
   });
 
   test("the list request asks for the endpoint's 30-per-page cap", async () => {
-    // The variables list caps per_page at 30; a 100 would be silently clamped
-    // and a 30-item first page would wrongly end the walk. The second page
-    // proves the loop continues past a FULL page of 30.
+    // The variables list caps per_page at 30; a 100 would be silently clamped and a 30-item first page would wrongly end the walk, so the second page
+    // proves the loop continues past a full page.
     const page1 = Array.from({ length: 30 }, (_, i) => ({ name: `VAR_${i}`, value: "x" }));
     const api = new MockApi({
       "GET /repos/o/r/actions/variables?per_page=30&page=1": {

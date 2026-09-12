@@ -1,11 +1,3 @@
-/**
- * The GraphQL request helpers and their error classification: callGraphql's
- * throwFor routing (with `GRAPHQL <opName>` in the method/path slot),
- * tryCallGraphql's observed-type tolerance, listGraphqlConnection's cursor
- * loop over its declared connection, and overrideAdviceLevel's awareness of
- * GraphQL writes.
- */
-
 import { describe, expect, test } from "bun:test";
 import { overrideAdviceLevel, PermissionDenied } from "../../src/sections/contract/errors.js";
 import {
@@ -111,8 +103,7 @@ describe("callGraphql", () => {
       ...section,
       graphql: {
         read: op,
-        // A sibling WRITE on the same override permission grades the advice
-        // at write - the overrideAdviceLevel contract, now over GraphQL ops.
+        // A sibling WRITE on the same override permission grades the advice at write (the overrideAdviceLevel contract, over GraphQL ops).
         write: {
           name: "UpdateToggles",
           kind: "write",
@@ -174,9 +165,8 @@ describe("tryCallGraphql tolerance", () => {
   });
 
   test("tolerance reads the observed types, never the folded status", async () => {
-    // The 404 status alone would look like the declared NOT_FOUND, but the
-    // response's actual types include an undeclared sibling: the status fold
-    // is lossy, so the full set must be declared for tolerance to hold.
+    // The 404 status alone would look like the declared NOT_FOUND, but the status fold is lossy: the full observed set must be declared for tolerance
+    // to hold.
     const api = new MockApi({
       "GRAPHQL RepoToggles": {
         error: {
@@ -213,9 +203,7 @@ describe("tryCallGraphql tolerance", () => {
   });
 
   test("an explicit tolerate naming an undeclared outcome does not compile", () => {
-    // graphqlOp preserves the literal `outcomes` keys, so the declared
-    // subset is pinned at the type level (the REST `as const satisfies`
-    // symmetry) - broadening tolerate is a compile error, not a runtime BUG.
+    // graphqlOp preserves the literal `outcomes` keys, so broadening tolerate is a compile error, not a runtime BUG.
     const api = new MockApi({});
     const smuggle = () =>
       tryCallGraphql(
@@ -231,9 +219,7 @@ describe("tryCallGraphql tolerance", () => {
   });
 
   test("a RATE_LIMITED response always classifies as a rate limit", async () => {
-    // RATE_LIMITED is not declarable as an outcome (the type excludes it),
-    // so the observed type can never be tolerated and throwFor's rate-limit
-    // branch renders the advice.
+    // RATE_LIMITED is not declarable as an outcome (the type excludes it), so the observed type can never be tolerated.
     const api = new MockApi({
       "GRAPHQL RepoToggles": {
         error: {
@@ -287,9 +273,7 @@ describe("declaration readers", () => {
   });
 
   test("the annotated-const idiom pins variables shapes at compile time", () => {
-    // Type-level only; the body never runs. The annotation on READ_OP carries
-    // its variables shape through GraphqlVariablesOf, so a missing or
-    // misnamed variable at a helper call site does not compile.
+    // The annotation on READ_OP carries its variables shape through GraphqlVariablesOf.
     const _never = () => {
       const api = new MockApi({});
       // @ts-expect-error - `repo` is missing
@@ -369,9 +353,7 @@ describe("listGraphqlConnection", () => {
   });
 
   test("a declared error outcome comes back as { error } instead of throwing", async () => {
-    // The probeAbsent posture over a connection: an operation declaring
-    // NOT_FOUND (the environments pins read) has a fine-grained denial come
-    // back as a value its caller reads as "resource absent".
+    // The probeAbsent posture over a connection: a fine-grained denial comes back as a value the caller reads as "resource absent".
     const tolerantPaged = {
       ...pagedOp,
       outcomes: { ok: "the rules", NOT_FOUND: "denied reads as absent" },
@@ -391,9 +373,8 @@ describe("listGraphqlConnection", () => {
   });
 
   test("a tolerated type arriving MID-walk still classifies as an error", async () => {
-    // Absence describes the whole resource: a NOT_FOUND after a successful
-    // first page means the connection vanished under the loop, and reading
-    // it as "absent" would silently discard the collected pages.
+    // Absence describes the whole resource: a NOT_FOUND after a successful first page means the connection vanished under the loop, and reading it as
+    // "absent" would discard the collected pages.
     const tolerantPaged = {
       ...pagedOp,
       outcomes: { ok: "the rules", NOT_FOUND: "denied reads as absent" },
@@ -420,8 +401,6 @@ describe("listGraphqlConnection", () => {
   });
 
   test("a query without $cursor does not compile as a paginated read", () => {
-    // The cursor contract moved from listGraphqlConnection's runtime BUG
-    // throw into GraphqlPaginatedReadDecl's query template type.
     // @ts-expect-error - the paginated arm's query type requires $cursor
     const cursorless: GraphqlPaginatedReadDecl = {
       ...READ_OP,

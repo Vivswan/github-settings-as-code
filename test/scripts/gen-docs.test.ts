@@ -1,7 +1,3 @@
-// Unit tests for the docs generator (.github/scripts/gen-docs.ts): each renderer pinned on a small
-// synthetic input, the loud failures, and the whole-file regeneration over the committed COVERAGE
-// and the registered pages, which must be a no-op (build:check's contract, so drift fails here with a diff first).
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -60,8 +56,6 @@ describe("renderSectionsTable", () => {
   });
 
   test("the Undeclared default column is rendered from undeclaredDefault for every policy", () => {
-    // The single source the docs derive deletion claims from: each policy value has exactly one
-    // display form, and the column never comes from authored prose.
     const docs = { sections_table: { endpoints: "e", notes: "n" } };
     const column = (undeclaredDefault: "delete" | "keep" | "untouched"): string | undefined =>
       renderSectionsTable(
@@ -321,8 +315,6 @@ describe("patFormParameters and renderPatFormUrl", () => {
       ],
       slugs,
     );
-    // pages is unconsumed; code_scanning_alerts has no slug but every operation
-    // naming it also accepts administration.
     expect(parameters).toEqual([
       ["administration", "write"],
       ["issues", "write"],
@@ -354,9 +346,8 @@ describe("the committed pages", () => {
   const pages = Object.keys(PAGE_REGIONS);
 
   test("are exactly what the generator renders, and every page is registered", () => {
-    // The strongest pin: every generated region is fresh (build:check's contract), which also
-    // proves the Sections renderer parses every real grant prose and every real permission has
-    // a form parameter.
+    // Every generated region fresh (build:check's contract) also proves the Sections renderer parses every real grant prose and every real permission
+    // has a form parameter.
     expect(pages.sort()).toEqual([
       "README.md",
       "docs/reference/architecture.md",
@@ -376,9 +367,7 @@ describe("the committed pages", () => {
   test.each(["README.md", "docs/start/getting-started.md"])(
     "%s must reference the token-form label exactly once and define it exactly once",
     (path) => {
-      // Negative controls, each a page that renders wrong yet regenerates as a no-op: a renamed
-      // reference, a second reference in any CommonMark form or spelling, a stale definition
-      // ahead of the generated one (it wins), and the sole definition moved outside the region.
+      // Negative controls, each a page that renders wrong yet regenerates as a no-op.
       const page = readFileSync(join(ROOT, path), "utf8");
       expect(page).toContain("][pat-form]");
       const lastHeading = page.match(/^## .*$/gm)?.at(-1) ?? "";
@@ -410,8 +399,7 @@ describe("the committed pages", () => {
   );
 
   test("a page without the token-form region may not reference the label", () => {
-    // A `[...][pat-form]` reference on a page whose tail carries no generated definition would
-    // render as literal brackets; the equality check catches it without a region to anchor to.
+    // A `[...][pat-form]` reference on a page whose tail carries no generated definition would render as literal brackets.
     const path = "docs/reference/sections.md";
     const page = readFileSync(join(ROOT, path), "utf8");
     expect(() => renderPage(path, `${page}\nsee the [form][pat-form]\n`)).toThrow(
@@ -491,8 +479,7 @@ describe("the committed pages", () => {
       "the outputs-list region in docs/reference/inputs.md encloses content the generator would not write",
     ],
   ])("refuses to regenerate %s in %s", (_label, path, mutate, error) => {
-    // Each page regenerates cleanly without the placement check and reads wrong with it skipped,
-    // so the committed pages' specs are pinned here (the mechanics in generated-regions.test.ts).
+    // Each page regenerates cleanly without the placement check and reads wrong with it skipped; the mechanics are in generated-regions.test.ts.
     const page = readFileSync(join(ROOT, path), "utf8");
     expect(() => renderPage(path, mutate(page))).toThrow(error);
   });
@@ -506,8 +493,7 @@ describe("the committed COVERAGE.md", () => {
     [...page.matchAll(/^\| \[([^\]]+)\][^|]*\| `([^`]+)`/gm)].map((m) => [m[2] ?? "", m[1] ?? ""]);
 
   test("keeps every Supported row in the order the hand-written page had", () => {
-    // Display order is a documentation decision, pinned row by row to the page as it read before
-    // generation; the registry's run order (environments before branches) is an engine constraint.
+    // Display order is a documentation decision; the registry's run order (environments before branches) is an engine constraint.
     expect(supportedRows(coverage)).toEqual([
       ["repository", "Repository core settings"],
       ["repository", "security_and_analysis"],
@@ -551,7 +537,6 @@ describe("the committed COVERAGE.md", () => {
   });
 
   test("the row pin sees a swap of two rows within one section", () => {
-    // Negative control: swapping the repository section's first two rows changes the sequence.
     const rows = coverage.split("\n").filter((line) => /^\| \[/.test(line));
     const [first, second] = rows;
     if (first === undefined || second === undefined) {
@@ -570,9 +555,7 @@ describe("the committed COVERAGE.md", () => {
   });
 
   test("must keep the region spanning everything below the title", () => {
-    // Prose left outside the region would drift from the generator's while
-    // regeneration stayed a no-op: a paragraph before BEGIN, one after END,
-    // a changed title, and a missing END marker.
+    // Prose left outside the region would drift from the generator's while regeneration stayed a no-op.
     const begin = coverage.match(/<!-- BEGIN GENERATED: coverage[^\n]*\n/)?.[0] ?? "";
     expect(begin).not.toBe("");
     const exact =
@@ -583,8 +566,7 @@ describe("the committed COVERAGE.md", () => {
     expect(() => renderCoverageFile(coverage.replace("# Coverage\n", "# Inventory\n"))).toThrow(
       exact,
     );
-    // Whitespace past the END marker regenerates as a no-op, so it is refused too: no final
-    // newline, an extra blank line, trailing spaces.
+    // Whitespace past the END marker regenerates as a no-op, so it is refused too.
     expect(() => renderCoverageFile(coverage.trimEnd())).toThrow(exact);
     expect(() => renderCoverageFile(`${coverage}\n`)).toThrow(exact);
     expect(() => renderCoverageFile(`${coverage.trimEnd()}  \n`)).toThrow(exact);
@@ -613,8 +595,6 @@ describe("the committed COVERAGE.md", () => {
         coverage.replace("`repository (topics key)`", "`repository (topics (legacy) key)`"),
       ),
     ).not.toThrow();
-    // The gaps section is one of its two forms: a note above an empty table, or rows below the
-    // table header; a note with rows, or neither, is not a rendering.
     const gapsHeader = "| Area | Endpoints | Why it matters |\n|---|---|---|\n";
     expect(coverage).toContain(gapsHeader);
     expect(() =>
@@ -662,8 +642,7 @@ describe("marker-shaped text on a Markdown page", () => {
   const begin = "<!-- BEGIN GENERATED: coverage -->";
 
   test("a # marker line is never a marker on a Markdown page, so the YAML form leaves the region unclosed", () => {
-    // The page's language picks the marker syntax (lib/generated-regions.ts), so the `# BEGIN`
-    // form, which would render as a heading, is plain text here: the region loses its BEGIN.
+    // The page's language picks the marker syntax (lib/generated-regions.ts), so the `# BEGIN` form is plain text here.
     const yamlForm = coverage.replace(/<!-- (BEGIN GENERATED: coverage[^\n]*?) -->/, "# $1");
     expect(() => renderCoverageFile(yamlForm)).toThrow(
       'region "coverage" needs exactly one BEGIN and one END marker, found 0 and 1',
@@ -671,8 +650,8 @@ describe("marker-shaped text on a Markdown page", () => {
   });
 
   test("a marker inside backticks in a paragraph is still a marker, loudly", () => {
-    // Generated pages never quote a marker, so no code-span masking exists on purpose: a loud
-    // false positive here beats a masker whose CommonMark corner cases silently hide a real marker.
+    // Generated pages never quote a marker, so no code-span masking exists on purpose: a loud false positive beats a masker whose CommonMark corner
+    // cases hide a real marker.
     const quoted = coverage.replace(
       /(<!-- BEGIN GENERATED: coverage[^\n]*-->\n)/,
       `$1see \`${begin}\` here\n`,

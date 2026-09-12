@@ -1,14 +1,3 @@
-/**
- * The plan executor's own contract: operations run in order through the
- * declared endpoints, thunks seal at execution, and a role that is not a
- * declared WRITE is refused before any request leaves. The refusals are the
- * runtime backstop behind the PlannedOp type - a plan built through the
- * erased view (the engine's own) carries bare string roles - so each one is
- * exercised here against a client that would happily answer. The change
- * line's one rule is pinned from every side: it records only when the
- * request, the change render, and the capture hook all succeeded.
- */
-
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../src/engine/execute.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
@@ -115,14 +104,12 @@ describe("executePlan", () => {
       "POST /repos/o/r/labels",
       "GRAPHQL ExecutorWrite",
     ]);
-    // The thunk sealed at execution, not at plan time.
     expect(api.mutations()[0]?.payload).toEqual({ name: "bug", secret: "plain($TOKEN)" });
   });
 
   test("async thunks are awaited, and a thunk may read through the plan's port after an earlier write", async () => {
-    // A value the request needs (a sealing key) exists only once an earlier
-    // operation ran, so the thunk reads it at execution through the read-only
-    // port plan() closed over, awaited before the request leaves.
+    // In production a request input (a sealing key) exists only once an earlier operation ran, so a payload thunk reads it at execution through
+    // the port plan() closed over.
     const api = new MockApi({
       "GET /repos/o/r/labels?per_page=100&page=1": { data: [{ name: "live" }] },
     }).allowMutations("POST /repos/o/r/labels", "GRAPHQL ExecutorWrite");
@@ -158,7 +145,6 @@ describe("executePlan", () => {
       notes: [],
       landed: 3,
     });
-    // The deferred read sits between the two writes, where the thunk ran.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       "POST /repos/o/r/labels",
       "GET /repos/o/r/labels?per_page=100&page=1",
@@ -170,9 +156,7 @@ describe("executePlan", () => {
   });
 
   test("a failing operation stops the plan, keeping the changes already on the wire", async () => {
-    // The first operation succeeds and the second is rejected: the failed
-    // execution must still carry the first one's change line, because the
-    // API has no transactions and that mutation really happened.
+    // The API has no transactions: the first mutation really happened, so the failed execution must still carry its change line.
     const api = new MockApi({
       "GRAPHQL ExecutorWrite": { data: {} },
       "POST /repos/o/r/labels": { error: REJECTED },
@@ -281,9 +265,8 @@ describe("executePlan", () => {
   });
 
   test("a change thunk that throws fails the operation without its line, after the request landed", async () => {
-    // The verification lives in the thunk (an echo reporting the old value):
-    // the mutation really happened, so it is counted as landed and reported
-    // like a rejected request, with the line absent and the thunk's own error.
+    // The verification lives in the thunk (an echo reporting the old value); the mutation really happened, so it counts as landed and reports like a
+    // rejected request.
     const api = new MockApi({}).allowMutations("POST /repos/o/r/labels");
     let captured = false;
     const plan = planOf({
@@ -304,7 +287,6 @@ describe("executePlan", () => {
       error: new Error("the write did not take"),
     });
     expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(["POST /repos/o/r/labels"]);
-    // The render failed, so the hook after it never ran.
     expect(captured).toBe(false);
   });
 
@@ -340,8 +322,6 @@ describe("executePlan", () => {
     };
     const execution = await executePlan(plan, SECTION, api, REPO, TOOLS);
     expect(seen).toEqual([{ id: 7, node_id: "L_7" }]);
-    // The mutation whose capture threw DID land, but its line is absent -
-    // the one failure rule - and the operation after it never runs.
     expect(execution).toEqual({
       status: "failed",
       changes: ['created label "bug"'],
@@ -358,8 +338,7 @@ describe("executePlan", () => {
   test.each<[hook: string, op: Partial<SectionPlan["ops"][number]>]>([
     ["capture hook", { capture: (async () => {}) as unknown as () => void }],
     ["change thunk", { change: (async () => "late") as unknown as () => string }],
-    // A REJECTING hook: the BUG is the report, and the discarded promise
-    // must not surface a second time as an unhandled rejection.
+    // A REJECTING hook: the BUG is the report, and the discarded promise must not surface again as an unhandled rejection.
     [
       "capture hook",
       {
@@ -430,8 +409,7 @@ describe("executePlan", () => {
   });
 
   test("a before hook runs ahead of the request, and its throw fails the operation with nothing sent", async () => {
-    // The hook reads through the plan's port (an input a later operation
-    // needs, pinned ahead of this write); its failure leaves the request unsent.
+    // The hook reads through the plan's port, the way a `before` resolution pins an input ahead of the first write.
     const api = new MockApi({
       "GET /repos/o/r/labels?per_page=100&page=1": { data: [{ name: "live" }] },
     }).allowMutations("POST /repos/o/r/labels", "GRAPHQL ExecutorWrite");
@@ -470,7 +448,6 @@ describe("executePlan", () => {
       error: new Error("the actor does not exist"),
     });
     expect(seen).toEqual(['[{"name":"live"}]']);
-    // The read ran before the first write; the second write never left.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       "GET /repos/o/r/labels?per_page=100&page=1",
       "POST /repos/o/r/labels",
@@ -478,9 +455,7 @@ describe("executePlan", () => {
   });
 
   test("a tolerated status renders the operation's own outcome, never throwFor's", async () => {
-    // One tolerated 409 turns into a note (the plan goes on, no change line);
-    // the next turns into the section's own failure advice. Neither reaches
-    // throwFor, whose 409 text would tell the user to fix the settings file.
+    // Neither tolerated 409 reaches throwFor, whose 409 text would tell the user to fix the settings file.
     const api = new MockApi({
       "POST /repos/o/r/labels": { error: CONFLICT },
       "GRAPHQL ExecutorWrite": { data: {} },
@@ -533,7 +508,6 @@ describe("executePlan", () => {
     });
     const answering = (status: number, message: string) =>
       new MockApi({ "POST /repos/o/r/labels": { error: { status, message, body: "" } } });
-    // Omitted statuses: both declared errors (409, 422) are absorbed.
     for (const [status, message] of [
       [409, "Conflict"],
       [422, "Validation Failed"],
@@ -552,8 +526,6 @@ describe("executePlan", () => {
         landed: 0,
       });
     }
-    // An explicit subset: the declared 422 outside it classifies through
-    // throwFor exactly as if undeclared.
     const narrowed = await executePlan(
       planOf({ role: "create", tolerate: { statuses: [409], outcome } }),
       SECTION,
@@ -570,8 +542,6 @@ describe("executePlan", () => {
         'labels: POST /repos/o/r/labels: 422 Validation Failed. The API rejected the request; fix the "labels" values in the settings file to satisfy the message above',
       ),
     });
-    // An undeclared status under the default: throwFor's classification, a
-    // PermissionDenied here, not the operation's outcome.
     const denied = await executePlan(
       planOf({ role: "create", tolerate: { outcome } }),
       SECTION,
@@ -608,8 +578,7 @@ describe("executePlan", () => {
   });
 
   test("an explicit tolerance naming an undeclared status is refused before any request leaves", async () => {
-    // Only the erased view can spell it (the type forbids it); the executor
-    // refuses against a client that would otherwise answer.
+    // Only the erased view can spell it; the executor refuses against a client that would otherwise answer.
     const api = new MockApi({}, { unroutedMutations: "succeed" });
     const execution = await executePlan(
       planOf({ role: "create", tolerate: { statuses: [404], outcome: () => ({ note: "" }) } }),
@@ -626,8 +595,7 @@ describe("executePlan", () => {
   });
 
   test("a rate-limited error is never a tolerated outcome, whatever the tolerance names", async () => {
-    // A rate limit can arrive as a 403; a tolerance naming 403 on an endpoint
-    // that declares it still hands the error to throwFor's rate-limit branch.
+    // A rate limit can arrive as a 403; a tolerance naming 403 on an endpoint that declares it still hands the error to throwFor's rate-limit branch.
     const limited = {
       ...SECTION,
       endpoints: {
@@ -697,9 +665,8 @@ describe("executePlan", () => {
   });
 
   test("a tolerance may name only the endpoint's declared error statuses, and never on GraphQL", () => {
-    // Compile-time only: each rejected shape is built first and assigned on
-    // one line, so the directive anchors to the assignment whichever
-    // property the compiler blames.
+    // Compile-time only: each rejected shape is built first and assigned on one line, so the directive anchors to the assignment whichever property
+    // the compiler blames.
     type Op = PlannedOp<typeof SECTION.endpoints, typeof SECTION.graphql>;
     const outcome = () => ({ note: "" });
     const declared: Op = {
@@ -742,8 +709,7 @@ describe("executePlan", () => {
     } as const;
     // @ts-expect-error a GraphQL rejection carries no HTTP status to tolerate
     const _graphql: Op = graphql;
-    // The tolerable range is the 4xx statuses minus the transport ones
-    // (401, 429), checked at both boundaries.
+    // The tolerable range is the 4xx statuses minus the transport ones (401, 429), checked at both boundaries.
     type Bounds = PlannedOp<{
       write: {
         route: "POST /repos/{owner}/{repo}/labels";
@@ -872,8 +838,7 @@ describe("executePlan", () => {
   });
 
   test("a thunk receives a frozen projection holding the resolver and nothing else", async () => {
-    // A caller may pass a wider object as tools; the thunk must see neither
-    // that object nor anything on it beyond the resolver.
+    // A caller may pass a wider object as tools; the thunk must see nothing on it beyond the resolver.
     const api = new MockApi({}).allowMutations("POST /repos/o/r/labels");
     const leaky = { ...TOOLS, api, repo: REPO, check: false as const };
     let seen: unknown;
@@ -895,9 +860,7 @@ describe("executePlan", () => {
     planOf({ role: "create", payload: (exec) => ({ leaked: exec.api }) });
   });
 
-  // The refusals: each names a role the erased plan type admits but the
-  // executor must never issue, and each runs against a client that would
-  // otherwise answer, so a missing guard fails the test loudly.
+  // Each refusal names a role the erased plan type admits but the executor must never issue, run against a client that would otherwise answer.
   const refused: ReadonlyArray<{ what: string; role: string; message: string }> = [
     {
       what: "a REST read role",
@@ -917,8 +880,7 @@ describe("executePlan", () => {
       message:
         'Error: BUG: labels planned an operation under role "typo", which names no declared endpoint or GraphQL operation',
     },
-    // Inherited names resolve through a plain `dict[role]` lookup; the
-    // executor must read own properties only.
+    // Inherited names resolve through a plain `dict[role]` lookup; the executor must read own properties only.
     {
       what: "an inherited role (constructor)",
       role: "constructor",
@@ -931,8 +893,7 @@ describe("executePlan", () => {
       message:
         'Error: BUG: labels planned an operation under role "toString", which names no declared endpoint or GraphQL operation',
     },
-    // Non-string roles: a number would coerce onto a matching key, a symbol
-    // would enter the property-key path; both are refused before any lookup.
+    // A number would coerce onto a matching key and a symbol would enter the property-key path; both are refused before any lookup.
     {
       what: "a numeric role",
       role: 0 as unknown as string,

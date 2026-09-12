@@ -18,11 +18,7 @@ const FLEET_DEFAULTS = {
   actions_secrets: [{ name: "FLEET_TOKEN", value: "$FLEET_TOKEN" }],
 } as SettingsFile;
 
-/**
- * The secret values of one document under the provenance multi.ts decides
- * for its kind: "target" for a remote target's own settings.yml, "operator"
- * for a central file or the defaults document applied to a fileless target.
- */
+/** The secret values of one document under the provenance multi.ts decides for its kind. */
 function valuesOf(doc: SettingsFile, source: SettingsSource) {
   return collectSecretValues(doc, SECTIONS, source);
 }
@@ -47,12 +43,7 @@ const FLEET_LABEL = 'the secret entry "FLEET_TOKEN"';
 /** The label webhooks derives for the test hook's config.secret. */
 const HOOK_LABEL = 'the webhook "https://x.test/h" config.secret';
 
-/**
- * One document shape per secret-declaring section, each declaring exactly
- * one secret carrying `ref`. Every secretValues-declaring section must have
- * a factory here, so a new secret family fails the whole-document tests
- * until its shape is covered.
- */
+/** One document shape per secret-declaring section; a new secret family fails the whole-document tests until its shape is added here. */
 const SECRET_SHAPES: Partial<Record<SectionKey, (ref: string) => unknown>> = {
   actions_secrets: (ref) => [{ name: "S", value: ref }],
   dependabot_secrets: (ref) => [{ name: "S", value: ref }],
@@ -90,9 +81,7 @@ describe("secret provenance is one source per document", () => {
     ["a remote target's own document is the target's", "target"],
     ["an operator document (central file or defaults fallback) is the operator's", "operator"],
   ])("every value in %s, whatever the reference string", (_name, source) => {
-    // A target naming the operator's own $FLEET_TOKEN gains nothing, and an
-    // operator document naming it is never refused: the source is the
-    // document's, never the string's.
+    // The source is the document's, never the string's: a target naming the operator's own $FLEET_TOKEN gains nothing.
     for (const [key, doc] of secretDocs("$FLEET_TOKEN")) {
       expect(
         valuesOf(doc, source).map((value) => [value.section, value.value, value.source]),
@@ -152,8 +141,7 @@ describe("secret provenance is one source per document", () => {
 });
 
 describe("runForRepo provenance", () => {
-  // Each document is branded through the REAL boundary, exactly like the run
-  // flows; an invalid fixture fails here instead of riding a cast.
+  // Branded through the REAL boundary, so an invalid fixture fails here instead of riding a cast.
   const validated = (doc: unknown): ValidatedSettings => {
     const silent: Io = {
       annotate: () => {},
@@ -197,9 +185,7 @@ describe("runForRepo provenance", () => {
   });
 
   test("a fallback-applied defaults reference resolves from the operator environment", async () => {
-    // The defaults document runs as "operator" (multi.ts decides that for a
-    // fileless target), so its $FLEET_TOKEN is the operator's and the
-    // resolved plaintext reaches the request.
+    // The defaults document runs as "operator" (multi.ts decides that for a fileless target), so its $FLEET_TOKEN resolves.
     const defaults = {
       webhooks: [{ config: { url: "https://x.test/h", secret: "$FLEET_TOKEN" } }],
     } as SettingsFile;
@@ -250,8 +236,7 @@ describe("runForRepo provenance", () => {
       },
       io,
     );
-    // The excluded webhooks section contributes no values, so its target
-    // reference is never collected, let alone refused.
+    // The excluded webhooks section contributes no values, so its target reference is never collected, let alone refused.
     expect(result.result).toBe("clean");
     expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([
       ["labels", "clean"],

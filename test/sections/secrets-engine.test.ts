@@ -1,10 +1,3 @@
-/**
- * Secrets engine tests: the seal round-trip, planSecrets' thunks (each seals
- * its own entry only when executed), and duplicate-name rejection. The
- * context-arm pin at the end guards the SectionContext type the request
- * helpers and the executor build on.
- */
-
 import { describe, expect, test } from "bun:test";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
@@ -87,7 +80,6 @@ describe("sealing", () => {
     await mockSodiumReady();
     const hostile = 'p@ss"word\\with\nnewline\tand unicode-éñ中';
     const sealed = sealForGithub(decodeBase64(MOCK_SECRETS_PUBLIC_KEY), hostile);
-    // The ciphertext is base64 and never contains the plaintext.
     expect(sealed).toMatch(/^[A-Za-z0-9+/]+=*$/);
     expect(sealed).not.toContain("p@ss");
     expect(unsealSecretValue(sealed)).toBe(hostile);
@@ -126,8 +118,7 @@ describe("sealing", () => {
 
   test("a parsed sealing key seals synchronously into the {encrypted_value, key_id} body, fresh per seal", async () => {
     await mockSodiumReady();
-    // Sealed boxes use a fresh ephemeral key per seal, so the ciphertexts
-    // must differ while both still carry the exact plaintext.
+    // Sealed boxes use a fresh ephemeral key per seal, so the ciphertexts must differ while both carry the plaintext.
     const key = parseSealingKey(
       section,
       { label: "actions_secrets" },
@@ -201,8 +192,6 @@ describe("planSecrets and the execution-time resolver", () => {
   });
 
   test("a builder can only answer with its own role's operation", () => {
-    // Compile-time only: the scope's builders are typed per role, so a
-    // section wiring the DELETE builder to its PUT role does not compile.
     type Put = { role: "put"; params: { secret_name: string }; drift: string[]; change: string };
     type Remove = {
       role: "remove";
@@ -224,9 +213,7 @@ describe("planSecrets and the execution-time resolver", () => {
   });
 
   test("a builder cannot demand a facet the engine never supplies", () => {
-    // Compile-time only: the builders are function-valued, so a parameter
-    // narrower than the engine's facet is a contravariance error rather than
-    // a method-bivariance pass.
+    // Compile-time only: the builders are function-valued, so a narrower parameter is a contravariance error rather than a method-bivariance pass.
     type Put = { role: "put"; params: { secret_name: string }; drift: string[]; change: string };
     const demanding = (write: { name: string; change: string; keyId: string }): Put => ({
       role: "put",
@@ -269,10 +256,8 @@ describe("planSecrets and the execution-time resolver", () => {
 });
 
 describe("the section context arms", () => {
-  // Reference VALIDATION (literals, provenance, unset/empty) lives in the
-  // engine (src/engine/secrets.ts + secret-refs.ts) and runs before any
-  // section. The context ARMS are compiler-enforced: a check context cannot
-  // carry a resolver, and an apply context cannot lack one.
+  // Reference VALIDATION lives in the engine (src/engine/secrets.ts + secret-refs.ts) and runs before any section; the context ARMS are
+  // compiler-enforced.
   test("a check-mode context carrying a resolver does not compile", () => {
     // @ts-expect-error the check arm pins resolveSecret to never
     const checkCtx: SectionContext = {

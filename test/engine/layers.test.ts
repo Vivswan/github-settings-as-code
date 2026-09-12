@@ -9,11 +9,7 @@ import { labelsSection } from "../../src/sections/labels/index.js";
 import { MockApi } from "../mock-api.js";
 import { REPO } from "../sections/section-run.js";
 
-/**
- * Every input document is frozen to the leaves: a fold step that touched one
- * would throw instead of passing, so every test below also pins that inputs
- * are never mutated.
- */
+/** Frozen to the leaves: a fold step that touched an input would throw, so every test also pins that inputs are never mutated. */
 function deepFreeze<T>(value: T): T {
   if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
     Object.freeze(value);
@@ -280,11 +276,7 @@ describe("mergeLayers: keyed sections", () => {
     });
   });
 
-  /**
-   * The labels planner over an empty repository: it rejects two entries that
-   * claim one label before any write, so a merged document it plans is one
-   * apply accepts. The ops are the creates, one per entry.
-   */
+  /** The labels planner over an empty repository rejects two entries claiming one label, so a merged document it plans is one apply accepts. */
   async function planLabels(entries: readonly Record<string, unknown>[]) {
     const api = new MockApi({ "GET /repos/o/r/labels?per_page=100&page=1": { data: [] } });
     const plan = await labelsSection.plan(
@@ -314,9 +306,6 @@ describe("mergeLayers: keyed sections", () => {
   ])(
     "a label renaming into a name another layer declares is one label, the higher entry (%s)",
     async (_order, { lower, higher }, entries) => {
-      // Under "replace" the higher entry wins wholesale: a lower `new_name`
-      // does not survive (the merged document declares "defect" outright and
-      // no longer renames "bug" into it), a higher one is kept as written.
       const result = merge([layer("fleet", { labels: lower }), layer("repo", { labels: higher })]);
       expect(result).toEqual({
         settings: { labels: { _undeclared: "delete", entries } },
@@ -349,8 +338,6 @@ describe("mergeLayers: keyed sections", () => {
         layer("fleet", { labels: [{ name: "bug" }, { name: "docs", new_name: "defect" }] }),
         layer("repo", { labels: higher }),
       ]);
-      // Each higher entry stands where the first lower entry it matches stood:
-      // the rename at "bug", "docs" at the superseded lower rename.
       const entries = [{ name: "bug", new_name: "defect" }, { name: "docs" }];
       expect(result).toEqual({
         settings: { labels: { _undeclared: "delete", entries } },
@@ -769,10 +756,7 @@ describe("mergeLayers: layer-boundary refusals", () => {
   });
 
   test("no refusal, of any kind, echoes a value or key taken from the document", () => {
-    // Every identity the documents below declare (names, titles, logins, a
-    // wrapper knob, a directive), every malformed value, and every private
-    // key holds the marker; the recognized keys (labels, color) are structure
-    // the prose may name. A refusal that printed one would print the marker.
+    // Every identity, malformed value, and private key below holds the marker; the recognized keys (labels, color) are structure the prose may name.
     const M = "ZZ_MARKER";
     const cyclic: Record<string, unknown> = { [M]: M };
     cyclic[`${M}_self`] = cyclic;

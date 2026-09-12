@@ -1,5 +1,3 @@
-/** Shared fetch stubbing and per-test trace facets for the github/ client tests. */
-
 import { GithubApi, type TraceIo } from "../../src/github/api.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 
@@ -9,12 +7,7 @@ export function restoreFetch(): void {
   globalThis.fetch = realFetch;
 }
 
-/**
- * Stub fetch with a fixed response sequence (one per call, in order; the last
- * one repeats, so a retried failure keeps failing). Counts the calls and
- * records each call's pathname, so a test can pin WHICH routes were touched
- * and in what order, not just how many.
- */
+/** The last response repeats, so a retried failure keeps failing. */
 export function stubFetch(responses: Array<() => Response>): {
   calls: number;
   paths: string[];
@@ -33,10 +26,7 @@ export function stubFetch(responses: Array<() => Response>): {
   return state;
 }
 
-/**
- * A fresh trace facet per test: the debug lines the client emitted and an
- * isolated mask registry, so one test's masks never redact another's traces.
- */
+/** A fresh trace facet per test, with an isolated mask registry so one test's masks never redact another's traces. */
 export function traceIo(): { io: TraceIo & Pick<Io, "mask">; lines: string[] } {
   const lines: string[] = [];
   return {

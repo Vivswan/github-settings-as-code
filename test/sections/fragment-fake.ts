@@ -1,7 +1,6 @@
 /**
- * A stateful GithubClient derived from a section's e2e mock fragment: requests route through the
- * pipeline's endpoint matching onto the same handlers over a seeded MockState, so a unit
- * idempotence proof runs against the mock's own transformers, not a second hand-written inverse.
+ * A stateful GithubClient over a section's e2e mock fragment, so a unit idempotence proof runs against the mock's own transformers, not a second
+ * hand-written inverse.
  */
 
 import type { ApiError, GithubClient } from "../../src/github/api.js";
@@ -17,10 +16,6 @@ export interface FragmentFake extends GithubClient {
   readonly writes: string[];
 }
 
-/**
- * The fake over one section's handlers and a state seeded from `live`;
- * a request outside the section's own endpoints is refused as 404.
- */
 export function fragmentFake(
   section: SectionMeta,
   handlers: Readonly<Record<string, Handler>>,

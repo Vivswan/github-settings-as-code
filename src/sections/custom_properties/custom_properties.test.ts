@@ -25,8 +25,8 @@ function changeLines(op: SectionPlan["ops"][number]): readonly string[] {
 }
 
 /**
- * The derived fake refuses the org probe: the dispatcher resolves GET /orgs/{org} to teams, the
- * first section declaring it. The probe only reads the seeded org, so it is answered here.
+ * The derived fake refuses the org probe (the dispatcher resolves GET /orgs/{org} to teams, the first section declaring it), so it is answered here
+ * from the seeded org.
  */
 function orgFake(values: Array<{ property_name: string; value: unknown }>) {
   const fake = fragmentFake(customPropertiesSection, customPropertiesMockHandlers, {
@@ -133,7 +133,6 @@ describe("custom_properties", () => {
         'custom_properties[compliance]: declared ["soc2","hipaa"] != live ["soc2"]; apply will set the declared value',
       ],
     ]);
-    // "pilot" is live, declared nowhere, and kept; "compliance" is managed.
     expect(result.notes).toEqual([
       'custom property "pilot" is set on the repo but not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply UNSET it',
       'custom property "tier" is set on the repo but not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply UNSET it',

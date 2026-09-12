@@ -29,11 +29,7 @@ async function apply(api: GithubClient, desired: Desired) {
   return executePlan(await plan(api, desired), interactionLimitsSection, api, REPO, TOOLS);
 }
 
-/**
- * A stateful fake of the interaction-limits API: the base PUT stores a
- * repository-origin limit with a fixed expires_at (a byte-stable re-arm),
- * the cap PATCH merges, and the bypass PUT/DELETE reconcile the login list.
- */
+/** A stateful fake of the interaction-limits API; the base PUT stores a fixed expires_at, so a re-arm is byte-stable. */
 function liveRepo(seed: {
   limit?: Record<string, unknown> | null;
   cap?: Record<string, unknown>;
@@ -95,7 +91,6 @@ describe("interaction_limits", () => {
         'armed the "contributors_only" interaction limit (expiry: one_week)',
       ],
     ]);
-    // The declared expiry produces the cannot-verify note.
     expect(result.notes).toEqual([
       "interaction_limits.expiry: GitHub reports only the computed expires_at, so the declared duration cannot be verified; apply re-arms it on every run",
     ]);
@@ -109,8 +104,7 @@ describe("interaction_limits", () => {
       'interaction_limits.limit: "contributors_only" != "existing_users"',
     ]);
     const matching = await plan(api, { limit: "existing_users" });
-    // alwaysRewrite by declaration: the op stands with no drift to report,
-    // so check reads clean while apply re-arms the ticking limit.
+    // alwaysRewrite by declaration: check reads clean while apply re-arms the ticking limit.
     expect(matching.ops.map((op) => [op.role, op.drift, op.change])).toEqual([
       [
         "put",
@@ -189,8 +183,7 @@ describe("interaction_limits", () => {
   test.each([null, [], "none"])(
     "a malformed live body (%p) is a loud failure, never an absent limit",
     async (body) => {
-      // An empty object is GitHub's "no limit"; anything else that is not a
-      // limit object must not read as absence and plan a re-arm over it.
+      // An empty object is GitHub's "no limit"; anything else that is not a limit object must not read as absence and plan a re-arm over it.
       const api = new MockApi({ [GET]: { data: body } });
       await expect(plan(api, { limit: "existing_users" })).rejects.toThrow(
         /interaction_limits: GET .*interaction-limits returned a body outside the documented shape/,
@@ -236,8 +229,7 @@ describe("interaction_limits", () => {
       "bypassAdd",
     ]);
     expect(second.ops.map((op) => [op.role, op.drift])).toEqual([["put", []]]);
-    // Two executions (the proof also runs the converged plan): the re-arm
-    // each time, the cap and bypass writes once.
+    // provePlanIdempotent executes the converged plan too, hence two re-arms.
     expect(api.writes.filter((w) => w === `PUT ${BASE}`)).toHaveLength(2);
     expect(api.writes.filter((w) => w !== `PUT ${BASE}`)).toEqual([
       `PATCH ${BASE}/pulls/creation-cap`,
@@ -327,8 +319,7 @@ describe("interaction_limits pull request creation cap", () => {
   test("a declared cap key absent from the live cap is noted as a phantom key", async () => {
     const api = new MockApi({ [CAP_GET]: { data: CAP_LIVE } });
     const result = await plan(api, {
-      // The cast simulates a future/mistyped cap key riding through the
-      // passthrough shape; the note under test is how plan() surfaces it.
+      // The cast simulates a future or mistyped cap key riding through the passthrough shape.
       pull_request_creation_cap: { enabled: true, max_open_prs: 5 },
     } as InteractionLimitsConfig);
     expect(result.notes).toEqual([
@@ -361,9 +352,7 @@ describe("interaction_limits pull request creation bypass list", () => {
   test("the undeclared logins are removed FIRST, then the missing ones added, case-insensitively", async () => {
     const api = new MockApi({ [BYPASS_GET]: { data: liveUsers } });
     const result = await plan(api, { pull_request_creation_bypass: ["Keeper", "newcomer"] });
-    // Removal first: the list holds at most 100 users, so adding before
-    // removing could transiently overflow it. "Keeper" matches the live
-    // "keeper" case-insensitively: neither written.
+    // Removal first: the list holds at most 100 users, so adding before removing could transiently overflow it.
     expect(result.ops).toEqual([
       {
         role: "bypassRemove",

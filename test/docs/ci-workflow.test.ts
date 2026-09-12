@@ -1,14 +1,8 @@
 /**
- * CI structural contract: the single required check `all-green` must `needs:`
- * every other job in ci.yml. Branch protection points at all-green, so a new
- * job it forgets would pass CI while never being required. Jobs that need
- * all-green, directly or through another job (the release job and everything
- * that needs it), are exempt: they run downstream of the gate and cannot also
- * be inside it. Informational jobs are exempt on BOTH sides of the comparison:
- * template sync flips ci.yml independently of this test, so it must pass
- * whether the job is still in the needs list or already out of it. Schedule-only
- * jobs (a job-level if: restricting them to the schedule event) are exempt the
- * same way: they never run on a pull request, so they can never gate one.
+ * Branch protection points at all-green, so a job it forgets would pass CI while never being required.
+ *   downstream of all-green    -> exempt: runs after the gate, so it cannot also be inside it
+ *   informational              -> exempt on BOTH sides: template sync flips ci.yml independently of this test
+ *   schedule-only (job if:)    -> exempt: never runs on a pull request, so it can never gate one
  */
 
 import { describe, expect, test } from "bun:test";
@@ -20,9 +14,8 @@ import { headRefPrefixes } from "./head-ref.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
-// Deliberately outside the gate: a red run flags template-convention drift
-// that the next sync PR heals, and must not block unrelated merges. Mirrors
-// the central CI's validator (see the platform repository's docs/all-green.md).
+// Outside the gate on purpose: a red run flags template-convention drift the next sync PR heals; mirrors the central CI's validator
+// (docs/all-green.md in the platform repository).
 const INFORMATIONAL = new Set(["validate-template"]);
 
 interface Workflow {
@@ -34,8 +27,7 @@ function needsOf(job: { needs?: string | string[] } | undefined): string[] {
   return Array.isArray(raw) ? raw : [raw];
 }
 
-// The whole job-level condition, not a substring of it: a comparison joined by || to
-// another event still runs on pull requests and must stay inside the gate.
+// The whole job-level condition, not a substring: a comparison joined by || to another event still runs on pull requests.
 const SCHEDULE_ONLY = /^\s*github\s*\.\s*event_name\s*==\s*(['"])schedule\1\s*$/;
 
 function scheduleOnly(job: { if?: string } | undefined): boolean {
@@ -96,8 +88,6 @@ describe("ci.yml all-green gate", () => {
     expectGateCovers({ jobs: ungated });
   });
 
-  // Every forgotten job that can run on a pull request, including conditions that merely
-  // mention the schedule event, fails through the same assertion the green run takes.
   test.each([
     ["no condition", {}],
     [
@@ -120,9 +110,8 @@ function expectReleasePrefixes(wf: Workflow): void {
 }
 
 describe("ci.yml release PR branch spelling", () => {
-  // ci.yml is template-managed and carries no head_ref condition today; a sync
-  // PR that brings one spelling the release PR branch namespace differently
-  // fails here, and the fix routes to the platform repository, not this file.
+  // ci.yml is template-managed and carries no head_ref condition today; a drifted spelling from a sync PR routes the fix to the platform repository,
+  // not this file.
   test("every startsWith(github.head_ref, ...) prefix is RELEASE_PR_BRANCH_PREFIX", () => {
     const text = readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8");
     expectReleasePrefixes(parseYaml(text) as Workflow);

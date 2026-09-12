@@ -1,8 +1,6 @@
 /**
- * Shared vocabulary for the kept/deleted-by-default contradiction tests
- * (COVERAGE rows, SettingsFile JSDoc, the Sections table's Notes cells). One definition of
- * the claim-word families, the negator rule, and the window logic, so the
- * three matchers cannot drift apart on what counts as a claim.
+ * One definition of the claim-word families, the negator rule, and the window logic, so the three kept/deleted-by-default matchers (COVERAGE rows,
+ * the SettingsFile schema descriptions, the Sections table's Notes cells) cannot drift apart.
  */
 
 import type { SectionKey } from "../../src/schema.js";
@@ -11,10 +9,8 @@ const DELETE_STEMS = String.raw`delet\w*|remov\w*|drop\w*|clear\w*`;
 const KEEP_STEMS = String.raw`kept|keep\w*|retain\w*|preserv\w*`;
 
 /**
- * The prose display name of each delete-by-default section, for the
- * enumeration pins over the getting-started warning and the migration
- * guide's paragraphs. A new delete-by-default section fails those tests through
- * deleteEnumerationProblems until its display name is added here.
+ * Prose display names of the delete-by-default sections; a new one fails the enumeration pins through deleteEnumerationProblems until it is added
+ * here.
  */
 const DELETE_DEFAULT_DISPLAY_NAMES: Partial<Record<SectionKey, string>> = {
   labels: "labels",
@@ -25,13 +21,8 @@ const DELETE_DEFAULT_DISPLAY_NAMES: Partial<Record<SectionKey, string>> = {
 };
 
 /**
- * Every way `prose` under-enumerates the delete-by-default sections: a
- * missing display name mapping (a new delete-default section), or a display
- * name the prose omits. An empty return means the enumeration is complete.
- * Omission-only on purpose: display names like "labels" are ordinary words,
- * so a negative check over prose would false-positive; the one spot that
- * names sections by backticked KEY (getting-started) gets its own exact
- * positive-and-negative check instead.
+ * Omission-only on purpose: display names like "labels" are ordinary words, so a negative check would false-positive. getting-started, which
+ * names backticked KEYS, gets its own exact check.
  */
 export function deleteEnumerationProblems(
   prose: string,
@@ -66,21 +57,17 @@ export const CLAIM_FAMILY: Record<"delete" | "keep", RegExp> = {
 /** Every claim stem of either family, for grammar-level matchers. */
 export const CLAIM_STEMS = `${DELETE_STEMS}|${KEEP_STEMS}`;
 
-// The one negator list; consumers resolve negation ONLY through
-// stemNegation, so a second negation grammar cannot grow elsewhere.
+// The one negator list; negation resolves ONLY through stemNegation, so a second grammar cannot grow elsewhere.
 const NEGATORS = new Set(["never", "not", "no", "none", "without"]);
 
 export type UndeclaredClaim = "delete" | "keep";
 
 /**
- * Whether the claim stem that follows `preceding` is negated. A negator
- * counts only when it sits within the three word-tokens directly before the
- * stem ("never actually deleted", "not kept"); one further away governs some
- * other word, so "entries not named in settings are deleted" and "no other
- * section behaves this way, undeclared autolinks DELETED" both read as plain
- * delete claims. Two negators inside the span ("not without deleting") are a
- * double negation this deliberately does not resolve - the caller must fail
- * loudly so the prose gets reworded.
+ * A negator counts only within the three word-tokens directly before the stem; further away it governs some other word.
+ * Two negators in the span are a double negation this deliberately does not resolve: the caller fails loudly and the prose gets reworded.
+ *   "never actually deleted"                                          -> negated
+ *   "entries not named in settings are deleted"                       -> plain delete claim
+ *   "no other section behaves this way, undeclared autolinks DELETED" -> plain delete claim
  */
 export function stemNegation(preceding: string): { negated: boolean } | { doubleNegation: string } {
   const span = preceding
@@ -96,25 +83,16 @@ export function stemNegation(preceding: string): { negated: boolean } | { double
 }
 
 /**
- * The sentence-bounded windows preceding each "by default" in `text`. A
- * window never crosses a sentence delimiter (so an adjacent sentence's
- * "delete plus recreate" cannot leak into a keep claim) and is capped so a
- * delimiter-free run cannot pull in half a table cell.
+ * The sentence-bounded windows before each "by default". A window never crosses a sentence delimiter (an adjacent "delete plus recreate" cannot leak
+ * into a keep claim) and is capped so a delimiter-free run cannot pull in half a table cell.
  */
 function defaultClaimWindows(text: string): string[] {
   return [...text.matchAll(/([^.;:!?]{0,80})by default/g)].map((match) => match[1] ?? "");
 }
 
 /**
- * Check the "... by default" claims in `text` against the expected policy:
- * at least one window must claim it, and no window may claim the opposite.
- * Every claim stem in a window resolves its own negation via stemNegation,
- * so a stray negator elsewhere in the clause cannot invert an unrelated
- * claim. A mixed-family negated clause ("not deleted but kept by default")
- * is deliberately REJECTED as ambiguous rather than parsed: the negator
- * lands in both stems' spans, the flipped reading contradicts the plain one,
- * and the fix is rewording the prose, not smarter parsing. Returns problem
- * strings (empty = consistent) so callers fail with the offending window.
+ * A mixed-family negated clause ("not deleted but kept by default") is REJECTED as ambiguous rather than parsed: the negator lands in both stems'
+ * spans and the flipped reading contradicts the plain one, so the fix is rewording.
  */
 export function defaultClaimProblems(text: string, policy: UndeclaredClaim): string[] {
   const windows = defaultClaimWindows(text);

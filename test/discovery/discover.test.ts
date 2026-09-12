@@ -242,9 +242,8 @@ describe("discoverRepos", () => {
   });
 
   test("a rate-limit 403 gets re-run advice, not PAT advice", async () => {
-    // A primary rate limit arrives as a 403 whose message mentions the rate
-    // limit; isPermissionError excludes it, so discovery must NOT tell the
-    // operator to swap tokens and abandon "*" for a transient throttle.
+    // A primary rate limit is a 403 whose message names the rate limit; isPermissionError excludes it, so discovery must not tell the operator to
+    // swap tokens for a transient throttle.
     const api = new MockApi({
       "GET /user/repos?affiliation=owner&per_page=100&page=1": {
         error: { status: 403, message: "API rate limit exceeded for user", body: "" },

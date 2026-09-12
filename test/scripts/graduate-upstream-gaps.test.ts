@@ -1,13 +1,3 @@
-/**
- * Unit tests for the pure logic of the gaps toolchain: compiler-output
- * parsing, the graduate-vs-foreign split, the spec-only rewrite template,
- * and the wholesale index generation. Fixture strings stand in for the
- * compiler and for gap files in the pure-logic blocks; a final block runs
- * the same functions against the real directory. The loud-failure paths
- * (foreign diagnostics, unparsable output, an unrecognizable gap file)
- * matter as much as the happy ones: the scripts must refuse to half-fix.
- */
-
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -65,8 +55,7 @@ describe("parseDiagnostics", () => {
   });
 
   test("attaches indented continuation lines to the diagnostic above them", () => {
-    // Real tsgo 7.0.2 --pretty false output for a chained error: the nested
-    // explanations continue on indented lines under the diagnostic.
+    // Real tsgo 7.0.2 --pretty false output: a chained error continues on indented lines under the diagnostic.
     const output = [
       "src/chain.ts(3,29): error TS2345: Argument of type '{ a: { b: string; }; }' is not assignable to parameter of type '{ a: { b: number; }; }'.",
       "  The types of 'a.b' are incompatible between these types.",
@@ -88,8 +77,7 @@ describe("parseDiagnostics", () => {
   });
 
   test("a chained TS2344 tripwire still graduates its gap file", () => {
-    // A tripwire whose constraint is object-shaped chains its message; the
-    // continuation lines must not turn the diagnostic into unparsed noise.
+    // An object-shaped constraint chains the tripwire's message; the continuation lines must not turn it into unparsed noise.
     const output = [
       "src/upstream-gaps/merge-queue.ts(12,34): error TS2344: Type '{ route: string; }' does not satisfy the constraint 'never'.",
       "  Types of property 'route' are incompatible.",
@@ -132,8 +120,7 @@ describe("isGapFile", () => {
   });
 
   test("the directory's infrastructure files are never graduatable", () => {
-    // index.ts and gap.ts carry no tripwire; a TS2344 in either means the
-    // machinery itself broke, and deleting it could never be the fix.
+    // index.ts and gap.ts carry no tripwire; a TS2344 in either means the machinery broke, and deleting it could never be the fix.
     expect(isGapFile("src/upstream-gaps/index.ts")).toBe(false);
     expect(isGapFile("src/upstream-gaps/gap.ts")).toBe(false);
     for (const file of ["src/upstream-gaps/index.ts", "src/upstream-gaps/gap.ts"]) {
@@ -395,13 +382,6 @@ describe("toSpecOnlyGapSource", () => {
   });
 });
 
-/**
- * The fixtures above stand in for gap files and listings; this block pins
- * the scripts against the REAL src/upstream-gaps/ so drift can never ship:
- * the committed index must equal a fresh regeneration, every gap file must
- * agree with the flag detector, and every spec-pinned file must be
- * rewritable by the graduation transform.
- */
 describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
   const GAPS_DIR = join(import.meta.dir, "..", "..", "src", "upstream-gaps");
   const realIndex = readFileSync(join(GAPS_DIR, "index.ts"), "utf8");
@@ -426,9 +406,8 @@ describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
   });
 
   test("every real spec-pinned gap is rewritable to the spec-only template", async () => {
-    // The sweep is legitimately empty once every octokit-kind gap has graduated
-    // (the auto-fix workflow rewrites them to spec-only), so the corpus is not
-    // pinned here; the synthetic fixtures above pin the transform itself.
+    // The sweep is legitimately empty once every octokit-kind gap has graduated, so the corpus is not pinned here; the synthetic fixtures pin the
+    // transform.
     for (const gap of realGapFiles) {
       const abs = join(import.meta.dir, "..", "..", gap);
       const source = readFileSync(abs, "utf8");

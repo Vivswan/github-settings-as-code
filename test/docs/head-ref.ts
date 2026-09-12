@@ -1,7 +1,6 @@
 /**
- * Workflows cannot import RELEASE_PR_BRANCH_PREFIX, so their if: conditions spell
- * it by hand. This pulls every literal a workflow's job- and step-level conditions
- * test github.head_ref against, so each workflow contract test can pin them.
+ * Workflows cannot import RELEASE_PR_BRANCH_PREFIX, so their if: conditions spell it by hand; this pulls every literal they test github.head_ref
+ * against.
  */
 
 /** The parts of a parsed workflow the head_ref walk reads. */
@@ -9,8 +8,7 @@ export interface HeadRefWorkflow {
   jobs: Record<string, { if?: string; steps?: Array<{ if?: string }> }>;
 }
 
-// Whitespace-tolerant at every token boundary GitHub's expression lexer allows,
-// so a reformatted or folded multiline if: still yields its literal instead of [].
+// Whitespace-tolerant at every token boundary GitHub's expression lexer allows, so a folded multiline if: still yields its literal.
 const HEAD_REF_PREFIX = /startsWith\s*\(\s*github\s*\.\s*head_ref\s*,\s*(['"])([^'"]*)\1\s*\)/g;
 
 /** Every literal `condition` tests github.head_ref against with startsWith. */

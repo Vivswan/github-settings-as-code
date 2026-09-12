@@ -1,7 +1,3 @@
-// The marker splice and placement check every generator shares (.github/scripts/lib/generated-regions.ts):
-// byte-exact splices per comment syntax, malformed or look-alike markers refused, and a region whose
-// markers moved from their home, into a code block, or around authored text refused by name.
-
 import { describe, expect, test } from "bun:test";
 import {
   assertRegionPlacement,
@@ -22,8 +18,6 @@ const HTML_BLOCK = [
   "after",
 ].join("\n");
 
-// Look-alikes for the region "tab" under the html syntax: a name the target only prefixes, name
-// suffixes, bare text, an unterminated comment, a markdown heading, and YAML-form markers.
 const HTML_NEAR_MISSES = [
   "<!-- BEGIN GENERATED: table -->",
   "<!-- BEGIN GENERATED: tab.extra -->",
@@ -37,9 +31,7 @@ const HTML_NEAR_MISSES = [
   "# END GENERATED: tab",
 ].join("\n");
 
-// Look-alikes for "tab" under the yaml syntax: trailing text, a trailing comment, HTML-form
-// markers as values, and marker-shaped lines that are scalar CONTENT (literal and folded block
-// scalars, a multiline double-quoted and single-quoted scalar).
+// Look-alikes for "tab" under the yaml syntax, including marker-shaped lines that are scalar CONTENT.
 const YAML_NEAR_MISSES = [
   "# BEGIN GENERATED: tab and more",
   "key: 1 # BEGIN GENERATED: tab",
@@ -288,8 +280,6 @@ describe("regionBounds", () => {
   });
 });
 
-// A page with a table region and an inline region under "## Inputs", a fenced block holding a
-// heading-shaped line, and a link-definition region closing the file.
 const PAGE = [
   "# Title",
   "",
@@ -387,14 +377,12 @@ describe("assertRegionPlacement", () => {
     for (const spec of [TABLE, LIST, LINK]) {
       expect(() => assertRegionPlacement(PAGE, spec, "doc.md")).not.toThrow();
     }
-    // Heading-shaped lines inside a fence, a raw block, or a blockquote head nothing outside
-    // them, so "## Inputs" stays the heading above the table.
+    // Heading-shaped lines inside a fence, a raw block, or a blockquote head nothing outside them.
     for (const between of ["```\n# fake\n```\n\n", "<pre>\n## fake\n</pre>\n\n", "> ## fake\n\n"]) {
       const shadowed = PAGE.replace("## Inputs\n\n", `## Inputs\n\n${between}`);
       expect(() => assertRegionPlacement(shadowed, TABLE, "doc.md"), between).not.toThrow();
     }
-    // A marker on the line right after a quoted paragraph is a real marker, not a lazy
-    // continuation: an HTML block (CommonMark type 2) interrupts a paragraph and closes the quote.
+    // A marker right after a quoted paragraph is a real marker: an HTML block (CommonMark type 2) interrupts a paragraph and closes the quote.
     const afterQuote = PAGE.replace(
       "## Inputs\n\n<!-- BEGIN GENERATED: table",
       "## Inputs\n\n> quoted paragraph\n<!-- BEGIN GENERATED: table",
@@ -403,9 +391,7 @@ describe("assertRegionPlacement", () => {
     // Up to three columns of indentation leave a marker a marker.
     const indented = PAGE.replace("<!-- BEGIN GENERATED: table", "   <!-- BEGIN GENERATED: table");
     expect(() => assertRegionPlacement(indented, TABLE, "doc.md")).not.toThrow();
-    // Blocks closed by their own rule leave the region outside: fences by a matching closer, a
-    // raw block by any recognized closing tag; a tag inside a fence and a fence inside a raw block
-    // are content.
+    // Blocks closed by their own rule leave the region outside; a tag inside a fence and a fence inside a raw block are content.
     for (const before of [
       "```\ncode\n```\n",
       "~~~js\n```\n~~~\n",
@@ -617,9 +603,8 @@ describe("assertRegionPlacement", () => {
   ])(
     "refuses a region left inside %s, which a line-parity count would let through",
     (_label, before, block) => {
-      // Each `before` leaves a block open ahead of "## Inputs" under the CommonMark rule its label
-      // names; one ending in "> " opens it inside a blockquote that goes on to hold the heading
-      // and the region, so the blockquote's end cannot close the block first.
+      // Each `before` leaves a block open ahead of "## Inputs"; one ending in "> " opens it inside a blockquote that holds the heading and the
+      // region, so the blockquote's end cannot close the block first.
       const quoted = before.endsWith("> ");
       const inside = PAGE.replace(
         /\n## Inputs\n\n([\s\S]*?<!-- END GENERATED: table -->\n)/,

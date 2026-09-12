@@ -9,12 +9,10 @@ import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { grantFor } from "../contract/permissions.js";
 import { actionsSection, endpointRouted } from "./index.js";
-// The casts on some plan() inputs below simulate keys GitHub adds: the
-// shape passes unknown keys through verbatim, which the static config type
-// cannot spell without giving up typo-checking on the known keys.
+// The `as ActionsConfig` casts below simulate keys GitHub adds: the shape passes unknown keys through verbatim, which the static config type cannot
+// spell without giving up typo-checking on the known keys.
 import type { ActionsConfig } from "./schema.js";
 
-/** The verdict's error prose, or null when the document validated. */
 function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
   return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
 }
@@ -116,14 +114,11 @@ describe("actions", () => {
       notes: [],
       drift: [],
     });
-    // Planning reads each declared key's own endpoint and never writes.
     expect(roles(api)).toEqual([PERMISSIONS, WORKFLOW, SELECTED, ACCESS]);
   });
 
   test("a selected policy already live with no allowlist plans only the allowlist PUT", async () => {
-    // The base permissions match, so no policy PUT is due; the allowlist GET
-    // still 404s (none exists yet) and only putSelected is planned - which
-    // is exactly what its drift line promises.
+    // The allowlist GET 404s (none exists yet) while the policy already matches, so only putSelected is due.
     const api = new MockApi({
       [PERMISSIONS]: { data: { enabled: true, allowed_actions: "selected" } },
     });
@@ -179,15 +174,13 @@ describe("actions", () => {
     });
     const result = await plan(api, { selected_actions: { github_owned_allowed: true } });
     expect(result.ops[0]?.payload).toEqual({ allowed_actions: "selected", enabled: true });
-    // The contradiction is a shape rejection (both modes, before any section
-    // writes), not a plan()-time throw.
+    // A shape rejection (both modes, before any section writes), not a plan()-time throw.
     const error = shapeError(
       { actions: { allowed_actions: "all", selected_actions: { github_owned_allowed: true } } },
       "f.yml",
     );
     expect(error).toContain("actions.selected_actions");
     expect(error).toContain('an allowlist only applies under allowed_actions: "selected"');
-    // The valid pairing and the inferred form both pass validation.
     expect(
       shapeError(
         {
@@ -214,8 +207,6 @@ describe("actions", () => {
       artifact_and_log_retention: { days: 30 },
       cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
     });
-    // Deterministic: one table pass, so retention precedes both cache PUTs
-    // and the two cache limits go in CACHE_ENDPOINT_BY_KEY order.
     expect(result.ops).toEqual([
       {
         role: "putRetention",
@@ -252,9 +243,8 @@ describe("actions", () => {
   });
 
   test("the shape rejects unrecognized, null, and scalar cache declarations upfront", () => {
-    // Inherited names like "constructor" must be caught too: an `in`-based
-    // check would walk the prototype chain and let them silently no-op. An
-    // own "__proto__" key (JSON.parse creates one) is unrecognized as well.
+    // An `in`-based check would walk the prototype chain and let "constructor" silently no-op; an own "__proto__" key (JSON.parse creates one) is
+    // unrecognized as well.
     for (const cache of [
       { max_cache_size: 25 },
       { constructor: 5 },
@@ -312,10 +302,8 @@ describe("actions", () => {
   });
 
   test("an omitted claim-key list on a custom template, and any list on the default one, are not compared", async () => {
-    // {use_default: false} with no list is the documented opt-in to the
-    // ORGANIZATION template, whose keys then appear live; comparing the
-    // omitted list against them would be permanent false drift. And GitHub
-    // ignores include_claim_keys under use_default: true.
+    // {use_default: false} with no list is the documented opt-in to the ORGANIZATION template, whose keys then appear live, so comparing the omitted
+    // list would be permanent false drift; GitHub ignores include_claim_keys under use_default: true.
     const custom = new MockApi({
       [OIDC]: { data: { use_default: false, include_claim_keys: ["repo", "context"] } },
     });
@@ -335,9 +323,7 @@ describe("actions", () => {
   });
 
   test("a declared use_immutable_subject rides the remainder diff", async () => {
-    // The flag flips the whole subject format, so a declared false against
-    // a live true must drift; undeclared, the inherited org/date default
-    // stays uncompared like every other undeclared key.
+    // The flag flips the whole subject format; undeclared, the inherited org/date default stays uncompared like every other undeclared key.
     const api = new MockApi({
       [OIDC]: {
         data: { use_default: false, include_claim_keys: ["repo"], use_immutable_subject: true },
@@ -356,8 +342,7 @@ describe("actions", () => {
   });
 
   test("the oidc shape rejects quoted booleans upfront", () => {
-    // A YAML '"false"' is truthy on the wire; both boolean fields must
-    // fail validation before any section writes.
+    // A YAML '"false"' is truthy on the wire.
     for (const bad of [
       { use_default: "false" },
       { use_default: true, use_immutable_subject: "false" },
@@ -367,10 +352,8 @@ describe("actions", () => {
   });
 
   test("a denied fork-pr-private read renders the ambiguity denialHint", async () => {
-    // If GitHub denies this pair on a public repository, this one sentence
-    // is the whole mitigation - and the mechanism (denialHint on the
-    // permission branch) has silently broken once before, so pin that a
-    // denial actually renders it.
+    // If GitHub denies this pair on a public repository this sentence is the whole mitigation, and denialHint rendering has silently broken once
+    // before.
     const api = new MockApi({
       [FORK_PRIVATE]: { error: { status: 403, message: "Forbidden", body: "" } },
     });
@@ -403,10 +386,8 @@ describe("actions", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     const denied = thrown as PermissionDenied;
-    // The failing call is a GET, but the advice grades by the SECTION's need
-    // on the override permission: the OIDC PUT sibling writes with the same
-    // Actions permission, so read-only advice would cost a second round trip
-    // (grant read, pass preflight, fail on the write).
+    // The advice grades by the SECTION's need on the override permission: the OIDC PUT sibling writes with the same Actions permission, so read-only
+    // advice would cost a second round trip.
     expect(denied.detail).toContain(grantFor({ repo: ["actions"] }));
     expect(denied.detail).not.toContain('"Administration"');
   });
@@ -440,9 +421,7 @@ describe("actions", () => {
       ["putForkPrApproval", approval, "applied the fork PR contributor approval policy"],
       ["putForkPrPrivate", privateRepos, "applied the private-repo fork PR workflow settings"],
     ]);
-    // The shape requires all four toggles and every one is compared: with
-    // every live value flipped, all four must drift - an omitted comparison
-    // cannot pass here; the passthrough field drifts as unknown to GitHub.
+    // Every live value is flipped, so an omitted comparison cannot pass here; the passthrough field drifts as unknown to GitHub.
     expect(result.ops[1]?.drift).toEqual([
       "actions.fork_pr_workflows_private_repos.run_workflows_from_fork_pull_requests: true != false",
       "actions.fork_pr_workflows_private_repos.send_write_tokens_to_workflows: false != true",
@@ -456,9 +435,8 @@ describe("actions", () => {
   });
 
   test("the private-repos shape requires the complete policy and stays loose otherwise", () => {
-    // GitHub does not document whether an omitted toggle is preserved or
-    // reset by the PUT, so the shape demands all four booleans (a YAML-quoted
-    // "true" included) before any section writes.
+    // GitHub does not document whether an omitted toggle is preserved or reset by the PUT, so the shape demands all four booleans (a YAML-quoted
+    // "true" included).
     for (const bad of [
       { send_secrets_and_variables: false },
       {
@@ -489,7 +467,6 @@ describe("actions", () => {
         },
       }).success,
     ).toBe(true);
-    // The approval object requires its policy string the same way.
     expect(actionsSection.shape.safeParse({ fork_pr_contributor_approval: {} }).success).toBe(
       false,
     );
@@ -560,9 +537,7 @@ describe("actions", () => {
   });
 
   test("a routed key's endpoint pair must share a name, and a scalar key must say how it becomes a body", () => {
-    // Compile-time only: the table wiring is checked at the call, so a GET
-    // paired with another key's PUT, or an enum-valued key PUT bare, never
-    // reaches the routing table.
+    // Compile-time only: a GET paired with another key's PUT, or an enum-valued key PUT bare, never reaches the routing table.
     const paired: ReturnType<typeof endpointRouted<"access_level", "Access">> = endpointRouted<
       "access_level",
       "Access"

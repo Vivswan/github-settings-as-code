@@ -47,9 +47,7 @@ function assertBacktickedEnumeration(
 }
 
 describe("README front door", () => {
-  // The README is the front door to docs/: a pitch, a three-step quick start, the versioning
-  // note, the library pointer, and a table into the guides. Each pin here is a shape the reference content would
-  // break if it grew back: the tables live on the reference pages now.
+  // Each pin is a shape the reference content would break if it grew back into the README; the tables live on the reference pages.
   const prose = readme.replace(/```[\s\S]*?```/g, "");
 
   test("carries exactly the front-door headings, in order", () => {
@@ -272,18 +270,13 @@ describe("schema $schema hints and $id", () => {
       genScript.includes(`join(ROOT, ${rest.map((part) => JSON.stringify(part)).join(", ")})`),
       `gen-settings-schema.ts does not write to ${rest.join("/")}, where the $id points`,
     ).toBe(true);
-    // <owner>/<repo> is the slug the manifest's repository URL names (the
-    // package name is scoped and cannot serve); the equality catches a
-    // rename on either side.
+    // The package name is scoped and cannot serve as the slug, so the manifest's repository URL does; the equality catches a rename on either side.
     const manifestSlug = pkg.repository.url.match(
       /^git\+https:\/\/github\.com\/([^/]+\/[^/]+)\.git$/,
     )?.[1];
     expect(`${owner}/${repo}`).toBe(manifestSlug ?? "");
-    // <owner>/<repo> is the slug the README's own workflow snippet installs
-    // (that pin is itself anchored by the "README version pins" test). An
-    // includes() cannot prove EVERY install line agrees - third-party
-    // actions share the uses: syntax - but a $id naming a slug no snippet
-    // installs fails here.
+    // includes() cannot prove EVERY install line agrees (third-party actions share the uses: syntax), but a $id naming a slug no snippet installs
+    // fails here.
     expect(
       readme.includes(`uses: ${owner}/${repo}@`),
       `the README never installs "uses: ${owner}/${repo}@...", so the $id's slug matches no workflow snippet`,

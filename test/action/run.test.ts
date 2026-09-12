@@ -10,12 +10,8 @@ import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 
-// Every run() below injects this capturing Io in place of the @actions/core
-// sink, so a green suite prints no raw ::error::/::warning:: workflow
-// commands - and the failure-path tests assert the exact captured text
-// (annotations as "<level>: <message>", log lines verbatim). The step summary
-// and the action outputs are captured the same way, so the assertions read
-// exactly what run() handed the port.
+// A capturing Io replaces the @actions/core sink, so a green suite prints no raw workflow commands and the failure-path tests assert the exact
+// captured text.
 let captured: string[] = [];
 let summaries: string[] = [];
 let outputs: Record<string, string> = {};
@@ -221,9 +217,7 @@ describe("run in multi-repo mode (env glue)", () => {
       },
     });
     expect(await run({ api: failing, io: testIo })).toBe(1);
-    // The failure path's own reporting, captured instead of echoed to the test
-    // log: the error annotation for the failed target (redacted by default,
-    // since the 500 leaves its visibility unproven) and the outcome line.
+    // The error annotation is redacted by default, since the 500 leaves the target's visibility unproven.
     expect(captured).toContain(
       "error: private repository #1: failed - repository. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
     );
@@ -269,7 +263,6 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(await run({ api: api, io: testIo })).toBe(1);
     const output = outputs["repos-result"] ?? "";
     const summary = summaries.join("\n");
-    // neither the output nor the summary carries the private slug or values
     for (const text of [output, summary]) {
       expect(text).not.toContain("o/priv");
       expect(text).not.toContain("SECRET-live");
@@ -293,20 +286,16 @@ describe("run in multi-repo mode (env glue)", () => {
       "GET /repos/o/priv": { data: { has_wiki: true, private: true } },
     });
     expect(await run({ api: api, io: testIo })).toBe(1);
-    // the single-repo redaction path registered the slug for masking
     expect(captured).toContain("mask: o/priv");
     const summary = summaries.join("\n");
     expect(summary).not.toContain("o/priv");
     expect(summary).toContain("details hidden");
-    // Finding F: the redacted single-repo summary renders the SAME per-section
-    // table the multi path does - the section key and its status are visible
-    // (the policy keeps statuses everywhere), the detail cell is hidden, and
-    // the live drift value never appears.
+    // The redacted single-repo summary renders the SAME per-section table the multi path does: statuses stay visible everywhere, only the detail cell
+    // is hidden.
     expect(summary).toContain("| Section | Status | Detail |");
     expect(summary).toContain("repository");
     expect(summary).toContain(":warning: drift");
     expect(summary).toContain("hidden (private repository)");
-    // the live value that drifted must not leak
     expect(summary).not.toContain("has_wiki");
   });
 
@@ -321,18 +310,14 @@ describe("run in multi-repo mode (env glue)", () => {
     const api = new MockApi({ "GET /repos/o/self": { data: { has_wiki: false, private: true } } });
     expect(await run({ api: api, io: testIo })).toBe(0);
     const summary = summaries.join("\n");
-    // full detail: the section table renders normally, no redaction note
     expect(summary).not.toContain("details hidden");
     expect(summary).toContain("repository");
-    // and no visibility probe: the self carve-out skips it (only the engine GET)
+    // The self carve-out skips the visibility probe: the one GET is the engine's.
     const gets = api.calls.filter((c) => c.method === "GET" && c.path === "/repos/o/self");
     expect(gets).toHaveLength(1);
   });
 
-  // Every invalid private-repos/private-report/report-public-key combination
-  // is rejected at config parse - exit 1 before any API call - and the error
-  // annotation must name ITS OWN rule: exit code and call count alone would
-  // pass on a wrong-rule rejection.
+  // The error annotation must name ITS OWN rule: exit code and call count alone would pass on a wrong-rule rejection.
   test.each([
     [
       "private-report: issue with private-repos: show",
@@ -409,7 +394,6 @@ describe("run in multi-repo mode (env glue)", () => {
       }
       const api = new MockApi({});
       expect(await run({ api: api, io: testIo })).toBe(1);
-      // rejected at config parse, before any API call
       expect(api.calls).toHaveLength(0);
       expect(captured.filter((line) => line.startsWith("error: ")).join("\n")).toContain(fragment);
     },
@@ -529,10 +513,8 @@ describe("run in multi-repo mode (env glue)", () => {
     process.env["INPUT_PRIVATE-REPOS"] = "redact";
     process.env["INPUT_PRIVATE-REPORT"] = "issue";
     process.env.INPUT_MODE = "check";
-    // repo GET body has neither private nor visibility -> unknown -> redact, no deliver
     const api = new MockApi({ "GET /repos/o/maybe": { data: { has_wiki: true } } });
     expect(await run({ api: api, io: testIo })).toBe(1); // drift exits 1
-    // no issue/label traffic: the report was withheld, and the withholding is said once, safely
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
     const withheld = captured.find((line) => line.includes("visibility could not be verified"));
@@ -735,8 +717,7 @@ describe("run in mode: merge", () => {
 
   test.each([
     ["a mapping", { setting: true }],
-    // A null on an unknown key is no opt-out marker: nothing known is
-    // being removed, so it is the same misspelling and must name the file.
+    // A null on an unknown key is no opt-out marker: nothing known is being removed, so it is the same misspelling.
     ["null", null],
   ])(
     "a layer with an unknown top-level key set to %s fails naming the layer: a merge has no allowlist to tolerate it",
@@ -756,9 +737,7 @@ describe("run in mode: merge", () => {
   );
 
   test("a sections allowlist is rejected before any layer is read, so the written document is never narrower than the fold", async () => {
-    // The fixtures fold to three sections (THREE_LAYERS_MERGED above); an
-    // allowlist naming one of them is refused up front rather than
-    // narrowing the file, and a layer path that does not exist proves the
+    // An allowlist naming one of the three folded sections is refused up front rather than narrowing the file; the nonexistent layer path proves the
     // refusal precedes the read.
     setMergeEnv([layer("fleet.yml"), layer("repo.yml"), join(dir, "nope.yml")]);
     process.env.INPUT_SECTIONS = "labels";
@@ -774,9 +753,8 @@ describe("run in mode: merge", () => {
   });
 
   test("a cyclic layer (a YAML anchor that includes itself) is refused by the fold, naming the layer", async () => {
-    // Raw YAML: a self-referencing anchor under a private key parses to a
-    // cyclic object; the standalone validation ignores the key, so the
-    // engine's boundary is what refuses the layer.
+    // A self-referencing anchor under a private key parses to a cyclic object; standalone validation ignores the key, so the engine's boundary is
+    // what refuses the layer.
     const top = join(dir, "top.yml");
     writeFileSync(top, ["_notes: &loop", "  self: *loop", "labels: []", ""].join("\n"));
     setMergeEnv([layer("fleet.yml"), top]);

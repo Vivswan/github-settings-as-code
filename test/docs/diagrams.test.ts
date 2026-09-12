@@ -1,18 +1,10 @@
 /**
- * Diagram pins: every mermaid fence in docs/ names real code. Node labels are
- * quoted (wherever the node is defined, an edge line included) and read per
- * `<br>` segment in a fixed order: captions first, then a path token, then
- * the symbols that path exports (in the same segment or the segments after
- * it, split on spaces and commas). A caption may not look like code (no `/`,
- * no `()`), and once a path has been read every later segment is a path or a
- * symbol list, so a mistyped path or symbol cannot hide as prose. Every
- * concept diagram (one outside a generated region) is followed by a
- * "Demonstrated by:" line whose links, absolute GitHub URLs into this
- * repository, resolve to files. The pins prove existence only: a caption-only
- * label names no file and passes on its own, and a demonstration link is
- * checked to resolve to a file, not to test the claim its diagram makes.
- * Kept pure over markdown text so the mutation checks below can prove each
- * guard fails.
+ * Every mermaid fence in docs/ names real code; the pins prove existence only, never the claim a diagram makes.
+ * A quoted node label reads per `<br>` segment, so a mistyped path or symbol cannot hide as prose:
+ *   captions                -> first; may not look like code (no `/`, no `()`)
+ *   a path token            -> src/, test/, docs/, lib/, or .github/ prefix
+ *   symbols after the path  -> exported by that path, split on spaces and commas, in this or later segments
+ * A concept diagram (outside a generated region) is followed by a "Demonstrated by:" line whose absolute GitHub links resolve to files.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -43,9 +35,7 @@ function exportsSymbol(file: string, name: string): boolean {
 const NODE_DEFINITION = /(?<![\w"-])([A-Za-z_][\w-]*)([[({>]+)(?![-|])/g;
 
 /**
- * The labels of a mermaid block's nodes, defined standalone or inline on an
- * edge line. A label that is not quoted is reported instead of read: an
- * unquoted label is invisible to the pins, so it is not allowed to exist.
+ * A mermaid block's node labels, standalone or inline on an edge line; an unquoted label is invisible to the pins, so it is reported instead of read.
  */
 function nodeLabels(mermaid: string): { labels: string[]; problems: string[] } {
   const labels: string[] = [];
@@ -78,10 +68,6 @@ function nodeLabels(mermaid: string): { labels: string[]; problems: string[] } {
   return { labels, problems };
 }
 
-/**
- * Problems with one label, as "label: problem": captions, then a path and
- * its exported symbols, per the grammar in the module header.
- */
 export function labelProblems(label: string, root: string): string[] {
   const problems: string[] = [];
   const missing = new Set<string>();
@@ -151,12 +137,6 @@ function insideGeneratedRegion(lines: readonly string[], line: number): boolean 
   return open;
 }
 
-/**
- * Every diagram problem in one page: a node naming a missing path or an
- * unexported symbol, a concept diagram without its "Demonstrated by:" line
- * before the next heading, or a demonstration link that is not a repository
- * URL to an existing file.
- */
 export function diagramProblems(markdown: string, root: string): string[] {
   const problems: string[] = [];
   for (const block of fencedBlocks(markdown, "mermaid")) {
@@ -206,8 +186,7 @@ describe("docs/ diagrams", () => {
     .sort();
 
   test("the architecture page carries exactly the seven concept diagrams and the module map", () => {
-    // Each H2 heads one diagram; pinning the list means a section cannot
-    // quietly disappear while the per-page checks still pass.
+    // Pinning the list means a section cannot quietly disappear while the per-page checks still pass.
     const markdown = readFileSync(join(DOCS, "reference", "architecture.md"), "utf8");
     const headings = markdown.split("\n").filter((line) => line.startsWith("## "));
     expect(headings).toEqual([

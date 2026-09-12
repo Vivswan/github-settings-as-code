@@ -35,7 +35,6 @@ describe("planRedaction", () => {
     expect(plan.display("o/PrivA")).toBe("private repository #1");
     expect(plan.isRedacted("o/privB")).toBe(true);
     expect(plan.display("o/privB")).toBe("private repository #2");
-    // case-insensitive lookup finds the same placeholder
     expect(plan.display("O/PRIVA")).toBe("private repository #1");
   });
 
@@ -62,7 +61,6 @@ describe("planRedaction", () => {
     );
     expect(plan.isRedacted("Admin/Repo")).toBe(false);
     expect(plan.display("Admin/Repo")).toBe("Admin/Repo");
-    // the private non-self target still gets #1, not #2
     expect(plan.display("o/priv")).toBe("private repository #1");
     expect(plan.maskedSlugs).toEqual(["o/priv"]);
   });
@@ -81,13 +79,10 @@ describe("planRedaction", () => {
       privateSet("o/priv"),
       "admin/repo",
     );
-    // filtered slug is masked
     expect(plan.maskedSlugs).toContain("o/filtered");
     expect(plan.maskedSlugs).toContain("o/priv");
-    // but never placeholdered
     expect(plan.isRedacted("o/filtered")).toBe(false);
     expect(plan.display("o/filtered")).toBe("o/filtered");
-    // the target already masked is not duplicated by the extra list
     expect(plan.maskedSlugs.filter((s) => s.toLowerCase() === "o/priv")).toHaveLength(1);
   });
 
@@ -308,8 +303,7 @@ describe("public projections", () => {
     io.output("result", slug);
     // @ts-expect-error nor the summary channel
     io.summary(slug);
-    // The runtime shape is an opaque box: even forced through, the slug text
-    // is not what a sink would print.
+    // The runtime shape is an opaque box: even forced through, the slug text is not what a sink would print.
     expect(`${slug}`).not.toContain("o/priv");
     expect(emitted.join("\n")).not.toContain("o/priv");
   });
@@ -336,9 +330,8 @@ describe("capturingIo", () => {
   });
 
   test("the mask registry passes through; every other channel is dropped, not forwarded", () => {
-    // A redacted target's sink must let nothing textual out: the debug trace,
-    // summary, and outputs are the run's own, written elsewhere from the
-    // public view, so a stray write through the capture reaches nowhere.
+    // The debug trace, summary, and outputs are the run's own, written elsewhere from the public view, so a stray write through the capture must
+    // reach nowhere.
     const through: string[] = [];
     const base: Io = {
       annotate: () => {},
@@ -360,10 +353,8 @@ describe("capturingIo", () => {
   });
 
   test("composes as capturingIo(prefixedIo(io, display)): capture is per-target, mask stays raw", () => {
-    // The plan wraps prefixedIo INSIDE capturingIo. capturingIo suppresses the
-    // wrapped sink's emission entirely, so the prefix never reaches the base;
-    // each target owns its own capture buffer, so the recorded lines need no
-    // prefix to be attributable. mask still passes through to the base.
+    // capturingIo suppresses the wrapped sink entirely, so the prefix never reaches the base; each target owns its own buffer, so recorded lines need
+    // no prefix.
     const masks: string[] = [];
     const emitted: string[] = [];
     const base: Io = {

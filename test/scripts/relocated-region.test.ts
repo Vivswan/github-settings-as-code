@@ -1,6 +1,3 @@
-// The relocation mutation the placement suites share: a block region moves with its marker
-// lines, an inline region (mid-line, ending its line, or alone on it) moves as its marker span.
-
 import { expect, test } from "bun:test";
 import { relocatedRegion } from "./relocated-region.js";
 

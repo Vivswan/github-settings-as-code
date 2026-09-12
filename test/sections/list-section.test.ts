@@ -1,7 +1,6 @@
 /**
- * The list-section factory's own controls, over variants of the labels declaration (real routes,
- * real slice): what the factory derives and how a wrong declaration fails loudly. The labels
- * suite pins the pilot's prose; this file pins the factory's rules once.
+ * The list-section factory's own controls over variants of the labels declaration; the labels suite pins the pilot's prose, this file pins the
+ * factory's rules once.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -141,8 +140,7 @@ describe("listSection", () => {
       endpoints: base.endpoints as ListEndpoints,
       address: unreachable,
     });
-    // A conditional between two literal dictionaries is a union too: keyof would hide the
-    // second arm's DELETE-as-update, so the union is refused before any per-role pin runs.
+    // A conditional between two literal dictionaries is a union too: keyof would hide the second arm's DELETE-as-update.
     const flag = Boolean(process.env.LIST_SECTION_NEVER_SET);
     listSection({
       ...base,

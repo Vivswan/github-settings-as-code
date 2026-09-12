@@ -1,18 +1,6 @@
 /**
- * The release pipeline proven against local fixture repositories: a bare
- * "origin" plus clones playing the CI checkouts, so "the next release puts
- * vX.Y.Z and the major on the build branch's commit for the merge commit"
- * is a unit test, not something the first real release discovers. Covers
- * the packaged-commit topology (the build chain's parents, tree, bundle
- * bytes, the carries-a-bundle invariant), idempotent reruns that verify
- * instead of move, the tamper stops, the major move, the boundary anchor,
- * the moving latest tag, and the one push-failure classification every
- * retrying push goes through.
- *
- * Every push in this file runs through a git shim first on PATH: it refuses
- * a push whose working directory is not inside a fixture (so a helper called
- * without cwd can never reach the real origin) and, inside withPushPlans,
- * logs each push and plays a rival or a scripted remote failure ahead of it.
+ * The release pipeline against local fixture repositories (a bare origin plus clones playing the CI checkouts), so the tag topology is a unit test
+ * rather than what the first real release discovers.
  */
 
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
@@ -39,16 +27,14 @@ import {
   verifyPublishedRefs,
 } from "../../.github/scripts/release-pipeline.js";
 
-// Nearly every test here shells out to git dozens of times; bun's 5s default
-// times out under parallel machine load (setDefaultTimeout is file-scoped).
+// Dozens of git spawns per test time out bun's 5s default under parallel machine load.
 setDefaultTimeout(30_000);
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
-/** Where every fixture lives: mkdtemp under the temp dir with this prefix,
- * resolved to its physical path (the shim compares against `pwd -P`). */
+/** Resolved to its physical path: the shim compares against `pwd -P`. */
 const FIXTURE_AREA = realpathSync(tmpdir());
 const FIXTURE_PREFIX = "release-pipeline-";
 const PLANS_ENV = "RELEASE_PIPELINE_PUSH_PLANS";
@@ -65,10 +51,7 @@ function guardRefusal(cwd: string): string {
   return `release-pipeline fixture guard: refusing git push from ${cwd}, which is not inside ${FIXTURE_AREA}/${FIXTURE_PREFIX}*/`;
 }
 
-/** Install the git shim first on PATH for the whole file: the real git for
- * everything but push; a push is refused outside the fixture area, and when
- * ${PLANS_ENV} names a plans directory it is logged there and its plan (by
- * ordinal; none lets it through) runs first. */
+/** The git shim first on PATH refuses a push outside the fixture area, so no test can reach a real remote. */
 let shimDir = "";
 /** PATH as it was before the shim went first; undefined until it did. */
 let realPath: string | undefined;
@@ -109,8 +92,7 @@ beforeAll(() => {
   realPath = process.env.PATH ?? "";
   process.env.PATH = `${shimDir}:${realPath}`;
 });
-// Undo only what beforeAll got to: a setup failure must surface as itself,
-// not as a cleanup of a PATH never changed or a directory never made.
+// Undo only what beforeAll got to, so a setup failure surfaces as itself.
 afterAll(() => {
   if (realPath !== undefined) {
     process.env.PATH = realPath;
@@ -120,8 +102,7 @@ afterAll(() => {
   }
 });
 
-/** A clone configured hermetically: fixed identity, no signing, no hooks
- * (the developer's global gitconfig must not leak into the fixtures). */
+/** Hermetic clone: the developer's global gitconfig (identity, signing, hooks) must not leak into the fixtures. */
 function clone(root: string, originDir: string, name: string): string {
   const dir = join(root, name);
   execFileSync("git", ["clone", "--quiet", originDir, dir]);
@@ -144,9 +125,7 @@ function commitAll(cwd: string, subject: string): string {
   return git(cwd, "rev-parse", "HEAD");
 }
 
-/** Take the workflows directory out of a clone's index: what every
- * packaged tree lacks, so a planted chain commit deviates from the
- * pipeline's only where the test means it to. */
+/** What every packaged tree lacks, so a planted chain commit deviates from the pipeline's only where the test means it to. */
 function stripWorkflows(cwd: string): void {
   git(cwd, "rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".github/workflows");
 }
@@ -188,9 +167,10 @@ interface Fixture {
   mergeSha: string;
 }
 
-/** origin/main at "2.0.0 released" (seed) plus the squash-merged release PR
- * for 2.1.0 on top, with the bundle freshly "built" in the work clone -
- * exactly the state the packaging job sees. */
+/**
+ * origin/main at the 2.0.0 release (seed) plus the squash-merged 2.1.0 release PR, with the bundle freshly "built" in the work clone: the state the
+ * packaging job sees.
+ */
 function seedFixture(): Fixture {
   const root = mkdtempSync(join(tmpdir(), FIXTURE_PREFIX));
   roots.push(root);
@@ -213,8 +193,7 @@ function seedFixture(): Fixture {
     )}\n`,
   );
   write(work, "CHANGELOG.md", CHANGELOG_21.replace(/## \[2\.1\.0\][\s\S]*?\n\n## /, "## "));
-  // A workflow (which no chain commit may carry) beside another .github
-  // file (which every chain commit keeps).
+  // A workflow (which no chain commit may carry) beside another .github file (which every chain commit keeps).
   write(work, ".github/workflows/ci.yml", "name: ci\non: push\njobs: {}\n");
   write(work, ".github/dependabot.yml", "version: 2\nupdates: []\n");
   write(work, "src/marker.ts", "export const marker = 1;\n");
@@ -235,8 +214,7 @@ function checkoutOf(fx: Fixture, name: string, sha: string, bundle: string): str
   return dir;
 }
 
-/** A later green push to main, prepared as CI sees it: a fresh clone at
- * the new head with the bundle "built" from it. */
+/** A later green push to main as CI sees it: a fresh clone at the new head with the bundle "built" from it. */
 function pushGreenCommit(fx: Fixture, name: string, bundle: string): { dir: string; sha: string } {
   const dir = clone(fx.root, fx.origin, name);
   write(dir, "src/marker.ts", `export const marker = "${name}";\n`);
@@ -246,15 +224,15 @@ function pushGreenCommit(fx: Fixture, name: string, bundle: string): { dir: stri
   return { dir, sha };
 }
 
-/** The Source trailer as git parses it: proves the value sits in a real
- * trailer block, not just somewhere in the body. */
+/** The Source trailer as git parses it, proving the value sits in a real trailer block rather than somewhere in the body. */
 function sourceTrailer(cwd: string, sha: string): string {
   return git(cwd, "log", "-1", "--format=%(trailers:key=Source,valueonly)", sha);
 }
 
-/** The verify job's checkout: main's head at depth 1, made after main
- * moved past the merge commit, so the merge commit's tree is not local
- * and only the confirmation's own fetch can supply it. */
+/**
+ * The verify job's checkout: depth 1 at main's head after main moved past the merge commit, so only the confirmation's own fetch can supply the merge
+ * commit's tree.
+ */
 function shallowChecker(fx: Fixture, name: string): string {
   pushGreenCommit(fx, `${name}-after-release`, "packaged-bundle-bytes-9\n");
   const checker = join(fx.root, name);
@@ -273,20 +251,13 @@ function shallowChecker(fx: Fixture, name: string): string {
 }
 
 const buildTip = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/heads/build");
-/** A commit's first parent as its object records it, whatever ref or
- * shallow state the clone reading it is in. */
+/** A commit's first parent as its object records it, whatever ref or shallow state the reading clone is in. */
 const parentOf = (cwd: string, sha: string): string =>
   git(cwd, "cat-file", "-p", sha).match(/^parent ([0-9a-f]{40})$/m)?.[1] ?? "";
 const latestTag = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/tags/latest^{}");
 const remoteRef = (fx: Fixture, ref: string): string => git(fx.work, "ls-remote", "origin", ref);
 
-/**
- * A commit shaped like the pipeline's chain commits but minted by another
- * writer: `source`'s tree minus workflows plus `bundle`, parented on `parent`
- * (null for the chain's first commit, a root like the pipeline's own), naming
- * `source` in a Source trailer. Not pushed; the clone holding it is returned
- * for a competitor plan to push from.
- */
+/** A chain-shaped commit minted by another writer, not pushed; the clone holding it is returned for a competitor plan to push from. */
 function rivalChainCommit(
   fx: Fixture,
   name: string,
@@ -322,8 +293,6 @@ type PushPlan =
   /** Replay a remote a file:// origin cannot play: this stderr, this exit status. */
   | { fail: { stderr: string; status: number } };
 
-/** Run `body` with the shim logging every push and playing `plans` by
- * ordinal (null lets that push through). Returns the push argument lists, in order. */
 function withPushPlans(fx: Fixture, plans: (PushPlan | null)[], body: () => void): string[][] {
   const plansDir = mkdtempSync(join(fx.root, "push-plans-"));
   for (const [index, plan] of plans.entries()) {
@@ -353,8 +322,7 @@ function withPushPlans(fx: Fixture, plans: (PushPlan | null)[], body: () => void
       process.env[PLANS_ENV] = before;
     }
   }
-  // No log means no push was attempted; any other trouble reading it must
-  // surface, or a no-push assertion could not tell the two apart.
+  // No log means no push was attempted; any other trouble reading it must surface, or a no-push assertion could not tell the two apart.
   const log = join(plansDir, "pushes.log");
   if (!existsSync(log)) {
     return [];
@@ -456,10 +424,8 @@ describe("packageRelease", () => {
     const packaged = git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}");
     expect(result).toEqual({ created: true, packagedSha: packaged, latestSha: packaged });
     expect(pushes).toEqual([appendOf(packaged), TAG_PUSH, latestOf("", packaged)]);
-    // The chain's first commit is a root (no parent: a child of the source
-    // would record the workflow files' deletion, a workflow change the
-    // default token may not push); the tag and latest sit on it, and so
-    // does the major once it moves.
+    // The chain's first commit is a root: a child of the source would record the workflow files' deletion, a workflow change the default token may
+    // not push.
     expect(buildTip(fx)).toBe(packaged);
     expect(latestTag(fx)).toBe(packaged);
     retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
@@ -481,8 +447,6 @@ describe("packageRelease", () => {
     expect(body).toContain("Workflow-run: https://example.invalid/actions/runs/1");
     expect(sourceTrailer(fx.origin, packaged)).toBe(fx.mergeSha);
 
-    // Idempotent rerun: a fresh checkout that rebuilt the same bytes
-    // verifies the existing tag instead of recreating or moving it.
     const rerun = checkoutOf(fx, "rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
     let verified: ReturnType<typeof packageRelease> | undefined;
     const rerunPushes = withPushPlans(fx, [], () => {
@@ -519,7 +483,6 @@ describe("packageRelease", () => {
     const pushes = withPushPlans(fx, [], () => {
       result = packageRelease({ cwd: release, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    // latest names the newer commit and stays there.
     expect(result).toEqual({ created: true, packagedSha: chain, latestSha: tip });
     expect(pushes).toEqual([TAG_PUSH]);
     expect(git(fx.origin, "rev-parse", "refs/tags/v2.1.0^{}")).toBe(chain);
@@ -546,7 +509,6 @@ describe("packageRelease", () => {
       ),
     );
     expect(remoteRef(fx, "refs/tags/latest")).toBe("");
-    // The rerun verifies the tag, then moves latest.
     const rerun = checkoutOf(fx, "rerun-heal", fx.mergeSha, "packaged-bundle-bytes-1\n");
     let result: ReturnType<typeof packageRelease> | undefined;
     const rerunPushes = withPushPlans(fx, [], () => {
@@ -572,8 +534,7 @@ describe("packageRelease", () => {
       "packaged-bundle-bytes-0\n",
     );
     git(backfill.from, "push", "--quiet", "origin", `${backfill.sha}:refs/heads/build`);
-    // The rerun's checkout is a full clone at the merge commit; fetching the
-    // tag must not cut the seed out of main's history, or the backfill would
+    // The rerun's checkout is a full clone at the merge commit; fetching the tag must not cut the seed out of main's history, or the backfill would
     // read as off main.
     const rerun = checkoutOf(fx, "rerun-backfilled", fx.mergeSha, "packaged-bundle-bytes-1\n");
     let result: ReturnType<typeof packageRelease> | undefined;
@@ -583,9 +544,7 @@ describe("packageRelease", () => {
     expect(result).toEqual({ created: false, packagedSha: packaged.packagedSha, latestSha: newer });
     expect(pushes).toEqual([]);
     expect(latestTag(fx)).toBe(newer);
-    // The same checkout then moves the major and confirms: no fetch along the
-    // way may have cut the chain's parent links (a shallow marker on a chain
-    // commit would read the release as off build).
+    // No fetch along the way may have cut the chain's parent links: a shallow marker on a chain commit would read the release as off build.
     expect(retagMajor({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
       major: "v2",
       packagedSha: packaged.packagedSha,
@@ -808,9 +767,8 @@ describe("packageRelease", () => {
 
   test("a tag on a commit that is not on build is refused, even with the right tree and bytes", () => {
     const fx = seedFixture();
-    // build holds the seed's package; the planted tag has the merge commit's
-    // exact chain tree, its bundle bytes, and a Source trailer, but is
-    // parented on the merge commit itself, off the chain.
+    // The planted tag has the merge commit's exact chain tree, bundle bytes, and Source trailer, but is parented on the merge commit itself, off the
+    // chain.
     advanceBuild({
       cwd: checkoutOf(fx, "seed-run", fx.seedSha, "packaged-bundle-bytes-0\n"),
       sourceSha: fx.seedSha,
@@ -879,9 +837,7 @@ describe("packageRelease", () => {
 
   test("a source that never reached main is refused before any push, however well its manifest matches", () => {
     const fx = seedFixture();
-    // A release-shaped commit (manifest at 2.1.0, release subject) on a side
-    // branch: what a draft whose target is not the merge commit would hand
-    // the hook. Everything but "is it on main" checks out.
+    // A release-shaped commit on a side branch: what a draft whose target is not the merge commit would hand the hook.
     const side = clone(fx.root, fx.origin, "off-main-release");
     git(side, "checkout", "--quiet", "-b", "side", fx.seedSha);
     write(side, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.1.0" }, null, 2)}\n`);
@@ -936,9 +892,10 @@ describe("packageRelease", () => {
   });
 });
 
-/** The next release's merge landed on origin/main, prepared from a fresh
- * clone (as CI sees it - the previous release's packaged commit lives on
- * build, never in a working branch). */
+/**
+ * The next release's merge on origin/main, prepared from a fresh clone as CI sees it: the previous release's packaged commit lives on build, never in
+ * a working branch.
+ */
 function prepareNextRelease(
   fx: Fixture,
   version: string,
@@ -962,7 +919,6 @@ describe("retagMajor", () => {
     expect(git(fx.origin, "rev-parse", "refs/tags/v2^{}")).toBe(packagedSha);
     expect(buildTip(fx)).toBe(packagedSha);
 
-    // The next release in the line force-moves it again, along the chain.
     const next = prepareNextRelease(fx, "2.1.1", 44, "packaged-bundle-bytes-2\n");
     const packaged = packageRelease({ cwd: next.dir, tag: "v2.1.1", sourceSha: next.mergeSha });
     retagMajor({ cwd: next.dir, tag: "v2.1.1", sourceSha: next.mergeSha });
@@ -982,7 +938,6 @@ describe("retagMajor", () => {
 
   test("the major never moves to a commit that is not a pure package", () => {
     const fx = seedFixture();
-    // Plant v2.1.0 as a bundle-less child of the merge commit naming it as source.
     const planter = clone(fx.root, fx.origin, "planter-empty");
     git(planter, "checkout", "--quiet", fx.mergeSha);
     git(planter, "config", "user.name", "planter");
@@ -1007,8 +962,7 @@ describe("retagMajor", () => {
 
   test("the major never moves to a package whose bundle is not this source's build", () => {
     const fx = seedFixture();
-    // Plant v2.1.0 as a well-shaped packaged commit (source and tree pass)
-    // carrying the WRONG bundle bytes; only the byte verification catches it.
+    // Source and tree pass; only the byte verification catches the planted bundle.
     const planter = clone(fx.root, fx.origin, "planter-wrong-bytes");
     git(planter, "checkout", "--quiet", fx.mergeSha);
     stripWorkflows(planter);
@@ -1033,7 +987,6 @@ describe("retagMajor", () => {
     const next = prepareNextRelease(fx, "2.1.1", 44, "packaged-bundle-bytes-2\n");
     const packaged = packageRelease({ cwd: next.dir, tag: "v2.1.1", sourceSha: next.mergeSha });
     retagMajor({ cwd: next.dir, tag: "v2.1.1", sourceSha: next.mergeSha });
-    // The stale rerun replays the v2.1.0 job on its old merge commit.
     const stale = checkoutOf(fx, "stale-rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
     packageRelease({ cwd: stale, tag: "v2.1.0", sourceSha: fx.mergeSha });
     expect(() => retagMajor({ cwd: stale, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
@@ -1102,10 +1055,7 @@ describe("retagMajor", () => {
 describe("verifyPublishedRefs", () => {
   test("the version tag and the major point at the same packaged, bundle-carrying chain commit", () => {
     const fx = seedFixture();
-    // build already holds the seed's package, so the release's chain commit
-    // is appended behind it rather than minted as the root; the merge
-    // commit's tree reaches the shallow checker only through the
-    // confirmation's own fetch.
+    // build already holds the seed's package, so the release's chain commit is appended behind it rather than minted as the root.
     advanceBuild({
       cwd: checkoutOf(fx, "seed-run", fx.seedSha, "packaged-bundle-bytes-0\n"),
       sourceSha: fx.seedSha,
@@ -1116,8 +1066,6 @@ describe("verifyPublishedRefs", () => {
     const verified = verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha });
     expect(verified).toEqual({ major: "v2", packagedSha });
     expect(packagedSha).toBe(buildTip(fx));
-    // Later green pushes move the tip past the tag; the confirmation from a
-    // fresh shallow checkout still finds the tag's commit on the chain.
     for (const name of ["third-green", "fourth-green"]) {
       const next = pushGreenCommit(fx, name, `packaged-bundle-${name}\n`);
       advanceBuild({ cwd: next.dir, sourceSha: next.sha });
@@ -1135,8 +1083,6 @@ describe("verifyPublishedRefs", () => {
   test("a major left on a different commit fails the confirmation", () => {
     const fx = seedFixture();
     packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
-    // The major was never moved (or was moved elsewhere): point it at the
-    // seed commit by hand.
     git(fx.work, "tag", "-f", "v2", fx.seedSha);
     git(fx.work, "push", "--quiet", "--force", "origin", "refs/tags/v2");
     const checker = clone(fx.root, fx.origin, "verify-drift");
@@ -1149,8 +1095,7 @@ describe("verifyPublishedRefs", () => {
     const fx = seedFixture();
     packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
     const checker = clone(fx.root, fx.origin, "verify-missing");
-    // The confirmation fetches refs/tags/v2 from origin; with no major ever
-    // pushed, git itself refuses the fetch.
+    // The confirmation fetches refs/tags/v2 from origin; with no major ever pushed, git itself refuses the fetch.
     expect(() =>
       verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha }),
     ).toThrow(/couldn't find remote ref/);
@@ -1158,9 +1103,7 @@ describe("verifyPublishedRefs", () => {
 
   test("a version tag that changes more than the bundle fails the confirmation", () => {
     const fx = seedFixture();
-    // The merge commit's chain tree (minus workflows, plus the bundle) plus a tampered action.yml,
-    // parented on the seed so nothing but the confirmation's own fetch can
-    // bring the merge commit's tree to a shallow checkout.
+    // Parented on the seed, so nothing but the confirmation's own fetch can bring the merge commit's tree to a shallow checkout.
     const planter = clone(fx.root, fx.origin, "verify-planter-extra");
     git(planter, "checkout", "--quiet", fx.mergeSha);
     stripWorkflows(planter);
@@ -1215,9 +1158,7 @@ describe("verifyPublishedRefs", () => {
   });
 });
 
-/** Simulate release-please's PR branch: manifest + changelog bumped for the
- * next version, built on the given main head; pushed (force) unless asked
- * to keep the commit local for a competitor plan. */
+/** release-please's PR branch: manifest and changelog bumped to `version` on `from`; left unpushed for a competitor plan when `push` is false. */
 function createReleasePrBranch(
   fx: Fixture,
   from: string,
@@ -1266,8 +1207,6 @@ describe("anchorReleasePr", () => {
     const worker = clone(fx.root, fx.origin, "anchor-worker");
     const result = anchorReleasePr({ cwd: worker, sourceSha: mainHead });
     expect(result.changed).toBe(true);
-    // The branch now records main's head as the boundary; its release
-    // content is untouched.
     const check = clone(fx.root, fx.origin, "anchor-check");
     git(check, "checkout", "--quiet", "release-please--branches--main");
     const config = JSON.parse(readFileSync(join(check, "release-please-config.json"), "utf8")) as {
@@ -1275,14 +1214,11 @@ describe("anchorReleasePr", () => {
     };
     expect(config["last-release-sha"]).toBe(mainHead);
     expect(readFileSync(join(check, ".release-please-manifest.json"), "utf8")).toContain("2.2.0");
-    // Rerun is a no-op.
     const again = anchorReleasePr({
       cwd: clone(fx.root, fx.origin, "anchor-again"),
       sourceSha: mainHead,
     });
     expect(again.changed).toBe(false);
-    // Squash-merging the PR lands the boundary on main, where the check
-    // accepts it as the parent of the new release merge.
     git(check, "checkout", "--quiet", "main");
     git(check, "merge", "--quiet", "--squash", "release-please--branches--main");
     git(check, "commit", "--quiet", "-m", "chore(main): release 2.2.0 (#60)");
@@ -1312,9 +1248,8 @@ describe("anchorReleasePr", () => {
 
   test("a branch built on an older head is left for its own refresh to anchor", () => {
     const fx = seedFixture();
-    // The branch was refreshed from the SEED commit; main has since moved
-    // to the 2.1.0 merge. Anchoring mergeSha onto it would record a
-    // boundary the branch's content was not computed from.
+    // The branch was refreshed from the SEED while main moved on to the 2.1.0 merge; anchoring mergeSha would record a boundary its content was not
+    // computed from.
     createReleasePrBranch(fx, fx.seedSha, "2.2.0");
     const worker = clone(fx.root, fx.origin, "anchor-stale-branch");
     const result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
@@ -1327,9 +1262,8 @@ describe("anchorReleasePr", () => {
     createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
     const worker = clone(fx.root, fx.origin, "anchor-twice");
     expect(anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha }).changed).toBe(true);
-    // The refresh force-push wipes the anchor commit; the SAME clone must
-    // be able to fetch the rewritten branch and anchor again (a local
-    // checked-out branch would make git refuse the fetch).
+    // The refresh force-push wipes the anchor commit; the SAME clone must fetch the rewritten branch (a locally checked-out branch would make git
+    // refuse the fetch).
     createReleasePrBranch(fx, fx.mergeSha, "2.3.0");
     expect(anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha }).changed).toBe(true);
     expect(releasePrConfig(fx, "anchor-twice-check").boundary).toBe(fx.mergeSha);
@@ -1361,7 +1295,6 @@ describe("anchorReleasePr", () => {
       reason: `release-please--branches--main: anchored at ${fx.mergeSha}`,
     });
     expect(pushes).toEqual([ANCHOR_PUSH, ANCHOR_PUSH]);
-    // The anchor sits on the REFRESHED branch: its content is 2.3.0's.
     const anchored = releasePrConfig(fx, "anchor-raced-check");
     expect(anchored.boundary).toBe(fx.mergeSha);
     expect(anchored.manifest).toContain("2.3.0");
@@ -1463,17 +1396,14 @@ describe("boundaryCheck", () => {
   test("a recorded boundary that is not on this history fails naming that", () => {
     const fx = seedFixture();
     const dir = clone(fx.root, fx.origin, "boundary-foreign");
-    // The seed commit records a placeholder boundary and has no release
-    // merge behind it.
+    // The seed commit records a placeholder boundary and has no release merge behind it.
     git(dir, "checkout", "--quiet", fx.seedSha);
     expect(() => boundaryCheck(dir)).toThrow(/not on this history at all/);
   });
 
   test("a shallow checkout is refused before any verdict", () => {
     const fx = seedFixture();
-    // The release merge is within depth but its parent, the recorded
-    // boundary, is not: a full history passes this, a truncated one would
-    // call it stale.
+    // The release merge is within depth 2 but its parent, the recorded boundary, is not: a truncated history would call it stale.
     write(
       fx.work,
       "release-please-config.json",
@@ -1518,9 +1448,8 @@ describe("boundaryCheck", () => {
     const dir = clone(fx.root, fx.origin, "boundary-newer");
     write(dir, "src/marker.ts", "export const marker = 3;\n");
     const between = commitAll(dir, "feat: land between two releases");
-    // The 2.2.0 release PR anchored main's tip and merged under a subject
-    // RELEASE_SUBJECT does not match: the 2.1.0 merge is still the newest
-    // one recognized, yet the boundary sits after it.
+    // The 2.2.0 release PR merged under a subject RELEASE_SUBJECT does not match, so the 2.1.0 merge stays the newest recognized one while the
+    // boundary sits after it.
     write(dir, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.2.0" }, null, 2)}\n`);
     write(
       dir,
@@ -1541,8 +1470,7 @@ describe("boundaryCheck", () => {
   test("a boundary on an unmerged branch is stale, not newer", () => {
     const fx = seedFixture();
     const dir = clone(fx.root, fx.origin, "boundary-off-main");
-    // A descendant of the release merge that never landed on main: the
-    // stale message's rollback IS the repair here.
+    // A descendant of the release merge that never landed on main: the stale message's rollback IS the repair.
     git(dir, "checkout", "--quiet", "-b", "side");
     write(dir, "src/marker.ts", "export const marker = 4;\n");
     const offMain = commitAll(dir, "feat: never merged");
@@ -1579,8 +1507,7 @@ describe("boundaryCheck", () => {
       )}\n`,
     );
     commitAll(dir, "chore: align the fixture boundary");
-    // Newer than the release merge, matching its prefix but not its shape:
-    // must neither become the boundary nor park the check.
+    // Newer than the release merge and sharing its prefix, but not its shape: must neither become the boundary nor park the check.
     write(dir, "src/marker.ts", "export const marker = 7;\n");
     commitAll(dir, "chore(main): release pipeline documentation");
     expect(boundaryCheck(dir).boundary).toBe(fx.mergeSha);
@@ -1632,11 +1559,9 @@ describe("advanceBuild", () => {
     expect(body).toContain(`build: main at ${git(fx.origin, "rev-parse", "--short", fx.mergeSha)}`);
     expect(body).toContain("Workflow-run: https://example.invalid/actions/runs/7");
     expect(sourceTrailer(fx.origin, tip)).toBe(fx.mergeSha);
-    // The checkout itself is untouched: HEAD still the source, index clean.
     expect(git(fx.work, "rev-parse", "HEAD")).toBe(fx.mergeSha);
     expect(git(fx.work, "status", "--porcelain")).toBe("");
 
-    // Idempotent rerun from a fresh checkout that rebuilt the bundle.
     const rerun = checkoutOf(fx, "build-rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
     let again: ReturnType<typeof advanceBuild> | undefined;
     const rerunPushes = withPushPlans(fx, [], () => {
@@ -1656,8 +1581,7 @@ describe("advanceBuild", () => {
   test("a newer green commit appends a fast-forward child of the previous tip and latest follows", () => {
     const fx = seedFixture();
     const first = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
-    // The stale rerun's checkout is cloned BEFORE the newer commit exists:
-    // it must learn that commit from origin to see build as already past.
+    // The stale checkout is cloned BEFORE the newer commit exists: it must learn that commit from origin to see build as already past.
     const stale = checkoutOf(fx, "build-stale", fx.mergeSha, "packaged-bundle-bytes-1\n");
     const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
     let second: ReturnType<typeof advanceBuild> | undefined;
@@ -1676,8 +1600,6 @@ describe("advanceBuild", () => {
     );
     expect(sourceTrailer(fx.origin, tip)).toBe(next.sha);
 
-    // The stale rerun of the older commit's run finds its commit behind the
-    // tip and leaves both refs where the newer run put them.
     let staleResult: ReturnType<typeof advanceBuild> | undefined;
     const stalePushes = withPushPlans(fx, [], () => {
       staleResult = advanceBuild({ cwd: stale, sourceSha: fx.mergeSha });
@@ -1700,10 +1622,8 @@ describe("advanceBuild", () => {
     expect(paths.filter((path) => path.startsWith(".github/workflows/"))).toEqual([]);
     expect(paths).toContain(".github/dependabot.yml");
     expect(paths).toContain("lib/index.js");
-    // main changes a workflow and adds another; the chain commit that follows
-    // carries neither (GitHub's refusal of workflow pushes to a token without
-    // the workflows grant is judged per push, so this is the shape the fixture
-    // can pin), and its diff against its own source is the removal plus the bundle.
+    // GitHub judges a token's workflow-push refusal per push, so a workflow change between two appends is the shape the fixture can pin: the chain
+    // commit carries neither workflow.
     const dir = clone(fx.root, fx.origin, "workflow-change");
     write(dir, ".github/workflows/ci.yml", "name: ci\non: [push, pull_request]\njobs: {}\n");
     write(dir, ".github/workflows/nightly.yml", "name: nightly\non: schedule\njobs: {}\n");
@@ -1741,9 +1661,6 @@ describe("advanceBuild", () => {
     expect(buildTip(fx)).toBe(tip);
   });
 
-  /** A hand-planted refs/tags/latest naming `source` in a Source trailer:
-   * `source`'s tree minus workflows plus `files` over the planted bundle,
-   * parented on `parent`, force-pushed as the tag. */
   function plantLatest(
     fx: Fixture,
     name: string,
@@ -1793,8 +1710,7 @@ describe("advanceBuild", () => {
     (_name, plant) => {
       const fx = seedFixture();
       const tip = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
-      // A newer main commit build has not packaged yet: its Source trailer
-      // alone would read as "newer, leave it".
+      // The newer main commit is not packaged yet, so its Source trailer alone would read as "newer, leave it".
       const newer = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
       const planted = plant(fx, tip, newer.sha);
       expect(latestTag(fx)).toBe(planted);
@@ -1817,8 +1733,7 @@ describe("advanceBuild", () => {
   test("a latest fifty-one chain commits behind the tip is left alone", () => {
     const fx = seedFixture();
     const kept = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
-    // Fifty-one release backfills of an older source land after it; rolling
-    // latest back to the older tip would be wrong however long the chain.
+    // Rolling latest back to the older tip would be wrong however long the backfill chain.
     const filler = clone(fx.root, fx.origin, "latest-filler");
     git(filler, "checkout", "--quiet", fx.seedSha);
     stripWorkflows(filler);
@@ -1860,8 +1775,7 @@ describe("advanceBuild", () => {
     advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
     const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
     const newer = advanceBuild({ cwd: next.dir, sourceSha: next.sha }).buildSha;
-    // The release hook backfills the seed after it; latest is then re-made by
-    // hand as an ANNOTATED tag at the newer commit (its id is a tag object).
+    // latest is re-made by hand as an ANNOTATED tag (its id is a tag object) at the newer commit.
     const backfill = rivalChainCommit(
       fx,
       "seed-backfill",
@@ -1909,9 +1823,6 @@ describe("advanceBuild", () => {
     expect(latestTag(fx)).toBe(tip);
   });
 
-  /** A hand-pushed refs/heads/build: a child of `from` under `message`
-   * carrying `files` (by default just a bundle that is not CI's build; a
-   * `{ linkTo }` value plants a symlink), force-pushed over whatever build held. */
   function plantBuild(
     fx: Fixture,
     name: string,
@@ -1937,8 +1848,6 @@ describe("advanceBuild", () => {
     return git(planter, "rev-parse", "HEAD");
   }
 
-  /** A side branch off `from` that never reached main, pushed to origin; a
-   * build tip built from it names a source off main's history. */
   function plantForeignBuild(fx: Fixture, from: string): { sideSha: string; planted: string } {
     const side = clone(fx.root, fx.origin, "build-side");
     git(side, "checkout", "--quiet", "-b", "side", from);
@@ -1957,8 +1866,6 @@ describe("advanceBuild", () => {
   const foreign = (tip: string, source: string): string =>
     `refs/heads/build is at ${tip}, built from ${source}, which is not on main's history; refusing to append to a build branch this pipeline did not advance - inspect it by hand.`;
 
-  /** The tree `source` minus workflows plus the planted bundle would have:
-   * what a tip that names `source` is held against. */
   function rebuiltTree(fx: Fixture, name: string, source: string): string {
     const rebuild = clone(fx.root, fx.origin, name);
     git(rebuild, "checkout", "--quiet", source);
@@ -1968,9 +1875,6 @@ describe("advanceBuild", () => {
     return git(rebuild, "write-tree");
   }
 
-  /** The exact refusal for a commit whose tree is not its Source plus the
-   * bundle: `where` is how the pipeline met it (the tip it is at, or a
-   * commit found holding it). */
   function notAPackage(
     fx: Fixture,
     where: "is at" | "holds",
@@ -1988,9 +1892,7 @@ describe("advanceBuild", () => {
     );
   }
 
-  /** A tip crafted with plumbing: `from`'s tree minus workflows plus the
-   * planted bundle plus an EMPTY subtree at `empty/`, which a path diff
-   * cannot list. */
+  /** A tip with an EMPTY subtree at `empty/`, which a path diff cannot list. */
   function plantEmptySubtreeBuild(fx: Fixture, from: string): string {
     const planter = clone(fx.root, fx.origin, "build-empty-subtree");
     git(planter, "checkout", "--quiet", from);
@@ -2045,8 +1947,7 @@ describe("advanceBuild", () => {
     [
       "built from a descendant of this commit that never reached main",
       (fx) => {
-        // Descends from main's head, so ancestry alone would read it as a
-        // newer run's work; only its absence from main tells it apart.
+        // Descends from main's head, so ancestry alone would read it as a newer run's work; only its absence from main tells it apart.
         const { sideSha, planted } = plantForeignBuild(fx, fx.mergeSha);
         git(fx.work, "fetch", "--quiet", "origin", "refs/heads/side");
         return { planted, error: new Error(foreign(planted, sideSha)) };
@@ -2080,8 +1981,6 @@ describe("advanceBuild", () => {
     [
       "naming this source with a bundle that is not this checkout's build",
       (fx) => {
-        // The tree CI's build of this source packages, taken from a genuine
-        // advance; the planted tip then replaces it with another bundle.
         const genuine = checkoutOf(fx, "build-genuine", fx.mergeSha, "packaged-bundle-bytes-1\n");
         const built = advanceBuild({ cwd: genuine, sourceSha: fx.mergeSha }).buildSha;
         const tree = git(fx.origin, "rev-parse", `${built}^{tree}`);
@@ -2108,8 +2007,7 @@ describe("advanceBuild", () => {
     [
       "naming a newer main commit but lacking its bundle",
       (fx) => {
-        // A stale rerun would read this as "already past"; the tip's own
-        // tree still has to be a package of the source it names.
+        // A stale rerun would read this as "already past"; the tip's own tree still has to be a package of the source it names.
         const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
         const planted = plantBuild(
           fx,
@@ -2129,8 +2027,7 @@ describe("advanceBuild", () => {
     [
       "naming a newer main commit but carrying the bundle as a symlink",
       (fx) => {
-        // A symlink at the bundle's path has a size (its target text), so a
-        // size probe alone would bless a tip consumers cannot run.
+        // A symlink at the bundle's path has a size (its target text), so a size probe alone would bless a tip consumers cannot run.
         const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
         const planted = plantBuild(
           fx,
@@ -2151,8 +2048,7 @@ describe("advanceBuild", () => {
     [
       "naming a newer main commit and carrying an empty subtree beyond the bundle",
       (fx) => {
-        // Invisible to a path diff (no path lives in an empty tree), so only
-        // tree identity catches it.
+        // Invisible to a path diff (no path lives in an empty tree), so only tree identity catches it.
         const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
         const planted = plantEmptySubtreeBuild(fx, next.sha);
         return {
@@ -2170,8 +2066,7 @@ describe("advanceBuild", () => {
     [
       "naming an older main commit and carrying a file beyond the bundle",
       (fx) => {
-        // The append path: an older source is a valid parent only when its
-        // tip is a pure package, never with a foreign file riding along.
+        // The append path: an older source is a valid parent only when its tip is a pure package, never with a foreign file riding along.
         const planted = plantBuild(
           fx,
           "build-older-extra",
@@ -2213,10 +2108,7 @@ describe("advanceBuild", () => {
     expect(remoteRef(fx, "refs/heads/build")).toBe("");
   });
 
-  /** `count` packaged commits of the seed, chained from a root (the shape
-   * the pipeline mints while build does not exist), in a clone that has not
-   * pushed them: what other runs would append to build, as the plans that
-   * land one ahead of each of this run's pushes. */
+  /** `count` packaged commits of the seed chained from a root, unpushed: the plans land one ahead of each of this run's pushes. */
   function competitors(
     fx: Fixture,
     count: number,
@@ -2253,11 +2145,6 @@ describe("advanceBuild", () => {
     };
   }
 
-  /** The retried outcome after one overtaken append: build landed as the
-   * child of the rival's tip, latest followed, and the pushes carried a
-   * child of `before` (the tip this run first observed, rejected; "" for a
-   * root, minted while build did not exist), then the child of the rival's
-   * tip, then the latest lease. */
   function expectRetriedOnto(
     fx: Fixture,
     before: string,
@@ -2285,10 +2172,8 @@ describe("advanceBuild", () => {
     expectRetriedOnto(fx, "", rival.first, result, pushes);
   });
 
-  // The rival lands DURING the pipeline's push: origin's update hook moves
-  // build once receive-pack has advertised it, so the update itself fails
-  // its compare-and-set with git's own words for a ref created since
-  // ("reference already exists") or moved since ("is at ... but expected").
+  // The rival lands DURING the push: origin's update hook moves build after receive-pack advertised it, so the update fails its own compare-and-set.
+  // git words that differently for a ref created since ("reference already exists") and one moved since ("is at ... but expected").
   const raced: [string, boolean][] = [
     ["created", false],
     ["moved", true],
@@ -2322,8 +2207,7 @@ describe("advanceBuild", () => {
     const fx = seedFixture();
     const stderr = `To https://github.com/o/r.git\n ! [remote rejected] 0123abc -> build (cannot lock ref 'refs/heads/build': is at ${fx.seedSha} but expected ${fx.mergeSha})\nerror: failed to push some refs to 'https://github.com/o/r.git'\n`;
     let result: ReturnType<typeof advanceBuild> | undefined;
-    // The scripted loss lands nothing, so the retry finds no build and
-    // pushes the source's own root package again, this time for real.
+    // The scripted loss lands nothing, so the retry finds no build and pushes the root package again, for real.
     const pushes = withPushPlans(fx, [{ fail: { stderr, status: 1 } }], () => {
       result = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
     });
@@ -2343,8 +2227,6 @@ describe("advanceBuild", () => {
         "could not advance refs/heads/build after 3 attempts; something keeps moving it concurrently - rerun this job once it settles.",
       );
     });
-    // Each attempt re-read the tip and built on it before being overtaken
-    // again: a root first, then a child of each rival tip but the last.
     const shas = pushes.map(appendedSha);
     expect(pushes).toEqual(shas.map(appendOf));
     expect(shas.map((sha) => parentOf(fx.work, sha))).toEqual(["", ...rival.shas.slice(0, -1)]);
@@ -2364,8 +2246,6 @@ describe("advanceBuild", () => {
           error = thrown;
         }
       });
-      // One push, of the source's own root package, then the failure as git
-      // worded it: no retry, no "moving it concurrently", no latest.
       const shas = pushes.map(appendedSha);
       expect(pushes).toEqual(shas.map(appendOf));
       expect(shas.map((sha) => parentOf(fx.work, sha))).toEqual([""]);
@@ -2386,9 +2266,8 @@ describe("advanceBuild", () => {
         sourceSha: fx.seedSha,
       }).buildSha;
       const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
-      // The instant this run's append lands, the release hook's backfill of
-      // the merge commit lands on top of it: origin's post-receive hook
-      // appends it, so the tip this run reads next is the backfill.
+      // origin's post-receive hook appends the release hook's backfill of the merge commit on top of this run's append, so the tip this run reads
+      // next is the backfill.
       const rival = clone(fx.root, fx.origin, "backfill");
       git(rival, "checkout", "--quiet", fx.mergeSha);
       stripWorkflows(rival);
@@ -2426,7 +2305,6 @@ describe("advanceBuild", () => {
       expect(sourceTrailer(fx.origin, tip)).toBe(fx.mergeSha);
       expect(sourceTrailer(fx.origin, own)).toBe(next.sha);
       expect(git(fx.origin, "rev-parse", `${own}^`)).toBe(older);
-      // latest names this run's commit, the newest source, not the backfilled tip.
       expect(result).toEqual({
         changed: true,
         buildSha: own,
@@ -2435,7 +2313,6 @@ describe("advanceBuild", () => {
       });
       expect(pushes).toEqual([appendOf(own), latestOf(older, own)]);
       expect(latestTag(fx)).toBe(own);
-      // A rerun of the merge commit's post-green leaves it there.
       const rerun = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
       expect(rerun).toEqual({
         changed: false,
@@ -2451,7 +2328,6 @@ describe("advanceBuild", () => {
       // Post-green skipped the 2.1.0 merge; the next green commit reached build first.
       const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
       const newer = advanceBuild({ cwd: next.dir, sourceSha: next.sha }).buildSha;
-      // The release hook then appends the merge commit's package after it.
       const release = checkoutOf(fx, "release-backfill", fx.mergeSha, "packaged-bundle-bytes-1\n");
       const older = packageRelease({
         cwd: release,
@@ -2460,7 +2336,6 @@ describe("advanceBuild", () => {
       }).packagedSha;
       expect(buildTip(fx)).toBe(older);
       expect(latestTag(fx)).toBe(newer);
-      // A rerun of the merge commit's post-green must not lease latest back.
       let result: ReturnType<typeof advanceBuild> | undefined;
       const pushes = withPushPlans(fx, [], () => {
         result = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha });
@@ -2473,7 +2348,6 @@ describe("advanceBuild", () => {
       });
       expect(pushes).toEqual([]);
       expect(latestTag(fx)).toBe(newer);
-      // The next green push appends past the backfill and latest follows again.
       const third = pushGreenCommit(fx, "third-green", "packaged-bundle-bytes-3\n");
       const moved = advanceBuild({ cwd: third.dir, sourceSha: third.sha });
       expect(moved).toEqual({
@@ -2575,13 +2449,10 @@ describe("release configuration contract", () => {
       packages: Record<string, Record<string, unknown>>;
     };
     const root = config.packages["."];
-    // draft + force-tag-creation pinned FALSE (explicit, not the upstream
-    // default, which could change) is what keeps release-please from ever
-    // creating a tag on main; the hook mints the only tag, on the build
-    // branch's chain commit. include-component-in-tag: false keeps tags
-    // strictly vX.Y.Z, the one shape releaseMajor() accepts.
-    // skip-github-release would stop releases entirely (release_created
-    // never fires, the hook never runs).
+    // release-please must never create a tag on main; the hook mints the only tag, on the build chain commit.
+    //   draft: true + force-tag-creation: false  -> explicit, since the upstream default could change
+    //   include-component-in-tag: false          -> tags stay strictly vX.Y.Z, the one shape releaseMajor() accepts
+    //   skip-github-release unset                -> set, release_created never fires and the hook never runs
     expect(root?.draft).toBe(true);
     expect(root?.["force-tag-creation"]).toBe(false);
     expect(config["skip-github-release"]).toBeUndefined();

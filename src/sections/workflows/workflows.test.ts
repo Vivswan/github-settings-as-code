@@ -14,10 +14,7 @@ interface LiveWorkflow {
   state: string;
 }
 
-/**
- * A stateful fake of the workflows API: the list reflects every enable and
- * disable, so a plan over executed state sees the converged repository.
- */
+/** A stateful fake of the workflows API, so a plan over executed state sees the converged repository. */
 function liveRepo(workflows: LiveWorkflow[]): GithubClient & { writes: string[] } {
   return {
     writes: [],
@@ -81,7 +78,6 @@ describe("workflows", () => {
       notes: [],
       drift: [],
     });
-    // Planning reads and never writes.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([route]);
   });
 
@@ -186,9 +182,8 @@ describe("workflows", () => {
   });
 
   test("a planned operation can only name a declared write role, and must justify itself", () => {
-    // Compile-time only: the plans are never executed. Each rejected shape
-    // is built first and assigned on one line, so the directive anchors to
-    // the assignment whichever property the compiler blames.
+    // Compile-time only. Each rejected shape is built first and assigned on one line, so the @ts-expect-error anchors to the assignment whichever
+    // property the compiler blames.
     type Op = PlannedOp<typeof workflowsSection.endpoints>;
     const _enable: Op = {
       role: "enable",

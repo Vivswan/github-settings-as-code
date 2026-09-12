@@ -1,5 +1,4 @@
-// A generated region moved elsewhere in its file, the mutation every placement suite applies to a
-// committed page or a fixture: the negative control a placement assertion exists to catch.
+// The negative control every placement assertion exists to catch: a generated region moved elsewhere in its file.
 
 import { expect } from "bun:test";
 import {
@@ -18,10 +17,6 @@ function ownsLine(text: string, [start, end]: MarkerSpan): boolean {
   );
 }
 
-/**
- * `text` with region `name` cut out and pasted right after `anchor`: a block region (each marker
- * owning its line) moves with its whole marker lines, an inline one moves as its marker span alone.
- */
 export function relocatedRegion(
   text: string,
   name: string,

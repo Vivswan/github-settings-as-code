@@ -1,12 +1,3 @@
-/**
- * Unit test for the diff-aware section selector: the shared fan-out derived
- * from the import graph (canaries on the real tree, the scanner, resolver, and
- * graph rules on synthetic trees), that every path on disk resolves through
- * some rule, and the cross-cutting, docs-only, deleted-path, and fail-loud
- * branches - including the tripwire that a flat src/sections/ file outside the
- * named registry files throws instead of silently skipping the smoke job.
- */
-
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,10 +67,6 @@ function syntheticRepo(files: Record<string, string>): string {
   return root;
 }
 
-/**
- * Every graph rule in one tree: an intermediate shared file, a shared
- * subdirectory, and importers that must add no key.
- */
 const GRAPH_FIXTURE: Record<string, string> = {
   "src/sections/shared/engine.ts": "export const engine = 1;\n",
   "src/sections/shared/factory.ts":
@@ -100,15 +87,10 @@ const GRAPH_FIXTURE: Record<string, string> = {
 
 describe("changed-sections derived fan-out", () => {
   test("the real tree derives exactly the layout's fan-out for every shared file", () => {
-    // A canary over the whole map: a new importer, a dropped one, a new or
-    // deleted shared file, or a hub edge reopening (a section file importing
-    // the registry-backed engine modules) all surface here and force a
-    // decision - check the import chain is intended, then update the row.
+    // A canary over the whole map: a new or dropped importer, a new or deleted shared file, or a hub edge reopening surfaces here and forces a
+    // decision.
     expect(deriveSharedFanOut(REPO_ROOT)).toEqual({
-      // The permission-vocabulary normalizer for the two membership sections.
       "roles.ts": inKeyOrder("collaborators", "teams"),
-      // The sealing engine: the four repository-level secret families through
-      // the repo-secrets factory, environments through its nested secrets key.
       "secrets-engine.ts": inKeyOrder(
         "environments",
         "actions_secrets",
@@ -116,7 +98,6 @@ describe("changed-sections derived fan-out", () => {
         "codespaces_secrets",
         "agents_secrets",
       ),
-      // The sealed-box primitive reaches every family only through the engine.
       "sealed-box.ts": inKeyOrder(
         "environments",
         "actions_secrets",
@@ -130,21 +111,13 @@ describe("changed-sections derived fan-out", () => {
         "codespaces_secrets",
         "agents_secrets",
       ),
-      // The list-section factory: every list section on it adds itself here.
       "list-section.ts": inKeyOrder("labels", "autolinks", "deploy_keys"),
-      // The value-based engine: the two variable families through the
-      // repo-variables factory, environments through its nested variables key.
       "variables-engine.ts": inKeyOrder("environments", "actions_variables", "agents_variables"),
       "repo-variables.ts": inKeyOrder("actions_variables", "agents_variables"),
-      // The setup factory: the two GET/PATCH setup sections.
       "setup-section.ts": inKeyOrder("code_scanning_default_setup", "code_quality_setup"),
-      // knobbed() shapes every knobbed section's wrapper and environments'
-      // nested lists. src/schema.ts uses it too, but every section reaches
-      // src/schema.ts only through type imports, which are not edges.
+      // src/schema.ts imports knobbed() too, but sections reach src/schema.ts only through type imports, which are not edges.
       "schema-helpers.ts": inKeyOrder(...UNDECLARED_POLICY_SECTIONS, "environments"),
-      // The renamed-key error map behind knobbed()'s wrapper, so the same
-      // sections as schema-helpers.ts (the docs shape imports it too, but
-      // nothing bundled reaches the docs shape).
+      // The docs shape imports renamed-key.ts too, but nothing bundled reaches the docs shape.
       "renamed-key.ts": inKeyOrder(...UNDECLARED_POLICY_SECTIONS, "environments"),
     });
   });
@@ -188,8 +161,7 @@ describe("changed-sections derived fan-out", () => {
   });
 
   test("scanImports throws on a computed specifier instead of dropping the edge", () => {
-    // Bun's import list silently omits these three; each must name the file
-    // and line so the author rewrites it as a literal.
+    // Bun's import list silently omits these three; the error must name the file and line.
     for (const [line, form] of [
       ["const d = await import(name);", "import(name)"],
       ["const r = require(name);", "require(name)"],
@@ -235,13 +207,10 @@ describe("changed-sections derived fan-out", () => {
   test("the fan-out follows the graph through intermediates and ignores non-section importers", () => {
     const fanOut = deriveSharedFanOut(syntheticRepo(GRAPH_FIXTURE));
     expect(fanOut).toEqual({
-      // labels reaches engine through factory; teams imports it directly;
-      // src/schema.ts and registry.ts import it too but add no key, and
-      // pages' type-only import is no edge at all.
+      // src/schema.ts and registry.ts import engine too but add no key, and pages' type-only import is no edge.
       "engine.ts": inKeyOrder("labels", "teams"),
       "factory.ts": inKeyOrder("labels"),
-      // milestones' dynamic import of the directory and pages' template
-      // spelling of it; labels' unit test imports it too and is not an edge.
+      // labels' unit test imports util too and is not an edge.
       "util/index.ts": inKeyOrder("pages", "milestones"),
     });
   });
@@ -283,8 +252,7 @@ describe("changed-sections derived fan-out", () => {
   });
 
   test("a computed import anywhere under src fails the whole derivation, naming the file", () => {
-    // Every form Bun's import list would silently drop; the template edge in
-    // GRAPH_FIXTURE (pages/mock.ts) proves a substitution-free template passes.
+    // The template edge in GRAPH_FIXTURE (pages/mock.ts) proves a substitution-free template passes.
     for (const load of ["await import(which)", "require(which)", `await import(\`\${which}\`)`]) {
       const root = syntheticRepo({
         ...GRAPH_FIXTURE,
@@ -299,20 +267,14 @@ describe("changed-sections derived fan-out", () => {
 
 describe("changed-sections file map", () => {
   test("every path on disk under src/sections resolves through some selector rule", () => {
-    // sectionsForFiles throws on an unrecognized src/sections/ path, so a
-    // stray helper file must either get a rule or move under a recognized
-    // directory - resolving every real path proves nothing on disk is in that
-    // state.
     for (const path of sectionsPathsOnDisk()) {
       expect(() => sectionsForFiles(changed(path)), `${path} does not resolve`).not.toThrow();
     }
   });
 
   test("every top-level src entry is either sections/ or all-selecting", () => {
-    // A new top-level src module the selector does not know about would make
-    // PRs touching only it skip the smoke job; force a prefix entry instead.
-    // Only directories and .ts files count: stray artifacts like .DS_Store
-    // are not selector inputs.
+    // A new top-level src module the selector does not know would let PRs touching only it skip the smoke job. Stray artifacts like .DS_Store are not
+    // selector inputs.
     for (const entry of readdirSync(SRC_DIR, { withFileTypes: true })) {
       if (!entry.isDirectory() && !entry.name.endsWith(".ts")) {
         continue;
@@ -339,10 +301,6 @@ describe("changed-sections selection", () => {
   });
 
   test("a section directory selects its key for every file under it", () => {
-    // The post-migration layout: src/sections/<key>/... spells the key
-    // verbatim, and everything under it - module, mock, test, scenario -
-    // selects exactly that section. Path-based, so the rule holds before any
-    // directory exists on disk.
     expect(renderSelection(sectionsForFiles(changed("src/sections/labels/index.ts")))).toBe(
       "labels",
     );
@@ -392,9 +350,7 @@ describe("changed-sections selection", () => {
   });
 
   test("a deleted shared file whose importers now resolve to its sibling spelling selects that sibling's sections", () => {
-    // foo.ts and foo/index.ts are interchangeable to an importer of "./foo.js",
-    // so deleting one leaves the importers unchanged and typecheck green; the
-    // sibling's current fan-out is the affected set.
+    // foo.ts and foo/index.ts are interchangeable to an importer of "./foo.js", so deleting one leaves the importers unchanged and typecheck green.
     const fanOut = deriveSharedFanOut(
       syntheticRepo({
         "src/sections/shared/a/index.ts": "export const a = 1;\n",
@@ -407,8 +363,7 @@ describe("changed-sections selection", () => {
     expect(select(removed("src/sections/shared/a.ts"))).toBe("labels");
     expect(select(removed("src/sections/shared/b/index.ts"))).toBe("teams");
     expect(select(removed("src/sections/shared/c.ts"))).toBe("none");
-    // Only .ts files are selector inputs, deleted or not: a stray file under
-    // shared/ never gets the sibling rule, so "a.js" cannot borrow a/index.ts.
+    // Only .ts files are selector inputs, so "a.js" cannot borrow a/index.ts.
     expect(() => select(removed("src/sections/shared/a.js"))).toThrow(/matches no selector rule/);
     expect(() => select(removed("src/sections/shared/notes.md"))).toThrow(
       /matches no selector rule/,
@@ -416,8 +371,7 @@ describe("changed-sections selection", () => {
   });
 
   test("parseNameStatus reads NUL-delimited records raw and throws on any other shape", () => {
-    // -z keeps a path with a tab, a quote, and a backslash verbatim (git would
-    // C-quote it otherwise, and the src/sections/ prefix would go unmatched).
+    // -z keeps a path with a tab, a quote, and a backslash verbatim; git would C-quote it otherwise and the src/sections/ prefix would go unmatched.
     const odd = 'src/sections/labels/scenarios/tab\there "quoted" back\\slash.yml';
     expect(
       parseNameStatus(
@@ -435,8 +389,7 @@ describe("changed-sections selection", () => {
       ...changed("m", "t", "u", "x", "b"),
     ]);
     expect(parseNameStatus("")).toEqual([]);
-    // Letters git does not emit here: a rename score (--no-renames was lost;
-    // its two paths misalign the fields) and a letter git never uses.
+    // A rename score means --no-renames was lost and its two paths misalign the fields; Q is a letter git never uses.
     expect(() => parseNameStatus("R100\0old.ts\0new.ts\0")).toThrow(/unparseable/);
     expect(() => parseNameStatus("R\0old.ts\0")).toThrow(/unparseable/);
     expect(() => parseNameStatus("Q\0q.ts\0")).toThrow(/unparseable/);
@@ -459,9 +412,7 @@ describe("changed-sections selection", () => {
   });
 
   test("a flat src/sections file besides the registry files throws", () => {
-    // Sections are directories; registry.ts and docs-registry.ts are the only
-    // flat files the layout allows. A diff naming any other flat path
-    // (whatever its history) must fail loudly, never resolve quietly.
+    // registry.ts and docs-registry.ts are the only flat files the layout allows; any other flat path must fail loudly, whatever its history.
     for (const stale of [
       "src/sections/labels.ts",
       "src/sections/deploy-keys.ts",
@@ -474,8 +425,7 @@ describe("changed-sections selection", () => {
         /matches no selector rule/,
       );
     }
-    // A cross-cutting path in the same diff must not mask the stale path:
-    // the selector resolves every src/sections/ path before answering "all".
+    // A cross-cutting path in the same diff must not mask the stale path: every src/sections/ path is resolved before answering "all".
     expect(() => sectionsForFiles(changed("src/schema.ts", "src/sections/labels.ts"))).toThrow(
       /matches no selector rule/,
     );
@@ -485,7 +435,6 @@ describe("changed-sections selection", () => {
     const selection = sectionsForFiles(
       changed("src/sections/milestones/index.ts", "src/sections/labels/index.ts"),
     );
-    // labels precedes milestones in SECTION_KEYS, so the list is ordered.
     expect(renderSelection(selection)).toBe("labels,milestones");
   });
 
@@ -506,9 +455,7 @@ describe("changed-sections selection", () => {
   });
 
   test("docs-registry.ts selects none and never masks or widens the rest of the diff", () => {
-    // The docs-only aggregator is never in the bundle; build:check gates docs
-    // drift, so it behaves like lib/: no section on its own, transparent
-    // beside a section or a cross-cutting change.
+    // The docs-only aggregator is never in the bundle and build:check gates docs drift, so it behaves like lib/.
     expect(sectionsForFiles(changed("src/sections/docs-registry.ts")).kind).toBe("none");
     expect(
       renderSelection(
@@ -531,14 +478,9 @@ describe("changed-sections selection", () => {
       "src/main.ts",
       "src/schema.ts",
       "test/e2e/runner.ts",
-      // The selection machinery itself, the repo-owned checks workflow, and
-      // the local composite actions it runs: a PR touching only one of them
-      // must not skip the smoke job.
       ".github/scripts/changed-sections.ts",
       ".github/workflows/checks.yml",
       ".github/actions/fetch-test-artifacts/action.yml",
-      // src/sections/contract/ holds the cross-cutting contract modules (the
-      // barrel split); a contract-module-only PR must select every section.
       "src/sections/contract/requests.ts",
     ]) {
       expect(sectionsForFiles(changed(file)), `${file} should select all`).toEqual({
@@ -548,8 +490,7 @@ describe("changed-sections selection", () => {
   });
 
   test("a section change plus a regenerated schema scopes to the section, not all", () => {
-    // lib/settings.schema.json regenerates alongside schema-affecting src
-    // changes; the lib file must not force "all" or diff-awareness is dead.
+    // lib/settings.schema.json regenerates alongside schema-affecting src changes; forcing "all" would kill diff-awareness.
     const selection = sectionsForFiles(
       changed("src/sections/labels/index.ts", "lib/settings.schema.json"),
     );
@@ -557,8 +498,7 @@ describe("changed-sections selection", () => {
   });
 
   test("a lib-only diff selects none (the schema-check job gates schema drift)", () => {
-    // The only committed file under lib/ is the generated schema, which
-    // carries no runnable code; the smoke job has nothing to exercise.
+    // The only committed file under lib/ is the generated schema, which carries no runnable code.
     expect(sectionsForFiles(changed("lib/settings.schema.json")).kind).toBe("none");
   });
 
@@ -567,7 +507,6 @@ describe("changed-sections selection", () => {
   });
 
   test("a core-path change wins over a section change", () => {
-    // Any all-selecting path forces all, regardless of other changed files.
     const selection = sectionsForFiles(
       changed("src/sections/labels/index.ts", "src/engine/diff.ts"),
     );

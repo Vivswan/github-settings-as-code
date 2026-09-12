@@ -69,7 +69,7 @@ describe("collaborators", () => {
       notes: [],
       drift: [],
     });
-    // The owner "O" is never removed, and planning only reads.
+    // The owner "O" is never removed.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST, INVITATIONS]);
   });
 

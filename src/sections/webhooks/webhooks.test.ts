@@ -17,7 +17,6 @@ import { webhooksSection } from "./index.js";
 import { webhooksMockHandlers } from "./mock.js";
 import type { WebhookConfig } from "./schema.js";
 
-/** The verdict's error prose, or null when the document validated. */
 function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
   return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
 }
@@ -73,8 +72,7 @@ const SECRET_NOTE =
 
 describe("webhooks shape", () => {
   test("an entry-level secret is rejected, pointing at config.secret", () => {
-    // The misplacement would otherwise pass the loose shape, ship the raw
-    // reference text verbatim, and create a silently unauthenticated hook.
+    // The misplacement would otherwise pass the loose shape, ship the raw reference text verbatim, and create a silently unauthenticated hook.
     const result = webhooksSection.shape.safeParse([
       { config: { url: "https://t.test/h" }, secret: "$HOOK_SECRET" },
     ]);
@@ -122,10 +120,9 @@ describe("webhooks secretValues", () => {
   });
 
   test("malformed containers return [] and leave the error to validation", () => {
-    // The extractor can face any merged value, so a malformed declaration
-    // must not throw here - validation is where the user gets the message.
+    // The extractor faces any merged value, so the double cast feeds it a pre-validation value on purpose; validation is where the user gets the
+    // message.
     for (const malformed of [null, "hooks", 42, { _undeclared: "keep" }, [null, "x"]]) {
-      // The double cast feeds the extractor a PRE-VALIDATION value on purpose.
       expect(webhooksSection.secretValues?.(malformed as unknown as WebhookConfig[])).toEqual([]);
     }
   });
@@ -292,8 +289,7 @@ describe("webhooks plan", () => {
   });
 
   test("a declared url matching several live hooks fails BEFORE any operation is planned, naming their ids", async () => {
-    // A missing url declared BEFORE the ambiguous one must not become a
-    // create; the scan runs over the whole declaration first.
+    // A missing url declared before the ambiguous one must not become a create; the scan runs over the whole declaration first.
     const api = new MockApi({
       [LIST]: { data: [liveHook(11, "https://dup.test/h"), liveHook(12, "https://dup.test/h")] },
     });
@@ -359,8 +355,7 @@ describe("webhooks plan", () => {
       'DELETED undeclared webhook "https://stray.test/hook"',
     ]);
     expect(notes).toEqual([]);
-    // The proof also executes the converged second plan, so the two
-    // secret-bearing config PATCHes land once more and nothing else does.
+    // provePlanIdempotent executes the converged second plan too, so the two secret-bearing config PATCHes land once more.
     expect(api.writes).toEqual([
       "PATCH /repos/o/r/hooks/601/config",
       "PATCH /repos/o/r/hooks/601",
@@ -369,8 +364,7 @@ describe("webhooks plan", () => {
       "PATCH /repos/o/r/hooks/601/config",
       expect.stringMatching(/^PATCH \/repos\/o\/r\/hooks\/\d+\/config$/),
     ]);
-    // The created hook now exists, so its secret recurs as a config PATCH: the
-    // facet with no lines, which check mode reads as clean plus the note.
+    // The created hook now exists, so its secret recurs as a config PATCH: the facet with no lines, which check mode reads as clean plus the note.
     expect(first.ops.map((op) => op.role)).toEqual(["updateConfig", "update", "create", "remove"]);
     expect(second.ops.map((op) => [op.role, op.params, op.drift])).toEqual([
       [

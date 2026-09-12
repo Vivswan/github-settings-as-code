@@ -74,11 +74,13 @@ function guidePages(): string[] {
 }
 
 /**
- * The closed fence vocabulary: `yaml settings` is a complete settings document,
- * `yaml layer` one layer of a merge (valid once its null markers are stripped,
- * not necessarily standalone), `yaml` a workflow file, `mermaid` a diagram
- * (pinned to real code in diagrams.test.ts), `ts` a library consumer's
- * TypeScript, `text` and `bash` never yaml.
+ * The closed fence vocabulary; plain `yaml` is reserved for workflow files so a settings example cannot dodge validation by dropping its tag.
+ *   yaml settings -> a complete settings document
+ *   yaml layer    -> one layer of a merge, valid once its null markers are stripped
+ *   yaml          -> a workflow file
+ *   mermaid       -> a diagram, pinned to real code in diagrams.test.ts
+ *   ts            -> a library consumer's TypeScript
+ *   text, bash    -> never yaml
  */
 const ALLOWED_FENCE_INFO = new Set([
   "yaml settings",
@@ -554,7 +556,6 @@ describe("docs/ guide pages", () => {
       .concat(templates);
   }
 
-  /** One release-please extra-file: a marker-scanned path, or a json updater entry. */
   type ExtraFile = string | { type: string; path: string; jsonpath?: string };
 
   function releaseExtraFiles(): ExtraFile[] {
@@ -565,12 +566,8 @@ describe("docs/ guide pages", () => {
   }
 
   test("marker-bearing files equal the release-please extra-files set", () => {
-    // release-please's generic updater rewrites version pins only in files
-    // listed under extra-files; a page moved without updating
-    // release-please-config.json keeps its stale pin silently. A docs
-    // restructure is exactly when that happens, so pin the sets equal.
-    // An extra-files entry outside markerScanFiles() (action.yml, a
-    // workflow) fails this equality and means the scan set needs widening.
+    // release-please rewrites pins only in files listed under extra-files, so a page moved without a config update keeps a stale pin silently.
+    // An extra-files entry outside markerScanFiles() (action.yml, a workflow) fails here too and means the scan set needs widening.
     const extraFiles = releaseExtraFiles().filter((entry) => typeof entry === "string");
     const marked = markerScanFiles()
       .filter((file) => readFileSync(file.path, "utf8").includes("x-release-please-"))

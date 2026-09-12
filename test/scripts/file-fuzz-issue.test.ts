@@ -1,11 +1,3 @@
-/**
- * Unit test for the nightly issue-filing script's pure helpers: line
- * truncation, seed extraction, the replay-command chooser, the run-link
- * builder, and the body assembly over failing-scenario directories (built in a
- * temp dir), including the corpus-vs-fuzz replay distinction and the body cap.
- * The gh calls are not tested here (they need a live GitHub).
- */
-
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,8 +29,7 @@ describe("head", () => {
   });
 
   test("a single trailing newline is not counted as an extra line", () => {
-    // Exactly `limit` lines plus a trailing newline must return whole, not
-    // report "1 more lines" for the empty trailing split element.
+    // Exactly `limit` lines plus a trailing newline must not report "1 more lines" for the empty trailing split element.
     const text = `${["1", "2", "3"].join("\n")}\n`;
     expect(head(text, 3)).toBe("1\n2\n3");
   });
@@ -66,8 +57,6 @@ describe("seedFrom", () => {
   });
 
   test("returns undefined for a corpus name even if its report mentions a seed", () => {
-    // Detection is name-only: a corpus scenario is never mislabeled a fuzz
-    // failure just because its report text contains the word "seed".
     expect(seedFrom("labels-drift")).toBeUndefined();
     expect(seedFrom("seed-rotation-check")).toBeUndefined();
   });
@@ -113,7 +102,6 @@ describe("buildBody", () => {
 
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), "artifacts-"));
-    // A corpus failure: report has no seed, so the replay is a run.ts command.
     const corpus = join(root, "labels-drift-100-0");
     mkdirSync(corpus, { recursive: true });
     writeFileSync(
@@ -121,8 +109,6 @@ describe("buildBody", () => {
       "# labels-drift\n\n## Failures\n\n- exit code 1 != 0\n",
     );
     writeFileSync(join(corpus, "scenario.yml"), "name: labels-drift\nsettings:\n  labels: []\n");
-    // A fuzz failure: the report heading is the fuzz-<seed> scenario name, so
-    // the replay is a seeded fuzz command detected from the name prefix.
     const fuzz = join(root, "fuzz-314159-0");
     mkdirSync(fuzz, { recursive: true });
     writeFileSync(join(fuzz, "report.md"), "# fuzz-314159\n\niter 7 FAIL\n");
@@ -157,8 +143,6 @@ describe("buildBody", () => {
   });
 
   test("caps the body under the GitHub limit and says how many were omitted", () => {
-    // Many large failure dirs: the body must stay well under 65,536 chars and
-    // name the omitted scenarios.
     const bigRoot = mkdtempSync(join(tmpdir(), "big-"));
     const filler = "x".repeat(5000);
     for (let i = 0; i < 40; i++) {
@@ -174,10 +158,7 @@ describe("buildBody", () => {
   });
 
   test("a single giant single-line artifact still produces a body under the limit", () => {
-    // The pathological case: one artifact whose report and scenario are each a
-    // single 70,000-char line, which line truncation cannot shorten. The
-    // character cap must keep the whole body under GitHub's 65,536 limit so the
-    // filing itself does not fail.
+    // One artifact whose report and scenario are each a single 70,000-char line, which line truncation cannot shorten.
     const giantRoot = mkdtempSync(join(tmpdir(), "giant-"));
     const dir = join(giantRoot, "labels-drift-9-0");
     mkdirSync(dir, { recursive: true });
@@ -199,11 +180,7 @@ describe("buildBody", () => {
 });
 
 describe("fileIssue", () => {
-  /**
-   * A recording gh runner: captures every command and answers the issue-list
-   * query from `openNumber` (a number opens the comment path, undefined the
-   * create path).
-   */
+  /** A recording gh runner; `openNumber` set opens the comment path, undefined the create path. */
   function fakeGh(openNumber?: number): { run: GhRunner; calls: string[][] } {
     const calls: string[][] = [];
     const run: GhRunner = async (args) => {
@@ -242,8 +219,7 @@ describe("fileIssue", () => {
     "number",
   ];
 
-  // Assignment policy lives in the auto-assign workflow, which the nightly
-  // dispatches after filing; neither argv sequence below touches assignees.
+  // Assignment policy lives in the auto-assign workflow the nightly dispatches after filing, so neither argv sequence touches assignees.
   test("create path ensures the label, finds no open issue, and opens a labeled issue with the body", async () => {
     const { run, calls } = fakeGh(undefined);
     await fileIssue(run, "body");

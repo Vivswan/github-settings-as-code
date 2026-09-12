@@ -97,8 +97,7 @@ describe("deliverIssueReport", () => {
   });
 
   test("a fallback-scan hit without the marker reattaches it on the upsert PATCH", async () => {
-    // The marker was stripped by a human; without relabeling here, every
-    // future label-filtered lookup would miss this issue forever.
+    // The marker was stripped by a human; without relabeling here, every future label-filtered lookup would miss this issue forever.
     const api = new MockApi({
       [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
       [LABEL_LOOKUP]: { data: [] },
@@ -112,9 +111,7 @@ describe("deliverIssueReport", () => {
   });
 
   test("an issue found by the label lookup is PATCHed without a labels field", async () => {
-    // Human-added labels must never be clobbered: the normal upsert leaves
-    // the labels alone (the marker is already attached - that is how the
-    // lookup found it).
+    // Human-added labels must never be clobbered; the marker is already attached (that is how the lookup found it).
     const api = new MockApi({
       [LABEL_CREATE]: { error: { status: 422, message: "already_exists", body: "" } },
       [LABEL_LOOKUP]: {
@@ -245,8 +242,7 @@ describe("deliverIssueReport", () => {
   });
 
   test("a throwing transport never escapes; the warning stays slug-free", async () => {
-    // MockApi throws on unrouted mutations, standing in for a network-level
-    // failure (GithubApi throws those with the path in the message).
+    // MockApi throws on unrouted mutations, standing in for a network-level failure (GithubApi throws those with the path in the message).
     const api = new MockApi({});
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({
@@ -280,8 +276,6 @@ describe("deliverIssueReport under mode: on-failure", () => {
     const api = new MockApi({ [OPEN_LOOKUP]: { data: [] } });
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
     expect(result).toEqual({ skipped: true });
-    // the single open-issue lookup and nothing else: no label ensure-create,
-    // no /user creator-scan fallback, no mutation of any kind
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([`GET ${OPEN_LOOKUP_PATH}`]);
   });
 
@@ -376,8 +370,7 @@ describe("injectMarkerLabel", () => {
   });
 
   test("a wrapped labels section stays wrapped, keeping its undeclared policy", () => {
-    // Injection must rebuild the operator's chosen shape: losing the wrapper
-    // here would silently restore the labels default (delete) on the next run.
+    // Injection must rebuild the operator's chosen shape: losing the wrapper here would silently restore the labels default (delete) on the next run.
     const settings: SettingsFile = {
       labels: { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
     };
@@ -387,7 +380,6 @@ describe("injectMarkerLabel", () => {
       _undeclared: "keep",
       entries: [{ name: "bug", color: "d73a4a" }, MARKER_LABEL_CONFIG],
     });
-    // input is not mutated
     expect(settings.labels).toEqual({
       _undeclared: "keep",
       entries: [{ name: "bug", color: "d73a4a" }],
@@ -410,10 +402,7 @@ describe("injectMarkerLabel", () => {
   });
 
   test("a bare wrapper (no policy key) stays bare - omission is preserved", () => {
-    // Injection must not change the SHAPE of the operator's declaration: a
-    // bare wrapper stays bare; the section handler resolves the default
-    // policy itself. Materializing the key here would rewrite a declaration
-    // the user wrote, for no gain.
+    // Injection must not change the SHAPE of the operator's declaration; the section handler resolves the default policy itself.
     const settings: SettingsFile = { labels: { entries: [{ name: "bug" }] } };
     const result = injectMarkerLabel(settings);
     expect(result.outcome).toBe("injected");
@@ -443,18 +432,15 @@ describe("injectMarkerLabel", () => {
   });
 
   test("a rename moving the marker AWAY is refused (new_name stripped), not injected", () => {
-    // Renaming the marker to another name would break the next run's lookup by
-    // the constant marker name, so the rename is dropped and flagged.
+    // Renaming the marker to another name would break the next run's lookup by the constant marker name, so the rename is dropped and flagged.
     const settings: SettingsFile = {
       labels: [{ name: MARKER_LABEL, new_name: "something-else", color: "0e2a47" }],
     };
     const result = injectMarkerLabel(settings);
     expect(result.outcome).toBe("rename-refused");
-    // the entry survives but its new_name is gone, so the marker keeps its name
     expect(result.settings.labels).toEqual([
       { name: MARKER_LABEL, new_name: undefined, color: "0e2a47" },
     ]);
-    // input is not mutated
     const original = (settings.labels as Array<{ new_name?: string }> | undefined)?.[0];
     expect(original?.new_name).toBe("something-else");
   });
@@ -468,13 +454,8 @@ describe("injectMarkerLabel", () => {
   });
 
   test("every injection outcome preserves document validity, in both label forms", () => {
-    // applyMarkerInjection (src/report/delivery.ts) carries the injected
-    // document across the ValidatedSettings brand on the strength of this
-    // property: the injection appends the constant marker config or strips a
-    // new_name, and neither may ever produce a document validateSettingsDoc
-    // rejects. The rename-refused arm is the risky one - it writes an
-    // explicit `new_name: undefined` key - so all three outcomes are pinned
-    // here, in the plain-array and wrapped forms alike.
+    // applyMarkerInjection (src/report/delivery.ts) carries the injected document across the ValidatedSettings brand on the strength of this
+    // property; the rename-refused arm, which writes an explicit `new_name: undefined`, is the risky one.
     const cases: Array<{ doc: SettingsFile; expected: string }> = [
       { doc: { labels: [{ name: "bug", color: "d73a4a" }] }, expected: "injected" },
       {
