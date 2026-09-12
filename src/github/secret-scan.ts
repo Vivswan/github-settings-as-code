@@ -82,13 +82,8 @@ function normalizePlainData(
   if (ancestors.has(value)) {
     throw new NotPlainDataError(path, "a reference back to one of its own containers");
   }
+  // One frame per nesting level: a helper for the container body would halve the depth a valid payload may reach.
   ancestors.add(value);
-  const normalized = normalizeContainer(value, path, ancestors);
-  ancestors.delete(value);
-  return normalized;
-}
-
-function normalizeContainer(value: object, path: string[], ancestors: Set<object>): unknown {
   const descriptors = Object.getOwnPropertyDescriptors(value);
   if (Array.isArray(value)) {
     // A manual index loop over descriptors never dispatches .map or invokes an index accessor someone defineProperty'd onto the array.
@@ -107,6 +102,7 @@ function normalizeContainer(value: object, path: string[], ancestors: Set<object
         item === undefined ? null : normalizePlainData(item, [...path, String(index)], ancestors),
       );
     }
+    ancestors.delete(value);
     return items;
   }
   const out: Record<string, unknown> = Object.create(null);
@@ -124,6 +120,7 @@ function normalizeContainer(value: object, path: string[], ancestors: Set<object
     }
     out[key] = normalizePlainData(item, [...path, key], ancestors);
   }
+  ancestors.delete(value);
   return out;
 }
 

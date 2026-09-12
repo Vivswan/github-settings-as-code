@@ -1140,8 +1140,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a cyclic payload aborts at the cycle's field, never a stack overflow or a raw trace", async () => {
-    // A YAML alias to an ancestor (config: &c { self: *c }) reaches the scan as a cycle. Before the ancestor check the
-    // normalizer recursed until the stack gave out: tens of seconds and a fallback reason naming no field.
+    // A YAML alias to an ancestor (config: &c { self: *c }) reaches the scan as a cycle.
     const cyclic: Record<string, unknown> = { url: "https://example.test", secret: hostileSecret };
     cyclic.self = cyclic;
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
