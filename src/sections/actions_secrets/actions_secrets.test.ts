@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { runForRepo, validateSettingsDoc } from "../../../src/engine/orchestrate.js";
-import type { GithubClient } from "../../../src/github/api.js";
+import { type GithubClient, SECRET_RESPONSE_WITHHELD } from "../../../src/github/api.js";
 import { type Io, maskRegistry } from "../../../src/io.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
@@ -332,12 +332,14 @@ describe("actions_secrets execution", () => {
     expect(unsealSecretValue(payload.encrypted_value)).toBe(hostile);
   });
 
-  test("a failing PUT fails the execution with the API error and without the plaintext", async () => {
+  test("a failing PUT fails the execution with the error withheld, whatever the client echoed", async () => {
+    // The stub client echoes the plaintext the way a real 422 body can; the PUT reaches it marked as secret-carrying,
+    // so the contract layer rebuilds the error before it renders.
     const api = new MockApi({
       [LIST]: listOf(),
       [PUBLIC_KEY]: KEY_ROUTE,
       "PUT /repos/o/r/actions/secrets/DENIED_WRITE": {
-        error: { status: 422, message: "Validation Failed", body: "" },
+        error: { status: 422, message: "Validation Failed: super-plain is too weak", body: "" },
       },
     });
     const planned = await plan(api, [{ name: "DENIED_WRITE", value: "$V" }]);
@@ -349,12 +351,14 @@ describe("actions_secrets execution", () => {
       tools({ $V: "super-plain" }),
     );
     expect(execution.status).toBe("failed");
+    expect(api.mutations().map((call) => call.carriesSecret)).toEqual([true]);
     const message =
       execution.status === "failed" && execution.error instanceof Error
         ? execution.error.message
         : "";
-    expect(message).toContain("PUT /repos/o/r/actions/secrets/DENIED_WRITE: 422 Validation Failed");
-    expect(message).not.toContain("super-plain");
+    expect(message).toBe(
+      `actions_secrets: writing secret "DENIED_WRITE" failed - PUT /repos/o/r/actions/secrets/DENIED_WRITE: 422 ${SECRET_RESPONSE_WITHHELD}. The API rejected the request; fix the "actions_secrets" values in the settings file to satisfy the message above`,
+    );
   });
 
   test("a reference the engine never resolved fails inside the thunk, before its request", async () => {

@@ -99,7 +99,7 @@ function watchingNotFound(
       }
       return result;
     },
-    tryGraphql: (op, variables, slug) => api.tryGraphql(op, variables, slug),
+    tryGraphql: (op, variables, slug, options) => api.tryGraphql(op, variables, slug, options),
   };
 }
 

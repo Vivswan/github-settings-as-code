@@ -6,8 +6,12 @@ import {
   checkRepository,
   collectingIo,
   describeProblem,
+  type GithubClient,
   parseRepoSlug,
+  type RepoRunReport,
   renderMergedYaml,
+  SECRET_RESPONSE_WITHHELD,
+  SECRET_TRANSPORT_WITHHELD,
   SectionSelection,
   SNAPSHOT_SCHEMA_URL,
   snapshotRepositories,
@@ -109,6 +113,91 @@ describe("checkRepository and applyRepository", () => {
       log: [],
     });
     expect(collected.lines).toEqual([{ line: "repository: patched repository fields: has_wiki" }]);
+  });
+});
+
+describe("a caller-supplied client that echoes a secret", () => {
+  // JSON escaping turns the quote into \", so the collected log's exact-literal mask would miss the echo; outcomes[].detail
+  // is never masked at all. The withholding must therefore happen before either sees the error.
+  const plaintext = 'hook-"canary"-9f3a';
+  const hooks = branded({
+    webhooks: [
+      { config: { url: "https://x.test/h", secret: "$WEBHOOK_SECRET" }, events: ["push"] },
+    ],
+  });
+  const echoing = (
+    create: () => Promise<
+      { data: unknown } | { error: { status: number; message: string; body: string } }
+    >,
+  ) => {
+    const reads = new MockApi({ "GET /repos/o/r/hooks?per_page=100&page=1": { data: [] } });
+    const marks: Array<true | undefined> = [];
+    const client: GithubClient = {
+      tryRequest: (method, path, payload, options) => {
+        if (method !== "POST") {
+          return reads.tryRequest(method, path, payload, options);
+        }
+        marks.push(options?.carriesSecret === true ? true : undefined);
+        return create();
+      },
+      tryGraphql: (op, variables, slug, options) => reads.tryGraphql(op, variables, slug, options),
+    };
+    return { client, marks };
+  };
+  const failed = (detail: string): RepoRunReport => ({
+    repo: "o/r",
+    result: "failed",
+    outcomes: [{ key: "webhooks", status: "failed", detail: [detail] }],
+    preflightDenied: [],
+    log: [{ level: "error", line: detail }],
+  });
+
+  test.each([
+    {
+      answer:
+        "returns a message-only rate limit, which must still fail the run rather than skip the section",
+      create: async () => ({
+        error: {
+          status: 403,
+          message: `API rate limit exceeded while storing ${plaintext}`,
+          body: "",
+        },
+      }),
+      detail: `webhooks: creating webhook "https://x.test/h" failed - POST /repos/o/r/hooks: 403 ${SECRET_RESPONSE_WITHHELD}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
+    },
+    {
+      answer: "returns a 422 whose message quotes the value",
+      create: async () => ({
+        error: {
+          status: 422,
+          message: `Validation Failed: secret ${JSON.stringify(plaintext)} is too weak`,
+          body: "",
+        },
+      }),
+      detail: `webhooks: creating webhook "https://x.test/h" failed - POST /repos/o/r/hooks: 422 ${SECRET_RESPONSE_WITHHELD}. The API rejected the request; fix the "webhooks" values in the settings file to satisfy the message above`,
+    },
+    {
+      answer: "throws a transport error quoting the request body",
+      create: async (): Promise<{ data: unknown }> => {
+        throw new Error(
+          `fetch failed; body was ${JSON.stringify({ config: { secret: plaintext } })}`,
+        );
+      },
+      detail: `webhooks: POST /repos/o/r/hooks failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run the workflow`,
+    },
+  ])("apply withholds the failure when the client $answer", async ({ create, detail }) => {
+    const { client, marks } = echoing(create);
+    // "warn" is the policy under which a misread denial would turn the failure into a skipped section.
+    const result = await applyRepository(client, {
+      repo,
+      settings: hooks,
+      onMissingPermission: "warn",
+      sections: SectionSelection.ALL,
+      secretEnv: { WEBHOOK_SECRET: plaintext },
+    });
+    expect(marks).toEqual([true]);
+    expect(result).toEqual(failed(detail));
+    expect(JSON.stringify(result)).not.toContain("canary");
   });
 });
 

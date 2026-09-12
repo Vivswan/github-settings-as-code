@@ -57,6 +57,22 @@ function rejectThenable(section: SectionMeta, role: string, hook: string, value:
   }
 }
 
+/**
+ * The mark is the act of resolving: the resolver is the only way a plaintext enters an operation, so an operation
+ * whose hooks resolved one issues a secret-carrying request (the contract layer withholds its failure), and one that
+ * resolved none cannot carry a secret. A fresh recorder per operation keeps one operation's resolve from marking the next.
+ */
+function secretRecorder(tools: ExecTools): { exec: ExecTools; resolved: () => boolean } {
+  let resolved = false;
+  const exec: ExecTools = Object.freeze({
+    resolveSecret: (reference: string): string => {
+      resolved = true;
+      return tools.resolveSecret(reference);
+    },
+  });
+  return { exec, resolved: () => resolved };
+}
+
 export async function executePlan(
   plan: SectionPlan,
   section: SectionMeta,
@@ -64,14 +80,17 @@ export async function executePlan(
   repo: RepoRef,
   tools: ExecTools,
 ): Promise<PlanExecution> {
-  const exec: ExecTools = Object.freeze({
-    resolveSecret: (reference: string): string => tools.resolveSecret(reference),
-  });
-  const ctx: SectionContext = { api, repo, check: false, resolveSecret: exec.resolveSecret };
+  const ctx: SectionContext = {
+    api,
+    repo,
+    check: false,
+    resolveSecret: (reference) => tools.resolveSecret(reference),
+  };
   const changes: string[] = [];
   const notes: string[] = [];
   let landed = 0;
   for (const op of plan.ops) {
+    const { exec, resolved } = secretRecorder(tools);
     try {
       let response: unknown;
       if (typeof op.role !== "string") {
@@ -90,7 +109,13 @@ export async function executePlan(
         }
         await op.before?.(exec);
         const payload = typeof op.payload === "function" ? await op.payload(exec) : op.payload;
-        const request = { params: op.params, query: op.query, payload, describe: op.describe };
+        const request = {
+          params: op.params,
+          query: op.query,
+          payload,
+          carriesSecret: resolved(),
+          describe: op.describe,
+        };
         if (op.tolerate === undefined) {
           response = await callDeclared(ctx, section, endpoint, request);
         } else {
@@ -125,6 +150,7 @@ export async function executePlan(
           typeof op.variables === "function" ? await op.variables(exec) : op.variables;
         response = await callGraphql(ctx, section, graphqlOp, variables ?? {}, {
           describe: op.describe,
+          carriesSecret: resolved(),
         });
       }
       landed++;

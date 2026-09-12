@@ -1,4 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import {
+  type GithubClient,
+  SECRET_RESPONSE_WITHHELD,
+  SECRET_TRANSPORT_WITHHELD,
+} from "../../src/github/api.js";
 import { actionsSection } from "../../src/sections/actions/index.js";
 import {
   type EndpointDecl,
@@ -18,8 +23,12 @@ import {
 import { type SectionPermission, samePermission } from "../../src/sections/contract/permissions.js";
 import { hasDrift, plainData, planContext } from "../../src/sections/contract/plan.js";
 import {
+  call,
+  callDeclared,
+  callGraphql,
   declaredTolerance,
   probeAbsent,
+  tryCall,
   tryCallDeclared,
 } from "../../src/sections/contract/requests.js";
 import { environmentsSection } from "../../src/sections/environments/index.js";
@@ -1049,6 +1058,152 @@ describe("declaredTolerance", () => {
   });
 });
 
+describe("a marked request's failure is rebuilt on the engine's side of the client port", () => {
+  const ctx = { repo: { owner: "o", name: "r", slug: "o/r" }, check: false as const };
+  const endpoint: EndpointDecl = {
+    route: "PATCH /repos/{owner}/{repo}/code-quality/setup",
+    statuses: { 200: "updated", 409: "a run is in progress" },
+  };
+  const op = graphqlOp<{ token: string }>()({
+    name: "MarkedWrite",
+    kind: "write",
+    query: "mutation MarkedWrite($token: String!) { noop(token: $token) { id } }",
+    outcomes: { ok: "written" },
+  });
+  // What a caller's own client may hand back for a rejected secret: the value, verbatim, in the message.
+  const echo = "Validation Failed: token hunter2 is too weak";
+  const answering = (status: number, message = echo): GithubClient => ({
+    tryRequest: async () => ({ error: { status, message, body: message } }),
+    tryGraphql: async () => ({
+      error: { status, message, body: message, graphqlTypes: ["UNPROCESSABLE"] },
+    }),
+  });
+  const throwing: GithubClient = {
+    tryRequest: async () => {
+      throw new Error(echo);
+    },
+    tryGraphql: async () => {
+      throw new Error(echo);
+    },
+  };
+  const rest = (api: GithubClient, carriesSecret: boolean) =>
+    callDeclared({ ...ctx, api, resolveSecret: () => "" }, actionsSection, endpoint, {
+      payload: { token: "hunter2" },
+      carriesSecret,
+      describe: "arming the setup",
+    });
+  const graphql = (api: GithubClient, carriesSecret: boolean) =>
+    callGraphql(
+      { ...ctx, api, resolveSecret: () => "" },
+      actionsSection,
+      op,
+      { token: "hunter2" },
+      {
+        describe: "arming the setup",
+        carriesSecret,
+      },
+    );
+
+  test.each([
+    {
+      wire: "REST, the client answers 422",
+      run: () => rest(answering(422), true),
+      thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 ${SECRET_RESPONSE_WITHHELD}. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above`,
+    },
+    {
+      wire: "REST, the client throws",
+      run: () => rest(throwing, true),
+      thrown: `PATCH /repos/o/r/code-quality/setup failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run the workflow`,
+    },
+    {
+      wire: "GraphQL, the client answers with errors",
+      run: () => graphql(answering(422), true),
+      thrown: `actions: arming the setup failed - GRAPHQL MarkedWrite: 422 ${SECRET_RESPONSE_WITHHELD}. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above`,
+    },
+    {
+      wire: "GraphQL, the client throws",
+      run: () => graphql(throwing, true),
+      thrown: `GRAPHQL MarkedWrite failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run the workflow`,
+    },
+    {
+      wire: "REST, the client answers a rate limit signalled only by its message",
+      run: () => rest(answering(403, "API rate limit exceeded for hunter2"), true),
+      thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 403 ${SECRET_RESPONSE_WITHHELD}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
+    },
+    {
+      wire: "REST, the client answers a plain 403",
+      run: () => rest(answering(403), true),
+      thrown:
+        `actions: the token was denied arming the setup failed - PATCH /repos/o/r/code-quality/setup: 403 ${SECRET_RESPONSE_WITHHELD}. ` +
+        `To fix, grant "Administration" (read and write) under the PAT's Repository permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and write)`,
+    },
+    // The controls: unmarked, the same answers render as the client gave them.
+    {
+      wire: "REST unmarked, the client answers 422",
+      run: () => rest(answering(422), false),
+      thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 ${echo}. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above`,
+    },
+    {
+      wire: "GraphQL unmarked, the client throws",
+      run: () => graphql(throwing, false),
+      thrown: echo,
+    },
+  ])("$wire", async ({ run, thrown }) => {
+    await expect(run()).rejects.toThrow(new Error(thrown));
+  });
+
+  test("a tolerated status on a marked request comes back withheld too, keeping the status the tolerance reads", async () => {
+    // The tolerance's outcome thunk may render error.message into a note or failure (shared/setup-section.ts does).
+    const result = await tryCallDeclared(
+      { ...ctx, api: answering(409), resolveSecret: () => "" },
+      actionsSection,
+      endpoint,
+      {
+        payload: { token: "hunter2" },
+        carriesSecret: true,
+        tolerated: declaredTolerance(endpoint),
+      },
+    );
+    expect(result).toEqual({
+      error: { status: 409, message: SECRET_RESPONSE_WITHHELD, body: SECRET_RESPONSE_WITHHELD },
+    });
+  });
+
+  test("a payload-bearing request cannot be built without stating the mark", () => {
+    // @ts-expect-error the erased executor core demands carriesSecret beside a payload
+    const withoutMark: Parameters<typeof callDeclared>[3] = { payload: { token: "hunter2" } };
+    expect(withoutMark.payload).toEqual({ token: "hunter2" });
+    // A WIDENED variable escapes excess-property checks, which only a literal gets; `payload?: never` refuses it anyway.
+    // The route is literal so `params` is optional, and a GET so the port binds it: the only thing left to refuse is the payload.
+    const literal = {
+      route: "GET /repos/{owner}/{repo}/code-quality/setup",
+      statuses: { 200: "the setup" },
+    } as const satisfies EndpointDecl;
+    const widened = { describe: "arming the setup", payload: { token: "hunter2" } };
+    const readCtx = { ...ctx, api: new MockApi({}), check: true as const };
+    void (() => call(readCtx, actionsSection, literal, { describe: widened.describe }));
+    // @ts-expect-error the typed helpers admit no payload, literal or widened
+    void (() => call(readCtx, actionsSection, literal, widened));
+    // @ts-expect-error the typed helpers admit no payload, literal or widened
+    void (() => tryCall(readCtx, actionsSection, literal, widened));
+    // The section-facing port forwards its options to those helpers, so it refuses the same object.
+    const port = planContext(
+      { ...actionsSection, endpoints: { setup: literal } } as SectionMeta<
+        "actions",
+        { setup: typeof literal }
+      >,
+      readCtx.api,
+      readCtx.repo,
+    );
+    void (() => port.read.setup.call({ describe: widened.describe }));
+    // @ts-expect-error the port admits no payload either
+    void (() => port.read.setup.call(widened));
+    // @ts-expect-error the port admits no payload either
+    void (() => port.read.setup.tryCall(widened));
+    expect(widened.payload).toEqual({ token: "hunter2" });
+  });
+});
+
 describe("tryCallDeclared", () => {
   const ctx = { repo: { owner: "o", name: "r", slug: "o/r" }, check: false as const };
   const endpoint: EndpointDecl = {
@@ -1069,7 +1224,7 @@ describe("tryCallDeclared", () => {
         { ...ctx, api: answering(409, "Conflict"), resolveSecret: () => "" },
         actionsSection,
         endpoint,
-        { tolerated, describe: "arming the setup" },
+        { tolerated, carriesSecret: false, describe: "arming the setup" },
       ),
     ).toEqual({ error: { status: 409, message: "Conflict", body: "" } });
     await expect(
@@ -1077,7 +1232,7 @@ describe("tryCallDeclared", () => {
         { ...ctx, api: answering(422, "Unprocessable"), resolveSecret: () => "" },
         actionsSection,
         endpoint,
-        { tolerated, describe: "arming the setup" },
+        { tolerated, carriesSecret: false, describe: "arming the setup" },
       ),
     ).rejects.toThrow(
       new Error(
@@ -1105,9 +1260,7 @@ describe("tryCallDeclared", () => {
         { ...ctx, api: limited, resolveSecret: () => "" },
         actionsSection,
         declares403,
-        {
-          tolerated: declaredTolerance(declares403),
-        },
+        { tolerated: declaredTolerance(declares403), carriesSecret: false },
       ),
     ).rejects.toThrow(limitHit);
     await expect(
@@ -1121,7 +1274,7 @@ describe("tryCallDeclared", () => {
         { ...ctx, api: plain, resolveSecret: () => "" },
         actionsSection,
         declares403,
-        { tolerated: declaredTolerance(declares403) },
+        { tolerated: declaredTolerance(declares403), carriesSecret: false },
       ),
     ).toEqual({ error: { status: 403, message: "Forbidden", body: "" } });
     expect(

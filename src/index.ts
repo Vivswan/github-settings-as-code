@@ -130,6 +130,9 @@ export {
   type GraphqlOp,
   isPermissionError,
   isRateLimitError,
+  type RequestMark,
+  SECRET_RESPONSE_WITHHELD,
+  SECRET_TRANSPORT_WITHHELD,
   type TraceIo,
 } from "./github/api.js";
 export { getRepoFile } from "./github/repo-file.js";
