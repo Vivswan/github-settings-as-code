@@ -34,24 +34,30 @@ describe("package.json as the npm manifest", () => {
     });
   });
 
-  test("exports the library build, the schema, and its own manifest", () => {
+  test("exports the library build, the schema, and its own manifest, and both bin names run the CLI build", () => {
     expect(pkg.exports).toEqual({
       ".": { types: "./lib/pkg/index.d.ts", default: "./lib/pkg/index.js" },
       "./settings.schema.json": "./lib/settings.schema.json",
       "./package.json": "./package.json",
     });
-    // No bin yet: a CLI is its own change, with its own smoke.
-    expect("bin" in pkg).toBe(false);
+    expect(pkg.bin).toEqual({
+      "github-settings-as-code": "lib/pkg/cli.js",
+      gsac: "lib/pkg/cli.js",
+    });
   });
 
   test("ships the library build, the schema, the license, and the README only", () => {
     expect(pkg.files).toEqual(["lib/pkg/", "lib/settings.schema.json", "LICENSE.md", "README.md"]);
   });
 
-  test("keeps the action-only packages out of the runtime dependencies", () => {
+  test("keeps the action-only packages out of the runtime dependencies, and the CLI's in", () => {
     for (const name of ["@actions/artifact", "@actions/core"]) {
       expect(name in pkg.dependencies, `${name} is a runtime dependency`).toBe(false);
       expect(name in pkg.devDependencies, `${name} is missing from devDependencies`).toBe(true);
+    }
+    // The bin runs from the installed package, so its libraries must install with it.
+    for (const name of ["commander", "consola", "picocolors"]) {
+      expect(name in pkg.dependencies, `${name} is missing from dependencies`).toBe(true);
     }
   });
 

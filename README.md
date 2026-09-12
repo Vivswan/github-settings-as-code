@@ -63,6 +63,8 @@ The [getting started guide](docs/start/getting-started.md) walks the same steps 
 
 The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node 22.14 or newer): validate, merge, check, and apply from your own code. It is built from this repository with `bun run build:lib`; the [library reference](docs/reference/library.md) has the API by group.
 
+The package is also a command: `npx @vivswan/github-settings-as-code@next check --repository o/r --settings-file .github/settings.yml` runs the action's check from a terminal; the [command line guide](docs/start/cli.md) has every command.
+
 ## Docs
 
 | Goal | Read |
@@ -85,6 +87,7 @@ The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node
 | Move a pin to a new major | [Upgrading](docs/upgrading/README.md) |
 | See how the code is laid out | [Architecture](docs/reference/architecture.md) |
 | Use the engine from your own code | [Library](docs/reference/library.md) |
+| Run check, apply, or validate from a terminal | [Command line](docs/start/cli.md) |
 
 ## Contributing
 

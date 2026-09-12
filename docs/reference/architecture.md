@@ -230,6 +230,7 @@ Each node is one layer of `src/`, labelled with the paths it owns; an arrow mean
 graph TD
   main["src/main.ts"]
   action["src/action/"]
+  cli["src/cli.ts<br>src/cli/"]
   library["src/index.ts"]
   flows["src/flows/"]
   engine["src/engine/"]
@@ -246,6 +247,7 @@ graph TD
   upstream_gaps["src/upstream-gaps/"]
   main --> action
   action --> library
+  cli --> library
   library --> discovery
   library --> engine
   library --> flows

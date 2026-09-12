@@ -20,6 +20,10 @@
     "./settings.schema.json": "./lib/settings.schema.json",
     "./package.json": "./package.json"
   },
+  "bin": {
+    "github-settings-as-code": "lib/pkg/cli.js",
+    "gsac": "lib/pkg/cli.js"
+  },
   "files": [
     "lib/pkg/",
     "lib/settings.schema.json",
@@ -62,7 +66,10 @@
     "@octokit/types": "18.0.0",
     "age-encryption": "0.3.1",
     "bottleneck": "2.19.5",
+    "commander": "15.0.0",
+    "consola": "3.4.2",
     "neverthrow": "8.2.0",
+    "picocolors": "1.1.1",
     "yaml": "2.9.0",
     "zod": "4.5.4"
   },

@@ -27,6 +27,7 @@ const REQUIRED_PAGES = [
   "start/getting-started.md",
   "start/examples.md",
   "start/migrating-from-probot.md",
+  "start/cli.md",
   "reference/sections.md",
   "reference/inputs.md",
   "reference/semantics.md",
