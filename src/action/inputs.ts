@@ -5,39 +5,38 @@
  * execution code never touches raw inputs.
  */
 
-import { resolve } from "node:path";
 import * as core from "@actions/core";
 import {
   AFFILIATIONS,
   ARCHIVED_FILTERS,
+  DEFAULT_API_VERSION,
   DEFAULT_DISCOVERY_FILTERS,
+  DEFAULT_SETTINGS_FILE,
   type DiscoveryFilters,
   FORKS_FILTERS,
-  VISIBILITY_FILTERS,
-} from "../discovery/discover.js";
-import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
-import type { Layering } from "../engine/layers.js";
-import { DEFAULT_API_VERSION } from "../github/api.js";
-import { parseRecipient } from "../report/artifact-report.js";
-import { SECTION_KEYS, type SectionKey } from "../schema.js";
-import type { MustBeNever } from "../types.js";
-import {
-  DEFAULT_PRIVATE_REPORT,
-  DEFAULT_PRIVATE_REPOS,
+  type Layering,
+  type MergeConfig,
+  type MultiConfig,
+  type MustBeNever,
   PRIVATE_REPORT_CHANNELS,
   PRIVATE_REPOS_POLICIES,
   type PrivateReportChannel,
   type PrivateReposPolicy,
-} from "./redact.js";
+  parseRecipient,
+  parseRepoSlug,
+  quoteList,
+  type RunFlowConfig,
+  SECTION_KEYS,
+  type SectionKey,
+  type SingleConfig,
+  VISIBILITY_FILTERS,
+} from "../index.js";
 
-/**
- * Default settings-file path, and the sentinel the multi-repo guard
- * compares against: an unchanged value means the user did not override it,
- * so combining it with repos/repos-dir is rejected. Single source for the
- * action.yml `settings-file` default, this fallback, the override check,
- * and multi.ts's remote-path prose.
- */
-export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
+/** Default `private-repos`, pinned against action.yml by the contract test. */
+export const DEFAULT_PRIVATE_REPOS = "redact" satisfies PrivateReposPolicy;
+
+/** Default `private-report`, pinned against action.yml by the contract test. */
+const DEFAULT_PRIVATE_REPORT = "none" satisfies PrivateReportChannel;
 
 /**
  * One action input: its action.yml entry (description, default) and its
@@ -340,10 +339,6 @@ function readEnum<T extends string>(
   return value as T;
 }
 
-export function quoteList(names: string[]): string {
-  return names.map((name) => `"${name}"`).join(", ");
-}
-
 /** What separates the entries of a list input; a single path can never contain one. */
 const LIST_SEPARATOR = /[\n,]/;
 
@@ -463,68 +458,21 @@ function resolveReportPublicKey(channel: PrivateReportChannel): string | { error
   return key;
 }
 
-/** The inputs shared by the two engine modes (apply and check). */
-interface CommonConfig {
-  token: string;
-  mode: "apply" | "check";
-  onMissingPermission: "fail" | "warn";
-  requiredSections: Set<SectionKey>;
-  onlySections: Set<SectionKey>;
-  apiVersion: string;
-  /** Whether to hide private/internal targets from the public view. */
-  privateRepos: PrivateReposPolicy;
-  /** Where the full unredacted report for a redacted target is delivered. */
-  privateReport: PrivateReportChannel;
-  /**
-   * The age recipient the `artifact` channel encrypts every report to. Empty
-   * for the other channels (parse rejects a value supplied without the artifact
-   * channel), a validated `age1...` recipient when the channel is `artifact`.
-   */
-  reportPublicKey: string;
-  /**
-   * The workflow's own repository (GITHUB_REPOSITORY), read once here so the
-   * run flows stay env-free. A target equal to this slug is never redacted:
-   * a repository operating on itself leaks nothing.
-   */
-  selfSlug: string;
-  /**
-   * Link to the workflow run, for the private report metadata. Built once here
-   * from GITHUB_SERVER_URL/GITHUB_REPOSITORY/GITHUB_RUN_ID so the run flows stay
-   * env-free; empty when those are unset (local runs), which the report tolerates.
-   */
-  runUrl: string;
-}
-
 /**
- * A mode: merge run: the layers to fold, low to high, and where the result
- * goes. No token, no API version, no target, no section allowlist: merge mode
- * never reaches GitHub and writes every section the layers declare, and the
- * type carries that (no field to read a token or an allowlist from).
+ * The inputs shared by the two engine modes (apply and check): the flow
+ * config plus what only the action reads. selfSlug (GITHUB_REPOSITORY) and
+ * runUrl (GITHUB_SERVER_URL/GITHUB_REPOSITORY/GITHUB_RUN_ID) are read from
+ * the environment once here, so the run flows stay env-free.
  */
-export interface MergeConfig {
-  kind: "merge";
-  settingsFiles: string[];
-  mergedFile: string;
-  layering: Layering;
+interface CommonConfig extends RunFlowConfig {
+  token: string;
+  apiVersion: string;
 }
 
 /** Everything run() needs, already validated; `kind` picks the mode. */
 export type RunConfig =
-  | (CommonConfig &
-      (
-        | { kind: "single"; repo: RepoRef; settingsFile: string }
-        | {
-            kind: "multi";
-            reposDir: string;
-            reposInput: string;
-            defaultsFile: string;
-            adminOwner: string;
-            discoveryFilters: DiscoveryFilters;
-            /** Filter inputs the user explicitly set, for the misuse rejections. */
-            discoveryFiltersSet: string[];
-          }
-      ))
-  | MergeConfig;
+  | (CommonConfig & (({ kind: "single" } & SingleConfig) | ({ kind: "multi" } & MultiConfig)))
+  | ({ kind: "merge" } & MergeConfig);
 
 /**
  * The inputs a mode: merge run reads, plus `token`, which it tolerates unread
@@ -553,7 +501,7 @@ export const MERGE_REJECTED_INPUTS: readonly InputName[] = (
 ).filter((name) => !(MERGE_INPUTS as readonly string[]).includes(name));
 
 /** Read and validate the mode: merge inputs; the first problem wins. */
-function parseMergeConfig(): { config: MergeConfig } | { error: string } {
+function parseMergeConfig(): { config: Extract<RunConfig, { kind: "merge" }> } | { error: string } {
   const rejected = MERGE_REJECTED_INPUTS.filter((name) => {
     const value = input(name);
     return value !== "" && value !== INPUT_DECLS[name].default;
@@ -582,21 +530,6 @@ function parseMergeConfig(): { config: MergeConfig } | { error: string } {
   if (settingsFiles.length === 0) {
     return {
       error: `the "settings-file" input is "${inputOrDefault("settings-file")}", which lists no file. In mode: merge it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file`,
-    };
-  }
-  // The merge reads every layer, then writes the folded document to
-  // merged-file: a merged-file that names a layer would overwrite that layer,
-  // and the next run would fold the merged document as if it were a layer.
-  // Paths are compared resolved, so "./a.yml" and "a.yml" collide.
-  const mergedPath = resolve(mergedFile);
-  const collision = settingsFiles.findIndex((layer) => resolve(layer) === mergedPath);
-  if (collision !== -1) {
-    return {
-      error:
-        `the "merged-file" input "${mergedFile}" is layer ${collision + 1} of the ` +
-        `"settings-file" list ("${settingsFiles[collision]}"): the merge would overwrite that ` +
-        `layer with the folded document, and the next run would fold the merged document as a ` +
-        `layer. Write the merged document to a path outside the layer list`,
     };
   }
   return { config: { kind: "merge", settingsFiles, mergedFile, layering } };

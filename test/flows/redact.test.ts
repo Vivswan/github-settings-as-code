@@ -10,10 +10,9 @@ import {
   REDACTED_NOTE,
   redactedChannel,
   toPublicView,
-} from "../../src/action/redact.js";
-import { type Io, maskRegistry, prefixedIo } from "../../src/io.js";
+} from "../../src/flows/redact.js";
+import { type Io, maskRegistry, prefixedIo, silentIo } from "../../src/io.js";
 import { isPrivate, markPrivate } from "../../src/private.js";
-import { silentIo } from "../io-fake.js";
 
 /** A private-set predicate from a lowercase-keyed slug list. */
 function privateSet(...slugs: string[]): (slug: string) => boolean {

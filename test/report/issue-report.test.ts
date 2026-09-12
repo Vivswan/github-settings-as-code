@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { silentIo } from "../../src/io.js";
 import {
   deliverIssueReport,
   ISSUE_TITLE,
@@ -9,7 +10,6 @@ import {
   MARKER_LABEL_CONFIG,
 } from "../../src/report/issue-report.js";
 import type { SettingsFile } from "../../src/schema.js";
-import { silentIo } from "../io-fake.js";
 import { MockApi, type Route } from "../mock-api.js";
 
 const SLUG = { owner: "o", name: "private-repo", slug: "o/private-repo" };

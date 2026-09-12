@@ -14,43 +14,16 @@
 import type { Target } from "../discovery/targets.js";
 import type { RepoRunResult } from "../engine/orchestrate.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
-import { type AnnotationLevel, type Io, prefixedIo } from "../io.js";
+import { type CollectedLine, type Io, prefixedIo } from "../io.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
+import type { RedactedDetail, TargetDetail } from "../report/delivery.js";
 import type { SectionKey } from "../schema.js";
 
 /** The `private-repos` input values; the single source its type derives from. */
 export const PRIVATE_REPOS_POLICIES = ["redact", "show"] as const;
 
-/** Default `private-repos`, pinned against action.yml by the contract test. */
-export const DEFAULT_PRIVATE_REPOS = "redact";
-
 export type PrivateReposPolicy = (typeof PRIVATE_REPOS_POLICIES)[number];
-
-/**
- * The `private-report` channel values. `none` delivers nothing; `issue` posts
- * the full unredacted report to the private target repo itself (the one
- * GitHub-ACL-private channel a public run has); `issue-on-failure` is the
- * quiet variant of `issue` - it writes the issue only when the run needs
- * attention (failed, or check-mode drift) and closes it on recovery, so a
- * healthy repo never sees an issue; `artifact` uploads every redacted
- * target's report as one age-encrypted workflow artifact, for readers who
- * hold the key but no GitHub access to the targets.
- */
-export const PRIVATE_REPORT_CHANNELS = ["none", "issue", "issue-on-failure", "artifact"] as const;
-
-/** Default `private-report`, pinned against action.yml by the contract test. */
-export const DEFAULT_PRIVATE_REPORT = "none";
-
-export type PrivateReportChannel = (typeof PRIVATE_REPORT_CHANNELS)[number];
-
-/** The channels that deliver through the target repo's report issue. */
-export type IssueChannel = Extract<PrivateReportChannel, "issue" | "issue-on-failure">;
-
-/** Narrow a channel to the issue-delivering pair. */
-export function isIssueChannel(channel: PrivateReportChannel): channel is IssueChannel {
-  return channel === "issue" || channel === "issue-on-failure";
-}
 
 /**
  * The note appended to every redacted line: it names the two escape hatches
@@ -74,22 +47,6 @@ export const WITHHELD_REPORT_NOTICE =
   "- typically the token cannot read the target repository), so the private report was " +
   "withheld rather than risk delivering it to a public repository. Grant the token metadata " +
   "read access and re-run; a transient API failure also leaves visibility unverified";
-
-/**
- * One target's rich end state: slug, section outcomes with live detail, and
- * the note for a skip or failure that produced no outcomes. Open in the clear;
- * sealed with the transcript when redacted.
- */
-interface TargetDetail {
-  slug: string;
-  outcomes: RepoRunResult["outcomes"];
-  note?: string;
-}
-
-/** A redacted target's detail also carries every line its run would have printed. */
-export interface RedactedDetail extends TargetDetail {
-  transcript: CapturedLine[];
-}
 
 /** One multi-repo target's end state: safe closed values plus the detail the public view projects from. */
 export interface TargetOutcome {
@@ -265,19 +222,13 @@ export function planRedaction(
   };
 }
 
-/** One recorded line from a captured Io: annotations carry a level, log lines do not. */
-export interface CapturedLine {
-  level?: AnnotationLevel;
-  line: string;
-}
-
 /**
  * An Io that lets nothing textual out: annotate/log are recorded for the
  * private report, debug/summary/output are dropped (those surfaces are written
  * from the public view), only the mask registry passes through.
  */
-export function capturingIo(io: Io): { io: Io; drain(): CapturedLine[] } {
-  const captured: CapturedLine[] = [];
+export function capturingIo(io: Io): { io: Io; drain(): CollectedLine[] } {
+  const captured: CollectedLine[] = [];
   return {
     io: {
       annotate: (level, message) => captured.push({ level, line: message }),

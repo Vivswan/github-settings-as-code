@@ -8,8 +8,8 @@
  * exemption read.
  */
 
-import { isIssueChannel } from "../../../src/action/redact.js";
 import { MAX_RETRIES } from "../../../src/github/api.js";
+import { isIssueChannel } from "../../../src/report/delivery.js";
 import {
   ISSUE_REPORT_PERMISSION,
   MARKER_LABEL,

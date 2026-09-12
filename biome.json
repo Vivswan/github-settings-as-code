@@ -73,7 +73,7 @@
       }
     },
     {
-      "includes": ["src/action/redact.ts"],
+      "includes": ["src/flows/redact.ts"],
       "linter": {
         "rules": {
           "style": {

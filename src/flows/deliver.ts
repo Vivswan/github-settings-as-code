@@ -17,12 +17,18 @@ import type { RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import { isPrivate } from "../private.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
-import { openReportChannel, type RunConclusion } from "../report/delivery.js";
+import {
+  ARTIFACT_NEEDS_UPLOADER,
+  isIssueChannel,
+  openReportChannel,
+  type PrivateReportChannel,
+  type RunConclusion,
+} from "../report/delivery.js";
+import type { SectionKey } from "../schema.js";
 import {
   emitRedactedResult,
-  isIssueChannel,
   isPrivateVisibility,
-  type PrivateReportChannel,
+  type PrivateReposPolicy,
   type PublicTargetView,
   publicDetail,
   type TargetChannel,
@@ -93,9 +99,34 @@ export function runOutcome(
 export interface DeliveryConfig {
   mode: "apply" | "check";
   privateReport: PrivateReportChannel;
+  /** The age recipient the `artifact` channel encrypts every report to; empty for the other channels. */
   reportPublicKey: string;
+  /** The repository the run acts for; a target equal to it is never redacted. */
   selfSlug: string;
+  /** Link to the workflow run, for the private report metadata; may be empty. */
   runUrl: string;
+}
+
+/** The inputs the single- and multi-repo flows share: the engine options, the redaction policy, and the delivery inputs. */
+export interface RunFlowConfig extends DeliveryConfig {
+  onMissingPermission: "fail" | "warn";
+  requiredSections: Set<SectionKey>;
+  onlySections: Set<SectionKey>;
+  /** Whether to hide private/internal targets from the public view. */
+  privateRepos: PrivateReposPolicy;
+}
+
+/**
+ * The fatal message when the `artifact` channel has no upload port, null otherwise.
+ * Both flows check it before any API work; openReportChannel asserts the same rule.
+ */
+export function missingUploaderProblem(
+  cfg: Pick<DeliveryConfig, "privateReport">,
+  uploader: ArtifactUploader | undefined,
+): string | null {
+  return cfg.privateReport === "artifact" && uploader === undefined
+    ? ARTIFACT_NEEDS_UPLOADER
+    : null;
 }
 
 /**
@@ -126,7 +157,6 @@ export interface Delivery {
 /**
  * Run `body` with the run's delivery open, then flush it even when `body` throws:
  * the artifact channel uploads every accumulated report as ONE document here.
- * `uploader` is the test port; production passes undefined for @actions/artifact.
  */
 export async function withDelivery<T>(
   run: { api: GithubClient; cfg: DeliveryConfig; io: Io; uploader?: ArtifactUploader },

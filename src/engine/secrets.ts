@@ -11,13 +11,13 @@
  * operator layers merge mode folds into it), a central per-repo file, and the
  * defaults document applied whole to a target that has no file of its own -
  * is operator-authored. The multi-repo flow decides the value where it
- * chooses the document (action/multi.ts); the single-repo flow takes the
+ * chooses the document (flows/multi.ts); the single-repo flow takes the
  * engine's "operator" default.
  */
 
-import type { SettingsSource, SourcedSecretValue } from "../action/secret-refs.js";
 import type { SectionKey, SettingsFile } from "../schema.js";
 import type { SectionModule } from "../sections/contract/module.js";
+import type { SettingsSource, SourcedSecretValue } from "./secret-refs.js";
 
 /** One declared secret value, tagged with the section that declared it. */
 export interface SectionSecretValue extends SourcedSecretValue {

@@ -6,10 +6,10 @@
 
 import { describe, expect, test } from "bun:test";
 import { runForRepo, validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { silentIo } from "../../src/io.js";
 import type { SectionKey } from "../../src/schema.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../e2e/mock/secrets.js";
-import { silentIo } from "../io-fake.js";
 import { MockApi } from "../mock-api.js";
 
 /**

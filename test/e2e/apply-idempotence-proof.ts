@@ -4,7 +4,7 @@
  * runScenario invokes for expect.fixpoint: "apply_idempotent" through the runner's ChildInvoker.
  */
 
-import { isIssueChannel } from "../../src/action/redact.js";
+import { isIssueChannel } from "../../src/report/delivery.js";
 import {
   ALWAYS_REWRITE_STATE_FAMILIES,
   recurrence,

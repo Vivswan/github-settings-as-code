@@ -4,7 +4,7 @@ import {
   resolveSecretRefs,
   type SourcedSecretValue,
   validateSecretRef,
-} from "../../src/action/secret-refs.js";
+} from "../../src/engine/secret-refs.js";
 
 /** The entry label validateSecretRef weaves into its error prose. */
 const LABEL = 'the secret entry "TEST_ENTRY"';

@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
-import { runMulti } from "../../src/action/multi.js";
-import type { TargetOutcome } from "../../src/action/redact.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
+import { runMulti } from "../../src/flows/multi.js";
+import type { TargetOutcome } from "../../src/flows/redact.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
 import {

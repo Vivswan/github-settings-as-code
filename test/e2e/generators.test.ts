@@ -4,9 +4,9 @@ import { basename, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { describeOptOut } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { silentIo } from "../../src/io.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
-import { silentIo } from "../io-fake.js";
 import { type LiveWitnessKind, UNDECLARED_KEY } from "./gen-support.js";
 import {
   ARTIFACT_TEST_RECIPIENT,

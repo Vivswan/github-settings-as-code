@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { INPUT_DECLS, type MergeConfig, parseConfig } from "../../src/action/inputs.js";
+import { INPUT_DECLS, parseConfig, type RunConfig } from "../../src/action/inputs.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 
 /**
@@ -176,7 +176,7 @@ describe("the mode input", () => {
 
 describe("mode: merge", () => {
   /** What the two-layer merge env parses to; the tests below vary one input around it. */
-  const MERGE_CONFIG: MergeConfig = {
+  const MERGE_CONFIG: Extract<RunConfig, { kind: "merge" }> = {
     kind: "merge",
     settingsFiles: ["fleet.yml", "repo.yml"],
     mergedFile: "out/merged.yml",
@@ -206,26 +206,6 @@ describe("mode: merge", () => {
     setMergeEnv({ "merged-file": "" });
     expect(rejection()).toBe(
       'mode: merge needs a "merged-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file',
-    );
-  });
-
-  test("a merged-file that names one of the layers is rejected, naming the layer's position", () => {
-    setMergeEnv({ "merged-file": "repo.yml" });
-    expect(rejection()).toBe(
-      'the "merged-file" input "repo.yml" is layer 2 of the "settings-file" list ("repo.yml"): ' +
-        "the merge would overwrite that layer with the folded document, and the next run would " +
-        "fold the merged document as a layer. Write the merged document to a path outside the " +
-        "layer list",
-    );
-  });
-
-  test("the collision is found on the resolved paths, so a ./ spelling of a layer still collides", () => {
-    setMergeEnv({ "merged-file": "./fleet.yml" });
-    expect(rejection()).toBe(
-      'the "merged-file" input "./fleet.yml" is layer 1 of the "settings-file" list ' +
-        '("fleet.yml"): the merge would overwrite that layer with the folded document, and the ' +
-        "next run would fold the merged document as a layer. Write the merged document to a path " +
-        "outside the layer list",
     );
   });
 

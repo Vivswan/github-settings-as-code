@@ -101,7 +101,7 @@ export type SecretRefsResolution =
 /**
  * One designated secret field's value, tagged with the provenance of the
  * DOCUMENT that declared it. Provenance is decided once, where the document
- * is chosen (action/multi.ts readTargetSettings): a target-fetched document
+ * is chosen (flows/multi.ts readTargetSettings): a target-fetched document
  * is "target", so its references are refused, and every other document is
  * "operator", so its references resolve.
  */
