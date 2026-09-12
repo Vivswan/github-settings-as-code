@@ -1076,7 +1076,7 @@ async function runMergePredicted(
 
 // --- Transport-fault fuzz ---------------------------------------------------
 
-/** Mirrors the mock's FaultOption kinds. */
+/** The mock's transport FaultOption kinds; echo_422, a validation rejection with no transient form, stays with the curated scenarios. */
 const FAULT_KINDS = ["rate_limit_403", "429_then_200", "connection_drop", "server_error"] as const;
 type FaultKind = (typeof FAULT_KINDS)[number];
 

@@ -21,7 +21,7 @@ import {
   type RerunCapture,
 } from "./apply-idempotence-proof.js";
 import { E2E_TOKEN, ADMIN_SLUG as REPO_SLUG } from "./constants.js";
-import { assertIssueReport } from "./issue-report-assert.js";
+import { assertIssueReport, checkReportLeaks } from "./issue-report-assert.js";
 import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { isWriteRequest } from "./mock/dispatch.js";
 import { type ServerOptions, startMockServer } from "./mock/server.js";
@@ -573,14 +573,14 @@ export async function runScenario(
     //   E2E_TOKEN                -> never add-mask'd, so any echo on a public surface is a real leak
     //   every scenario env value -> by definition a resolved secret plaintext, listed by the author or not
     // An EMPTY env value is skipped: a set-but-empty variable is a scenario about the resolver's
-    // empty-value error, not a leakable secret.
-    const leakNeedles = [
+    // empty-value error, not a leakable secret. Those two families are secrets, forbidden on the
+    // private-report surface too, where a leaks_nowhere needle (a slug, a private live value) belongs.
+    const secretNeedles = [
       ...new Set(
-        [E2E_TOKEN, ...(exp.leaks_nowhere ?? []), ...Object.values(scenario.env ?? {})].filter(
-          (needle) => needle !== "",
-        ),
+        [E2E_TOKEN, ...Object.values(scenario.env ?? {})].filter((needle) => needle !== ""),
       ),
     ];
+    const leakNeedles = [...new Set([...secretNeedles, ...(exp.leaks_nowhere ?? [])])];
     // requests_contain may assert on a query string, so match the full form.
     const fullLog = handle.requests.map((r) => renderRequest(r, true));
     for (const needle of exp.requests_contain ?? []) {
@@ -668,6 +668,8 @@ export async function runScenario(
         ).map((failure) => `${rerun.label}: ${failure}`),
       );
     }
+    // The request log spans the primary invocation and every re-run, so one sweep covers each delivered report.
+    failures.push(...checkReportLeaks(handle.requests, secretNeedles));
 
     const report: ScenarioReport = {
       scenario: scenario.name,

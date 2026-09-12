@@ -9,17 +9,62 @@ function stringBody(request: LoggedRequest | undefined): string | undefined {
   return typeof body === "string" ? body : undefined;
 }
 
+/** A rejected write delivered nothing, so only an accepted one counts as a report; the leak sweep below reads every attempt. */
+function accepted(request: LoggedRequest): boolean {
+  return request.status >= 200 && request.status < 300;
+}
+
 export function deliveredIssueBody(requests: LoggedRequest[], slug: string): string | undefined {
   const base = `/repos/${slug}/issues`;
-  const create = requests.find((r) => r.method === "POST" && r.pathname === base);
+  const create = requests.find((r) => accepted(r) && r.method === "POST" && r.pathname === base);
   const fromCreate = stringBody(create);
   if (fromCreate !== undefined) {
     return fromCreate;
   }
   const lastPatch = requests
-    .filter((r) => r.method === "PATCH" && r.pathname.startsWith(`${base}/`))
+    .filter((r) => accepted(r) && r.method === "PATCH" && r.pathname.startsWith(`${base}/`))
     .at(-1);
   return stringBody(lastPatch);
+}
+
+const ISSUE_WRITE = /^\/repos\/([^/]+\/[^/]+)\/issues(?:\/\d+)?$/;
+
+/**
+ * Every report body the run TRANSMITTED, whichever target it went to and whether or not GitHub accepted it: the create
+ * and each reuse or close PATCH. A rejected write still carried its body over the wire, so a leak in it is a leak.
+ */
+export function transmittedReportBodies(
+  requests: LoggedRequest[],
+): Array<{ slug: string; body: string }> {
+  const out: Array<{ slug: string; body: string }> = [];
+  for (const request of requests) {
+    const slug = request.pathname.match(ISSUE_WRITE)?.[1];
+    if (slug === undefined || (request.method !== "POST" && request.method !== "PATCH")) {
+      continue;
+    }
+    const body = stringBody(request);
+    if (body !== undefined) {
+      out.push({ slug, body });
+    }
+  }
+  return out;
+}
+
+/**
+ * The private report is the one surface the redacted transcript reaches, and it is written unmasked so the private slug
+ * stays legible there (capturingIo in src/flows/redact.ts). A resolved secret plaintext must still never land in it, so
+ * the runner sweeps every delivered body for the run's secrets; the same needles fail the public surfaces via checkLeaks.
+ */
+export function checkReportLeaks(requests: LoggedRequest[], secrets: string[]): string[] {
+  const failures: string[] = [];
+  for (const { slug, body } of transmittedReportBodies(requests)) {
+    for (const needle of secrets) {
+      if (body.includes(needle)) {
+        failures.push(`leak: "${needle}" present in the private report body sent to ${slug}`);
+      }
+    }
+  }
+  return failures;
 }
 
 export function assertIssueReport(
@@ -28,9 +73,11 @@ export function assertIssueReport(
 ): string[] {
   const failures: string[] = [];
   const issuesPath = `/repos/${spec.slug}/issues`;
-  const creates = requests.filter((r) => r.method === "POST" && r.pathname === issuesPath);
+  const creates = requests.filter(
+    (r) => accepted(r) && r.method === "POST" && r.pathname === issuesPath,
+  );
   const patches = requests.filter(
-    (r) => r.method === "PATCH" && r.pathname.startsWith(`${issuesPath}/`),
+    (r) => accepted(r) && r.method === "PATCH" && r.pathname.startsWith(`${issuesPath}/`),
   );
 
   if (spec.created_count !== undefined && creates.length !== spec.created_count) {
@@ -96,6 +143,12 @@ export function assertIssueReport(
       );
     } else if (!deliveredBody.includes(needle)) {
       failures.push(`issue_report: report body for ${spec.slug} missing "${needle}"`);
+    }
+  }
+  // An undelivered body lacks everything; body_contains, or created_count, is what pins delivery.
+  for (const needle of spec.body_lacks ?? []) {
+    if (deliveredBody?.includes(needle)) {
+      failures.push(`issue_report: report body for ${spec.slug} must not contain "${needle}"`);
     }
   }
   if (spec.state !== undefined) {

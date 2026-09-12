@@ -49,11 +49,12 @@ export interface CorruptOption {
 
 /**
  * `times` is the recovery budget: 1 is a transient the client's retries absorb, and 1 + MAX_RETRIES faults every attempt,
- * a hard failure. rate_limit_403 is the exception: a primary rate limit is fatal on its first firing whatever the budget.
+ * a hard failure. rate_limit_403 and echo_422 are the exceptions, fatal on their first firing whatever the budget: a
+ * primary rate limit and a validation rejection are never retried.
  */
 export interface FaultOption {
   key: string;
-  kind: "rate_limit_403" | "429_then_200" | "connection_drop" | "server_error";
+  kind: "rate_limit_403" | "429_then_200" | "connection_drop" | "server_error" | "echo_422";
   times?: number | "always";
 }
 
