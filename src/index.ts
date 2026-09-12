@@ -105,7 +105,6 @@ export {
   type GraphqlOp,
   isPermissionError,
   isRateLimitError,
-  RERUN_ADVICE,
   type TraceIo,
 } from "./github/api.js";
 export { getRepoFile } from "./github/repo-file.js";
@@ -130,6 +129,7 @@ export {
   type Problem,
   type ProblemOf,
   quoteList,
+  RERUN_ADVICE,
   type SettingsFileRole,
   type SettingsProblem,
   type TopLevelShape,

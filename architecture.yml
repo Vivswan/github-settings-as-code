@@ -42,6 +42,6 @@ edges:
   github: [io, plain-data]
   discovery: [github, private, problem]
   report: [discovery, engine, github, io, private, problem, schema, sections, types]
-  problem: [github, plain-data, schema]
+  problem: [plain-data, schema]
   schema: [sections, types]
   upstream-gaps: [types]

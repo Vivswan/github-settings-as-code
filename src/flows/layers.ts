@@ -4,7 +4,7 @@
  * (engine/layers.ts), and validate the result. Nothing here reaches GitHub.
  */
 
-import { Result } from "neverthrow";
+import { ok, Result } from "neverthrow";
 import {
   type Layer,
   type Layering,
@@ -19,12 +19,16 @@ import type { LayerProblem, ProblemOf, SettingsProblem } from "../problem.js";
 import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../schema.js";
 import { readSettingsFile } from "./settings-read.js";
 
-/** Read and parse every layer, in order; the first unreadable path fails, named. */
+/** Read and parse every layer, in order; the first unreadable path fails, named, and the rest are not read. */
 export function readLayerFiles(
   paths: readonly string[],
 ): Result<Layer[], ProblemOf<"settings-file-unreadable">> {
-  return Result.combine(
-    paths.map((path) => readSettingsFile(path, "layer").map((doc): Layer => ({ name: path, doc }))),
+  return paths.reduce<Result<Layer[], ProblemOf<"settings-file-unreadable">>>(
+    (layers, path) =>
+      layers.andThen((read) =>
+        readSettingsFile(path, "layer").map((doc) => [...read, { name: path, doc }]),
+      ),
+    ok([]),
   );
 }
 

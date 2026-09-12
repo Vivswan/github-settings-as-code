@@ -8,9 +8,17 @@
  * the permission policy can classify them.
  */
 
-import { RERUN_ADVICE } from "./github/api.js";
 import { isPlainObject } from "./plain-data.js";
 import type { SectionKey } from "./schema.js";
+
+/**
+ * The advice appended to a transient (non-permission) API failure: a network
+ * blip or a 5xx that survived the retries. One source for the discovery
+ * problems rendered here and multi.ts's remote-file read failure, so the "not
+ * a permission problem" wording cannot drift between them.
+ */
+export const RERUN_ADVICE =
+  "This is not a permission problem; re-run the workflow, and retry later if it persists";
 
 /** Names as an error message lists them: each quoted, comma-separated. */
 export function quoteList(names: readonly string[]): string {

@@ -294,7 +294,6 @@ graph TD
   report --> schema
   report --> sections
   report --> types
-  problem --> github
   problem --> plain_data
   problem --> schema
   schema --> sections

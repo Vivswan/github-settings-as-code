@@ -32,12 +32,12 @@ import {
 } from "../discovery/targets.js";
 import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
 import type { SettingsSource } from "../engine/secret-refs.js";
-import { type GithubClient, isPermissionError, RERUN_ADVICE } from "../github/api.js";
+import { type GithubClient, isPermissionError } from "../github/api.js";
 import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import type { Private } from "../private.js";
-import { describeProblem, type Problem } from "../problem.js";
+import { describeProblem, type Problem, RERUN_ADVICE } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import { applyMarkerInjection } from "../report/delivery.js";
 import {
