@@ -194,6 +194,15 @@ describe("changed-sections derived fan-out", () => {
     expect(scanImports("const t = await import(`./lit.js`);\n", "probe.ts")).toEqual(["./lit.js"]);
   });
 
+  test("scanImports reads a file that opens with a shebang, as the bin entry does", () => {
+    expect(
+      scanImports(
+        '#!/usr/bin/env node\nimport { main } from "./cli/program.js";\nmain();\n',
+        "cli.ts",
+      ),
+    ).toEqual(["./cli/program.js"]);
+  });
+
   test("resolveImport maps .js to .ts, a directory to its index, and .json to itself, and throws on a dangling one", () => {
     const root = syntheticRepo({
       "src/sections/shared/engine.ts": "",

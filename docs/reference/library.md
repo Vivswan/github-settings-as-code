@@ -155,6 +155,11 @@ const exitCode = await runSingle(client, config, collected.io).match(
 console.log(exitCode, collected.outputs.result, collected.lines.map((entry) => entry.line));
 ```
 
+## CLI
+
+The package's `bin` entries, `github-settings-as-code` and `gsac`, run the same flows from a terminal: `check`, `apply`, and `merge` take the action's inputs as `--flags`,
+and `validate` and `permissions` read a settings file alone. The [command line guide](../start/cli.md) has every command, the flag rule, and the exit codes.
+
 ## Versioning
 
 The package and the action share one version, the one in `.release-please-manifest.json` (release-please rewrites `package.json` from it), so a settings file that validates on the library validates on the action of the same version.

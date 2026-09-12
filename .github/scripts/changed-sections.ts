@@ -41,6 +41,9 @@ export const ALL_SELECTING_PREFIXES = [
   "src/flows/",
   "src/github/",
   "src/action/",
+  // The CLI runs the same flows the action does, so its change is smoked like the action's.
+  "src/cli/",
+  "src/cli.ts",
   "src/discovery/",
   "src/report/",
   // Cross-cutting: gap files define supplemental route typing across sections.
@@ -137,7 +140,8 @@ function assertNoComputedImports(text: string, file: string): void {
  * errors name the file, not this tool, because arch-lint.ts shares this and resolveImport. */
 export function scanImports(text: string, file: string): string[] {
   assertNoComputedImports(text, file);
-  return TRANSPILER.scanImports(text)
+  // Bun.Transpiler rejects a shebang line (the bin entry keeps one); oxc above accepts it.
+  return TRANSPILER.scanImports(text.replace(/^#!.*\n/, ""))
     .map((entry) => entry.path)
     .filter((specifier) => specifier.startsWith("./") || specifier.startsWith("../"));
 }

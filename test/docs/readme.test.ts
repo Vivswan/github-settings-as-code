@@ -73,6 +73,7 @@ describe("README front door", () => {
         "docs/start/getting-started.md",
         "docs/start/examples.md",
         "docs/start/migrating-from-probot.md",
+        "docs/start/cli.md",
         "docs/reference/sections.md",
         "docs/reference/architecture.md",
         "docs/reference/library.md",
@@ -97,7 +98,7 @@ describe("README front door", () => {
 
   test("stays a front door in size", () => {
     // The tripwire against the reference tables growing back.
-    expect(readme.split("\n").length).toBeLessThanOrEqual(100);
+    expect(readme.split("\n").length).toBeLessThanOrEqual(101);
   });
 });
 

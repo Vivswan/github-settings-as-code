@@ -5,16 +5,18 @@
  * subpath), and compile a TypeScript consumer against the bundled index.d.ts
  * with skipLibCheck off - a declaration that leaks a devDependency type, or a
  * type the emitter could not name, fails here instead of on a consumer's
- * machine.
+ * machine. The installed bin is run under Node too: its help must name every
+ * subcommand, and `validate` must accept a small settings file.
  *
  * Usage: `bun .github/scripts/package-smoke.ts` from anywhere; the temp
  * directory is removed on every path, failure included.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CLI_COMMANDS } from "../../src/cli/program.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 
 /** This script lives at .github/scripts/, two levels below the repository root. */
@@ -56,10 +58,27 @@ const result = validateSettings({ labels: [] });
 export const ok: boolean = result.isOk() && first === "repository";
 `;
 
+/** The settings file the installed CLI validates: one section, valid as written. */
+const SETTINGS_FILE = "labels:\n  - name: bug\n    color: d73a4a\n";
+
+/** The control: a label without its name, which the validator refuses. */
+const INVALID_SETTINGS_FILE = "labels:\n  - color: d73a4a\n";
+
 /** Run a command to completion in `cwd`, streaming its output; a non-zero exit throws. */
 function run(command: string, args: string[], cwd: string): void {
   console.log(`$ ${[command, ...args].join(" ")}`);
   execFileSync(command, args, { cwd, stdio: "inherit" });
+}
+
+/** Run a command expected to fail; any other exit code, zero included, throws. */
+function expectExit(code: number, command: string, args: string[], cwd: string): void {
+  console.log(`$ ${[command, ...args].join(" ")}  # expecting exit ${code}`);
+  const result = spawnSync(command, args, { cwd, stdio: "inherit" });
+  if (result.status !== code) {
+    throw new Error(
+      `${[command, ...args].join(" ")} exited ${result.status ?? "by signal"}, expected ${code}`,
+    );
+  }
 }
 
 /** Run a command and return its stdout. */
@@ -125,6 +144,18 @@ async function main(): Promise<void> {
     writeFileSync(join(consumer, "main.mjs"), NODE_CONSUMER);
     run(CONSUMER_NODE, ["--version"], consumer);
     run(CONSUMER_NODE, ["main.mjs"], consumer);
+    // The bin through its installed shim, under the consumer's Node: the package's own runtime.
+    const bin = join(consumer, "node_modules", ".bin", "gsac");
+    const help = capture(CONSUMER_NODE, [bin, "--help"], consumer);
+    const missing = CLI_COMMANDS.filter((command) => !help.includes(`  ${command}`));
+    if (missing.length > 0) {
+      throw new Error(`the installed CLI's help names no ${missing.join(", ")} command`);
+    }
+    writeFileSync(join(consumer, "settings.yml"), SETTINGS_FILE);
+    run(CONSUMER_NODE, [bin, "validate", "settings.yml"], consumer);
+    // The failing control: a bin that swallowed its exit code would pass the line above.
+    writeFileSync(join(consumer, "invalid.yml"), INVALID_SETTINGS_FILE);
+    expectExit(1, CONSUMER_NODE, [bin, "validate", "invalid.yml"], consumer);
     writeFileSync(join(consumer, "main.ts"), TS_CONSUMER);
     run(
       join(REPO_ROOT, "node_modules", ".bin", "tsc"),
