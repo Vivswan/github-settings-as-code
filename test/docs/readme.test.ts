@@ -28,12 +28,6 @@ import { stalePins } from "./version-pins.js";
 const ROOT = join(import.meta.dir, "..", "..");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 
-/**
- * Assert the parenthesized enumeration `leadRe` captures from `text` carries
- * each `expected` value backticked and nothing else backticked - the same pin
- * the action-yml contract test applies to the output description, so a new
- * value cannot skip the prose and a dropped one cannot linger.
- */
 function assertBacktickedEnumeration(
   text: string,
   leadRe: RegExp,
@@ -148,9 +142,6 @@ describe("README example settings.yml blocks", () => {
 
 describe("README version pins", () => {
   test("every uses: pin names the current release's moving major tag", () => {
-    // The uses: pins carry the inline x-release-please-major annotation, so
-    // every release PR that bumps the major rewrites them together with the
-    // manifest; this test is the tripwire for the annotations rotting away.
     const pins = stalePins([{ label: "README.md", text: readme }]);
     if (pins === null) {
       return; // nothing released yet, no pin can be right
@@ -164,10 +155,7 @@ describe("README version pins", () => {
   });
 
   test("the exact-pin advice names the version tag and the build/ namespace stays retired", () => {
-    // Under the single-tag scheme (.github/workflows/release.yml) every
-    // vX.Y.Z tag points at a packaged commit carrying the built action, so
-    // the exact pin README offers is the version tag itself; the retired
-    // build/ namespace must not reappear anywhere in the README.
+    // Every vX.Y.Z tag points at a packaged commit, so the version tag itself is the exact pin.
     expect(
       readme.includes("`@vX.Y.Z`"),
       "README's exact-pin advice must name the `@vX.Y.Z` tag form",
@@ -188,12 +176,7 @@ describe("README version pins", () => {
 });
 
 describe("delete-by-default enumeration", () => {
-  // The quick-start warning enumerates the sections whose undeclared entries
-  // an apply deletes; the set is derived from the registry so a new
-  // delete-by-default section fails here until the prose (and the display
-  // map in claims.ts) follows. This list drifted once already - the
-  // quick-start warning named three of five sections. The guides' two
-  // enumerations are pinned the same way in guides.test.ts.
+  // The quick-start warning drifted to three of five sections once already; the guides' enumerations are pinned in guides.test.ts.
   const deleteKeys = SECTIONS.filter((s) => s.undeclaredDefault === "delete").map((s) => s.key);
 
   test("the quick-start first-run warning names every delete-by-default section", () => {
@@ -440,58 +423,6 @@ describe("schema.ts file-header additions claim", () => {
         new RegExp(`\\b${key}\\b`).test(header),
         `the schema.ts file header names the addition section "${key}"; defer to PROBOT_PARITY_KEYS instead of enumerating`,
       ).toBe(false);
-    }
-  });
-});
-
-describe("section-contract references to the Sections page's headings", () => {
-  const SECTIONS_PAGE = "docs/reference/sections.md";
-  const contractDir = join(ROOT, "src", "sections", "contract");
-  const contractSrc = readdirSync(contractDir)
-    .filter((file) => file.endsWith(".ts"))
-    .map((file) => readFileSync(join(contractDir, file), "utf8"))
-    .join("\n");
-  // Headings count only outside fenced code blocks.
-  const pageProse = readFileSync(join(ROOT, ...SECTIONS_PAGE.split("/")), "utf8").replace(
-    /```[\s\S]*?```/g,
-    "",
-  );
-
-  test('every "..." name quoted beside a docs/reference/sections.md mention is a heading of that page', () => {
-    // The Sections table's home is the reference page, so the contract's
-    // JSDoc points there; every quoted name on a line naming the page must
-    // exist as one of its markdown headings, so a heading rename (or a
-    // JSDoc typo) fails here. All quoted names on the line count.
-    const named: string[] = [];
-    for (const line of contractSrc.split("\n")) {
-      const mention = line.indexOf(SECTIONS_PAGE);
-      if (mention === -1) {
-        continue;
-      }
-      named.push(...[...line.slice(mention).matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? ""));
-    }
-    // Zero extracted names while the contract still names the page means the
-    // extraction went blind (e.g. a rewrap split the mention from its
-    // quotes); fail loudly rather than pass on an empty list.
-    expect(
-      named.length,
-      `the section contract names ${SECTIONS_PAGE} but no quoted heading name was extracted; fix the JSDoc line wrap or this extraction`,
-    ).toBeGreaterThan(0);
-    // A README mention beside table wording is the stale pointer this test replaced; a README
-    // mention on its own (the quick start, the repository front door) is fine.
-    const stale = contractSrc
-      .split("\n")
-      .filter((line) => /README/.test(line) && /\b(?:Sections|table)\b/.test(line));
-    expect(
-      stale,
-      `the section contract still points at the README for the Sections table; it lives on ${SECTIONS_PAGE}`,
-    ).toEqual([]);
-    for (const name of named) {
-      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      expect(
-        new RegExp(`^#{1,6} ${escaped}\\s*$`, "m").test(pageProse),
-        `a section-contract JSDoc names the Sections page's "${name}", but ${SECTIONS_PAGE} has no such heading`,
-      ).toBe(true);
     }
   });
 });

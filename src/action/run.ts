@@ -1,8 +1,3 @@
-/**
- * The action's run: parse the inputs, run the single, multi, or merge flow, conclude. The policies live with the
- * engine (src/engine/orchestrate.ts).
- */
-
 import {
   type ArtifactUploader,
   concludeMerge,

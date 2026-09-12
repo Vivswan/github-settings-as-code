@@ -130,7 +130,6 @@ function stripWorkflows(cwd: string): void {
   git(cwd, "rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".github/workflows");
 }
 
-/** Every path in a commit's tree. */
 function treePaths(cwd: string, sha: string): string[] {
   return git(cwd, "ls-tree", "-r", "--name-only", sha).split("\n");
 }
@@ -206,7 +205,6 @@ function seedFixture(): Fixture {
   return { root, origin, work, seedSha, mergeSha };
 }
 
-/** A fresh CI checkout of `sha` with `bundle` "built" from it. */
 function checkoutOf(fx: Fixture, name: string, sha: string, bundle: string): string {
   const dir = clone(fx.root, fx.origin, name);
   git(dir, "checkout", "--quiet", sha);
@@ -2365,7 +2363,6 @@ describe("advanceBuild", () => {
       const first = advanceBuild({ cwd: fx.work, sourceSha: fx.mergeSha }).buildSha;
       const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
       let result: ReturnType<typeof advanceBuild> | undefined;
-      // Plan 2 (the lease push) is beaten by a hand move of latest.
       const pushes = withPushPlans(
         fx,
         [null, { competitor: { from: fx.work, sha: fx.seedSha, ref: "refs/tags/latest" } }],

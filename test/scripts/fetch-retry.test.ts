@@ -7,7 +7,6 @@ import { fetchTextWithRetry } from "../../.github/scripts/lib/fetch-retry.js";
 
 const URL_UNDER_TEST = "https://raw.githubusercontent.com/owner/repo/ref/artifact.json";
 
-/** A fetch stub replaying `outcomes` in order; a thrown entry rejects. */
 function fetchScript(outcomes: Array<Response | Error>): {
   fetchImpl: (url: string, init?: RequestInit) => Promise<Response>;
   calls: () => number;

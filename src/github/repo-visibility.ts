@@ -46,7 +46,6 @@ async function probe(api: GithubClient, slug: string): Promise<RepoVisibility> {
   if (visibility === "public" || visibility === "private" || visibility === "internal") {
     return visibility;
   }
-  // Only an explicit private === false proves the repo public; anything else is unknown and redacted.
   if (repo?.private === false) {
     return "public";
   }

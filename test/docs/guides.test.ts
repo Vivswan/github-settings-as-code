@@ -93,13 +93,9 @@ const ALLOWED_FENCE_INFO = new Set([
 ]);
 
 /**
- * Fence-policy violations for one markdown document. The fencedBlocks
- * extractor assumes exactly this form, and the closed info vocabulary is
- * what makes example validation unavoidable: `yaml settings` is validated,
- * `yaml` must be a workflow, and the rest of the list is visibly not a
- * settings document. Kept pure so the mutation tests below can prove the
- * guard rejects each realistic authoring mistake. Extend ALLOWED_FENCE_INFO
- * deliberately when a guide needs a new language.
+ * Fence-policy violations for one document. fencedBlocks (markdown.ts) needs the exact info string on a backtick fence preceded only by indent,
+ * so a wrong tag, a tilde fence, or a blockquoted fence hides an example from it; column zero and exactly three backticks are the guides' own
+ * convention.
  */
 function fenceViolations(markdown: string, allowed: ReadonlySet<string>): string[] {
   const problems: string[] = [];
@@ -140,10 +136,8 @@ function fenceViolations(markdown: string, allowed: ReadonlySet<string>): string
 }
 
 /**
- * GitHub's heading slugger, as the anchor-integrity test needs it: lowercase,
- * spaces become hyphens, and punctuation (backticks, $, parentheses, slashes,
- * dots, quotes) is STRIPPED rather than hyphenated; underscores and hyphens
- * survive. Duplicate -1/-2 suffixes are handled by headingSlugs.
+ * GitHub's heading slugger: punctuation (backticks, $, parentheses, slashes, dots, quotes) is STRIPPED rather than hyphenated; underscores and
+ * hyphens survive.
  */
 function githubSlug(heading: string): string {
   return heading
@@ -230,14 +224,9 @@ const SITE_ORIGIN = "https://docs-site.invalid";
 const SITE_ROOT = "/docs-root-7c1e/";
 
 /**
- * Every relative link or image in the docs/ page at `page` (its path under
- * docs/) that resolves outside docs/, as "docs/<page>:<line>: (<target>)".
- * Resolution is the WHATWG URL parser's, as a browser would do it (whitespace
- * and newlines stripped, backslashes as slashes, dot segments folded). The line
- * is the first one carrying the destination (or, for an encoded one, its file
- * name). The published site is built from docs/ alone, so a link to the
- * README, COVERAGE.md, or lib/ has nothing to land on there; those go through
- * an absolute URL.
+ * Relative links in the docs/ page at `page` that resolve outside docs/.
+ * Resolution is the WHATWG URL parser's, as a browser does it; the published site is built from docs/ alone, so a link to the README, COVERAGE.md, or
+ * lib/ has nothing to land on there.
  */
 async function linksLeavingDocs(markdown: string, page: string): Promise<string[]> {
   const base = new URL(`${SITE_ROOT}${page}`, SITE_ORIGIN);
@@ -1136,9 +1125,7 @@ describe("refusal table parser (mutation checks)", () => {
 });
 
 describe("fence policy guard (mutation checks)", () => {
-  // Each mutation is a realistic authoring mistake that would make an
-  // example invisible to fencedBlocks; the guard must reject every one,
-  // or a settings example could dodge validation.
+  // Every mutation but the indented and four-backtick fences hides the example from fencedBlocks; those two break only the guides' one fence form.
   test("accepts the canonical form", () => {
     expect(fenceViolations("```yaml settings\nlabels: []\n```\n", ALLOWED_FENCE_INFO)).toEqual([]);
   });

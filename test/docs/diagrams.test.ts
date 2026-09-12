@@ -31,7 +31,6 @@ function exportsSymbol(file: string, name: string): boolean {
   ).test(text);
 }
 
-/** A node definition wherever it sits: an id, an opening shape run, and what follows the run. */
 const NODE_DEFINITION = /(?<![\w"-])([A-Za-z_][\w-]*)([[({>]+)(?![-|])/g;
 
 /**

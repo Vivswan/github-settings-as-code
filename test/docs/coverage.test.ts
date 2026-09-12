@@ -35,7 +35,6 @@ describe("COVERAGE path citations", () => {
 });
 
 describe("COVERAGE gaps anti-test", () => {
-  /** The facet of a GraphQL operation the collision check reads: its document text. */
   type GraphqlDocument = { readonly query: string };
 
   // Root-level fragment spreads and inline fragments are expanded so a refactor into fragments cannot hide a field.

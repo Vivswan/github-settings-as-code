@@ -60,7 +60,7 @@ interface Caller {
 }
 
 interface CallerContract {
-  /** The workflow's top-level keys: no lane, permissions, or env above the one job. */
+  /** The workflow's top-level keys: no lane, permissions, or env above the jobs. */
   topLevel: string[];
   triggers: string[];
   /** The whole workflow_call interface ci.yml must satisfy. */
@@ -474,7 +474,6 @@ describe("the push probe under bash", () => {
   ) as Caller;
   const run = must(must(must(wf.jobs.build, "build job").steps?.[1], "probe step").run, "run");
 
-  /** The fence token a run opened with; asserts the open and close lines bracket exactly `inner`. */
   function expectFenced(lines: string[], inner: string[]): void {
     const [open, header, ...rest] = lines;
     const token = open?.match(FENCE_OPEN)?.[1];

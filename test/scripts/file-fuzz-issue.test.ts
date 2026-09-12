@@ -246,7 +246,7 @@ describe("fileIssue", () => {
   });
 
   test("returns the created issue number (parsed from gh's create URL)", async () => {
-    const { run } = fakeGh(undefined); // fakeGh's create returns .../issues/7
+    const { run } = fakeGh(undefined);
     expect(await fileIssue(run, "body")).toBe(7);
   });
 

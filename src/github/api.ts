@@ -236,7 +236,7 @@ export function redactingOctokitLog(trace: TraceRedaction): {
 export const MAX_RETRY_WAIT_S = 60;
 // Exported so the test harness builds its retry budgets (1 + MAX_RETRIES) from the one real value, and the docs
 // contradiction test pins the guide's retry count to it.
-export const MAX_RETRIES = 2; // total attempts = 1 + MAX_RETRIES
+export const MAX_RETRIES = 2;
 
 const ActionOctokit = Octokit.plugin(requestLog, retry, throttling);
 

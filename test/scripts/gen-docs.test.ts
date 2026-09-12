@@ -603,7 +603,6 @@ describe("the committed COVERAGE.md", () => {
     expect(() =>
       renderCoverageFile(coverage.replace(/\nThe table is EMPTY right now[^\n]*\n\n/, "\n")),
     ).toThrow(shape);
-    // The rows arm accepts a page whose gaps table has rows and no note.
     expect(() =>
       renderCoverageFile(
         coverage
@@ -622,7 +621,6 @@ describe("the committed COVERAGE.md", () => {
         ),
       ),
     ).toThrow(shape);
-    // Authored prose inside the region, after the last list: not a body the generator writes.
     expect(() =>
       renderCoverageFile(
         coverage.replace(

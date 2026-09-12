@@ -85,7 +85,7 @@ function runsScript(names: readonly string[]): RegExp {
   return new RegExp(`\\bbun run (?:${names.map(escapeRegExp).join("|")})${TOKEN_END}`);
 }
 
-/** The whole run scalar is the plain fetch command; anything wrapping, quoting, or commenting it is not a fetch. */
+/** Exact equality, unlike runsFetch: a wrapped or masked fetch (`bun fetch || true`) does not propagate its failure. */
 function isFetchCommand(run: string | undefined, fetchScript: string): boolean {
   return (run ?? "").trim() === `bun ${fetchScript}`;
 }
@@ -242,10 +242,6 @@ function theOne(steps: Step[], matches: (step: Step) => boolean, what: string): 
   return found[0] as number;
 }
 
-/**
- * Per artifact: exactly one cache of its path under a string key, then exactly one fetch gated
- * on that cache's miss, failure-propagating, under the shell a composite run step must declare.
- */
 function expectCompositeShape(action: CompositeAction): void {
   expect(action.runs.using, `${COMPOSITE_DIR} must be a composite action`).toBe("composite");
   const steps = action.runs.steps ?? [];
@@ -330,7 +326,7 @@ function executedLines(run: string): string[] {
   return lines;
 }
 
-/** A run scalar executing a `bun install` command: at the start of a line, outside heredocs, not commented out, echoed, or quoted. */
+/** A `bun install` the job relies on: `|| true` masks the failure, so a line carrying `||` is not one. */
 function installs(run: string | undefined): boolean {
   return executedLines(run ?? "").some(
     (line) => /^\s*bun install(?:\s|$)/.test(line) && !line.includes("||"),
@@ -342,10 +338,6 @@ function runsFetch(run: string | undefined, fetchScript: string): boolean {
   return executedLines(run ?? "").some((line) => !line.trim().startsWith("#") && token.test(line));
 }
 
-/**
- * Every artifact the job's loaders need is put on disk earlier by the job's one sanctioned
- * provider, after setup-bun and an install, and skipped only when the loader is too.
- */
 function expectArtifactsProvided(where: string, steps: Step[]): void {
   const uncached = UNCACHED_FETCH_JOBS.has(where);
   const provides = (step: Step, artifact: FetchedArtifact) =>

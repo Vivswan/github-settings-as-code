@@ -18,12 +18,10 @@ const REPO_ROOT = join(import.meta.dir, "..", "..");
 const SRC_DIR = join(REPO_ROOT, "src");
 const SECTIONS_DIR = join(SRC_DIR, "sections");
 
-/** Diff entries for files that still exist (added or modified). */
 function changed(...paths: string[]): ChangedFile[] {
   return paths.map((path) => ({ path, deleted: false }));
 }
 
-/** Diff entries for files the diff deletes. */
 function removed(...paths: string[]): ChangedFile[] {
   return paths.map((path) => ({ path, deleted: true }));
 }
@@ -172,7 +170,6 @@ describe("changed-sections derived fan-out", () => {
         form,
       ).toThrow(/src\/sections\/labels\/index\.ts:2 loads a module through a computed specifier/);
     }
-    // A literal template is a literal: no throw, and it is an edge.
     expect(scanImports("const t = await import(`./lit.js`);\n", "probe.ts")).toEqual(["./lit.js"]);
   });
 
@@ -207,7 +204,7 @@ describe("changed-sections derived fan-out", () => {
   test("the fan-out follows the graph through intermediates and ignores non-section importers", () => {
     const fanOut = deriveSharedFanOut(syntheticRepo(GRAPH_FIXTURE));
     expect(fanOut).toEqual({
-      // src/schema.ts and registry.ts import engine too but add no key, and pages' type-only import is no edge.
+      // src/schema.ts imports engine directly and registry.ts reaches it through teams; neither adds a key, and pages' type-only import is no edge.
       "engine.ts": inKeyOrder("labels", "teams"),
       "factory.ts": inKeyOrder("labels"),
       // labels' unit test imports util too and is not an edge.

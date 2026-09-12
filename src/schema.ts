@@ -1,7 +1,8 @@
 /**
  * The settings document composed from the per-section slices (src/sections/<key>/schema.ts); this file adds only the
  * document-level wrappers (the undeclared knob, .optional()), so an org/user document can compose its own from the same
- * slices. Only DECLARED keys are ever applied or compared.
+ * slices. Only DECLARED keys are ever applied or compared. The sections in PROBOT_PARITY_KEYS keep the Probot Settings
+ * app's plain-array form so an existing Probot config applies to them unchanged; every other section is an addition.
  *
  * descriptions                            -> the docs files (src/schema.docs.yml, each <key>.docs.yml)
  * refine checks                           -> runtime-only, invisible to toJSONSchema, and they survive loosen()
