@@ -124,7 +124,11 @@ const LiveBranchSummary = z.looseObject({ name: z.string() });
 
 /** The snapshot note for the surface the REST reads cannot carry. */
 const GRAPHQL_ONLY_NOTE =
-  "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule surface, which snapshot does not read; an omitted key leaves its live value untouched, so declare them to manage them. A branch a wildcard rule protects is written here as a LITERAL entry carrying that rule's protection (the REST reads name no pattern), and applying it would create a literal rule beside the wildcard; replace such entries with one wildcard entry naming the pattern";
+  "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule " +
+  "surface, which snapshot does not read; an omitted key leaves its live value untouched, so declare them to " +
+  "manage them. A branch a wildcard rule protects is written here as a LITERAL entry carrying that rule's " +
+  "protection (the REST reads name no pattern), and applying it would create a literal rule beside the " +
+  "wildcard; replace such entries with one wildcard entry naming the pattern";
 
 /** Built in the ONE place that decides whether the GraphQL run state exists, so no other site re-spells the predicate. */
 type ClassifiedEntry =
