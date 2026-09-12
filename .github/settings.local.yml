@@ -26,7 +26,7 @@ repository:
   private: false
 
 labels:
-  # e2e-nightly.yml's file-fuzz-issue.ts files under this label, so it must
+  # e2e-nightly.yml files its tracking issue under this label, so it must
   # survive the label sync.
   - name: e2e-fuzz
     color: "B60205"
