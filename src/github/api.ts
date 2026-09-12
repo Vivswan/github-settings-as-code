@@ -452,7 +452,7 @@ export class GithubApi implements GithubClient {
     if (!secretScan.ok) {
       const reason =
         secretScan.reason ??
-        "its payload is not plain JSON data (a cyclic value, or a value carrying a function or exotic prototype)";
+        "its payload is not plain JSON data (a value carrying a function or exotic prototype)";
       throw new Error(
         `${method} ${path} was not sent: ${reason}, so it could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
       );
@@ -517,7 +517,7 @@ export class GithubApi implements GithubClient {
     if (!scan.ok) {
       const reason =
         scan.reason ??
-        "its variables are not plain JSON data (a cyclic value, or a value carrying a function or exotic prototype)";
+        "its variables are not plain JSON data (a value carrying a function or exotic prototype)";
       throw new Error(
         `GRAPHQL ${op.name} was not sent: ${reason}, so they could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
       );
