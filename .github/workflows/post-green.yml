@@ -1,5 +1,6 @@
 # Repo-owned, never overwritten by sync; ci.yml calls it after the all-green gate, before the release, with the
-# judged sha. Pending runs coalesce (ci.yml's concurrency group), so jobs here reconcile current state and stay idempotent.
+# judged sha. Main runs are keyed by sha (ci.yml's concurrency group), so runs for different shas never coalesce
+# and successive merges can overlap; jobs here reconcile current state and stay idempotent.
 
 name: Post Green
 
