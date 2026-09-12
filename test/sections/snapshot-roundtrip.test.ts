@@ -9,11 +9,14 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import type { GithubClient } from "../../src/github/api.js";
 import type { SectionKey } from "../../src/schema.js";
 import { actionsSecretsSection } from "../../src/sections/actions_secrets/index.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { deployKeysSection } from "../../src/sections/deploy_keys/index.js";
+import { interactionLimitsSection } from "../../src/sections/interaction_limits/index.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
+import { milestonesSection } from "../../src/sections/milestones/index.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { webhooksSection } from "../../src/sections/webhooks/index.js";
 import { registryFake } from "./fragment-fake.js";
@@ -138,6 +141,46 @@ describe("snapshot round trip", () => {
       ],
     });
   });
+
+  test("two live milestones under one title fail the snapshot, naming both", async () => {
+    const api = registryFake({
+      milestones: [
+        { id: 1, number: 1, title: "v1", state: "open" },
+        { id: 2, number: 2, title: "v1", state: "closed" },
+      ],
+    });
+    await expect(
+      milestonesSection.snapshot(planContext(milestonesSection, api, REPO)),
+    ).rejects.toThrow(
+      'milestones: GitHub holds milestones that resolve to one identity: "v1 (number 1)" and ' +
+        '"v1 (number 2)". This section manages one milestone per identity, so the snapshot ' +
+        "cannot declare them; delete all but one of each on GitHub, then snapshot again",
+    );
+  });
+
+  test.each([
+    [{ enabled: "yes" }, "enabled: Invalid input: expected boolean, received string"],
+    [null, "(body): Invalid input: expected object, received null"],
+  ])(
+    "a creation-cap body off the shape (%j) fails the snapshot instead of reading as no cap",
+    async (body, issue) => {
+      const fake = registryFake({});
+      const api: GithubClient = {
+        tryRequest: (method, path, payload, options) =>
+          method === "GET" && path === "/repos/o/r/interaction-limits/pulls/creation-cap"
+            ? Promise.resolve({ data: body })
+            : fake.tryRequest(method, path, payload, options),
+        tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
+      };
+      await expect(
+        interactionLimitsSection.snapshot(planContext(interactionLimitsSection, api, REPO)),
+      ).rejects.toThrow(
+        "interaction_limits: GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap " +
+          `returned a body outside the documented shape - ${issue}. Check the "api-version" ` +
+          "input against the GitHub REST docs for this endpoint",
+      );
+    },
+  );
 
   test("a hook without a config.url is noted and left out; alone, it leaves nothing to declare", async () => {
     const api = registryFake({ hooks: [{ id: 7, config: {} }] });

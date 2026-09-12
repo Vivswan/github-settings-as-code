@@ -115,6 +115,11 @@ function noLiveLimit(live: unknown): boolean {
   );
 }
 
+const LiveCreationCap = z.looseObject({
+  enabled: z.boolean(),
+  max_open_pull_requests: z.number().optional(),
+});
+
 const LiveInteractionLimit = z.looseObject({
   limit: z.string(),
   origin: z.string().optional(),
@@ -384,12 +389,14 @@ export const interactionLimitsSection = {
         `interaction_limits: ${CAP_UNAVAILABLE} (405), so pull_request_creation_cap and pull_request_creation_bypass are omitted`,
       );
     } else {
-      const liveCap = projectOntoSchema(
-        InteractionLimitsConfig.unwrap().shape.pull_request_creation_cap,
-        cap.data,
-      );
-      if (liveCap?.enabled === true) {
-        value.pull_request_creation_cap = liveCap;
+      // Parsed at the boundary: a body off the shape (a null, a quoted flag) fails the section
+      // instead of reading as "no cap".
+      const liveCap = parseLive(this, ENDPOINTS.capGet, LiveCreationCap, cap.data);
+      if (liveCap.enabled) {
+        value.pull_request_creation_cap = projectOntoSchema(
+          InteractionLimitsConfig.unwrap().shape.pull_request_creation_cap,
+          liveCap,
+        );
       }
       const bypass = await liveBypassLogins(ctx, this);
       if (bypass.length > 0) {
