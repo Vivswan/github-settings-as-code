@@ -1,0 +1,38 @@
+name: workflows-snapshot-roundtrip
+description: "mode: snapshot reads the live workflows back into snapshot.yml and writes nothing to GitHub. Active and manually disabled workflows read back by path and state; a deleted one has no file to speak for and is omitted. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  workflows:
+    - id: 1
+      name: CI
+      path: .github/workflows/ci.yml
+      state: active
+    - id: 2
+      name: Old
+      path: .github/workflows/old.yml
+      state: disabled_manually
+    - id: 3
+      name: Gone
+      path: .github/workflows/gone.yml
+      state: deleted
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: workflows
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    workflows: snapshot
+  snapshot:
+    workflows:
+      - path: .github/workflows/ci.yml
+        state: active
+      - path: .github/workflows/old.yml
+        state: disabled
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

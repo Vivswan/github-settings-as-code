@@ -1,0 +1,55 @@
+name: webhooks-snapshot-roundtrip
+description: "mode: snapshot reads the live webhooks back into snapshot.yml and writes nothing to GitHub. Live webhooks read back with their config, events, and active flag; the secret GitHub never reveals becomes a $WEBHOOK_SECRET_<hook id> reference with a note, and the value comes from the environment when the snapshot is checked back. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  hooks:
+    - id: 601
+      events:
+        - push
+        - pull_request
+      config:
+        url: https://ci.example.com/hook
+        content_type: json
+        insecure_ssl: "0"
+        secret: the-live-secret
+    - id: 602
+      active: false
+      config:
+        url: https://deploy.example.com/hook
+env:
+  WEBHOOK_SECRET_601: webhook-secret-plaintext-4d1e
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: webhooks
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    webhooks: snapshot
+  snapshot:
+    webhooks:
+      _undeclared: keep
+      entries:
+        - name: web
+          config:
+            url: https://ci.example.com/hook
+            content_type: json
+            insecure_ssl: "0"
+            secret: $WEBHOOK_SECRET_601
+          events:
+            - push
+            - pull_request
+          active: true
+        - name: web
+          config:
+            url: https://deploy.example.com/hook
+          events:
+            - push
+          active: false
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

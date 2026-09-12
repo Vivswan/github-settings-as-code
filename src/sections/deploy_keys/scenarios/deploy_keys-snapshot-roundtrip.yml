@@ -1,0 +1,35 @@
+name: deploy_keys-snapshot-roundtrip
+description: "mode: snapshot reads the live deploy_keys back into snapshot.yml and writes nothing to GitHub. Live deploy keys read back by title, key (the comment GitHub drops is dropped here too), and read_only flag. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  deploy_keys:
+    - title: ci-deploy
+      key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample deploy@ci
+    - title: read-write
+      key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOther
+      read_only: false
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: deploy_keys
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    deploy_keys: snapshot
+  snapshot:
+    deploy_keys:
+      _undeclared: keep
+      entries:
+        - title: ci-deploy
+          key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample
+          read_only: false
+        - title: read-write
+          key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOther
+          read_only: false
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

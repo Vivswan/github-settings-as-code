@@ -20,10 +20,41 @@ import {
   requestLogFailures,
   type ScenarioReport,
   setReplay,
+  snapshotCheckInputs,
   stripDebugLines,
   stripMaskLines,
 } from "./runner.js";
 import type { Scenario } from "./schema.js";
+
+describe("snapshotCheckInputs (the round-trip check's inputs)", () => {
+  test("carries every input the snapshot set, drops both destinations, and switches the mode", () => {
+    // private_report at its default is legal in snapshot mode and outside the
+    // three inputs the check once allowlisted: only derivation by exclusion keeps it.
+    expect(
+      snapshotCheckInputs({
+        mode: "snapshot",
+        snapshot_file: "snapshot.yml",
+        snapshot_dir: "snapshots",
+        sections: "labels,webhooks",
+        on_missing_permission: "warn",
+        private_repos: "show",
+        private_report: "none",
+      }),
+    ).toEqual({
+      mode: "check",
+      sections: "labels,webhooks",
+      on_missing_permission: "warn",
+      private_repos: "show",
+      private_report: "none",
+    });
+  });
+
+  test("a scenario with only the destination yields a bare check run", () => {
+    expect(snapshotCheckInputs({ mode: "snapshot", snapshot_file: "snapshot.yml" })).toEqual({
+      mode: "check",
+    });
+  });
+});
 
 describe("bundle build parity (harness vs production)", () => {
   test("the declared build:bundle script matches what the harness builds", () => {

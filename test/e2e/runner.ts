@@ -9,10 +9,11 @@
  *                process so a run never tests stale code
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parseRepoSlug } from "../../src/discovery/targets.js";
 import type { OutputName } from "../../src/io.js";
 import {
   assertApplyIdempotent,
@@ -225,20 +226,24 @@ function mergedFilePath(dir: string): string {
   return join(dir, "merged.yml");
 }
 
-function mergedFileFailures(path: string, expected: Record<string, unknown>): string[] {
+function documentFileFailures(
+  label: string,
+  path: string,
+  expected: Record<string, unknown>,
+): string[] {
   let live: unknown;
   try {
     live = parseYaml(readFileSync(path, "utf8"));
   } catch (error) {
     return [
-      `merged file ${path} unreadable: ${error instanceof Error ? error.message : String(error)}`,
+      `${label} file ${path} unreadable: ${error instanceof Error ? error.message : String(error)}`,
     ];
   }
   if (Bun.deepEquals(live, expected)) {
     return [];
   }
   if (typeof live !== "object" || live === null || Array.isArray(live)) {
-    return [`merged document is not a mapping: ${JSON.stringify(live)}`];
+    return [`${label} document is not a mapping: ${JSON.stringify(live)}`];
   }
   const record = live as Record<string, unknown>;
   const keys = new Set([...Object.keys(expected), ...Object.keys(record)]);
@@ -246,11 +251,50 @@ function mergedFileFailures(path: string, expected: Record<string, unknown>): st
   for (const key of keys) {
     if (!Bun.deepEquals(record[key], expected[key])) {
       failures.push(
-        `merged.${key}: ${JSON.stringify(record[key])} != expected ${JSON.stringify(expected[key])}`,
+        `${label}.${key}: ${JSON.stringify(record[key])} != expected ${JSON.stringify(expected[key])}`,
       );
     }
   }
   return failures;
+}
+
+/**
+ * The snapshot files a dir-form scenario pins, each resolved to its
+ * `<snapshot_dir>/<owner>/<name>.yml` path under the scenario's temp dir.
+ */
+function pinnedDirSnapshots(
+  scenario: Scenario,
+  dir: string,
+): Array<{ slug: string; path: string; expected: Record<string, unknown> }> {
+  const snapshotDir = scenario.inputs?.snapshot_dir;
+  if (snapshotDir === undefined) {
+    return [];
+  }
+  const pinned: Array<{ slug: string; path: string; expected: Record<string, unknown> }> = [];
+  for (const [slug, spec] of Object.entries(scenario.repos ?? {})) {
+    const expected = spec.expect?.snapshot;
+    const repo = parseRepoSlug(slug);
+    if (expected === undefined || repo.isErr()) {
+      continue;
+    }
+    pinned.push({
+      slug,
+      path: join(dir, snapshotDir, repo.value.owner, `${repo.value.name}.yml`),
+      expected,
+    });
+  }
+  return pinned;
+}
+
+/**
+ * The check run that proves a snapshot round-trips takes every input the scenario set, minus the two
+ * destinations check mode rejects; derived by exclusion so a target-selecting input added later still rides along.
+ */
+export function snapshotCheckInputs(
+  inputs: NonNullable<Scenario["inputs"]>,
+): NonNullable<Scenario["inputs"]> {
+  const { snapshot_file: _file, snapshot_dir: _dir, ...carried } = inputs;
+  return { ...carried, mode: "check" };
 }
 
 /** Built from scratch: only PATH and HOME are taken from process.env. */
@@ -271,8 +315,9 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
     // A test knob: millisecond plugin units and the immediate scheduler, so retry scenarios run in milliseconds instead of seconds.
     RETRY_BASE_MS: "1",
   };
-  // settings-file is a single-repo input the action rejects beside the multi-repo inputs. A merge
-  // lists every layer file below settings.yml, lowest first.
+  // settings-file is a single-repo input the action rejects beside the multi-repo inputs and in
+  // snapshot mode. A merge lists every layer file below settings.yml, lowest first; a snapshot names
+  // its destination relative to the child's working directory (this temp dir).
   if (inputs.mode === "merge") {
     const layers = (scenario.settings_layers ?? []).map((layer, i) => {
       const path = join(dir, `layer-${i}.yml`);
@@ -281,6 +326,13 @@ function childEnv(scenario: Scenario, dir: string, apiUrl: string): NodeJS.Proce
     });
     env["INPUT_SETTINGS-FILE"] = [...layers, join(dir, "settings.yml")].join("\n");
     env["INPUT_MERGED-FILE"] = mergedFilePath(dir);
+  } else if (inputs.mode === "snapshot") {
+    if (inputs.snapshot_file !== undefined) {
+      env["INPUT_SNAPSHOT-FILE"] = inputs.snapshot_file;
+    }
+    if (inputs.snapshot_dir !== undefined) {
+      env["INPUT_SNAPSHOT-DIR"] = inputs.snapshot_dir;
+    }
   } else if (!multi) {
     env["INPUT_SETTINGS-FILE"] = join(dir, "settings.yml");
   }
@@ -520,7 +572,18 @@ export async function runScenario(
       failures.push(`result "${first.outputs.result}" != expected "${exp.result}"`);
     }
     if (exp.merged !== undefined) {
-      failures.push(...mergedFileFailures(mergedFilePath(dir), exp.merged));
+      failures.push(...documentFileFailures("merged", mergedFilePath(dir), exp.merged));
+    }
+    // 3-snapshot. The snapshot document(s) a mode: snapshot run wrote, each
+    // compared whole after a YAML parse, so the comment header is ignored.
+    const snapshotFile = scenario.inputs?.snapshot_file;
+    if (exp.snapshot !== undefined && snapshotFile !== undefined) {
+      failures.push(...documentFileFailures("snapshot", join(dir, snapshotFile), exp.snapshot));
+    }
+    for (const pinned of pinnedDirSnapshots(scenario, dir)) {
+      failures.push(
+        ...documentFileFailures(`snapshot[${pinned.slug}]`, pinned.path, pinned.expected),
+      );
     }
     // The `skipped-sections` output is compared as a set: the engine emits SECTION_KEYS order, which
     // the expectation should not restate. An ABSENT output fails even against an empty expectation:
@@ -646,6 +709,41 @@ export async function runScenario(
       const newViolations = handle.violations.slice(violationsBefore);
       if (newViolations.length > 0) {
         failures.push(`convergence: mock violations:\n  ${newViolations.join("\n  ")}`);
+      }
+    }
+
+    // 8-snapshot. The written snapshot, fed back as the settings file of a CHECK run against the
+    // SAME seeded state, must read clean without a write.
+    if (exp.snapshot_converges && snapshotFile !== undefined) {
+      const violationsBefore = handle.violations.length;
+      const writesBefore = handle.requests.length;
+      handle.enterCheckMode();
+      copyFileSync(join(dir, snapshotFile), join(dir, "settings.yml"));
+      const check = await invoke(
+        { ...scenario, inputs: snapshotCheckInputs(scenario.inputs ?? {}) },
+        dir,
+        handle.url,
+      );
+      reruns.push(captureRerun("snapshot check", check));
+      const newWrites = handle.requests.slice(writesBefore).filter(isWriteRequest);
+      if (check.exitCode !== 0) {
+        failures.push(
+          `snapshot round trip: the check exited ${check.exitCode}, expected 0${killNote(check)}`,
+        );
+      }
+      if (check.outputs.result !== "clean") {
+        failures.push(
+          `snapshot round trip: the check's result is "${check.outputs.result}", expected "clean"`,
+        );
+      }
+      if (newWrites.length > 0) {
+        failures.push(
+          `snapshot round trip: the check wrote ${newWrites.length} time(s): ${newWrites.map((r) => renderRequest(r, false)).join(", ")}`,
+        );
+      }
+      const newViolations = handle.violations.slice(violationsBefore);
+      if (newViolations.length > 0) {
+        failures.push(`snapshot round trip: mock violations:\n  ${newViolations.join("\n  ")}`);
       }
     }
 

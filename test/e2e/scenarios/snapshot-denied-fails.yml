@@ -1,0 +1,35 @@
+name: snapshot-denied-fails
+description: "A snapshot under the default on-missing-permission: fail with a section the token cannot read: the run fails with exit 1 and result failed, the denial is an error annotation, and no file is written (the summary says so)."
+settings: {}
+live_state:
+  labels:
+    - name: bug
+      color: d73a4a
+      description: Something is broken
+  actions_variables:
+    - name: REGION
+      value: eu-west-1
+      created_at: 2026-01-01T00:00:00Z
+      updated_at: 2026-01-01T00:00:00Z
+token_permissions:
+  variables: none
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: labels,actions_variables
+expect:
+  exit_code: 1
+  result: failed
+  skipped_sections: []
+  outcomes:
+    labels: snapshot
+    actions_variables: failed
+  stdout_contains:
+    - "::error::actions_variables: not snapshotted - the token was denied GET /repos/e2e-owner/e2e-repo/actions/variables"
+  summary_contains:
+    - ":x: failed - the snapshot failed, so no file was written"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /

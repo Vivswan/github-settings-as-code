@@ -1,0 +1,35 @@
+name: labels-snapshot-roundtrip
+description: "mode: snapshot reads the live labels back into snapshot.yml and writes nothing to GitHub. Every live label reads back with its color lower-cased and GitHub's null description spelled as the empty string the file takes. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  labels:
+    - name: bug
+      color: d73a4a
+      description: Something is broken
+    - name: docs
+      color: 0075CA
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: labels
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    labels: snapshot
+  snapshot:
+    labels:
+      _undeclared: delete
+      entries:
+        - name: bug
+          color: d73a4a
+          description: Something is broken
+        - name: docs
+          color: 0075ca
+          description: ""
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

@@ -1,0 +1,29 @@
+name: autolinks-snapshot-roundtrip
+description: "mode: snapshot reads the live autolinks back into snapshot.yml and writes nothing to GitHub. A live autolink reads back with the is_alphanumeric flag GitHub reports. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  autolinks:
+    - key_prefix: JIRA-
+      url_template: https://jira.example.com/<num>
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: autolinks
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    autolinks: snapshot
+  snapshot:
+    autolinks:
+      _undeclared: delete
+      entries:
+        - key_prefix: JIRA-
+          url_template: https://jira.example.com/<num>
+          is_alphanumeric: true
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

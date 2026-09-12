@@ -91,6 +91,37 @@ const SPECIMENS = {
     { code: "input-merge-only", inputs: ["merged-file", "layering"], mode: "check" },
     'the "merged-file", "layering" input(s) only apply to mode: merge, but this run is in check mode, so they would never be used. Remove the input(s), or set mode: merge to fold settings files',
   ],
+  "input-snapshot-only": [
+    { code: "input-snapshot-only", inputs: ["snapshot-file"], mode: "check" },
+    'the "snapshot-file" input(s) only apply to mode: snapshot, but this run is in check mode, so it would never be used. Remove the input(s), or set mode: snapshot to write the live settings to a file',
+  ],
+  "input-rejected-in-snapshot": [
+    { code: "input-rejected-in-snapshot", inputs: ["settings-file", "layering"] },
+    'the "settings-file", "layering" input(s) do not apply to mode: snapshot, which only reads the ' +
+      "target repositories' live settings into snapshot-file or snapshot-dir: it applies no " +
+      "document, folds no layers, and delivers no report. Remove the input(s), or move them to " +
+      "the apply, check, or merge step they belong to",
+  ],
+  "input-snapshot-destination-missing": [
+    { code: "input-snapshot-destination-missing" },
+    'mode: snapshot needs exactly one of the "snapshot-file" input (one repository\'s settings written to that file) or the "snapshot-dir" input (one <owner>/<name>.yml per repos or repos-dir target under that directory). Set one of them',
+  ],
+  "input-snapshot-destinations-both": [
+    { code: "input-snapshot-destinations-both" },
+    'the "snapshot-file" and "snapshot-dir" inputs are both set, but a snapshot run writes one form: a single repository to snapshot-file, or one <owner>/<name>.yml per multi-repo target under snapshot-dir. Remove one of them',
+  ],
+  "input-snapshot-file-with-multi": [
+    { code: "input-snapshot-file-with-multi" },
+    'the "snapshot-file" input writes one repository\'s snapshot, but "repos" or "repos-dir" names multi-repo targets. Set "snapshot-dir" to write one file per target, or remove the multi-repo inputs and name the repository with "repository"',
+  ],
+  "input-repository-with-snapshot-dir": [
+    { code: "input-repository-with-snapshot-dir" },
+    'the "repository" input cannot be combined with "snapshot-dir", which writes one file per "repos" or "repos-dir" target. Remove "repository", or set "snapshot-file" to snapshot one repository',
+  ],
+  "input-snapshot-dir-without-targets": [
+    { code: "input-snapshot-dir-without-targets" },
+    'the "snapshot-dir" input needs multi-repo targets: set "repos" (an owner/name list, or "*" to discover) or "repos-dir". To snapshot one repository, set "snapshot-file" instead',
+  ],
   "input-token-missing": [
     { code: "input-token-missing" },
     'cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
@@ -221,6 +252,21 @@ const SPECIMENS = {
   "merged-file-unwritable": [
     { code: "merged-file-unwritable", path: "out/merged.yml", reason: "EACCES" },
     'cannot write the merged document to out/merged.yml: EACCES. Check that the "merged-file" input names a writable path',
+  ],
+  "snapshot-file-is-settings-file": [
+    {
+      code: "snapshot-file-is-settings-file",
+      snapshotFile: "./.github/settings.yml",
+      settingsFile: ".github/settings.yml",
+    },
+    'the "snapshot-file" input "./.github/settings.yml" is the settings file apply and check read (.github/settings.yml): the snapshot would overwrite the document you author. Write it to another path and copy it over deliberately',
+  ],
+  "snapshot-dir-overlaps-repos-dir": [
+    { code: "snapshot-dir-overlaps-repos-dir", snapshotDir: "central", reposDir: "central/acme" },
+    'the "snapshot-dir" input "central" is, contains, or sits inside the "repos-dir" ' +
+      '"central/acme": the snapshots are written in the repos-dir layout, so they would overwrite ' +
+      "the central settings files or be read back as central files. Write them to a directory " +
+      "outside the repos-dir and copy them over deliberately",
   ],
   "no-targets": [
     { code: "no-targets", filteredOut: 2 },

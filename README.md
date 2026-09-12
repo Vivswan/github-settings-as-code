@@ -6,7 +6,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 
 1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) from the [pre-filled token form][pat-form] and save it as the `ADMIN_TOKEN` repository secret. The form starts with every repository permission the action can need (an organization owner adds Members: read by hand); the default `GITHUB_TOKEN` can never hold them.
 
-2. Add `.github/settings.yml`. The first line gives editor autocomplete and hover docs:
+2. Add `.github/settings.yml` (or start from a [snapshot](docs/operate/snapshot.md) of the live settings). The first line gives editor autocomplete and hover docs:
 
    ```yaml
    # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major

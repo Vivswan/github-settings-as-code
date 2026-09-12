@@ -805,3 +805,98 @@ describe("run in mode: merge", () => {
     ]);
   });
 });
+
+describe("run in mode: snapshot", () => {
+  const ENV_KEYS = [
+    "INPUT_TOKEN",
+    "INPUT_MODE",
+    "INPUT_REPOSITORY",
+    "INPUT_SETTINGS-FILE",
+    "INPUT_SNAPSHOT-FILE",
+    "INPUT_SECTIONS",
+    "GITHUB_REPOSITORY",
+  ];
+  const saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
+  let dir: string;
+  let snapshotFile: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "snapshot-mode-"));
+    snapshotFile = join(dir, "out", "snapshot.yml");
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    for (const [key, value] of saved) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  /** A snapshot run's env: the token, the target, the file, the labels allowlist. */
+  function setSnapshotEnv() {
+    for (const key of ENV_KEYS) {
+      delete process.env[key];
+    }
+    process.env.INPUT_TOKEN = "t";
+    process.env.INPUT_MODE = "snapshot";
+    // The workflow's own repository: the self carve-out skips the visibility
+    // probe, so the target is shown without a repository route.
+    process.env.GITHUB_REPOSITORY = "o/r";
+    process.env.INPUT_REPOSITORY = "o/r";
+    process.env["INPUT_SNAPSHOT-FILE"] = snapshotFile;
+    process.env.INPUT_SECTIONS = "labels";
+  }
+
+  const LABELS = [{ name: "bug", color: "d73a4a", description: "Something is broken" }];
+  const labelsApi = () =>
+    new MockApi({ "GET /repos/o/r/labels?per_page=100&page=1": { data: LABELS } });
+
+  test("writes the live settings to snapshot-file and publishes the snapshot result", async () => {
+    setSnapshotEnv();
+    const api = labelsApi();
+    expect(await run({ api, io: testIo })).toBe(0);
+    expect(api.mutations()).toEqual([]);
+    expect(parseYaml(readFileSync(snapshotFile, "utf8"))).toEqual({
+      labels: { _undeclared: "delete", entries: LABELS },
+    });
+    expect(outputs).toEqual({ "skipped-sections": "", result: "snapshot" });
+    expect(captured).toEqual([`snapshot written to ${snapshotFile}`, "result: snapshot"]);
+  });
+
+  test("an apply-time input is rejected before any API call, and no file is written", async () => {
+    setSnapshotEnv();
+    process.env["INPUT_SETTINGS-FILE"] = "other.yml";
+    const api = labelsApi();
+    expect(await run({ api, io: testIo })).toBe(1);
+    expect(api.calls).toEqual([]);
+    expect(existsSync(snapshotFile)).toBe(false);
+    expect(captured).toEqual([
+      'error: the "settings-file" input(s) do not apply to mode: snapshot, which only reads the ' +
+        "target repositories' live settings into snapshot-file or snapshot-dir: it applies no " +
+        "document, folds no layers, and delivers no report. Remove the input(s), or move them to " +
+        "the apply, check, or merge step they belong to",
+      "result: failed",
+    ]);
+  });
+
+  test("snapshot then check: the written file checks clean against the live state it was read from", async () => {
+    setSnapshotEnv();
+    expect(await run({ api: labelsApi(), io: testIo })).toBe(0);
+    for (const key of ENV_KEYS) {
+      delete process.env[key];
+    }
+    process.env.INPUT_TOKEN = "t";
+    process.env.INPUT_MODE = "check";
+    process.env.GITHUB_REPOSITORY = "o/r";
+    process.env.INPUT_REPOSITORY = "o/r";
+    process.env.INPUT_SECTIONS = "labels";
+    process.env["INPUT_SETTINGS-FILE"] = snapshotFile;
+    const api = labelsApi();
+    expect(await run({ api, io: testIo })).toBe(0);
+    expect(api.mutations()).toEqual([]);
+    expect(outputs.result).toBe("clean");
+  });
+});

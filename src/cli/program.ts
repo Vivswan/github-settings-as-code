@@ -1,5 +1,5 @@
 /**
- * The command tree: check, apply, and merge mirror the action's modes with
+ * The command tree: check, apply, merge, and snapshot mirror the action's modes with
  * INPUT_DECLS as their flags; validate and permissions read a file alone.
  * `--token`, `--json`, `--summary`, and `--verbose` are global. main() runs
  * argv to its exit code without touching the process.
@@ -13,6 +13,7 @@ import {
   INPUT_DECLS,
   type Io,
   type Mode,
+  type MustBeNever,
   parseConfig,
   type RunConfig,
 } from "../index.js";
@@ -29,7 +30,14 @@ import { argvReader, inputOption, inputsForMode, once, tokenValues } from "./inp
 import { type CliStreams, cliIo, type MaskedStreams, maskedStreams } from "./io.js";
 
 /** Every subcommand, in help order; the package smoke asserts the installed help names each. */
-export const CLI_COMMANDS = ["check", "apply", "merge", "validate", "permissions"] as const;
+export const CLI_COMMANDS = [
+  "check",
+  "apply",
+  "merge",
+  "snapshot",
+  "validate",
+  "permissions",
+] as const;
 
 type CliCommand = (typeof CLI_COMMANDS)[number];
 
@@ -37,14 +45,22 @@ const DESCRIPTION: Readonly<Record<CliCommand, string>> = {
   check: "Report drift between a settings file and the live repository; exits 1 on any drift",
   apply: "Apply a settings file to the repository",
   merge: "Fold an ordered list of settings files into one document, with no token and no API call",
+  snapshot:
+    "Write a repository's live settings as a settings file, or one file per multi-repo target under a directory",
   validate: "Validate a settings file against the schema; no token, no API call",
   permissions: "Print the PAT grant each section a settings file declares needs",
 };
 
 /** The subcommands that run the engine or the merge, each under its mode. */
-const MODE_COMMANDS = { check: "check", apply: "apply", merge: "merge" } as const satisfies Partial<
-  Record<CliCommand, Mode>
->;
+const MODE_COMMANDS = {
+  check: "check",
+  apply: "apply",
+  merge: "merge",
+  snapshot: "snapshot",
+} as const satisfies Partial<Record<CliCommand, Mode>>;
+
+/** Compile-time lockstep: a Mode without a subcommand fails here. */
+type _UnlistedMode = MustBeNever<Exclude<Mode, (typeof MODE_COMMANDS)[keyof typeof MODE_COMMANDS]>>;
 
 interface Globals {
   readonly token?: string;
