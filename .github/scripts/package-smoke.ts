@@ -62,6 +62,8 @@ const TS_CONSUMER = `import {
   type RepoRef,
   SECTION_KEYS,
   type SectionKey,
+  type SectionPlan,
+  type SectionSnapshot,
   sectionModule,
   type SnapshotContext,
   snapshotContext,
@@ -74,7 +76,7 @@ declare const client: GithubClient;
 declare const repo: RepoRef;
 const labels = sectionModule("labels");
 const snapshotCtx = snapshotContext(labels, client, repo, "warn");
-export const direct = () =>
+export const direct = (): Promise<[SectionPlan, SectionSnapshot<"labels"> | undefined]> =>
   Promise.all([labels.plan(planContext(labels, client, repo), []), labels.snapshot?.(snapshotCtx)]);
 // @ts-expect-error only snapshotContext() mints a DenialPolicy
 export const forged: SnapshotContext = { ...snapshotCtx, onMissingPermission: { notesDenials: true } };

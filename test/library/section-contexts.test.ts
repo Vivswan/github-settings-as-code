@@ -8,6 +8,8 @@ import {
   planContext,
   type RepoRef,
   type SectionModule,
+  type SectionPlan,
+  type SectionSnapshot,
   type SnapshotContext,
   sectionModule,
   snapshotContext,
@@ -22,7 +24,7 @@ describe("a section module called through the entry", () => {
   test("plan() over planContext() reports the drift the engine would, reading only", async () => {
     const api = new MockApi({ [LIST]: { data: liveLabels } });
     const labels = sectionModule("labels");
-    const plan = await labels.plan(planContext(labels, api, REPO), [
+    const plan: SectionPlan = await labels.plan(planContext(labels, api, REPO), [
       { name: "bug", color: "000000", description: "Something isn't working" },
     ]);
     expect(plan).toEqual({
@@ -48,7 +50,8 @@ describe("a section module called through the entry", () => {
     const api = new MockApi({ [LIST]: { data: liveLabels } });
     const labels = sectionModule("labels");
     const ctx = snapshotContext(labels, api, REPO, "warn");
-    expect(await labels.snapshot?.(ctx)).toEqual({
+    const snapshot: SectionSnapshot<"labels"> | undefined = await labels.snapshot?.(ctx);
+    expect(snapshot).toEqual({
       value: {
         _undeclared: "delete",
         entries: [{ name: "bug", color: "d73a4a", description: "Something isn't working" }],
