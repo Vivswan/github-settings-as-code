@@ -51,19 +51,39 @@ export function inputsForMode(mode: Mode): InputName[] {
   return INPUT_NAMES.filter((name) => !hidden.includes(name) && reads(name));
 }
 
+/** What one subcommand accepts: the shape its flags' help text is worded for. */
+export interface Subcommand {
+  /** The inputs the subcommand takes as flags. */
+  readonly flags: ReadonlySet<InputName>;
+  /** The mode the subcommand runs, or null for init, which runs none. */
+  readonly mode: Mode | null;
+}
+
+/** A mode's subcommand: its flags are the inputs the mode reads. */
+export function modeSubcommand(mode: Mode): Subcommand {
+  return { flags: new Set(inputsForMode(mode)), mode };
+}
+
 /**
- * The init subcommand's flags: the snapshot inputs of one repository, with
- * settings-file as the destination in place of snapshot-file. Filtered from
- * the declarations so the help keeps their order.
+ * The init subcommand: the snapshot inputs of one repository, with
+ * settings-file as the destination in place of snapshot-file. No mode runs
+ * it, so the clauses restricted to modes leave its help.
  */
-const INIT_FLAGS: ReadonlySet<InputName> = new Set<InputName>([
-  "repository",
-  "settings-file",
-  "on-missing-permission",
-  "sections",
-  "api-version",
-]);
-export const INIT_INPUTS: readonly InputName[] = INPUT_NAMES.filter((name) => INIT_FLAGS.has(name));
+export const INIT_SUBCOMMAND: Subcommand = {
+  flags: new Set<InputName>([
+    "repository",
+    "settings-file",
+    "on-missing-permission",
+    "sections",
+    "api-version",
+  ]),
+  mode: null,
+};
+
+/** init's flags in declaration order, the order the help keeps. */
+export const INIT_INPUTS: readonly InputName[] = INPUT_NAMES.filter((name) =>
+  INIT_SUBCOMMAND.flags.has(name),
+);
 
 /**
  * init's one reworded flag: the declaration describes the file apply and check
@@ -78,22 +98,118 @@ export function exposedInputs(): InputName[] {
   return INPUT_NAMES.filter((name) => flags.has(name));
 }
 
-/** The sentence the action's `repository` description spends on a default a terminal never has. */
-const ACTIONS_DEFAULT_SENTENCE = "Defaults to the current repository.";
-const CLI_REPOSITORY_SENTENCE =
-  "Required unless repos or repos-dir is set (inside GitHub Actions, GITHUB_REPOSITORY supplies it).";
-if (!INPUT_DECLS.repository.description.includes(ACTIONS_DEFAULT_SENTENCE)) {
-  throw new Error(
-    `BUG: the repository input's description no longer says "${ACTIONS_DEFAULT_SENTENCE}"; reword the CLI's replacement with it`,
-  );
+/** `text` as the declaration spells it; a reworded declaration fails here rather than leave the help stale. */
+export function declared(input: InputName, text: string): string {
+  if (!INPUT_DECLS[input].description.includes(text)) {
+    throw new Error(
+      `BUG: the ${input} input's description no longer says "${text}"; reword the CLI's clause with it`,
+    );
+  }
+  return text;
 }
 
-/** The flag's help text: the declaration's, reworded where it assumes the Actions runner. */
-export function inputDescription(name: InputName): string {
-  const description = INPUT_DECLS[name].description;
-  return name === "repository"
-    ? description.replace(ACTIONS_DEFAULT_SENTENCE, CLI_REPOSITORY_SENTENCE)
-    : description;
+/**
+ * A stretch of a declaration's description whose truth rests on other flags
+ * or on the mode, removed verbatim (its leading separator included) from the
+ * help of a subcommand that does not meet the assumption.
+ */
+interface Clause {
+  readonly input: InputName;
+  readonly text: string;
+  /** What stands in for `text` when it is removed; a bare removal by default. */
+  readonly replacement?: string;
+  /** Met when the subcommand accepts every one of these flags. */
+  readonly flags?: readonly InputName[];
+  /** Met when the subcommand runs one of these modes. */
+  readonly modes?: readonly Mode[];
+}
+
+const MULTI_REPO_FLAGS: readonly InputName[] = ["repos", "repos-dir"];
+
+const CLAUSES: readonly Clause[] = [
+  {
+    input: "repository",
+    text: declared(
+      "repository",
+      " Single-repo mode only; cannot be combined with repos or repos-dir.",
+    ),
+    flags: MULTI_REPO_FLAGS,
+  },
+  {
+    input: "settings-file",
+    text: declared(
+      "settings-file",
+      " Single-repo and merge modes only; multi-repo targets read repos-dir files or each " +
+        "repository's own .github/settings.yml, so overriding it alongside repos or repos-dir fails the run.",
+    ),
+    flags: MULTI_REPO_FLAGS,
+  },
+  {
+    input: "snapshot-dir",
+    text: declared("snapshot-dir", "; defaults-file does not apply"),
+    flags: ["defaults-file"],
+  },
+  {
+    input: "sections",
+    text: declared(
+      "sections",
+      " apply, check, and snapshot only: mode: merge writes every section its layers declare, " +
+        "so the allowlist belongs on the step that runs the merged document and fails the merge when set.",
+    ),
+    modes: ["apply", "check", "snapshot"],
+  },
+  {
+    input: "private-report",
+    text: declared(
+      "private-report",
+      " Under artifact, those reports are concatenated, age-encrypted to report-public-key, and " +
+        "uploaded as one workflow artifact (settings-as-code-private-report) for readers who hold " +
+        "the key but no GitHub access to the targets; the artifact channel needs the Actions " +
+        "artifact service, so on GitHub Enterprise Server it warns and uploads nothing.",
+    ),
+    flags: ["report-public-key"],
+  },
+  {
+    input: "private-report",
+    text: declared("private-report", "issue, issue-on-failure, or artifact."),
+    replacement: "issue, or issue-on-failure.",
+    flags: ["report-public-key"],
+  },
+];
+
+function meets(subcommand: Subcommand, clause: Clause): boolean {
+  const flags = (clause.flags ?? []).every((flag) => subcommand.flags.has(flag));
+  const mode =
+    clause.modes === undefined ||
+    (subcommand.mode !== null && clause.modes.includes(subcommand.mode));
+  return flags && mode;
+}
+
+/** The sentence the action's `repository` description spends on a default a terminal never has. */
+const ACTIONS_DEFAULT_SENTENCE = declared("repository", "Defaults to the current repository.");
+
+/**
+ * A flag's help text under `subcommand`: the declaration's, minus the clauses
+ * about flags and modes the subcommand lacks, and reworded where it assumes
+ * the Actions runner.
+ */
+export function inputDescription(name: InputName, subcommand: Subcommand): string {
+  let description: string = INPUT_DECLS[name].description;
+  for (const clause of CLAUSES) {
+    if (clause.input === name && !meets(subcommand, clause)) {
+      description = description.replace(clause.text, clause.replacement ?? "");
+    }
+  }
+  if (name === "repository") {
+    const unless = MULTI_REPO_FLAGS.every((flag) => subcommand.flags.has(flag))
+      ? " unless repos or repos-dir is set"
+      : "";
+    description = description.replace(
+      ACTIONS_DEFAULT_SENTENCE,
+      `Required${unless} (inside GitHub Actions, GITHUB_REPOSITORY supplies it).`,
+    );
+  }
+  return description;
 }
 
 /** Whether the declaration is a list; read through InputDecl since only the list members carry the field. */
@@ -118,18 +234,22 @@ export function once(flag: string): (value: string, previous?: string) => string
 }
 
 /**
- * The commander option for one input: `--<name> <value>`, repeatable when the
- * declaration is a list; `description` replaces the declaration's where a
- * subcommand reads the input for another purpose.
+ * The commander option for one input under `subcommand`: `--<name> <value>`,
+ * repeatable when the declaration is a list; `description` replaces the
+ * declaration's where the subcommand reads the input for another purpose.
  */
-export function inputOption(name: InputName, description = inputDescription(name)): Option {
+export function inputOption(
+  name: InputName,
+  subcommand: Subcommand,
+  description = inputDescription(name, subcommand),
+): Option {
   const parse = isList(name) ? accumulate : once(name);
   return new Option(`--${name} <value>`, description).argParser(parse);
 }
 
 /** Commander's attribute for each flag (camelCase of the name), read from commander itself. */
 const ATTRIBUTE: Readonly<Record<InputName, string>> = Object.fromEntries(
-  INPUT_NAMES.map((name) => [name, inputOption(name).attributeName()]),
+  INPUT_NAMES.map((name) => [name, new Option(`--${name} <value>`).attributeName()]),
 ) as Record<InputName, string>;
 
 /** A flag value as the runner would hand it over: trimmed, as @actions/core trims every input. */

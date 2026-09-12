@@ -32,8 +32,9 @@ import {
   argvReader,
   INIT_INPUTS,
   INIT_SETTINGS_FILE_DESCRIPTION,
+  INIT_SUBCOMMAND,
   inputOption,
-  inputsForMode,
+  modeSubcommand,
   once,
   tokenValues,
 } from "./inputs.js";
@@ -166,8 +167,9 @@ export function buildProgram(options: ProgramOptions): {
 
   for (const [name, mode] of Object.entries(MODE_COMMANDS) as [CliCommand, Mode][]) {
     const command = program.command(name).description(DESCRIPTION[name]);
-    for (const input of inputsForMode(mode)) {
-      command.addOption(inputOption(input));
+    const subcommand = modeSubcommand(mode);
+    for (const input of subcommand.flags) {
+      command.addOption(inputOption(input, subcommand));
     }
     command.action(async function (this: Command) {
       const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
@@ -189,8 +191,8 @@ export function buildProgram(options: ProgramOptions): {
   for (const input of INIT_INPUTS) {
     init.addOption(
       input === "settings-file"
-        ? inputOption(input, INIT_SETTINGS_FILE_DESCRIPTION)
-        : inputOption(input),
+        ? inputOption(input, INIT_SUBCOMMAND, INIT_SETTINGS_FILE_DESCRIPTION)
+        : inputOption(input, INIT_SUBCOMMAND),
     );
   }
   init
