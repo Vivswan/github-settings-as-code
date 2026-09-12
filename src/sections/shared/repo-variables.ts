@@ -13,11 +13,17 @@ import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsVariableConfig } from "../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../agents_variables/schema.js";
 import { parseLive } from "../contract/live.js";
-import { defaultUndeclaredPolicy, loosen, undeclaredPolicy } from "../contract/module.js";
+import {
+  defaultUndeclaredPolicy,
+  loosen,
+  type SectionSnapshot,
+  undeclaredPolicy,
+} from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
+import { knobbedSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 import {
   LiveVariable,
   planVariables,
@@ -104,6 +110,12 @@ type SharedPlan = (
   declared: WideDeclared,
 ) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
 
+/** What every family's snapshot reads back: one shape, since the two entry slices are identical. */
+type WideSnapshot = {
+  value: UndeclaredPolicyList<{ name: string; value: string }> | undefined;
+  notes: string[];
+};
+
 type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 type _SharedPlanIsEveryFamilyPlan = MustBeNever<
@@ -120,6 +132,9 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly endpoints: RepoVariablesEndpoints<VariablesSegment<K>>;
   readonly shape: z.ZodType;
   readonly plan: RepoVariablesPlan<K>;
+  readonly snapshot: (
+    ctx: PlanContext<RepoVariablesEndpoints<VariablesSegment<K>>>,
+  ) => Promise<SectionSnapshot<K>>;
 }
 
 /**
@@ -208,6 +223,20 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     return planVariables(scope, { entries, policy, defaultPolicy });
   };
 
+  const snapshot = async (ctx: PlanContext<WideEndpoints>): Promise<WideSnapshot> => {
+    const live = parseLive(
+      section,
+      wide.list,
+      z.array(LiveVariable),
+      await ctx.read.list.listAllEnveloped("variables"),
+    );
+    if (live.length === 0) {
+      return { value: undefined, notes: [] };
+    }
+    const entries = live.map((variable) => projectOntoSchema(VARIABLES_ENTRIES[key], variable));
+    return { value: knobbedSnapshot(section, entries), notes: [] };
+  };
+
   const section: RepoVariablesSectionModule<K> = {
     key,
     undeclaredDefault: "delete",
@@ -215,6 +244,8 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     endpoints,
     shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
     plan,
+    // The family's port is the wide port at one segment; the cast is that boundary.
+    snapshot: (ctx) => snapshot(ctx as PlanContext<WideEndpoints>),
   };
   return section;
 }

@@ -93,6 +93,18 @@ export function skippedSectionKeys(
 }
 
 /**
+ * How the on-missing-permission policy classifies a denied section that has written nothing: warn
+ * skips it, fail fails it, and a required section fails whatever the policy. The one statement the
+ * apply/check pipeline and the snapshot pipeline (./snapshot.ts) both read.
+ */
+export function deniedSectionStatus(
+  policy: "fail" | "warn",
+  required: boolean,
+): "skipped" | "failed" {
+  return policy === "warn" && !required ? "skipped" : "failed";
+}
+
+/**
  * The ONE boundary that turns a raw parsed document into the ValidatedSettings the engine accepts. Unknown top-level
  * keys are errors, except outside a non-empty `sections` allowlist, where they downgrade to a warning.
  */
@@ -356,7 +368,7 @@ export async function runForRepo(
         const required = opts.sections.required.has(section.key);
         // A denial after some operations landed is a partial mutation, never a skip: the warn policy applies only when nothing was written.
         const landed = produced.landed;
-        if (opts.onMissingPermission === "warn" && !required && landed === 0) {
+        if (landed === 0 && deniedSectionStatus(opts.onMissingPermission, required) === "skipped") {
           io.annotate("warning", `${section.key}: skipped - ${error.detail}`);
           outcomes.push({
             key: section.key,

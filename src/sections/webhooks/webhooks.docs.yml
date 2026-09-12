@@ -20,6 +20,8 @@ coverage:
       number and string spellings as equal (GitHub stores strings); events compare
       order-insensitively. Hook urls appear in drift and change lines on purpose: they are
       configuration, not credentials (the secret is the masked part).
+      Snapshot reads the hooks back as entries under the keep default, a set secret as a
+      `$WEBHOOK_SECRET_<n>` reference with a note to export it.
 schema:
   SettingsFile.webhooks: >-
     Repository webhooks, managed one per config.url; undeclared hooks are kept by default and

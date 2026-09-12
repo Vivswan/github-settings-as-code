@@ -17,6 +17,7 @@ import {
   type KeyedListLayering,
   loosen,
   type SectionMeta,
+  type SectionSnapshot,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
@@ -32,6 +33,7 @@ import {
 } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
+import { knobbedSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 
 /** A list section enumerates its live resources, so it is exactly a section with an undeclared policy. */
 export type ListSectionKey = UndeclaredPolicySection;
@@ -235,6 +237,7 @@ export interface ListSectionModule<
     ctx: PlanContext<Ends>,
     desired: Declared<K>,
   ) => Promise<SectionPlan<PlannedOp<Ends>>>;
+  readonly snapshot: (ctx: PlanContext<Ends>) => Promise<SectionSnapshot<K>>;
   /** The declaration, for the harness derivations (the mock's transformers, the fuzz witness). */
   readonly decl: ListSectionDecl<K, Ends, Live, F>;
 }
@@ -243,6 +246,7 @@ export interface ListSectionModule<
 interface ErasedDecl {
   readonly key: ListSectionKey;
   readonly noun: string;
+  readonly entry: z.ZodType<object>;
   readonly live: z.ZodType<object>;
   readonly endpoints: ListEndpoints;
   readonly listing?: Listing;
@@ -520,6 +524,29 @@ async function planList(
   return plan;
 }
 
+/**
+ * The live list read back as entries: each item in its comparable form (the lens normalizes as
+ * GitHub stores), projected onto the entry slice so the server-owned fields fall away, under the
+ * section's default policy. An empty list is nothing to declare.
+ */
+async function snapshotList(
+  decl: ErasedDecl,
+  section: SectionMeta<ListSectionKey>,
+  ctx: PlanContext<ListEndpoints>,
+): Promise<{ value: UndeclaredPolicyList<object> | undefined; notes: string[] }> {
+  const live = parseLive(
+    section,
+    decl.endpoints.list,
+    z.array(decl.live),
+    await readList(decl, ctx),
+  );
+  if (live.length === 0) {
+    return { value: undefined, notes: [] };
+  }
+  const entries = live.map((item) => projectOntoSchema(decl.entry, decl.lens.fromLive(item)));
+  return { value: knobbedSnapshot(section, entries), notes: [] };
+}
+
 function secretValuesOf(decl: ErasedDecl, declared: ErasedDeclared): DeclaredSecretValue[] {
   const extract = decl.secretValues;
   if (extract === undefined) {
@@ -568,6 +595,12 @@ export function listSection<
         ctx as unknown as PlanContext<ListEndpoints>,
         desired as unknown as ErasedDeclared,
       ) as unknown as Promise<SectionPlan<PlannedOp<Ends>>>,
+    snapshot: (ctx) =>
+      snapshotList(
+        erased,
+        section,
+        ctx as unknown as PlanContext<ListEndpoints>,
+      ) as unknown as Promise<SectionSnapshot<K>>,
     decl,
   };
   return section;

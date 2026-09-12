@@ -94,4 +94,25 @@ export const workflowsSection = {
     }
     return plan;
   },
+  // Every disabled_* live state reads back as "disabled", the effective state apply compares; a
+  // "deleted" workflow has no file and would only plan as unfixable drift, so it is left out.
+  async snapshot(ctx) {
+    const live = parseLive(
+      this,
+      ENDPOINTS.list,
+      z.array(LiveWorkflow),
+      await ctx.read.list.listAllEnveloped("workflows"),
+    );
+    const present = live.filter((w) => w.state !== "deleted");
+    if (present.length === 0) {
+      return { value: undefined, notes: [] };
+    }
+    return {
+      value: present.map((w) => ({
+        path: w.path,
+        state: w.state === "active" ? ("active" as const) : ("disabled" as const),
+      })),
+      notes: [],
+    };
+  },
 } satisfies SectionModule<"workflows", typeof ENDPOINTS>;

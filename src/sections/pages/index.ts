@@ -3,6 +3,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { loosen, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
+import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { PagesConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["pages"] };
@@ -124,5 +125,13 @@ export const pagesSection = {
       });
     }
     return plan;
+  },
+  // No site is nothing to declare (not `pages: null`, which would DISABLE Pages on apply).
+  async snapshot(ctx) {
+    const probe = await ctx.read.get.probeAbsent();
+    if ("missing" in probe) {
+      return { value: undefined, notes: [] };
+    }
+    return { value: projectOntoSchema(PagesConfig, probe.data), notes: [] };
   },
 } satisfies SectionModule<"pages", typeof ENDPOINTS>;

@@ -26,6 +26,7 @@ import {
   plainData,
   type SectionPlan,
 } from "../contract/plan.js";
+import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { INTERACTION_LIMITS_ROUTED_KEYS, InteractionLimitsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -354,5 +355,50 @@ export const interactionLimitsSection = {
       }
     }
     return plan;
+  },
+  /**
+   * The base limit only when the repository owns it (an inherited one is the organization's
+   * setting); the cap only where the feature exists (its 405 also means the bypass endpoints
+   * would deny) and is enabled, since a disabled cap is GitHub's default; the bypass list only
+   * when someone is on it.
+   */
+  async snapshot(ctx) {
+    const notes: string[] = [];
+    const value: Record<string, unknown> = {};
+    const live = await liveBaseLimit(ctx, this);
+    if (live.kind === "repository") {
+      value.limit = live.limit;
+      notes.push(
+        "interaction_limits.expiry: GitHub reports only the computed expires_at, so the declared duration cannot be read back; apply re-arms the limit with GitHub's default (one_day) unless you declare expiry",
+      );
+    } else if (live.kind === "inherited") {
+      notes.push(
+        `interaction_limits: the live "${live.limit}" limit is set at the ${live.origin} level, not on the repository, so it is not part of the repository's snapshot`,
+      );
+    }
+    const cap = await ctx.read.capGet.tryCall({
+      describe: "reading the pull request creation cap",
+    });
+    if ("error" in cap) {
+      notes.push(
+        `interaction_limits: ${CAP_UNAVAILABLE} (405), so pull_request_creation_cap and pull_request_creation_bypass are omitted`,
+      );
+    } else {
+      const liveCap = projectOntoSchema(
+        InteractionLimitsConfig.unwrap().shape.pull_request_creation_cap,
+        cap.data,
+      );
+      if (liveCap?.enabled === true) {
+        value.pull_request_creation_cap = liveCap;
+      }
+      const bypass = await liveBypassLogins(ctx, this);
+      if (bypass.length > 0) {
+        value.pull_request_creation_bypass = bypass;
+      }
+    }
+    if (Object.keys(value).length === 0) {
+      return { value: undefined, notes };
+    }
+    return { value: value as DeclaredInteractionLimits, notes };
   },
 } satisfies SectionModule<"interaction_limits", typeof ENDPOINTS>;

@@ -1,11 +1,13 @@
 /**
  * A stateful GithubClient over a section's e2e mock fragment, so a unit idempotence proof runs against the mock's own transformers, not a second
- * hand-written inverse.
+ * hand-written inverse. Two views: one section's fragment (a request outside it is refused), or the whole merged registry.
  */
 
 import type { ApiError, GithubClient } from "../../src/github/api.js";
+import type { SectionKey } from "../../src/schema.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { matchEndpoint } from "../e2e/mock/dispatch.js";
+import { HANDLERS } from "../e2e/mock/handlers.js";
 import { buildStateForSlug, type LiveState, type MockState } from "../e2e/mock/state.js";
 import type { Handler } from "../e2e/mock/support.js";
 import { REPO } from "./section-run.js";
@@ -21,6 +23,19 @@ export function fragmentFake(
   handlers: Readonly<Record<string, Handler>>,
   live: LiveState,
 ): FragmentFake {
+  return handlerFake(handlers, live, section.key);
+}
+
+/** The fake over EVERY section's handlers (the merged mock tables), as an all-grades token sees them. */
+export function registryFake(live: LiveState): FragmentFake {
+  return handlerFake(HANDLERS, live, null);
+}
+
+function handlerFake(
+  handlers: Readonly<Record<string, Handler>>,
+  live: LiveState,
+  only: SectionKey | null,
+): FragmentFake {
   const state = buildStateForSlug(REPO.slug, { settingsYaml: null, liveState: live }, "org");
   const writes: string[] = [];
   return {
@@ -30,7 +45,11 @@ export function fragmentFake(
       const url = new URL(path, "https://api.github.com");
       const matched = matchEndpoint(method, url.pathname);
       const handler = matched === null ? undefined : handlers[matched.key];
-      if (matched === null || matched.endpoint.section !== section.key || handler === undefined) {
+      if (
+        matched === null ||
+        (only !== null && matched.endpoint.section !== only) ||
+        handler === undefined
+      ) {
         return { error: { status: 404, message: `unexpected ${method} ${path}`, body: "" } };
       }
       if (method !== "GET") {
@@ -61,7 +80,7 @@ export function fragmentFake(
       return { data: response.body };
     },
     async tryGraphql() {
-      throw new Error(`${section.key} issues no GraphQL`);
+      throw new Error(`${only ?? "the registry fake"} issues no GraphQL`);
     },
   };
 }

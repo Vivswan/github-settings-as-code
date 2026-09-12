@@ -1,0 +1,123 @@
+/**
+ * The helpers every snapshot() shares: the projection of a live object onto a section's schema
+ * slice (server-assigned fields fall away because the slice never names them), and the knobbed
+ * wrapper a list section's snapshot emits.
+ */
+
+import type { z } from "zod";
+import type { UndeclaredPolicySection } from "../../schema.js";
+import type { UndeclaredPolicyList } from "../../types.js";
+import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
+
+/** The zod internals the projection walks: the def discriminator and its children. */
+interface ProjectionDef {
+  type: string;
+  shape?: Record<string, z.ZodType>;
+  catchall?: z.ZodType;
+  element?: z.ZodType;
+  innerType?: z.ZodType;
+  options?: readonly z.ZodType[];
+  valueType?: z.ZodType;
+}
+
+function defOf(schema: z.ZodType): ProjectionDef {
+  return (schema as unknown as { _zod: { def: ProjectionDef } })._zod.def;
+}
+
+/** The schema types the projection treats as leaves: the live value passes through verbatim. */
+const LEAF_TYPES: ReadonlySet<string> = new Set([
+  "string",
+  "number",
+  "int",
+  "boolean",
+  "enum",
+  "literal",
+  "unknown",
+  "null",
+]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A live value projected onto a schema slice: an object keeps exactly the keys the slice's shape
+ * names (a loose object keeps its passthrough keys too), each child projected in turn; a list
+ * projects its items; a union projects through its first option accepting the value.
+ * A `null` the slice cannot hold is GitHub's "no value" (a not-configured setup's null
+ * runner_type), so the key is omitted rather than emitted as an invalid declaration; every other
+ * value the slice rejects is left in place for the document validation to name.
+ * The one cast is the boundary: the engine validates the assembled document before returning it.
+ */
+export function projectOntoSchema<T>(schema: z.ZodType<T>, live: unknown): T {
+  return project(schema, live) as T;
+}
+
+function project(schema: z.ZodType, live: unknown): unknown {
+  if (live === undefined) {
+    return undefined;
+  }
+  if (live === null) {
+    return schema.safeParse(null).success ? null : undefined;
+  }
+  const def = defOf(schema);
+  switch (def.type) {
+    case "optional":
+    case "nullable":
+      return project(def.innerType as z.ZodType, live);
+    case "object": {
+      if (!isPlainObject(live)) {
+        return live;
+      }
+      const shape = def.shape ?? {};
+      const out: Record<string, unknown> = {};
+      for (const [key, child] of Object.entries(shape)) {
+        const projected = project(child, live[key]);
+        if (projected !== undefined) {
+          out[key] = projected;
+        }
+      }
+      // A catchall other than never is a passthrough object: its extra keys are declarable.
+      if (def.catchall !== undefined && defOf(def.catchall).type !== "never") {
+        for (const [key, value] of Object.entries(live)) {
+          if (!(key in shape) && value !== undefined) {
+            out[key] = value;
+          }
+        }
+      }
+      return out;
+    }
+    case "array":
+      return Array.isArray(live)
+        ? live.map((item) => project(def.element as z.ZodType, item))
+        : live;
+    case "record":
+      return isPlainObject(live)
+        ? Object.fromEntries(
+            Object.entries(live).map(([key, value]) => [
+              key,
+              project(def.valueType as z.ZodType, value),
+            ]),
+          )
+        : live;
+    case "union": {
+      const option = (def.options ?? []).find((candidate) => candidate.safeParse(live).success);
+      return option === undefined ? live : project(option, live);
+    }
+    default:
+      if (!LEAF_TYPES.has(def.type)) {
+        throw new Error(
+          `projectOntoSchema(): unhandled schema type "${def.type}" - teach the projection its walk before authoring it in a section slice`,
+        );
+      }
+      return live;
+  }
+}
+
+/** A knobbed section's snapshot value: its entries under the section's own default policy, spelled out. */
+export function knobbedSnapshot<E>(
+  section: SectionMeta<UndeclaredPolicySection>,
+  entries: E[],
+): UndeclaredPolicyList<E> {
+  return { _undeclared: defaultUndeclaredPolicy(section), entries };
+}

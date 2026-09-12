@@ -12,7 +12,7 @@ import { CodeQualitySetupConfig } from "../code_quality_setup/schema.js";
 import { CodeScanningDefaultSetupConfig } from "../code_scanning_default_setup/schema.js";
 import { expand } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
-import { loosen, requirePlainMapping } from "../contract/module.js";
+import { loosen, requirePlainMapping, type SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,
@@ -21,6 +21,7 @@ import {
   plainData,
   type SectionPlan,
 } from "../contract/plan.js";
+import { projectOntoSchema } from "./snapshot-helpers.js";
 
 export type SetupKey = "code_scanning_default_setup" | "code_quality_setup";
 
@@ -104,6 +105,7 @@ export interface SetupSectionModule<K extends SetupKey> {
   readonly endpoints: SetupEndpoints<K>;
   readonly shape: z.ZodType;
   readonly plan: SetupPlan<K>;
+  readonly snapshot: (ctx: PlanContext<SetupEndpoints<K>>) => Promise<SectionSnapshot<K>>;
 }
 
 /** The verbatim-PATCH plan, the named 202 configuration run, and the 409 advice live here once; routes, shape, and read grade derive from the key. */
@@ -168,6 +170,15 @@ export function setupSection<K extends SetupKey>(setup: {
     return planned;
   };
 
+  // The GET always answers with the whole configuration (a not-configured setup included), so
+  // the snapshot is that body on the slice's keys; the PATCH takes the same keys back verbatim.
+  // SETUPS pairs the slice with its key, so its projection IS the section's declared type; the
+  // casts are the wide-port and per-key boundaries.
+  const snapshot = async (ctx: PlanContext<SetupEndpoints<K>>): Promise<SectionSnapshot<K>> => {
+    const live = await (ctx as PlanContext<WideEndpoints>).read.get.call();
+    return { value: projectOntoSchema(slice as z.ZodType, live) as SetupDeclared<K>, notes: [] };
+  };
+
   const section: SetupSectionModule<K> = {
     key,
     undeclaredDefault: "untouched",
@@ -176,6 +187,7 @@ export function setupSection<K extends SetupKey>(setup: {
     endpoints,
     shape: requirePlainMapping(loosen(slice)),
     plan,
+    snapshot,
   };
   return section;
 }

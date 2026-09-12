@@ -29,6 +29,7 @@ import {
 } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
+import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { WebhookConfig } from "./schema.js";
 
 const LiveHook = z.looseObject({
@@ -136,6 +137,11 @@ function describeHook(hook: LiveHook): string {
 
 const CANNOT_VERIFY_SECRET =
   'GitHub never reveals a webhook secret (reads echo "********"), so the declared value cannot be verified; apply re-sends it on every run so rotations propagate';
+
+/** The environment variable a snapshot names for the Nth (1-based) live hook's secret. */
+function snapshotSecretVariable(index: number): string {
+  return `WEBHOOK_SECRET_${index}`;
+}
 
 export const webhooksSection = {
   key: "webhooks",
@@ -285,5 +291,26 @@ export const webhooksSection = {
       );
     }
     return plan;
+  },
+  // A live hook reports a set secret as "********": the entry carries a `$WEBHOOK_SECRET_<n>`
+  // reference in its place (numbered by list position), and a note asks for the value.
+  async snapshot(ctx) {
+    const live = parseLive(this, ENDPOINTS.list, z.array(LiveHook), await ctx.read.list.listAll());
+    if (live.length === 0) {
+      return { value: undefined, notes: [] };
+    }
+    const notes: string[] = [];
+    const entries = live.map((hook, index) => {
+      const entry = projectOntoSchema(WebhookConfig, hook);
+      if (entry.config.secret === undefined) {
+        return entry;
+      }
+      const variable = snapshotSecretVariable(index + 1);
+      notes.push(
+        `webhooks[${describeHook(hook)}].config.secret: the webhook secret is not readable; export a value as ${variable} into the environment before apply`,
+      );
+      return { ...entry, config: { ...entry.config, secret: `$${variable}` } };
+    });
+    return { value: knobbedSnapshot(this, entries), notes };
   },
 } satisfies SectionModule<"webhooks", typeof ENDPOINTS>;

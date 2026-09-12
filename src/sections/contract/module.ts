@@ -310,9 +310,20 @@ interface SectionModuleBase<
 }
 
 /**
+ * What a section reads back as a settings document: its live state in the section's own declared
+ * form, or `undefined` when nothing exists (the engine omits the key). `notes` carry what the value
+ * cannot: a secret's unreadable value, a feature the repository lacks.
+ */
+export interface SectionSnapshot<K extends SectionKey = SectionKey> {
+  readonly value: SettingsFile[K] | undefined;
+  readonly notes: readonly string[];
+}
+
+/**
  * plan() only READS (through the port in PlanContext) and returns the operations that would converge the
  * repository; the engine renders them as drift in check mode and executes them in apply mode.
- * Modules register in ../registry.ts.
+ * snapshot() reads through the same port, so it cannot write either; a section without one is
+ * unsupported by snapshot (see snapshotUnsupportedNote). Modules register in ../registry.ts.
  */
 export interface SectionModule<
   K extends SectionKey = SectionKey,
@@ -320,8 +331,20 @@ export interface SectionModule<
   G extends GraphqlDict = GraphqlDict,
 > extends SectionModuleBase<K, E, G> {
   plan(ctx: PlanContext<E, G>, desired: SectionInput<K>): Promise<SectionPlan<PlannedOp<E, G>>>;
+  snapshot?(ctx: PlanContext<E, G>): Promise<SectionSnapshot<K>>;
   /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
   run?: never;
+}
+
+/**
+ * Why a section without snapshot() cannot be read back: a write-only section has nothing to read
+ * (derived from its operations, like writeOnlyCheckNote), any other is simply not implemented yet.
+ */
+export function snapshotUnsupportedNote(section: SectionMeta): string {
+  if (planningReads(section).length === 0) {
+    return `${section.key}: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run`;
+  }
+  return `${section.key}: snapshot is not implemented for this section yet`;
 }
 
 /**
