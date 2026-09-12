@@ -266,6 +266,40 @@ export interface PlanContext<
   readonly read: BoundReads<E, G>;
 }
 
+/** The run's on-missing-permission input: how a read the token is denied classifies. */
+export type MissingPermissionPolicy = "fail" | "warn";
+
+let mintPolicy: (input: MissingPermissionPolicy) => DenialPolicy;
+
+/**
+ * The policy as a snapshot() sees it. Only snapshotContext() mints one: the constructor is private
+ * and the class nominal, so a section cannot hand readOrNote a literal "warn" and turn a denial the
+ * run should fail on into a note.
+ */
+export class DenialPolicy {
+  private constructor(private readonly input: MissingPermissionPolicy) {}
+
+  static {
+    mintPolicy = (input) => new DenialPolicy(input);
+  }
+
+  /** Under warn a denied sub-read is noted and left out; under fail it propagates. */
+  get notesDenials(): boolean {
+    return this.input === "warn";
+  }
+}
+
+/**
+ * What snapshot() reads through: the plan port plus the run's denial policy, so a helper over one
+ * sub-read (readOrNote) classifies a denial where it happens instead of noting it under both.
+ */
+export interface SnapshotContext<
+  E extends EndpointDict = EndpointDict,
+  G extends GraphqlDict = GraphqlDict,
+> extends PlanContext<E, G> {
+  readonly onMissingPermission: DenialPolicy;
+}
+
 /**
  * `D` is the drift type its arm demands: an ordinary operation must justify itself with at least one
  * drift line (DriftFor), so "check reported clean while apply mutated" is unrepresentable.
@@ -499,4 +533,13 @@ export function planContext<E extends EndpointDict, G extends GraphqlDict>(
   repo: RepoRef,
 ): PlanContext<E, G> {
   return { repo, read: boundReads(meta, api, repo) };
+}
+
+export function snapshotContext<E extends EndpointDict, G extends GraphqlDict>(
+  meta: SectionMeta<SectionKey, E, G>,
+  api: GithubClient,
+  repo: RepoRef,
+  onMissingPermission: MissingPermissionPolicy,
+): SnapshotContext<E, G> {
+  return { ...planContext(meta, api, repo), onMissingPermission: mintPolicy(onMissingPermission) };
 }

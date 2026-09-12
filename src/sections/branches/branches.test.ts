@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import type { GithubClient } from "../../../src/github/api.js";
-import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
+import {
+  type PlannedOp,
+  planContext,
+  snapshotContext,
+} from "../../../src/sections/contract/plan.js";
 import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
 import { buildState, type LiveState } from "../../../test/e2e/mock/state.js";
 import type { Json } from "../../../test/e2e/mock/support.js";
@@ -1460,7 +1464,9 @@ describe("branches snapshot", () => {
         error: { status: 404, message: "Branch not protected", body: "" },
       },
     });
-    const snapshot = await branchesSection.snapshot(planContext(branchesSection, api, REPO));
+    const snapshot = await branchesSection.snapshot(
+      snapshotContext(branchesSection, api, REPO, "fail"),
+    );
     expect(snapshot.value?.map((entry) => entry.name)).toEqual(["main"]);
     expect(snapshot.notes).toEqual([
       "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule " +
@@ -1497,7 +1503,9 @@ describe("branches snapshot", () => {
     const api = new MockApi({
       "GET /repos/o/r/branches?protected=true&per_page=100&page=1": { data: [] },
     });
-    const snapshot = await branchesSection.snapshot(planContext(branchesSection, api, REPO));
+    const snapshot = await branchesSection.snapshot(
+      snapshotContext(branchesSection, api, REPO, "fail"),
+    );
     expect(snapshot).toEqual({ value: undefined, notes: [] });
   });
 });

@@ -21,7 +21,13 @@ import {
   writeGatedReads,
 } from "../../src/sections/contract/module.js";
 import { type SectionPermission, samePermission } from "../../src/sections/contract/permissions.js";
-import { hasDrift, plainData, planContext } from "../../src/sections/contract/plan.js";
+import {
+  DenialPolicy,
+  hasDrift,
+  plainData,
+  planContext,
+  snapshotContext,
+} from "../../src/sections/contract/plan.js";
 import {
   call,
   callDeclared,
@@ -35,6 +41,7 @@ import { environmentsSection } from "../../src/sections/environments/index.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { repositorySection } from "../../src/sections/repository/index.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
+import type { readOrNote } from "../../src/sections/shared/snapshot-helpers.js";
 import { MockApi } from "../mock-api.js";
 
 const section: SectionMeta = rulesetsSection;
@@ -1298,6 +1305,27 @@ describe("tryCallDeclared", () => {
       ),
     );
     expect(api.calls).toEqual([]);
+  });
+});
+
+describe("DenialPolicy", () => {
+  test("only snapshotContext() mints the policy readOrNote honors; a literal, a stand-in, or a new is a compile error", () => {
+    const REPO = { owner: "o", name: "r", slug: "o/r" };
+    const api = new MockApi({});
+    expect(
+      snapshotContext(actionsSection, api, REPO, "warn").onMissingPermission.notesDenials,
+    ).toBe(true);
+    expect(
+      snapshotContext(actionsSection, api, REPO, "fail").onMissingPermission.notesDenials,
+    ).toBe(false);
+    // The negative controls: each of these is how a section could have picked "warn" for itself.
+    type Carrier = Parameters<typeof readOrNote>[0];
+    // @ts-expect-error the input string is not the minted carrier
+    const _literal: Carrier = { onMissingPermission: "warn" };
+    // @ts-expect-error a structural stand-in is not the carrier either: the class is nominal
+    const _standIn: Carrier = { onMissingPermission: { notesDenials: true } };
+    // @ts-expect-error the constructor is private
+    const _minted: DenialPolicy = new DenialPolicy("warn");
   });
 });
 

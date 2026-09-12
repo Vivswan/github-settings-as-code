@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import type { GithubClient } from "../../../src/github/api.js";
-import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
+import {
+  type MissingPermissionPolicy,
+  type PlannedOp,
+  planContext,
+  snapshotContext,
+} from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
@@ -792,8 +797,8 @@ describe("repository GraphQL-routed keys", () => {
 });
 
 describe("repository snapshot", () => {
-  const snapshot = (api: GithubClient) =>
-    repositorySection.snapshot(planContext(repositorySection, api, REPO));
+  const snapshot = (api: GithubClient, policy: MissingPermissionPolicy = "fail") =>
+    repositorySection.snapshot(snapshotContext(repositorySection, api, REPO, policy));
   const LFS_NOTE =
     "repository.enable_git_lfs: GitHub exposes no endpoint to read Git LFS back, so the snapshot leaves it out; declare it yourself to manage it";
 
@@ -878,8 +883,9 @@ describe("repository snapshot", () => {
     expect((await snapshot(bare)).value).not.toHaveProperty("security_and_analysis");
   });
 
-  test("a denied toggle probe is a note, an owner-enforced toggle reads back with a note, and an unreadable policy is left out", async () => {
-    const api = new MockApi({
+  /** The fixture a denied toggle probe and a denied features query share across the two policies. */
+  const deniedProbeApi = () =>
+    new MockApi({
       [GET]: { data: { description: "x", topics: [] } },
       "GET /repos/o/r/private-vulnerability-reporting": {
         error: { status: 403, message: "Forbidden", body: "" },
@@ -887,7 +893,10 @@ describe("repository snapshot", () => {
       "GET /repos/o/r/immutable-releases": { data: { enabled: true, enforced_by_owner: true } },
       ...features({ issueCreationPolicy: "NOBODY" }),
     });
-    expect(await snapshot(api)).toEqual({
+
+  test("under warn, a denied toggle probe is a note, an owner-enforced toggle reads back with a note, and an unreadable policy is left out", async () => {
+    const api = deniedProbeApi();
+    expect(await snapshot(api, "warn")).toEqual({
       value: {
         description: "x",
         enable_vulnerability_alerts: false,
@@ -906,6 +915,29 @@ describe("repository snapshot", () => {
       ],
     });
     expect(api.mutations()).toEqual([]);
+  });
+
+  test("under fail, a denied toggle probe or a denied features query fails the section with the grant advice, never a note", async () => {
+    const probe = await rejection(snapshot(deniedProbeApi(), "fail"));
+    expectAdministrationDenied(probe);
+    expect((probe as PermissionDenied).detail).toContain(
+      "the token was denied GET /repos/o/r/private-vulnerability-reporting: 403 Forbidden",
+    );
+    const features403 = new MockApi({
+      [GET]: { data: { topics: [] } },
+      "GET /repos/o/r/immutable-releases": { data: { enabled: false, enforced_by_owner: false } },
+      "GRAPHQL RepositoryFeatures": {
+        error: {
+          status: 403,
+          message: "Resource not accessible",
+          body: "",
+          graphqlTypes: ["FORBIDDEN"],
+        },
+      },
+    });
+    const query = await rejection(snapshot(features403, "fail"));
+    expectAdministrationDenied(query);
+    expect((query as PermissionDenied).detail).toContain("GRAPHQL RepositoryFeatures");
   });
 
   test("four toggle 404s are left out under one note, since a concealed denial answers the same; one other answer proves the grant", async () => {
@@ -947,13 +979,13 @@ describe("repository snapshot", () => {
     });
   });
 
-  test("a denied features query leaves both GraphQL keys out under one note", async () => {
+  test("under warn, a denied features query leaves both GraphQL keys out under one note", async () => {
     const api = new MockApi({
       [GET]: { data: { topics: [] } },
       "GET /repos/o/r/private-vulnerability-reporting": { data: { enabled: false } },
       "GRAPHQL RepositoryFeatures": { error: { status: 403, message: "Forbidden", body: "" } },
     });
-    expect(await snapshot(api)).toEqual({
+    expect(await snapshot(api, "warn")).toEqual({
       value: {
         enable_vulnerability_alerts: false,
         enable_automated_security_fixes: false,

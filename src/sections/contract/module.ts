@@ -13,7 +13,7 @@ import {
 } from "./endpoints.js";
 import type { GraphqlOpDecl } from "./graphql.js";
 import { grantFor, type SectionPermission } from "./permissions.js";
-import type { PlanContext, PlannedOp, SectionPlan } from "./plan.js";
+import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "./plan.js";
 
 interface SectionContextBase {
   api: GithubClient;
@@ -349,7 +349,7 @@ export interface SectionSnapshot<K extends SectionKey = SectionKey> {
  * repository; the engine renders them as drift in check mode and executes them in apply mode.
  * Modules register in ../registry.ts.
  *
- *   snapshot() present  -> reads through the same port, so it cannot write either
+ *   snapshot() present  -> reads through the same port (plus the run's denial policy), so it cannot write either
  *   snapshot() absent   -> the section is unsupported by snapshot (snapshotUnsupportedNote)
  */
 export interface SectionModule<
@@ -358,7 +358,7 @@ export interface SectionModule<
   G extends GraphqlDict = GraphqlDict,
 > extends SectionModuleBase<K, E, G> {
   plan(ctx: PlanContext<E, G>, desired: SectionInput<K>): Promise<SectionPlan<PlannedOp<E, G>>>;
-  snapshot?(ctx: PlanContext<E, G>): Promise<SectionSnapshot<K>>;
+  snapshot?(ctx: SnapshotContext<E, G>): Promise<SectionSnapshot<K>>;
   /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
   run?: never;
 }

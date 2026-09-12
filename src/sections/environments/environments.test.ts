@@ -21,7 +21,7 @@ import {
 } from "../../../test/sections/section-run.js";
 import { executePlan } from "../../engine/execute.js";
 import type { GithubClient } from "../../github/api.js";
-import { type PlannedOp, planContext, planDrift } from "../contract/plan.js";
+import { type PlannedOp, planContext, planDrift, snapshotContext } from "../contract/plan.js";
 import { allGraphqlOps, type SectionEndpointKey, type SectionGraphqlKey } from "../registry.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
 import { environmentsMockGraphqlHandlers, environmentsMockHandlers } from "./mock.js";
@@ -1487,7 +1487,7 @@ describe("environments snapshot", () => {
       environment_secrets: { qa: [{ name: "github_pat", ...STAMPS }] },
     });
     const snapshot = await environmentsSection.snapshot(
-      planContext(environmentsSection, api, REPO),
+      snapshotContext(environmentsSection, api, REPO, "fail"),
     );
     expect(snapshot).toEqual({
       value: [
@@ -1529,7 +1529,7 @@ describe("environments snapshot", () => {
     ]);
   });
 
-  test("a token with only the Environments grant loses the Actions-gated keys to notes, not the section", async () => {
+  test("a token with only the Environments grant loses the Actions-gated keys to notes, not the section, under warn", async () => {
     const inner = fragmentFake(environmentsSection, environmentsMockHandlers, {
       environments: {
         production: {
@@ -1563,7 +1563,7 @@ describe("environments snapshot", () => {
       tryGraphql: (op, variables, slug) => inner.tryGraphql(op, variables, slug),
     };
     const snapshot = await environmentsSection.snapshot(
-      planContext(environmentsSection, api, REPO),
+      snapshotContext(environmentsSection, api, REPO, "warn"),
     );
     expect(snapshot).toEqual({
       value: [
@@ -1581,7 +1581,6 @@ describe("environments snapshot", () => {
           "404 here can also mean the environment does not exist, or that its deployment_branch_policy does not " +
           "set custom_branch_policies: true",
         "environments[production].deployment_protection_rules: left out of the snapshot - the token was denied " +
-          'listing deployment protection rules of environment "production" failed - ' +
           "GET /repos/o/r/environments/production/deployment_protection_rules: 403 Resource not accessible by " +
           'personal access token. To fix, grant "Actions" (read) under the PAT\'s Repository permissions. Note: a ' +
           "404 here can also mean the environment does not exist",
@@ -1594,7 +1593,7 @@ describe("environments snapshot", () => {
   test("no environment reads back as nothing to declare", async () => {
     const api = fragmentFake(environmentsSection, environmentsMockHandlers, {});
     const snapshot = await environmentsSection.snapshot(
-      planContext(environmentsSection, api, REPO),
+      snapshotContext(environmentsSection, api, REPO, "fail"),
     );
     expect(snapshot).toEqual({ value: undefined, notes: [] });
   });

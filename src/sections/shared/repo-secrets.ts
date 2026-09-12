@@ -23,7 +23,7 @@ import {
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
+import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "../contract/plan.js";
 import { DependabotSecretConfig } from "../dependabot_secrets/schema.js";
 import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
@@ -165,7 +165,7 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
   readonly closedSurface: typeof CLOSED_SURFACE;
   readonly plan: RepoSecretsPlan<K>;
   readonly snapshot: (
-    ctx: PlanContext<RepoSecretsEndpoints<SecretsSegment<K>>>,
+    ctx: SnapshotContext<RepoSecretsEndpoints<SecretsSegment<K>>>,
   ) => Promise<SectionSnapshot<K>>;
 }
 
@@ -254,7 +254,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
   // GitHub lists names only, so each entry carries the per-store reference the operator must
   // export before an apply, and a note says so per secret. Names are read through secretKey, the
   // uppercase form GitHub stores and the planner compares by, so the reference grammar holds.
-  const snapshot = async (ctx: PlanContext<WideEndpoints>): Promise<WideSnapshot> => {
+  const snapshot = async (ctx: SnapshotContext<WideEndpoints>): Promise<WideSnapshot> => {
     const live = parseLive(
       section,
       wide.list,
@@ -286,7 +286,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     closedSurface: CLOSED_SURFACE,
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
-    snapshot: (ctx) => snapshot(ctx as PlanContext<WideEndpoints>),
+    snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints>),
   };
   return section;
 }

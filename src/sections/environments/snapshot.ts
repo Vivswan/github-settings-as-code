@@ -7,10 +7,11 @@
 import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import type { SectionMeta } from "../contract/module.js";
+import type { SnapshotContext } from "../contract/plan.js";
 import { secretKey } from "../shared/secrets-engine.js";
 import { projectOntoSchema, readOrNote } from "../shared/snapshot-helpers.js";
 import { listBranchPolicies } from "./branch-policies.js";
-import type { EnvironmentsRestContext } from "./endpoints.js";
+import type { ENDPOINTS } from "./endpoints.js";
 import {
   listEnvironmentSecrets,
   listEnvironmentVariables,
@@ -39,10 +40,10 @@ function wrapped<E>(key: NestedKey, entries: E[]): UndeclaredPolicyList<E> {
  * flag enables them (the endpoint 404s otherwise); a disabled protection rule is not an active
  * gate, so it is not declared. Each secret becomes a `$NAME` reference with a note asking for it.
  * The policy and rule lists sit behind the Actions grant, not the section's, so a denial there
- * leaves that key out with a note instead of taking the whole section down.
+ * is the key's own: a note under the warn policy, the section's failure under fail.
  */
 export async function snapshotNested(
-  ctx: EnvironmentsRestContext,
+  ctx: SnapshotContext<typeof ENDPOINTS>,
   section: SectionMeta,
   envName: string,
   liveEnv: Record<string, unknown>,
@@ -77,6 +78,7 @@ export async function snapshotNested(
   const flags = liveEnv.deployment_branch_policy as { custom_branch_policies?: unknown } | null;
   if (flags?.custom_branch_policies === true) {
     const policies = await readOrNote(
+      ctx,
       notes,
       `environments[${envName}].deployment_branch_policies`,
       () => listBranchPolicies(ctx, section, envName),
@@ -89,6 +91,7 @@ export async function snapshotNested(
     }
   }
   const rules = await readOrNote(
+    ctx,
     notes,
     `environments[${envName}].deployment_protection_rules`,
     () => listProtectionRules(ctx, section, envName),

@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
 import type { GithubClient } from "../../../src/github/api.js";
-import { driftOf, type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
+import {
+  driftOf,
+  type MissingPermissionPolicy,
+  type PlannedOp,
+  planContext,
+  snapshotContext,
+} from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
@@ -582,8 +588,8 @@ describe("actions", () => {
 });
 
 describe("actions snapshot", () => {
-  const snapshot = (api: GithubClient) =>
-    actionsSection.snapshot(planContext(actionsSection, api, REPO));
+  const snapshot = (api: GithubClient, policy: MissingPermissionPolicy = "fail") =>
+    actionsSection.snapshot(snapshotContext(actionsSection, api, REPO, policy));
   /** The note a sub-read the fake has no body for produces: its 404 classifies as a denial. */
   const leftOut = (key: string, path: string, grant = sectionGrant(actionsSection)) =>
     `actions.${key}: left out of the snapshot - the token was denied GET ${path}: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, ${grant}`;
@@ -648,7 +654,7 @@ describe("actions snapshot", () => {
     expect(api.writes).toEqual([]);
   });
 
-  test("a denied sub-read is a note naming its key with the read's own grant; the allowlist is skipped off the selected policy", async () => {
+  test("under warn, a denied sub-read is a note naming its key with the read's own grant; the allowlist is skipped off the selected policy", async () => {
     const live = liveActions({
       [BASE]: { enabled: true, allowed_actions: "all" },
       [`${BASE}/artifact-and-log-retention`]: { days: 90, maximum_allowed_days: 400 },
@@ -664,7 +670,7 @@ describe("actions snapshot", () => {
       },
       tryGraphql: live.tryGraphql,
     };
-    const read = await snapshot(api);
+    const read = await snapshot(api, "warn");
     expect(read).toEqual({
       value: {
         enabled: true,
@@ -692,7 +698,7 @@ describe("actions snapshot", () => {
     expect(live.writes).toEqual([]);
   });
 
-  test("a denied cache limit is noted by its own key while the readable sibling limit survives", async () => {
+  test("under warn, a denied cache limit is noted by its own key while the readable sibling limit survives", async () => {
     const api = liveActions({
       [BASE]: { enabled: true, allowed_actions: "all" },
       [`${BASE}/workflow`]: { default_workflow_permissions: "read" },
@@ -708,7 +714,7 @@ describe("actions snapshot", () => {
         require_approval_for_fork_pr_workflows: true,
       },
     });
-    const read = await snapshot(api);
+    const read = await snapshot(api, "warn");
     expect(read.value?.cache).toEqual({ max_cache_retention_days: 7 });
     expect(read.notes).toEqual([
       leftOut("cache.max_cache_size_gb", "/repos/o/r/actions/cache/storage-limit"),
@@ -725,5 +731,44 @@ describe("actions snapshot", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     expect((thrown as PermissionDenied).detail).toContain(sectionGrant(actionsSection));
+  });
+
+  test("under fail, a denied sub-read fails the section with that read's own grant advice, never a note", async () => {
+    // Every key but the OIDC template reads back, so the one denial is the sub-read's alone.
+    const api = liveActions({
+      [BASE]: { enabled: true, allowed_actions: "all" },
+      [`${BASE}/workflow`]: { default_workflow_permissions: "read" },
+      [`${BASE}/access`]: { access_level: "none" },
+      [`${BASE}/artifact-and-log-retention`]: { days: 90 },
+      "/repos/o/r/actions/cache/retention-limit": { max_cache_retention_days: 7 },
+      "/repos/o/r/actions/cache/storage-limit": { max_cache_size_gb: 10 },
+      [`${BASE}/fork-pr-contributor-approval`]: { approval_policy: "first_time_contributors" },
+      [`${BASE}/fork-pr-workflows-private-repos`]: {
+        run_workflows_from_fork_pull_requests: false,
+        send_write_tokens_to_workflows: false,
+        send_secrets_and_variables: false,
+        require_approval_for_fork_pr_workflows: true,
+      },
+    });
+    let thrown: unknown;
+    try {
+      await snapshot(api, "fail");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PermissionDenied);
+    expect((thrown as PermissionDenied).detail).toBe(
+      `the token was denied GET /repos/o/r/actions/oidc/customization/sub: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, ${grantFor({ repo: ["actions"] }, undefined, "write")}`,
+    );
+    // The control: under warn the same fixture reads back with the denial as its one note.
+    const noted = await snapshot(api, "warn");
+    expect(noted.value).not.toHaveProperty("oidc_customization_sub");
+    expect(noted.notes).toEqual([
+      leftOut(
+        "oidc_customization_sub",
+        "/repos/o/r/actions/oidc/customization/sub",
+        grantFor({ repo: ["actions"] }, undefined, "write"),
+      ),
+    ]);
   });
 });
