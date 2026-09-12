@@ -106,10 +106,19 @@ export function installReleasePipelineFixture(): void {
   });
 }
 
+/** A fixture repository does nothing between the commands a test runs in it. Since git 2.54 every push and fetch
+ * spawns a detached `git maintenance run --auto` whose geometric repack packs and deletes the loose objects as soon
+ * as two of them share the objects/17 shard; a plain-path clone copying the origin's loose objects at that moment
+ * dies with "failed to copy file ... No such file or directory". Origins take pushes and clones fetch, so all get it. */
+function disableBackgroundMaintenance(dir: string): void {
+  git(dir, "config", "maintenance.auto", "false");
+}
+
 /** Hermetic clone: the developer's global gitconfig (identity, signing, hooks) must not leak into the fixtures. */
 export function clone(root: string, originDir: string, name: string): string {
   const dir = join(root, name);
   execFileSync("git", ["clone", "--quiet", originDir, dir]);
+  disableBackgroundMaintenance(dir);
   git(dir, "config", "user.name", "fixture");
   git(dir, "config", "user.email", "fixture@example.invalid");
   git(dir, "config", "commit.gpgsign", "false");
@@ -236,6 +245,7 @@ export function seedFixture(): Fixture {
   mkdirSync(join(root, "no-hooks"));
   const origin = join(root, "origin.git");
   execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", origin]);
+  disableBackgroundMaintenance(origin);
   const work = clone(root, origin, "work");
   write(work, ".gitignore", "lib/index.js\nlib/pkg/\n");
   write(work, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.0.0" }, null, 2)}\n`);
@@ -301,6 +311,7 @@ export function shallowChecker(fx: Fixture, name: string): string {
   pushGreenCommit(fx, `${name}-after-release`, "packaged-bundle-bytes-9\n");
   const checker = join(fx.root, name);
   execFileSync("git", ["clone", "--quiet", "--depth", "1", `file://${fx.origin}`, checker]);
+  disableBackgroundMaintenance(checker);
   let known = true;
   try {
     execFileSync("git", ["rev-parse", "--verify", "--quiet", `${fx.mergeSha}^{commit}`], {
