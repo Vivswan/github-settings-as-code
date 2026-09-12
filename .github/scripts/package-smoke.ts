@@ -25,7 +25,7 @@ const PACKAGE = "@vivswan/github-settings-as-code";
 const NODE_CONSUMER = `import { SECTION_KEYS, validateSettings } from "${PACKAGE}";
 import schema from "${PACKAGE}/settings.schema.json" with { type: "json" };
 const result = validateSettings({ labels: [] });
-if (!result.ok) throw new Error("validateSettings rejected an empty labels list: " + result.error);
+if (result.isErr()) throw new Error("validateSettings rejected an empty labels list: " + result.error.code);
 if (!SECTION_KEYS.includes("labels")) throw new Error("SECTION_KEYS lacks labels");
 if (typeof schema.$schema !== "string") throw new Error("the schema subpath did not resolve to the JSON Schema");
 console.log("imported " + SECTION_KEYS.length + " section keys and the schema");
@@ -35,7 +35,7 @@ console.log("imported " + SECTION_KEYS.length + " section keys and the schema");
 const TS_CONSUMER = `import { SECTION_KEYS, type SectionKey, validateSettings } from "${PACKAGE}";
 const first: SectionKey | undefined = SECTION_KEYS[0];
 const result = validateSettings({ labels: [] });
-export const ok: boolean = result.ok && first === "repository";
+export const ok: boolean = result.isOk() && first === "repository";
 `;
 
 /** Run a command to completion in `cwd`, streaming its output; a non-zero exit throws. */

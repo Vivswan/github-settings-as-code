@@ -21,20 +21,21 @@ The package exports three paths: the entry (`.`), the committed settings.yml JSO
 
 ## The API by group
 
-Every name below is exported from the entry, [src/index.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/src/index.ts). Each group has one short example; the types beside each name are in the bundled declarations. The examples continue from one another: `result` is the Validate group's validated document, `client` the Client group's `GithubApi`, and `config` in the Io example a `SingleConfig` (the action's parsed inputs).
+Every name below is exported from the entry, [src/index.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/src/index.ts). Each group has one short example; the types beside each name are in the bundled declarations. Every fallible call returns a [neverthrow](https://github.com/supermacro/neverthrow) `Result` (or `ResultAsync`) whose error is a typed `Problem`; `describeProblem` renders one as the message the action would print. The examples continue from one another: `settings` is the Validate group's validated document, `client` the Client group's `GithubApi`, and `config` in the Io example a `SingleConfig` (the action's parsed inputs).
 
 ### Validate and merge
 
-`validateSettings` validates a parsed document; `mergeLayers`, `foldLayers`, and `readLayerFiles` fold layers as `mode: merge` does; `renderMergedYaml` prints the result the way the merged-file output is written; `readSettingsFile` and `parseSettingsDoc` read YAML.
+`validateSettings` validates a parsed document; `mergeLayers`, `foldLayers`, and `readLayerFiles` fold layers as `mode: merge` does; `renderMergedYaml` prints the result the way the merged-file output is written; `readSettingsFile` (given the file's role) and `parseSettingsDoc` read YAML.
 
 ```ts
-import { readSettingsFile, validateSettings } from "@vivswan/github-settings-as-code";
+import { describeProblem, readSettingsFile, validateSettings } from "@vivswan/github-settings-as-code";
 
-const read = readSettingsFile(".github/settings.yml");
-if ("error" in read) throw new Error(read.error);
-const result = validateSettings(read.doc, { source: ".github/settings.yml" });
-if (!result.ok) throw new Error(result.error);
-console.log(result.warnings);
+const validated = readSettingsFile(".github/settings.yml", "settings-file").andThen((doc) =>
+  validateSettings(doc, { source: ".github/settings.yml" }),
+);
+if (validated.isErr()) throw new Error(describeProblem(validated.error));
+const { settings, warnings } = validated.value;
+console.log(warnings);
 ```
 
 ### Schema
@@ -61,33 +62,36 @@ const client = new GithubApi({ token: process.env.GITHUB_TOKEN ?? "" });
 
 ### Check and apply
 
-`checkRepository` plans and diffs every active section without writing; `applyRepository` executes the plan. Both take the validated settings, the parsed `RepoRef` from `parseRepoSlug`, and the permission policy, and return the result plus the lines the run printed.
+`checkRepository` plans and diffs every active section without writing; `applyRepository` executes the plan. Both take the validated settings, the parsed `RepoRef` from `parseRepoSlug`, the permission policy, and a `SectionSelection` (which sections run and which must fully apply; `SectionSelection.ALL` runs every declared section), and return the result plus the lines the run printed.
 
 ```ts
-import { checkRepository, parseRepoSlug } from "@vivswan/github-settings-as-code";
+import { checkRepository, parseRepoSlug, SectionSelection } from "@vivswan/github-settings-as-code";
 
 const repo = parseRepoSlug("octo-org/api");
-if (repo === null) throw new Error("not an owner/name slug");
+if (repo.isErr()) throw new Error(describeProblem(repo.error));
 const report = await checkRepository(client, {
-  repo,
-  settings: result.settings,
+  repo: repo.value,
+  settings,
   onMissingPermission: "warn",
-  requiredSections: new Set(),
-  onlySections: new Set(),
+  sections: SectionSelection.ALL,
 });
 console.log(report.result, report.outcomes.map((o) => `${o.key}: ${o.status}`), report.log);
 ```
 
 ### Flows
 
-The run flows the action wraps: `runSingle` (one repository from a local file), `runMulti` (repos-dir, discovery, defaults file), `runMerge` (fold files into one), with `concludeRun` and `failRun` turning a finished run into outputs and an exit code. `SingleConfig`, `MultiConfig`, and `MergeConfig` are the inputs the action parses into.
+The run flows the action wraps: `runSingle` (one repository from a local file), `runMulti` (repos-dir, discovery, defaults file), `runMerge` (fold files into one), with `concludeRun`, `concludeMerge`, and `failRun` turning a finished run or its problem into outputs and an exit code. `SingleConfig`, `MultiConfig`, and `MergeConfig` are the inputs the action parses into; `parseConfig` builds one from an input reader and the environment the way the action does.
 
 ```ts
-import { runMerge, silentIo } from "@vivswan/github-settings-as-code";
+import { concludeMerge, failRun, runMerge, silentIo } from "@vivswan/github-settings-as-code";
 
+const io = silentIo();
 const exitCode = runMerge(
   { settingsFiles: ["base.yml", "team.yml"], mergedFile: "merged.yml", layering: "merge" },
-  silentIo(),
+  io,
+).match(
+  (merged) => concludeMerge(io, merged),
+  (problem) => failRun(io, problem),
 );
 ```
 
@@ -99,8 +103,8 @@ const exitCode = runMerge(
 import { DEFAULT_DISCOVERY_FILTERS, discoverRepos } from "@vivswan/github-settings-as-code";
 
 const found = await discoverRepos(client, { ...DEFAULT_DISCOVERY_FILTERS, topics: ["managed"] });
-if ("error" in found) throw new Error(found.error);
-console.log(found.repos.map((r) => r.slug));
+if (found.isErr()) throw new Error(describeProblem(found.error));
+console.log(found.value.repos.map((r) => r.slug));
 ```
 
 ### Report
@@ -112,7 +116,7 @@ import { encryptReport, parseRecipient } from "@vivswan/github-settings-as-code"
 
 const recipient = process.env.REPORT_PUBLIC_KEY ?? "";
 const checked = parseRecipient(recipient);
-if (!checked.ok) throw new Error(checked.error);
+if (checked.isErr()) throw new Error(describeProblem(checked.error));
 const sealed = await encryptReport(recipient, "# report");
 ```
 
@@ -135,11 +139,10 @@ console.log(labels.key, Object.keys(labels.endpoints), sectionGrant(labels));
 import { collectingIo, concludeRun, failRun, runSingle } from "@vivswan/github-settings-as-code";
 
 const collected = collectingIo();
-const run = await runSingle(client, config, collected.io);
-const exitCode =
-  "fatal" in run
-    ? failRun(collected.io, run.fatal)
-    : concludeRun(collected.io, { kind: "single", mode: config.mode, target: run.target });
+const exitCode = await runSingle(client, config, collected.io).match(
+  (target) => concludeRun(collected.io, { kind: "single", mode: config.mode, target }),
+  (problem) => failRun(collected.io, problem),
+);
 console.log(exitCode, collected.outputs.result, collected.lines.map((entry) => entry.line));
 ```
 
