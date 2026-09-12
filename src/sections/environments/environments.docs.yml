@@ -1,8 +1,8 @@
 sections_table:
   endpoints: >-
     environment listing + PUT environments + per-environment variables, secrets, deployment branch
-    policies, deployment protection rules, and pins (GraphQL EnvironmentPins + PinEnvironment +
-    ReorderEnvironment)
+    policies, deployment protection rules, and pins (GraphQL EnvironmentPins +
+    EnvironmentPinsSnapshot + PinEnvironment + ReorderEnvironment)
   notes: >-
     reviewers, wait timer, branch-policy flags; nested `variables`, `secrets`,
     `deployment_branch_policies`, and `deployment_protection_rules` keys reconcile per environment,
@@ -87,8 +87,14 @@ coverage:
       same-named secrets in two environments get two variables; two names the fold collapses are
       noted once), branch-policy patterns while the custom_branch_policies flag is on, and the
       enabled protection rules by App slug (those two lists sit behind the Actions grant, so a
-      denial there leaves the key out with a note and the rest of the environment reads back). The pin state is GraphQL-only and not read back (noted
-      once).
+      denial there leaves the key out with a note and the rest of the environment reads back). The
+      pin state reads back through the snapshot's own pins read (EnvironmentPinsSnapshot, the
+      planner's selection under a declaration that tolerates no denial, so a concealed 404 is a
+      PermissionDenied naming the grant, which the engine turns into a skipped section under
+      on-missing-permission: warn and a failed run under fail, instead of reading as no pins): the pinned environments
+      LEAD the file in rank order with `pinned: true`, since the planner reads declaration order as
+      pin order, and the unpinned ones follow without the key (an absent key leaves a pin
+      untouched); a pin naming no listed environment is a note.
 schema:
   SettingsFile.environments: Deployment environments, upserted by name.
   DeploymentBranchPolicyConfig: >-

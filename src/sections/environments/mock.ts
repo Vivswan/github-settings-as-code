@@ -17,6 +17,7 @@ import {
 import {
   asObject,
   branchPoliciesEnabled,
+  type GraphqlHandlerResult,
   type Json,
   noContent,
   ok,
@@ -310,8 +311,8 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
   },
 };
 
-export const environmentsMockGraphqlHandlers: SectionGraphqlHandlers<"environments"> = {
-  "environments.pins": ({ state }) => ({
+function pinsConnection(state: MockState): GraphqlHandlerResult {
+  return {
     data: {
       repository: {
         pinnedEnvironments: {
@@ -324,7 +325,13 @@ export const environmentsMockGraphqlHandlers: SectionGraphqlHandlers<"environmen
         },
       },
     },
-  }),
+  };
+}
+
+export const environmentsMockGraphqlHandlers: SectionGraphqlHandlers<"environments"> = {
+  "environments.pins": ({ state }) => pinsConnection(state),
+  // The snapshot's read serves the same pins.
+  "environments.pinsSnapshot": ({ state }) => pinsConnection(state),
   "environments.pin": ({ state, variables }) => {
     const target = pinTargetName(state, variables);
     if ("errors" in target) {

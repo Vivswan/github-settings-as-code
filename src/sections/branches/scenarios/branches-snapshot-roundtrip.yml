@@ -1,16 +1,24 @@
 name: branches-snapshot-roundtrip
 description: >-
   mode: snapshot reads the live branch protection back into snapshot.yml and writes nothing to
-  GitHub. The protected-branch listing names main; its classic protection reads back in the PUT
-  vocabulary: {enabled} wrappers as booleans with the off controls omitted, actor objects as login
-  and slug lists, the url keys and enforcement_level dropped, the required checks in both spellings
-  the PUT takes with GitHub's null app_id as the PUT's -1, and a live required_signatures. develop
-  is unprotected, so it is not listed and not written. The GraphQL-only surface
-  (force_push_bypassers, required_deployments, wildcard rules) is one note. The written file, fed
-  back to a check run against the same state, reads clean.
+  GitHub. The protected-branch listing names main and release/1.0; main's classic protection reads
+  back in the PUT vocabulary: {enabled} wrappers as booleans with the off controls omitted, actor
+  objects as login and slug lists, the url keys and enforcement_level dropped, the required checks
+  in both spellings the PUT takes with GitHub's null app_id as the PUT's -1, and a live
+  required_signatures. The GraphQL rules read (the snapshot's own, which tolerates no denial)
+  supplies what REST cannot carry: main's force-push bypassers in the file's actor spelling and its
+  required deployment environments, and the wildcard rule release/* as its own entry with the off
+  controls dropped. release/1.0 is protected only by that wildcard rule, so it is NOT written as a
+  literal entry (applying one would create a second rule beside the wildcard). develop is
+  unprotected, so it is not listed and not written. The written file, fed back to a check run
+  against the same state, reads clean.
 settings: {}
 live_state:
-  branches: [main, develop]
+  branches: [main, develop, release/1.0]
+  environments:
+    production:
+      name: production
+      protection_rules: []
   branch_protection:
     main:
       url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection
@@ -72,6 +80,23 @@ live_state:
       required_signatures:
         url: https://api.github.com/repos/e2e-owner/e2e-repo/branches/main/protection/required_signatures
         enabled: true
+  # The GraphQL-only fields of main's rule: the REST GET cannot carry them.
+  branch_protection_graphql:
+    main:
+      bypassForcePushActors: [octocat, e2e-owner/platform, app/deploy-gate]
+      requiresDeployments: true
+      requiredDeploymentEnvironments: [production]
+  # A wildcard rule, invisible to the REST protection endpoints except as the effective
+  # protection of the branches it matches.
+  branch_protection_rules:
+    - pattern: release/*
+      isAdminEnforced: true
+      requiresStatusChecks: true
+      requiresStrictStatusChecks: true
+      requiredStatusCheckContexts: [ci]
+      requiresApprovingReviews: true
+      requiredApprovingReviewCount: 1
+      bypassForcePushActors: [release-bot]
 inputs:
   mode: snapshot
   snapshot_file: snapshot.yml
@@ -107,16 +132,30 @@ expect:
             apps: [deploy-gate]
           required_linear_history: true
           required_signatures: true
+          force_push_bypassers: [app/deploy-gate, e2e-owner/platform, octocat]
+          required_deployments:
+            environments: [production]
+      - name: release/*
+        protection:
+          enforce_admins: true
+          required_status_checks:
+            strict: true
+            contexts: [ci]
+          required_pull_request_reviews:
+            required_approving_review_count: 1
+            require_code_owner_reviews: false
+            dismiss_stale_reviews: false
+            require_last_push_approval: false
+          force_push_bypassers: [release-bot]
   requests_contain:
     - "GET /repos/e2e-owner/e2e-repo/branches?protected=true"
     - "GET /repos/e2e-owner/e2e-repo/branches/main/protection"
+    - "GET /repos/e2e-owner/e2e-repo/branches/release%2F1.0/protection"
+    - "GRAPHQL BranchProtectionRulesSnapshot"
   never:
     - POST /
     - PATCH /
     - PUT /
     - DELETE /
-    - GRAPHQL
     - "GET /repos/{repo}/branches/develop/protection"
-  stdout_contains:
-    - "protection.force_push_bypassers, protection.required_deployments, and wildcard rules ride the GraphQL rule surface, which snapshot does not read"
   snapshot_converges: true

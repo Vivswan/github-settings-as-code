@@ -11,7 +11,7 @@ import {
   FLAG_PAIRING_FIXTURES,
 } from "../../../test/fixtures/environment-flag-pairing.js";
 import { MockApi } from "../../../test/mock-api.js";
-import { fragmentFake } from "../../../test/sections/fragment-fake.js";
+import { fragmentFake, registryFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import {
   NO_SECRETS,
@@ -19,8 +19,10 @@ import {
   secretTools,
   sectionRunners,
 } from "../../../test/sections/section-run.js";
+import { proveSnapshotRoundTrip } from "../../../test/sections/snapshot-roundtrip.js";
 import { executePlan } from "../../engine/execute.js";
 import type { GithubClient } from "../../github/api.js";
+import { PermissionDenied } from "../contract/errors.js";
 import { type PlannedOp, planContext, planDrift, snapshotContext } from "../contract/plan.js";
 import { allGraphqlOps, type SectionEndpointKey, type SectionGraphqlKey } from "../registry.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
@@ -31,7 +33,7 @@ import type {
   EnvironmentConfig,
   EnvironmentVariableConfig,
 } from "./schema.js";
-import { PINNED_NOTE, sharedSecretNotes } from "./snapshot.js";
+import { sharedSecretNotes, withPins } from "./snapshot.js";
 
 const { plan, check, apply } = sectionRunners(environmentsSection);
 
@@ -140,7 +142,7 @@ describe("environments plan", () => {
     ]);
   });
 
-  test("the read port exposes exactly the GET roles and the pins query, the probe in its absent posture", () => {
+  test("the read port exposes exactly the GET roles and the two pins queries, the probe in its absent posture", () => {
     const ctx = planContext(environmentsSection, new MockApi({}), REPO);
     expect(Object.keys(ctx.read).sort()).toEqual([
       "list",
@@ -150,6 +152,7 @@ describe("environments plan", () => {
       "listSecrets",
       "listVariables",
       "pins",
+      "pinsSnapshot",
       "probe",
       "secretsPublicKey",
     ]);
@@ -1503,7 +1506,6 @@ describe("environments snapshot", () => {
       ],
       notes: [
         "environments[qa].secrets[GITHUB_PAT]: value of GITHUB_PAT is not readable; export it into the environment as SECRET_ENVIRONMENT_QA_GITHUB_PAT before apply",
-        PINNED_NOTE,
       ],
     });
     expect(api.writes).toEqual([]);
@@ -1584,7 +1586,6 @@ describe("environments snapshot", () => {
           "GET /repos/o/r/environments/production/deployment_protection_rules: 403 Resource not accessible by " +
           'personal access token. To fix, grant "Actions" (read) under the PAT\'s Repository permissions. Note: a ' +
           "404 here can also mean the environment does not exist",
-        PINNED_NOTE,
       ],
     });
     expect(inner.writes).toEqual([]);
@@ -1596,5 +1597,73 @@ describe("environments snapshot", () => {
       snapshotContext(environmentsSection, api, REPO, "fail"),
     );
     expect(snapshot).toEqual({ value: undefined, notes: [] });
+  });
+
+  test("the pinned environments lead in rank order with pinned: true, the rest follow without the key, and the file plans clean", async () => {
+    // The listing order (web, api, sandbox) differs from the rank order (api, web), so the
+    // assertion proves rank wins. Hole-y positions, as live GitHub leaves them after an unpin.
+    const api = registryFake({
+      environments: {
+        web: { name: "web", protection_rules: [] },
+        api: { name: "api", protection_rules: [] },
+        sandbox: { name: "sandbox", protection_rules: [] },
+      },
+      pinned_environments: [
+        { name: "web", position: 7 },
+        { name: "api", position: 3 },
+      ],
+    });
+    const { snapshot } = await proveSnapshotRoundTrip(environmentsSection, api);
+    expect(snapshot).toEqual({
+      value: [{ name: "api", pinned: true }, { name: "web", pinned: true }, { name: "sandbox" }],
+      notes: [],
+    });
+  });
+
+  test("a pin naming no listed environment stops the declared block there, so the file's pins stay a prefix of the live order", () => {
+    const entries = [{ name: "Prod" }, { name: "qa" }, { name: "web" }];
+    // Case-insensitive match for the leading pin; ghost is unlisted, so web (ranked after it) is not declared.
+    expect(withPins(entries, ["prod", "ghost", "web"])).toEqual({
+      entries: [{ name: "Prod", pinned: true }, { name: "qa" }, { name: "web" }],
+      notes: [
+        'environments: the pinned environment "ghost" is not in the environment listing, so its pin cannot be declared; ' +
+          'the pins ranked after it ("web") are left without the pinned key too, since declared pins must lead the live list',
+      ],
+    });
+    expect(withPins(entries, ["ghost"])).toEqual({
+      entries,
+      notes: [
+        'environments: the pinned environment "ghost" is not in the environment listing, so its pin cannot be declared',
+      ],
+    });
+  });
+
+  test("a denied pins read fails the snapshot with the grant advice instead of reading as no pins", async () => {
+    const inner = fragmentFake(environmentsSection, environmentsMockHandlers, {
+      environments: { qa: { name: "qa", protection_rules: [] } },
+    });
+    const api: GithubClient = {
+      tryRequest: (method, path, payload, options) =>
+        inner.tryRequest(method, path, payload, options),
+      tryGraphql: () =>
+        Promise.resolve({
+          error: {
+            status: 404,
+            message: "Could not resolve to a Repository with the given name",
+            body: "",
+            graphqlTypes: ["NOT_FOUND"],
+          },
+        }),
+    };
+    const failure = environmentsSection.snapshot(
+      snapshotContext(environmentsSection, api, REPO, "fail"),
+    );
+    await expect(failure).rejects.toBeInstanceOf(PermissionDenied);
+    await expect(failure).rejects.toThrow(
+      "environments: the token was denied GRAPHQL EnvironmentPinsSnapshot: 404 Could not resolve to a Repository " +
+        'with the given name (a 404 here can also mean the resource does not exist). To fix, grant "Environments" ' +
+        '(read and write) under the PAT\'s Repository permissions; declared "deployment_branch_policies" and ' +
+        '"deployment_protection_rules" keys additionally need "Actions" (read) and "Administration" (read and write)',
+    );
   });
 });

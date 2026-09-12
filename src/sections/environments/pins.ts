@@ -9,17 +9,32 @@ import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import type { ENDPOINTS } from "./endpoints.js";
 import { MAX_PINNED_ENVIRONMENTS } from "./schema.js";
 
+/** The pins selection both pins reads share, so the snapshot's read cannot lag the planner's. */
+const PINS_SELECTION =
+  "($owner: String!, $repo: String!, $cursor: String) { repository(owner: $owner, name: $repo) { pinnedEnvironments(first: 100, after: $cursor) { nodes { position environment { name } } pageInfo { hasNextPage endCursor } } } }";
+
 const PINS_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   name: "EnvironmentPins",
   kind: "read",
-  query:
-    "query EnvironmentPins($owner: String!, $repo: String!, $cursor: String) { repository(owner: $owner, name: $repo) { pinnedEnvironments(first: 100, after: $cursor) { nodes { position environment { name } } pageInfo { hasNextPage endCursor } } } }",
+  query: `query EnvironmentPins${PINS_SELECTION}`,
   connection: { path: ["repository", "pinnedEnvironments"] },
   outcomes: {
     ok: "the pinned environments with their 1-based positions",
     NOT_FOUND:
       "the repository is not visible to the token; read as no pins (the denial surfaces on the first pin write)",
   },
+});
+
+/**
+ * The snapshot's read of the same pins. No write follows a snapshot to surface a denial, so
+ * NOT_FOUND is not tolerated here: a concealed denial fails the read with the grant advice.
+ */
+const PINS_SNAPSHOT = graphqlOp<{ owner: string; repo: string }>()({
+  name: "EnvironmentPinsSnapshot",
+  kind: "read",
+  query: `query EnvironmentPinsSnapshot${PINS_SELECTION}`,
+  connection: { path: ["repository", "pinnedEnvironments"] },
+  outcomes: { ok: "the pinned environments with their 1-based positions, for the snapshot" },
 });
 
 /**
@@ -56,6 +71,7 @@ const REORDER_ENVIRONMENT = graphqlOp<{ environmentId: string; position: number 
 
 export const GRAPHQL_OPS = {
   pins: PINS_QUERY,
+  pinsSnapshot: PINS_SNAPSHOT,
   pin: PIN_ENVIRONMENT,
   reorder: REORDER_ENVIRONMENT,
 } as const satisfies Record<string, GraphqlOpDecl>;
@@ -81,6 +97,9 @@ interface LivePin {
   position: number;
   name: string;
 }
+
+/** The pinned environment names in rank order, as the snapshot orders its pinned entries. */
+export type PinnedNames = readonly string[];
 
 /**
  * A pin without a numeric position and a name has no identity to reconcile by, and silently
@@ -111,7 +130,22 @@ async function listLivePins(ctx: EnvironmentsPlanContext): Promise<LivePin[]> {
   if ("error" in listed) {
     return [];
   }
-  return listed.items.map(livePin).sort((a, b) => a.position - b.position);
+  return rankPins(listed.items);
+}
+
+/** The snapshot's read: the op tolerates no outcome, so a denial throws with the grant advice. */
+export async function snapshotPins(ctx: EnvironmentsPlanContext): Promise<PinnedNames> {
+  const listed = await ctx.read.pinsSnapshot.listConnection(repoVariables(ctx));
+  if ("error" in listed) {
+    throw new Error(
+      "BUG: environments: the snapshot pins query declares no tolerated outcome, yet its read returned an error instead of throwing",
+    );
+  }
+  return rankPins(listed.items).map((pin) => pin.name);
+}
+
+function rankPins(nodes: readonly unknown[]): LivePin[] {
+  return nodes.map(livePin).sort((a, b) => a.position - b.position);
 }
 
 /** Environment names are case-insensitive on GitHub. */

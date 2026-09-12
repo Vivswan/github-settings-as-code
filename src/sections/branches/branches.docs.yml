@@ -2,9 +2,9 @@ sections_table:
   endpoints: >-
     protected-branch listing + classic branch protection + required-signatures sub-endpoint +
     app-by-slug actor lookup +
-    GraphQL BranchProtectionRules + BranchProtectionRepository + BranchProtectionActorUser +
-    BranchProtectionActorTeam + CreateBranchProtectionRule + UpdateBranchProtectionRule +
-    DeleteBranchProtectionRule
+    GraphQL BranchProtectionRules + BranchProtectionRulesSnapshot + BranchProtectionRepository +
+    BranchProtectionActorUser + BranchProtectionActorTeam + CreateBranchProtectionRule +
+    UpdateBranchProtectionRule + DeleteBranchProtectionRule
   notes: >-
     `protection: null` removes protection; the protection PUT drops `required_signatures`, so
     declare it on any branch already carrying it; `force_push_bypassers` (users, `org/team`,
@@ -68,11 +68,19 @@ coverage:
       omitted and the required checks in both spellings the PUT takes, `contexts` and `checks` (an
       any-App check as app_id -1, the PUT's spelling of GitHub's null read-back, which the diff
       normalizes the same way); a listed branch
-      whose protection read answers 404 (a ruleset protects it) is left out, and
-      force_push_bypassers, required_deployments, and wildcard rules are not read back
-      (GraphQL-only, noted once; a branch a wildcard rule protects comes back as a literal entry
-      carrying that rule's protection, since no REST read names the pattern, and the note says to
-      replace such entries with the wildcard entry).
+      whose protection read answers 404 (a ruleset protects it) is left out. The snapshot's own
+      rules read (BranchProtectionRulesSnapshot, the planner's selection under a declaration that
+      tolerates no denial, so a concealed 404 is a PermissionDenied naming the grant, which the
+      engine turns into a skipped section under on-missing-permission: warn and a failed run under
+      fail, instead of reading as no rules) supplies the GraphQL-only surface: a literal entry carries its
+      force_push_bypassers (actor strings in the file's spelling, sorted) and required_deployments
+      when set, an empty allowance list and an off requirement omitted since an absent routed key
+      leaves the live value untouched; every wildcard rule is written as its own entry with the
+      off controls dropped; a branch only a wildcard rule protects is NOT written as a literal
+      entry (the REST read serves that rule's protection under the branch's name, and a literal
+      entry would create a second rule on apply); a literal-pattern rule whose branch the REST
+      read did not surface (no such branch, or a denied probe) is a note, since a literal entry
+      applies through the PUT that needs the branch.
 schema:
   SettingsFile.branches: Classic branch protection per branch.
   BranchConfig: Classic protection for one branch name or wildcard pattern.

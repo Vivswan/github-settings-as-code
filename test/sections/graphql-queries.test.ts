@@ -75,47 +75,50 @@ describe("declared GraphQL queries", () => {
     }
   });
 
-  test("the branches rules query selects every translation-table twin", () => {
-    // A twin in a translation table but not in RULES_QUERY's selection set would drift forever: the live field reads as undefined and never
-    // converges.
-    const op = allGraphqlOps()["branches.rulesQuery"];
-    if (op === undefined) {
-      throw new Error("the branches section no longer declares rulesQuery; update this test");
-    }
-    // Only fields selected DIRECTLY on the rule nodes count, since that is where the engine reads node[twin]; an aliased twin reads back under the
-    // alias, so aliases are rejected too.
-    const selected = new Set<string>();
-    visit(parse(op.query), {
-      Field(node) {
-        if (node.name.value !== "branchProtectionRules") {
-          return;
-        }
-        for (const selection of node.selectionSet?.selections ?? []) {
-          if (selection.kind !== "Field" || selection.name.value !== "nodes") {
-            continue;
+  test.each(["branches.rulesQuery", "branches.rulesSnapshot"] as const)(
+    "%s selects every translation-table twin",
+    (key) => {
+      // A twin in a translation table but not in the query's selection set would drift forever: the live field reads as undefined and never
+      // converges (the planner's read), or the snapshot writes a rule without it (the snapshot's read).
+      const op = allGraphqlOps()[key];
+      if (op === undefined) {
+        throw new Error(`the branches section no longer declares ${key}; update this test`);
+      }
+      // Only fields selected DIRECTLY on the rule nodes count, since that is where the engine reads node[twin]; an aliased twin reads back under the
+      // alias, so aliases are rejected too.
+      const selected = new Set<string>();
+      visit(parse(op.query), {
+        Field(node) {
+          if (node.name.value !== "branchProtectionRules") {
+            return;
           }
-          for (const field of selection.selectionSet?.selections ?? []) {
-            if (field.kind === "Field") {
-              expect(
-                field.alias,
-                `RULES_QUERY must not alias "${field.name.value}": the engine reads rule fields by their twin name`,
-              ).toBeUndefined();
-              selected.add(field.name.value);
+          for (const selection of node.selectionSet?.selections ?? []) {
+            if (selection.kind !== "Field" || selection.name.value !== "nodes") {
+              continue;
+            }
+            for (const field of selection.selectionSet?.selections ?? []) {
+              if (field.kind === "Field") {
+                expect(
+                  field.alias,
+                  `${key} must not alias "${field.name.value}": the engine reads rule fields by their twin name`,
+                ).toBeUndefined();
+                selected.add(field.name.value);
+              }
             }
           }
-        }
-      },
-    });
-    const twins = [
-      ...Object.values(GRAPHQL_BOOLEAN_TWINS),
-      ...Object.values(GRAPHQL_REVIEW_TWINS),
-      ...Object.values(GRAPHQL_STATUS_CHECK_TWINS),
-    ];
-    for (const twin of twins) {
-      expect(
-        selected.has(twin),
-        `RULES_QUERY must select "${twin}" on the rule nodes: a twin in a translation table but not in the query's selection set can never converge`,
-      ).toBe(true);
-    }
-  });
+        },
+      });
+      const twins = [
+        ...Object.values(GRAPHQL_BOOLEAN_TWINS),
+        ...Object.values(GRAPHQL_REVIEW_TWINS),
+        ...Object.values(GRAPHQL_STATUS_CHECK_TWINS),
+      ];
+      for (const twin of twins) {
+        expect(
+          selected.has(twin),
+          `${key} must select "${twin}" on the rule nodes: a twin in a translation table but not in the query's selection set can never converge`,
+        ).toBe(true);
+      }
+    },
+  );
 });

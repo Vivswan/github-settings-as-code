@@ -7,8 +7,11 @@ description: >-
   with live items in its wrapped form under that list's default policy: variables with their values,
   secrets as per-store $SECRET_ENVIRONMENT_<NAME>_<SECRET> references with a note each, the branch-
   policy patterns while custom_branch_policies is on, and the enabled protection rules by App slug.
-  The pin state is GraphQL-only and one note. The written file, fed back to a check run against the
-  same state with the secret values in the environment, reads clean.
+  The pins connection (the snapshot's own read, which tolerates no denial) says staging is pinned,
+  so staging LEADS the file with pinned: true and production follows without the key: the planner
+  reads declaration order as pin order, so any other order would plan a reorder. The written file,
+  fed back to a check run against the same state with the secret values in the environment, reads
+  clean.
 settings: {}
 live_state:
   environments:
@@ -45,6 +48,7 @@ live_state:
       name: staging
       protection_rules: []
       deployment_branch_policy: null
+  pinned_environments: [staging]
   environment_variables:
     production:
       - name: REGION
@@ -96,6 +100,14 @@ expect:
     environments: snapshot
   snapshot:
     environments:
+      - name: staging
+        pinned: true
+        deployment_branch_policy: null
+        secrets:
+          _undeclared: keep
+          entries:
+            - name: DEPLOY_TOKEN
+              value: $SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN
       - name: production
         wait_timer: 30
         prevent_self_review: true
@@ -130,28 +142,20 @@ expect:
           _undeclared: keep
           entries:
             - app: region-guard
-      - name: staging
-        deployment_branch_policy: null
-        secrets:
-          _undeclared: keep
-          entries:
-            - name: DEPLOY_TOKEN
-              value: $SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN
   requests_contain:
     - "GET /repos/e2e-owner/e2e-repo/environments"
     - "GET /repos/e2e-owner/e2e-repo/environments/production/variables"
     - "GET /repos/e2e-owner/e2e-repo/environments/production/secrets"
     - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment-branch-policies"
     - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment_protection_rules"
+    - "GRAPHQL EnvironmentPinsSnapshot"
   never:
     - POST /
     - PATCH /
     - PUT /
     - DELETE /
-    - GRAPHQL
     - "GET /repos/{repo}/environments/staging/deployment-branch-policies"
   stdout_contains:
     - "environments[production].secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN before apply"
     - "environments[staging].secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN before apply"
-    - "pinned rides the GraphQL pins connection, which snapshot does not read"
   snapshot_converges: true
