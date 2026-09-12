@@ -211,11 +211,17 @@ export {
   type PatResource,
   type SectionPermission,
 } from "./sections/contract/permissions.js";
-export type {
-  Justification,
-  PlannedOpBase,
-  Tolerance,
-  Unverifiable,
+export {
+  type DenialPolicy,
+  type Justification,
+  type MissingPermissionPolicy,
+  type PlanContext,
+  type PlannedOpBase,
+  planContext,
+  type SnapshotContext,
+  snapshotContext,
+  type Tolerance,
+  type Unverifiable,
 } from "./sections/contract/plan.js";
 export {
   allEndpoints,

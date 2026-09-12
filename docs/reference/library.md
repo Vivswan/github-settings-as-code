@@ -134,10 +134,23 @@ const sealed = await encryptReport(recipient, "# report");
 `SECTIONS` is every section module in execution order; `sectionModule(key)` returns one; `sectionGrant` renders the PAT grant a section needs; `allEndpoints` and `allGraphqlOps` flatten every declared route, tagged with its owner; `endpointMethod` and `endpointPath` split a route.
 
 ```ts
-import { sectionGrant, sectionModule } from "@vivswan/github-settings-as-code";
+import { planContext, sectionGrant, sectionModule, snapshotContext } from "@vivswan/github-settings-as-code";
 
 const labels = sectionModule("labels");
 console.log(labels.key, Object.keys(labels.endpoints), sectionGrant(labels));
+```
+
+A module's `plan()` and `snapshot()` are callable directly, each over a context built from your `GithubClient` and a `RepoRef`:
+
+- `planContext(module, client, repo)` for `plan()`.
+- `snapshotContext(module, client, repo, onMissingPermission)` for `snapshot()`; the fourth argument is the permission policy, `"fail"` or `"warn"` (a `MissingPermissionPolicy`). The context carries it as a `DenialPolicy` only this factory mints, so a literal object cannot stand in for one.
+
+Prefer `checkRepository()` and `snapshotRepository()` for the whole document: one run over every selected section, permission failures classified per section, and one report or rendered file at the end.
+
+```ts
+const labelsPlan = await labels.plan(planContext(labels, client, repo.value), settings.labels ?? []);
+const labelsSnapshot = await labels.snapshot?.(snapshotContext(labels, client, repo.value, "warn"));
+console.log(labelsPlan.ops.length, labelsSnapshot?.value, labelsSnapshot?.notes);
 ```
 
 ### Io
