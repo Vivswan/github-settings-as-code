@@ -14,9 +14,11 @@ import { ARTIFACT_REFUSED, describeCliProblem } from "../../src/cli/commands.js"
 import {
   CLI_UNSUPPORTED_INPUTS,
   exposedInputs,
+  INIT_SUBCOMMAND,
   inputDescription,
   inputsForMode,
   isList,
+  modeSubcommand,
 } from "../../src/cli/inputs.js";
 import { maskedStreams } from "../../src/cli/io.js";
 import { buildProgram, CLI_COMMANDS, main } from "../../src/cli/program.js";
@@ -635,15 +637,68 @@ describe("the help text", () => {
       for (const option of options) {
         const name = option.long?.slice(2) as InputName;
         expect(option.flags, `${mode} ${name}`).toBe(`--${name} <value>`);
-        expect(option.description, `${mode} ${name}`).toBe(inputDescription(name));
+        expect(option.description, `${mode} ${name}`).toBe(
+          inputDescription(name, modeSubcommand(mode)),
+        );
       }
     }
   });
 
+  /**
+   * A flag mention in prose: `--name` anywhere, or the bare name where the
+   * prose cannot mean the noun: a hyphenated name, or one followed by a colon
+   * and its value (`repos: "*"`). The single-word names (sections, repository,
+   * topics) double as the prose's own nouns, so bare they do not count.
+   */
+  function mentions(name: string, text: string): boolean {
+    const bare = name.includes("-") ? `${name}(?![\\w-])` : `${name}:`;
+    return new RegExp(`(?<![\\w-])(--${name}(?![\\w-])|${bare})`).test(text);
+  }
+
+  test("every command's help names only the flags it accepts, and restricts itself to no other subcommand", () => {
+    const subcommands = program.commands.map((command) => command.name());
+    const restriction = new RegExp(
+      `\\b((?:${subcommands.join("|")})(?:, |,? and )?)+ only\\b`,
+      "g",
+    );
+    // The mode is the subcommand, never a flag; every other input is some command's flag.
+    const inputs = Object.keys(INPUT_DECLS).filter((name) => name !== "mode");
+    const findings: string[] = [];
+    for (const command of program.commands) {
+      // Commander folds the text to width; the prose is scanned unfolded.
+      const help = command.helpInformation().replace(/\s+/g, " ");
+      const accepted = new Set(
+        [...command.options, ...program.options].map((option) => option.long?.slice(2)),
+      );
+      for (const name of inputs.filter((name) => !accepted.has(name) && mentions(name, help))) {
+        findings.push(`${command.name()} --help names --${name}, which it does not accept`);
+      }
+      for (const [clause] of help.matchAll(restriction)) {
+        if (!new RegExp(`\\b${command.name()}\\b`).test(clause)) {
+          findings.push(`${command.name()} --help restricts "${clause}" away from itself`);
+        }
+      }
+    }
+    expect(findings).toEqual([]);
+  });
+
   test("the repository flag's help names the terminal's requirement, not the runner's default", () => {
-    const description = inputDescription("repository");
-    expect(description).toContain("Required unless repos or repos-dir is set");
-    expect(description).not.toContain("Defaults to the current repository");
-    expect(description).toStartWith(INPUT_DECLS.repository.description.split(".")[0] ?? "");
+    const check = inputDescription("repository", modeSubcommand("check"));
+    expect(check).toContain("Required unless repos or repos-dir is set");
+    expect(check).not.toContain("Defaults to the current repository");
+    expect(check).toStartWith(INPUT_DECLS.repository.description.split(".")[0] ?? "");
+    // init has no multi-repo flags, so neither the escape clause nor the combination rule applies.
+    expect(inputDescription("repository", INIT_SUBCOMMAND)).toBe(
+      "Target repository (owner/name). Required (inside GitHub Actions, GITHUB_REPOSITORY supplies it).",
+    );
+  });
+
+  test("init's sections flag keeps the allowlist sentence and drops the mode restriction", () => {
+    expect(inputDescription("sections", INIT_SUBCOMMAND)).toBe(
+      "Optional comma-separated allowlist of sections to process.",
+    );
+    expect(inputDescription("sections", modeSubcommand("check"))).toBe(
+      INPUT_DECLS.sections.description,
+    );
   });
 });
