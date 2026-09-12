@@ -39,6 +39,10 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   },
   "branches.putProtection": ({ state, param, body }) => {
     const branch = param("branch");
+    // GitHub rejects protection for a branch that does not exist with this exact body.
+    if (!state.branches.includes(branch)) {
+      return { status: 404, body: { message: "Branch not found" } };
+    }
     const stored = protectionFromPut(asObject(body));
     // The signed-commit requirement is its own sub-resource and absent from
     // the PUT's request schema (protectionFromPut drops any

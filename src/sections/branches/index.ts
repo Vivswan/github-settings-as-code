@@ -21,6 +21,7 @@
 
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
+import type { ApiError } from "../../github/api.js";
 import { parseLive } from "../contract/live.js";
 import { loosen, type SectionMeta, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
@@ -127,6 +128,15 @@ function omittedLiveDrift(
 
 function isPlainMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * GitHub's own reply for a branch that does not exist.
+ * A denied probe is a 404 too (fine-grained tokens conceal denied reads), with the body "Not Found".
+ * Reading that as a missing branch skipped protecting an existing branch on every apply.
+ */
+function isMissingBranch(error: ApiError): boolean {
+  return error.status === 404 && error.message === "Branch not found";
 }
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -346,11 +356,10 @@ async function planLiteralEntry(
   // the GraphQL-only fields, so a planned PUT re-applies every declared one.
   let putPlanned = false;
   if ("missing" in probe) {
-    // Protection 404s for a missing BRANCH too. Only a definitive 404 on the
-    // advisory probe flips the finding; any other failure (no Contents
-    // grant) keeps the plain unprotected reading.
+    // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart.
+    // A denied probe (no Contents grant) keeps the plain unprotected reading.
     const branchProbe = await ctx.read.branchProbe.tryCall({ params });
-    if ("error" in branchProbe && branchProbe.error.status === 404) {
+    if ("error" in branchProbe && isMissingBranch(branchProbe.error)) {
       // Nothing to plan: no operation can create a branch. Check reports
       // the drift; apply surfaces it as a note.
       plan.drift.push(

@@ -1,0 +1,29 @@
+# The branch does NOT exist live; the token has Administration but not Contents.
+# The advisory probe is denied (a concealed 404), so the section cannot tell the branch is missing.
+# It plans the protection PUT, which GitHub answers 404 "Branch not found".
+# The failure is loud and names the missing branch beside the grant advice.
+name: branches-missing-branch-no-contents-apply-fails
+settings:
+  branches:
+    - name: release
+      protection:
+        enforce_admins: true
+inputs:
+  mode: apply
+denial_style: fine_grained
+live_state:
+  branches: ["main"]
+  branch_protection: {}
+token_permissions:
+  administration: write
+  contents: none
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    branches: failed
+  requests_contain:
+    - "PUT /repos/e2e-owner/e2e-repo/branches/release/protection"
+  summary_contains:
+    - "404 Branch not found"
+    - 'a 404 answering "Branch not found" means the declared branch does not exist on the repo; create the branch, or remove it from the settings file'

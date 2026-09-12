@@ -6,6 +6,13 @@
 
 import type { EndpointDecl } from "../contract/endpoints.js";
 
+/**
+ * GitHub answers a protection PUT on a missing branch with 404 "Branch not found".
+ * Its status is the one a denied write shares, so the reading rides the denial advice.
+ */
+const MISSING_BRANCH_HINT =
+  'a 404 answering "Branch not found" means the declared branch does not exist on the repo; create the branch, or remove it from the settings file';
+
 export const ENDPOINTS = {
   // The primary read: a fine-grained 404 reads as "unprotected", so a denied
   // token surfaces on the first write, not here.
@@ -17,6 +24,8 @@ export const ENDPOINTS = {
   putProtection: {
     route: "PUT /repos/{owner}/{repo}/branches/{branch}/protection",
     statuses: { 200: "protection replaced" },
+    // Reached for a missing branch only when the advisory probe below was denied.
+    denialHint: MISSING_BRANCH_HINT,
     hints: {
       422:
         'Usually a sub-object is missing a required half: "required_status_checks" needs both ' +
@@ -40,12 +49,12 @@ export const ENDPOINTS = {
     route: "DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures",
     statuses: { 204: "signed-commit requirement removed" },
   },
-  // Advisory branch-existence probe, consulted when the protection read 404s
-  // to tell a missing branch from an unprotected one. The read port tolerates
-  // every failure on it (only a definitive 404 changes the finding). It is
-  // Contents-gated in reality, but that requirement stays OUT of the
-  // section's grant prose because the probe is optional (a token without
-  // Contents just loses the branch-does-not-exist wording).
+  // Advisory branch-existence probe: tells a missing branch from an unprotected one after a 404.
+  // The read port tolerates every failure on it.
+  // Only GitHub's "Branch not found" 404 changes the finding (isMissingBranch in index.ts).
+  // A token without Contents is denied the read as a 404 too, with the body "Not Found".
+  // The Contents requirement stays OUT of the section's grant prose: the probe is optional.
+  // Without Contents a missing branch surfaces at the PUT instead (MISSING_BRANCH_HINT).
   branchProbe: {
     route: "GET /repos/{owner}/{repo}/branches/{branch}",
     statuses: { 200: "the branch exists", 404: "no such branch" },
