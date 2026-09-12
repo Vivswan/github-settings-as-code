@@ -85,9 +85,12 @@ describe("checkCompatMarkers", () => {
         "// COMPAT(v03): a leading zero",
         "/* COMPAT(v3): */",
         "const legacy = /* COMPAT(v3): */ true;",
+        "/* See #123. COMPAT(v3): */",
+        "/* issue #5: COMPAT(v3): real text; delete it */",
         "// COMPAT(v3): fine; delete it",
         '// COMPAT(v3): the "#" alias still parses; delete support for #',
         "// COMPAT(v3): keep the src/**/ glob; delete the legacy matcher */",
+        "/* closed */ // COMPAT(v3): a closed block before the marker; delete the matcher */",
         "",
       ].join("\n"),
       "notes.md":
@@ -98,9 +101,11 @@ describe("checkCompatMarkers", () => {
       stdout: [
         "COMPAT markers by removal major (package.json 2.0.0):",
         "  v3",
-        "    src/m.ts:8  fine; delete it",
-        '    src/m.ts:9  the "#" alias still parses; delete support for #',
-        "    src/m.ts:10  keep the src/**/ glob; delete the legacy matcher */",
+        "    src/m.ts:9  real text; delete it",
+        "    src/m.ts:10  fine; delete it",
+        '    src/m.ts:11  the "#" alias still parses; delete support for #',
+        "    src/m.ts:12  keep the src/**/ glob; delete the legacy matcher */",
+        "    src/m.ts:13  a closed block before the marker; delete the matcher */",
         "",
       ].join("\n"),
       stderr: [
@@ -115,6 +120,7 @@ describe("checkCompatMarkers", () => {
         malformed("src/m.ts:5", "COMPAT(v03): a leading zero"),
         malformed("src/m.ts:6", "COMPAT(v3): */"),
         malformed("src/m.ts:7", "COMPAT(v3): */ true;"),
+        malformed("src/m.ts:8", "COMPAT(v3): */"),
         "",
       ].join("\n"),
     });

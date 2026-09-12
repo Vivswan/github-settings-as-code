@@ -11,9 +11,9 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 
 ## Backward compatibility
 
-- A compat path that stays (an alias, a retired input still accepted, an arm for an older artifact) carries a comment `COMPAT(vN): <what stays working and what to delete>`, N the major that removes it. JSON takes no comments, so compat in a JSON file is marked in the code that reads it.
+- A compat path that stays (an alias, a retired input still accepted, an arm for an older artifact) carries a comment `COMPAT(vN): <what stays working and what to delete>`, N the major that deletes it: compat kept today for a pre-3 shape is marked v3; compat introduced during 3.x for a 3.0 shape is marked v4. JSON takes no comments, so compat in a JSON file is marked in the code that reads it. A path that must work forever is not compat and gets no marker.
 - `bun run check:compat` (in `bun run check` and in CI) rejects a malformed marker and any marker whose major is at or below `package.json`'s, and prints the remaining markers grouped by major.
-- A release PR runs the same check against the major it cuts, so every marker for that major is deleted on `main` before the release can merge.
+- A release PR's tree already carries the version it cuts, so the same check makes a major release PR unmergeable until every marker for that major is deleted on `main` first: with 3.0.0 in preparation, every v3-marked path goes before v3 cuts.
 
 ## End-to-end tests
 

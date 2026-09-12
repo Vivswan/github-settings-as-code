@@ -1,15 +1,15 @@
 /**
  * The compat-marker gate. Backward-compatibility code that stays is marked in a comment, `COMPAT(vN): <what stays
- * working and what to delete>` with N the major that removes it, and this script fails once that major is current
- * or is the release being cut, so the removal lands before the major ships.
+ * working and what to delete>` with N the major that removes it, and this script fails once that major is current.
+ * A release PR's tree already carries the version it cuts, so a major release still holding its markers fails here.
  *
  *   bun .github/scripts/check-compat-markers.ts                     due line: package.json's major
- *   bun .github/scripts/check-compat-markers.ts --target-major 3    due line: the major a release PR cuts
+ *   bun .github/scripts/check-compat-markers.ts --target-major 3    due line: a major to plan for, by hand
  *
  * The tree is `git ls-files` with untracked files and without ignored ones, minus the skip set below. Markdown may
  * name the convention in inline code as `COMPAT(vN)`; everywhere else the version is digits, so a marker cannot
- * dodge the gate by leaving its major out. Node builtins only, like release-pipeline.ts: the release PR's checks run this before
- * `bun install`. Fixture tests: test/scripts/check-compat-markers.test.ts.
+ * dodge the gate by leaving its major out. Node builtins only, like its .github/scripts siblings. Fixture tests:
+ * test/scripts/check-compat-markers.test.ts.
  */
 
 import { execFileSync } from "node:child_process";
@@ -36,9 +36,9 @@ const OCCURRENCE = /COMPAT\(/g;
 const MARKER = /^COMPAT\(v(0|[1-9]\d*)\):(.*)$/;
 /** The placeholder inside an inline-code span: a backtick before it (checked at the call) and one after it. */
 const PLACEHOLDER = /^COMPAT\(vN\)[^`]*`/;
-/** The comment a marker sits in decides where its description ends: the nearest opener before it on the line names
- * a closer (a block comment) or none (a line comment, or Markdown prose, which run to the end of the line). */
-const OPENER = /\/\/|#|\/\*|<!--/g;
+// A description ends at its block comment's closer; in a line comment or Markdown prose it runs to the end of the
+// line. A `#` or `//` before the marker is not an opener: "/* See #123. COMPAT(v3): */" sits in the block comment.
+const BLOCK_OPENER = /\/\*|<!--/g;
 const CLOSER_OF: Readonly<Record<string, string>> = { "/*": "*/", "<!--": "-->" };
 const SYNTAX = "COMPAT(v<major>): <what stays working and what to delete>";
 
@@ -86,8 +86,13 @@ export function scanText(path: string, text: string): Scan {
 }
 
 function descriptionOf(body: string, before: string): string {
-  const closer = CLOSER_OF[[...before.matchAll(OPENER)].at(-1)?.[0] ?? ""];
-  const end = closer === undefined ? -1 : body.indexOf(closer);
+  const opener = [...before.matchAll(BLOCK_OPENER)].at(-1);
+  if (opener === undefined) {
+    return body.trim();
+  }
+  const closer = CLOSER_OF[opener[0]] as string;
+  const open = !before.slice(opener.index + opener[0].length).includes(closer);
+  const end = open ? body.indexOf(closer) : -1;
   return (end === -1 ? body : body.slice(0, end)).trim();
 }
 
